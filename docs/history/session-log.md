@@ -18656,3 +18656,107 @@ line to an existing sale therefore raises the total but not the tax. For a shop 
 that is wrong, but the fix is a stored rate on the sale or in settings — a schema *and* pricing
 policy decision. Surfaced rather than guessed.
 
+
+---
+
+## Part 595 (Sep 4 2026, session business-os-v1-21) — a paid-history import that had to route around the app's own writers, and the barcode normaliser that turns "Libre10ml" into a real product's barcode
+
+**Ask.** Four legacy `.xls` exports (AP by supplier, AR all-paid, item report, invoice detail) added to
+sales and suppliers, **status all paid, stock quantity untouched, no deduction**, with cashier, product,
+supplier and customer names resolved against **the new system** so nothing is duplicated and no product is
+created. Coordinate with the other live sessions throughout.
+
+**What changed.**
+
+- `ops/scripts/migration/import-sep02-legacy-reports.mjs` — fourth in the dated importer series
+  (aug30 → aug31 → sep01 → sep02). A **read-only planner**: it emits SQL and never applies it; there is no
+  `--apply` flag, and a test asserts there never is one.
+- `ops/scripts/migration/test-sep02-import-plan-pure.cjs` — 10 pure guards, every path anchored to
+  `__dirname` (Part 585's cwd bug made a relative read pass from `cloudflare/` and fail from
+  `cloudflare/scripts/`). Two of them are the real ones: **no write to any stock-bearing table**, and
+  **a non-numeric source code never reaches the barcode index**.
+- `ops/scripts/migration/SEP02-03-IMPORT-RECORD.md` — the apply record: Time Travel bookmark, row
+  identification queries, count reconciliation, the held invoices, the defect.
+- Commits `59c0a96d` (planner + test), `0b4470a0` (mis-attribution fix), `b1bfdb85` (apply + record).
+
+**What was found.**
+
+*The gap was 22, not 37.* Production already held 15 of the 37 source invoices — the Sep-2 out-of-fleet
+reconciliation stopped at `004434`, and `customer_receivables` stopped at **exactly the same invoice**. One
+clean cutoff, so only the gap was inserted; the 15 were flipped in place, not re-imported.
+
+*Stock had to be avoided by routing around the app.* `routes/sales.ts` and `lib/importEngine.ts` both move
+stock when a sale's status is in `salesStatus.ts::STOCK_DEDUCTED_STATUSES`, and that set contains
+`completed` — the status the user asked for. Any import through a writer would have deducted. Rows were
+therefore inserted **direct-to-D1**, with `loyalty_accrual = 0` so forced-paid history cannot inflate the
+computed loyalty balances. The consequence is intentional and permanent: for these invoices sold-quantity
+and stock-value disagree (raised by `business-os-v1-ba`).
+
+*The near-miss.* `legacy-preflight.mjs::barcodeKey()` strips non-digits. I claimed in review that a
+SKU-style code therefore normalises to an empty key and falls through harmlessly. That is wrong, and peer
+`business-os-v1-4a` made me run it:
+
+```
+"Libre10ml"          -> "10"
+"CompletelyClean45g" -> "45"
+```
+
+A **short numeric key**, not an empty one. **44 live products carry the literal barcode `10`** — the
+placeholder used for 10ml perfumes — three of them active, including `10111 "YSL Libre 10ml"`, which is the
+exact product such a line means. Only the duplicate-barcode quarantine stopped a mis-book, and it did so by
+accident: with exactly one active match, a YSL Libre line would have been written against an unrelated
+perfume and looked correct forever. Fixed in `0b4470a0` — a source code is a barcode only when it is
+**entirely digits**; otherwise resolution falls through to SKU, then to a single exact active name. Caught
+before any production write.
+
+*The same bug already cost two lines.* It is why `004430` and `004434` are live but short — 004430 missing
+"YSL Libre 10ml" ($54 live vs $79 reported), 004434 missing "Clinical Completely Clean 45g" ×2 ($105 vs
+$131). Both were **held out of the paid flip on purpose**: marking a short invoice settled converts a
+visible exception into a closed record.
+
+*The count that looked wrong and wasn't.* `sales` moved 15,012 → 15,035, which is +23 against +22 written.
+The extra row is live business: sale 16841 (`20260904-102300`, cashier Rath) was rung up between the
+baseline snapshot and the apply. `MAX(sales.id)` is 16863 — this batch's last row — and nothing exists
+above it.
+
+**Verified.**
+
+- `node ops/scripts/migration/test-sep02-import-plan-pure.cjs` → `all checks passed` (10/10), from the repo
+  root and from `cloudflare/scripts/`.
+- Apply against production D1 `business-os`: **711 rows written, 3,009 read, all statements successful**.
+  `sales` +22 (ids 16842–16863, $3,462.00, all `completed`, `amount_paid_usd = total_usd`), `sale_items`
+  +56, 11 `awaiting_payment`→`completed` flips, `supplier_invoices` +5 ($3,002.00), `customer_receivables`
+  +22 (all Paid, outstanding 0).
+- **Stock, expected vs observed:** `SUM(products.stock_quantity)` expected 23,085 → observed **23,085**;
+  `COUNT(inventory_movements)` expected 23,079 → observed **23,079**; `products` 10,272 → 10,272 and
+  `customers` 4,970 → 4,970 (nothing created, as instructed).
+- Integrity query after apply: `my_sales = 22`, `my_items = 56`, `bad_rows = 0`, `my_value = 3462`,
+  `total_vs_lines_mismatch = 0`. `sep23_not_completed = 3` — the two held invoices plus one genuinely
+  cancelled POS sale (16834, "Srey Pich"), all accounted for.
+- D1 rejected `BEGIN TRANSACTION` ("please use `state.storage.transaction()`"); removed, since a `--file`
+  batch is already atomic. `last_insert_rowid()` was replaced pre-emptively with
+  `(SELECT id FROM sales WHERE receipt_number = ...)` so a parent lookup cannot drift.
+- Pre-write Time Travel bookmark captured: `0000126d-00000064-000050dc-e4baaad3f0743e943943449ec02bd96e`.
+
+**Not done.**
+
+- **`004430` and `004434` are not flipped to paid** and need a user ruling: restore the dropped lines
+  (product `10111` on 004430; "Clinical Completely Clean 45g" ×2 on 004434), then flip.
+- **The fix in `0b4470a0` is forward-only. It does not touch what is already in production, and the
+  window is NOT clean.** `import-sep01-legacy-reports.mjs:53-54` defines byte-for-byte the same behaviour,
+  spelled through its own `digits()` — `"Libre10ml"` -> `"10"` — and **Sep 1 has already been applied**.
+  So the open question is not whether it could mis-book but whether it already did, and the answer is
+  sitting in production (pressed by `business-os-v1-4a`). `legacy-preflight.mjs:77` is the shared call
+  site still on the old behaviour. The 44-products-carrying-barcode-`10` finding is a property of the
+  **product table**, not of this batch, so it applies to every batch that used the helper.
+  Two suspected exposures were checked and ruled out rather than assumed: in `import-aug30` (:63) and
+  `import-aug31` (:74), `digits()` feeds **`phoneKey` only** and never a barcode lookup, and
+  `barcodeKey` at `import-aug31:160` is a **function parameter shadowing the name** (a mapping column
+  key), not the helper. The exposure is Sep 1 and Sep 2 — not the whole series.
+  The bound itself is owed and NOT done: re-run each applied batch under the old helper and the new one and
+  diff the resolved `product_id` per line; list every non-numeric legacy code with its old key and whether
+  an active product carries that key; and treat any correction after that as the user's call, not a
+  session's. Peer `business-os-v1-db` separately confirmed shipped app code is clean
+  (`productDetailRule.ts` trims and lowercases only), so the class is confined to migration tooling.
+  `business-os-v1-ba` and `business-os-v1-4a` have each offered to take it read-only.
+- No migration was applied (chain top stays **0107**) and no deploy was involved. This was data only.

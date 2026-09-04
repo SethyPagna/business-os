@@ -125,6 +125,41 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**📥 LEGACY Sep 2–3 IMPORT APPLIED TO PRODUCTION (Sep 4 2026) — session business-os-v1-21, on the user's explicit go,
+announced to all eleven live peers with no objection. Reference to re-verify; full record in
+[`ops/scripts/migration/SEP02-03-IMPORT-RECORD.md`](ops/scripts/migration/SEP02-03-IMPORT-RECORD.md).** Data only —
+**no migration (chain top stays 0107), no deploy.** Written: 22 sales (ids 16842–16863, $3,462.00) + 56 sale_items,
+11 `awaiting_payment`→`completed` flips, 5 `supplier_invoices` ($3,002.00), 22 `customer_receivables`. Pre-write Time
+Travel bookmark `0000126d-00000064-000050dc-e4baaad3f0743e943943449ec02bd96e`; every row is identifiable via
+`sales.notes LIKE 'Legacy import 004%(Sep 2-3 batch)%'` and the two `source_file` values.
+**Stock deliberately untouched and verified both sides:** `SUM(stock_quantity)` 23,085→23,085,
+`COUNT(inventory_movements)` 23,079→23,079, `products` and `customers` unchanged (nothing created). Sales were
+inserted **direct-to-D1** precisely because `routes/sales.ts` and `lib/importEngine.ts` both deduct stock for a
+status in `STOCK_DEDUCTED_STATUSES` (which contains `completed`); `loyalty_accrual = 0` on all 22 so forced-paid
+history cannot inflate computed balances. Sold-quantity and stock-value now disagree for these invoices **by design**.
+Of the 37 source invoices 004420–004456, **15 were already imported by the Sep-2 out-of-fleet reconciliation** and
+`customer_receivables` stopped at the same invoice, so only the 22-invoice gap was inserted.
+
+- **⚠️ OPEN, needs the user: `004430` and `004434` are live but SHORT A LINE each** — 004430 missing "YSL Libre 10ml"
+  ($54 live vs $79 report), 004434 missing "Clinical Completely Clean 45g" ×2 ($105 vs $131). They were **held out of
+  the paid flip** on purpose: marking a short invoice settled turns a visible exception into a closed record. Restore
+  the lines, then flip.
+- **⚠️ OPEN, unbounded: the migration tooling's barcode normaliser mis-keys SKU-style codes.**
+  `legacy-preflight.mjs::barcodeKey()` strips non-digits, so `"Libre10ml"`→`"10"` and `"CompletelyClean45g"`→`"45"` —
+  a short numeric key, **not** an empty one. That is what dropped the two lines above. The same bug was live in this
+  batch's own planner and was caught pre-write by peer `business-os-v1-4a`: **44 live products carry the literal
+  barcode `10`** (the 10ml-perfume placeholder), 3 active, including `10111 "YSL Libre 10ml"` — the exact product the
+  dropped line means. Only the duplicate-barcode quarantine prevented a silent mis-book. Fixed here in `0b4470a0` (a
+  code is a barcode only when entirely digits) — but **that fix is FORWARD-ONLY and the window is NOT clean.**
+  `import-sep01-legacy-reports.mjs:53-54` is byte-for-byte the same behaviour through its own `digits()`, and
+  **Sep 1 is already applied to production**, so the question is whether it *already* mis-booked, not whether it could;
+  `legacy-preflight.mjs:77` is the shared call site still on the old behaviour. Ruled out rather than assumed:
+  `import-aug30:63` and `import-aug31:74` use `digits()` for `phoneKey` **only**, and `barcodeKey` at
+  `import-aug31:160` is a parameter shadowing the name, not the helper — so the exposure is Sep 1 + Sep 2, not the
+  whole series. **The bound is owed and NOT done:** re-run each applied batch under both helpers and diff the resolved
+  `product_id` per line. Peer `business-os-v1-db` confirmed shipped app code is clean (`productDetailRule.ts`
+  trims/lowercases only), so this is confined to migration tooling.
+
 **🚀 DEPLOYED (Sep 3 2026, 14:27 UTC) — Worker version `3b25fe33-a806-44f7-9d42-caca6801f102`, from committed
 `e3678a39` on `ship/2026-09-03` (NOT MAIN; pushed to origin), by session business-os-v1-c3, on the user's explicit go
 ("then continue implementing and actually deploying"). Reference to re-verify — Part 587.** Built in an isolated
