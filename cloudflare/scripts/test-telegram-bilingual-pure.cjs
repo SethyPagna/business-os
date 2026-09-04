@@ -115,6 +115,44 @@ assert.deepEqual(
 assert.ok(Object.keys(SENSE_EXEMPT).length <= 3, 'too many glossary exemptions -- the Worker is drifting from the app\'s Khmer')
 console.log(`PASS glossary: ${checked} Worker terms also exist in the language packs and use the pack's Khmer (${Object.keys(SENSE_EXEMPT).length} documented sense exemption)`)
 
+// The check above transitively covers every Worker term that HAS a pack
+// counterpart. The terms that do not -- 'Net Total', 'SRET', the command
+// descriptions -- are where a rival spelling could still be born, so hold
+// those to the rival-spelling rules the app's own glossary uses.
+//
+// FOLLOW-UP: frontend/tests/khmerRetailVocabulary.test.ts (on
+// origin/fx/khmer-naming, not yet at this base commit) owns the full rule
+// list. When it merges, replace this block with a scan of
+// src/lib/telegramLang.ts driven by THAT file's GLOSSARY, so the rules live
+// in one place. Until then this is the retail subset Telegram can hit.
+const RIVAL_SPELLINGS = [
+  ['batch / lot', 'បាច់', [/(?<!អាប់)ឡូត/, 'ឡុត']],
+  ['customer', 'អតិថិជន', ['អ្នកទិញ']],
+  ['cost', 'ថ្លៃដើម', ['តម្លៃដើម']],
+  ['reason', 'មូលហេតុ', ['ហេតុផល']],
+  ['settle', 'ដោះស្រាយ', ['សម្រះ']],
+  ['barcode', 'បាកូដ', ['បារកូដ']],
+  ['update', 'ធ្វើបច្ចុប្បន្នភាព', ['អាប់ដេត']],
+  ['return (noun)', 'ការប្រគល់មកវិញ', [/ការត្រឡប់(?!វិញ)/, 'បងវិល', 'ការបង្វិលត្រឡប់']],
+]
+const everyWorkerKhmer = [
+  ...Object.entries(lang.TELEGRAM_LABELS).map(([key, entry]) => [`label ${key}`, entry.km]),
+  ...Object.entries(lang.TELEGRAM_HEADINGS).map(([heading, km]) => [`heading ${heading}`, km]),
+  ...Object.entries(lang.TELEGRAM_VALUE_PHRASES).map(([english, km]) => [`phrase ${english}`, km]),
+  ...lang.TELEGRAM_COMMANDS.map((doc) => [`reference ${doc.command}`, doc.km]),
+]
+const forked = []
+for (const [concept, canonical, rivals] of RIVAL_SPELLINGS) {
+  for (const [where, khmer] of everyWorkerKhmer) {
+    for (const rival of rivals) {
+      const hit = typeof rival === 'string' ? khmer.includes(rival) : rival.test(khmer)
+      if (hit) forked.push(`${concept}: ${where} uses ${rival}, the app says ${canonical} -- ${khmer}`)
+    }
+  }
+}
+assert.deepEqual(forked, [], `the Worker forked the Khmer retail vocabulary:\n  ${forked.join('\n  ')}`)
+console.log(`PASS rival spellings: ${everyWorkerKhmer.length} Worker Khmer strings clear all ${RIVAL_SPELLINGS.length} retail glossary rules`)
+
 // --- 3. every label the Worker actually emits is in the dictionary ----------
 // A source-shape check: scan lib/telegram.ts's builders AND the two routes
 // that compose lines inline for `Something: ` line prefixes, and require each
