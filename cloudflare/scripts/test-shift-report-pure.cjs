@@ -444,6 +444,106 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(reply.includes('No shift was registered'), `a day with no shift must say so:\n${reply}`)
   assert.ok(KHMER.test(reply), 'the empty-day answer is English-only')
   console.log('PASS empty day: a day with no registered shift is answered bilingually, not with a blank report')
+
+  // --- 10. every figure comes from the kernel column it claims to ------------
+  //
+  // Sections 1-3b drive formatShiftReport directly, so they pin the LAYOUT and
+  // the arithmetic but not the wiring: shiftFigures could read tax_usd into the
+  // store-discount line and every one of them would still pass. The stub in
+  // section 9 answers all its money queries with the same shape, so it cannot
+  // tell two kernel columns apart either.
+  //
+  // This one gives every column a DISTINCT value and reads the rendered
+  // message back. A crossed source shows up as the wrong number on the line,
+  // which is exactly how this defect would reach the owner's phone.
+  const kernelRow = {
+    tx_count: 12,
+    gross_sales_usd: 218,
+    store_discount_usd: 2,
+    membership_discount_usd: 1,
+    tax_usd: 7,
+    delivery_usd: 6,
+    store_delivery_usd: 0,
+    delivery_actual_cost_usd: 3.5,
+    delivery_actual_cost_count: 2,
+    delivery_sale_count: 2,
+    recognized_net_usd: 222,
+    pending_revenue_usd: 18,
+    recognized_tax_usd: 7,
+    recognized_delivery_usd: 6,
+    recognized_store_delivery_usd: 0,
+    recognized_delivery_cost_usd: 3.5,
+    refund_usd: 12,
+    refund_paid_out_usd: 12,
+  }
+  const mappingDb = {
+    prepare(sql) {
+      const answerGet = () => {
+        if (/FROM settings/.test(sql)) return { value: 'Sok Meng Shop' }
+        if (/FROM shift_sessions/.test(sql)) return CLOSED
+        if (/AS gross_sales_usd/.test(sql)) return kernelRow
+        if (/AS cost_usd/.test(sql)) return { cost_usd: 120 }
+        if (/AS returned_cost_usd/.test(sql)) return { returned_cost_usd: 0 }
+        if (/AS item_discount_usd/.test(sql)) return { item_discount_usd: 5 }
+        if (/AS cancelled/.test(sql)) return { invoices: 12, cancelled: 1, edited: 2 }
+        // shiftExpenses -- the only other .get, and the only one FROM fees.
+        if (/FROM fees/.test(sql)) return { usd: 4, khr: 0 }
+        throw new Error(`unexpected .get in the mapping stub:\n${sql}`)
+      }
+      return {
+        async get(params) { void params; return answerGet() },
+        async all(params) {
+          void params
+          if (/FROM shift_sessions/.test(sql)) return [CLOSED]
+          if (/AS payment_method/.test(sql)) return [{ payment_method: 'Cash', tx_count: 12, total_usd: 210, collected_usd: 210 }]
+          if (/AS delivery_contact_name[\s\S]*FROM sales/.test(sql)) {
+            return [{
+              delivery_contact_id: 4, delivery_contact_name: 'Vireak Buntham', deliveries: 2,
+              charged_fee_usd: 6, absorbed_fee_usd: 0, actual_cost_usd: 3.5, actual_cost_count: 2,
+              last_delivery_at: '2026-09-04 05:00:00',
+            }]
+          }
+          // The courier-expense leg (fees joined to delivery_contacts).
+          return []
+        },
+      }
+    },
+  }
+  const wiredMapping = loadReal('lib/telegram.ts', {
+    './db': { getDb: () => mappingDb },
+    './businessDateWindow': businessDateWindow,
+    './telegramLang': lang,
+    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => mappingDb }, './businessDateWindow': businessDateWindow }),
+  })
+  return wiredMapping.telegramCommandReply({}, '/shift 04/09/2026', NOW)
+}).then((reply) => {
+  const mapped = reply.split('\n')
+  const mappedValue = (english) => {
+    const found = mapped.find((line) => line.trimStart().startsWith(`${english}${SEP}`))
+    assert.ok(found, `the report has no "${english}" line:\n${reply}`)
+    return found.slice(found.indexOf(': ') + 2)
+  }
+  // Each of these is a DIFFERENT number, so a line reading from the wrong
+  // kernel column cannot coincidentally match.
+  assert.equal(mappedValue('Revenue'), '$210.00', 'revenue is recognized net sales minus refunds')
+  assert.equal(mappedValue('Tax'), '$7.00', 'the tax line must read tax_usd')
+  assert.equal(mappedValue('Refund'), '$12.00', 'the refund line must read refund_usd, not the unpaid credit')
+  assert.equal(mappedValue('Unpaid credit'), '$18.00', 'and unpaid credit must still read pending_revenue_usd')
+  assert.equal(mappedValue('Avg order value'), '$17.50', 'avg order is revenue / tx_count, from the kernel')
+  assert.equal(mappedValue('Store discount'), '$2.00', 'the store half of the invoice discount')
+  assert.equal(mappedValue('Membership discount'), '$1.00', 'the membership half')
+  assert.equal(mappedValue('Invoice discount'), '$3.00', 'and their sum is the invoice discount')
+  assert.equal(mappedValue('Cost of goods'), '$120.00', 'cost is the kernel cost, net of restocked returns')
+  // revenue 210 - cost 120 + delivery net (6 - 3.5) = 92.50, the kernel's own
+  // profit definition. Asserted as a VALUE so a second profit rule invented
+  // here would show up as a different number.
+  assert.equal(mappedValue('Profit'), '$92.50', 'profit is the kernel definition, not one computed in the message')
+  assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
+  assert.equal(mappedValue('Delivery cost'), '$3.50', 'the courier money actually paid out')
+  assert.equal(mappedValue('Delivery margin'), '$2.50', 'and the difference between them')
+  const courier = mapped.find((line) => line.startsWith('• Vireak Buntham'))
+  assert.ok(courier.endsWith('2 · $6.00 − $3.50 = $2.50'), `the courier row lost a part: ${courier}`)
+  console.log('PASS sources: every added figure reads the kernel column it claims, proved with distinct values end to end')
   console.log('OK test-shift-report-pure')
 }).catch((error) => {
   console.error(error)
