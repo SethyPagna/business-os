@@ -2793,6 +2793,82 @@ from a `0099` that collided with the applied `0099_legacy_cashier_identity_backf
 off the filename, so it would have run out of order after 0107). Re-verify both against
 `d1_migrations` immediately before any apply: several lanes are live and numbering has already
 collided once this week (Part 586).
+### The owner's Sep-4 rulings on product identity and the price tiers (business-os-v1-c3)
+
+Four questions were put to the user by the S4-17b survey lane. All four are now answered, plus one
+instruction nobody had asked for. Recorded verbatim because each one decides real data:
+
+> *"Merge the no barcode if there is an existing product with same name but no barcode...just add
+> and divide the different cost if they have cost."*
+> *"Ysl New Item, no barcode, zero cost, nothing to average against — placeholder to delete."*
+> *"for same products same barcode the only difference is a leading zero...remove the leading zero
+> and merge them... for cost just add and divide... for selling price take most expensive same for
+> vip."*
+> *"Also, swap VIP price with Wholesale price... the current VIP price is actually wholesale
+> price...so delete VIP price, make it wholesale price...and make sure the automation on and off is
+> made..."*
+
+Note the asymmetry in the third ruling, because it is easy to implement wrong: **cost averages,
+but selling price and VIP price take the MAXIMUM.** The owner would rather charge the higher of
+two recorded prices than average down. Averaging a price would quietly cut margin on every merged
+row.
+
+- [~] **S4-29 · Merge rules extended to match the rulings.** *(claimed: `business-os-v1-c3`
+  subagent, branch `s4/merge-rules` off **`c730e5be`** — not off the deployed tip, because the base
+  averaging rule lives on `s4/identity-cost` and is unshipped.)* Adds: same-name/both-barcodes-empty
+  merges; barcodes differing **only by leading zeros** normalize and merge (narrow — `01234` and
+  `1234` merge, `1234` and `12345` must not); max-not-mean for selling and VIP price; the
+  `Ysl New Item` (id 10185) deletion written and unrun. Must size the two categories nobody has
+  counted yet — no-barcode name twins (13 rows / 12 names in the first survey) and leading-zero
+  barcode pairs (uncounted). Told to extend `merge-duplicates` rather than write SQL, since that
+  route already handles per-branch stock, batch re-pointing by `batch_key`, `sale_items` and
+  `inventory_movements` reparenting, the audit row and a reversible undo snapshot.
+- [~] **S4-28 · VIP price becomes the wholesale price, plus the deferred on/off automation.**
+  *(claimed: `business-os-v1-c3` subagent, branch `s4/wholesale-tier` off `e3678a39`.)*
+  **The columns already exist**: `0093_product_wholesale_price.sql` added `wholesale_price_usd/khr`
+  and is applied in production. VIP is stored as `special_price_*`. So this is a **data move plus a
+  rename**, not new schema — and the rows to watch are any product carrying **both** a VIP and a
+  wholesale price, which the lane must report rather than guess at.
+  - **The automation the user asked for was already written down as deferred.** 0093's own header:
+    *"The 'wholesale only > N' note and its default-off auto-apply toggle are a separate,
+    still-being-specified sub-feature and get their own later migration."* That is this.
+  - Boundary with S4-29: S4-28 owns the price tier and its automation, S4-29 owns the merge path.
+    Both touch the lang packs, which are the fleet's hottest merge file — add keys only, never
+    reorder.
+
+- [x] **S4-26 · Reports hub ported, densified, Khmer line box fixed inside the surface. Done** on
+  `s4/reports`, pushed — `c89af33c`, `6e878fb3`, `eae31420`.
+  - **It found a silent defect first.** `s4/09` ported the kit primitives but **not**
+    `frontend/src/styles/tokens.css`, which *declares* every `--ui-surface` / `--ui-line` /
+    `--ui-row-h` / `--ui-size-body` the kit reads. All 18 were undefined, so `var(--ui-row-h)` was
+    invalid at computed-value time: `height:auto` rows, inherited 14px text, no hairlines, no
+    zebra. **Nothing throws and no build fails** — it just quietly looks wrong, which is why it
+    survived a port. Density work was impossible until it was fixed.
+  - Density: row height *auto* -> **24px** (Khmer 28px), body 14 -> **12px**, meta 14 -> **11px**,
+    cell padding 12 -> **6px**, and the table dropped `w-full` for `w-auto`. That last one is the
+    real answer to "fields and value much closer" — `w-full` was stretching a four-column table
+    across the screen with the label at one edge and its number at the other.
+  - **Not visually verified, and it says so.** A preview started from an `rc/*` worktree serves the
+    main checkout, so density was confirmed from the **emitted CSS of a real build** instead —
+    including that Tailwind actually compiled the comma-bearing arbitrary values
+    (`[&_tbody_td]:px-[var(--ui-cell-px,12px)]`), which was the genuine risk.
+  - Two reds mid-way were **its own**, not pre-existing (re-checked at base): `statsStrip.test.ts`
+    pinned a literal ternary and an exact class string. Rewritten to pin intent — the selects reach
+    the user, the density holds — rather than the spelling.
+
+- [ ] **S4-22 · the global Khmer fix, now with exact coordinates** *(still `business-os-v1-7c`'s).*
+  Root cause from the S4-26 lane: a Khmer cluster stacks a superscript sign above the base and a
+  coeng subscript below, ~1.55–1.65em of ink, but `main.css`'s Aug-31 compaction pass pulled the
+  `body.lang-km` line-heights down to **1.38–1.52**. Line-height alone only *overlaps* lines — the
+  **shearing** appears where a short line box meets an `overflow:hidden` ancestor, and Tailwind's
+  `.truncate` is exactly that. `overflow-x` cannot be clipped independently of `overflow-y`, so the
+  only real fix is giving the line box its height back.
+  - Lines to change: `frontend/src/styles/main.css` **133, 138, 143, 148** (the `!important`
+    `body.lang-km .text-xs/.text-sm/.text-base/.text-lg` rules) and **122, 159, 166** (headings,
+    buttons, nav), all needing a floor of ~**1.6**.
+  - **Blast radius, which is why S4-26 did not take it: 121 of 179 component files use `.truncate`**,
+    plus 5 using `line-clamp` — essentially every surface every other lane is editing, and it
+    reflows row heights app-wide. It wants a quiet tree, not a busy one.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
