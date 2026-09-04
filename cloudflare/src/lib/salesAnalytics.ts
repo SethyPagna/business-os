@@ -118,6 +118,86 @@ export interface SalesFilters {
   // query in later pages stays on the same receipt set even while new sales
   // are being created. Absent for normal reports/dashboard paths.
   maxSaleId?: number | null
+  // ---- Shift window (S4-7) ------------------------------------------------
+  // An exact timestamp window, half-open [createdFrom, createdTo), for a
+  // report whose boundary is a MOMENT rather than a day: a cash-drawer shift
+  // runs from the minute the float was registered to the minute it was
+  // counted, and both of those sit mid-day. startDate/endDate cannot express
+  // that (whole local days) and startTime/endTime cannot either (a
+  // time-of-day mask that repeats on every day in the range).
+  //
+  // The value must be in SQLite's CURRENT_TIMESTAMP shape,
+  // 'YYYY-MM-DD HH:MM:SS' UTC -- NOT ISO-with-T. sales.created_at is stored
+  // in that shape (lib/clientTimestamp.ts normalises the offline path to it
+  // for exactly this reason), and at position 10 'T' sorts AFTER ' ', so an
+  // ISO bound would silently drop or admit rows. shiftWindowBound() below is
+  // the one converter; callers must not build these by hand.
+  //
+  // Deliberately NOT run through localDateRangeClause: these bounds are
+  // already absolute UTC instants, so shifting them by the business offset
+  // would move the window by seven hours.
+  createdFrom?: string | null
+  createdTo?: string | null
+  // The cashier who rang the sale up. A shift belongs to one employee, so
+  // every figure on their report is scoped to their own receipts; without
+  // this a two-till shop would report each till the other's takings.
+  // Matched on cashier_id (the account), never cashier_name (a snapshot two
+  // people can end up sharing after a rename).
+  cashierId?: number | string | null
+}
+
+/**
+ * Normalise any timestamp to the shape `sales.created_at` is stored in --
+ * 'YYYY-MM-DD HH:MM:SS' UTC. `shift_sessions.opened_at`/`closed_at` are full
+ * ISO strings with a 'T' and a 'Z' (routes/shifts.ts writes
+ * `new Date().toISOString()`), and comparing those against created_at
+ * lexicographically without this converter is wrong in a way that still
+ * produces plausible-looking numbers. Returns null for anything unparseable,
+ * and a null bound is simply not applied.
+ */
+export function shiftWindowBound(value: unknown): string | null {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return null
+  const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+  if (!Number.isFinite(parsed.getTime())) return null
+  return parsed.toISOString().slice(0, 19).replace('T', ' ')
+}
+
+/**
+ * The shift window as SQL, so there is exactly ONE definition of it.
+ *
+ * whereActiveSales() below calls this, and so does any query that needs the
+ * same window without the kernel's other machinery (the shift report's
+ * invoice counts, which must SEE cancelled sales and therefore cannot go
+ * through the hide-cancelled guard). Writing `created_at >= ... AND < ...` a
+ * second time by hand is exactly how the two would drift -- the boundary
+ * being half-open is a decision, not an accident, and it has to be made in
+ * one place.
+ */
+export function shiftWindowWhere(
+  alias: string,
+  f: Pick<SalesFilters, 'createdFrom' | 'createdTo' | 'cashierId'>,
+): { clauses: string[]; params: Record<string, unknown> } {
+  const clauses: string[] = []
+  const params: Record<string, unknown> = {}
+  const createdFrom = shiftWindowBound(f.createdFrom)
+  if (createdFrom) {
+    clauses.push(`${alias}.created_at >= @createdFrom`)
+    params.createdFrom = createdFrom
+  }
+  // EXCLUSIVE upper bound: with `<=`, a sale rung at the exact second the
+  // drawer was counted would be reported on the closing shift AND on the
+  // next one.
+  const createdTo = shiftWindowBound(f.createdTo)
+  if (createdTo) {
+    clauses.push(`${alias}.created_at < @createdTo`)
+    params.createdTo = createdTo
+  }
+  if (f.cashierId != null && String(f.cashierId).trim() !== '') {
+    clauses.push(`${alias}.cashier_id = @cashierId`)
+    params.cashierId = Number(f.cashierId)
+  }
+  return { clauses, params }
 }
 
 export interface SalesTotals {
@@ -377,6 +457,11 @@ function whereActiveSales(alias: string, f: SalesFilters) {
     clauses.push(`${alias}.id <= @maxSaleId`)
     params.maxSaleId = Number(f.maxSaleId)
   }
+  // Shift window (S4-7). Absent on every pre-existing caller, so those
+  // queries are unchanged.
+  const shift = shiftWindowWhere(alias, f)
+  clauses.push(...shift.clauses)
+  Object.assign(params, shift.params)
   const validTime = (v: unknown): v is string => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
   if (validTime(f.startTime) && validTime(f.endTime)) {
     // The time-of-day window is interpreted in the FIXED business timezone
@@ -477,6 +562,33 @@ async function returnedCostByBucket(env: Env, f: SalesFilters, bucketExpr: strin
   const rows = await db.prepare(returnedCostSql(bucketExpr, whereSql))
     .all<{ bucket: string | number | null; returned_cost_usd: number }>(params)
   return new Map((rows || []).map((r) => [r.bucket == null ? '' : String(r.bucket), num(r.returned_cost_usd)]))
+}
+
+/**
+ * Discount given away on the LINES, as opposed to on the invoice (S4-7).
+ *
+ * SalesTotals already carries the two invoice-level discounts --
+ * store_discount_usd (the cashier's whole-sale discount) and
+ * membership_discount_usd -- because both are columns on the sales row. The
+ * item-level one has no header column at all: `sales.subtotal_usd` is the sum
+ * of the LINE totals, which are already net of each line's own discount, so
+ * the money never appears anywhere on the header. Recovering it means summing
+ * the two per-line columns, and that is what this does.
+ *
+ * Same recognized-only basis as cost, and joined the same way, so
+ * `revenue + item discount + invoice discount` reconciles against the
+ * pre-discount value of what left the shelf.
+ */
+export async function getItemDiscountUsd(env: Env, f: SalesFilters): Promise<number> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('s', f)
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0)), 0) AS item_discount_usd
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    WHERE ${whereSql} AND ${recognizedExpr('s.')}
+  `).get<{ item_discount_usd: number }>(params)
+  return round2(num(row?.item_discount_usd))
 }
 
 export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd = 0): SalesTotals {

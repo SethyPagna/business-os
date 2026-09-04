@@ -40,17 +40,18 @@
 // adding a line; the pure test pins that every label the routes actually emit
 // IS known.
 //
-// FOR S4-7 (the shift report) AND ANY LATER MESSAGE
-// -------------------------------------------------
-// Nothing to adopt and nothing to wire. Send the shift report through
-// `sendTelegramEvent` and write its lines as plain `English label: value` --
-// every label already in LABELS comes out bilingual on its own. For a line
-// this table has no word for (`Opening float`, `Cash counted`, `Variance`),
-// add ONE entry here with the Khmer COPIED FROM km.json, and
-// scripts/test-telegram-bilingual-pure.cjs will (a) check that Khmer against
-// the pack and (b) fail if a new `Xxx: ` line ships without an entry. Prefer
-// `labeled('key', value)` over a raw string when composing new code -- it is
-// the same output, checked by tsc.
+// FOR ANY LATER MESSAGE
+// ---------------------
+// Nothing to adopt and nothing to wire. Write the lines as plain
+// `English label: value` -- every label already in LABELS comes out bilingual
+// on its own. For a line this table has no word for, add ONE entry here with
+// the Khmer COPIED FROM km.json, and scripts/test-telegram-bilingual-pure.cjs
+// will (a) check that Khmer against the pack and (b) fail if a new `Xxx: `
+// line ships without an entry. Prefer `labeled('key', value)` over a raw
+// string when composing new code -- it is the same output, checked by tsc.
+//
+// S4-7 (the shift report) took exactly that route: fifteen entries at the end
+// of LABELS, one `/shift` command doc, and no change to any mechanism here.
 
 /** Separator between the two labels of one line. */
 export const BILINGUAL_SEPARATOR = ' / '
@@ -137,6 +138,46 @@ const LABELS = {
   cashiers: { en: 'Cashiers', km: 'អ្នកគិតប្រាក់' },
   latestReceipts: { en: 'Latest receipts', km: 'វិក្កយបត្រចុងក្រោយ' },
   yourChatId: { en: 'This chat id', km: 'លេខឆាតនេះ' },
+
+  // --- shift report (S4-7) ---
+  // The line set, and its ORDER, is the shop owner's own, as amended after
+  // review: shop name, cashier, from/to, invoice counts (total, cancelled,
+  // edited), revenue, item discount, invoice discount, gross sale, other
+  // expense, registered cash, final amount -- THEN unpaid credit, printed
+  // below the total rather than above it, because a line above a total reads
+  // as an input to it and credit is explicitly not one (see the arithmetic
+  // note on formatShiftReport). From/To/Cashier/Branch reuse the labels above
+  // rather than growing shift-specific twins.
+  shop: { en: 'Shop', km: 'ហាង' },
+  shift: { en: 'Shift', km: 'វេន' },
+  invoices: { en: 'Invoices', km: 'វិក្កយបត្រ' },
+  // The owner said "deleted". Nothing in this system deletes a sale -- the
+  // only two `DELETE FROM sales` sites in routes/sales.ts and routes/returns.ts
+  // are rollbacks of a write that never completed, so no receipt a cashier
+  // ever saw can vanish. A voided receipt is `sale_status = 'cancelled'`, and
+  // that is what this counts, under the word the app itself uses everywhere
+  // else. Calling it "Deleted" would claim rows are gone that are still there.
+  cancelled: { en: 'Cancelled', km: 'បានបោះបង់' },
+  // Sales with at least one `sale_amendments` row (migration 0115) written
+  // inside the window -- the append-only ledger IS the definition of edited.
+  edited: { en: 'Edited', km: 'បានកែ' },
+  revenue: { en: 'Revenue', km: 'ចំណូល' },
+  itemDiscount: { en: 'Item discount', km: 'បញ្ចុះតម្លៃលើមុខទំនិញ' },
+  invoiceDiscount: { en: 'Invoice discount', km: 'បញ្ចុះតម្លៃលើវិក្កយបត្រ' },
+  grossSale: { en: 'Gross sale', km: 'ការលក់សរុប' },
+  otherExpense: { en: 'Other expense', km: 'ចំណាយផ្សេងៗ' },
+  registeredCash: { en: 'Registered cash', km: 'សាច់ប្រាក់ដែលបានចុះបញ្ជី' },
+  cashCounted: { en: 'Cash counted', km: 'សាច់ប្រាក់ដែលបានរាប់' },
+  difference: { en: 'Difference', km: 'ភាពខុសគ្នា' },
+  finalAmount: { en: 'Final amount', km: 'ចំនួនទឹកប្រាក់ចុងក្រោយ' },
+  // Reuses the app's own term for pending revenue -- copied verbatim from
+  // en.json/km.json's `rpt_pending_credit` (the Sales reports' "Unpaid
+  // credit" column) rather than inventing new wording for the same figure.
+  // Printed BELOW Final amount (see formatShiftReport): the owner's ruling
+  // was that a line above a total reads as an input to it, and unpaid credit
+  // explicitly is not one.
+  unpaidCredit: { en: 'Unpaid credit', km: 'ឥណទានមិនទាន់បង់' },
+  paymentMethod: { en: 'Payment method', km: 'វិធីទូទាត់' },
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS
@@ -279,6 +320,12 @@ export const TELEGRAM_COMMANDS: readonly CommandDoc[] = [
     en: 'Receipts with items, prices, cashier',
     km: 'វិក្កយបត្រ ជាមួយមុខទំនិញ តម្លៃ អ្នកគិតប្រាក់',
     example: '/sales yesterday', dated: true,
+  },
+  {
+    command: '/shift', icon: '🧑‍💼',
+    en: 'Each employee shift: takings and cash',
+    km: 'វេនបុគ្គលិកនីមួយៗ៖ ចំណូល និងសាច់ប្រាក់',
+    example: '/shift today', dated: true,
   },
   {
     command: '/fees', icon: '💸',

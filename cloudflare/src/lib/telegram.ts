@@ -4,6 +4,10 @@ import {
   bi, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue,
   parseReportDate, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
+import {
+  getDeliveryContactTotals, getItemDiscountUsd, getPaymentMethodBreakdown, getSalesTotals,
+  shiftWindowWhere, type SalesFilters,
+} from './salesAnalytics'
 import type { Env } from '../index'
 
 export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stock_out'
@@ -31,6 +35,10 @@ function isEnabled(value: string | undefined, fallback: boolean): boolean {
 function cleanLine(value: unknown, max = 300): string {
   return String(value ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
 }
+// Money formatters, kept together with money() below so a new message cannot
+// grow a third way of printing a dollar amount.
+const round2 = (value: number) => Math.round(value * 100) / 100
+const usd = (value: unknown) => `$${round2(Number(value) || 0).toFixed(2)}`
 function money(usd: unknown, khr: unknown): string {
   const usdValue = Number(usd) || 0; const khrValue = Number(khr) || 0; const parts: string[] = []
   if (usdValue) parts.push(`$${usdValue.toFixed(2)}`)
@@ -245,13 +253,352 @@ async function inventorySummaryReport(env: Env): Promise<string> {
   ].join('\n')
 }
 
+// ---- Shift report (S4-7) ---------------------------------------------------
+//
+// The owner's line set, in the owner's order: shop name, cashier, from/to,
+// invoice counts (total / cancelled / edited), revenue, item discount,
+// invoice discount, gross sale, other expense, registered cash, final
+// amount -- THEN unpaid credit (moved below the total on the owner's review
+// ruling; see the note at "Final amount" below) -- then the payment-method
+// and delivery-service breakdowns.
+//
+// WHAT A SHIFT IS SCOPED TO. One employee, one branch, one business day --
+// the key of migration 0116's `shift_sessions`, and the board's own words for
+// S4-10 ("the shift report covers whichever user is signed in"). So every
+// figure below is scoped to that cashier's own receipts inside the window
+// between the minute they registered the float and the minute they counted
+// it. A shift whose branch_id is NULL (a single-branch till, the common shop
+// here) is not narrowed by branch, because there is only one; the cashier
+// scope still holds it to that employee's takings.
+//
+// WHY IT GOES THROUGH THE SALES KERNEL. Revenue has exactly one definition in
+// this system -- net sales, over recognized (neither cancelled nor
+// awaiting_payment) receipts, minus customer refunds, tax and delivery
+// excluded. A shift report that summed `total_usd` itself would be a second,
+// quietly different revenue on a surface the owner reads every evening. So it
+// calls getSalesTotals/getPaymentMethodBreakdown/getDeliveryContactTotals
+// with the shift window as a filter and formats what comes back.
+//
+// THE TWO FIGURES THAT ARE JUDGEMENT CALLS, named here rather than buried:
+//
+//   * "Deleted" is reported as CANCELLED. Nothing deletes a sale in this
+//     system (see telegramLang.ts's `cancelled` entry), so the count the
+//     owner asked for is the count of voided receipts, under the app's own
+//     word for them.
+//
+//   * "Final amount" is what should be IN THE DRAWER at the end:
+//     registered cash + money actually collected - other expense. Collected
+//     is the kernel's collected_total (revenue + tax + customer-paid
+//     delivery), because tax and a delivery fee the customer handed over are
+//     physically in the till even though neither is revenue. Credit is NOT
+//     subtracted: unpaid credit was never collected, so it is never in the
+//     revenue figure to begin with, and subtracting it would count it twice.
+//     The two components are printed under the total so the arithmetic can be
+//     checked without opening the app. THE OWNER'S REVIEW RULING kept this
+//     arithmetic unchanged but moved the "Unpaid credit" line to print BELOW
+//     Final amount rather than above it: a line sitting above a total reads
+//     as an input to that total, and credit explicitly is not one. Below the
+//     total it reads as what it is -- informational, money owed rather than
+//     money in the drawer.
+//
+// Riel is never folded into dollars anywhere here -- the drawer holds both and
+// the shop counts them separately, the same convention migration 0116 and
+// every fee surface already follow.
+
+export type ShiftReportSession = {
+  shift_code: string
+  user_id: number
+  user_name: string | null
+  branch_id: number | null
+  branch_name: string | null
+  business_date: string
+  opened_at: string
+  opening_float_usd: number
+  opening_float_khr: number
+  closed_at: string | null
+  closing_counted_usd: number | null
+  closing_counted_khr: number | null
+}
+
+export type ShiftReportFigures = {
+  invoices: number
+  cancelled: number
+  edited: number
+  revenueUsd: number
+  itemDiscountUsd: number
+  invoiceDiscountUsd: number
+  grossSaleUsd: number
+  creditUsd: number
+  otherExpenseUsd: number
+  otherExpenseKhr: number
+  collectedUsd: number
+  paymentMethods: { method: string; count: number; collectedUsd: number }[]
+  deliveryServices: { name: string; deliveries: number; chargedUsd: number }[]
+}
+
+/**
+ * The whole message, pure -- no D1, no clock beyond the `nowMs` an open shift
+ * needs for its "to" bound. scripts/test-shift-report-pure.cjs drives it
+ * directly, so the shape and the arithmetic are pinned without a database.
+ */
+export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now()): string {
+  const open = !shift.closed_at
+  const lines = [
+    reportTitle('🧑‍💼', 'Shift', 'វេន', shift.business_date),
+    labeled('shop', cleanLine(shopName || 'Business OS', 80)),
+    labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
+  ]
+  if (shift.branch_name) lines.push(labeled('branch', cleanLine(shift.branch_name, 60)))
+  lines.push(
+    labeled('shift', cleanLine(shift.shift_code, 40)),
+    labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
+    // An open shift reports up to NOW and says so, rather than printing a
+    // closing time that has not happened. A shift left running overnight is
+    // the honest record -- migration 0116 refuses to close one on a timer --
+    // so the report has to be able to render one.
+    open
+      ? `${label('to')}: ${formatBusinessDateTime(new Date(nowMs).toISOString(), nowMs)} — ${bi('still open', 'នៅបើកនៅឡើយ')}`
+      : labeled('to', formatBusinessDateTime(shift.closed_at, nowMs)),
+    '',
+    // Bare numbers, not `counted(...)`: the label IS the noun here, so
+    // "Invoices / វិក្កយបត្រ: 12 receipt(s) / វិក្កយបត្រ" would print the same
+    // Khmer word twice on one line. The breakdown bullets further down keep
+    // the counted noun, because those lines carry no label.
+    labeled('invoices', figures.invoices),
+    labeled('cancelled', figures.cancelled),
+    labeled('edited', figures.edited),
+    '',
+    labeled('revenue', usd(figures.revenueUsd)),
+    labeled('itemDiscount', usd(figures.itemDiscountUsd)),
+    labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)),
+    labeled('grossSale', usd(figures.grossSaleUsd)),
+    labeled('otherExpense', money(figures.otherExpenseUsd, figures.otherExpenseKhr)),
+    labeled('registeredCash', money(shift.opening_float_usd, shift.opening_float_khr)),
+  )
+
+  // What should be in the drawer. Printed with its two moving parts under it,
+  // so the number can be checked against the lines above without arithmetic
+  // in the reader's head, and so a disagreement points at a component rather
+  // than at "the report is wrong".
+  const floatUsd = Number(shift.opening_float_usd) || 0
+  const expenseUsd = Number(figures.otherExpenseUsd) || 0
+  const finalUsd = floatUsd + (Number(figures.collectedUsd) || 0) - expenseUsd
+  lines.push(
+    labeled('finalAmount', usd(finalUsd)),
+    `     ${usd(floatUsd)} + ${usd(figures.collectedUsd)} − ${usd(expenseUsd)}`,
+    // A line each, not a ` / ` pair: this caption is a phrase long enough that
+    // joining the two languages wraps into a mush at phone width -- the same
+    // rule telegramLang.ts's command reference follows for its sentences.
+    '     registered cash + collected − expense',
+    '     សាច់ប្រាក់ចុះបញ្ជី + ប្រាក់ទទួល − ចំណាយ',
+  )
+
+  // Printed AFTER Final amount, deliberately: the owner's ruling was that a
+  // line above a total reads as an input to it, and unpaid credit is not one
+  // (see the section comment above). Below the total it reads as what it
+  // is -- money owed, not money that belongs in tonight's drawer count.
+  lines.push(labeled('unpaidCredit', usd(figures.creditUsd)))
+
+  // The closing count only exists once the employee has ended the shift by
+  // hand, so an open shift shows neither it nor a difference against it --
+  // printing "Difference: -$256.00" for a shift still in progress would read
+  // as a missing-cash alarm on every open till.
+  if (!open) {
+    lines.push(labeled('cashCounted', money(shift.closing_counted_usd, shift.closing_counted_khr)))
+    const countedUsd = Number(shift.closing_counted_usd) || 0
+    const difference = Math.round((countedUsd - finalUsd) * 100) / 100
+    // Sign in FRONT of the currency symbol: `$-3.00` reads as a price.
+    const sign = difference < 0 ? '−' : difference > 0 ? '+' : ''
+    lines.push(labeled('difference', `${sign}${usd(Math.abs(difference))}`))
+  }
+
+  if (figures.paymentMethods.length) {
+    lines.push('', `${label('paymentMethod')}:`)
+    for (const row of figures.paymentMethods) {
+      lines.push(`• ${localizeTelegramValue(cleanLine(row.method, 40))} — ${counted(row.count, 'receipt(s)')} · ${usd(row.collectedUsd)}`)
+    }
+  }
+  if (figures.deliveryServices.length) {
+    lines.push('', `${label('deliveryService')}:`)
+    for (const row of figures.deliveryServices) {
+      lines.push(`• ${localizeTelegramValue(cleanLine(row.name, 60))} — ${row.deliveries} · ${usd(row.chargedUsd)}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+const SHIFT_COLUMNS = `shift_code, user_id, user_name, branch_id, branch_name, business_date,
+  opened_at, opening_float_usd, opening_float_khr,
+  closed_at, closing_counted_usd, closing_counted_khr`
+
+/** The filter that turns "this shift" into a query the sales kernel accepts. */
+function shiftFilters(shift: ShiftReportSession, nowMs: number): SalesFilters {
+  return {
+    createdFrom: shift.opened_at,
+    // An open shift is reported up to now. shiftWindowBound normalises both.
+    createdTo: shift.closed_at || new Date(nowMs).toISOString(),
+    cashierId: shift.user_id,
+    // Falsy (null) branch is not a filter -- see the section comment.
+    branchId: shift.branch_id ?? null,
+  }
+}
+
+/**
+ * Invoice counts. Deliberately NOT through getSalesTotals: the kernel's
+ * default guard hides cancelled sales, and "how many receipts were voided" is
+ * one of the three counts the owner asked for. It reuses shiftWindowWhere()
+ * so the window is the same window, half-open and all.
+ *
+ * "Edited" is the existence of a `sale_amendments` row (migration 0115) --
+ * the append-only ledger IS the record of an edit, so this cannot drift from
+ * what the sale-detail sheet shows. EXISTS rather than a join, so a sale
+ * amended four times counts once.
+ */
+async function shiftInvoiceCounts(env: Env, shift: ShiftReportSession, nowMs: number) {
+  const filters = shiftFilters(shift, nowMs)
+  const { clauses, params } = shiftWindowWhere('sales', filters)
+  if (shift.branch_id) {
+    clauses.push('sales.branch_id = @branchId')
+    params.branchId = shift.branch_id
+  }
+  const row = await getDb(env).prepare(`
+    SELECT COUNT(*) AS invoices,
+           COALESCE(SUM(CASE WHEN COALESCE(NULLIF(sales.sale_status, ''), 'completed') = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled,
+           COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM sale_amendments a WHERE a.sale_id = sales.id) THEN 1 ELSE 0 END), 0) AS edited
+    FROM sales
+    WHERE ${clauses.join(' AND ')}
+  `).get<{ invoices: number; cancelled: number; edited: number }>(params)
+  return { invoices: Number(row?.invoices || 0), cancelled: Number(row?.cancelled || 0), edited: Number(row?.edited || 0) }
+}
+
+/**
+ * Expenses paid out of THIS drawer: recorded inside the window by the same
+ * employee. `created_at` is the moment the record was written and shares
+ * sales' timestamp shape; `fee_date` is a bare day and could not tell two
+ * shifts on one date apart.
+ */
+async function shiftExpenses(env: Env, shift: ShiftReportSession, nowMs: number) {
+  const { clauses, params } = shiftWindowWhere('fees', shiftFilters(shift, nowMs))
+  // fees has no cashier_id -- the equivalent column is created_by. Drop the
+  // clause the sales table owns and add the fees one.
+  const feeClauses = clauses.filter((clause) => !clause.includes('cashier_id'))
+  delete params.cashierId
+  feeClauses.push('fees.created_by = @createdBy')
+  params.createdBy = shift.user_id
+  if (shift.branch_id) {
+    feeClauses.push('fees.branch_id = @branchId')
+    params.branchId = shift.branch_id
+  }
+  const row = await getDb(env).prepare(`
+    SELECT COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr
+    FROM fees
+    WHERE ${feeClauses.join(' AND ')}
+  `).get<{ usd: number; khr: number }>(params)
+  return { usd: Number(row?.usd || 0), khr: Number(row?.khr || 0) }
+}
+
+async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number): Promise<ShiftReportFigures> {
+  const filters = shiftFilters(shift, nowMs)
+  const [totals, itemDiscountUsd, counts, expenses, paymentMethods, deliveries] = await Promise.all([
+    getSalesTotals(env, filters),
+    getItemDiscountUsd(env, filters),
+    shiftInvoiceCounts(env, shift, nowMs),
+    shiftExpenses(env, shift, nowMs),
+    getPaymentMethodBreakdown(env, filters),
+    getDeliveryContactTotals(env, filters),
+  ])
+  return {
+    invoices: counts.invoices,
+    cancelled: counts.cancelled,
+    edited: counts.edited,
+    // Canonical revenue, straight off the kernel -- never re-derived here.
+    revenueUsd: totals.revenue_usd,
+    itemDiscountUsd,
+    // The kernel's `discount_usd` is store + membership: both are taken off
+    // the whole invoice rather than off a line, which is what makes them the
+    // invoice discount.
+    invoiceDiscountUsd: totals.discount_usd,
+    // Pre-discount value of what left the shelf. `gross_sales_usd` is the sum
+    // of subtotals, which are already net of the LINE discounts, so the item
+    // discount is added back to reach the price the goods were listed at.
+    grossSaleUsd: Math.round((totals.gross_sales_usd + itemDiscountUsd) * 100) / 100,
+    // Unpaid credit, on the same net basis. Not revenue, and not in the till.
+    creditUsd: totals.pending_revenue_usd,
+    otherExpenseUsd: expenses.usd,
+    otherExpenseKhr: expenses.khr,
+    collectedUsd: totals.collected_total_usd,
+    paymentMethods: paymentMethods.map((row) => ({ method: row.payment_method, count: row.tx_count, collectedUsd: row.collected_usd })),
+    deliveryServices: deliveries.map((row) => ({ name: row.delivery_contact_name, deliveries: row.deliveries, chargedUsd: row.charged_fee_usd })),
+  }
+}
+
+async function shopName(env: Env): Promise<string> {
+  const row = await getDb(env).prepare("SELECT value FROM settings WHERE key = 'business_name'").get<{ value: string }>()
+  return cleanLine(row?.value || 'Business OS', 80)
+}
+
+async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number): Promise<string> {
+  const [name, figures] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs)])
+  return formatShiftReport(name, shift, figures, nowMs)
+}
+
+/**
+ * `/shift [date]` -- every shift registered on that business day, one block
+ * each, newest first.
+ *
+ * It cannot be "the signed-in user's shift": a Telegram chat carries no
+ * Business OS session, which is why the whole command surface is gated on the
+ * CHAT rather than on a user (see routes/telegram.ts). The audience of the
+ * allow-listed chat is the owner or a manager, and what they need at closing
+ * time is every till, so the day's shifts are what the command answers with.
+ * The single-shift message is what `sendTelegramShiftReport` pushes.
+ */
+async function shiftReport(env: Env, date: string, nowMs: number): Promise<string> {
+  const shifts = await getDb(env).prepare(`
+    SELECT ${SHIFT_COLUMNS} FROM shift_sessions
+    WHERE business_date = @date
+    ORDER BY opened_at DESC LIMIT 12
+  `).all<ShiftReportSession>({ date })
+  if (!shifts.length) {
+    return [
+      reportTitle('🧑‍💼', 'Shift', 'វេន', date),
+      bi('No shift was registered on this day.', 'គ្មានវេនណាមួយបានចុះបញ្ជីក្នុងថ្ងៃនេះទេ។'),
+    ].join('\n')
+  }
+  const blocks: string[] = []
+  for (const shift of shifts) blocks.push(await shiftReportFor(env, shift, nowMs))
+  return blocks.join(`\n${'━'.repeat(18)}\n`)
+}
+
+/**
+ * Push ONE shift's report to the alerts chat. This is the hand-off for the
+ * lane that owns routes/shifts.ts: its `POST /close` handler can call
+ * `c.executionCtx.waitUntil(sendTelegramShiftReport(c.env, shift.id))` after
+ * the close succeeds and the report goes out with no other change. Returns
+ * false (never throws) when Telegram is not configured or the id is unknown,
+ * so it can never turn a successful close into a failed request.
+ */
+export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: number = Date.now()): Promise<boolean> {
+  try {
+    const config = await getTelegramConfig(env)
+    if (!config.enabled || configurationProblem(config)) return false
+    const shift = await getDb(env).prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: shiftId })
+    if (!shift) return false
+    await postTelegram(config, await shiftReportFor(env, shift, nowMs))
+    return true
+  } catch (error) {
+    console.error('[telegram] shift report could not be sent', error)
+    return false
+  }
+}
+
 // ---- Command dispatch (S4-9) ----------------------------------------------
 // Pure-ish and exported so scripts/test-telegram-bilingual-pure.cjs can drive
 // every command, including the bad-argument and unknown-command paths, with a
 // stubbed D1 and no bot token and no live chat.
 
 /** Commands that accept an optional day argument. */
-const DATED_COMMANDS = new Set(['/report', '/today', '/summary', '/sales', '/fees'])
+const DATED_COMMANDS = new Set(['/report', '/today', '/summary', '/sales', '/fees', '/shift', '/shifts'])
 
 function unknownCommandReply(command: string): string {
   return [
@@ -276,6 +623,10 @@ export async function telegramCommandReply(env: Env, text: string, nowMs: number
   if (!parsed.ok) return parsed.message
   if (command === '/sales') return salesReport(env, parsed.date)
   if (command === '/fees') return feesReport(env, parsed.date)
+  // `/shifts` is accepted as well as `/shift`: the reply is a list, and a
+  // manager who types the plural should get the report rather than the
+  // unknown-command help.
+  if (command === '/shift' || command === '/shifts') return shiftReport(env, parsed.date, nowMs)
   return dayReport(env, parsed.date)
 }
 
@@ -344,8 +695,6 @@ export type TelegramStockChange = {
   lot?: string | null; branchOnHand?: number | null; totalOnHand?: number | null; by?: string | null
 }
 const TELEGRAM_MAX_ITEM_LINES = 20
-const round2 = (value: number) => Math.round(value * 100) / 100
-const usd = (value: unknown) => `$${(Number(value) || 0).toFixed(2)}`
 
 // dd/mm/yyyy HH:mm in the business day's zone (UTC+7) -- the app-wide display
 // convention (day-first since Sep 4 2026). D1's CURRENT_TIMESTAMP is
