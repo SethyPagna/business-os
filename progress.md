@@ -410,8 +410,8 @@ re-derived).** Of the migrations on disk, **exactly one is CRLF** — `0105_fee_
 it contains **zero** `CREATE TRIGGER`, so it cannot reach the splitter bug. `0106_return_replacement_sales.sql`
 (untracked, someone's in-flight file — untouched) is LF, 0 CR, no triggers. **9 migrations do contain
 `CREATE TRIGGER`; none of them is CRLF on disk.** So: the protection is genuinely absent here, and nothing is
-currently armed. **The risk is the next trigger-bearing migration deployed from a tree without the pin** — which is
-why this is worth doing before it is worth panicking about.
+currently armed **in this working tree — which, see the correction immediately below, is the one tree nobody
+deploys from.** Superseded on the temper, not on the sweep.
 
 **⚠️ AND MIND THE MIRROR-IMAGE SCOPE ERROR IN MY OWN RETRACTIONS (`db` caught it).** Read flat, "the staleness
 check does no normalisation — retracted" tells a lane on `main` that the check normalises. **It does not: on `main`
@@ -419,6 +419,52 @@ the string `normalizeEol` does not occur in that file at all.** Likewise `.gitat
 `origin/main` **and absent from this shared checkout's disk right now**, so `eol=lf` is **not active in the tree
 eleven sessions are working in**. Both retractions above have been re-scoped for this; if you quote either of them
 onward, carry the ref with it or you hand on the error in the opposite direction.
+
+**⚠️ CORRECTION TO "NOTHING IS PRIMED" ABOVE — that was a property of THIS TREE, and the deploy path is the
+armed one (`7c` found it, `ee` reproduced and extended it).** The disk sweep was right and the conclusion drawn
+from it was not. This working tree is LF for reasons that predate the current filter; **a fresh checkout arms
+everything.** `7c` materialised migrations through git's own smudge filter with
+`git checkout-index --prefix=<scratch>/ --` — which is what a checkout actually does — and got CRLF. Re-run here
+across **all nine** trigger-bearing migrations, not the two `7c` sampled:
+
+| migration | CR after smudge | `END`-anchored lines |
+|---|---|---|
+| `0010_product_name_grouping` | 121 | 3 |
+| `0018_products_fts` | 65 | 3 |
+| `0019_products_fts_code` | 60 | 3 |
+| `0020_contacts_fts` | 188 | 18 |
+| `0021_products_fts_name_trigram` | 73 | 3 |
+| `0088_legacy_finance_and_audit_ledgers` | 155 | 1 |
+| `0090_legacy_inventory_effect_stock_guard` | 28 | 1 |
+| `0092_legacy_inventory_effect_guard_idempotency` | 29 | 1 |
+| `0101_legacy_inventory_effect_historical_cost` | 46 | 1 |
+
+**9 of 9 armed** — every one fully CRLF (CR count equals LF count) and every one carrying the `END;` the splitter
+mishandles. **And the tree nobody deploys from is the safe one, while the tree every deploy uses is the armed one:**
+deploys run from fresh isolated worktrees with a real `npm ci` (`bos-dep` on Sep 3; my own deploy worktree the same
+way, created and removed). So the calm reading came from measuring the one tree that is not on the path.
+
+**WHAT KEEPS IT FROM BEING ON FIRE, stated as carefully as the risk (`7c`).** All nine are `0010`–`0101` and long
+since applied to production, and `wrangler d1 migrations apply` runs only **unapplied** files — so a routine deploy
+off `main` does not re-run them. Two real exposures remain:
+
+- **(a) Any NEW trigger-bearing migration authored from here on.** Exactly the `0115` shape. This is the live one.
+- **(b) A from-scratch D1 bootstrap.** Restoring or standing up a fresh database from `main` runs the chain from
+  `0001` and dies at the **first** trigger file with earlier migrations already committed. **That file is `0010`,
+  not `0018`** (correcting `7c`'s number): `0010_product_name_grouping.sql` has **4** `CREATE TRIGGER`s and **9**
+  migrations ahead of it. Disaster-recovery-shaped — the worst possible moment to be debugging line endings.
+  *Untested and to stay untested: nobody runs a bootstrap against a real database to confirm this. It is reasoned
+  from the mechanism, and it is labelled as such.*
+
+**A detail that says this is a repeat, not a first (`ee`).** `0010` carries its own comment block about the same
+wrangler splitter — a *different* trigger of it, a lowercase `begin` in the trigger body, wrangler issue #10998 —
+ending "it works fine locally". So this codebase has now been bitten by that one splitter in two distinct ways,
+and both times the local run passed. **Treat `wrangler`'s statement splitter as a known-hostile parser and the
+local `--file` path as blind to it.**
+
+**So keep "calm, not alarm" for the schedule and drop it for the rationale (`7c`'s wording, and it is better than
+the original).** It is not urgent because something is about to break; it is urgent because the case where it
+breaks is the case where you least want to be debugging line endings.
 
 ### 🟡 THE DOCS ARE FORKED IN TWO PLACES — union, never pick a side
 

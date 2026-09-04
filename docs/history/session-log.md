@@ -19508,3 +19508,40 @@ of a lane. Left unclaimed on the board with an explicit note not to reserve them
 
 *Nothing in this addendum was found by agreement. Every correction came from a session that re-ran the measurement
 instead of accepting the sentence — including both corrections to the addendum that was itself a correction.*
+
+### Part 601, addendum 3 — the calm reading came from the one tree nobody deploys from
+
+The addendum above closed with "nothing is armed today", derived from a disk sweep: nine migrations contain
+`CREATE TRIGGER`, none is CRLF on disk. The sweep was right; the conclusion was a property of the shared working
+tree, which is the single tree in this fleet that never deploys anything.
+
+`7c` tested what a checkout actually does rather than what the disk currently holds —
+`git checkout-index --prefix=<scratch>/ --`, which runs git's smudge filter — and got CRLF back. Re-run here
+across all nine rather than the two `7c` sampled: **9 of 9 come out fully CRLF** (CR count equal to LF count),
+every one carrying the `END;` the wrangler splitter mishandles. `0020_contacts_fts.sql` alone has 18 such lines.
+So the shared tree is LF for reasons predating the current filter, and **any fresh clone, new worktree or CI
+checkout of `main` arms all nine** — which matters precisely because deploys are run from fresh isolated
+worktrees with a real `npm ci`. *The armed tree is the deploy path; the calm tree is the one nobody ships from.*
+
+What holds it back, and it deserves the same care as the risk: those nine are `0010`–`0101`, long applied, and
+`wrangler d1 migrations apply` runs only unapplied files, so a routine deploy does not re-run them. Two exposures
+survive — **any new trigger-bearing migration**, which is the `0115` shape exactly, and **a from-scratch D1
+bootstrap**, which would run the chain from `0001` and die at the first trigger file with earlier migrations
+already committed. That file is `0010_product_name_grouping.sql` — 4 triggers, 9 migrations ahead of it — not
+`0018` as first reported. The bootstrap path is reasoned from the mechanism and deliberately left untested: nobody
+runs one against a real database to confirm a line-ending theory.
+
+One detail settles what kind of problem this is. `0010` carries its own comment block about the *same* wrangler
+splitter — a different trigger of it, a lowercase `begin` in the trigger body, wrangler issue #10998 — ending
+"it works fine locally". This codebase has been bitten by that one parser twice, in two different ways, and both
+times the local run was green. The splitter is a known-hostile parser and `--file` is blind to it.
+
+`7c`'s reframing is the one to keep, and it is better than the original: **not urgent because something is about
+to break, urgent because the case where it breaks is the case where you least want to be debugging line endings.**
+
+And a fourth correction in a single afternoon, all the same defect. The disk sweep measured one tree and was
+reported as a property of the refs — the same error as the `.gitattributes` claim, the `:83` citation, and the
+invented explanation for the `:83` citation. `ba` named the reason the third one slipped through: **a post-hoc
+explanation is a claim and needs the same evidence as the finding it explains.** Root causes get accepted on
+plausibility in a way findings never do, because they arrive attached to a confession, and nobody audits an
+admission of fault.
