@@ -345,4 +345,41 @@ await runTest('a guarded overlay always RENDERS the prompt it raises', () => {
   assert.deepEqual(missing, [], 'these call useCloseGuard but never render the prompt -- they would trap the operator')
 })
 
+function everyComponentFile(): string[] {
+  const root = new URL('../src/components/', import.meta.url)
+  const found: string[] = []
+  const walk = (dir: URL, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) { walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`); continue }
+      if (entry.name.endsWith('.tsx')) found.push(`components/${prefix}${entry.name}`)
+    }
+  }
+  walk(root, '')
+  return found.sort()
+}
+
+await runTest('minimize is never routed through the close guard', () => {
+  // S4-20 keeps the minimize control, and S4-21 must not quietly break it.
+  // Minimizing PRESERVES the work -- utils/minimizedWork.ts parks it as a
+  // chip and utils/workDrafts.ts keeps its content -- so raising "Discard
+  // changes?" on minimize would be asking the operator to throw away
+  // exactly what they just asked to keep. The two controls sit side by side
+  // in the header, which is precisely why a later edit could wire them
+  // together "for consistency". This is the tripwire for that edit.
+  const offenders: string[] = []
+  for (const file of everyComponentFile()) {
+    const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
+    for (const match of source.matchAll(/onMinimize=\{/g)) {
+      const window = source.slice(match.index ?? 0, (match.index ?? 0) + 400)
+      if (/requestClose\s*\(/.test(window) || /closeGuard\./.test(window)) offenders.push(file)
+    }
+  }
+  assert.deepEqual([...new Set(offenders)], [], 'minimize must call its own handler, never the close guard')
+
+  const button = readFileSync(new URL('../src/components/shared/MinimizeButton.tsx', import.meta.url), 'utf8')
+  // Prose about the guard is fine (and is there on purpose); a CALL is not.
+  assert.ok(!/requestClose\s*\(/.test(button) && !/closeGuard\./.test(button), 'the shared minimize button must stay independent of the close guard')
+  assert.match(button, /aria-label=\{tr\('minimize', 'Minimize', '/, 'the shared minimize button must carry a Khmer fallback label')
+})
+
 process.exit(failed ? 1 : 0)
