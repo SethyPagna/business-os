@@ -2440,11 +2440,11 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   a line-height / overflow fix at the CSS level, not per component.
 - [ ] **S4-23 · Membership number for every customer, `LC-` prefix**, zero-padded to a fixed
   width so the digits fill the missing places at the back.
-- [ ] **S4-24 · Sale detail = receipt-shaped.** Clicking a sale shows what the receipt shows,
+- [~] **S4-24 · Sale detail = receipt-shaped.** *(claimed `business-os-v1-c3`, branch `s4/receipt-shape` off `e3678a39`.)* Clicking a sale shows what the receipt shows,
   without the extra breakdowns: status, customer with membership, status update, and the
   add-sale-products action. Returns: move the print buttons to the end of the page, off the
   header beside the X.
-- [ ] **S4-25 · Delivery merges into the items list**, the way the receipt places it next to
+- [~] **S4-25 · Delivery merges into the items list** *(claimed `business-os-v1-c3`, same lane as S4-24 — same files.)*, the way the receipt places it next to
   the total. *(Reading to confirm with the user: the delivery fee becomes a line in the
   items list rather than its own block.)*
 
@@ -2592,10 +2592,15 @@ matters soonest: S4-21 is meant to be the single dirty-state contract every othe
 so if it stays unbuilt the other lanes will hand-roll their own.
 
 `business-os-v1-40`, `-63` and `-7e` (all ~7h old, none on the Sep-4 table) were offered the five
-unowned items — S4-12, S4-23, S4-24, S4-25, S4-26 — and told to name one rather than three of
+unowned items — S4-12, S4-23 and S4-26 — and told to name one rather than three of
 them starting the same thing. **S4-19 was deliberately held back** from that offer: renaming RECON
 to `ADJMM/DD/YYYY` rewrites existing D1 rows, so it is a data migration and should be boarded with
 that written down, not picked up casually.
+
+**S4-24 and S4-25 are no longer unowned:** taken here rather than left waiting on a reply,
+because they are one surface (the sale-detail and return-detail modals plus the receipt renderer)
+and splitting them across two sessions would have put two lanes in the same three files. Branch
+`s4/receipt-shape` off `e3678a39`.
 
 ### Subagent roster (committed `739f3750`, .claude/agents/)
 
