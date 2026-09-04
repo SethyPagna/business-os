@@ -9,8 +9,15 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
 // Telegram's webhook must be public: Telegram cannot present a Business OS
 // session cookie. Its secret header is verified before parsing or replying;
-// command handlers then apply the tighter manager-user AND manager-chat
-// allowlists stored in Settings.
+// handleTelegramWebhook then applies the chat allow-list held in the
+// `telegram_chat_id` setting (comma-separated), and answers an unapproved
+// chat with a refusal that carries no shop data.
+//
+// There is deliberately NO per-USER check: a Telegram user id has no link to
+// a Business OS account, so it would be a second list to keep by hand with no
+// stronger guarantee than "which chat is this". The chat IS the boundary, so
+// the approved chat must be an owner DM or a manager-only group -- never a
+// staff-wide alerts group.
 app.post('/webhook', async (c) => {
   if (!(await isTelegramWebhookRequest(c.env, c.req.header('X-Telegram-Bot-Api-Secret-Token')))) return c.json({ error: 'Unauthorized' }, 401)
   const update = await c.req.json().catch(() => null)

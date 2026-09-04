@@ -37,7 +37,8 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
-const telegram = loadReal('lib/telegram.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow })
+const telegramLang = loadReal('lib/telegramLang.ts')
+const telegram = loadReal('lib/telegram.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang })
 
 // --- date: UTC -> business zone, mm/dd/yyyy HH:mm, both timestamp shapes ---
 assert.equal(telegram.formatBusinessDateTime('2026-09-02T17:30:00.000Z'), '09/03/2026 00:30', 'ISO with Z shifts +7h across midnight')
@@ -100,10 +101,10 @@ assert.ok(many.includes('+ 5 more item(s)'))
 // --- stock change with resulting on-hand ---
 assert.deepEqual(telegram.formatStockChangeTelegramLines({
   product: 'Rice 5kg', type: 'remove', quantity: -3, branch: 'Shop', reason: 'Damaged', branchOnHand: 12, totalOnHand: 40, by: 'Za',
-}).filter(Boolean), ['Product: Rice 5kg', 'Change: −3', 'Branch: Shop', 'Reason: Damaged', 'On hand: Shop 12 · all branches 40', 'By: Za'])
+}).filter(Boolean), ['Product: Rice 5kg', 'Stock change: −3', 'Branch: Shop', 'Reason: Damaged', 'On hand: Shop 12 · all branches 40', 'By: Za'])
 assert.deepEqual(telegram.formatStockChangeTelegramLines({
   product: 'Rice 5kg', type: 'add', quantity: 5, branch: 'Warehouse', lot: '09032026', branchOnHand: 0, totalOnHand: null,
-}).filter(Boolean), ['Product: Rice 5kg', 'Change: +5', 'Branch: Warehouse', 'Lot: 09032026', 'On hand: Warehouse 0'])
+}).filter(Boolean), ['Product: Rice 5kg', 'Stock change: +5', 'Branch: Warehouse', 'Lot: 09032026', 'On hand: Warehouse 0'])
 
 // --- transfers: one builder for the single, bulk and inventory-page routes ---
 assert.deepEqual(telegram.formatTransferTelegramLines({
