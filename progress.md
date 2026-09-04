@@ -515,6 +515,41 @@ local `--file` path as blind to it.**
 the original).** It is not urgent because something is about to break; it is urgent because the case where it
 breaks is the case where you least want to be debugging line endings.
 
+**✅ THE ASSUMPTION UNDER "NOTHING IS ARMED" IS NOW A FINDING — read from wrangler's source (`db` flagged it as an
+unverified assumption; `ee` verified it).** `db` was right to refuse to bank it: the whole all-clear rested on
+*"`wrangler d1 migrations apply` parses only unapplied files"*, which nobody had checked, and if it were wrong the
+conclusion inverted from "none armed" to "79 armed". Read at
+`cloudflare/node_modules/wrangler/wrangler-dist/cli.js`, **wrangler 4.116.0**:
+
+- `getUnappliedMigrationNames(migrations, appliedMigrations)` filters **on names only** — it compares directory
+  entries against the names in `d1_migrations` and never opens a file.
+- The apply handler loops `for (const migration of unappliedMigrations)` and calls `buildMigrationQuery` per item.
+- `buildMigrationQuery` does `fs.readFileSync(path.join(migrationsPath, migrationName), 'utf8')` — **the one named
+  file**, then appends its own `INSERT INTO <migrations table>`.
+
+**So an applied migration's file is never read, and its line endings cannot matter.** The all-clear holds for the
+reason `db` assumed, and it is no longer an assumption.
+
+**⚠️ Scope it, because that is the lesson of the whole day:** `cloudflare/package.json` pins wrangler as
+**`^4.112.0`**, a caret range. A deploy worktree running a real `npm ci` can install a newer wrangler than the one
+read here. **This finding is scoped to 4.116.0 and to nothing else** — re-read it if a deploy pulls a new minor.
+
+**THE EXPOSED-TREE SWEEP, and it is 79 trees, not a handful (`db`).** Across ~82 worktrees on this machine, checked
+against the 10 trigger-bearing migrations (`0010`, `0018`–`0021`, `0088`, `0090`, `0092`, `0101`, `0115`):
+
+- **79 carry CRLF trigger files, and every one of them is pin-less.** Most carry 9, through `0101`.
+- **`bos-s4-date` carries 10 — including `0115_sale_amendments.sql` itself**, the file that actually failed,
+  CRLF on disk right now. (`0115` carries **2** triggers.)
+- **The three deploy-capable trees are clean** — `bos-dlv`, `ee-integrate`, `bos-cert-ee`: pin present, 116
+  migrations LF, 0 CRs in trigger files. **The pin works where it exists**, which is the positive control this
+  finding otherwise lacked.
+
+**AND THE MERGE IS NECESSARY, NOT SUFFICIENT — for whoever lands it (`db`).** Git applies filters when it checks
+out a path, so **landing `.gitattributes` on `main` fixes only NEW checkouts.** The 79 existing worktrees keep
+their CRLF afterwards. Whoever takes the merge should plan a re-checkout or normalisation pass for live worktrees
+as part of it, not assume the commit closes the exposure. Same shape as the deploy-target correction earlier
+today, and the same shape as the necessary/sufficient rule already on this board.
+
 ### 🟡 THE DOCS ARE FORKED IN TWO PLACES — union, never pick a side
 
 | | `main` (`4b58e9a1`) | `rc/ee-integrate-2026-09-04` (`2bd6675e`) |

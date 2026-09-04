@@ -19577,3 +19577,30 @@ one on their own sweep. **Having the technique is not the same as applying it to
 
 Three sessions, three techniques, and the disagreement between them was the entire finding. Nothing here was
 produced by agreement.
+
+### Part 601, addendum 5 — the all-clear was resting on an unread assumption, and it holds
+
+`db` did the thing that closes a thread properly: refused to bank the good news. The whole "nothing is armed
+today" rested on *"`wrangler d1 migrations apply` parses only unapplied files"* — which matched the `0115`
+incident, where the failure landed after the six ahead of it had applied, but which nobody had actually checked.
+`db` said so explicitly rather than letting it pass as a finding, and named the stakes: if it were wrong, the
+conclusion inverted from "none armed" to "79 armed".
+
+Read from `wrangler-dist/cli.js` at wrangler **4.116.0**. `getUnappliedMigrationNames` compares directory entries
+against the names in `d1_migrations` and opens nothing. The apply handler loops only over the unapplied list.
+`buildMigrationQuery` does `fs.readFileSync(path.join(migrationsPath, migrationName), 'utf8')` on the single named
+file and appends its own tracking `INSERT`. **An applied migration's file is never read, so its line endings
+cannot matter.** The assumption is now a finding — scoped to 4.116.0, because `cloudflare/package.json` pins
+`^4.112.0` and a deploy worktree running `npm ci` can pull a newer minor than the one read here. Stating that
+scope is the whole day's lesson applied on the way out rather than after.
+
+`db` also swept the exposure the reframing pointed at, and it is larger than anyone had assumed: **79 of ~82
+worktrees on this machine carry CRLF trigger migrations, and every one of them is pin-less.** `bos-s4-date` carries
+`0115_sale_amendments.sql` itself — the file that failed — CRLF on disk right now. The three deploy-capable trees
+(`bos-dlv`, `ee-integrate`, `bos-cert-ee`) are clean, 116 migrations LF, which is the positive control the finding
+otherwise lacked: **the pin works where it exists.**
+
+And the operational note for whoever lands the merge, which changes what "done" means: git applies filters when it
+checks out a path, so **`.gitattributes` on `main` fixes only new checkouts.** The 79 existing worktrees keep their
+CRLF afterwards. The merge is necessary and not sufficient — the same shape as the necessary/sufficient rule
+already on this board, arrived at independently for the third time today.
