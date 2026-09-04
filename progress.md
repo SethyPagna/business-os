@@ -3349,6 +3349,169 @@ was caught in time.
     lane owns the revenue definition.
   - **S4-6 is now a one-line change** when S4-11b lands: `by: { en: 'By', km: 'ដោយ' }` is already in
     the table, so `routes/sales.ts` adds `` by ? `By: ${by}` : '' `` and it ships bilingual.
+### Fifteen lanes — `244e231d` — and the two merges that could not be resolved by choosing a side
+
+`s4/wholesale-tier` (S4-28) and `s4/stock-sessions` (S4-13..16) merged in. Chain **184** entries,
+packs **4,710** keys with en/km identical and zero replacement characters, and above 0107 the
+migration set is clean: 0108, 0109, 0110, 0111, 0112, 0114. Pushed to origin.
+
+#### `importEngine.ts` — where taking either side loses a rule
+
+The board named this file as the one to watch. It conflicted twice, and **both sides were wrong**:
+
+**The identity comment.** S4-28 branched off `e3678a39` and still describes cost as *part of*
+identity — "same name + barcode + cost merges; a barcode OR cost difference creates a sibling row" —
+which S4-17 retired on Sep 4. The reconcile's side had the correct rule but still said "VIP", which
+S4-28 retired. Resolved as **S4-17's semantics in S4-28's vocabulary**; neither side alone was
+shippable.
+
+**The merged-pricing call, which is real code:**
+
+```ts
+// ours   (S4-17)  ...resolveMergedPricing(...), ...resolveMergedCost(...)
+// theirs (S4-28)  ...resolveMergedPricing(...), ...resolveMergedWholesalePricing(...)
+// resolved        all three -- selling MAX, wholesale MAX, cost MEAN
+```
+
+Three resolvers over three disjoint field sets. **Taking either side silently drops one lane's
+pricing rule and still passes every test that remains** — the same shape as the chain conflict,
+except in behaviour rather than coverage. Verified afterwards that all three resolvers actually
+resolve: `resolveMergedCost` and `resolveMergedPricing` from `productDetailRule`,
+`resolveMergedWholesalePricing` defined locally at `importEngine.ts:1195`.
+
+S4-28's **three in-place pack value edits** — `csv_template_columns`, `wholesale_price_hint`,
+`csv_info_pricing` — auto-merged because nobody else held those keys, and were then **checked rather
+than assumed**: all three carry the new wholesale wording, in both packs, with no `vip_price` left.
+
+#### The one red the sweep caught, and why the obvious fix was wrong
+
+`test-telegram-bilingual-pure.cjs` was green on its own branch and **red on the reconcile**. Neither
+lane was at fault. S4-24b's `POST /:id/items` returns:
+
+```ts
+return c.json({ error: `Failed to add sale items: ${message}` }, 500)
+```
+
+which has the identical shape to a Telegram line — capitalised phrase, colon, interpolation — so the
+coverage scanner flagged it as an untranslated bot label. **The obvious fix, adding it to
+`telegramLang.ts`, would have put an HTTP error into the bot's vocabulary.** The scanner now skips
+`c.json(` lines, since Telegram lines are always pushed onto a lines array.
+
+And the guard was proved to still guard rather than assumed: 33 label sites still scanned, and an
+injected untranslated `lines.push()` is still caught. Fixed in `ef2cc271`.
+
+- [x] **S4-28 · VIP price becomes the wholesale price, plus the automation. Done** on
+  `s4/wholesale-tier` (`bc5bf4aa`, `59906158`), merged. Migration **0111**, unrun.
+  - **Survey settles it with nothing to ask:** 10,272 products, **9,552 carry a VIP price, 0 carry a
+    wholesale price, 0 carry both**, and 9,546 of those sit *below* that product's selling price.
+    A discount applied to essentially the whole catalogue is a wholesale book, not a VIP perk — the
+    number corroborates the ruling rather than merely permitting it.
+  - **"Only 2 equal selling" was the load-bearing figure.** The frontend had **four
+    `?? selling_price` client-side defaults** that made a product with no tier price inherit its
+    selling price on save. Two rows out of 9,552 proves they never meaningfully polluted the column,
+    so the whole set is safe to move. All four removed; a test that *asserted* the bug now forbids it.
+  - **The columns are kept, zeroed, not dropped** — and the third reason is decisive: `cleanPayload()`
+    persists any body key matching a real column. This is a PWA whose till tabs stay open for days,
+    so old clients **will** keep POSTing `special_price_usd`. Against a kept column that lands as a
+    harmless 0; against a dropped one it is an unknown column and **the entire product save fails**.
+  - Fixed in passing, a live pre-existing bug: `productExport.ts`'s pricing group named
+    `Special_Price_*` while the builder emitted `VIP_Price_*`, so **every export using the column
+    chooser silently dropped the tier columns**.
+  - Automation defaults **off** (`pos_wholesale_auto_enabled`, only the literal `'true'` enables),
+    min qty 10, semantics strictly `> N`. It only upgrades a plain line with no manual discount and
+    only downgrades a line it stamped itself — **a wholesale price the cashier picked is never taken
+    away.**
+  - Reassuring for the deploy: `sale_items.price_mode` holds only `'custom'` and `'selling'` in
+    production, so **no historical receipt depends on the VIP tier**; and 0 users and 0 roles held
+    `products_image_only_show_vip`.
+
+- [x] **S4-13 / S4-14 / S4-15 / S4-16 · the stock-session surface. Done** on `s4/stock-sessions`
+  (`378812bb`, `6794a17f`, `33249bd5`), merged. **No migration — 0113 stays free.**
+  - **S4-15 was (a) + (b), not (c), and nothing was missing server-side.**
+    `POST /api/inventory/adjust` already parsed and stored `unitCostUsd`, `paymentStatus`,
+    `creditDueDate`, `sessionId`, `supplierId`/`supplierName`, and `stockInSessionsQuery.ts` already
+    selected them. **Only `FastStockInModal` ever sent them.** Payment status had no control on the
+    adjust form at all; receipt cost was captured only behind the unlock-pricing toggle and never
+    sent; `sessionId` was never sent, so one receipt split across seconds under the legacy key.
+  - Both "entry points" collapse to **one file** — `Products.tsx` and `StockChangeSection.tsx` both
+    lazy-import the same `StockAdjustModal`. `Inventory.tsx` imports it `as any`, so **its type
+    errors would never have surfaced**; fixed there too.
+  - **S4-14's timezone decision is the kind that silently shifts a day.** Stamped in
+    `Asia/Phnom_Penh` via `businessDateTimeId`, parsed through `parseServerTimestampMs` — **not**
+    `Date.parse`, because D1's `CURRENT_TIMESTAMP` writes a timezone-less UTC string that a bare
+    parse reads as local and shifts by 7 hours. Pinned: `2026-08-30T17:00:00Z` → `S-20260831-0000`.
+  - S4-16 turned out to be a consequence, not a separate fix: `routes/inventory.ts` converts a `set`
+    above the current figure into an `add` of the difference through the same batch ledger, so it is
+    **a genuine receipt** and now carries received date, supplier and cost. A `set` that *lowers*
+    stock still carries none.
+  - Four owner questions it raised rather than guessed: session ids **collide within a minute**
+    (suffix or seconds?); payment now defaults to "Paid" (or should blank mean unknown?); receipt
+    cost is deliberately **not** prefilled from the stored cost, so a blank stays visibly blank; and
+    `perm_act_products_add` was left alone because it names a *capability*, not the button.
+### The owner's second round of Sep-4 rulings — five answers, two new lanes
+
+Put to the user with **measured numbers attached**, not as abstract choices. Recorded verbatim:
+
+| Question | Ruling |
+|---|---|
+| Receipt number on an amended sale | **Same number, reprinted.** One sale, one number. |
+| Tax | *"tax can turn on off in settings which will show based on that, if off, doesn't show."* |
+| "Merge the no barcode…" | **Both rows unbarcoded** — the conservative reading. |
+| MAC shade codes (`0601`/`601`) | **Merge them too.** |
+| Telegram vs app date format | *"Option 3, change the whole app to dd-mm-yyy, just receipt id stays yyyy-mm-dd."* |
+
+**Attaching the numbers is what made these answerable.** The no-barcode question was not "which
+reading do you prefer" but "**1 pair** under the narrow reading, **120 rows across 118 names** under
+the wide one" — measured with a SELECT before asking. The owner picked the narrow rule, which is
+already built and tested, so that ruling costs nothing.
+
+- **Tax closes the S4-24b open question, and it moves rather than freezes.** Tax is a **settings
+  toggle**: off means *absent*, not a zero row — on the receipt, the sale detail and the amendment
+  history alike. S4-30 was told to stop freezing tax the way S4-24b did, to follow the existing
+  `settings` key/value pattern (`change_exchange_rate` in `routes/sales.ts` is the model), and that a
+  stored **rate** beside the toggle is now sanctioned — the owner pointed at settings themselves.
+  Existing sales keep their absolute `tax_usd`; no rate is retro-derived. **0116** is reserved if the
+  toggle needs schema.
+
+- [~] **S4-32 · The wholesale tier never reached the merge path — a silent data-loss defect.**
+  *(claimed: `business-os-v1-c3` subagent, branch `s4/wholesale-merge-path` off `244e231d`.)*
+  **Found by S4-28 reading S4-29's branch rather than assuming the lanes agreed** — neither lane
+  could see this alone, and no test currently fails on it.
+  - Once 0111 runs, `special_price_*` is zeroed ballast. The merge path still reads it, so
+    `MAX(special_price_*)` folds **0 against 0** and **merging two duplicates silently drops the
+    survivor's wholesale price**. Merge-**undo** is worse: it restores `special_price_*`, so undoing
+    a merge **writes zeros over a real wholesale price**.
+  - Sites: both copies of `productDetailRule.ts`, `routes/products.ts` (both merge SELECTs, the keeper
+    UPDATE and its binds, the undo snapshot), and `undoAppliers.ts`. A straight rename — the MAX-wins
+    semantics stay correct for wholesale.
+  - Told to grep the whole repo for `special_price` and give a **verdict per site** (move / deliberate
+    ballast / dead) rather than trusting the list, and to write a regression test that is **red before**
+    the fix and green after — proving the defect rather than asserting it.
+  - Also carries the MAC ruling: lower the leading-zero fold guard from 4 digits to 3. Told to
+    **measure what else a 3-digit guard admits across the whole catalogue** and stop if it catches a
+    genuinely different product. Every other guard holds — numeric only, `0` never collapses to blank,
+    and normalization stays **comparison-only**, because 27 zero-stripped barcodes are already carried
+    by a product under a different name and an in-place rewrite would make a scan ambiguous.
+
+- [~] **S4-33 · The whole app moves to `dd-mm-yyyy`.** *(claimed: `business-os-v1-c3` subagent,
+  branch `s4/date-format-ddmmyyyy` off `244e231d`.)* This reverses a convention pinned across the
+  codebase and in `consistency-audit.md` — **which the lane was told to update, because leaving it
+  stale means the next session "fixes" this work back.**
+  - **The line that must not be crossed:** display dates change; **identifiers never do.** Receipt
+    numbers (the owner called this out — migration 0107), stock session ids `S-YYYYMMDD-HHMM`,
+    `ADJMM/DD/YYYY` lot codes (0108), ISO timestamps in storage, transport and query parameters, and
+    anything used as a sort key, dedupe key, filename or URL parameter. Told to **classify every site
+    before editing it** and report any it cannot classify.
+  - **Ambiguity is the hazard, not the formatting.** `05-09-2026` is indistinguishable from
+    `mm-dd-yyyy`, and that cuts both ways — the Telegram lane refused day-first input for exactly this
+    reason, and that refusal now inverts. Input parsers must not silently guess; ISO stays accepted
+    everywhere; 24-hour time is unchanged.
+  - Warned that **many tests pin date strings as literals**, and that each red must be judged as
+    "pinning a real contract" or "pinning the old spelling" — updating assertions until they pass is
+    how a real regression gets papered over. Must add a test pinning that a receipt number, a session
+    id and an `ADJ` lot code **kept their shape**, so nobody later "finishes the job" and corrupts them.
+  - Boundaries: `routes/sales.ts`, `SaleDetailModal.tsx` and `undoAppliers.ts` belong to S4-30 and
+    S4-32 while those run; date sites inside them are to be listed, not edited.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
