@@ -307,7 +307,7 @@ app.post('/', async (c) => {
       const available = batchStockMap.get(`${item.batch_id}:${item.branch_id}`) || 0
       if (item.quantity > available) {
         const name = productMap.get(item.product_id)?.name || `product #${item.product_id}`
-        return c.json({ error: `Insufficient batch stock for ${name}: requested ${item.quantity}, available ${available}` }, 409)
+        return c.json({ error: `Insufficient stock for ${name}: requested ${item.quantity}, available ${available}` }, 409)
       }
     }
   }

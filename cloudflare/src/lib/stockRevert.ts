@@ -136,7 +136,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         usedBatchId = batchId
       } catch (err) {
         if (err instanceof InsufficientBatchStockError) return { ok: false, status: 400, error: err.message }
-        return { ok: false, status: 400, error: err instanceof Error ? err.message : 'Failed to revert batch stock' }
+        return { ok: false, status: 400, error: err instanceof Error ? err.message : 'Failed to revert stock' }
       }
     } else {
       const drained = await removeStockAcrossBatches(db, { productId, branchId, quantity: magnitude })
@@ -149,7 +149,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         const received = await receiveBatchStock(db, { productId, branchId, quantity: magnitude, batchId })
         usedBatchId = received.batchId
       } catch (err) {
-        return { ok: false, status: 400, error: err instanceof Error ? err.message : 'Failed to revert batch stock' }
+        return { ok: false, status: 400, error: err instanceof Error ? err.message : 'Failed to revert stock' }
       }
     } else {
       await applyAggregateDelta(db, productId, branchId, magnitude)

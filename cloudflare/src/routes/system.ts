@@ -322,7 +322,7 @@ app.post('/reset-data', async (c) => {
 
       return c.json({
         success: true,
-        message: `Products reset complete - products, batches, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${MAX_IMAGE_DELETES_PER_RESET}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
+        message: `Products reset complete - products, their received dates, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${MAX_IMAGE_DELETES_PER_RESET}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
       })
     } catch (error) {
       return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)
@@ -706,7 +706,7 @@ app.post('/finalize-migration', async (c) => {
     return c.json({
       success: true,
       affected,
-      message: `Parked ${affected.branch_batch_stock} historical lot row(s) — the POS lot picker will now skip un-allocatable "Unified stock import" lots. A fresh backup was taken first.`,
+      message: `Parked ${affected.branch_batch_stock} historical row(s) — the POS picker will now skip un-allocatable "Unified stock import" received dates. A fresh backup was taken first.`,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Finalize migration failed' }, 500)

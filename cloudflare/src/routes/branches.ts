@@ -358,12 +358,12 @@ app.post('/transfer', async (c) => {
     sourceBatch = (await db.prepare(
       `SELECT id, lot_code, expiry_date, notes FROM product_batches WHERE id = @batchId AND variant_product_id = @productId AND is_active = 1`,
     ).get<{ id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>({ batchId, productId })) ?? null
-    if (!sourceBatch) return c.json({ error: 'Batch not found for this product' }, 404)
+    if (!sourceBatch) return c.json({ error: 'Received date not found for this product' }, 404)
     const batchStock = await db.prepare(
       'SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId',
     ).get<{ quantity: number }>({ batchId, branchId: fromBranchId })
     const batchAvailable = batchStock ? Number(batchStock.quantity) || 0 : 0
-    if (quantity > batchAvailable) return c.json({ error: 'Insufficient batch stock in source branch' }, 400)
+    if (quantity > batchAvailable) return c.json({ error: 'Insufficient stock in source branch' }, 400)
   }
 
   const [fromBranch, toBranch, mergeTarget] = await Promise.all([
@@ -657,11 +657,11 @@ app.post('/transfer-bulk', async (c) => {
     for (const item of batchItems) {
       const batchRow = batchRowById.get(item.batchId)
       if (!batchRow || batchRow.variant_product_id !== item.productId) {
-        return c.json({ error: `Batch not found for product ${productById.get(item.productId)?.name || `#${item.productId}`}` }, 404)
+        return c.json({ error: `Received date not found for product ${productById.get(item.productId)?.name || `#${item.productId}`}` }, 404)
       }
       const batchAvailable = batchStockById.get(item.batchId) || 0
       if (item.quantity > batchAvailable) {
-        return c.json({ error: `Insufficient batch stock for ${productById.get(item.productId)?.name || `#${item.productId}`} (need ${item.quantity}, have ${batchAvailable})` }, 400)
+        return c.json({ error: `Insufficient stock for ${productById.get(item.productId)?.name || `#${item.productId}`} (need ${item.quantity}, have ${batchAvailable})` }, 400)
       }
       batchById.set(item.batchId, { id: batchRow.id, lot_code: batchRow.lot_code, expiry_date: batchRow.expiry_date, notes: batchRow.notes })
     }

@@ -295,7 +295,7 @@ export async function consumeDamagedLot(db: D1Compat, input: {
     FROM damaged_stock_lots WHERE id = @id
   `).get<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; return_id: number | null; quantity_remaining: number }>({ id: input.lotId })
   if (!lot || Number(lot.product_id) !== Number(input.productId)) {
-    throw new Error('Selected damaged lot does not belong to this product')
+    throw new Error('Selected damaged stock does not belong to this product')
   }
   const result = await db.prepare(`
     UPDATE damaged_stock_lots

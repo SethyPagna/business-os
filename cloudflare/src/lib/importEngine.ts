@@ -145,7 +145,7 @@ export type ImportRowResult = {
 // the wording only needs to change in one place.
 export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   negative_stock: 'Negative stock (clamped to 0)',
-  unreadable_batch_date: 'Batch date unreadable (received as today)',
+  unreadable_batch_date: 'Received date unreadable (received as today)',
   barcode_collision: 'Same barcode, different name',
   sku_collision: 'Same SKU, different name',
   name_match: 'Matched an existing contact by name',
@@ -1470,7 +1470,7 @@ export async function classifyProducts(
       rowWarnings.push({ kind: 'negative_stock', message: `Stock quantity "${displayValue}" is negative; imported as 0 (negative stock isn't supported).` })
     }
     if (rawReceivedDate && !normalizeToIsoDate(rawReceivedDate)) {
-      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Batch date "${rawReceivedDate}" is not a readable mm/dd/yyyy date; the batch was received as today instead.` })
+      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Received date "${rawReceivedDate}" is not a readable mm/dd/yyyy date; the stock was received as today instead.` })
     }
     // Only set image_path when this row actually resolved one, and only
     // then if the row didn't explicitly ask to keep whatever the existing

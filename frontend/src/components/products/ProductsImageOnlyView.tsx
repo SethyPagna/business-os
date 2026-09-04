@@ -29,6 +29,7 @@ import Modal from '../shared/Modal'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtDateOnly } from '../../utils/formatters'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 // Same lazyRetry pattern ProductForm.tsx already uses for this modal --
 // keeps it out of this view's own (deliberately tiny, per Part 241) bundle
@@ -192,7 +193,7 @@ export default function ProductsImageOnlyView() {
   const [detailsProduct, setDetailsProduct] = useState<ImageOnlyProduct | null>(null)
   // K6: lots for the open detail, one flat list across the row's branches
   // ('loading' | 'error' | rows). Only ever fetched when the grant exists.
-  type DetailBatchRow = { id: number; lotCode: string | null; expiryDate: string | null; batchNumber: number | null; quantity: number; branchName: string }
+  type DetailBatchRow = { id: number; lotCode: string | null; receivedAt: string | null; expiryDate: string | null; batchNumber: number | null; quantity: number; branchName: string }
   const [detailBatches, setDetailBatches] = useState<'loading' | 'error' | DetailBatchRow[]>([])
   useEffect(() => {
     if (!detailsProduct || !showBatches) { setDetailBatches([]); return }
@@ -206,6 +207,7 @@ export default function ProductsImageOnlyView() {
       return (result?.batches || []).map((batch) => ({
         id: batch.id,
         lotCode: batch.lot_code,
+        receivedAt: batch.received_at,
         expiryDate: batch.expiry_date,
         batchNumber: batch.batch_number,
         quantity: Number(batch.quantity || 0),
@@ -704,7 +706,11 @@ export default function ProductsImageOnlyView() {
                     {detailBatches.map((batch) => (
                       <div key={`${batch.branchName}-${batch.id}`} className="flex items-center justify-between gap-2 py-1.5 text-xs">
                         <span className="min-w-0 truncate text-gray-700 dark:text-gray-200">
-                          {batch.lotCode || `#${batch.batchNumber ?? batch.id}`}
+                          {/* Z1a: a lot reads as its received DATE. Rendering
+                              `batch.lotCode` verbatim printed the raw MMDDYYYY
+                              code ("08242026") next to real mm/dd/yyyy dates --
+                              exactly what batchDisplayLabel exists to prevent. */}
+                          {batchDisplayLabel({ id: batch.id, lot_code: batch.lotCode, received_at: batch.receivedAt, batch_number: batch.batchNumber }, t('batch') || 'Batch')}
                           {batch.expiryDate ? <span className="ml-1 text-gray-400">exp {fmtDateOnly(batch.expiryDate)}</span> : null}
                         </span>
                         <span className="flex-shrink-0 text-gray-500 dark:text-gray-400">{batch.branchName}: {Number(batch.quantity || 0)}</span>

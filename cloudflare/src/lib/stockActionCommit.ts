@@ -422,7 +422,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     const candidates = line.batchLabel
       ? pool.filter((batch) => normalizedBatchLabel(batch.batch_key || batch.lot_code) === line.batchLabel)
       : pool
-    if (line.batchLabel && candidates.length === 0) throw new Error(`Row ${line.rowNumber} batch was not found`)
+    if (line.batchLabel && candidates.length === 0) throw new Error(`Row ${line.rowNumber} received date was not found`)
     for (const batch of candidates) {
       if (remaining <= 0) break
       if (batch.quantity <= 0) continue
@@ -431,8 +431,8 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
       batch.quantity -= take
       remaining -= take
     }
-    if (remaining > 0.0000001) throw new Error(`Row ${line.rowNumber} has insufficient batch stock`)
-    if (line.allocations.length > MAX_ALLOCATIONS_PER_LINE) throw new Error(`Row ${line.rowNumber} exceeds the ${MAX_ALLOCATIONS_PER_LINE}-batch safety limit`)
+    if (remaining > 0.0000001) throw new Error(`Row ${line.rowNumber} has insufficient stock`)
+    if (line.allocations.length > MAX_ALLOCATIONS_PER_LINE) throw new Error(`Row ${line.rowNumber} exceeds the ${MAX_ALLOCATIONS_PER_LINE}-received-date safety limit`)
     allocationCount += line.allocations.length
     if (allocationCount > MAX_SALE_ALLOCATIONS) throw new Error(`Sale group exceeds the ${MAX_SALE_ALLOCATIONS}-allocation safety limit`)
   }

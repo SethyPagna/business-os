@@ -241,7 +241,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
     const explicit = await db.prepare(
       'SELECT id, batch_number FROM product_batches WHERE id = @id AND variant_product_id = @productId',
     ).get<{ id: number; batch_number: number | null }>({ id: input.batchId, productId: input.productId })
-    if (!explicit) throw new Error('Selected batch does not belong to this product')
+    if (!explicit) throw new Error('Selected received date does not belong to this product')
     batchId = Number(explicit.id)
     batchNumber = explicit.batch_number != null ? Number(explicit.batch_number) : null
   } else {
@@ -356,7 +356,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
 export class InsufficientBatchStockError extends Error {
   available: number
   constructor(available: number) {
-    super(`Only ${available} available in this batch at this branch`)
+    super(`Only ${available} available under this received date at this branch`)
     this.name = 'InsufficientBatchStockError'
     this.available = available
   }
@@ -389,7 +389,7 @@ export async function removeStockFromBatch(db: D1Compat, input: {
     productId: input.productId,
     branchId: input.branchId,
   })
-  if (!batch) throw new Error('Selected batch does not belong to this product')
+  if (!batch) throw new Error('Selected received date does not belong to this product')
   const available = Number(batch.available) || 0
   if (input.quantity > available) throw new InsufficientBatchStockError(available)
 
