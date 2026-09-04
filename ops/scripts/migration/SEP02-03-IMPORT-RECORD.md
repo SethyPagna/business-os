@@ -329,6 +329,24 @@ the receivables. The header says so, and says the thing an operator actually nee
 re-run, 0 rows written everywhere is success, not failure.** A guard that makes re-running
 safe is worth little if the person holding the file reads its silence as a fault.
 
+**The guards buy more than idempotence — they buy convergence.** Each one tests the
+precondition *that* statement needs rather than a shared "has this batch run" flag, so the
+file reaches the correct end state from **any** starting point: fully unapplied, fully
+applied, or any partial mixture. Stop after the inserts and a re-run no-ops them on
+`NOT EXISTS` while the total corrections still see the old totals and apply correctly
+(`business-os-v1-ba`). The batch *should* be atomic so a partial state should not arise;
+the point is that the file does not have to depend on that. What this actually protects is
+the ordinary case, not the exotic one: **the connection drops, the operator cannot tell
+whether it committed, and the right move is simply to re-run.**
+
+One correction worth recording because the plausible version is wrong: the six statements
+are **order-insensitive**. The total corrections are guarded on a *literal* pre-correction
+total (`AND total_usd = 54`), not on anything derived from the line items, so they cannot
+fire early or twice wherever they sit. The ordering only becomes load-bearing if someone
+later rewrites that guard to compute the total from `SUM(sale_items.total_usd)` — an
+improvement that looks obvious and silently couples the sections. The script says: change
+the guard and the order together, or not at all.
+
 **Rule for the next reconciliation script:** `customer_receivables` is reachable by
 `(source_file, legacy_id)` / `id`. Use that wherever the sale side can reach it, and the
 reconstructed `invoice_no` + date only where it cannot — and say in the script which of the
