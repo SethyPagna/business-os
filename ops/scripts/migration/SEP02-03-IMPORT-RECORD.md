@@ -95,12 +95,45 @@ would have been written against an unrelated perfume and looked correct forever.
 Fixed in `0b4470a0`: a source code is a barcode only when it is **entirely digits**;
 otherwise resolution falls through to SKU and then to a single exact active name.
 
-**Blast radius is wider than this lane.** `import-sep01-legacy-reports.mjs` uses the
-same helper via its own `digits()`, so Sep 1 shares the exposure. Peer
-`business-os-v1-db` separately confirmed no *shipped app* code strips digits from a
-barcode (`productDetailRule.ts` trims and lowercases only), so this class is confined
-to the migration tooling. **Bounding it across the full reconciliation window is not
-done and is owed** — it is a defect report, not part of this import.
+**Blast radius: BOUNDED, and smaller than feared.** Measured read-only on Sep 4 2026 by
+replaying each applied batch's own product resolution twice — once under the old helper,
+once under the fixed rule — and diffing the resolved `product_id` per line.
+
+| Batch | Lines checked | Resolve differently | Verdict |
+|---|---|---|---|
+| Sep 1, invoice lines | 56 over 29 invoices | **0** | clean; its only non-numeric code is blank |
+| Sep 1, stock transfers | 4 non-numeric codes | **0** | all four are header/banner rows |
+| Sep 2, the pre-existing 15 | 15 invoices | **2 dropped lines** | 004430 and 004434; other 13 reconcile to the cent |
+| Sep 2, this batch's 22 | 45 distinct lines | 0 | resolved under the fixed rule |
+| Aug 30 / Aug 31 | n/a | n/a | not exposed — see below |
+
+**Total production impact of the defect: 2 lines, $51**, both in the two held invoices,
+both restorable. Nothing was ever silently mis-booked into a wrong product; the
+near-miss stayed a near-miss.
+
+The Sep-1 **transfer** path deserved its own check and got one: it calls
+`resolveUniqueBarcode` with **no name fallback**, so a bogus short key hitting exactly
+one active product would mis-book silently. Its four non-numeric codes are `"Item Code"`
+and three `"Created By:Super Admin…"` banner rows; none matches an active product.
+
+Aug 30 and Aug 31 were **read rather than assumed**: `digits()` at `import-aug30:63` and
+`import-aug31:74` is only ever called from `phoneKey` (`:265` and `:208`), never a
+barcode lookup, and `barcodeKey` at `import-aug31:160` is a function parameter holding a
+mapping column name, not the imported helper.
+
+**Three matching strategies, two of which lie.** Recorded because they produce a
+confidently wrong number: matching reported lines to live lines by normalized **name**
+gives false positives, because the legacy report spells products differently
+(`"Elf Halo Glow Powder Fair Nautral"` vs `"e.l.f. Halo Glow Powder Fair Natural"`);
+matching by **price** gives false positives on nearly every line, because the report's
+`Price` column is **pre-discount** while `sale_items.applied_price_usd` is
+**post-discount**. Both said 5 dropped lines across 3 invoices. Only matching on
+**product identity** gives the true 2 across 2, and the reported-vs-live line counts
+corroborate it.
+
+Peer `business-os-v1-db` separately confirmed no *shipped app* code strips digits from a
+barcode (`productDetailRule.ts` trims and lowercases only), so the class was always
+confined to migration tooling.
 
 ## Identity policy applied
 
