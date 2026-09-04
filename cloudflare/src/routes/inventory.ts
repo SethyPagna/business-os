@@ -15,7 +15,7 @@ import { buildIssueStateClauses, buildLikeAliasClause, runFuzzyFallbackMatch, to
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
+import { normalizeToIsoDate } from '../lib/batchCode'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
@@ -1086,10 +1086,6 @@ const STOCK_ROW_COLUMNS = `id, name, sku, barcode, category, brand, unit, descri
   purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
   low_stock_threshold, out_of_stock_threshold`
 
-function moneyEq(a: unknown, b: unknown): boolean {
-  return Math.round((Number(a) || 0) * 100) === Math.round((Number(b) || 0) * 100)
-}
-
 function lowerTrim(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
@@ -1107,13 +1103,14 @@ function mirrorCostFields(usd: number, khr: number) {
 // destination row, then move quantity onto it). Applies the exact same
 // identity rule findIdentityMatch already uses for transfers/import/
 // merge-duplicates (lib/productDetailRule.ts): same name group + same
-// DETAILS (barcode + cost) is one row; anything else is a different row.
-// Selling and wholesale price are deliberately not part of that -- they are
-// what we plan to charge, not what the item is. Returns the product id stock
-// should actually be added to -- either an existing sibling row that
-// already matches the edited pricing, the source row itself (pricing
-// wasn't actually different from what it already had), or a brand-new
-// sibling row created to hold this specific combination of details.
+// DETAIL (the barcode, and nothing else) is one row; only a different
+// barcode is a different row. Cost, selling and wholesale price are
+// deliberately not part of that -- cost is what we paid on one receipt and
+// belongs to the batch ledger, the other two are what we plan to charge.
+// Returns the product id stock should actually be added to -- either the
+// source row itself (the ordinary case: the barcode did not change), an
+// existing sibling row that already carries the edited barcode, or a
+// brand-new sibling row created to hold a barcode nothing else has.
 async function resolveAddStockTarget(
   env: Env,
   source: StockRowFields,
@@ -1124,7 +1121,6 @@ async function resolveAddStockTarget(
     costUsd: number; costKhr: number
     barcode: string | null
   },
-  receivedDate?: string | null,
 ): Promise<{ productId: number; created: boolean }> {
   const db = getDb(env)
   const candidate: ProductIdentityRow = {
@@ -1137,30 +1133,49 @@ async function resolveAddStockTarget(
     selling_price_khr: overrides.sellingKhr,
   }
 
-  // cost_price_*, not purchase_price_*: the latter is a legacy pair that only
-  // mirrorCostFields ever populates, so it sits at its 0 default on every
-  // import-created and Add/Edit-form-created product. Comparing it here meant
-  // this short-circuit could never fire for those rows -- the same
-  // always-zero-column mistake lib/productIdentity.ts carried.
-  // Same product + barcode + receipt batch may share the option even when
-  // this receipt's cost differs. Per-receipt cost belongs to the batch and
-  // movement ledgers; it must not rewrite products.cost_price_*.
-  const effectiveReceivedDate = receivedDate || new Date().toISOString().slice(0, 10)
-  const receiptBatchKey = String(dateToBatchCode(effectiveReceivedDate)).toLowerCase()
-  const ownsReceiptBatch = lowerTrim(overrides.barcode) === lowerTrim(source.barcode)
-    && Boolean(await db.prepare(`
-      SELECT 1 AS found FROM product_batches
-      WHERE variant_product_id = @productId AND is_active = 1
-        AND LOWER(TRIM(batch_key)) = @batchKey
-      LIMIT 1
-    `).get<{ found: number }>({ productId: source.id, batchKey: receiptBatchKey }))
-  if (ownsReceiptBatch) return { productId: source.id, created: false }
+  // THE identity rule (lib/productDetailRule.ts), as it has stood since
+  // Sep 4 2026: the barcode is the ONLY detail. Cost is NOT identity -- two
+  // receipts of the same article at different prices are ONE row, and the
+  // costs merge (resolveMergedCost) rather than forking a child row.
+  //
+  // This function used to spell that rule out itself, and went on spelling
+  // out the OLD version of it after the rule changed. It required the cost
+  // to match as well, and then handed the leftover to findIdentityMatch --
+  // which excludes the source row (`id != @id`). With only one row on the
+  // barcode there was nothing else to find, so every Add Stock at a new
+  // cost fell through and INSERTed a sibling carrying the SAME barcode.
+  //
+  // That is not hypothetical. Production, Sep 3 2026: "Olay Serum Body
+  // Lotion 547ml" / 075609215322 received 28 units at 17.50 against a row
+  // costed 17.00. The add forked row 47155; the 28 units and their lot
+  // landed on it, while the POS -- which resolves the barcode to row 4758 --
+  // showed Out of Stock over a lot list of 31 zeroes. Stock the person had
+  // just received became unsellable. The split then survived the 0109 fold,
+  // which moves branch_stock but by its own written design not batches, so
+  // the units ended up stranded on a deactivated row.
+  //
+  // So: the same barcode means the SOURCE row. Always, with no lookup and
+  // no fork. This was the one call site that re-implemented the rule rather
+  // than delegating; every other one goes through productDetailSignature
+  // and inherited the Sep-4 change for free (routes/branches.ts,
+  // lib/importEngine.ts, lib/productIdentity.ts -- all swept, all clean).
+  //
+  // The receipt's own cost is NOT lost by staying on this row: it is written
+  // to the batch and movement ledgers (`unit_cost_usd`, see receiveBatchStock
+  // and the inventory_movements INSERT below), which is where per-receipt
+  // cost belongs. `products.cost_price_*` is deliberately left untouched
+  // here -- re-deriving the catalog cost from a receipt is a separate
+  // decision with its own drift trap (averaging against the stored scalar
+  // compounds on every repeat receipt, so it would have to be re-derived
+  // from the ledger's DISTINCT costs, not folded in pairwise), and it is
+  // recorded as an open ruling rather than silently taken here.
+  if (lowerTrim(overrides.barcode) === lowerTrim(source.barcode)) {
+    return { productId: source.id, created: false }
+  }
 
-  const sameAsSelf = moneyEq(overrides.costUsd, source.cost_price_usd)
-    && moneyEq(overrides.costKhr, source.cost_price_khr)
-    && lowerTrim(overrides.barcode) === lowerTrim(source.barcode)
-  if (sameAsSelf) return { productId: source.id, created: false }
-
+  // A genuinely different barcode is a different article -- but another
+  // child row in the same name group may already carry it, in which case
+  // the stock belongs there rather than on a third row.
   const match = await findIdentityMatch(db, candidate)
   if (match) return { productId: match.id, created: false }
 
@@ -1364,7 +1379,7 @@ app.post('/adjust', async (c) => {
       costKhr: pricing.cost_khr != null ? Number(pricing.cost_khr) || 0 : Number(source.cost_price_khr) || 0,
       barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
     }
-    const resolved = await resolveAddStockTarget(c.env, source, overrides, receivedDate)
+    const resolved = await resolveAddStockTarget(c.env, source, overrides)
     targetProductId = resolved.productId
     createdSibling = resolved.created
     if (!createdSibling) {
