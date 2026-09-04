@@ -23,6 +23,8 @@ import { mintMembershipNumber, normalizeMembershipNumber, withMintedMembershipNu
 import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
+import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
+import { buildContactPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
@@ -483,6 +485,30 @@ function registerContactRoutes(config: ContactConfig) {
       )
       return c.json(rows)
     }
+    // fields=picker: the bounded offline-mirror / picker shape. Only the
+    // columns a picker or a receipt needs (never notes/company/audit
+    // columns), never the loyalty aggregation, and never more than `limit`
+    // rows -- for customers the most recently active first (last sale, via
+    // idx_sales_customer_created), so a device that keeps an offline copy
+    // keeps the people who actually walk in, not the first N by name. The
+    // reply says how many rows exist, so the client can tell a full copy
+    // from a truncated one. Cache version: the table alone -- no computed
+    // balance here, so a sale must NOT turn this over the way it turns
+    // over the unpaged list (that churn is what made the unbounded read
+    // effectively uncacheable during business hours).
+    if (String(query.fields || '') === 'picker') {
+      const limit = clampInt(query.limit, CONTACT_PICKER_DEFAULT_LIMIT, 1, CONTACT_PICKER_MAX_LIMIT)
+      const version = `${config.table}:${await getVersionWithFallback(c.env, config.table)}`
+      const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+        const [totalRow, items] = await Promise.all([
+          db.prepare(`SELECT COUNT(*) AS count FROM ${config.table}`).get<{ count: number }>({}),
+          db.prepare(buildContactPickerSql(config.table)).all<Record<string, unknown>>({ limit }),
+        ])
+        const total = Number(totalRow?.count || 0)
+        return { items: items || [], total, limit, truncated: total > (items || []).length }
+      })
+      return c.json(payload)
+    }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
     const search = String(query.search || query.q || '').trim().toLowerCase()
     // `baseWhere` contains filters that should also constrain the year facet.
@@ -506,6 +532,20 @@ function registerContactRoutes(config: ContactConfig) {
       baseWhere.push(contactMatch.sql)
       Object.assign(params, contactMatch.params)
     }
+
+    // ids=1,2,3 (or a repeated ids= param): batched read of specific
+    // contacts. Without it the only way to fetch known rows was to
+    // download the entire table -- for customers the heaviest read in the
+    // system, since the unpaged shape below also runs the loyalty
+    // aggregation over every row. Additive: absent -> nothing changes.
+    // Over the ceiling is an error, never a silent truncation, so a caller
+    // can never mistake a partial answer for a complete one.
+    const idFilter = parseContactIdFilter(c.req.queries('ids') ?? query.ids)
+    if (idFilter.tooMany) {
+      return c.json({ error: `ids: at most ${CONTACT_ID_FILTER_MAX} ids per request` }, 400)
+    }
+    const idClause = buildContactIdClause(idFilter)
+    if (idClause) baseWhere.push(idClause)
 
     const gender = String(query.gender || '').trim().toLowerCase()
     if (gender === 'unspecified') {
@@ -2153,6 +2193,14 @@ app.post('/customers/:id/points', async (c) => {
 // rather than leaving the stub, since a wrong-shaped `[]` is worse than
 // an unused-but-correct endpoint: silent, and indistinguishable from "no
 // customers have points yet" if something starts calling it later.
+//
+// It IS called now: LoyaltyPointsPage.tsx's "Top customer points" board
+// used to download the whole customers table (every column, plus the
+// loyalty aggregation for all ~5k rows) just to sort ten membership
+// holders by balance client-side. `membership_only` + `sort=points` +
+// `top` move that to the server, where the scan is already happening, and
+// return ten rows instead of megabytes. All three are additive: without
+// them this endpoint answers exactly as before.
 app.get('/customers/points-summary', async (c) => {
   const db = getDb(c.env)
   const query = c.req.query()
@@ -2169,6 +2217,10 @@ app.get('/customers/points-summary', async (c) => {
     where.push(contactMatch.sql)
     Object.assign(params, contactMatch.params)
   }
+  // membership_only=1: only contacts that actually carry a membership
+  // number, i.e. the only ones a loyalty board can name.
+  const membershipOnly = ['1', 'true', 'yes'].includes(String(query.membership_only || '').trim().toLowerCase())
+  if (membershipOnly) where.push(`trim(COALESCE(membership_number, '')) <> ''`)
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
   const limit = clampInt(query.limit, 500, 1, 2000)
 
@@ -2195,7 +2247,16 @@ app.get('/customers/points-summary', async (c) => {
     }
   })
 
-  return c.json(payload)
+  // sort=points: highest balance first (ties keep the name order the SQL
+  // already applied, since Array#sort is stable). Balances are computed
+  // above rather than stored, which is why this cannot be an ORDER BY --
+  // same reason the paged list route documents for points_balance.
+  if (String(query.sort || '').trim().toLowerCase() === 'points') {
+    payload.sort((left, right) => Number(right.points_balance || 0) - Number(left.points_balance || 0))
+  }
+  // top=N: return only the first N of the (optionally sorted) result.
+  const top = clampInt(query.top, 0, 0, 2000)
+  return c.json(top > 0 ? payload.slice(0, top) : payload)
 })
 
 export default app

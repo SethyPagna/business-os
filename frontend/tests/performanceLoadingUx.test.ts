@@ -1914,8 +1914,8 @@ assert.match(
 )
 assert.match(
   loyaltyPointsPage,
-  /import \{ getCustomers as getLoyaltyCustomers \} from '\.\.\/\.\.\/api\/contactReadTransport\.ts'/,
-  'loyalty customer points should use the focused contact read transport instead of the broad window.api registry',
+  /import \{ getCustomerPointSummaries \} from '\.\.\/\.\.\/api\/contactsTransport\.ts'/,
+  'loyalty customer points should use the focused points-summary transport -- never the whole customers list, never the broad window.api registry',
 )
 assert.match(
   loyaltyPointsPage,
@@ -1929,8 +1929,8 @@ assert.doesNotMatch(
 )
 assert.match(
   loyaltyPointsPage,
-  /withLoaderTimeout\(\(\) => getLoyaltyCustomers\(\), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS\)/,
-  'loyalty customer points should timeout slow customer reads',
+  /withLoaderTimeout\(\(\) => getCustomerPointSummaries\(\{[\s\S]*?membership_only: 1,[\s\S]*?sort: 'points',[\s\S]*?top: LOYALTY_TOP_CUSTOMERS,[\s\S]*?\}\), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS\)/,
+  'loyalty customer points should ask the server for the ten-row board under an explicit timeout, not download every customer',
 )
 assert.match(
   loyaltyPointsPage,
@@ -3346,8 +3346,8 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => loadPosCustomers\(\),\s*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
-  'POS customer option reads should timeout slow customer requests',
+  /withLoaderTimeout\(\s*\(\) => searchPosCustomers\(search\),\s*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
+  'POS customer option reads should be a bounded server search under a timeout, never a whole-table download',
 )
 assert.match(
   pos,
@@ -3376,8 +3376,16 @@ assert.match(
 )
 assert.match(
   pos,
-  /if \(!isActive \|\| !contactOptionsReady\) return[\s\S]*!customerOptionsLoadedRef\.current[\s\S]*loadCustomers\('POS customer options on demand'\)[\s\S]*!deliveryOptionsLoadedRef\.current[\s\S]*loadDeliveryContacts\('POS delivery options on demand'\)/,
-  'POS should keep customer and delivery reads off the catalog path and avoid refetching loaded option lists',
+  /if \(!isActive \|\| !contactOptionsReady\) return[\s\S]*!deliveryOptionsLoadedRef\.current[\s\S]*loadDeliveryContacts\('POS delivery options on demand'\)/,
+  'POS should keep delivery reads off the catalog path and avoid refetching a loaded option list',
+)
+// Customers are NOT a load-once option list any more: the picker asks the
+// server the same question the cashier is typing, debounced, so the till
+// never downloads the customer table (see POS_CUSTOMER_SEARCH_DEBOUNCE_MS).
+assert.match(
+  pos,
+  /if \(!isActive \|\| !contactOptionsReady\) return undefined\s*\n\s*if \(!showCustomer && !showAddCustomer\) return undefined[\s\S]*setTimeout\([\s\S]*loadCustomers\('POS customer search', search\)[\s\S]*\}, delay\)/,
+  'POS customer reads should stay behind an open customer section and a debounced search term',
 )
 assert.match(
   pos,
