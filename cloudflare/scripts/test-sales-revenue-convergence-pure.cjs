@@ -294,5 +294,38 @@ check(`both surfaces equal the hand-computed net-sales revenue (${EXPECT.revenue
 check(`CONVERGENCE: the header's refund is apportioned too -- the charged basis would have given ${230 - EXPECT.refundsChargedBasis}`,
   statsRevenue !== 230 - EXPECT.refundsChargedBasis)
 
+// ---- 9. NO SIXTH COPY: sweep every route and lib for the raw refund --------
+// The double-minus is not a bug in one query, it is a phrasing that reads as
+// obviously correct -- "revenue minus what we refunded" -- and so gets retyped.
+// Revenue is net of both discounts; a refund is the CHARGED line price, which is
+// not. Subtracting it raw takes the discounts off a second time. netRefundExpr
+// scales by netSale/subtotal and is the only sanctioned way to say it.
+//
+// compat.ts carried five such copies behind the Dashboard while sales.ts and the
+// kernel were converging perfectly, so this sweeps the tree rather than a list.
+const srcRoot = path.join(__dirname, '..', 'src')
+const sourceFiles = []
+;(function walk(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) walk(full)
+    else if (entry.name.endsWith('.ts')) sourceFiles.push(full)
+  }
+})(srcRoot)
+check(`the sweep actually found the worker source (${sourceFiles.length} .ts files)`, sourceFiles.length > 20)
+
+// netSaleExpr(...) followed by a bare "- COALESCE(<alias>refund_usd, 0)".
+const rawRefund = /netSaleExpr\([^)]*\)\}\s*-\s*COALESCE\([a-z]*\.?refund_usd/
+const offenders = sourceFiles.filter((f) => rawRefund.test(fs.readFileSync(f, 'utf8')))
+  .map((f) => path.relative(srcRoot, f))
+check(`no source file subtracts an un-apportioned refund from net sales${offenders.length ? ' -- found in ' + offenders.join(', ') : ''}`,
+  offenders.length === 0)
+
+// And the guard has to be able to see one. Prove it against a synthetic line
+// rather than trusting that a regex which matched nothing was ever right.
+check('the sweep regex recognises the double-minus it exists to forbid',
+  rawRefund.test("COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd")
+  && !rawRefund.test("COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd"))
+
 console.log(`\nALL ${passed} CHECKS PASSED`)
 })().catch((e) => { console.error(e); process.exit(1) })
