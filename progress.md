@@ -2334,9 +2334,37 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   completed'`). These are old-system sales whose stock was already accounted for at
   import, so the deduction is a double-count of 9 units across products 165, 5196, 5067,
   4115, 4259, 238, 3924, 955, 939. The revert must restore both the 7 statuses and the 9
-  units. **No production write has been made.** Remote D1 is SELECT-only by standing rule,
-  so the mechanism is the user's call: the app's own Undo entry (if its applier really
-  reverses this — being verified) or an explicitly-approved guarded script.
+  units. **No production write has been made, and none is authorised.**
+  **VERDICT (S4-1 verification lane, read-only, Sep 4): the in-app Undo does NOT reverse this.**
+  Proven twice over. (1) `frontend/src/utils/actionHistory.ts:297` posts
+  `undo_payload: entry.undo_payload || {}` and the bulk caller
+  (`components/sales/Sales.tsx:1218`) passes no payload, only live JS closures;
+  `cloudflare/src/lib/undoAppliers.ts:682` resolves the applier off `payload.applier`, so `{}`
+  resolves to `null` — and **no sale-status applier is registered at all** (only `branch.update`,
+  `product.merge`, `product.merge.bulk`, `supplier.backfill`). (2) The production row confirms it:
+  `action_history` 160 carries `undo_payload='{}'` with `reversible=1, status='undoable'`.
+  - **The Undo button is worse than inert.** With `require_applied` it 409s
+    (`routes/actionHistory.ts:271`); without it the Worker flips `undoable` -> `redoable` and
+    **changes no data** — recording a reversal that never happened. Do not press it on row 160.
+  - **The label lies about the count: 9 PATCHes returned 200, but only 7 sales changed.** The
+    other 2 were already `completed`, hit the `oldStatus === saleStatus` early return, and wrote
+    nothing. **Which 2 is unknowable** — a no-op leaves no audit row, no movement, and does not
+    touch `updated_at`. Do not guess ids.
+  - **Reverting is clean; no double-count is possible.** Verified preconditions: zero returns
+    against all 7 sales (so `returnedByItem = 0` and each line restores in full), all 9
+    `sale_items` have `batch_id`/`damaged_lot_id` NULL with no batch allocations, and for all 9
+    products `SUM(branch_stock) == products.stock_quantity` exactly — so the deduct path's
+    `MAX(0, ...)` clamp never fired and there is no drift for the unclamped restore to inflate.
+  - Expected effect: 9 units back to branch 2, 9 new `inventory_movements` of type `return`
+    (`quantity=+1`), revenue down $297 / 1,202,850 riel (which is the point), no loyalty impact
+    (all 7 have `loyalty_accrual=0`), payment fields untouched.
+  - **Sale 16834 is NOT part of this batch** — `awaiting_payment -> cancelled` at 15:03 UTC, 14
+    minutes later, moved zero stock. Leave it alone unless the user says otherwise.
+  - **The procedure is written and unrun**, in Part 593: a baseline SELECT, 7 calls to the app's
+    own `PATCH /api/sales/:id/status` (idempotent — a re-run cannot double-restore, since an
+    already-reverted sale hits the same early return), then a proof SELECT. Each PATCH is one
+    atomic `db.batch` per sale, so a half-application leaves every sale either fully reverted or
+    untouched. **Waiting on the user's go.**
 
 **Sales: status, stock and confirmation**
 
