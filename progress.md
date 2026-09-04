@@ -3079,6 +3079,169 @@ another lane for hours — for work that did not exist. The split itself was rig
 are different sizes); what was missing was one `git show` against the deployed tip before writing
 "is a frontend change". **Check the deployed tip before boarding a display task as unbuilt** —
 reading the ask, or even the current worktree, is not the same as reading what is live.
+### The nine-lane reconcile is certified green — `c3145839`
+
+Run against a **static** tree this time (no merge landed during the sweep), so unlike the previous
+run its header names the commit it actually certified:
+
+| Check | Result |
+|---|---|
+| `cloudflare` `tsc --noEmit` | clean |
+| worker pure tests, **per file** | **175 files, 0 red** |
+| `frontend` `tsc --noEmit` | clean |
+| `check:source` | 483 source files |
+| `verify:i18n` | 4,691 keys, every referenced key resolves in both packs |
+| frontend tests, **per file** | **181 files, 0 red** |
+| `vite build` | built in 35.5s |
+
+Per-file sweeps throughout, never the `&&` chain alone — the chain stops at the first red and hides
+everything after it. **Still not a deploy candidate**: S4-2, S4-28, S4-29, S4-13..16 and S4-30 are
+in flight and go on top.
+
+### Migration numbers are ASSIGNED now — and the third collision had already happened
+
+The ledger above said "0111+ free, S4-28 and S4-29 told to take these", and I repeated that sentence
+to a third lane. **"Take the first free number" is not a safe instruction when lanes run
+concurrently: every lane computes the same answer.** Worse, while I was preventing that one, S4-2 —
+which branched before 0109 and 0110 existed — had already written **`0109_sales_stock_skipped.sql`
+against the existing `0109_barcode_only_cost_merge_fallback.sql`**, which is *already merged into the
+reconcile*.
+
+**That collision would not have conflicted.** The two files have different names, so git merges them
+cleanly and produces a tree holding two 0109 migrations. No conflict, no warning — and D1 keys off
+the filename, so both run, in an order neither lane designed. This is the same shape as the
+deploy-provenance incident: a green check describing something other than what ships.
+
+| Number | Owner | State |
+|---|---|---|
+| **0107** | `0107_receipt_numbers_business_format.sql` | **applied in production** — the highest applied |
+| 0108 | S4-19 `s4/adj-prefix` | written, unrun |
+| 0109 | S4-17b `s4/cost-merge-survey` | written, unrun — **merged into the reconcile** |
+| 0110 | S4-23 `s4/membership-lc` | written, unrun |
+| 0111 | S4-28 wholesale — `0111_wholesale_price_is_the_vip_price.sql` | **written**, unrun |
+| 0112 | S4-29 merge rules + the `Ysl New Item` (10185) deletion | assigned |
+| 0113 | S4-13..16 stock sessions — *only if genuinely needed* | reserved |
+| 0114 | S4-2 `s4/sales-status-nostock` — **renumbered from the colliding 0109** | reassigned |
+| 0115 | S4-30 sale amendments | assigned |
+| 0116+ | unassigned — **ask, do not take** | |
+
+Derived by `git ls-tree` across all `origin/s4/*` branches, not from lane claims. Every one of these
+is **UNRUN and stays unrun** — there is no user approval for any production write, and neither a
+coordinator message nor a peer's report is user approval.
+
+**0113 is reserved, not encouraged.** S4-13 is a rename and S4-14 a display format. The board says
+the S4-15 columns already exist and merely are not populated — so a migration appearing in that lane
+is a signal it has misdiagnosed the gap, not that it needs the slot.
+
+- [x] **S4-2 · Complete a sale without touching stock, admin-only. Done** on
+  `s4/sales-status-nostock` (`bd460faf` Worker, `42913b42` frontend), pushed. Migration renumbered
+  to **0114**, unrun. Answers the owner's ruling directly: *"make them status completed without
+  changing stock quantity, and make this an option for admins."*
+  - Server-side gate is the codebase's **existing** `isAdminControlUser` (`lib/permissions.ts`) —
+    no invented role — checked before any validation or DB read, and it **refuses with 403** rather
+    than silently dropping the flag and performing a stock-moving transition.
+  - **The load-bearing decision: the skip is sticky.** `heldQuantity` is a state machine that assumes
+    *the system* removed the units. Once a sale reaches `completed` having deducted nothing,
+    `held(completed)` is a lie for that sale, and a normal cancel computes `delta = 0 - quantity` and
+    **adds units nobody ever took — inventing stock.** So `stock_skipped` is re-read on every later
+    transition and skipped again. A stock-skipped sale is permanently outside the stock ledger.
+  - The cost of that, stated plainly by the lane rather than hidden: tick the box on a sale whose
+    stock really *was* deducted and those units are never returned. That is the conservative
+    direction — never invent phantom stock — it is admin-explicit, and the dialog says so.
+  - Returns are unaffected and correctly so: `routes/returns.ts` restocks from the **return record**
+    (goods physically came back), not from `held()`.
+  - Gate green in both packages at its tip, baseline re-checked at `e3678a39` first so no red was
+    misattributed. "Byte-for-byte unchanged when the flag is off" is a `deepStrictEqual` of the whole
+    plan object across **six** transition shapes, not just the happy path.
+  - **Two gaps it correctly refused to paper over:** the 9 units already missing from branch 2 are
+    **not repaired** by this feature — it prevents recurrence, it does not fix the incident; and the
+    7 already-flipped sales need `stock_skipped = 1` backfilled to protect their future transitions.
+    Both are production writes. Both unrun.
+
+### S4-28's language-pack changes are NOT purely additive — the one thing to watch at merge
+
+Every other live lane is add-only. S4-28 reported, unprompted, that it **modifies two existing keys
+in place**, and that is exactly the case a naive union resolves wrongly:
+
+- `csv_template_columns` — advertised `vip_price_usd, vip_price_khr` as import destinations. Those
+  are gone, so it now reads `wholesale_price_usd, wholesale_price_khr`. **If another lane also
+  touches this key, S4-28's value must win**, or the template documents a dead column.
+- `wholesale_price_hint` — described the tier as "selectable at POS like the VIP tier", a tier that
+  no longer exists.
+
+The union resolver already handles the one-sided case (changed side wins) and **reports a genuine
+two-sided clash instead of letting insertion order decide** — so this is covered, but it is the
+first lane where that branch of the resolver will actually matter.
+
+It also deliberately **deleted nothing**, leaving `special_price`, `special_price_hint`,
+`special_price_usd_full` and `special_price_khr_full` orphaned but present, rather than handing a
+deletion to be merged against three live lanes. Correct call. Drop those four in a dedicated commit
+once the lanes have landed.
+
+**Its production survey settles the data move with nothing to ask:** 10,272 products, **9,552 carry
+a VIP price, 0 carry a wholesale price, and 0 carry both.**
+### S4-30 · Amendable sales, as an append-only ledger — the owner's Sep-4 request
+
+Recorded verbatim, because the shape of this one is easy to lose in paraphrase:
+
+> *"like for sales, it should be editable, like sometime we make a sale, but we input wrong delivery
+> cost, or customers change their mind and want to add or replace products, add new products, add to
+> existing etc... maybe a timer that gives it a window to edit. **we do an add on top, so we know we
+> added** so for example before 1.5 dollar delivery, then we add another 0.5 dollar, in details it
+> shows both, in sales receipt it shows 2 dollar... same for products, it shows both, but in receipt
+> it shows result, so if remove it doesn't show on receipt but it shows on details, and add it, like
+> 1 and now 2, it shows 2 in receipt, but 1 and add 1 in receipt... with record of added and time in
+> details. but receipt treats as one receipt finalized total without customer realize it is changed...
+> but new receipt..."*
+
+**The specification is two deliberately different views of one sale**, and the whole value is in the
+difference:
+
+| | Sale detail (staff) | Receipt (customer) |
+|---|---|---|
+| Delivery corrected 1.50 → 2.00 | `$1.50`, then `+$0.50` | `$2.00` |
+| Line quantity 1 → 2 | `1`, then `+1` | `2` |
+| A removed line | shown, as a removal | **absent entirely** |
+| Who and when | recorded per amendment | never shown |
+
+*"We do an add on top"* is the architectural instruction, not a UI note: amendments are **deltas,
+appended — never an overwrite that loses the prior value.** And the receipt must read as one clean
+finalized sale: *"without customer realize it is changed."*
+
+- [~] **S4-30 · claimed by a `business-os-v1-c3` subagent**, branch `s4/sale-amendments` off the
+  reconcile tip `c3145839`, migration **0115** assigned. Briefed to:
+  - Keep **net state in `sales`/`sale_items`** and put the history in a new append-only ledger — so
+    stock, reports, revenue and the existing receipt renderer keep working untouched, and the receipt
+    needs no change at all because it already renders net state. **Told to verify that reading
+    against the actual renderer before building on it**, since `receiptContracts.ts` may freeze a
+    snapshot at sale time, which would change the design.
+  - **Subsume S4-24b's `POST /:id/items`, not duplicate it.** Two ways to add a line with two
+    different audit trails would make this feature worse than not having it.
+  - **Honour S4-2's sticky `stock_skipped` flag** — amending a stock-skipped sale must move no stock
+    either, for the same reason a naive cancel would invent units.
+  - **Refuse every amendment kind on a sale carrying return rows**, proved by a real
+    `return_items JOIN returns` read rather than the status label, exactly as S4-24b does.
+  - Make the edit window **configurable with an admin override** via the existing
+    `isAdminControlUser`, rather than hard-coded — the owner said *"maybe a timer"*, which is
+    thinking aloud, not a fixed rule.
+  - **Freeze tax and discount**, inheriting the open question below rather than re-litigating it.
+
+#### The one thing only the owner can decide
+
+**Does an amended sale reprint under its ORIGINAL receipt number, or get a NEW one?** The words
+support both: *"receipt treats as one receipt finalized total... but new receipt."* This is not a
+style question — receipt numbers carry a business format from applied migration **0107**, and a
+second number against one sale risks **double-counting revenue** in any report that counts receipts.
+The lane is building the safer reading (reprint under the original number) and keeping the other a
+small change rather than a rewrite. **Ask before shipping.**
+
+#### Still open from S4-24b, and it now matters more
+
+`sales.tax_usd` is an absolute amount and **no tax rate is stored anywhere in this schema**. Adding a
+line raises the total but not the tax. With amendments this stops being an edge case and becomes the
+normal path — every corrected delivery fee and every added product widens the gap. The fix is a
+stored rate on the sale or in settings: a schema **and** pricing-policy decision, so it is asked, not
+guessed.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
