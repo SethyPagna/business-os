@@ -149,13 +149,13 @@ async function cashierTotals(env: Env, date: string): Promise<CashierRow[]> {
 }
 
 /**
- * `YYYY-MM-DD` -> `mm/dd/yyyy`. The project pins mm/dd/yyyy + 24-hour
+ * `YYYY-MM-DD` -> `dd/mm/yyyy`. The project pins dd/mm/yyyy + 24-hour
  * everywhere (consistency-audit.md; formatBusinessDateTime above), so a report
  * header must not invent a second date shape.
  */
 export function formatBusinessDay(isoDate: string): string {
   const parts = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  return parts ? `${parts[2]}/${parts[3]}/${parts[1]}` : String(isoDate || '')
+  return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : String(isoDate || '')
 }
 
 const reportTitle = (icon: string, en: string, km: string, date?: string): string =>
@@ -347,15 +347,16 @@ const TELEGRAM_MAX_ITEM_LINES = 20
 const round2 = (value: number) => Math.round(value * 100) / 100
 const usd = (value: unknown) => `$${(Number(value) || 0).toFixed(2)}`
 
-// mm/dd/yyyy HH:mm in the business day's zone (UTC+7) -- the app-wide display
-// convention. D1's CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' UTC without a
-// zone marker; client-sent created_at is ISO with one. Missing/invalid -> now.
+// dd/mm/yyyy HH:mm in the business day's zone (UTC+7) -- the app-wide display
+// convention (day-first since Sep 4 2026). D1's CURRENT_TIMESTAMP is
+// 'YYYY-MM-DD HH:MM:SS' UTC without a zone marker; client-sent created_at is
+// ISO with one. Missing/invalid -> now.
 export function formatBusinessDateTime(value?: string | null, nowMs = Date.now()): string {
   const raw = String(value || '').trim()
   const parsed = raw ? Date.parse(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`) : Number.NaN
   const local = new Date((Number.isFinite(parsed) ? parsed : nowMs) + BUSINESS_UTC_OFFSET_MINUTES * 60_000)
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(local.getUTCMonth() + 1)}/${pad(local.getUTCDate())}/${local.getUTCFullYear()} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`
+  return `${pad(local.getUTCDate())}/${pad(local.getUTCMonth() + 1)}/${local.getUTCFullYear()} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`
 }
 
 export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {

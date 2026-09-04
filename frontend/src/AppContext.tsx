@@ -2270,7 +2270,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const formatDateTime = useCallback((value: unknown, options: Intl.DateTimeFormatOptions = {}): string => {
     const date = normalizeDateInput(value)
     if (!date) return '--'
-    return date.toLocaleString('en-US', {
+    const resolved: Intl.DateTimeFormatOptions = {
       hour12: false,
       year: 'numeric',
       month: '2-digit',
@@ -2280,7 +2280,18 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       second: '2-digit',
       timeZone: displayTimezone,
       ...options,
-    })
+    }
+    // dd/mm/yyyy day-first (Sep 4 2026), assembled from parts so the order
+    // is ours and not the formatter locale's -- see utils/formatters.ts.
+    // Callers that override the field shape via `options` (a month name, a
+    // weekday, time-only) are handed straight to Intl instead: there is no
+    // day/month order to fix when the fields are not all-numeric.
+    const numericDate = resolved.year === 'numeric' && resolved.month === '2-digit' && resolved.day === '2-digit'
+    if (!numericDate) return date.toLocaleString('en-US', resolved)
+    const parts = new Intl.DateTimeFormat('en-US', resolved).formatToParts(date)
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+    const time = [get('hour'), get('minute'), get('second')].filter(Boolean).join(':')
+    return `${get('day')}/${get('month')}/${get('year')}${time ? `, ${time}` : ''}`
   }, [displayTimezone])
 
   const canWriteToServer = !!syncUrl && !syncServerUnreachable

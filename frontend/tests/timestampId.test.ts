@@ -59,14 +59,18 @@ await runTest('client and server generators stay hand-synced and wired in', () =
   assert.doesNotMatch(returnsTransport, /\$\{prefix\}-\$\{Date\.now\(\)\}/)
 })
 
-await runTest('the compact id form stays OUT of displayed dates (receipt shows mm/dd/yyyy 24h)', () => {
+await runTest('the compact id form stays OUT of displayed dates (receipt shows dd/mm/yyyy 24h)', () => {
   // User, Aug 30 2026: yyyymmdd+time is ONLY for the receipt id; shown
-  // dates keep the app-wide mm/dd/yyyy + 24-hour convention.
-  assert.equal(fmtDateTime24('2026-08-30T07:35:12Z'), '08/30/2026 14:35')
+  // dates keep the app-wide display convention -- which became DAY-first
+  // on Sep 4 2026: "change the whole app to dd-mm-yyy, just receipt id
+  // stays yyyy-mm-dd". 30 is past the 12th, so this pins the order
+  // rather than merely agreeing with it. The 24-hour half is unchanged.
+  assert.equal(fmtDateTime24('2026-08-30T07:35:12Z'), '30/08/2026 14:35')
   const receipt = readFrontend('src/components/receipt/Receipt.tsx')
   assert.match(receipt, /fmtDateTime24\(createdAt \|\| new Date\(\)\)/)
-  // The old locale-default form printed 12-hour AM/PM (and day-first on
-  // non-US devices) -- it must not come back.
+  // The old locale-default form printed 12-hour AM/PM and let the DEVICE
+  // pick the field order. A wrong locale swaps day and month without
+  // failing, so the order is assembled by hand now -- it must not come back.
   assert.doesNotMatch(receipt, /toLocaleString\(undefined/)
 })
 

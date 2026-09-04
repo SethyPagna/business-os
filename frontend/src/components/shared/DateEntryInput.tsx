@@ -13,7 +13,7 @@ import { applyDateEntryMask, isoToDisplayDate, normalizeDateEntry } from '../../
 // keyboard entry that rejects '9032026' outright), so every staff-typed date
 // in the admin app renders THIS instead.
 //
-// Contract: `value` is the stored ISO 'YYYY-MM-DD' (a legacy mm/dd/yyyy
+// Contract: `value` is the stored ISO 'YYYY-MM-DD' (a legacy slash-form
 // string is tolerated on the way in), `onChange` hands back ISO -- the same
 // shape the native fields it replaced already used, so adopting it is a
 // one-line change per call site. '' means cleared.
@@ -94,7 +94,7 @@ export default function DateEntryInput({
   className = '',
   bare = false,
   ariaLabel,
-  placeholder = 'mm/dd/yyyy',
+  placeholder = 'dd/mm/yyyy',
   disabled = false,
   autoFocus = false,
   min,
@@ -188,8 +188,11 @@ export default function DateEntryInput({
     else element.blur()
   }
 
-  const errorText = tr('date_entry_invalid', 'Enter the date as mm/dd/yyyy.')
-  const helpText = tr('date_entry_help', 'Type digits only — 9032026 becomes 09/03/2026.')
+  const errorText = tr('date_entry_invalid', 'Enter the date as dd/mm/yyyy (day first).')
+  // Spells out "day first" because the SAME keystrokes that used to mean
+  // 3 September now mean 9 March -- the digits do not reveal the change, so
+  // this hint is the only warning a cashier's muscle memory gets.
+  const helpText = tr('date_entry_help', 'Type digits only, day first — 9032026 becomes 09/03/2026 (9 March).')
 
   return (
     <span className="relative inline-flex w-full min-w-0 items-center gap-1">

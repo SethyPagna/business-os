@@ -119,7 +119,12 @@ export function classifyImportHeader(headerCells: string[]): ImportTemplateDetec
     return { type: 'stock_actions', header, signals: pick('action', 'shop', 'warehouse', 'cost_price') }
   }
   // Products: pricing/stock/batch/image columns straight from the template.
-  const productSignals = pick('selling_price_usd', 'selling_price_khr', 'stock_quantity', 'batch(mm/dd/yyyy)', 'image_filename_1', 'is_group', 'low_stock_threshold')
+  // BOTH batch headers are signals. The downloaded template ships
+  // `batch(dd/mm/yyyy)` since Sep 4 2026, but every sheet the shop already
+  // holds says `batch(mm/dd/yyyy)`, and both must still route to 'products'
+  // -- the two headers differ only in how their cells are READ
+  // (lib/batchCode.ts's readBatchDateCell), never in which template they are.
+  const productSignals = pick('selling_price_usd', 'selling_price_khr', 'stock_quantity', 'batch(dd/mm/yyyy)', 'batch(mm/dd/yyyy)', 'image_filename_1', 'is_group', 'low_stock_threshold')
   if (productSignals.length >= 1 && has('name') && !has('action')) {
     return { type: 'products', header, signals: productSignals }
   }

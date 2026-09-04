@@ -10,7 +10,7 @@ import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './stat
 
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
 // trigger pill, and a panel laid out as two ENDPOINT BOXES
-// (Start | → | End), each holding a large editable MM/DD/YYYY date with its
+// (Start | → | End), each holding a large editable DD/MM/YYYY date with its
 // own month + year selects underneath -- replacing both the old chip strips
 // AND the first redesign's separate manual-input row + label/select rows.
 // The box whose date the next calendar click will set carries a blue ring
@@ -20,7 +20,7 @@ import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './stat
 // ✕ or an outside click.
 //
 // The trigger pill never spells out the words "Start Date"/"End Date"
-// (user, Aug 31): it always reads MM/DD/YYYY → MM/DD/YYYY -- the literal
+// (user, Aug 31): it always reads DD/MM/YYYY → DD/MM/YYYY -- the literal
 // display format as a placeholder when empty, the real dates once picked --
 // and appends each endpoint's own 24-hour HH:MM once a time is set.
 //
@@ -35,10 +35,11 @@ import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './stat
 // -- otherwise picking a month or year (a click outside rootRef) would slam
 // the whole panel shut before the navigation could take effect.
 //
-// Display format is MM/DD/YYYY on purpose: the stock mockup artwork shows
-// DD/MM placeholders, but mm/dd/yyyy-everywhere is a settled decision
-// (locale pinned en-US; re-swept Part 388/W2) -- flagged in progress.md
-// rather than silently diverging from it.
+// Display format is DD/MM/YYYY -- which is also what the stock mockup
+// artwork always showed. It was MM/DD/YYYY until Sep 4 2026 (user: "change
+// the whole app to dd-mm-yyy, just receipt id stays yyyy-mm-dd"). The note
+// that stood here recorded a deliberate divergence from that artwork; the
+// divergence is now closed rather than merely re-flagged.
 //
 // Dates are handled as ISO strings (YYYY-MM-DD) end to end and formatted by
 // string parts -- never `new Date('YYYY-MM-DD')` for display, which shifts a
@@ -92,7 +93,7 @@ export function todayDateTimeRange(now?: Date): DateTimeRange {
 
 function displayDate(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
-  return m ? `${m[2]}/${m[3]}/${m[1]}` : ''
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : ''
 }
 
 // The hand-typed date parser that used to live here (strict MM/DD/YYYY only)
@@ -313,17 +314,17 @@ export default function DateTimeRangePicker({
     setPickPhase('start')
   }
 
-  // Trigger labels: always the literal MM/DD/YYYY format -- as a placeholder
+  // Trigger labels: always the literal DD/MM/YYYY format -- as a placeholder
   // when a side is empty, as the real date once picked -- never the words
   // "Start Date"/"End Date" (user, Aug 31). Each side carries its own 24-hour
   // HH:MM once any time is set (the unset side defaults to the day's edges,
   // matching the panel's old suffix).
   const showTimes = showTime && Boolean(value.startTime || value.endTime)
-  const startTriggerLabel = `${displayDate(value.startDate) || 'MM/DD/YYYY'}${showTimes ? ` ${value.startTime || '00:00'}` : ''}`
-  const endTriggerLabel = `${displayDate(value.endDate) || 'MM/DD/YYYY'}${showTimes ? ` ${value.endTime || '23:59'}` : ''}`
+  const startTriggerLabel = `${displayDate(value.startDate) || 'DD/MM/YYYY'}${showTimes ? ` ${value.startTime || '00:00'}` : ''}`
+  const endTriggerLabel = `${displayDate(value.endDate) || 'DD/MM/YYYY'}${showTimes ? ` ${value.endTime || '23:59'}` : ''}`
 
   // One endpoint box: START or END label, the date itself as a LARGE editable
-  // MM/DD/YYYY input (bumped from text-xs per user direction "the dates can
+  // DD/MM/YYYY input (bumped from text-xs per user direction "the dates can
   // be made larger"), and that endpoint's month + year selects underneath.
   // The box for the endpoint the next calendar click will set carries a blue
   // ring; mousedown anywhere in a box retargets the click sequence to it.
@@ -362,7 +363,7 @@ export default function DateTimeRangePicker({
           bare
           t={t}
           className={`w-full bg-transparent text-center font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${invalid ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-50'}`}
-          placeholder="mm/dd/yyyy"
+          placeholder="dd/mm/yyyy"
           ariaLabel={which === 'start' ? (t('range_start') || 'Start date') : (t('range_end') || 'End date')}
         />
         {/* The month/year selects that used to sit here moved into the

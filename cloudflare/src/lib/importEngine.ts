@@ -73,7 +73,7 @@ import { buildImportedContactState } from './contactOptions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
-import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
+import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
@@ -1278,8 +1278,9 @@ export async function classifyProducts(
   // barcode and batch may top that lot up while its own movement/received
   // cost remains historical. Read only lot codes named by this window.
   const requestedLotCodes = [...new Set(rows.map((row) => {
-    const raw = str(row['batch(mm/dd/yyyy)'] || row.batch || row.date || row.received_date)
-    const iso = normalizeToIsoDate(raw) || (!raw ? todayIso() : '')
+    // The column header decides day-first vs month-first -- readBatchDateCell.
+    const { raw, order } = readBatchDateCell(row as Record<string, unknown>)
+    const iso = normalizeToIsoDate(raw, order) || (!raw ? todayIso() : '')
     return iso ? lower(dateToBatchCode(iso)) : ''
   }).filter(Boolean))]
   const productsByActiveLot = new Map<string, Set<number>>()
@@ -1475,16 +1476,19 @@ export async function classifyProducts(
     // broken by the rename. Either way, a blank cell still means
     // "received now" -- see the comment above on why this can't just be
     // null.
-    // Normalize to ISO before storing: the cell is TYPED mm/dd/yyyy (the
-    // column header says so) but received_at is a DATE column every reader
+    // Normalize to ISO before storing: the cell is typed in whatever order
+    // its own column header names -- `batch(mm/dd/yyyy)` month-first,
+    // `batch(dd/mm/yyyy)` day-first, bare `batch`/`date`/`received_date`
+    // month-first because they name no format and must keep the only meaning
+    // they have ever had (readBatchDateCell). received_at is a DATE column every reader
     // compares/sorts/groups with SQL date functions -- storing the raw
     // display string put "08/24/2026" verbatim into 6,031 production lots
     // (Aug-28 catalog import), where date() returns NULL and ordering is
     // lexicographic garbage. Migration 0077 repairs the stored rows; this
     // keeps new ones ISO. An unreadable non-blank cell falls back to today
     // WITH a visible warning below, never silently.
-    const rawReceivedDate = str(row['batch(mm/dd/yyyy)'] || row.batch || row.date || row.received_date)
-    data.received_date = normalizeToIsoDate(rawReceivedDate) || todayIso()
+    const { raw: rawReceivedDate, order: receivedDateOrder } = readBatchDateCell(row as Record<string, unknown>)
+    data.received_date = normalizeToIsoDate(rawReceivedDate, receivedDateOrder) || todayIso()
     // The stored/displayed batch code is always derived from
     // received_date directly above, never from a separately-typed label
     // -- "lot code can be removed... batch column is just a translated

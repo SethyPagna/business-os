@@ -1,4 +1,4 @@
-import { fmtDateTime24 } from './formatters.ts'
+import { fmtBusinessIsoDateTime } from './formatters.ts'
 
 export const SALES_IMPORT_COLUMNS = [
   'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency', 'exchange_rate',
@@ -41,7 +41,13 @@ function saleItems(sale: DataRow): DataRow[] {
 function headerFields(sale: DataRow): DataRow {
   return {
     receipt_number: value(sale, 'receipt_number'),
-    sale_date: sale.created_at ? fmtDateTime24(sale.created_at as string) : '',
+    // ISO, deliberately, even though the app displays dates day-first: this
+    // cell is read BACK by parseSalesImportDateTime, whose slash branch is
+    // month-first forever (every sheet the shop already has keeps its
+    // present meaning). A day-first cell here would re-import as a
+    // different date without failing. Same instant, same business
+    // timezone, same 24-hour clock -- only the field order is ISO.
+    sale_date: sale.created_at ? fmtBusinessIsoDateTime(sale.created_at as string) : '',
     sale_status: value(sale, 'sale_status', 'completed'),
     payment_method: value(sale, 'payment_method', 'Cash'),
     payment_currency: value(sale, 'payment_currency', 'USD'),

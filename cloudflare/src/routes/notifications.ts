@@ -51,12 +51,13 @@ const NOTIFICATION_SETTING_KEYS = [
 ]
 const SUMMARY_SEPARATOR = ' - '
 
-// mm/dd/yyyy for user-facing date text -- the whole app shows this format
-// by request (Aug 25, reaffirmed Part 388). Pure string reorder, no Date
-// parsing (a bare date parses as UTC midnight and can shift a day).
-function formatDateMdy(value: unknown): string {
+// dd/mm/yyyy for user-facing date text -- the whole app shows this format
+// by request (Aug 25 numeric-everywhere, day-first since Sep 4 2026). Pure
+// string reorder, no Date parsing (a bare date parses as UTC midnight and
+// can shift a day).
+function formatDateDmy(value: unknown): string {
   const match = String(value ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return match ? `${match[2]}/${match[3]}/${match[1]}` : String(value ?? '')
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value ?? '')
 }
 
 function normalizeBoolean(value: unknown, fallback = true): boolean {
@@ -273,8 +274,8 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
       id: `supplier-credit-${row.id}`,
       label: `${who} — ${row.product_name}${row.lot_code ? ` (${row.lot_code})` : ''}`,
       meta: daysLeft < 0
-        ? `Overdue ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} — due ${formatDateMdy(row.credit_due_date)}`
-        : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${formatDateMdy(row.credit_due_date)})`,
+        ? `Overdue ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} — due ${formatDateDmy(row.credit_due_date)}`
+        : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${formatDateDmy(row.credit_due_date)})`,
       kind: daysLeft < 0 ? 'supplier_credit_overdue' : 'supplier_credit_due',
       tone: daysLeft < 0 ? 'danger' as const : 'warning' as const,
       pageId: 'inventory',
