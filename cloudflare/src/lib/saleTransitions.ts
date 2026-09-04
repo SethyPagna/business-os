@@ -158,8 +158,44 @@ export type SaleStockTransitionPlan = {
   deductions: Array<{ product_id: number; branch_id: number; quantity: number }>
   restoredUnits: number
   deductedUnits: number
+  // S4-2: units this transition WOULD have moved but deliberately did not,
+  // because the caller passed skipStock (admin-only "Don't touch stock").
+  // Non-zero only in that mode; it is what the audit trail records so a
+  // deliberately-skipped sale is never mistaken for a lost deduction.
+  skippedUnits: number
 }
 
+// S4-2 "Don't touch stock" (admin only, lock-gated in the UI, enforced
+// server-side in routes/sales.ts).
+//
+// WHY IT EXISTS. The Sep-2 2026 reconciliation rewrote every product's
+// quantity to the physically-counted truth, and that count ALREADY assumes
+// the migrated old-system sales are completed. Flipping such a sale
+// awaiting_payment -> completed therefore deducts units a second time --
+// on Sep 3 a bulk flip of 7 migrated sales took 9 units that were already
+// accounted for. For those sales the correct stock delta is zero, and no
+// amount of held() arithmetic can know that: it is a fact about where the
+// data came from, not about the lifecycle.
+//
+// WHAT skipStock DOES. The transition still happens in every other respect
+// (status, payment fields, cancellation record, audit, notifications); the
+// stock ledger is simply not touched -- no branch_stock, no
+// products.stock_quantity, no branch_batch_stock, no allocation release,
+// and above all NO inventory_movements row. Zero statements, not
+// compensating ones: an inventory_movements row asserts that units
+// physically moved, and none did.
+//
+// WHY IT MUST BE STICKY (routes/sales.ts persists sales.stock_skipped=1 and
+// re-applies it to every later transition of that sale). held() is a state
+// machine over the sale's status, and it assumes the system itself put the
+// units out. Once a sale reaches `completed` without the system deducting
+// anything, held(completed) is a lie for that sale: a later cancel would
+// compute delta = 0 - qty and ADD units that were never taken -- inventing
+// stock, the exact failure this feature exists to stop. So a stock-skipped
+// sale is permanently outside the stock ledger and every subsequent
+// transition of it moves zero. Real returns against it still restock
+// normally: routes/returns.ts works from the return record (goods actually
+// came back over the counter), not from held().
 export function planSaleStockTransition(input: {
   saleId: number | string
   oldStatus: string
@@ -169,11 +205,16 @@ export function planSaleStockTransition(input: {
   reason: string
   userId: number | string | null
   userName: string | null
+  // Admin-only, verified by the route BEFORE this is set (see
+  // isAdminControlUser there) -- the kernel never decides permission.
+  skipStock?: boolean
 }): SaleStockTransitionPlan {
   const statements: StockStatement[] = []
   const deductionMap = new Map<string, { product_id: number; branch_id: number; quantity: number }>()
   let restoredUnits = 0
   let deductedUnits = 0
+  let skippedUnits = 0
+  const skipStock = input.skipStock === true
 
   for (const item of input.items) {
     if (!item.product_id || !item.branch_id) continue
@@ -182,6 +223,14 @@ export function planSaleStockTransition(input: {
     const after = heldQuantity(input.newStatus, item.quantity, returned)
     const delta = after - before
     if (delta === 0) continue
+
+    if (skipStock) {
+      // Count what was NOT moved, emit nothing at all, and leave
+      // restoredUnits/deductedUnits at zero so the audit trail cannot
+      // read as if stock had moved.
+      skippedUnits += Math.abs(delta)
+      continue
+    }
 
     if (delta > 0) {
       // Taking stock (e.g. un-cancel, or awaiting_payment -> completed).
@@ -327,5 +376,5 @@ export function planSaleStockTransition(input: {
     }
   }
 
-  return { statements, deductions: [...deductionMap.values()], restoredUnits, deductedUnits }
+  return { statements, deductions: [...deductionMap.values()], restoredUnits, deductedUnits, skippedUnits }
 }
