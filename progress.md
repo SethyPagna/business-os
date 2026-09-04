@@ -2869,6 +2869,55 @@ row.
   - **Blast radius, which is why S4-26 did not take it: 121 of 179 component files use `.truncate`**,
     plus 5 using `line-clamp` — essentially every surface every other lane is editing, and it
     reflows row heights app-wide. It wants a quiet tree, not a busy one.
+### Migration number ledger — check this before you write a migration
+
+Numbering has collided **twice today**. D1 tracks applied migrations by **filename**, so two
+different `0108_*.sql` files both run, out of order, after 0107. Current state:
+
+| Number | Lane / file | State |
+|---|---|---|
+| **0107** | `0107_receipt_numbers_business_format.sql` | **applied in production** — the highest applied |
+| 0108 | S4-19 `0108_recon_lot_code_to_adj_date.sql` (`s4/adj-prefix`) | written, **unrun** |
+| 0109 | S4-17b `0109_barcode_only_cost_merge_fallback.sql` (`s4/cost-merge-survey`) | written, **unrun** — renumbered from a `0099` that collided with the applied `0099_legacy_cashier_identity_backfill.sql` |
+| 0110 | S4-23 `0110_customers_membership_lc_backfill.sql` (`s4/membership-lc`) | written, **unrun** — renumbered from 0108 |
+| 0111+ | free | S4-28 and S4-29 told to take these |
+
+**Re-verify against `d1_migrations` immediately before you pick one.** And note the renumbering
+rule cuts both ways: an **applied** filename is frozen, because renaming it makes D1 treat an
+applied migration as new and re-run its DDL, which fails the deploy. Only unrun files may move.
+
+- [x] **S4-23 · Every customer carries an `LC-` membership number. Done** on `s4/membership-lc`,
+  pushed. Nothing applied to production.
+  - **The gap-fill reading was right, and the existing code did neither.** All four generators
+    produced *random entropy* (`LCMN-` + 8 characters), so there was no sequence at all — nothing
+    to append to and no gaps to fill. `LC-#####` is new behaviour built to the sentence, not a
+    restoration of something that drifted.
+  - **Four generators, not the two the board expected.** `routes/contacts.ts:214`,
+    `lib/importEngine.ts:1785`, `lib/portalAccounts.ts:51`, and — the worst — a **fourth in the
+    browser**, `components/contacts/customerMembershipNumber.ts`. `CustomerFormModal` pre-filled
+    the field with a browser-invented number, and the create route only mints when the field
+    arrives blank, so **a client-side random value always beat the server**. Fixed by making the
+    field read-only on create ("Assigned on save", both packs) and letting the server mint. New
+    single authority: `cloudflare/src/lib/membershipNumber.ts`.
+  - **The uniqueness guarantee already existed**: `idx_customers_membership_lower_pg`, a partial
+    UNIQUE index on `lower(membership_number)` from migration 0015, live in production. But a
+    *deterministic* sequence changes the failure mode — concurrent writers now compute the **same**
+    next number, where random ones never collided. `withMintedMembershipNumber()` catches that and
+    hands the loser the next free number instead of an error.
+  - **Production survey (SELECT-only, Sep 4): 4,966 customers, and `membership_number` is NULL on
+    every single one.** Zero `LCMN-`, zero `LC-`, zero duplicates, zero `portal_accounts` rows. So
+    the backfill is not a repair — it is the first assignment: `LC-00001`..`LC-04966` in `id`
+    order, oldest customer first.
+  - Gate: both typechecks clean, **all** worker and frontend tests green, `check:source` 454 files,
+    `verify:i18n` 4,544 keys, `vite build` clean. New
+    `cloudflare/scripts/test-membership-number-pure.cjs` — 61 checks covering format, gap-fill
+    order, concurrent minting **including a forced race where an interloper steals the minted
+    number mid-write**, "one minter" source assertions, and the backfill at 5,000-row scale. It
+    loads the migration file by name and runs it against in-memory SQLite, which is why the 0108
+    -> 0110 renumber could be proved safe rather than assumed.
+  - Three existing tests pinned the old behaviour and were moved to the new contract:
+    `test-import-engine-pure.cjs`, `test-portal-accounts-pure.cjs`, and
+    `frontend/tests/{performanceLoadingUx,pricingContacts}.test.ts`.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
