@@ -139,8 +139,8 @@ ok(writes.length === 2,
 // ---- 5. POS actually mounts both ------------------------------------------
 ok(/import ShiftGate, \{ EndShiftButton \} from '\.\/ShiftGate'/.test(pos),
   'POS imports the gate and the end-shift control')
-ok(/<ShiftGate \/>/.test(pos), 'POS mounts the registration prompt')
-ok(/<EndShiftButton \/>/.test(pos), 'POS mounts the End Shift control')
+ok(/<ShiftGate\b/.test(pos), 'POS mounts the registration prompt')
+ok(/<EndShiftButton\b/.test(pos), 'POS mounts the End Shift control')
 
 // ---- 6. Every key the gate asks for exists in BOTH packs -------------------
 // verify:i18n covers this repo-wide, but a shift key missing from km would
