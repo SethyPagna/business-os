@@ -125,6 +125,52 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**🟡 STAGE 1 COMPLETE ON `rc/s4-2026-09-04` @ `979338e9` (Sep 4 2026, session business-os-v1-c3) — every S4
+lane merged and certified, and NOTHING DEPLOYED. Reference to re-verify.** That branch, not `main`, is the deploy
+candidate: `main` is 40-odd docs commits ahead of it and carries **no code** the branch lacks. Certified on the
+merged tree, which is byte-identical to committed `HEAD` (the worktree is clean apart from the three self-rewriting
+`frontend/public/*` files): frontend `tsc` clean · **188/188** tests · `check:source` 488 files · `verify:i18n`
+**4742** keys at parity in both packs · a real `vite build`; cloudflare `tsc` clean · **183/183** pure scripts. The
+`test:utils` chain is **190** entries and was proven a superset of every merged parent, not merely non-empty.
+
+- **⚠️ THE DEPLOY IS NOT FREE — this is the gate decision, and it is the user's.** Chain top is **0115**;
+  production D1 is still at **107** (re-verified by direct `SELECT` on `d1_migrations`, Sep 4). A deploy therefore
+  applies **seven** unrun migrations, and **five of them rewrite production data**: `0108` relabels the RECON lot
+  codes to `ADJ`+date, `0109` folds barcode-only duplicate costs, `0110` backfills every customer onto the `LC-`
+  sequence, `0111` moves the VIP price into `wholesale_price_*`, `0112` deletes the YSL placeholder product.
+  `0114` and `0115` are schema only. **Name those five to the user individually before asking for the go** — a
+  single "deploy?" understates what they do.
+
+- **The receipt now prints the selling price, and every discount reaches the total** (`9fdf327b`) — the owner's
+  Sep-4 rule, *"selling price (-discount), not discounted price(-discount)"*. The line printed `applied_price_usd`
+  (what was charged) with the saving beside it, e.g. `$49.00 (-$4.00)`, while `sales.subtotal_usd` is the sum of
+  **charged** line totals — so the cut was shown on the line and then vanished from the arithmetic below it.
+  Measured against production: **24,085 lines across 11,974 sales, $99,534.40** of discount the totals never
+  showed. Sale 16433 printed `$109.00` / `$5.00`; it now prints `$113.00` / `$9.00`. **The money does not move** —
+  both displayed figures shift by the same amount, so `(subtotal + savings) - (discount + savings)` is unchanged,
+  which is what lets every historical receipt reprint to the same total; `total_usd` and the tax base are untouched.
+  The arithmetic moved to `frontend/src/utils/receiptLineMath.ts` so a test can **execute** it rather than
+  pattern-match a component full of JSX, and `receiptLineMath.test.ts` drives real production sales 16433/16815.
+
+- **Three lanes merged, each certified after merging rather than before.** `s4/sale-amendments` @ `dbb87416`
+  (S4-30's raw-UTC timestamp in the amendment history). `s4/wholesale-merge-path` @ `b55930cf` — **one conflict,
+  and taking either side would not have compiled**: `HEAD` called a local `resolveMergedWholesalePricing` that the
+  branch deletes on purpose, S4-32 having re-pointed the shared `resolveMergedPricing` at `wholesale_price_*`.
+  `s4/date-format-ddmmyyyy` @ `334aad0a` — the usual single-line `test:utils` conflict, **unioned**, because each
+  side had one entry the other lacked and a side-pick drops a lane's test permanently and silently.
+
+- **RULED (mine, affirming S4-32): `/adjust` will NOT accept `special_price_*` as an input alias.** A stale PWA
+  till tab renders that field from its own cached product row, and 0111 zeroes the column, so an old tab can only
+  ever send `0` — aliasing it would let that `0` overwrite a sibling row's inherited wholesale price on INSERT.
+  Ignoring the dead key makes an old tab fall through to the stored `wholesale_price_*` instead. **The accepted
+  cost, which the user should know:** until every till reloads, a wholesale-price edit made from the Adjust dialog
+  on a stale tab is **silently dropped** (its stock adjustment still lands). The reasoning is pinned in
+  `routes/inventory.ts` beside the code, with an instruction not to "fix" it without re-reading 0111 first.
+
+- **S4-33 flagged one thing for the counter, not for code:** typing `9032026` still renders `09/03/2026`, but that
+  string now means **9 March**, not 3 September. Staff muscle memory will produce wrong dates that look right. The
+  placeholder and error text say "day first" loudly; a word to the counter would do more than either.
+
 **📥 LEGACY Sep 2–3 IMPORT APPLIED TO PRODUCTION (Sep 4 2026) — session business-os-v1-21, on the user's explicit go,
 announced to all eleven live peers with no objection. Reference to re-verify; full record in
 [`ops/scripts/migration/SEP02-03-IMPORT-RECORD.md`](ops/scripts/migration/SEP02-03-IMPORT-RECORD.md).** Data only —
@@ -3508,7 +3554,8 @@ already built and tested, so that ruling costs nothing.
   Existing sales keep their absolute `tax_usd`; no rate is retro-derived. **0116** is reserved if the
   toggle needs schema.
 
-- [~] **S4-32 · The wholesale tier never reached the merge path — a silent data-loss defect.**
+- [x] **S4-32 · The wholesale tier never reached the merge path — a silent data-loss defect. Done**, merged at
+  `27622a63`; the `/adjust` alias question it raised is ruled above.
   *(claimed: `business-os-v1-c3` subagent, branch `s4/wholesale-merge-path` off `244e231d`.)*
   **Found by S4-28 reading S4-29's branch rather than assuming the lanes agreed** — neither lane
   could see this alone, and no test currently fails on it.
@@ -3528,7 +3575,7 @@ already built and tested, so that ruling costs nothing.
     and normalization stays **comparison-only**, because 27 zero-stripped barcodes are already carried
     by a product under a different name and an in-place rewrite would make a scan ambiguous.
 
-- [~] **S4-33 · The whole app moves to `dd-mm-yyyy`.** *(claimed: `business-os-v1-c3` subagent,
+- [x] **S4-33 · The whole app moves to `dd-mm-yyyy`. Done**, merged at `979338e9`. *(claimed: `business-os-v1-c3` subagent,
   branch `s4/date-format-ddmmyyyy` off `244e231d`.)* This reverses a convention pinned across the
   codebase and in `consistency-audit.md` — **which the lane was told to update, because leaving it
   stale means the next session "fixes" this work back.**

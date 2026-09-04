@@ -18760,3 +18760,75 @@ above it.
   (`productDetailRule.ts` trims and lowercases only), so the class is confined to migration tooling.
   `business-os-v1-ba` and `business-os-v1-4a` have each offered to take it read-only.
 - No migration was applied (chain top stays **0107**) and no deploy was involved. This was data only.
+
+## Part 596 (Sep 4 2026, session business-os-v1-c3, COORDINATOR) — the discount the receipt showed and then spent, and three merges where picking a side was the wrong move
+
+**The receipt was doing subtraction twice and showing it once.** The owner's rule was terse — *"products show
+selling price and minus the discounts in total show selling price (-discount), not discounted price(-discount)"* —
+and the defect underneath it was exact. The line printed `applied_price_usd`, which checkout stores as what was
+actually **charged**, and then printed the saving beside it: `$49.00 (-$4.00)`. But `sales.subtotal_usd` is the sum
+of **charged** line totals. So the $4 had already been removed from the Subtotal before it was printed, and the
+Discount row never mentioned it. The cut appeared next to its line and then vanished from the arithmetic directly
+below it. Against production that is **24,085 lines across 11,974 sales and $99,534.40** of discount the totals
+never showed — not an edge case, the ordinary path.
+
+The fix is display-only and provably so: a line prints its **list** price, and both displayed figures shift by the
+same amount, so `(subtotal + savings) - (discount + savings) = subtotal - discount`. Sale 16433 went from
+`$109.00 / $5.00` to `$113.00 / $9.00` and still totals `$104.00`. That identity is what lets every historical
+receipt reprint to the same money, and it is why `total_usd` and the tax base are untouched.
+
+**The arithmetic moved out of the component so a test could run it.** `Receipt.tsx` is JSX, which the test runner
+cannot import, so every guard on it had been a source-scan — regexes matching the code's *spelling*. Extracting
+`utils/receiptLineMath.ts` let `receiptLineMath.test.ts` drive real production sales (16433, 16815) through the
+actual function and assert the printed lines sum to the printed Subtotal. It also pins the fallbacks that keep old
+receipts identical: no `base_price` falls back to charged, a price *increase* must not yield a negative saving, and
+sub-cent noise is not a discount.
+
+**Which immediately produced the red that proves the point.** `posCore.test.ts`'s Z2 lock asserted
+`baseUnitUsd > 0 ? baseUnitUsd + productDiscUnitUsd` **inside `Receipt.tsx`** — and the derivation had moved to the
+util, byte-identical apart from a helper's name. That is the failure mode the fleet rule exists for: a red is a
+suspect, not a verdict, and each one is either pinning a real contract or pinning the old spelling. This one pinned
+the spelling. It was re-pointed at the rule's new home rather than deleted, and given the assertion it had only ever
+implied — that the component still *consumes* the shared math. Then both halves were broken in turn to confirm the
+lock still goes red; a re-pointed lock nobody re-tests is just a deleted one with extra steps.
+
+**Three lane merges, and in two of them "pick a side" was the losing move.**
+
+- `s4/wholesale-merge-path` conflicted in `importEngine.ts`. `HEAD` called a local
+  `resolveMergedWholesalePricing`; the branch **deletes that function on purpose**, because S4-32 had re-pointed the
+  shared `resolveMergedPricing` at `wholesale_price_*` and the local copy had become a second implementation of one
+  rule — the exact drift `productDetailRuleParity.test.ts` exists to prevent. Taking `HEAD` would not have compiled.
+  The conflict looked like a choice and was actually a consolidation.
+- `s4/date-format-ddmmyyyy` conflicted on `test:utils`, the one very long line every lane appends to. Each side had
+  exactly one entry the other lacked (`dateFormatDayFirst` theirs, `receiptLineMath` mine). Either side-pick loses a
+  test **silently and permanently**. Unioned to 190 entries and then *proved* a superset of both parents, along with
+  both language packs, rather than trusting that the merge looked clean.
+
+One scare that was not one: a union check reported a test file on disk that no chain entry names. It turned out
+`testChainCoverage.test.ts` deliberately treats a test imported by a chained test as reachable, and
+`paginationSurfaceContract` is imported by `paginationRangeControl`. The guard was right and the ad-hoc check was
+naive — worth recording, because the instinct on seeing "the coverage guard passed but a file is unchained" is to
+distrust the guard.
+
+**Certified after merging, on the merged tree.** frontend `tsc` clean, **188/188** tests, `check:source` 488 files,
+`verify:i18n` **4742** keys at parity, a real `vite build`; cloudflare `tsc` clean, **183/183** pure scripts. The
+certified tree is byte-identical to committed `HEAD` (`979338e9`) apart from the three self-rewriting
+`frontend/public/*` files — stated explicitly because a certification that silently describes a different tree than
+its header claims is a mistake this project has already made once.
+
+**Nothing was deployed, and the gate is heavier than it looks.** The chain tops out at **0115** while production D1
+is still at **107**, re-verified by direct `SELECT`. A deploy applies **seven** unrun migrations and **five rewrite
+production data** — `0108` relabels RECON lot codes, `0109` folds barcode-only duplicate costs, `0110` backfills
+every customer onto `LC-`, `0111` moves the VIP price into `wholesale_price_*`, `0112` deletes a placeholder
+product. Asking "deploy?" without naming those five would understate the question.
+
+**A ruling, and an operational cost worth saying out loud.** S4-32 declined to accept `special_price_*` as an input
+alias on `/adjust` and handed the call up; affirmed. A stale PWA till tab renders that field from its own cached row
+and 0111 zeroes the column, so an old tab can only ever send `0` — aliasing it would let that `0` overwrite a
+sibling row's inherited wholesale price. The accepted cost is that until every till reloads, a wholesale-price edit
+made from the Adjust dialog on a stale tab is **silently dropped** (the stock adjustment still lands). That is the
+safe half of the trade, but it is not a free one, and the shop should hear it.
+
+**Finally, the thing no test can catch:** typing `9032026` still renders `09/03/2026`, and that string now means
+**9 March** rather than 3 September. The placeholder and error text say "day first" loudly. Staff muscle memory
+will still produce wrong dates that look entirely right, and a word to the counter will do more than either.
