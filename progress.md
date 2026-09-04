@@ -2688,13 +2688,80 @@ modes hard-wired. Needs: a setting, the second uniqueness shape, and the admin
 exemption in `ShiftGate`. Note the deployed index is already applied to
 production, so the second mode is a NEW migration, not a rename of 0116.
 
-**[ ] S4R5-3 · Reports must actually carry store discount, product discount,
+**[x] S4R5-3 · Reports must actually carry store discount, product discount,
 total discount and the actual delivery fee.** Stated as a verification ask —
 *"make sure it is actually done"* — so the deliverable is expected-vs-actual per
 figure, not a code reading. `getItemDiscountUsd` (S4-7, merged from
 `s4/shift-credit-line-ee`) supplies the item-level term; the two invoice-level
 discounts are columns on the sales row. Prove each one reaches a rendered
 report, and say which do not.
+
+DONE `1d67e895` (rc/deploy-2026-09-04, pushed; NOT yet deployed). Answered by
+measurement, not by reading the code. **August 2026, recognized sales:**
+
+| figure | actual in D1 | what the app reported |
+| --- | --- | --- |
+| Store discount | $5.50 | $5.50 — correct |
+| Membership discount | $0.00 | $0.00 — correct |
+| **Product discount** | **$2,338.85** (636 of 888 lines) | **nothing — no field existed** |
+| **Total discount** | $2,344.35 | **$5.50** — understated 425× |
+| Delivery charged | $249.50 | $249.50 — correct |
+| Delivery absorbed by shop | $0.00 | $0.00 — correct |
+
+So two of the four were right and two were not. The product discount leaves no
+trace on the sales header at all — `sales.subtotal_usd` is the sum of LINE
+totals and a line total is already net of its own discount — so no report
+*could* have shown it. `getItemDiscountUsd` had existed since S4-7 but was
+wired only into the Telegram shift report.
+
+Fixed: `SalesTotals` now carries `item_discount_usd` and `total_discount_usd`
+on every path (headline, period series, grouped, business-summary days), summed
+inside the **existing** COGS query — same join, same rows, same recognized-only
+basis, one extra `SUM`, zero extra rows read. `discount_usd` deliberately keeps
+meaning store + membership. The income statement now opens at *Goods at list
+price* and subtracts *Product discounts* in the open; the period and grouped
+tables show the true total plus a Product discounts column. Telegram drops its
+second full scan and reads the figure off the totals.
+
+#### The delivery answer is different from what it looks like at first
+
+Reading only `sales.delivery_actual_cost_usd`: **14 of 15,052 sales, $22.86 all
+time**, against 4,414 sales carrying a delivery fee. That reads as "nobody
+records what the courier is paid".
+
+It is not what is happening. The `fees` table carries **2,542 rows of
+`fee_type = 'delivery'` totalling ៛51,197,200 (≈ $12,487 at 4,100)** — and only
+2 rows in USD, $3.50. **The courier payments are recorded, in riel, as
+standalone fee rows.** Every one of them has `sale_id NULL`, so
+`deliveryActualCostExpr`’s `EXISTS (... fees.sale_id = s.id ...)` never matches
+and the kernel falls back to the near-empty sale column.
+
+Consequences, stated precisely:
+
+- **Gross profit and the net result are NOT wrong.** The fees aggregate applies
+  no `fee_type` filter, so those ≈$12.5K are already inside Expenses, and
+  `delivery_net_usd` subtracts ≈$0 rather than subtracting them a second time.
+  Nothing is double-counted and no money is missing.
+- **The delivery view IS wrong.** "Actual cost" reads $0.00 and "Delivery
+  margin" reads the whole fee charged — a 100% margin on a service the shop is
+  paying roughly $12.5K a year for.
+- `SaleDetailModal` declares `delivery_actual_cost_usd` and never renders it, so
+  a cost not typed at the till can neither be seen nor added afterwards. The
+  amendment machinery already has a `delivery_fee_changed` kind, which is the
+  natural place for a `delivery_actual_cost_changed` sibling.
+
+Carried as **S4R5-3b** below rather than bolted onto this commit, because it is
+a decision about which of two records is authoritative, not a bug fix.
+
+**[ ] S4R5-3b · Make the delivery reports read the courier payments that are
+actually recorded.** Two halves. (1) Decide and implement the authority rule:
+unlinked `fee_type='delivery'` rows are the real courier cost for the period,
+so the delivery aggregate should read them (converted at the business rate)
+rather than only `sales.delivery_actual_cost_usd` — with the existing
+`EXISTS`-guard extended so a LINKED fee row is still not counted twice. (2) Give
+`SaleDetailModal` the field: show the recorded cost, and allow adding one after
+the fact through a new `delivery_actual_cost_changed` amendment kind, so the
+per-sale record can be completed without reopening the till.
 
 **[ ] S4R5-4 · Re-derive gross profit and revenue against the corrected receipt,
 and restyle the Telegram reports.** Follows S4R5-1: if the receipt's discount
