@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { fmtTime, fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -217,7 +217,6 @@ export default function SaleDetailModal({
   const refundKhr = toNumber(sale.refund_khr)
   const membershipDiscountUsd = toNumber(sale.membership_discount_usd)
   const membershipDiscountKhr = toNumber(sale.membership_discount_khr)
-  const membershipPointsRedeemed = toNumber(sale.membership_points_redeemed)
   const baseDiscountUsd = toNumber(sale.discount_usd)
   const taxUsd = toNumber(sale.tax_usd)
   const subtotalUsd = toNumber(sale.subtotal_usd)
@@ -235,8 +234,6 @@ export default function SaleDetailModal({
   const taxKhr = toNumber(sale.tax_khr)
   const deliveryFeeUsd = toNumber(sale.delivery_fee_usd)
   const deliveryFeeKhr = toNumber(sale.delivery_fee_khr)
-  const deliveryActualCostUsd = toNumber(sale.delivery_actual_cost_usd)
-  const deliveryActualCostKhr = toNumber(sale.delivery_actual_cost_khr)
   const isDelivery = !!toNumber(sale.is_delivery) || !!String(sale.delivery_contact_name || '').trim()
   // S4-25: what the standalone Delivery card used to hold, rendered under the
   // delivery-fee row's label instead. `note` sits inside a <span>, so every
@@ -258,7 +255,6 @@ export default function SaleDetailModal({
       ))}
     </span>
   ) : null
-  const paymentCurrency = String(sale.payment_currency || '').trim()
   const paymentDetails = parsePaymentDetails(sale.payment_details)
   // Outstanding balance: an on-credit / partially-paid sale (amount_paid below
   // total). Shown so the admin detail no longer hides "still owed".
@@ -335,37 +331,13 @@ export default function SaleDetailModal({
             />
             <div className="mt-1 text-xs text-gray-400">{fmtTime(sale.created_at)}</div>
           </div>
+          {/* S4-24 (user, Sep 4 2026): "print buttons end of page...not on top
+              near the x close button". Print and Return moved to the footer at
+              the end of the record. Only the status badge and the close control
+              stay up here -- a badge is a fact about the record, and X is how
+              you leave, not something you do to the sale. */}
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <StatusBadge status={currentStatus} t={t} />
-            {onReturn ? (
-              <span className="inline-flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => onReturn(sale)}
-                  disabled={returnBlockedReason !== ''}
-                  className="rounded-lg bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50"
-                >
-                  {t('return') || 'Return'}
-                </button>
-                {/* Why the action is unavailable stays behind the hint, not
-                    as inline prose next to the button. */}
-                {returnBlockedReason ? (
-                  <InfoHint text={returnBlockedReason} label={t('return') || 'Return'} />
-                ) : null}
-              </span>
-            ) : null}
-            {onPrint ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose()
-                  onPrint(sale)
-                }}
-                className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
-              >
-                {t('print') || 'Print'}
-              </button>
-            ) : null}
             <button
               type="button"
               onClick={onClose}
@@ -412,30 +384,40 @@ export default function SaleDetailModal({
                     </span>
                   </DetailRow>
                 ) : (
-                  <DetailRow label={t('payment_method') || 'Payment method'} value={sale.payment_method} badge />
-                )}
-                {paymentCurrency && paymentCurrency.toUpperCase() !== 'USD' ? (
-                  <DetailRow label={translateOr('payment_currency', 'Payment currency', 'រូបិយប័ណ្ណទូទាត់')} value={paymentCurrency} />
-                ) : null}
-                {paymentDetails.length > 1 ? (
-                  <DetailRow label={translateOr('payment_breakdown', 'Payment breakdown', 'ការបំបែកការទូទាត់')}>
-                    <div className="space-y-0.5">
-                      {paymentDetails.map((detail, index) => (
-                        <div key={`${detail.method}-${index}`} className="flex justify-between gap-3">
-                          <span className="min-w-0 flex-1 break-words">{detail.method}</span>
-                          <span className="shrink-0 tabular-nums">{fmtUSD(detail.amount_usd)}{detail.amount_khr > 0 ? ` · ${fmtKHR(detail.amount_khr)}` : ''}</span>
-                        </div>
-                      ))}
-                    </div>
+                  /* S4-24: the split payment is no longer a row called
+                     "Payment breakdown" -- it is the payment row's own detail,
+                     which is exactly how the receipt prints it (Receipt.tsx
+                     order_info passes the same list as the payment Row's
+                     subValue). One fact, one row. */
+                  <DetailRow label={t('payment_method') || 'Payment method'}>
+                    <span className="block">
+                      <span className="badge-blue text-xs">{sale.payment_method}</span>
+                      {paymentDetails.length > 1 ? (
+                        <span className="mt-1 block space-y-0.5">
+                          {paymentDetails.map((detail, index) => (
+                            <span key={`${detail.method}-${index}`} className="flex justify-between gap-3 text-xs font-normal text-gray-500 dark:text-gray-400">
+                              <span className="min-w-0 flex-1 break-words">{detail.method}</span>
+                              <span className="shrink-0 tabular-nums">{fmtUSD(detail.amount_usd)}{detail.amount_khr > 0 ? ` · ${fmtKHR(detail.amount_khr)}` : ''}</span>
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
+                    </span>
                   </DetailRow>
-                ) : null}
+                )}
                 <DetailRow label={t('branch') || 'Branch'} value={sale.branch_name} />
                 <DetailRow label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
                 {sale.source_return_id ? (
                   <DetailRow label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
                 ) : null}
-                <DetailRow label={t('timezone') || 'Timezone'} value={fmtTimezoneLabel(sale.device_tz)} mono />
-                <DetailRow label={t('device') || 'Device'} value={sale.device_name} />
+                {/* S4-24: Timezone, Device and Payment currency are gone from
+                    this card. They are device telemetry -- no receipt prints
+                    them, and the user asked for the detail to read like one.
+                    The data is not lost: it is still on the sale row, still
+                    exported, and still on the Sales list's own columns. If a
+                    till ever needs to be identified from a receipt, put it
+                    back deliberately rather than by re-adding a row nobody
+                    asked for. */}
               </DetailRowGroup>
             </SectionCard>
 
@@ -562,9 +544,11 @@ export default function SaleDetailModal({
                       sub={membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : null}
                     />
                   ) : null}
-                  {membershipPointsRedeemed > 0 ? (
-                    <MoneyRow label={t('points_redeemed') || 'Points redeemed'} tone="muted" amount={membershipPointsRedeemed} />
-                  ) : null}
+                  {/* S4-24: "Points redeemed" is gone. It is not money -- it
+                      sat in a money column stating the mechanism behind the
+                      membership discount printed directly above it, which is
+                      the kind of second explanation of one number the user
+                      meant by "no need so much break downs". */}
                   {taxUsd > 0 ? (
                     <MoneyRow label={t('tax') || 'Tax'} amount={fmtUSD(taxUsd)} sub={taxKhr > 0 ? fmtKHR(taxKhr) : null} />
                   ) : null}
@@ -618,14 +602,13 @@ export default function SaleDetailModal({
                       sub={changeKhr > 0 ? fmtKHR(changeKhr) : null}
                     />
                   ) : null}
-                  {deliveryActualCostUsd > 0 || deliveryActualCostKhr > 0 ? (
-                    <MoneyRow
-                      label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិត')}
-                      tone="muted"
-                      amount={fmtUSD(deliveryActualCostUsd)}
-                      sub={deliveryActualCostKhr > 0 ? fmtKHR(deliveryActualCostKhr) : null}
-                    />
-                  ) : null}
+                  {/* S4-24: "Actual delivery cost" is gone from this summary.
+                      It is what the shop PAID the driver, not part of what the
+                      customer owes, and printing it under Change invited the
+                      reader to subtract it from a total it was never in --
+                      literally the "difference" the user asked to remove. It
+                      stays on the sale row and in the delivery reports, which
+                      is where a margin question belongs. */}
                 </tfoot>
               </table>
             </div>
@@ -790,6 +773,45 @@ export default function SaleDetailModal({
                     })()}
               </button>
             </section>
+          ) : null}
+
+          {/* S4-24: the record's actions, at the end of the record. They read
+              in the order you reach them -- you have just finished reading the
+              sale, so Print and Return are the next things you might do.
+              Full-width and stacked below sm so a thumb cannot miss them; a
+              row from sm. */}
+          {onPrint || onReturn ? (
+            <div className="flex flex-col gap-2 border-t border-gray-200 pt-4 sm:flex-row sm:justify-end dark:border-gray-700">
+              {onReturn ? (
+                <span className="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onReturn(sale)}
+                    disabled={returnBlockedReason !== ''}
+                    className="w-full rounded-lg bg-orange-50 px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50"
+                  >
+                    {t('return') || 'Return'}
+                  </button>
+                  {/* Why the action is unavailable stays behind the hint, not
+                      as inline prose next to the button. */}
+                  {returnBlockedReason ? (
+                    <InfoHint text={returnBlockedReason} label={t('return') || 'Return'} />
+                  ) : null}
+                </span>
+              ) : null}
+              {onPrint ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose()
+                    onPrint(sale)
+                  }}
+                  className="w-full rounded-lg bg-blue-50 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-100 sm:w-auto dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
+                >
+                  {t('print') || 'Print'}
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>

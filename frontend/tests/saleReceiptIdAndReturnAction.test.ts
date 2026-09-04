@@ -63,9 +63,18 @@ console.log('PASS SaleDetailModal renders the receipt id full-width, wrapping, w
 // --- 3. the Return action, its gate, and its guards ----------------------
 
 assert.match(saleDetail, /onReturn\?: \(sale: SaleDetail\) => void/, 'SaleDetailModal must accept an onReturn callback')
-assert.match(saleHeader, /onClick=\{\(\) => onReturn\(sale\)\}/, 'the Return button must invoke onReturn with the sale')
-assert.match(saleHeader, /disabled=\{returnBlockedReason !== ''\}/, 'a sale that cannot be returned leaves the button inert')
-assert.match(saleHeader, /<InfoHint text=\{returnBlockedReason\}/, 'the reason belongs behind an InfoHint, not as inline prose')
+// S4-24 (user, Sep 4 2026): "print buttons end of page...not on top near the x
+// close button". Return and Print left the header for a footer at the end of
+// the record. Every guarantee this section was written for still holds -- it is
+// only the slice that moved -- and the header is now asserted EMPTY of them, so
+// the buttons cannot drift back up beside the close control.
+const saleActions = saleDetail.slice(saleDetail.indexOf("{onPrint || onReturn ?"))
+assert.ok(saleActions.length > 200, 'expected to find the sale detail action footer')
+assert.match(saleActions, /onClick=\{\(\) => onReturn\(sale\)\}/, 'the Return button must invoke onReturn with the sale')
+assert.match(saleActions, /disabled=\{returnBlockedReason !== ''\}/, 'a sale that cannot be returned leaves the button inert')
+assert.match(saleActions, /<InfoHint text=\{returnBlockedReason\}/, 'the reason belongs behind an InfoHint, not as inline prose')
+assert.match(saleActions, /onPrint\(sale\)/, 'Print lives in the same footer')
+assert.doesNotMatch(saleHeader, /onReturn\(sale\)|onPrint\(sale\)/, 'no record action may sit beside the close button')
 // One close affordance per modal: the header X, and nothing else.
 assert.equal((saleDetail.match(/aria-label=\{t\('close'\) \|\| 'Close'\}/g) || []).length, 1, 'the sale detail modal keeps exactly one close affordance')
 
