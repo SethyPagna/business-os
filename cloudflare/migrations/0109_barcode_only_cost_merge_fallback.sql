@@ -1,4 +1,12 @@
--- 0099: FALLBACK backfill for the Sep 4 2026 identity-rule change
+-- 0109: FALLBACK backfill for the Sep 4 2026 identity-rule change
+--
+-- RENUMBERED 0099 -> 0109 by the coordinator (business-os-v1-c3), Sep 4.
+-- 0099 was already taken by 0099_legacy_cashier_identity_backfill.sql, which is
+-- APPLIED in production. D1 tracks applied migrations by FILENAME, so a second
+-- 0099_*.sql would have been read as unapplied and run out of order, after 0107.
+-- Production is applied through 0107 (0107_receipt_numbers_business_format.sql,
+-- verified by SELECT against d1_migrations); 0108 is claimed by the S4-19 lane
+-- (0108_recon_lot_code_to_adj_date.sql, also unrun).
 -- ("only a different barcode forks a child row; a differing cost now
 -- MERGES instead of splitting a row" -- see progress.md S4-17 / S4-17b
 -- and cloudflare/src/lib/productDetailRule.ts's resolveMergedCost).
