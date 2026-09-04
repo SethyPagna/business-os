@@ -32,6 +32,7 @@ import {
 } from '../../constants'
 import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
+import ShiftGate, { EndShiftButton } from './ShiftGate'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
@@ -3221,6 +3222,13 @@ export default function POS() {
             {orders.length < LAYOUT.MAX_CONCURRENT_ORDERS && (
               <button onClick={addNewOrder} className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 text-gray-400 hover:text-blue-600 text-sm font-bold transition-colors" title="New order">+</button>
             )}
+            {/* End Shift (S4R4-5). It sits at the right edge of the till's own
+                control strip and renders NOTHING unless a shift is open, so
+                "end only once" is visible in the UI as well as enforced in the
+                UPDATE: once ended, there is no button to press again. */}
+            <div className="ml-auto flex-shrink-0 pl-2">
+              <EndShiftButton />
+            </div>
           </div>
 
           {/* Cart panel view toggle -- lets the person collapse to just the
@@ -3809,6 +3817,11 @@ export default function POS() {
           />
         </Suspense>
       ) : null}
+
+      {/* Opening-cash prompt (S4R4-5). Mounted last so it overlays the till,
+          and non-dismissible: the owner's rule is that the first use of POS
+          each day keeps prompting until the drawer float is registered. */}
+      <ShiftGate />
 
       {/* Product detail bottom-sheet */}
       {detailProduct ? (

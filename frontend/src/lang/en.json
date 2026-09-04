@@ -5475,5 +5475,21 @@
   "sale_amended": "Sale updated.",
   "sale_amended_stock": "Sale updated, and {n} unit(s) moved in stock.",
   "sale_amended_no_stock_skipped": "Sale updated. This sale was completed without moving stock, so stock was left alone.",
-  "sale_amend_failed": "Could not update the sale"
+  "sale_amend_failed": "Could not update the sale",
+  "shift_register_title": "Register opening cash",
+  "shift_register_hint": "Count the cash in the drawer before your first sale. This is asked once a day.",
+  "shift_float_usd": "Opening cash (USD)",
+  "shift_float_khr": "Opening cash (KHR)",
+  "shift_start": "Start shift",
+  "shift_registered": "Shift registered.",
+  "shift_already_registered": "This shift was already registered.",
+  "shift_register_failed": "Could not register the shift.",
+  "shift_end": "End shift",
+  "shift_end_hint": "Count the drawer and record the closing amounts. A shift can only be ended once.",
+  "shift_opened_with": "Opened with",
+  "shift_counted_usd": "Counted (USD)",
+  "shift_counted_khr": "Counted (KHR)",
+  "shift_ended": "Shift ended.",
+  "shift_already_ended": "This shift was already ended.",
+  "shift_end_failed": "Could not end the shift."
 }
