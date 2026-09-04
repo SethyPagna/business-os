@@ -4379,6 +4379,7 @@
   "server_time": "Server Time",
   "server_tunnel_reconnecting": "Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.",
   "server_url": "Server URL",
+  "session_id": "Session ID",
   "session_duration": "Default Session Duration",
   "session_duration_hint": "Applied as default on login screen (can be overridden per login)",
   "session_revoked_notice": "Session ended. That device is signed out.",

@@ -7,6 +7,7 @@
 // output); keep the two in step.
 
 import { BUSINESS_TIME_ZONE } from '../constants.ts'
+import { parseServerTimestampMs } from './formatters.ts'
 
 export function businessDateTimeId(now: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -23,6 +24,31 @@ export function businessDateTimeId(now: Date = new Date()): string {
   }).formatToParts(now)
   const get = (type: string) => parts.find((part) => part.type === type)?.value || ''
   return `${get('year')}${get('month')}${get('day')}-${get('hour')}${get('minute')}${get('second')}`
+}
+
+/**
+ * Display id for one stock-in session: `S-YYYYMMDD-HHMM`, 24-hour, stamped in
+ * the business timezone (S4-14). The Sessions list used to print the raw
+ * grouping key in this column -- "session:1757003912345", or the legacy form
+ * "legacy:2026-09-03 08:12:44::1:7" -- which is a database join key, not
+ * something a shop owner can read back over the phone.
+ *
+ * Derived from the session's OWN first-movement timestamp rather than minted
+ * at render time, so the id is stable for the life of the row and identical on
+ * every device. Server stamps are timezone-less UTC (SQLite's
+ * CURRENT_TIMESTAMP), so they go through parseServerTimestampMs -- a bare
+ * Date.parse would read them as local time and shift the id by 7 hours here.
+ *
+ * Minute resolution is what the board asked for, so two sessions opened in the
+ * same minute do share an id; callers keep the opaque key on the row's `title`
+ * so support can still tell them apart. Empty string for an unreadable stamp,
+ * which callers render as their own placeholder.
+ */
+export function stockSessionId(rawCreatedAt: unknown): string {
+  const ms = parseServerTimestampMs(rawCreatedAt as string)
+  if (!Number.isFinite(ms)) return ''
+  const [datePart, timePart] = businessDateTimeId(new Date(ms)).split('-')
+  return `S-${datePart}-${timePart.slice(0, 4)}`
 }
 
 // Hand-synced mirror of cloudflare/src/lib/receiptNumber.ts's guard -- keep

@@ -4375,6 +4375,7 @@
   "server_time": "ពេលម៉ាស៊ីន",
   "server_tunnel_reconnecting": "Server/tunnel កំពុងភ្ជាប់ឡើងវិញ។ ទិន្នន័យ cache នៅតែបង្ហាញ ហើយការពិនិត្យ read-only នឹង refresh ដោយស្វ័យប្រវត្តិ។",
   "server_url": "URL ម៉ាស៊ីន",
+  "session_id": "លេខសម្គាល់វគ្គ",
   "session_duration": "រយៈពេលស្ថានភាពលំនាំដើម",
   "session_duration_hint": "ប្រើជាលំនាំដើមនៅពេលចូល (អាចប្ដូរបាននៅពេលចូលម្ដងៗ)",
   "session_revoked_notice": "បានបញ្ចប់វគ្គ។ ឧបករណ៍នោះត្រូវបានចាកចេញ។",

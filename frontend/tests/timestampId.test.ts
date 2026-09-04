@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BUSINESS_RECEIPT_NUMBER_RE, businessDateTimeId, isBusinessReceiptNumber } from '../src/utils/timestampId.ts'
+import { BUSINESS_RECEIPT_NUMBER_RE, businessDateTimeId, isBusinessReceiptNumber, stockSessionId } from '../src/utils/timestampId.ts'
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
 
 const testDir = dirname(fileURLToPath(import.meta.url))
@@ -94,6 +94,26 @@ await runTest('the client refuses a foreign receipt shape, so the @ label cannot
   const serverRe = serverLib.match(/export const BUSINESS_RECEIPT_NUMBER_RE = (.+)$/m)?.[1]
   assert.equal(serverRe, String(BUSINESS_RECEIPT_NUMBER_RE), 'client and server receipt regexes drifted apart')
 })
+await runTest('S4-14: a stock-in session id is S-YYYYMMDD-HHMM in Phnom Penh time', () => {
+  // Minute resolution, no seconds -- and the SAME +7 shift the receipt id
+  // uses, so an evening-UTC session carries the next Phnom Penh day.
+  assert.equal(stockSessionId('2026-08-30T07:35:12Z'), 'S-20260830-1435')
+  assert.equal(stockSessionId('2026-08-30T17:00:00Z'), 'S-20260831-0000')
+  // SQLite CURRENT_TIMESTAMP has no zone marker and must still be read as
+  // UTC -- a bare Date.parse would treat it as local and shift the id.
+  assert.equal(stockSessionId('2026-08-30 07:35:12'), 'S-20260830-1435')
+  // Unreadable input yields '' so the caller can fall back, never 'S-NaN'.
+  for (const bad of ['', null, undefined, 'not a date']) {
+    assert.equal(stockSessionId(bad), '', `should not mint an id from ${String(bad)}`)
+  }
+  // The Sessions list must SHOW this id, keep the opaque grouping key only
+  // as the cell's title, and no longer head that column 'Receipt'.
+  const sessions = readFrontend('src/components/products/StockInSessionsSection.tsx')
+  assert.match(sessions, /stockSessionId\(session\.createdAt\) \|\| session\.key/)
+  assert.match(sessions, /tr\('session_id', 'Session ID'\)/)
+  assert.doesNotMatch(sessions, /tr\('receipt', 'Receipt'\)/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
