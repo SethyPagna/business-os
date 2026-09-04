@@ -240,6 +240,19 @@ Legacy sales older than that have no movements because none was ever recorded �
 reason all **14,921** already-completed legacy sales have none. Stock for that era arrived
 as a migrated snapshot.
 
+**Attribution is not provenance.** Reach for `reason`, not `user_name`, when bounding a
+legacy set (`business-os-v1-ba`). Here `user_name` would have split this set 66 / 2 and sent
+the next reader hunting a phantom manual stock adjustment by a named cashier; `reason LIKE
+'Old-system sale%'` covers **68 of 68** and is what actually settled it.
+
+**And that is the argument for the marker gap above, made better than tidiness.**
+`inventory_movements` has a durable, queryable provenance marker — `reason LIKE
+'Old-system sale%'` — which is exactly why the question in this section was answerable in a
+single query instead of by inference. `sales` has no equivalent for this batch, which is why
+the 22 rows need a `notes LIKE` match and an id range. Same system, same need, solved in one
+table and lost in the other. Backfilling `legacy_receipt_number` is not housekeeping; it
+restores to `sales` a capability `inventory_movements` already has.
+
 ## Sources
 
 Archived under explicit dated names in `Migration from old system/` (untracked):
