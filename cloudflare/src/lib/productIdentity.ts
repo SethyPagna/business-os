@@ -41,13 +41,48 @@ export type ProductIdentityRow = {
 
 /**
  * Cleanup-only barcode normalization for the import typo the production audit
- * found: the same real barcode entered once normally and once with ONE extra
- * leading zero. Placeholder/short barcodes stay untouched, and this helper is
+ * found: the same real barcode entered once normally and once with extra
+ * leading zeros. Placeholder/short barcodes stay untouched, and this helper is
  * deliberately not used by ordinary create/transfer identity matching.
+ *
+ * The owner's ruling (Sep 4 2026, verbatim): "for same products same barcode
+ * the only difference is a leading zero... remove the leading zero and merge
+ * them". Three properties make that safe to act on automatically:
+ *
+ *   * IDEMPOTENT -- strips EVERY leading zero, not one. Stripping exactly one
+ *     was the original bug: applied to both sides of a pair it moves them in
+ *     lockstep and they never meet, so `08339327539` and `008339327539` (one
+ *     real Charlotte Tilbury barcode, entered twice) stayed two child rows
+ *     forever. Three such pairs exist in production; `ltrim`-style stripping
+ *     converges them because the result never begins with a zero.
+ *   * NUMERIC ONLY -- a code containing any non-digit keeps its zeros, since a
+ *     leading zero in an alphanumeric SKU is not a GTIN artefact.
+ *   * MINIMUM LENGTH 4 -- if stripping would leave fewer than four digits the
+ *     original is returned untouched. This is what keeps the placeholder codes
+ *     safe ('0' stays '0' rather than collapsing to a blank barcode, which
+ *     would make it collide with every unbarcoded row) and what keeps the MAC
+ *     shade codes ('0601' vs '601') out of automatic merging.
+ *
+ * Narrow by construction: it only ever removes leading zeros, so `1234` and
+ * `12345` are untouched and can never fold together. Because the fold is
+ * applied on top of an EXACT name match, and because GTIN-14 uses a leading
+ * indicator digit of 1-8 for a case/carton and 0 for the plain unit, folding
+ * zeros can never conflate a carton with a single item.
+ *
+ * COMPARISON ONLY -- nothing here rewrites the stored barcode column. See the
+ * bucketing in findDuplicateProductGroups: the already-clean row is chosen as
+ * the survivor and the extra-zero row is folded into it, so the catalog ends
+ * up with the clean barcode without any UPDATE to a barcode ever being issued.
+ * That matters -- 27 zero-stripped barcodes in production are also carried, in
+ * their already-stripped form, by a product under a DIFFERENT name. Rewriting
+ * barcodes in place would hand those 27 a duplicate of a live code and make a
+ * scan ambiguous; picking the clean row as survivor cannot.
  */
 export function normalizeLeadingZeroBarcodeForCleanup(value: unknown): string {
   const barcode = String(value ?? '').trim().toLowerCase()
-  return /^0[0-9]{4,}$/.test(barcode) ? barcode.slice(1) : barcode
+  if (!/^[0-9]+$/.test(barcode)) return barcode
+  const stripped = barcode.replace(/^0+/, '')
+  return stripped.length >= 4 ? stripped : barcode
 }
 
 // Finds another ACTIVE product row that is genuinely the same item as
@@ -374,10 +409,21 @@ export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductD
       // the stable final tie-break.
       const rawBarcodes = new Set(bucket.map((row) => String(row.barcode ?? '').trim().toLowerCase()))
       const isLeadingZeroPair = rawBarcodes.size > 1
+      // How many leading zeros this row would shed. 0 means the row already
+      // carries the clean barcode. Ranking on the COUNT rather than on a
+      // was-it-normalized boolean is what lets a double-zero row lose to its
+      // single-zero twin: '008339327539' and '08339327539' are both "normalized",
+      // so the boolean tied them and the dirtier row won on the id tie-break,
+      // putting the extra zero back into the catalog as the survivor.
+      const zerosShed = (row: ProductIdentityRow) => {
+        const raw = String(row.barcode ?? '').trim().toLowerCase()
+        return raw.length - normalizeLeadingZeroBarcodeForCleanup(raw).length
+      }
       const ordered = [...bucket].sort((a, b) => {
-        const aWasNormalized = normalizeLeadingZeroBarcodeForCleanup(a.barcode) !== String(a.barcode ?? '').trim().toLowerCase()
-        const bWasNormalized = normalizeLeadingZeroBarcodeForCleanup(b.barcode) !== String(b.barcode ?? '').trim().toLowerCase()
-        if (isLeadingZeroPair && aWasNormalized !== bWasNormalized) return aWasNormalized ? 1 : -1
+        if (isLeadingZeroPair) {
+          const zeroDiff = zerosShed(a) - zerosShed(b)
+          if (zeroDiff) return zeroDiff
+        }
         const stockDiff = (Number(b.live_stock_quantity) || 0) - (Number(a.live_stock_quantity) || 0)
         if (stockDiff) return stockDiff
         return a.id - b.id
