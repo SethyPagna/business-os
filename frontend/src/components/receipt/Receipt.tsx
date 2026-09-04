@@ -8,6 +8,7 @@ import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd } from '../../utils/receiptLineMath'
+import { receiptTotalsFigures } from '../../utils/receiptTotals'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
@@ -233,7 +234,9 @@ const LABELS = {
     pointsRedeemed: 'Points redeemed:',
     tax: 'Tax:',
     total: 'TOTAL',
+    netTotal: 'Net total:',
     paid: 'Paid:',
+    balanceDue: 'Balance due:',
     change: 'Change:',
     refunded: 'Refunded:',
     thankYou: 'Thank you for your patronage!',
@@ -268,7 +271,9 @@ const LABELS = {
     pointsRedeemed: 'ពិន្ទុបានប្រើ:',
     tax: 'ពន្ធ:',
     total: 'សរុប',
+    netTotal: 'សរុបសុទ្ធ:',
     paid: 'បានបង់:',
+    balanceDue: 'នៅជំពាក់:',
     change: 'ប្រាក់អាប់:',
     refunded: 'បានសងវិញ:',
     thankYou: 'សូមអរគុណសម្រាប់ការទិញទំនិញ!',
@@ -374,15 +379,31 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // Date objects, epoch numbers, ISO values, and SQLite's timezone-less UTC
   // all resolve to the same dd/mm/yyyy HH:mm Phnom Penh wall clock.
   const dateStr = fmtDateTime24(createdAt || new Date())
-  const exchangeRate = toNumber(sale.exchange_rate) || toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100
-  const subtotalUsd = toNumber(sale.subtotal_usd ?? sale.subtotal)
-  const discountUsd = toNumber(sale.discount_usd ?? sale.discount)
-  const discountKhr = toNumber(sale.discount_khr) || discountUsd * exchangeRate
-  const membershipDiscountUsd = toNumber(sale.membership_discount_usd)
-  const membershipDiscountKhr = toNumber(sale.membership_discount_khr) || membershipDiscountUsd * exchangeRate
+  const showItemDiscount = tpl.show_item_discount !== false
+  // ONE derivation of this sale's money column, shared with the admin sale
+  // detail (utils/receiptTotals.ts). Each surface used to read the raw row
+  // for itself, with its own `?? sale.total` coalescing, which is how they
+  // came to disagree about who paid the delivery fee, about what a refund
+  // does to the Total, and about whether riel counts as payment.
+  // receiptTotals.test.ts asserts the printed column reconciles to
+  // sale.total_usd on real fixtures rather than a reader trusting that it does.
+  //
+  // The composition lines below are spelled out as receiptLineMath.test.ts
+  // pins them (Sep 4 2026); their inputs come from the shared read so the two
+  // surfaces cannot drift on the same row.
+  const totals = useMemo(() => receiptTotalsFigures(sale, {
+    showItemDiscount,
+    fallbackExchangeRate: toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100,
+  }), [appliedSettings.exchange_rate, sale, showItemDiscount])
+  const exchangeRate = totals.exchangeRate
+  const subtotalUsd = totals.subtotalUsd
+  const discountUsd = totals.discountUsd
+  const discountKhr = totals.discountKhr
+  const membershipDiscountUsd = totals.membershipDiscountUsd
+  const membershipDiscountKhr = totals.membershipDiscountKhr
   const membershipPointsRedeemed = toNumber(sale.membership_points_redeemed)
-  const taxUsd = toNumber(sale.tax_usd ?? sale.tax)
-  const taxKhr = toNumber(sale.tax_khr) || taxUsd * exchangeRate
+  const taxUsd = totals.taxUsd
+  const taxKhr = totals.taxKhr
   const delivery = receiptDeliveryFigures(sale, exchangeRate)
   const deliveryFeeUsd = delivery.faceUsd
   const deliveryFeeKhr = delivery.faceKhr
@@ -401,7 +422,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // unchanged: (subtotal + savings) - (discount + savings) = subtotal - total.
   // That is what lets every historical receipt reprint to the same money, and
   // it is why nothing here touches sale.total_usd or the tax base.
-  const showItemDiscount = tpl.show_item_discount !== false
+  //
   // Every per-line cut on the sale. It is printed on its OWN row (Item
   // Discount, per the owner’s Sep-4 photo) rather than folded into Subtotal
   // and Discount, so it is named rather than merely included -- and, unlike
@@ -414,7 +435,10 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const displayedDiscountUsd = discountUsd
   const displayedDiscountKhr = discountKhr
   // Every cut on the sale in one figure: per line, order-level, and the
-  // membership tier. This is the owner’s "total discount".
+  // membership tier. This is the owner’s "total discount". A RECAP of rows
+  // printed above it, never a further subtraction: subtotal_usd already
+  // excludes the per-line cut, and the Total below already has the other two
+  // taken off. receiptTotals.test.ts states the size of that gap.
   const totalDiscountUsd = lineSavingsUsd + discountUsd + membershipDiscountUsd
   const totalQty = items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0)
   // The item table’s column track, defined ONCE so the header and the rows
@@ -425,13 +449,22 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     ? 'grid-cols-[minmax(0,1fr)_2.2rem_minmax(3.9rem,auto)_minmax(3.4rem,auto)]'
     : 'grid-cols-[minmax(0,1fr)_2.2rem_minmax(4.6rem,auto)]'
   const totalUsd = toNumber(sale.total_usd ?? sale.total)
-  const totalKhr = toNumber(sale.total_khr) || totalUsd * exchangeRate
-  const paidUsd = toNumber(sale.amount_paid_usd ?? sale.amount_paid)
-  const paidKhr = toNumber(sale.amount_paid_khr)
-  const changeUsd = toNumber(sale.change_usd ?? sale.change_returned)
-  const changeKhr = toNumber(sale.change_khr)
-  const refundUsd = toNumber(sale.refund_usd)
-  const refundKhr = toNumber(sale.refund_khr)
+  const totalKhr = totals.totalKhr
+  const paidUsd = totals.paidUsd
+  const paidKhr = totals.paidKhr
+  const changeUsd = totals.changeUsd
+  const changeKhr = totals.changeKhr
+  const refundUsd = totals.refundUsd
+  const refundKhr = totals.refundKhr
+  // A return is a later event against the sale, so total_usd does not net it:
+  // the refund prints BELOW the Total with the net beneath it, or the minus
+  // sign describes a subtraction no printed row ever makes.
+  const netTotalUsd = totals.netTotalUsd
+  const netTotalKhr = totals.netTotalKhr
+  // Still owed. A cancelled sale owes nothing; riel tendered counts as
+  // payment, converted at the rate the sale was booked at (receiptTotals.ts).
+  const outstandingUsd = String(sale.sale_status || '') === 'cancelled' ? 0 : totals.outstandingUsd
+  const outstandingKhr = outstandingUsd > 0 ? totals.outstandingKhr : 0
   const actualFont =
     lang === 'km' || lang === 'both'
       ? `"Khmer OS", "Noto Sans Khmer", "Segoe UI", sans-serif`
@@ -587,7 +620,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     // something the rows above did not already say on their own -- i.e.
     // when more than one kind of discount is present.
     total_discount: tpl.show_discount !== false && totalDiscountUsd > 0
-      && [lineSavingsUsd, discountUsd, membershipDiscountUsd].filter((v) => v > 0).length > 1 ? (
+      && [lineSavingsUsd, displayedDiscountUsd, membershipDiscountUsd].filter((v) => v > 0).length > 1 ? (
       <Row key="total_discount" label={labelFor(lang, 'totalDiscount')} value={`-${fmtUSD(totalDiscountUsd)}`} tone="text-red-600" bold />
     ) : null,
     discount: tpl.show_discount && displayedDiscountUsd > 0 ? (
@@ -622,18 +655,39 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         ) : ''}
       />
     ) : null,
-    refund: refundUsd > 0 ? (
-      <Row key="refund" label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" />
-    ) : null,
     total: (
       <div key="total" className="my-2 border-y-2 border-black py-2">
         <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold />
       </div>
     ),
+    // Returns booked against this sale, then what the customer is left with.
+    // BELOW the Total, never above it: sale.total_usd is what the sale rang up
+    // and does not net a refund, so a minus row printed above that line
+    // described a subtraction the line beneath it never made. Underneath it,
+    // Net total states the result so both halves foot.
+    refund: refundUsd > 0 ? (
+      <div key="refund">
+        <Row label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" />
+        <Row label={labelFor(lang, 'netTotal')} value={fmtUSD(netTotalUsd)} subValue={tpl.show_total_khr && netTotalKhr > 0 ? fmtKHR(netTotalKhr) : ''} bold />
+      </div>
+    ) : null,
     payment: tpl.show_amount_paid ? (
       <div key="payment">
         {paidUsd > 0 ? <Row label={`${labelFor(lang, 'paid')} (USD)`} value={fmtUSD(paidUsd)} /> : null}
         {paidKhr > 0 ? <Row label={`${labelFor(lang, 'paid')} (KHR)`} value={fmtKHR(paidKhr)} /> : null}
+        {/* What is still owed. A credit / awaiting-payment sale printed a
+            Total and a smaller Paid and then simply stopped, leaving the
+            customer to do the subtraction on a receipt that never named the
+            balance. Riel tendered counts against it -- see receiptTotals.ts. */}
+        {outstandingUsd > 0 ? (
+          <Row
+            label={labelFor(lang, 'balanceDue')}
+            value={fmtUSD(outstandingUsd)}
+            subValue={tpl.show_total_khr && outstandingKhr > 0 ? fmtKHR(outstandingKhr) : ''}
+            bold
+            tone="text-red-600"
+          />
+        ) : null}
       </div>
     ) : null,
     change: tpl.show_change && (changeUsd > 0 || changeKhr > 0) ? (
@@ -689,7 +743,13 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   for (const key of ['total_qty', 'item_discount', 'total_discount']) {
     if (!fieldOrder.includes(key)) fieldOrder.push(key)
   }
-  if (!fieldOrder.includes('refund')) fieldOrder.splice(Math.max(fieldOrder.indexOf('total'), 0), 0, 'refund')
+  // AFTER the total, never before it: the refund row carries the Net total
+  // with it, and that pair only reads correctly under the figure they net.
+  if (!fieldOrder.includes('refund')) {
+    const totalIndex = fieldOrder.indexOf('total')
+    if (totalIndex >= 0) fieldOrder.splice(totalIndex + 1, 0, 'refund')
+    else fieldOrder.push('refund')
+  }
 
   const renderedSections = fieldOrder
     .map((key, index) => (key === '---divider---' || key.startsWith('divider_')
