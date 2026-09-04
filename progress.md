@@ -2756,6 +2756,43 @@ the worse outcome.
 production write the user has not approved, so both produce a verdict, the real row counts, and the
 exact unrun command. No agent message counts as that approval.
 
+### Provenance re-verified against production, Sep 4 (business-os-v1-c3) — and `main` is two migrations behind live
+
+Checked directly rather than inherited from a peer claim or a summary, per the deploy-provenance
+rule that you never deploy until you can name the source of the build you are replacing:
+
+| Question | Evidence | Answer |
+|---|---|---|
+| What is live? | `wrangler deployments list` | Worker **`3b25fe33`**, deployed **2026-09-03 14:27:14Z** (21:27 local) |
+| Applied migrations? | `SELECT ... FROM d1_migrations` on remote | tops out at **107**, `0107_receipt_numbers_business_format.sql` |
+| Which tree built it? | `git ls-tree e3678a39 cloudflare/migrations/` | `e3678a39` carries **through 0107** — it matches production exactly |
+
+**So `e3678a39` is confirmed as the deployed tip from two independent angles**, not just asserted.
+That also settles the S4-1 lane's one open caveat: it read `e3678a39` as production on instruction
+and could not prove it. Now proven. (Timeline note: the deploy landed 14:27Z and the bulk status
+change that caused the incident ran at 14:48–14:49Z — twenty-one minutes after the new build went
+live.)
+
+**`main` carries migrations only through 0105.** It is missing **0106 and 0107**, both applied in
+production. **A deploy from `main` would be the Part 583 incident again**, exactly: a clean,
+certified tree rolling production backwards with every check green. Nobody deploys from `main`
+until it has been reconciled forward — and reconciled means the migration chain matches
+`d1_migrations`, not merely that `main` typechecks.
+
+**The cost rule the user asked for is built, pushed, and NOT live.** `s4/identity-cost`
+(`c730e5be`, pushed) sits **three commits ahead of the deployed tip** — `b1463d4b` barcode-only
+identity plus `resolveMergedCost`, `f4474ea1` the additive import path, `c730e5be` cost
+reconciliation when folding a duplicate. The board marks S4-17 `[x] done` and that is true of the
+code, but "done" has been read as "live" once already this week. It is **not** in `e3678a39`.
+Until it ships, a differing cost still forks a child row in production, and the 352 groups S4-17b
+surveyed cannot be merged by the route that is supposed to merge them.
+
+**Migration numbers in flight, all unrun:** `0108` (S4-19, RECON -> ADJ lot codes, `s4/adj-prefix`
+`8e8ca524`), `0109` (S4-17b cost-merge fallback, `s4/cost-merge-survey` `a6f8c71d` — renumbered
+from a `0099` that collided with the applied `0099_legacy_cashier_identity_backfill.sql`; D1 keys
+off the filename, so it would have run out of order after 0107). Re-verify both against
+`d1_migrations` immediately before any apply: several lanes are live and numbering has already
+collided once this week (Part 586).
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
