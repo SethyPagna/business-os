@@ -227,10 +227,31 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     /const today = businessToday\(\)/.test(src)
     && /startDate: String\(query\.startDate \|\| today\)/.test(src)
     && !/defaultStart/.test(src))
-  // The intentionally-skipped sites must stay (expiry_date has a per-row bound;
-  // the audit_logs retention delete has no created_at index -- ±7h immaterial).
-  check('expiry_date and audit_logs date() sites are deliberately untouched',
-    /date\(expiry_date\)/.test(src) && /DELETE FROM audit_logs WHERE date\(created_at\)/.test(src))
+  // expiry_date keeps its date() wrapper: the comparison has a per-row bound,
+  // so there is no index for a sargable rewrite to reach anyway.
+  check('the expiry_date date() site is deliberately untouched', /date\(expiry_date\)/.test(src))
+
+  // The audit_logs retention delete USED to be excluded from the sargable
+  // sweep, on the reasoning that it had no created_at index so a +-7h drift
+  // was immaterial. fx/sargable-date-fix rewrote it anyway, for a second
+  // reason the old exclusion never considered: a single unbounded DELETE over
+  // a large backlog blows D1's statement budget. It is now both sargable (a
+  // bare `created_at < @cutoff`, no date() wrapper for an index to trip over)
+  // and batched behind a LIMIT so the retention sweep cannot run away.
+  //
+  // This assertion was red on fx/sargable-date-fix's own branch -- the lane
+  // changed the behaviour and left the guard pinning the old shape. Pin the
+  // new intent instead, and keep both halves, so neither property can be lost
+  // silently: dropping the batching would be a production incident, and
+  // re-adding date(created_at) would undo the sargability.
+  {
+    const retention = src.slice(src.indexOf('DELETE FROM audit_logs'))
+    check('the audit_logs retention delete is sargable -- no date() around created_at',
+      /DELETE FROM audit_logs/.test(src) && !/DELETE FROM audit_logs WHERE date\(created_at\)/.test(src)
+      && /created_at < @cutoff/.test(retention.slice(0, 300)))
+    check('and it is batched, so a large backlog cannot exhaust the D1 statement budget',
+      /LIMIT \d+/.test(retention.slice(0, 300)))
+  }
 
   const win = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8')
   check('businessDateWindow.ts localTodayExpr uses date(now,+7h)', /date\('now', '\$\{BUSINESS_TZ_FORWARD\}'\)/.test(win))
