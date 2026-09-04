@@ -1,0 +1,68 @@
+-- 0108_recon_lot_code_to_adj_date.sql
+--
+-- Lane S4-19 ("regarding the RECON just put rename it ADJMM/DD/YYYY").
+--
+-- What "RECON" actually is: NOT a label produced by any current source
+-- path. It is literal data written directly into `product_batches` by a
+-- one-off Sep-2 2026 Codex "Authoritative Item Export" reconciliation run
+-- (see docs/history/session-log.md, Part 581 -- "9,921 synthetic RECON-*
+-- lots (batch-identity rule broken)"). 9,921 rows, all `synthetic = 1`,
+-- all `created_at = 2026-09-02T15:30:00.000Z` (one batch operation), carry
+--   lot_code      = 'RECON-<productId>'                e.g. 'RECON-529'
+--   batch_number  = 'RECON-<YYYYMMDD>-<productId>'      e.g. 'RECON-20260902-529'
+-- `grep -rn "RECON" cloudflare/src frontend/src` (and a repo-wide sweep of
+-- every .ts/.tsx/.js/.cjs file, dist/dry-run bundles included) turns up
+-- only the unrelated `RECONCILE` stock-import-mode constant and
+-- `RECONNECT_*`/`reconnecting` networking strings -- no code path emits or
+-- parses the literal "RECON-" prefix.
+--
+-- Why the user sees it: frontend/src/utils/batchLabel.ts's
+-- `batchDisplayLabel()` treats any lot_code that is not a pure 8-digit
+-- MMDDYYYY string as "a genuine custom lot code" and renders it verbatim.
+-- 'RECON-529' fails that digits-only check, so it prints as-is in every
+-- surface that shows a batch/lot: the POS lot picker (ProductDetailSheet),
+-- Inventory's ManageBatchesModal / ProductDetailModal / ReceiveBatchModal,
+-- Products' StockChangeSection / ProductDetailReport / ProductRowParts /
+-- AttributeSupplierModal, and Branches' TransferModal.
+--
+-- This migration renames `lot_code` only, to 'ADJ' + the row's own
+-- `created_at` date in mm/dd/yyyy (e.g. 'ADJ09/02/2026') -- the adjustment's
+-- own date, not today's date, so the label will not drift if this migration
+-- is applied on a later day. Once lot_code stops being a pure-digit date
+-- code, batchDisplayLabel() still falls into the "custom code" branch and
+-- prints it verbatim, so 'ADJ09/02/2026' is exactly what will render.
+--
+-- Scoped to `lot_code LIKE 'RECON-%' AND synthetic = 1` so it can only ever
+-- touch rows this reconciliation run created, never a real user-entered
+-- lot code that happens to start with those letters.
+--
+-- NOT touched here, flagged instead (see the lane report for S4-19):
+-- `batch_number` on these SAME rows holds the identical
+-- 'RECON-YYYYMMDD-<productId>' string in a column declared INTEGER and
+-- normally treated as a per-product auto-increment sequence
+-- (lib/productBatches.ts's `nextBatchNumber`,
+-- `COALESCE(MAX(batch_number), 0) + 1`). SQLite orders TEXT above any
+-- INTEGER/REAL for these products, so MAX(batch_number) already returns
+-- the RECON text instead of the true highest number, and `+ 1` on that
+-- text coerces to 0 + 1 = 1 -- the NEXT stock-in for any of these 9,921
+-- products will silently get batch_number = 1, which is very likely
+-- already taken. This is a real, pre-existing numbering bug independent of
+-- the display fix and intersects with the still-open "lot-identity option
+-- A/B" forward-fix from Part 581 (twin-merge decision, not yet applied,
+-- "user decides go/no-go"). It needs its own reviewed fix, not a
+-- string-rename piggybacked onto this one.
+--
+-- BEFORE RUNNING: migration numbering on this repo has already collided
+-- once this week (docs/history/session-log.md Part 586 -- production
+-- applied through 0107, an RC lane independently claimed a different
+-- 0106). Re-check the true next free number against remote D1 first:
+--   cd cloudflare && node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --json --command "SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 3"
+-- and rename this file if 0108 is no longer free.
+--
+-- UNRUN. Hand-verify the row count first, then apply via the normal
+-- migration path (not run by this lane):
+--   cd cloudflare && node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --remote
+
+UPDATE product_batches
+SET lot_code = 'ADJ' || strftime('%m/%d/%Y', created_at)
+WHERE lot_code LIKE 'RECON-%' AND synthetic = 1;
