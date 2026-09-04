@@ -279,9 +279,40 @@ customers. Every one of those 70 is already `status = 'Paid'`, and the statement
 exactly the correct 82 rows, $9,754.10 outstanding.
 
 **That is the barcode near-miss again, in a different table.** Benign because of what the
-data happened to contain, not because the key was right. Fixed before first execution:
-the predicate is now an exact match on `cr.invoice_no || '@' || substr(cr.invoice_date,1,10)`,
-verified to select the same 82 rows. Nothing was applied under the loose form.
+data happened to contain, not because the key was right. Nothing was ever applied under
+the loose form.
+
+**The first fix traded a loud failure for a silent one, and was itself replaced.**
+Tightening the predicate to `cr.invoice_no || '@' || substr(cr.invoice_date,1,10)` removed
+the over-match, and an over-match is loud — wrong rows have to be excluded by something.
+An under-match is silent (`business-os-v1-ba`): that predicate joins **two independently
+sourced dates**, the AR file's `invoice_date` and the date baked into
+`sales.legacy_receipt_number`. They agree for all 82 today. A legacy file recording an
+invoice a day late, or a timezone difference at either write, produces a pair that differs
+by one day and simply vanishes from the result set with no error.
+
+**So the join was removed from execution entirely.** The 82 receivables are now addressed
+by `id` — the primary key, which surfaces the table's *declared* identity
+`UNIQUE(source_file, legacy_id)`. `invoice_no || '@' || date` is a **reconstructed** key,
+correct today only because two sources happen to agree; the declared key is correct by
+construction. The ids were resolved read-only and the mapping proved strictly **1:1**:
+82 pairs / 82 distinct sales / 82 distinct AR rows, covering all 82 target sales, and the
+**customer name agrees on all 82 pairs** — a third field corroborating a pairing derived
+from two. Re-checked independently by id: all 82 present, all 82 still unpaid,
+$9,754.10 outstanding.
+
+The script now also states **expected `rows_written` per statement** (1 / 1 / 1 / 1 / 82 /
+82) so the operator compares against a number at execution time rather than trusting a
+count established at authoring time. That is the same lesson as the constructed index blob
+that was valid against the HEAD it was built from and inverted when HEAD moved: **a
+predicate verified against the data it was authored against has exactly that property.**
+
+**Rule for the next reconciliation script:** `customer_receivables` is reachable by
+`(source_file, legacy_id)` / `id`. Use that wherever the sale side can reach it, and the
+reconstructed `invoice_no` + date only where it cannot — and say in the script which of the
+two you are relying on and why. Whoever writes the next one will reach for `invoice_no`
+first; that is what the 80% collision costs, and a comment naming the real key is what
+stops them.
 
 **Nothing in the Worker joins AR to sales on `invoice_no`** — grepped; the tables are not
 linked in application code at all, so this is confined to migration and reconciliation
