@@ -2631,7 +2631,7 @@ printed receipt attached. Recorded before any of it was worked, per the owner's
 standing instruction: *"if i add throughout the conversation as you fix giving
 new tasks as you work, you don't forget...always note in progress.md."*
 
-**[ ] S4R5-1 · The receipt's item table is FOUR columns, and the price column
+**[x] S4R5-1 · The receipt's item table is FOUR columns, and the price column
 shows the discount, not the discounted price.** The owner's photo is the
 reference. Reading it column by column: `ទំនិញ` (Item) · `ចំនួន` (Qty) ·
 `តម្លៃ` (Price) · `សរុប` (Total). One line reads
@@ -2650,6 +2650,33 @@ gave once — *"the products show selling price and minus the discounts in total
 show selling price (-discount), not discounted price(-discount)"* — now with a
 picture, so treat the photo as the spec and check the live template against it
 line by line rather than assuming the earlier fix covered it.
+
+DONE `1dd19bd0` (rc/deploy-2026-09-04, pushed; NOT yet deployed). The photo is
+the layout now: price column = selling unit price with the per-unit cut beside
+it, total column = the net line, plus named **Total Qty**, **Item Discount** and
+**Total Discount** rows. Subtotal reverts to the stored `subtotal_usd` (the
+lines are net, so they sum to it) and Discount reverts to the order-level cut
+alone — the per-line cut is no longer folded into those two, it has a row with
+its own name. The money is unchanged either way:
+`(subtotal + savings) − (discount + savings) = subtotal − discount`, and the
+test asserts both readings against real production sales 16433 and 16815.
+
+Three defects the fourth column exposed, all fixed in the same commit:
+
+- `printReceipt`’s print/PDF path **replaced** the captured grid with three
+  tracks unconditionally, so the fourth cell would have wrapped onto its own
+  row *on paper* while looking right on screen. It counts the cells now.
+- the canvas fallback (iOS / tainted foreignObject) understood exactly three
+  tab-separated fields and folded the rest into the right-hand slot — price and
+  total would have printed jammed together.
+- `chargedUnitKhr` had no exchange-rate fallback, so a line with no stored riel
+  would have lost its riel subline when the Total column started reading the
+  charged side.
+
+`show_item_unit_price` was the toggle behind the deleted `qty × unit` subline.
+Rather than leave a dead switch in Receipt Settings it now gates the price
+**column**: off gives item / qty / total, and the setting still means what it
+says.
 
 **[ ] S4R5-2 · One shift per system per day, not one per user.** Start/End Shift
 is done by **one account** for the whole system. It must be settable: either
