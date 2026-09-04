@@ -189,7 +189,32 @@ storefront **200** with Leang branding · admin **200** · `d1 migrations list -
    file’s own LIMITATIONS section predicts and prescribes an allowlist entry for. Header and FAIL message now state
    the baseline is GREEN, so a future red is a real finding.
 
-**🟢 LANE `s4/pay-notes-points-delivery-88` (session `business-os-v1-88`) — DONE, PUSHED, NOT DEPLOYED.**
+**🚀 LANE `s4/pay-notes-points-delivery-88` (session `business-os-v1-88`) — DEPLOYED TO PRODUCTION Sep 4 2026.**
+Reference state, to re-verify rather than trust: wrangler version **`798d9e19-76d0-4909-8db3-6a7a4ad43ad7`**,
+commit **`c7ef7264`** (contains this lane's `64aa0a51`), migration **`0117` applied 11:37:39**, highest applied
+is now 0117 (`d1_migrations` row id 116 — the id is a row counter, not the filename number). Deployed by
+session `ee` from an isolated worktree; this session held no deploy role. Post-deploy probes all
+expected-vs-actual exact: `/health` ok on both hosts, storefront 200, admin 200, `/api/products` 401, `/ws` 426.
+
+**⛔ TWO OPEN ITEMS THAT ONLY THE OWNER CAN CLOSE — the deploy is not the end of this lane.**
+
+1. **Membership points are LIVE and ON, with every balance at zero.** The switch defaults to enabled and `0117`
+   writes no settings row, so the programme is running against zeroed balances and **accrual has already
+   resumed** — the AFTER output reported `new_accruing_since_before = 1`, i.e. a sale accrued during the deploy
+   window itself. This state decays every minute the till is open. Closing it is a toggle-and-save on the
+   Loyalty Points page, not a D1 write.
+2. **The balance read was never completed.** It is the only check that observes what was actually approved.
+   Session `ee` correctly declined to authenticate as the owner and handed it over rather than marking it
+   passed. Three customers were verified as SAFE to check — **19718, 19719, 19735** — each having zero sales
+   with an id above `max(sales_reset_ids)`, so their balances are composed only of captured sales and a `0`
+   reading is instant-independent. **That safety decays the moment any of them buys something.**
+
+**Do them in this order: toggle OFF first, then read the balance.** Flipping first stops new accrual and makes
+the read instant-independent by construction rather than by careful customer selection. A non-zero reading has
+two causes and, while the till is open, the innocent one (a new sale accruing) is likelier than the bug it was
+written to catch — so a non-zero result is a *diagnosis*, never a reason to roll back `0117`. Rolling back would
+restore 34 customers' points while the owner believed them cleared.
+
 Branch on origin at `64aa0a51`, cut from production’s `2c497564`. Five user items: payment-method write-back,
 the sale-detail notes box, the membership-points switch + historical reset (migration **`0117`**), the `Edit`
 column alignment, and the compact driver/delivery split. Narrative and the expected-vs-actual ledger: **Part 599**.
@@ -324,7 +349,7 @@ Not lost, but one `git branch -D` from lost, and not live:
 | Lane | Tip | Shipped files | Owner |
 |---|---|---|---|
 | `s4/modal-chrome-ee` | `8dae6da1` | 74 (frontend modals) | ee |
-| ~~`s4/pay-notes-points-delivery-88`~~ | `64aa0a51` | 15, incl. migration `0117_membership_points_reset.sql` | 88 — **PUSHED to origin Sep 4, no longer local-only. Four lanes left on one disk.** |
+| ~~`s4/pay-notes-points-delivery-88`~~ | `64aa0a51` | 15, incl. migration `0117_membership_points_reset.sql` | 88 — **DEPLOYED Sep 4 in `c7ef7264`, wrangler `798d9e19`. Two owner actions still open — see the lane block.** |
 | `s4/awaiting-payment-hold-ee` | `c2f13396` | 7 (sale status / holds) | ee |
 | `s4/shifts-ee` | `18cbee6e` | 3 (telegram, salesAnalytics) | ee |
 | `s4/shift-credit-line-ee` | `18cbee6e` | same commit as `s4/shifts-ee` — two names, one lane | ee |
