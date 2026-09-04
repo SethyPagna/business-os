@@ -35,6 +35,60 @@ type ShiftGateContext = {
   notify: (message: unknown, type?: string, duration?: number) => void
 }
 
+/**
+ * ONE shift state, shared by every mounted consumer.
+ *
+ * Why this exists: ShiftGate and EndShiftButton are separate components that
+ * both describe the same server row. When each held its own useState and
+ * fetched once on mount, the button asked BEFORE the shift existed, got
+ * can_end:false, rendered nothing -- and never asked again. Registering the
+ * shift updated only the gate’s copy, so the End Shift control stayed invisible
+ * for the rest of the session and came back only on a full page reload. That is
+ * the defect the owner reported on 2026-09-04: "shift are not seen with option
+ * to close shift".
+ *
+ * Two components describing one row must not keep two copies of it. Every read
+ * and every write goes through here, so a registration or a close is visible to
+ * both immediately.
+ */
+let sharedShift: ShiftState | null = null
+const shiftSubscribers = new Set<(next: ShiftState | null) => void>()
+// De-dupes the mount fetch: both components mount together on POS open, and
+// without this they would each ask the Worker for the same row.
+let shiftInFlight: Promise<void> | null = null
+
+/** Publish a new shift state to every mounted consumer. Writes call this. */
+export function publishShift(next: ShiftState | null) {
+  sharedShift = next
+  for (const notify of shiftSubscribers) notify(next)
+}
+
+function useSharedShift(branchId: number | null) {
+  const [state, setState] = useState<ShiftState | null>(sharedShift)
+
+  useEffect(() => {
+    shiftSubscribers.add(setState)
+    return () => { shiftSubscribers.delete(setState) }
+  }, [])
+
+  const refresh = useCallback(() => {
+    if (!shiftInFlight) {
+      shiftInFlight = fetchCurrentShift(branchId)
+        .then((next) => { publishShift(next) })
+        // Leave the shared state null. A read failure must NOT be treated as
+        // "registered" -- that would silently skip the prompt for the whole
+        // day. Null shows nothing yet and the next open re-asks.
+        .catch(() => { publishShift(null) })
+        .finally(() => { shiftInFlight = null })
+    }
+    return shiftInFlight
+  }, [branchId])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  return { state, refresh }
+}
+
 export default function ShiftGate({ children }: { children?: React.ReactNode }) {
   // useApp() is fully typed -- no cast. It carries no till branch today, so the
   // branch is left null and the Worker falls back to the request's own
@@ -50,24 +104,12 @@ export default function ShiftGate({ children }: { children?: React.ReactNode }) 
   const branchId = null
   const branchName = null
 
-  const [state, setState] = useState<ShiftState | null>(null)
+  const { state } = useSharedShift(branchId)
   const [busy, setBusy] = useState(false)
   const [floatUsd, setFloatUsd] = useState('')
   const [floatKhr, setFloatKhr] = useState('')
   const [note, setNote] = useState('')
 
-  const refresh = useCallback(async () => {
-    try {
-      setState(await fetchCurrentShift(branchId))
-    } catch {
-      // Leave state null. A read failure must NOT be treated as "registered" --
-      // that would silently skip the prompt for the whole day. Null simply
-      // shows nothing yet and the next open re-asks.
-      setState(null)
-    }
-  }, [branchId])
-
-  useEffect(() => { void refresh() }, [refresh])
 
   const submitOpen = async () => {
     if (busy) return
@@ -80,7 +122,9 @@ export default function ShiftGate({ children }: { children?: React.ReactNode }) 
         openingFloatKhr: Number(floatKhr) || 0,
         openingNote: note.trim() || null,
       })
-      setState(next)
+      // Publish, not setState: this is what makes End Shift appear the moment
+      // the drawer is registered, instead of only after a reload.
+      publishShift(next)
       notify(next.already_registered
         ? t('shift_already_registered')
         : t('shift_registered'))
@@ -166,17 +210,13 @@ export function EndShiftButton({ onEnded }: { onEnded?: () => void }) {
   const { t, notify } = useApp() as ShiftGateContext
   const branchId = null
 
-  const [state, setState] = useState<ShiftState | null>(null)
+  const { state } = useSharedShift(branchId)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [countedUsd, setCountedUsd] = useState('')
   const [countedKhr, setCountedKhr] = useState('')
   const [note, setNote] = useState('')
 
-  const refresh = useCallback(async () => {
-    try { setState(await fetchCurrentShift(branchId)) } catch { setState(null) }
-  }, [branchId])
-  useEffect(() => { void refresh() }, [refresh])
 
   const submitClose = async () => {
     if (busy) return
@@ -188,7 +228,7 @@ export function EndShiftButton({ onEnded }: { onEnded?: () => void }) {
         closingCountedKhr: Number(countedKhr) || 0,
         closingNote: note.trim() || null,
       })
-      setState(next)
+      publishShift(next)
       setOpen(false)
       notify(next.already_closed
         ? t('shift_already_ended')

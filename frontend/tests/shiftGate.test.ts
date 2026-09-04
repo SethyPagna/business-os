@@ -39,7 +39,14 @@ const ok = (cond: unknown, label: string) => {
 }
 
 // ---- 1. The prompt is not dismissible -------------------------------------
-const registerBlock = gate.slice(gate.indexOf('needsRegistration && ('), gate.indexOf('EndShiftButton'))
+// End-anchored on the DECLARATION, not the bare identifier: the identifier
+// also appears in prose above the overlay, and anchoring on it silently
+// collapsed this slice to empty (failing an unrelated check) the moment a
+// comment mentioned the component by name.
+const registerBlock = gate.slice(
+  gate.indexOf('needsRegistration && ('),
+  gate.indexOf('export function EndShiftButton'),
+)
 ok(registerBlock.length > 200, 'the registration overlay was located in the source')
 ok(/onClose=\{\(\) => \{[^}]*\}\}/.test(registerBlock),
   'the registration prompt wires onClose to a no-op -- it cannot be dismissed')
@@ -47,9 +54,16 @@ ok(!/setNeedsRegistration|onClose=\{\(\) => set/.test(registerBlock),
   'and nothing in the overlay closes it locally without registering')
 
 // ---- 2. A failed read must not read as registered --------------------------
-// The catch sets state to null, and the prompt condition is an explicit
-// `=== true` on the server's own flag -- so null cannot satisfy it either way.
-ok(/catch \{[\s\S]{0,400}setState\(null\)/.test(gate),
+// The catch drives the shared state to null, and the prompt condition is an
+// explicit `=== true` on the server's own flag -- so null cannot satisfy it
+// either way.
+//
+// Asserted on the BEHAVIOUR (the failure path ends at a null shift state), not
+// on the spelling: this previously pinned the literal `setState(null)`, which
+// went red when the two components were merged onto one shared store even
+// though the behaviour was unchanged. A check that fails on a rename is
+// pinning the implementation, not the rule.
+ok(/catch\b[\s\S]{0,400}(setState|publishShift)\(null\)/.test(gate),
   'a failed read resets shift state to null rather than assuming a shift exists')
 ok(/needs_registration === true/.test(gate),
   'the prompt condition tests the server flag with ===, so null/undefined never suppresses it')
@@ -100,5 +114,43 @@ ok(missingEn.length === 0, `every key resolves in en.json${missingEn.length ? ':
 ok(missingKm.length === 0, `every key resolves in km.json${missingKm.length ? ': ' + missingKm.join(', ') : ''}`)
 ok(used.every((k) => !k.includes('.')),
   'the gate uses flat snake_case keys, matching the packs (no dotted namespaces)')
+
+
+// ---- 8. One shift state, not two -----------------------------------------
+//
+// The 2026-09-04 defect: ShiftGate and the End Shift control each held their
+// own useState and each fetched once on mount. The control asked BEFORE the
+// shift existed, got can_end:false, rendered nothing, and never asked again --
+// registering the drawer updated only the gate's copy, so End Shift stayed
+// invisible until a full page reload. Reported by the owner as "shift are not
+// seen with option to close shift".
+//
+// The property that must hold: both components read ONE state, and every write
+// publishes to it.
+ok(/function useSharedShift\(/.test(gate), 'there is a single shared shift-state hook')
+ok(/export function publishShift\(/.test(gate), 'and a single publish path for writes')
+
+{
+  const gateStart = gate.indexOf('export default function ShiftGate')
+  const endStart = gate.indexOf('export function EndShiftButton')
+  ok(gateStart > 0 && endStart > gateStart, 'both component bodies were located')
+  const bodies = [
+    ['ShiftGate', gate.slice(gateStart, endStart)],
+    ['EndShiftButton', gate.slice(endStart)],
+  ] as const
+  for (const [name, body] of bodies) {
+    ok(/useSharedShift\(branchId\)/.test(body), name + ' reads the shared shift state')
+    ok(!/useState<ShiftState/.test(body), name + ' keeps no private copy of the shift state')
+    ok(!/fetchCurrentShift\(/.test(body), name + ' does not fetch the shift itself')
+    // A write must reach the OTHER component, which only publishing does.
+    ok(/publishShift\(next\)/.test(body), name + ' publishes its write, so the other surface updates at once')
+  }
+}
+
+// Both components mount together on POS open, so the mount fetch is de-duped.
+ok(/shiftInFlight/.test(gate), 'the shared hook de-dupes the mount fetch')
+
+// A failed read must still not read as "registered".
+ok(/publishShift\(null\)/.test(gate), 'a failed shift read publishes null, never a registered-looking state')
 
 console.log(`\nshiftGate: all ${checks} checks passed`)
