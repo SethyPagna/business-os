@@ -42,8 +42,8 @@ interface ProductCandidate {
   purchase_price_khr?: number | string | null
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
-  special_price_usd?: number | string | null
-  special_price_khr?: number | string | null
+  wholesale_price_usd?: number | string | null
+  wholesale_price_khr?: number | string | null
   discount_enabled?: boolean | number | null
   discount_type?: string | null
   discount_percent?: number | string | null
@@ -768,8 +768,8 @@ function pricingForVariant(product: ProductCandidate, costUsd: number): Record<s
   return {
     selling_price_usd: Number(product.selling_price_usd) || 0,
     selling_price_khr: Number(product.selling_price_khr) || 0,
-    special_price_usd: Number(product.special_price_usd) || 0,
-    special_price_khr: Number(product.special_price_khr) || 0,
+    wholesale_price_usd: Number(product.wholesale_price_usd) || 0,
+    wholesale_price_khr: Number(product.wholesale_price_khr) || 0,
     discount_enabled: Boolean(product.discount_enabled),
     discount_type: product.discount_type || 'percent',
     discount_percent: Number(product.discount_percent) || 0,

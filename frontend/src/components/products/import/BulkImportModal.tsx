@@ -484,15 +484,15 @@ const IMPORT_REVIEW_EDIT_FIELDS: Array<[string, string, string]> = [
   ['purchase_price_khr', 'purchase_price_khr', 'Cost KHR'],
   ['selling_price_usd', 'selling_price_usd', 'Sell USD'],
   ['selling_price_khr', 'selling_price_khr', 'Sell KHR'],
-  ['special_price_usd', 'special_price_usd_full', 'Special USD'],
-  ['special_price_khr', 'special_price_khr_full', 'Special KHR'],
+  ['wholesale_price_usd', 'wholesale_price_usd_full', 'Wholesale USD'],
+  ['wholesale_price_khr', 'wholesale_price_khr_full', 'Wholesale KHR'],
   ['discount_percent', 'discount_percent', 'Discount %'],
   ['discount_amount_usd', 'discount_amount_usd', 'Discount USD'],
   ['discount_amount_khr', 'discount_amount_khr', 'Discount KHR'],
   ['description', 'description', 'Description'],
 ]
 
-const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr']
+const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']
 
 function compactImportValue(value: unknown): string {
   const text = String(value ?? '').trim()
@@ -501,7 +501,7 @@ function compactImportValue(value: unknown): string {
 
 // Short "$1.50 / 6,000 KHR" style price summary for the redesigned
 // conflict-row header -- the full per-field grid (with cost, discount,
-// special price, etc.) still lives one click away in "More details";
+// wholesale price, etc.) still lives one click away in "More details";
 // this line is just enough to recognize the product at a glance.
 function compactImportPrice(row: ProductImportRow = {}): string {
   const usd = String(row?.selling_price_usd ?? '').trim()
@@ -2817,10 +2817,10 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             {showColumnsInfo ? (
               <div className="mt-3 space-y-3 rounded-lg border border-blue-200 bg-white/70 p-3 text-xs leading-relaxed text-slate-700 dark:border-blue-900/40 dark:bg-slate-900/40 dark:text-slate-200">
                 <p className="font-mono leading-relaxed">
-                  {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, vip_price_usd, vip_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(mm/dd/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames, is_active')}
+                  {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(mm/dd/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames, is_active')}
                 </p>
                 <p><strong>{T('csv_info_required_label', 'Required')}:</strong> {T('csv_info_required', 'only name (marked with *) has to be filled in -- every other column can be left blank.')}</p>
-                <p><strong>{T('csv_info_pricing_label', 'Pricing')}:</strong> {T('csv_info_pricing', 'selling/special/cost prices each have a USD and a KHR column -- fill in whichever currency you use, the other can stay blank.')}</p>
+                <p><strong>{T('csv_info_pricing_label', 'Pricing')}:</strong> {T('csv_info_pricing', 'selling/wholesale/purchase prices each have a USD and a KHR column -- fill in whichever currency you use, the other can stay blank.')}</p>
                 <p><strong>{T('csv_info_batch_label', 'Batch')}:</strong> {T('csv_info_batch', 'optional -- one column, batch(mm/dd/yyyy), is the date this stock was received (e.g. "08/24/2026"). Leave it blank and it defaults to today. The system auto-formats whichever date you give it into the stored batch code (e.g. "08242026") -- there is no separate free-typed label to fill in. A row naming the same received date as an earlier import or manual receive lands in the same batch automatically. expiry_date/expiry_alert_days are separate and control low-stock/expiry warnings, not batch numbering.')}</p>
                 <p><strong>{T('csv_info_images_label', 'Images')}:</strong> {T('csv_info_images', 'image_filename_1 through image_filename_5 (or the combined image_filenames column) should match the filenames of images you upload alongside the CSV. What to do about a product\'s existing images (keep, replace, or add to them) is chosen on the review screen after upload, not in the file.')}</p>
                 <p><strong>{T('csv_info_grouping_label', 'Variants/grouping')}:</strong> {T('csv_info_grouping', 'set is_group to 1 on a row that should act as a parent product, then set parent_id on its variant rows to that parent row\'s number to group them together.')}</p>

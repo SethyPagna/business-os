@@ -143,8 +143,10 @@ type AdjustForm = {
   pricingLocked: boolean
   selling_price_usd: InventoryFormValue
   selling_price_khr: InventoryFormValue
-  special_price_usd: InventoryFormValue
-  special_price_khr: InventoryFormValue
+  // Renamed from special_price_* with the tier itself (2026-09-04 ruling);
+  // must stay in lockstep with InventoryStockModals.tsx's own form type.
+  wholesale_price_usd: InventoryFormValue
+  wholesale_price_khr: InventoryFormValue
   discount_enabled: boolean
   discount_type: string
   discount_percent: InventoryFormValue
@@ -434,7 +436,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [adjustForm,    setAdjustForm]    = useState<AdjustForm>({
     type: 'add', quantity: DEFAULT_ADD_QUANTITY, reason: '', branch_id: '',
     pricingLocked: true,
-    selling_price_usd: '', selling_price_khr: '', special_price_usd: '', special_price_khr: '',
+    selling_price_usd: '', selling_price_khr: '', wholesale_price_usd: '', wholesale_price_khr: '',
     discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
     cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
     supplier_id: '', supplier_name: '',
@@ -1070,8 +1072,15 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
         selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
-        special_price_usd: parseFloat(String(adjustForm.special_price_usd)) || 0,
-        special_price_khr: parseFloat(String(adjustForm.special_price_khr)) || 0,
+        // Was special_price_*: the 2026-09-04 ruling renamed the tier, and
+        // routes/inventory.ts's /adjust contract now names the wholesale pair
+        // too, so this is a live column again, not a dead one. It still has no
+        // input on this form -- the values ride through prefilled from the row
+        // -- but it must be sent, because unlocked pricing can land the receipt
+        // on a NEW product row, and the pair is what seeds that row's tier.
+        // FastStockInModal sends it for the same reason.
+        wholesale_price_usd: parseFloat(String(adjustForm.wholesale_price_usd)) || 0,
+        wholesale_price_khr: parseFloat(String(adjustForm.wholesale_price_khr)) || 0,
         discount_enabled: !!adjustForm.discount_enabled,
         discount_type: adjustForm.discount_type,
         discount_percent: parseFloat(String(adjustForm.discount_percent)) || 0,
@@ -1179,8 +1188,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       pricingLocked: true,
       selling_price_usd: p.selling_price_usd || 0,
       selling_price_khr: p.selling_price_khr || 0,
-      special_price_usd: p.special_price_usd || 0,
-      special_price_khr: p.special_price_khr || 0,
+      // Was the special_price_* pair, prefilled for the deleted "VIP" tier.
+      // Now prefilled from the row's real wholesale price, and sent back out
+      // with the pricing payload (see below) so an unlocked receipt that
+      // creates a new row carries the tier onto it.
+      wholesale_price_usd: p.wholesale_price_usd || 0,
+      wholesale_price_khr: p.wholesale_price_khr || 0,
       discount_enabled: !!p.discount_enabled,
       discount_type: p.discount_type || 'percent',
       discount_percent: p.discount_percent || 0,

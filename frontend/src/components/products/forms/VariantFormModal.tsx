@@ -23,8 +23,8 @@ interface VariantParentProduct {
   cost_price_khr?: number | string | null
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
-  special_price_usd?: number | string | null
-  special_price_khr?: number | string | null
+  wholesale_price_usd?: number | string | null
+  wholesale_price_khr?: number | string | null
 }
 
 interface UnitOption {
@@ -53,8 +53,8 @@ interface VariantFormState {
   cost_price_khr: string
   selling_price_usd: string
   selling_price_khr: string
-  special_price_usd: string
-  special_price_khr: string
+  wholesale_price_usd: string
+  wholesale_price_khr: string
   stock_quantity: string
   branch_id: EntityId | ''
   unit: string
@@ -66,8 +66,8 @@ type NumericVariantField =
   | 'cost_price_khr'
   | 'selling_price_usd'
   | 'selling_price_khr'
-  | 'special_price_usd'
-  | 'special_price_khr'
+  | 'wholesale_price_usd'
+  | 'wholesale_price_khr'
   | 'stock_quantity'
 
 interface VariantMutationResponse {
@@ -141,8 +141,13 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     cost_price_khr: formatPriceNumber(parent.cost_price_khr || 0),
     selling_price_usd: formatPriceNumber(parent.selling_price_usd || 0),
     selling_price_khr: formatPriceNumber(parent.selling_price_khr || 0),
-    special_price_usd: formatPriceNumber((parent.special_price_usd ?? parent.selling_price_usd) || 0),
-    special_price_khr: formatPriceNumber((parent.special_price_khr ?? parent.selling_price_khr) || 0),
+    // No `?? parent.selling_price` fallback. A parent with no wholesale price
+    // must seed a BLANK wholesale field, not the selling price: seeding it
+    // with selling meant every variant created from such a parent was saved
+    // carrying a "wholesale price" equal to its selling price, which the POS
+    // then offered as a tier that discounts nothing.
+    wholesale_price_usd: formatPriceNumber(parent.wholesale_price_usd || 0),
+    wholesale_price_khr: formatPriceNumber(parent.wholesale_price_khr || 0),
     stock_quantity: '0',
     branch_id: branches.find((branch) => branch.is_default)?.id || '',
     unit: parent.unit || 'pcs',
@@ -205,8 +210,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
         // matching names are wrapped by the virtual group title in the UI.
         selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
         selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
-        special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
-        special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
+        wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
+        wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
         stock_quantity: parseNumericInput(form.stock_quantity),
         cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
         cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
@@ -235,8 +240,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           stock_quantity: parseNumericInput(form.stock_quantity),
           selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
           selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
-          special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
-          special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
+          wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
+          wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
           cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
           cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
         },
@@ -359,34 +364,34 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           </div>
 
           <div className="min-w-0">
-            <label htmlFor="variant-form-special-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
+            <label htmlFor="variant-form-wholesale-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {tr('wholesale_price_usd_full', 'Wholesale (USD)', 'បោះដុំ (USD)')}
             </label>
             <input
-              id="variant-form-special-price"
-              name="variant_special_price_usd"
+              id="variant-form-wholesale-price"
+              name="variant_wholesale_price_usd"
               className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
-              value={form.special_price_usd ?? ''}
-              onChange={(event) => setNumeric('special_price_usd', event.target.value)}
+              value={form.wholesale_price_usd ?? ''}
+              onChange={(event) => setNumeric('wholesale_price_usd', event.target.value)}
             />
           </div>
 
           <div className="min-w-0">
-            <label htmlFor="variant-form-special-price-khr" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {tr('special_price_khr_full', 'Special Price (KHR)', 'តម្លៃពិសេស (KHR)')}
+            <label htmlFor="variant-form-wholesale-price-khr" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'បោះដុំ (KHR)')}
             </label>
             <input
-              id="variant-form-special-price-khr"
-              name="variant_special_price_khr"
+              id="variant-form-wholesale-price-khr"
+              name="variant_wholesale_price_khr"
               className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
-              value={form.special_price_khr ?? ''}
-              onChange={(event) => setNumeric('special_price_khr', event.target.value)}
+              value={form.wholesale_price_khr ?? ''}
+              onChange={(event) => setNumeric('wholesale_price_khr', event.target.value)}
             />
           </div>
 

@@ -45,8 +45,7 @@ interface InventoryProduct {
   purchase_price_khr?: number
   selling_price_usd?: number
   selling_price_khr?: number
-  special_price_usd?: number
-  special_price_khr?: number
+  // No special_price_*: the "VIP" tier it backed was deleted on 2026-09-04.
   qty_sold?: number
   revenue_usd?: number
   cogs_usd?: number
@@ -83,11 +82,14 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const costPriceKhr = Number(p.purchase_price_khr || 0)
   const sellingPriceUsd = Number(p.selling_price_usd || 0)
   const sellingPriceKhr = Number(p.selling_price_khr || 0)
-  const specialPriceUsd = Number(p.special_price_usd || 0)
-  const specialPriceKhr = Number(p.special_price_khr || 0)
-  const hasSpecialPrice = specialPriceUsd > 0 || specialPriceKhr > 0
-  const activePriceUsd = hasSpecialPrice ? (specialPriceUsd || sellingPriceUsd) : sellingPriceUsd
-  const activePriceKhr = hasSpecialPrice ? (specialPriceKhr || sellingPriceKhr) : sellingPriceKhr
+  // The special_price_* ("VIP") tier is deleted by the 2026-09-04 ruling, so
+  // there is no longer a second tier that can override the shelf price here.
+  // "Active price" is therefore simply the selling price: wholesale is a tier
+  // the cashier picks per line at the POS, never the default price of a
+  // product, so it must not silently replace the selling price on this panel
+  // the way the old special price did.
+  const activePriceUsd = sellingPriceUsd
+  const activePriceKhr = sellingPriceKhr
   const stockQuantity = Number(p.stock_quantity || 0)
   const lowStockThreshold = Number(p.low_stock_threshold || 0)
   const stockPct = lowStockThreshold > 0
@@ -176,7 +178,10 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           </div>
 
           <div className="space-y-3">
-            <div className={`grid gap-2 sm:gap-3 ${hasSpecialPrice ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            {/* Fixed at two columns now that the third tile (the "Special
+                Price" / VIP tier) is deleted by the 2026-09-04 ruling -- the
+                grid used to widen to three whenever that tier had a value. */}
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
               <div className="rounded-xl bg-red-50 p-3 dark:bg-red-900/20">
                 <div className="mb-1 text-xs font-semibold text-red-600 dark:text-red-400">{T('label_cost_purchase', 'Cost Price')}</div>
                 <div className="font-bold text-red-700 dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
@@ -187,13 +192,10 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 <div className="font-bold text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
                 {sellingPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sellingPriceKhr)}</div> : null}
               </div>
-              {hasSpecialPrice ? (
-                <div className="rounded-xl bg-blue-50 p-3 dark:bg-blue-900/20">
-                  <div className="mb-1 text-xs font-semibold text-blue-600 dark:text-blue-400">{T('special_price', 'Special Price')}</div>
-                  <div className="font-bold text-blue-700 dark:text-blue-300">{fmtUSD(specialPriceUsd || sellingPriceUsd)}</div>
-                  {(specialPriceKhr || sellingPriceKhr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(specialPriceKhr || sellingPriceKhr || 0)}</div> : null}
-                </div>
-              ) : null}
+              {/* The "Special Price" tile is deleted (2026-09-04 ruling): that
+                  tier was the wholesale price under the wrong name, migration
+                  0111 moved its values to wholesale_price_*, and this inventory
+                  panel is a cost/stock view that never carried wholesale. */}
             </div>
             <div className="grid grid-cols-4 gap-1.5 text-center sm:gap-2">
               {[

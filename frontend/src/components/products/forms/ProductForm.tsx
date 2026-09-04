@@ -82,8 +82,6 @@ interface ProductFormState extends GroupCandidate {
   description?: string
   selling_price_usd?: EditableNumber
   selling_price_khr?: EditableNumber
-  special_price_usd?: EditableNumber
-  special_price_khr?: EditableNumber
   wholesale_price_usd?: EditableNumber
   wholesale_price_khr?: EditableNumber
   discount_enabled?: number | boolean
@@ -114,8 +112,6 @@ interface ProductFormState extends GroupCandidate {
 interface ProductSavePayload extends ProductFormState {
   selling_price_usd: number
   selling_price_khr: number
-  special_price_usd: number
-  special_price_khr: number
   wholesale_price_usd: number
   wholesale_price_khr: number
   discount_enabled: 0 | 1
@@ -447,8 +443,6 @@ export default function ProductForm({
       description: '',
       selling_price_usd: 0,
       selling_price_khr: 0,
-      special_price_usd: 0,
-      special_price_khr: 0,
       wholesale_price_usd: 0,
       wholesale_price_khr: 0,
       discount_enabled: 0,
@@ -600,17 +594,13 @@ export default function ProductForm({
       ...initialForm,
       selling_price_usd: editablePrice(initialForm.selling_price_usd),
       selling_price_khr: editablePrice(initialForm.selling_price_khr),
-      // VIP price is its OWN optional field. It must NOT default to the
-      // selling price: the API was omitting these two columns, so the
-      // `?? selling` fallback silently loaded the selling price into the
-      // VIP field, and the save below then wrote it back -- overwriting a
-      // real VIP price (e.g. 8) with the selling price (12) on every edit.
-      // A product with no VIP price loads blank/0 and stays that way.
-      special_price_usd: editablePrice(initialForm.special_price_usd),
-      special_price_khr: editablePrice(initialForm.special_price_khr),
-      // Wholesale price is its own optional field, same rule as VIP above:
-      // loads blank/0 when unset and stays that way, never borrowing the
-      // selling price.
+      // Wholesale price is its OWN optional field. It must NOT default to
+      // the selling price. This bug already happened once on the tier this
+      // one replaced: the API was omitting the columns, so a `?? selling`
+      // fallback silently loaded the selling price into the tier field and
+      // the save below wrote it back -- overwriting a real 8 with the
+      // selling 12 on every edit. Loads blank/0 when unset and stays that
+      // way, never borrowing the selling price.
       wholesale_price_usd: editablePrice(initialForm.wholesale_price_usd),
       wholesale_price_khr: editablePrice(initialForm.wholesale_price_khr),
       discount_enabled: Number(initialForm.discount_enabled || 0),
@@ -1008,10 +998,8 @@ export default function ProductForm({
       selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
       selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
       // No `?? selling` fallback -- see the load above. Whatever is in the
-      // VIP field (0 if the user left it blank) is what gets saved, so an
-      // untouched VIP price is never clobbered with the selling price.
-      special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd)),
-      special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr)),
+      // wholesale field (0 if the user left it blank) is what gets saved, so
+      // an untouched wholesale price is never clobbered with the selling one.
       wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
       wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
       discount_enabled: form.discount_enabled ? 1 : 0,
@@ -1530,35 +1518,16 @@ export default function ProductForm({
             />
           </div>
 
-          <div className="min-w-0 rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/10">
-            <div className="mb-2">
-              <p className="text-sm font-bold text-blue-700 dark:text-blue-400">{tr('special_price', 'Special Price', 'តម្លៃពិសេស')}</p>
-              <p className="text-xs text-blue-600 dark:text-blue-500">{tr('special_price_hint', 'Internal alternate selling price for staff-only situations or quick POS selection.', 'តម្លៃលក់ជម្រើសខាងក្នុង សម្រាប់ស្ថានភាពបុគ្គលិក ឬជ្រើសរហ័សនៅ POS។')}</p>
-            </div>
-            <DualPriceInput
-              labelUsd={tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
-              labelKhr={tr('special_price_khr_full', 'Special Price (KHR)', 'តម្លៃពិសេស (KHR)')}
-              valueUsd={form.special_price_usd}
-              valueKhr={form.special_price_khr}
-                onUsdChange={(value) => {
-                  setField('special_price_usd', value)
-                  if (!String(form.special_price_khr ?? '').trim()) {
-                    const converted = normalizePriceValue(parseNumericInput(value) * exchangeRate)
-                    setField('special_price_khr', value === '' ? '' : formatPriceNumber(converted))
-                  }
-                }}
-              onKhrChange={(value) => setField('special_price_khr', value)}
-              usdSymbol={usdSymbol}
-              khrSymbol={khrSymbol}
-              exchangeRate={exchangeRate}
-              t={t}
-            />
-          </div>
-
+          {/* The "Special Price"/VIP block that stood here is deleted. The
+              2026-09-04 ruling established that this tier was never a VIP
+              price -- it was the wholesale price under the wrong name -- so
+              migration 0111 moved the numbers into wholesale_price_* and the
+              form now offers the one tier that exists. Keeping both boxes
+              would have re-created the ambiguity the ruling settled. */}
           <div className="min-w-0 rounded-xl border border-indigo-100 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/10">
             <div className="mb-2">
               <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale', 'បោះដុំ')}</p>
-              <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', 'Bulk / wholesale price, selectable at POS like the VIP tier.', 'តម្លៃបោះដុំ អាចជ្រើសនៅ POS ដូចតម្លៃ VIP។')}</p>
+              <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', "The shop's bulk price. Selectable at the POS, and applied on its own above a quantity when that setting is on.", 'តម្លៃបោះដុំរបស់ហាង។ អាចជ្រើសនៅ POS និងប្រើដោយខ្លួនឯងពេលបរិមាណលើសកម្រិត ប្រសិនបើបានបើកការកំណត់នោះ។')}</p>
             </div>
             <DualPriceInput
               labelUsd={tr('wholesale_price_usd_full', 'Wholesale (USD)', 'បោះដុំ (USD)')}

@@ -48,7 +48,7 @@ async function run() {
     // second spread (resolveMergedCost) on Sep 4 2026 and the ordering this
     // guards did not change.
     const foldIndex = engineSource.indexOf('autoMergeRecords.push({ productId: earlier.id')
-    const pricingIndex = engineSource.indexOf('resolveMergedPricing([earlier.data, d])')
+    const pricingIndex = engineSource.indexOf('...resolveMergedPricing([earlier.data, d]),')
     assert.ok(foldIndex !== -1 && pricingIndex !== -1 && foldIndex < pricingIndex,
       'the losing-row snapshot must be taken before resolveMergedPricing mutates it')
     // internal keys never pollute the record

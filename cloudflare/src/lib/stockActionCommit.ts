@@ -13,7 +13,7 @@ export interface UnifiedStockAddInput {
   date: string
   batchLabel?: string | null
   sellingPriceUsd?: number | null
-  vipPriceUsd?: number | null
+  wholesalePriceUsd?: number | null
   costPriceUsd?: number | null
   /** Supplier this batch was bought from (migration 0062). Stored on batch
    *  creation; an existing batch's blank supplier is backfilled, but a
@@ -57,7 +57,7 @@ export interface UnifiedStockCreateProductInput {
   productName: string
   barcode?: string | null
   sellingPriceUsd?: number | null
-  vipPriceUsd?: number | null
+  wholesalePriceUsd?: number | null
   costPriceUsd?: number | null
 }
 
@@ -131,10 +131,10 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
   if (!product) {
     const inserted = await db.prepare(`
       INSERT OR IGNORE INTO products (
-        name, name_normalized, barcode, unit, selling_price_usd, special_price_usd, cost_price_usd,
+        name, name_normalized, barcode, unit, selling_price_usd, wholesale_price_usd, cost_price_usd,
         stock_quantity, is_active, client_request_id, created_at, updated_at
       ) VALUES (
-        @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @vipPriceUsd, @costPriceUsd,
+        @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @wholesalePriceUsd, @costPriceUsd,
         0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
     `).run({
@@ -142,7 +142,7 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
       nameNormalized: normalizeSearchText(productName),
       barcode: String(input.barcode || '').trim() || null,
       sellingPriceUsd: optionalMoney(input.sellingPriceUsd) ?? 0,
-      vipPriceUsd: optionalMoney(input.vipPriceUsd) ?? 0,
+      wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd) ?? 0,
       costPriceUsd: optionalMoney(input.costPriceUsd) ?? 0,
       clientRequestId,
     })
@@ -196,7 +196,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     jobId, actionKey, rowNumber, productId, productName, branchId, branchName,
     quantity, batchKey, lotCode, receivedAt, batchNumber, supplierName, supplierId,
     sellingPriceUsd: optionalMoney(input.sellingPriceUsd),
-    vipPriceUsd: optionalMoney(input.vipPriceUsd),
+    wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd),
     costPriceUsd: optionalMoney(input.costPriceUsd),
     reason: `Unified stock import ${jobId}, row ${rowNumber}`,
   }
@@ -268,8 +268,8 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
               stock_quantity = COALESCE(stock_quantity, 0) + @quantity,
               selling_price_usd = CASE WHEN @sellingPriceUsd IS NULL THEN selling_price_usd
                 ELSE MAX(COALESCE(selling_price_usd, 0), @sellingPriceUsd) END,
-              special_price_usd = CASE WHEN @vipPriceUsd IS NULL THEN special_price_usd
-                ELSE MAX(COALESCE(special_price_usd, 0), @vipPriceUsd) END,
+              wholesale_price_usd = CASE WHEN @wholesalePriceUsd IS NULL THEN wholesale_price_usd
+                ELSE MAX(COALESCE(wholesale_price_usd, 0), @wholesalePriceUsd) END,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = @productId AND ${guard}`,
       params,

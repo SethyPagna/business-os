@@ -56,6 +56,7 @@ const BUSINESS_IDENTITY_KEYS = new Set<string>([
 const SALES_POLICY_KEYS = new Set<string>([
   'currency_usd_symbol', 'currency_khr_symbol', 'exchange_rate', 'change_exchange_rate', 'tax_rate',
   'display_currency', 'pos_show_item_discount', 'pos_payment_methods',
+  'pos_wholesale_auto_enabled', 'pos_wholesale_auto_min_qty',
 ])
 
 // The permission a given settings key requires, mirroring settings.ts's

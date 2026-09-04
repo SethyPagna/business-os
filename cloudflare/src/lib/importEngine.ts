@@ -1106,7 +1106,7 @@ export type ProductImportMode = 'merge' | 'replace_all' | 'replace_columns' | 'f
 export const PRODUCT_REPLACE_COLUMNS = [
   'name', 'sku', 'barcode', 'category', 'categories', 'unit', 'description',
   'brand', 'brands', 'supplier',
-  'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr',
+  'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr',
   'cost_price_usd', 'cost_price_khr',
   'low_stock_threshold', 'out_of_stock_threshold',
   'discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr',
@@ -1172,6 +1172,44 @@ export function getProductImportReplaceColumns(policyJson: string | null | undef
   }
 }
 
+/**
+ * The wholesale half of the merge rule productDetailRule.ts's
+ * resolveMergedPricing implements for the selling prices: when two rows
+ * merge into one product and disagree on the wholesale price, the HIGHEST
+ * wins.
+ *
+ * Same reasoning as the selling-price merge -- these are prices we plan to
+ * charge, not facts about the item, and a merge must never quietly drop a
+ * product below a price one of the merged rows expected to charge. It lives
+ * here rather than inside resolveMergedPricing because that helper is shared
+ * with the product-detail identity rule (and its frontend twin
+ * frontend/src/utils/productDetailRule.ts), which this lane does not own;
+ * the two are called together at every merge site below.
+ *
+ * Returns only the fields at least one row actually carried, so the caller
+ * can spread the result over an existing row without clobbering an untouched
+ * column with a zero -- exactly resolveMergedPricing's contract.
+ */
+const WHOLESALE_MERGE_FIELDS = ['wholesale_price_usd', 'wholesale_price_khr'] as const
+
+export function resolveMergedWholesalePricing(
+  rows: Array<Record<string, unknown> | null | undefined>,
+): Partial<Record<typeof WHOLESALE_MERGE_FIELDS[number], number>> {
+  const merged: Partial<Record<typeof WHOLESALE_MERGE_FIELDS[number], number>> = {}
+  for (const field of WHOLESALE_MERGE_FIELDS) {
+    let best: number | null = null
+    for (const row of rows) {
+      const raw = row?.[field]
+      if (raw === undefined || raw === null || raw === '') continue
+      const value = Number(raw)
+      if (!Number.isFinite(value)) continue
+      if (best === null || value > best) best = value
+    }
+    if (best !== null) merged[field] = best
+  }
+  return merged
+}
+
 // ---------------------------------------------------------------------------
 // Per-type classification. Each function takes the already CSV-parsed rows
 // and existing DB rows (loaded once, up front) and returns a classification
@@ -1204,8 +1242,8 @@ export async function classifyProducts(
   // query shape doesn't fork, and so `match`'s type stays the same
   // regardless of which mode a given import job happens to be running.
   const existing = await db
-    .prepare(`SELECT id, sku, barcode, name, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, category, categories, brand, brands, unit, supplier, description, low_stock_threshold, special_price_usd, special_price_khr, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path FROM products`)
-    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; cost_price_usd: number | null; cost_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null; category: string | null; categories: string | null; brand: string | null; brands: string | null; unit: string | null; supplier: string | null; description: string | null; low_stock_threshold: number | null; special_price_usd: number | null; special_price_khr: number | null; out_of_stock_threshold: number | null; discount_enabled: number | null; discount_type: string | null; discount_percent: number | null; discount_amount_usd: number | null; discount_amount_khr: number | null; discount_label: string | null; discount_badge_color: string | null; discount_starts_at: string | null; discount_ends_at: string | null; expiry_date: string | null; expiry_alert_days: number | null; is_active: number | null; image_path: string | null }>()
+    .prepare(`SELECT id, sku, barcode, name, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, category, categories, brand, brands, unit, supplier, description, low_stock_threshold, wholesale_price_usd, wholesale_price_khr, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path FROM products`)
+    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; cost_price_usd: number | null; cost_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null; category: string | null; categories: string | null; brand: string | null; brands: string | null; unit: string | null; supplier: string | null; description: string | null; low_stock_threshold: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; out_of_stock_threshold: number | null; discount_enabled: number | null; discount_type: string | null; discount_percent: number | null; discount_amount_usd: number | null; discount_amount_khr: number | null; discount_label: string | null; discount_badge_color: string | null; discount_starts_at: string | null; discount_ends_at: string | null; expiry_date: string | null; expiry_alert_days: number | null; is_active: number | null; image_path: string | null }>()
   const bySku = new Map<string, typeof existing[number]>()
   // One barcode can now legitimately map to SEVERAL distinct products (see
   // the barcode-collision guard below) -- keep every candidate per barcode,
@@ -1365,22 +1403,36 @@ export async function classifyProducts(
     // mirroring frontend/productImportPlanner.ts's normalizeProductImportRow
     // defaults so a CSV row and the manual Add/Edit form produce the same
     // stored values for the same input.
-    // VIP price (stored in the special_price_* columns -- the DB name is
-    // unchanged; only the label is "VIP" now). Accepts the new `vip_price_*`
-    // header AND the legacy `special_price_*` one so old export files still
-    // import. A BLANK VIP price stores 0, NOT the selling price: defaulting
-    // to selling silently set VIP = selling on every row without an explicit
-    // value, which is exactly the "import didn't read the special price"
-    // report, and the edit form then wrote that back. Every consumer
-    // (POS, portal, detail) already treats 0 as "no VIP price, use selling",
-    // so 0 is the correct absent value.
-    const vipUsdRaw = row.vip_price_usd ?? row.special_price_usd
-    const vipKhrRaw = row.vip_price_khr ?? row.special_price_khr
-    data.special_price_usd = vipUsdRaw !== undefined && str(vipUsdRaw) !== ''
-      ? normalizeImportMoney(vipUsdRaw)
+    // Wholesale price (products.wholesale_price_usd/khr -- migration 0111).
+    // The tier this app used to call "VIP" and stored in special_price_*
+    // was never a VIP price: the owner ruled it always held the WHOLESALE
+    // number, so 0111 copied special_price_* into wholesale_price_* and
+    // zeroed the old columns. special_price_* is dead here -- never read,
+    // never written -- and wholesale_price_* is the only discounted tier.
+    //
+    // The legacy `vip_price_*` and `special_price_*` headers are still
+    // ACCEPTED and land in wholesale_price_*: by that same ruling a sheet
+    // headed "VIP price" is a wholesale sheet, and silently dropping the
+    // column would throw away the operator's real wholesale numbers on
+    // every re-import of a file exported before the rename. An explicit
+    // `wholesale_price_*` header wins when a file carries both, because it
+    // is the one header that unambiguously names the tier it means.
+    // (Same precedence order as productImportPlanner.ts's
+    // normalizeProductImportRow: wholesale, then vip, then special.)
+    //
+    // A BLANK wholesale price stores 0, NOT the selling price: defaulting
+    // to selling silently set the tier = selling on every row without an
+    // explicit value, which is exactly the "import didn't read the special
+    // price" report, and the edit form then wrote that back. Every consumer
+    // (POS, portal, detail) already treats 0 as "no discounted price, use
+    // selling", so 0 is the correct absent value.
+    const wholesaleUsdRaw = row.wholesale_price_usd ?? row.vip_price_usd ?? row.special_price_usd
+    const wholesaleKhrRaw = row.wholesale_price_khr ?? row.vip_price_khr ?? row.special_price_khr
+    data.wholesale_price_usd = wholesaleUsdRaw !== undefined && str(wholesaleUsdRaw) !== ''
+      ? normalizeImportMoney(wholesaleUsdRaw)
       : 0
-    data.special_price_khr = vipKhrRaw !== undefined && str(vipKhrRaw) !== ''
-      ? normalizeImportMoney(vipKhrRaw)
+    data.wholesale_price_khr = wholesaleKhrRaw !== undefined && str(wholesaleKhrRaw) !== ''
+      ? normalizeImportMoney(wholesaleKhrRaw)
       : 0
     data.out_of_stock_threshold = parseImportNumericValue(row.out_of_stock_threshold, 0, { allowNegative: false, field: 'out_of_stock_threshold' })
     data.discount_enabled = toBool01(row.discount_enabled ?? row.promotion_enabled ?? row.on_promotion, 0)
@@ -1661,15 +1713,21 @@ export async function classifyProducts(
       }
     }
 
-    // Selling and special price are NOT identity (see productDetailRule.ts):
+    // Selling and wholesale price are NOT identity (see productDetailRule.ts):
     // they are what we plan to charge, not what the item is. When this row
     // merges into an existing product and the two disagree, the HIGHEST of
     // each wins -- merging must never quietly drop a product below a price
     // one of the merged rows expected to charge. Applied before the changes
     // diff and before the write, so the reviewer sees the value that will
-    // actually be stored.
+    // actually be stored. The wholesale tier merges by the same rule through
+    // resolveMergedWholesalePricing (migration 0111 moved the discounted tier
+    // off the dead special_price_* columns).
     if (match) {
       Object.assign(data, resolveMergedPricing([
+        match as unknown as Record<string, unknown>,
+        data,
+      ]))
+      Object.assign(data, resolveMergedWholesalePricing([
         match as unknown as Record<string, unknown>,
         data,
       ]))
@@ -3000,8 +3058,12 @@ function applyFillBlankOnlyMode(data: Record<string, unknown>, match: Record<str
 export const PRODUCT_MONEY_FIELD_SOURCES: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
   ['selling_price_usd', ['selling_price_usd', 'price_usd']],
   ['selling_price_khr', ['selling_price_khr', 'price_khr']],
-  ['special_price_usd', ['vip_price_usd', 'special_price_usd']],
-  ['special_price_khr', ['vip_price_khr', 'special_price_khr']],
+  // Wholesale is the only discounted tier now (migration 0111). The legacy
+  // vip_price_*/special_price_* headers stay in the source list so an old
+  // sheet that fills the tier under its old name still counts as "provided"
+  // and is not overwritten by the existing wholesale value.
+  ['wholesale_price_usd', ['wholesale_price_usd', 'vip_price_usd', 'special_price_usd']],
+  ['wholesale_price_khr', ['wholesale_price_khr', 'vip_price_khr', 'special_price_khr']],
   ['cost_price_usd', ['cost_price_usd', 'purchase_price_usd', 'cost_usd']],
   ['cost_price_khr', ['cost_price_khr', 'purchase_price_khr', 'cost_khr']],
 ]
@@ -3230,7 +3292,7 @@ async function applyCrossChunkProductDedupe(
 
 function previewProductSignature(d: Record<string, unknown>): string {
   // Mirrors productImportRowSignature exactly so analyze and apply agree:
-  // name + barcode + cost is identity; selling/VIP price is mergeable data.
+  // name + barcode + cost is identity; selling/wholesale price is mergeable data.
   // A non-blank barcode + explicit lot code is the receipt-only exception:
   // later rows for that exact lot top up the first option without replacing
   // its catalog cost, while their own receipt costs remain on the batch and
@@ -3921,7 +3983,7 @@ export type ProductImportSignatureInput = {
 // normal update-path write once the second row resolves to the first's
 // pre-allocated id below), not two products.
 //
-// The shared identity rule is exact and deliberately excludes selling/VIP
+// The shared identity rule is exact and deliberately excludes selling/wholesale
 // price AND cost: same normalized name + barcode merges, and only a barcode
 // difference creates a sibling row. Branch never participates.
 //
@@ -4285,7 +4347,7 @@ async function dispatchStockActionSingle(
       productName: resolved.productName,
       barcode: resolved.barcode || null,
       sellingPriceUsd: resolved.sellingPriceUsd,
-      vipPriceUsd: resolved.vipPriceUsd,
+      wholesalePriceUsd: resolved.wholesalePriceUsd,
       costPriceUsd: resolved.costPriceUsd,
     })
     productId = ensured.productId
@@ -4309,7 +4371,7 @@ async function dispatchStockActionSingle(
       date: resolved.date,
       batchLabel: resolved.batchLabel,
       sellingPriceUsd: resolved.sellingPriceUsd,
-      vipPriceUsd: resolved.vipPriceUsd,
+      wholesalePriceUsd: resolved.wholesalePriceUsd,
       costPriceUsd: resolved.costPriceUsd,
       supplierName,
       supplierId,
@@ -5216,12 +5278,17 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // they survive.
           autoMergeRecords.push({ productId: earlier.id, rowNumber: r.rowNumber, losingJson: snapshotLosingRow(d) })
           // The identity rule's merge semantics (Part 388): when the twin
-          // rows disagree on selling/VIP price, the HIGHEST wins -- applied
-          // to BOTH rows' data, because the first row's INSERT and this
-          // row's later UPDATE each write their own params and the update
-          // runs last (statement order preserves row order).
-          const merged = { ...resolveMergedPricing([earlier.data, d]), ...resolveMergedCost([earlier.data, d]) }
-          Object.assign(earlier.data, merged)
+          // rows disagree on selling/wholesale price, the HIGHEST wins --
+          // applied to BOTH rows' data, because the first row's INSERT and
+          // this row's later UPDATE each write their own params and the
+          // update runs last (statement order preserves row order). Cost is
+          // the exception: it MEANS rather than maxes (S4-17), so all three
+          // resolvers are needed and none of them may be dropped.
+          const merged = {
+            ...resolveMergedPricing([earlier.data, d]),
+            ...resolveMergedWholesalePricing([earlier.data, d]),
+            ...resolveMergedCost([earlier.data, d]),
+          }          Object.assign(earlier.data, merged)
           Object.assign(d, merged)
           continue
         }
@@ -5277,7 +5344,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // down, which does write branch_stock for an explicit-branch
             // row.
             statements.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, special_price_usd=@special_price_usd, special_price_khr=@special_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
             continue
@@ -5331,7 +5398,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // single image_path).
           if (mode !== 'merge_stock') {
             statements.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, special_price_usd=@special_price_usd, special_price_khr=@special_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
           }
@@ -5513,7 +5580,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // '#e11d48'). normalizeProductImportRow pre-fills those three
           // with the same defaults for exactly this reason.
           statements.push({
-            sql: `INSERT INTO products (id, name, name_normalized, sku, barcode, category, categories, unit, unit_normalized, description, brand, brands, brand_compact, supplier, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path, created_at, updated_at) VALUES (@id, @name, @name_normalized, @sku, @barcode, @category, @categories, @unit, @unit_normalized, @description, @brand, @brands, @brand_compact, @supplier, @selling_price_usd, @selling_price_khr, @special_price_usd, @special_price_khr, @cost_price_usd, @cost_price_khr, @stock_quantity, @low_stock_threshold, @out_of_stock_threshold, @discount_enabled, @discount_type, @discount_percent, @discount_amount_usd, @discount_amount_khr, @discount_label, @discount_badge_color, @discount_starts_at, @discount_ends_at, @expiry_date, @expiry_alert_days, @is_active, @image_path, @created_at, @updated_at)`,
+            sql: `INSERT INTO products (id, name, name_normalized, sku, barcode, category, categories, unit, unit_normalized, description, brand, brands, brand_compact, supplier, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path, created_at, updated_at) VALUES (@id, @name, @name_normalized, @sku, @barcode, @category, @categories, @unit, @unit_normalized, @description, @brand, @brands, @brand_compact, @supplier, @selling_price_usd, @selling_price_khr, @wholesale_price_usd, @wholesale_price_khr, @cost_price_usd, @cost_price_khr, @stock_quantity, @low_stock_threshold, @out_of_stock_threshold, @discount_enabled, @discount_type, @discount_percent, @discount_amount_usd, @discount_amount_khr, @discount_label, @discount_badge_color, @discount_starts_at, @discount_ends_at, @expiry_date, @expiry_alert_days, @is_active, @image_path, @created_at, @updated_at)`,
             params: { ...d, id: newId, image_path: d.image_path ?? null, created_at: nowIso, updated_at: nowIso },
           })
           // Every new product gets a branch_stock row -- explicit branch

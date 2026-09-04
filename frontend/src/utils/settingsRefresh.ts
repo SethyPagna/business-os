@@ -24,6 +24,13 @@ const SETTINGS_CHANNEL_RULES: SettingsChannelRule[] = [
     channels: ['settings', 'sales', 'pos', 'dashboard'],
   },
   {
+    // Without a 'pos' channel here, turning the wholesale automation on would
+    // not reach an already-open till until it was reloaded -- the cashier
+    // would tick the box and watch nothing happen.
+    keys: ['pos_wholesale_auto_enabled', 'pos_wholesale_auto_min_qty'],
+    channels: ['settings', 'pos'],
+  },
+  {
     keys: [
       'business_name',
       'business_phone',

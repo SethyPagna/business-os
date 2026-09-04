@@ -23,7 +23,7 @@ function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, name_normalized TEXT, barcode TEXT, unit TEXT, stock_quantity REAL DEFAULT 0,
-      selling_price_usd REAL DEFAULT 0, special_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
+      selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
       is_active INTEGER DEFAULT 1, client_request_id TEXT UNIQUE, created_at TEXT, updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
@@ -60,7 +60,7 @@ function setup() {
 const input = {
   jobId: 'job-1', rowNumber: 2, productId: 10, productName: 'Serum',
   branchId: 1, branchName: 'Shop', quantity: 2, date: '08/27/2026',
-  batchLabel: 'LOT A', sellingPriceUsd: 12.345, vipPriceUsd: 10, costPriceUsd: 5,
+  batchLabel: 'LOT A', sellingPriceUsd: 12.345, wholesalePriceUsd: 10, costPriceUsd: 5,
 }
 
 ;(async () => {
@@ -69,8 +69,8 @@ const input = {
   const retry = await subject.applyUnifiedStockAdd(db, input)
   assert.strictEqual(first.alreadyApplied, false)
   assert.strictEqual(retry.alreadyApplied, true)
-  assert.deepStrictEqual(sqlite.prepare(`SELECT stock_quantity, selling_price_usd, special_price_usd, cost_price_usd FROM products WHERE id = 10`).get(), {
-    stock_quantity: 2, selling_price_usd: 12.35, special_price_usd: 10, cost_price_usd: 0,
+  assert.deepStrictEqual(sqlite.prepare(`SELECT stock_quantity, selling_price_usd, wholesale_price_usd, cost_price_usd FROM products WHERE id = 10`).get(), {
+    stock_quantity: 2, selling_price_usd: 12.35, wholesale_price_usd: 10, cost_price_usd: 0,
   }, 'receipt cost is historical; it never overwrites the catalog cost')
   assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity, 2)
   assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_batch_stock`).get().quantity, 2)
@@ -140,19 +140,19 @@ const input = {
   const createdDb = setup()
   const created = await subject.ensureUnifiedStockProduct(createdDb.db, {
     jobId: 'job-new', identityKey: 'new:new serum|NEW', productName: 'New Serum', barcode: 'NEW',
-    sellingPriceUsd: 9.999, vipPriceUsd: 8, costPriceUsd: 4,
+    sellingPriceUsd: 9.999, wholesalePriceUsd: 8, costPriceUsd: 4,
   })
   const createRetry = await subject.ensureUnifiedStockProduct(createdDb.db, {
     jobId: 'job-new', identityKey: 'new:new serum|NEW', productName: 'New Serum', barcode: 'NEW',
-    sellingPriceUsd: 99, vipPriceUsd: 88, costPriceUsd: 44,
+    sellingPriceUsd: 99, wholesalePriceUsd: 88, costPriceUsd: 44,
   })
   assert.strictEqual(created.created, true)
   assert.strictEqual(createRetry.created, false)
   assert.strictEqual(createRetry.productId, created.productId)
   assert.strictEqual(createdDb.sqlite.prepare(`SELECT COUNT(*) AS n FROM products WHERE client_request_id LIKE 'stock-import:%'`).get().n, 1)
   assert.strictEqual(createdDb.sqlite.prepare(`SELECT COUNT(*) AS n FROM branch_stock WHERE product_id = @id AND quantity = 0`).get({ id: created.productId }).n, 2)
-  assert.deepStrictEqual(createdDb.sqlite.prepare(`SELECT selling_price_usd, special_price_usd, cost_price_usd FROM products WHERE id = @id`).get({ id: created.productId }), {
-    selling_price_usd: 10, special_price_usd: 8, cost_price_usd: 4,
+  assert.deepStrictEqual(createdDb.sqlite.prepare(`SELECT selling_price_usd, wholesale_price_usd, cost_price_usd FROM products WHERE id = @id`).get({ id: created.productId }), {
+    selling_price_usd: 10, wholesale_price_usd: 8, cost_price_usd: 4,
   }, 'a retry resolves the original product instead of overwriting it with retry payload prices')
   console.log('PASS unified stock add commits batch/branch/product/movement/ledger atomically and is retry-idempotent')
 })().catch((error) => {

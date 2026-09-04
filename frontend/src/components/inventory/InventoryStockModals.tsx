@@ -50,8 +50,8 @@ type AdjustForm = {
   pricingLocked: boolean
   selling_price_usd: InventoryFormValue
   selling_price_khr: InventoryFormValue
-  special_price_usd: InventoryFormValue
-  special_price_khr: InventoryFormValue
+  wholesale_price_usd: InventoryFormValue
+  wholesale_price_khr: InventoryFormValue
   discount_enabled: boolean
   discount_type: string
   discount_percent: InventoryFormValue

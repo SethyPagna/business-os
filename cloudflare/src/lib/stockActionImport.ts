@@ -13,7 +13,7 @@ import {
 
 export const UNIFIED_STOCK_COLUMNS = [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
-  'selling_price', 'vip_price', 'cost_price', 'batch',
+  'selling_price', 'wholesale_price', 'cost_price', 'batch',
   // Optional (blank is fine, and files with only the original ten columns
   // still import): which supplier this row's stock was bought from. The
   // same product may carry different suppliers across batches — supplier
@@ -26,7 +26,7 @@ export interface UnifiedStockCatalogProduct {
   name: string
   barcode?: string | null
   selling_price_usd?: number | null
-  special_price_usd?: number | null
+  wholesale_price_usd?: number | null
   cost_price_usd?: number | null
   /** Active normalized lot/batch keys for the same-batch receipt exception. */
   batch_keys?: string[]
@@ -53,7 +53,7 @@ export interface UnifiedStockResolvedRow {
   date: string
   action: string
   sellingPriceUsd: number | null
-  vipPriceUsd: number | null
+  wholesalePriceUsd: number | null
   costPriceUsd: number | null
   batchLabel: string | null
   /** As-entered supplier for this row's batch; '' when the column is absent/blank. */
@@ -166,9 +166,17 @@ export function resolveUnifiedStockImportRows(
     const shop = optionalNumber(raw.shop, 'shop quantity')
     const warehouse = optionalNumber(raw.warehouse, 'warehouse quantity')
     const selling = optionalMoney(raw.selling_price, 'selling price')
-    const vip = optionalMoney(raw.vip_price, 'VIP price')
+    // Wholesale price -- the sheet column renamed from vip_price by migration
+    // 0111. The legacy vip_price / special_price spellings still resolve here:
+    // per the owner's ruling that column always carried wholesale numbers, so
+    // an old sheet headed "VIP price" IS a wholesale sheet and reading it as
+    // absent would silently drop the operator's real prices on every re-import
+    // of a file exported before the rename. An explicit wholesale_price wins,
+    // being the one header that unambiguously names the tier it means. Mirrors
+    // unifiedStockImport.ts's HEADER_ALIASES on the frontend side.
+    const wholesale = optionalMoney(raw.wholesale_price ?? raw.vip_price ?? raw.special_price, 'Wholesale price')
     const cost = optionalMoney(raw.cost_price, 'cost price')
-    const errors = [shop.error, warehouse.error, selling.error, vip.error, cost.error].filter((value): value is string => !!value)
+    const errors = [shop.error, warehouse.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
     if (!name && !barcode) errors.push('Name or barcode is required.')
     if (!date) errors.push('Date must be mm/dd/yyyy or yyyy-mm-dd.')
     if (shop.value == null && warehouse.value == null) errors.push('Enter a shop or warehouse quantity.')
@@ -211,7 +219,7 @@ export function resolveUnifiedStockImportRows(
       date,
       action,
       sellingPriceUsd: selling.value ?? matched.product?.selling_price_usd ?? null,
-      vipPriceUsd: vip.value ?? matched.product?.special_price_usd ?? null,
+      wholesalePriceUsd: wholesale.value ?? matched.product?.wholesale_price_usd ?? null,
       costPriceUsd: cost.value ?? matched.product?.cost_price_usd ?? null,
       batchLabel: batchLabel || null,
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
@@ -227,7 +235,7 @@ export function resolveUnifiedStockImportRows(
       date,
       action,
       sellingPriceUsd: resolved.sellingPriceUsd,
-      vipPriceUsd: resolved.vipPriceUsd,
+      wholesalePriceUsd: resolved.wholesalePriceUsd,
       costPriceUsd: resolved.costPriceUsd,
       batchLabel: resolved.batchLabel,
       isNewProduct: !matched.product,

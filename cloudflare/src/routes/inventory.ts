@@ -1055,8 +1055,8 @@ type StockRowFields = {
   parent_id: number | null
   selling_price_usd: number | null
   selling_price_khr: number | null
-  special_price_usd: number | null
-  special_price_khr: number | null
+  wholesale_price_usd: number | null
+  wholesale_price_khr: number | null
   discount_enabled: number | null
   discount_type: string | null
   discount_percent: number | null
@@ -1071,7 +1071,7 @@ type StockRowFields = {
 }
 
 const STOCK_ROW_COLUMNS = `id, name, sku, barcode, category, brand, unit, description, supplier, parent_id,
-  selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
+  selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr,
   discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr,
   purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
   low_stock_threshold, out_of_stock_threshold`
@@ -1109,7 +1109,7 @@ async function resolveAddStockTarget(
   source: StockRowFields,
   overrides: {
     sellingUsd: number; sellingKhr: number
-    specialUsd: number; specialKhr: number
+    wholesaleUsd: number; wholesaleKhr: number
     discountEnabled: boolean; discountType: string; discountPercent: number; discountAmountUsd: number; discountAmountKhr: number
     costUsd: number; costKhr: number
     barcode: string | null
@@ -1174,8 +1174,8 @@ async function resolveAddStockTarget(
     is_active: 1,
     selling_price_usd: overrides.sellingUsd,
     selling_price_khr: overrides.sellingKhr,
-    special_price_usd: overrides.specialUsd,
-    special_price_khr: overrides.specialKhr,
+    wholesale_price_usd: overrides.wholesaleUsd,
+    wholesale_price_khr: overrides.wholesaleKhr,
     discount_enabled: overrides.discountEnabled ? 1 : 0,
     discount_type: overrides.discountType || 'percent',
     discount_percent: overrides.discountPercent,
@@ -1333,8 +1333,8 @@ app.post('/adjust', async (c) => {
     const overrides = {
       sellingUsd: pricing.selling_price_usd != null ? Number(pricing.selling_price_usd) || 0 : Number(source.selling_price_usd) || 0,
       sellingKhr: pricing.selling_price_khr != null ? Number(pricing.selling_price_khr) || 0 : Number(source.selling_price_khr) || 0,
-      specialUsd: pricing.special_price_usd != null ? Number(pricing.special_price_usd) || 0 : Number(source.special_price_usd) || 0,
-      specialKhr: pricing.special_price_khr != null ? Number(pricing.special_price_khr) || 0 : Number(source.special_price_khr) || 0,
+      wholesaleUsd: pricing.wholesale_price_usd != null ? Number(pricing.wholesale_price_usd) || 0 : Number(source.wholesale_price_usd) || 0,
+      wholesaleKhr: pricing.wholesale_price_khr != null ? Number(pricing.wholesale_price_khr) || 0 : Number(source.wholesale_price_khr) || 0,
       discountEnabled: pricing.discount_enabled != null ? Boolean(pricing.discount_enabled) : Boolean(source.discount_enabled),
       discountType: pricing.discount_type != null ? String(pricing.discount_type) : String(source.discount_type || 'percent'),
       discountPercent: pricing.discount_percent != null ? Number(pricing.discount_percent) || 0 : Number(source.discount_percent) || 0,
@@ -1348,13 +1348,13 @@ app.post('/adjust', async (c) => {
     targetProductId = resolved.productId
     createdSibling = resolved.created
     if (!createdSibling) {
-      // Selling/VIP price is mergeable data: an explicit unlocked receipt
+      // Selling/wholesale price is mergeable data: an explicit unlocked receipt
       // may raise it, but never lower it. Cost remains untouched here.
       await db.prepare(`UPDATE products SET
           selling_price_usd = MAX(COALESCE(selling_price_usd, 0), @sellingUsd),
           selling_price_khr = MAX(COALESCE(selling_price_khr, 0), @sellingKhr),
-          special_price_usd = MAX(COALESCE(special_price_usd, 0), @specialUsd),
-          special_price_khr = MAX(COALESCE(special_price_khr, 0), @specialKhr),
+          wholesale_price_usd = MAX(COALESCE(wholesale_price_usd, 0), @wholesaleUsd),
+          wholesale_price_khr = MAX(COALESCE(wholesale_price_khr, 0), @wholesaleKhr),
           updated_at = CURRENT_TIMESTAMP
         WHERE id = @id`).run({ id: targetProductId, ...overrides })
     }

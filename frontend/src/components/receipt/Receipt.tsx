@@ -40,9 +40,10 @@ interface ReceiptItem {
   product_discount_usd?: number | string | null
   // The line's price tier -- comes straight through on the stored sale_items
   // row (the list query SELECTs si.*) and on the POS in-memory checkout
-  // payload, so the receipt can print a small tier tag ("VIP" / "Wholesale")
-  // under the item name. Absent or 'selling' -> no tag. Toggled per line in
-  // the cart (the VIP marker), so a deselected line arrives here as 'selling'.
+  // payload, so the receipt can print a small "Wholesale" tier tag beside the
+  // item name. Absent or 'selling' -> no tag. Toggled per line in the cart, so
+  // a deselected line arrives here as 'selling'. A legacy 'special' value also
+  // prints the wholesale tag -- see the tierTag derivation below.
   price_mode?: string | null
   product_discount_label?: string | null
 }
@@ -460,16 +461,23 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             && originalUnitUsd > unitUsd + 0.005
             && item.applied_price_usd != null
           const itemSavingsUsd = hasItemDiscount ? (originalUnitUsd - unitUsd) * qty : 0
-          // Price-tier tag printed under the item name (user). Derived from
-          // the persisted price_mode, so a VIP line the cashier left marked
-          // prints "VIP" and one they deselected (recorded as 'selling') prints
-          // nothing. "VIP" is identical in both packs; Wholesale carries its
-          // Khmer បោះដុំ for the forthcoming wholesale tier.
-          const tierTag = item.price_mode === 'special'
-            ? 'VIP'
-            : item.price_mode === 'wholesale'
-              ? (lang === 'km' ? 'បោះដុំ' : 'Wholesale')
-              : ''
+          // Price-tier tag printed beside the item name (user). Derived from
+          // the persisted price_mode, so a wholesale line the cashier left
+          // marked prints the tag and one they deselected (recorded as
+          // 'selling') prints nothing.
+          //
+          // 'special' is accepted here as a DEFENSIVE legacy alias and prints
+          // the WHOLESALE label, not "VIP". The 2026-09-04 ruling established
+          // that the tier this app called VIP was the wholesale price all
+          // along, so any historical row still carrying 'special' means
+          // wholesale and must be reprinted as such -- a receipt reprint has to
+          // say the same thing today that the sale meant. (Production was
+          // checked: zero sale_items rows carry price_mode='special', only
+          // 'custom' and 'selling'. This branch exists so an unreprinted or
+          // imported old row can never resurrect the deleted VIP wording.)
+          const tierTag = (item.price_mode === 'wholesale' || item.price_mode === 'special')
+            ? (lang === 'km' ? 'បោះដុំ' : 'Wholesale')
+            : ''
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="py-1.5">
               <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] items-start gap-x-2">

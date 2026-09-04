@@ -335,13 +335,15 @@ export const IMAGE_ONLY_BASE_FIELDS = [
  */
 export const IMAGE_ONLY_OPTIONAL_FIELDS: Record<string, readonly string[]> = {
   products_image_only_show_price: ['selling_price_usd', 'selling_price_khr'],
-  // VIP price is its own grant, separate from selling price (Aug 28): an org
-  // can let this role check the shelf price while keeping VIP terms private,
-  // or grant both for the "view everything, touch nothing" arrangement.
-  products_image_only_show_vip: ['special_price_usd', 'special_price_khr'],
-  // Wholesale price is its own grant too (same reasoning as VIP above): an org
-  // can expose the shelf price while keeping wholesale terms private, or grant
-  // any combination of the three tiers to the image-only role independently.
+  // products_image_only_show_vip (special_price_usd/khr) is GONE. The
+  // 2026-09-04 ruling established that the "VIP" tier was the wholesale price
+  // under a wrong name and deleted it; migration 0111 moved its values into
+  // wholesale_price_* and zeroed special_price_*, so the grant would now only
+  // expose two permanently-empty columns. Nothing is stranded by the removal:
+  // 0 users and 0 roles held the permission when it was checked in production.
+  // Wholesale price is its own grant, separate from selling price (Aug 28): an
+  // org can expose the shelf price while keeping wholesale terms private, or
+  // grant both for the "view everything, touch nothing" arrangement.
   products_image_only_show_wholesale: ['wholesale_price_usd', 'wholesale_price_khr'],
   products_image_only_show_barcode: ['barcode'],
   products_image_only_show_category: ['category'],

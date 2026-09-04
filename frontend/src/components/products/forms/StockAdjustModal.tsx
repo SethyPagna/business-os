@@ -51,8 +51,10 @@ type AdjustForm = {
   pricingLocked: boolean
   selling_price_usd: InventoryFormValue
   selling_price_khr: InventoryFormValue
-  special_price_usd: InventoryFormValue
-  special_price_khr: InventoryFormValue
+  // Renamed from special_price_* with the tier itself (2026-09-04 ruling), in
+  // lockstep with InventoryStockModals.tsx as the type comment above requires.
+  wholesale_price_usd: InventoryFormValue
+  wholesale_price_khr: InventoryFormValue
   discount_enabled: boolean
   discount_type: string
   discount_percent: InventoryFormValue
@@ -97,8 +99,10 @@ type PickedProduct = Record<string, any> & {
   barcode?: string
   selling_price_usd?: number
   selling_price_khr?: number
-  special_price_usd?: number
-  special_price_khr?: number
+  // Was special_price_*: the 2026-09-04 ruling deleted the "VIP" tier those
+  // columns backed, and migration 0111 moved the values into this pair.
+  wholesale_price_usd?: number
+  wholesale_price_khr?: number
   discount_enabled?: number | boolean | null
   discount_type?: string
   discount_percent?: number
@@ -296,8 +300,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     pricingLocked: true,
     selling_price_usd: 0,
     selling_price_khr: 0,
-    special_price_usd: 0,
-    special_price_khr: 0,
+    wholesale_price_usd: 0,
+    wholesale_price_khr: 0,
     discount_enabled: false,
     discount_type: 'percent',
     discount_percent: 0,
@@ -346,8 +350,12 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       pricingLocked: true,
       selling_price_usd: product.selling_price_usd || 0,
       selling_price_khr: product.selling_price_khr || 0,
-      special_price_usd: product.special_price_usd || 0,
-      special_price_khr: product.special_price_khr || 0,
+      // Was the special_price_* pair for the deleted "VIP" tier; prefilled from
+      // the row's real wholesale price now, and sent back out with the pricing
+      // payload below so an unlocked receipt that creates a new row carries
+      // the tier onto it.
+      wholesale_price_usd: product.wholesale_price_usd || 0,
+      wholesale_price_khr: product.wholesale_price_khr || 0,
       discount_enabled: !!product.discount_enabled,
       discount_type: product.discount_type || 'percent',
       discount_percent: product.discount_percent || 0,
@@ -455,8 +463,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
         selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
-        special_price_usd: parseFloat(String(adjustForm.special_price_usd)) || 0,
-        special_price_khr: parseFloat(String(adjustForm.special_price_khr)) || 0,
+        // Was special_price_*, renamed with the tier by the 2026-09-04 ruling.
+        // /adjust names the wholesale pair now, so this is a live column. No
+        // input renders for it -- the values ride through prefilled from the
+        // row -- but unlocked pricing can land the receipt on a NEW product
+        // row, and this pair is what seeds that row's tier. Kept identical to
+        // Inventory.tsx's copy of this payload.
+        wholesale_price_usd: parseFloat(String(adjustForm.wholesale_price_usd)) || 0,
+        wholesale_price_khr: parseFloat(String(adjustForm.wholesale_price_khr)) || 0,
         discount_enabled: !!adjustForm.discount_enabled,
         discount_type: adjustForm.discount_type,
         discount_percent: parseFloat(String(adjustForm.discount_percent)) || 0,

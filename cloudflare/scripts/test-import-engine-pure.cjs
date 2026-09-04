@@ -607,7 +607,7 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
 {
   const REQUIRED_PRODUCT_WRITE_COLUMNS = [
     'name', 'sku', 'barcode', 'category', 'unit', 'description', 'brand', 'supplier',
-    'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr',
+    'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr',
     'cost_price_usd', 'cost_price_khr',
     'low_stock_threshold', 'out_of_stock_threshold',
     'discount_enabled', 'discount_type', 'discount_percent',
@@ -873,7 +873,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const db = makeFakeProductsDb([])
     const results = await classifyProducts(db, [row({
       name: 'Widget', selling_price_usd: '10', cost_price_usd: '5',
-      special_price_usd: '8', out_of_stock_threshold: '2',
+      wholesale_price_usd: '8', out_of_stock_threshold: '2',
       discount_enabled: 'true', discount_type: 'percent', discount_percent: '15',
       discount_amount_usd: '0', discount_amount_khr: '0',
       discount_label: 'Sale', discount_badge_color: '#00ff00',
@@ -881,7 +881,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       expiry_date: '2027-01-01', expiry_alert_days: '45',
     }, 1)], 'job-1', null, noImages)
     const d = results[0].data
-    assert.strictEqual(d.special_price_usd, 8)
+    assert.strictEqual(d.wholesale_price_usd, 8)
     assert.strictEqual(d.out_of_stock_threshold, 2)
     assert.strictEqual(d.discount_enabled, 1)
     assert.strictEqual(d.discount_type, 'percent')
@@ -894,21 +894,31 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(d.expiry_alert_days, 45)
   }
 
-  // VIP price (stored in special_price_*; DB column name unchanged, label
-  // is "VIP" now). Two things this guards, both reported bugs:
-  //   1. the NEW `vip_price_*` header is read, and
-  //   2. the LEGACY `special_price_*` header still is (old export files),
-  //   3. a BLANK value defaults to 0, never the selling price.
+  // Wholesale price (products.wholesale_price_usd/khr -- migration 0111
+  // moved the tier off the dead special_price_* columns). Four things this
+  // guards, all reported bugs or the ruling itself:
+  //   1. the canonical `wholesale_price_*` header is read,
+  //   2. the LEGACY `vip_price_*` header lands in wholesale (that column
+  //      always held wholesale numbers, so an old "VIP" sheet is a
+  //      wholesale sheet and must not be dropped on the floor),
+  //   3. so does the even older `special_price_*` header, and an explicit
+  //      `wholesale_price_*` wins over both when a file carries them, and
+  //   4. a BLANK value defaults to 0, never the selling price.
   {
     const db = makeFakeProductsDb([])
-    const [viaVip, viaLegacy, blank] = await classifyProducts(db, [
-      row({ name: 'Vip New', selling_price_usd: '12', vip_price_usd: '8' }, 1),
-      row({ name: 'Vip Legacy', selling_price_usd: '12', special_price_usd: '7' }, 2),
-      row({ name: 'Vip Blank', selling_price_usd: '12' }, 3),
-    ], 'job-vip', null, noImages)
-    assert.strictEqual(viaVip.data.special_price_usd, 8, 'the new vip_price_usd header must be read into special_price_usd')
-    assert.strictEqual(viaLegacy.data.special_price_usd, 7, 'the legacy special_price_usd header must still be honored')
-    assert.strictEqual(blank.data.special_price_usd, 0, 'a row with no VIP price stores 0, not the selling price (12)')
+    const [viaWholesale, viaVip, viaLegacy, viaBoth, blank] = await classifyProducts(db, [
+      row({ name: 'Wholesale New', selling_price_usd: '12', wholesale_price_usd: '9' }, 1),
+      row({ name: 'Vip Legacy', selling_price_usd: '12', vip_price_usd: '8' }, 2),
+      row({ name: 'Special Legacy', selling_price_usd: '12', special_price_usd: '7' }, 3),
+      row({ name: 'Both Headers', selling_price_usd: '12', wholesale_price_usd: '9', vip_price_usd: '8', special_price_usd: '7' }, 4),
+      row({ name: 'Wholesale Blank', selling_price_usd: '12' }, 5),
+    ], 'job-wholesale', null, noImages)
+    assert.strictEqual(viaWholesale.data.wholesale_price_usd, 9, 'the canonical wholesale_price_usd header must be read into wholesale_price_usd')
+    assert.strictEqual(viaVip.data.wholesale_price_usd, 8, 'the legacy vip_price_usd header must land in wholesale_price_usd')
+    assert.strictEqual(viaLegacy.data.wholesale_price_usd, 7, 'the legacy special_price_usd header must land in wholesale_price_usd')
+    assert.strictEqual(viaBoth.data.wholesale_price_usd, 9, 'an explicit wholesale_price_usd header wins over both legacy spellings')
+    assert.strictEqual(blank.data.wholesale_price_usd, 0, 'a row with no wholesale price stores 0, not the selling price (12)')
+    assert.ok(!('special_price_usd' in viaLegacy.data), 'the dead special_price_usd column must never be written again')
   }
 
   // 2) Nothing set beyond the required fields -- every default must match
@@ -920,7 +930,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const db = makeFakeProductsDb([])
     const results = await classifyProducts(db, [row({ name: 'Bare Product', selling_price_usd: '20' }, 1)], 'job-2', null, noImages)
     const d = results[0].data
-    assert.strictEqual(d.special_price_usd, 0, 'VIP (special) price with no CSV value defaults to 0, NOT the selling price -- defaulting to selling silently set VIP = selling on every row and the edit form then wrote it back, destroying real VIP prices')
+    assert.strictEqual(d.wholesale_price_usd, 0, 'wholesale price with no CSV value defaults to 0, NOT the selling price -- defaulting to selling silently set the discounted tier = selling on every row and the edit form then wrote it back, destroying real wholesale prices')
     assert.strictEqual(d.out_of_stock_threshold, 0)
     assert.strictEqual(d.discount_enabled, 0)
     assert.strictEqual(d.discount_type, 'percent')
@@ -2109,12 +2119,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 
   // Pure helper behavior first.
   {
-    const data = { cost_price_usd: 0, cost_price_khr: 0, selling_price_usd: 45, special_price_usd: 0 }
-    const match = { cost_price_usd: 38, cost_price_khr: 155800, selling_price_usd: 45, special_price_usd: 40 }
+    const data = { cost_price_usd: 0, cost_price_khr: 0, selling_price_usd: 45, wholesale_price_usd: 0 }
+    const match = { cost_price_usd: 38, cost_price_khr: 155800, selling_price_usd: 45, wholesale_price_usd: 40 }
     preserveExistingMoneyOnBlankCells(data, match, { name: 'X', selling_price_usd: '45' })
     assert.strictEqual(data.cost_price_usd, 38, 'blank cost cell must keep the existing cost')
     assert.strictEqual(data.cost_price_khr, 155800, 'blank khr cost cell must keep the existing khr cost')
-    assert.strictEqual(data.special_price_usd, 40, 'blank VIP cell on a matched row must keep the existing VIP price')
+    assert.strictEqual(data.wholesale_price_usd, 40, 'blank wholesale cell on a matched row must keep the existing wholesale price')
     assert.strictEqual(data.selling_price_usd, 45, 'provided selling cell is untouched')
   }
   {

@@ -42,7 +42,7 @@ const subject = loadCompiled('stockActionImport.ts', {
 
 assert.deepStrictEqual(subject.UNIFIED_STOCK_COLUMNS, [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
-  'selling_price', 'vip_price', 'cost_price', 'batch',
+  'selling_price', 'wholesale_price', 'cost_price', 'batch',
   // supplier is OPTIONAL (migration 0062): blank/absent keeps the original
   // ten-column contract importable, present attributes the batch.
   'supplier',
@@ -50,7 +50,7 @@ assert.deepStrictEqual(subject.UNIFIED_STOCK_COLUMNS, [
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"reconcile"}'), 'reconcile')
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"wrong"}'), 'direct')
 
-const products = [{ id: 10, name: 'Serum', barcode: 'ABC', selling_price_usd: 12, special_price_usd: 10, cost_price_usd: 5 }]
+const products = [{ id: 10, name: 'Serum', barcode: 'ABC', selling_price_usd: 12, wholesale_price_usd: 10, cost_price_usd: 5 }]
 const branches = [{ id: 1, name: 'Shop' }, { id: 2, name: 'Warehouse' }]
 const current = [{ productId: 10, branchId: 1, quantity: 8 }, { productId: 10, branchId: 2, quantity: 4 }]
 

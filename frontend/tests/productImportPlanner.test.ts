@@ -380,16 +380,23 @@ await runTest('analyzeProductImportText surfaces both a duplicate-header and a b
   assert.equal(analysis.warnings.some((warning) => /Column 4 has no header/.test(warning)), true)
 })
 
-await runTest('VIP price: reads the vip_price_* header, honours the legacy special_price_* header, and defaults blank to 0 not the selling price', () => {
+await runTest('Wholesale price: reads wholesale_price_*, lands the legacy vip_price_*/special_price_* headers there too, prefers the explicit header, and defaults blank to 0 not the selling price', () => {
   const analysis = analyzeProductImportRows([
-    { name: 'Vip New', selling_price_usd: '12', vip_price_usd: '8', stock_quantity: '1' },
-    { name: 'Vip Legacy', selling_price_usd: '12', special_price_usd: '7', stock_quantity: '1' },
-    { name: 'Vip Blank', selling_price_usd: '12', stock_quantity: '1' },
+    { name: 'Wholesale New', selling_price_usd: '12', wholesale_price_usd: '9', stock_quantity: '1' },
+    { name: 'Vip Legacy', selling_price_usd: '12', vip_price_usd: '8', stock_quantity: '1' },
+    { name: 'Special Legacy', selling_price_usd: '12', special_price_usd: '7', stock_quantity: '1' },
+    { name: 'Both Headers', selling_price_usd: '12', wholesale_price_usd: '9', vip_price_usd: '8', special_price_usd: '7', stock_quantity: '1' },
+    { name: 'Wholesale Blank', selling_price_usd: '12', stock_quantity: '1' },
   ], [])
   const byName = (name: string) => analysis.rows.find((row) => String(row.name) === name)
-  assert.equal(Number(byName('Vip New')!.special_price_usd), 8, 'the new vip_price_usd header maps into special_price_usd')
-  assert.equal(Number(byName('Vip Legacy')!.special_price_usd), 7, 'the legacy special_price_usd header still works')
-  assert.equal(Number(byName('Vip Blank')!.special_price_usd), 0, 'a blank VIP price is 0, NOT the selling price (12) -- defaulting to selling was destroying real VIP prices on re-save')
+  assert.equal(Number(byName('Wholesale New')!.wholesale_price_usd), 9, 'the canonical wholesale_price_usd header maps into wholesale_price_usd')
+  // Migration 0111's ruling: that column always held wholesale numbers, so an
+  // old sheet headed "VIP price" is a wholesale sheet -- dropping it would lose
+  // the data on every re-import of a file exported before the rename.
+  assert.equal(Number(byName('Vip Legacy')!.wholesale_price_usd), 8, 'the legacy vip_price_usd header lands in wholesale_price_usd')
+  assert.equal(Number(byName('Special Legacy')!.wholesale_price_usd), 7, 'the legacy special_price_usd header lands in wholesale_price_usd')
+  assert.equal(Number(byName('Both Headers')!.wholesale_price_usd), 9, 'an explicit wholesale_price_usd header wins over both legacy spellings')
+  assert.equal(Number(byName('Wholesale Blank')!.wholesale_price_usd), 0, 'a blank wholesale price is 0, NOT the selling price (12) -- defaulting to selling was destroying real prices on re-save')
 })
 
 if (failed > 0) {
