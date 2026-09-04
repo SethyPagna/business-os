@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, hasAnyPermission, getPermissionTier, getActionTier } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, getPermissionTier, getActionTier, isAdminControlUser } from '../lib/permissions'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
 // every sales list/stat/report but perform no writes. Reads use this
@@ -1005,9 +1005,26 @@ app.patch('/:id/status', async (c) => {
     payment_details?: Array<{ method?: string; amount_usd?: number | string; amount_khr?: number | string }>
     amount_paid_usd?: number | string
     amount_paid_khr?: number | string
+    // S4-2: admin-only "Don't touch stock" -- change the status and move
+    // NO stock (see lib/saleTransitions.ts's planSaleStockTransition for
+    // why, and why it is sticky once set).
+    skip_stock?: boolean
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
   const saleStatus = String(body.sale_status || '')
+
+  // S4-2, server side. The UI hides the toggle behind an admin check AND a
+  // lock, but a hidden control is not a permission: the flag is refused
+  // here for anyone who is not an administrator, using the same
+  // isAdminControlUser() gate that guards user management, device approval
+  // and loyalty awards (reserved `admin` username, `admin` role code, or an
+  // explicit permissions.all grant). Refused loudly -- never silently
+  // downgraded to a normal stock-moving transition, which would deduct
+  // units the caller explicitly said not to touch.
+  const skipStockRequested = body.skip_stock === true || String(body.skip_stock ?? '') === 'true'
+  if (skipStockRequested && !isAdminControlUser(user)) {
+    return c.json({ error: 'Administrator access required to change a sale status without touching stock.' }, 403)
+  }
 
   if (!saleStatus || !VALID_SALE_STATUSES.includes(saleStatus)) {
     return c.json({ error: `Invalid status. Must be one of: ${VALID_SALE_STATUSES.join(', ')}` }, 400)
@@ -1021,6 +1038,8 @@ app.patch('/:id/status', async (c) => {
     receipt_number: string | null
     status_before_cancel: string | null
     cancel_fee_id: number | null
+    // migration 0109; absent (undefined) on a database that has not run it.
+    stock_skipped: number | null
   }>([id])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
@@ -1044,6 +1063,16 @@ app.patch('/:id/status', async (c) => {
   // see lib/saleTransitions.ts.
   const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // S4-2: is this transition outside the stock ledger? Either the admin
+  // asked for it now, or this sale was ALREADY marked stock-skipped by an
+  // earlier transition. The second half is the important one: a sale that
+  // reached `completed` without the system deducting anything must never
+  // later "give back" units it never took (a cancel would compute
+  // delta = 0 - held(completed) and invent stock). Once skipped, always
+  // skipped -- see the long note on planSaleStockTransition.
+  const saleAlreadyStockSkipped = Number(sale.stock_skipped || 0) === 1
+  const skipStock = skipStockRequested || saleAlreadyStockSkipped
 
   // Cancelling requires its reason (Mistake / Buyer didn't buy / Other +
   // note), and may carry the lost fee -- e.g. a delivery fee the shop
@@ -1126,11 +1155,19 @@ app.patch('/:id/status', async (c) => {
     }
   }
   const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
+  let skippedDamagedUnits = 0
   for (const item of items) {
     if (!item.damaged_lot_id || !item.product_id) continue
     const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
     const delta = heldQuantity(saleStatus, item.quantity, returned) - heldQuantity(oldStatus, item.quantity, returned)
     if (delta === 0) continue
+    // S4-2: a damaged lot is stock too -- "don't touch stock" means all of
+    // it, so these ops (and their damage movements) are counted and then
+    // NOT queued, rather than half-applying the transition.
+    if (skipStock) {
+      skippedDamagedUnits += Math.abs(delta)
+      continue
+    }
     damagedTransitionOps.push({ lotId: Number(item.damaged_lot_id), productId: item.product_id, productName: item.product_name, branchId: item.branch_id, delta })
   }
 
@@ -1143,7 +1180,9 @@ app.patch('/:id/status', async (c) => {
     reason: movementReason,
     userId: user?.id ?? null,
     userName: user?.name ?? null,
+    skipStock,
   })
+  const totalSkippedUnits = plan.skippedUnits + skippedDamagedUnits
 
   // Pre-flight availability for anything the plan TAKES (plain read; the
   // CHECK(quantity >= 0) constraints below remain the real race guard,
@@ -1163,6 +1202,21 @@ app.patch('/:id/status', async (c) => {
   if (body.notes !== undefined) {
     updates.push('notes = @notes')
     updateParams.notes = body.notes
+  }
+
+  // S4-2: WRITE DOWN that stock was deliberately not moved (migration
+  // 0109). Without this a sale whose deduction was skipped on purpose is
+  // indistinguishable, next month, from one whose deduction was lost to a
+  // bug -- and the flag is also what makes the skip sticky, so the sale's
+  // later transitions cannot invent the units back. Stamped once, on the
+  // transition that first skipped; re-marking is a no-op.
+  if (skipStockRequested && !saleAlreadyStockSkipped) {
+    updates.push(
+      'stock_skipped = 1',
+      "stock_skipped_at = datetime('now')",
+      'stock_skipped_by_name = @stock_skipped_by_name',
+    )
+    updateParams.stock_skipped_by_name = user?.name ?? null
   }
 
   // Y10: the payment for an awaiting-payment sale is decided when it is
@@ -1348,6 +1402,15 @@ app.patch('/:id/status', async (c) => {
     ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
     restoredUnits: plan.restoredUnits,
     deductedUnits: plan.deductedUnits,
+    // S4-2: the second half of "record that stock was deliberately
+    // skipped" -- the sale carries the flag, the audit trail carries WHO,
+    // WHEN, HOW MANY units were not moved, and whether this transition
+    // asked for it or merely inherited an earlier skip.
+    ...(skipStock ? {
+      stockSkipped: true,
+      stockSkippedUnits: totalSkippedUnits,
+      stockSkipSource: skipStockRequested ? 'requested' : 'sale_already_stock_skipped',
+    } : {}),
   })
   // Same cache-invalidation reasoning as POST / above -- a status change
   // here can deduct or restore stock.
@@ -1365,10 +1428,16 @@ app.patch('/:id/status', async (c) => {
       `Status: ${oldStatus.replace(/_/g, ' ')} → ${saleStatus.replace(/_/g, ' ')}`,
       sale.customer_name ? `Customer: ${sale.customer_name}` : '',
       cancelReason ? `Reason: ${cancelReasonLabel(cancelReason)}` : '',
+      // S4-2: say it out loud on the shop's channel too -- a status change
+      // that moved no stock must not look like a normal one.
+      skipStock ? `Stock: not changed (${totalSkippedUnits} unit${totalSkippedUnits === 1 ? '' : 's'} deliberately skipped)` : '',
       cancelFeeUsd || cancelFeeKhr ? `Lost fee: ${telegramMoney(cancelFeeUsd, cancelFeeKhr)}` : '',
     ],
   }).catch((error) => console.error('[telegram] sale status notification failed', error)))
-  return c.json(feeWarning ? { ...payload, warning: feeWarning } : payload)
+  // S4-2: echo the skip back so the client can badge the sale immediately
+  // (and so a scripted caller can assert the flag actually took effect).
+  const statusPayload = skipStock ? { ...payload, stock_skipped: 1 } : payload
+  return c.json(feeWarning ? { ...statusPayload, warning: feeWarning } : statusPayload)
 })
 
 // PATCH /api/sales/:id/customer -- attach/detach a customer or membership on
