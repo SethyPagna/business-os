@@ -125,6 +125,177 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+---
+
+## 📌 PICK-UP HERE — fleet handoff, Sep 4 2026 ~12:10 UTC (session `business-os-v1-ee`)
+
+*Written for the ~14 live sessions. Everything below is **reference to re-verify**, not fact. The one-line
+version: **production is live and healthy from a branch that is not `main`, one real reporting fix is stranded
+and unshipped, two items can only be closed by the owner, and the docs are forked in two places.***
+
+### LIVE RIGHT NOW
+
+| | |
+|---|---|
+| wrangler version | **`798d9e19-76d0-4909-8db3-6a7a4ad43ad7`** *(a wrangler version UUID, **not** a git sha)* |
+| commit | **`c7ef7264`** |
+| branch | **`rc/ee-integrate-2026-09-04`** — **NOT `main`** |
+| migrations | **`0117_membership_points_reset.sql` applied 11:37:39 UTC**; highest `d1_migrations` row id **116** |
+| pre-migration D1 bookmark | `00001284-00000006-000050dc-0b6029c1fc8415749dafe6e6a03422be` (11:36:20 UTC) |
+| previous live version | `a164d260-49ae-4bec-b372-eb73bce58850`, then `8480241e-…` (ledger #6) |
+
+**Never write a wrangler version as eight hex characters.** A truncated version UUID and a short git sha have
+the identical surface form, `git cat-file` fails the same way on both, and the failure *looks* like a missing
+commit. Three sessions ran `cat-file` on `8480241e` today and read the failure as a bad reference. Write the
+full UUID or prefix it with `version`. (Diagnosis: `business-os-v1-ba`.)
+
+**`main` DOES NOT CONTAIN THE DEPLOYED CODE.** `git merge-base --is-ancestor c7ef7264 origin/main` → **no**.
+Deploying `main` rolls back the entire S4 batch. Verified from four sessions independently.
+
+**Nothing was rolled back by this deploy.** `e83ee73f` (the 07:57 deploy, ledger #6) **is** contained in
+`c7ef7264` — confirmed independently by `ee`, `7c`, `ba`, `4a`, `db`. The 07:57 block earlier in this section is
+a correct historical record; it is not competing with this one. Ledger row **#7** below is this deploy.
+
+⚠️ The live probes in the table above were run at deploy time and **could not be re-run when this block was
+written** — `curl` to both hosts returned `000` (no connection) from this session. Treat `/health` as unconfirmed
+since 11:40 UTC and re-probe before relying on it.
+
+### ⛔ ONLY THE OWNER CAN CLOSE THESE TWO — details in the `s4/pay-notes-points-delivery-88` block below
+
+1. **Membership points are ON with every balance at zero, and accrual has already resumed.**
+2. **The authenticated balance read was never done** — safe subjects `19718`, `19719`, `19735`, expect `0`.
+   Do the toggle **first**, then the read.
+
+**Sharpening from `business-os-v1-db`, and it changes how item 1 can be closed:** the switch is on *by default
+when the settings row is absent* — `portal.ts:329` `normalizeBoolean(settings.loyalty_points_enabled, true)` and
+`LoyaltyPointsPage.tsx:385` `String(settings.loyalty_points_enabled ?? 'true')`. So the UI toggle renders
+identically for *unset* and for *explicitly true*, and **the item cannot be closed by looking at the toggle** —
+it needs a direct read of whether the `loyalty_points_enabled` row **exists**. If nobody ever wrote that row,
+the switch has never been off for a moment, including while `0117` ran. The owner asked for two things — zero
+the balances, and a switch — and only they can say whether accrual continuing from zero was the intent.
+
+### 🔴 THE BIGGEST OPEN ITEM: a real reporting fix is stranded and NOT live
+
+**In production today, the in-app Reports "Discounts" figure excludes every line-level discount, and the
+Telegram day report includes them. The two surfaces disagree with each other right now.**
+
+Verified at `c7ef7264` by `ee`, `88` and `7c` independently:
+
+- `getItemDiscountUsd` is defined at `salesAnalytics.ts:670` and its **only** caller anywhere is
+  `telegram.ts:567` (imported at `telegram.ts:9`). Nothing in the reports path reaches it.
+- `sales.ts:2944` verbatim: `total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0)`
+  — invoice-level only.
+- On `main` the helper **does not exist at all** (`7c`). The gap is real on both lines, differently.
+
+**Magnitude — the fix commit's own measurement, NOT independently re-derived.** August 2026 recognized sales:
+store `$5.50`, membership `$0.00`, product **`$2,338.85`** unreported ≈ **425×**. `7c` flagged that this is the
+number that will justify the work, so **re-measure it before it reaches the owner.**
+
+**The fix already exists, committed:** `1d67e895` on `rc/deploy-2026-09-04` (S4R5-3) — adds `item_discount_usd`
+and `total_discount_usd` to `SalesTotals`, summed inside the existing COGS query so it reads no extra rows.
+
+**`rc/deploy-2026-09-04` has DIVERGED — 1 ahead / 25 behind `c7ef7264`.** Not "behind"; the wording matters
+(`ba`, `db`). **Merge it forward. Never deploy from it, and never write it off** — that one commit ahead is this
+fix, and abandoning the branch abandons the fix.
+
+**Two hazards for whoever takes it — both make a *green* merge wrong:**
+
+- **The 4th positional slot already means something else.**
+  `c7ef7264`: `deriveTotals(level, costUsd, returnedCostUsd = 0, pending: PendingCostInput = {})` at `:691`.
+  `1d67e895`: `deriveTotals(level, costUsd, returnedCostUsd = 0, itemDiscountUsd = 0)` at `:628`.
+  `pending` arrived in the 25 commits the fix branch is behind, so this is **not a textual conflict a merge tool
+  resolves** — the signature has to be redesigned. Production has **four** 4-arg call sites, all passing object
+  literals: `:781`, `:833`, `:1364`, `:1498`. **Use an options object, not a fifth positional.** (Found by `88`;
+  the four-call-site count added by `ee`.)
+- **The quiet half, and it is the one to guard (`88`).** A **3-arg** call site compiles under *either* signature
+  and **both** 4th params default. So the merge goes green while one of the two features silently reads zero —
+  the pending cost or the item discount, depending which side won. *The tell is that nothing is red.* The guard
+  is a fixture where the 4th argument is non-zero and the assertion moves — **for both features**, not just the
+  one being merged. Locking only the merged one reproduces the same green.
+- **Scoping correction (`7c`): this is a port, not a cherry-pick.** At `1d67e895` the helper has **no caller** —
+  `telegram.ts` does not import it on that commit. So the fix branch wires the helper into `SalesTotals` while
+  the deployed line independently wired the *same helper* into Telegram. **Two divergent wirings of one helper,
+  neither aware of the other.** A cherry-pick will not conflict and will not obviously fail — it lands a second
+  consumer while the first stays, and whether the totals double-count or complement **depends on how
+  `SalesTotals` aggregates. Read that before the lift, not after.**
+
+**Status: UNCLAIMED.** `ee` and `88` both declined it deliberately — it spans `salesAnalytics.ts`, `telegram.ts`,
+`reportModel.ts`, `GroupedReport.tsx`, `PeriodReport.tsx`, both language packs and three pure tests, all
+rewritten underneath it by the S4 lanes. **It needs its own lane with the owner's report surfaces in front of
+it**, not a merge squeezed in after a deploy.
+
+### 🟡 THE DOCS ARE FORKED IN TWO PLACES — union, never pick a side
+
+| | `main` (`4b58e9a1`) | `rc/ee-integrate-2026-09-04` (`2bd6675e`) |
+|---|---|---|
+| session-log Parts | has **598, 599**, missing **600** | has **600**, missing **598, 599** |
+| board | has `88`'s lane block | has `ee`'s deploy block + the demotion of the 07:57 block |
+
+**Neither tree has the complete log.** Whoever merges must union both. **Next free Part number is `601`** — taken
+by this entry. Grep every `^## Part` header across *both* refs at the moment you write, not the tail of one.
+
+### BRANCH MAP — what is live and what is not
+
+**Already in production** (ancestors of `c7ef7264`) — all `s4/*` round-1..3 lanes, every `fx/*` from Sep 3–4
+including `fx/add-stock-barcode-identity` (`4741a921`), `rc/s4-2026-09-04`, `ship/2026-09-03`,
+`reconcile/2026-09-03`, all `hf/*`, `lane-a`, `lane-b`. ~70 branches. If your lane's tip is an ancestor of
+`c7ef7264`, **your work is live** — check with `git merge-base --is-ancestor <tip> c7ef7264` before re-doing it.
+
+**NOT in production, still open:**
+
+| Branch | Tip | Ahead | What is stranded there |
+|---|---|---|---|
+| `rc/deploy-2026-09-04` | `1d67e895` | 1 | **The discount fix above. Rescue it.** |
+| `rc/sec-10-reports` | `e2497aa0` | 155 | Long-lived, diverged. **Needs an owner to say whether it is alive.** |
+| `fx/reports-redesign` | `9b444788` | 4 | Touches the same report surfaces as the discount fix — coordinate. |
+| `hf/merge` | `65459d6e` | 8 | Unreviewed. |
+| `lane-c/app-update-prompt` | `8580c92a` | 1 | Relates to the restart-bar requirement. |
+| `docs/bulk-actions-spec-4f` | `ebde8430` | 4 | Spec only. |
+| `rc/p2-*`, `rc/coordinated-2026-09-02`, `rc/sec-11-ios-pwa` | — | 146–155 | Pre-Sep-3. **Probably dead — confirm before deleting.** |
+
+### WHAT ANY SESSION CAN PICK UP RIGHT NOW
+
+1. **Union the forked docs** (`main` ∪ `rc/ee-integrate-2026-09-04`) and get `c7ef7264` onto a line `main` can
+   reach. Highest value, no owner needed. **Coordinate with `c3`.**
+2. **The discount fix lane** — the whole item above. Biggest business impact. Read the two hazards first.
+3. **Re-measure the `$2,338.85` / `$5.50` August figures** against production (read-only) so the owner gets a
+   verified number, not a commit comment. Small, self-contained, unblocks item 2's justification.
+4. **Triage the dead `rc/*` branches** — read-only, then propose deletions. Nobody is doing it.
+5. **Escalated, never fixed** (all unclaimed): membership discount missing from the Telegram sale message
+   (`telegram.ts`); Khmer mojibake in `printReceipt.ts` → `buildTextOnlyPdf`; `recordDetailRowRhythm.test.ts`
+   locks a rhythm that blocks refund-position parity between the receipt and the sale detail.
+6. **The shared checkout has 65 dirty files** and a clean index. Several are junk at the repo root
+   (`CHECKPOINT*.txt/patch/md`, `run-log.txt`, `tmp/`, `outputs/`, and three files with **mangled names**
+   containing a literal newline or `\357\200\242`). Someone should identify owners and clean up — **ask before
+   deleting anything; a peer's in-flight lines are never yours to remove.**
+
+### TRAPS CONFIRMED TODAY — read these before you trust a green
+
+- **Line-survival is not composition.** After a 3-lane merge, verifying every added line survived passed — and
+  the build was still broken (a duplicate `saleTotals` binding, and a new file missing a stub key). Each lane
+  was green alone; the defect existed only in the union. **After any multi-lane merge, run every test file
+  individually** — `test:utils` chains with `&&` and stops at the first red, hiding the rest.
+- **A silent-red harness hole existed and may exist elsewhere.** `fastStockIn.test.ts` had
+  `if (failed > 0) process.exitCode = 1` **mid-file** with three tests after it — they printed FAIL and exited 0.
+  Fixed there. **Grep for the same shape in other test files.**
+- **A residual always closes.** A figure derived by subtraction foots the page regardless of what it names.
+  Footing assertions prove nothing; value assertions do.
+- **Same-instant assertions.** An equality against a live system is traffic-immune only when *both* sides are
+  read at the same instant. Capturing at runtime does not fix a *wrong* instant.
+- **`d1 migrations list` lies from the wrong tree** — it compares the *local* `migrations/` folder against the
+  DB. The main checkout stops at 0106 and reported "nothing to apply" against a DB with 0117 pending. Query
+  `d1_migrations` directly.
+- **Migration id ≠ filename number.** `d1_migrations` ids are row counters. File `0117` is row id **116**. This
+  was misread as an off-by-one twice today.
+- **Identifiers read as the wrong kind of thing** was the day's dominant failure — three distinct instances:
+  version-UUID vs sha, migration row-id vs filename, and settings *unset* vs *explicitly true*.
+
+*Sessions consulted before writing this block, all of whom released the files and several of whom corrected it:
+`c3`, `88`, `21`, `8b`, `7c`, `40`, `ba`, `63`, `4a`, `db`, `7e`, `02`×2. Corrections from `21`, `ba`, `7c`,
+`88`, `4a` and `db` are incorporated and attributed above.*
+
+---
+
 **🟢 DEPLOYED TO PRODUCTION Sep 4 2026 07:57 UTC — wrangler version id
 `8480241e-8867-442c-8643-93c8e5f8175e`, built from `rc/deploy-2026-09-04` @ `e83ee73f` (pushed to origin).
 **NOT FROM `main`** — `main` still does not contain the deployed code, and deploying `main` would roll back the
@@ -608,6 +779,7 @@ Read this before any deploy. The `deploy-provenance` skill exists because of the
 | 4 | `3b25fe33-a806-44f7-9d42-caca6801f102` | 2026-09-03T14:27:12Z | `e3678a39` | **`ship/2026-09-03`** (NOT main; pushed to origin) | clean, isolated worktree `Downloads/bos-dep`, real `npm ci`, removed after | none (chain top == prod top == 107) | no |
 | 5 | `a164d260-49ae-4bec-b372-eb73bce58850` | 2026-09-04T05:04:16Z | `2c497564` | **`rc/s4-2026-09-04`** (NOT main) | stamped **`-dirty`** — traced to the CRLF-only `frontend/public` trio in `bos-rc-s4`; zero content change | 0108–0115 | no |
 | 6 | `8480241e-8867-442c-8643-93c8e5f8175e` | 2026-09-04T07:57:12Z | `e83ee73f` | **`rc/deploy-2026-09-04`** (NOT main; pushed) | clean, isolated worktree `Downloads/bos-deploy`, real `npm ci`, removed after | **0116** only; **0 renames** | no |
+| 7 | `798d9e19-76d0-4909-8db3-6a7a4ad43ad7` | 2026-09-04T11:37:39Z | `c7ef7264` | **`rc/ee-integrate-2026-09-04`** (NOT main; pushed) | clean, isolated worktree, real `npm ci`, removed after | **0117** applied 11:37:39Z; `d1_migrations` row id **116** (ids are row counters, not filename numbers) | no |
 
 **#4 IS WHAT PRODUCTION SERVES RIGHT NOW (Part 587).** Served bundle `index-PVIjw20o.js`, the same file name
 the isolated build emitted; `/health` **200** on both hosts 49 s after the deploy; `/api/products` unauthenticated

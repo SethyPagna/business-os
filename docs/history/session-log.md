@@ -19335,3 +19335,95 @@ a 3-arg call site compiles under either signature and both fourth parameters def
 while one of the two features silently reads zero — and which one depends on which side won. The guard is a
 fixture where the fourth argument is non-zero and the assertion moves, **for both features**; locking only the
 one being merged reproduces the same green. Unclaimed lane; it needs the owner's report surfaces in front of it.
+
+## Part 601 — the handoff, and the eight-hex token that means two different things
+
+**Ask.** The owner, Sep 4 2026: update the status, the session log and progress.md with what needs to be done,
+what is missing, what changed, what can be done, what other sessions need to know, anything missing or wrong or
+forgotten, and in what lane — so that any of the ~14 live sessions can see immediately where to pick up.
+
+**What changed.** A `📌 PICK-UP HERE` block at the head of *Current status* in progress.md, and deploy ledger row
+**#7** (`798d9e19-76d0-4909-8db3-6a7a4ad43ad7` ← `c7ef7264`, migration `0117` at 11:37:39Z), which the ledger was
+missing. Both edits are **purely additive — 172 lines added, 0 deleted**, verified with and without
+`--ignore-cr-at-eol` so a line-ending sweep could not hide inside the diff. No existing line was rewritten,
+including the ones this session initially believed were wrong.
+
+**What was found.**
+
+- **The biggest open item is a fix that already exists and is not live.** In production (`c7ef7264`)
+  `getItemDiscountUsd` is defined at `salesAnalytics.ts:670` and its only caller anywhere is `telegram.ts:567`,
+  while `sales.ts:2944` reads `total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0)`
+  — invoice-level only. **So the in-app Reports "Discounts" figure excludes every line-level discount and the
+  Telegram day report includes them: the two surfaces disagree with each other on production today.** The fix is
+  committed at `1d67e895` on `rc/deploy-2026-09-04` and was never shipped. Its own measurement puts August 2026
+  at `$2,338.85` of line discount against `$5.50` of invoice discount — a figure recorded as **not independently
+  re-derived**, because it is the number that will justify the work (`7c`).
+
+- **Three sessions ran `git cat-file` on `8480241e` and read the failure as a missing commit.** It is not a
+  commit. It is the first segment of the wrangler version UUID `8480241e-8867-442c-8643-93c8e5f8175e`, correctly
+  recorded in the deploy ledger as row #6. A truncated version id and a short git sha have the **identical
+  surface form** — eight lowercase hex — and `git cat-file` fails identically on a wrong sha and on a version id,
+  so the failure *looks* like a bad reference in both cases. `ba` named the underlying problem: two namespaces,
+  one surface form, no type tag. The rule adopted: **never write a wrangler version as eight hex characters** —
+  write the full UUID, which cannot be mistaken for a sha. The eight-char prefix always can.
+
+- **The session's own broadcast carried the error it was warning about.** This session told twelve peers that
+  main's board "shows the wrong live version". It does not: `21` checked and found `progress.md:193` already
+  carrying `798d9e19` / `c7ef7264` correctly, and `8480241e` sitting at `:610` as a correct historical ledger
+  row. The read had come from a *ledger* row and been reported as a *current-state* claim. Had the block "fixed"
+  it, a correct record of deploy #6 would have been overwritten. **The block was made additive instead, and the
+  07:57 entry left untouched.**
+
+- **A green merge can be wrong in a way nothing goes red for (`88`).** `deriveTotals`'s 4th positional parameter
+  is `pending: PendingCostInput = {}` in production (`:691`) and `itemDiscountUsd = 0` on the fix branch
+  (`:628`). Same slot, two meanings, **both defaulted**. The loud half — a 4-arg call site crossing over —
+  TypeScript catches, and there are **four** such sites, all passing object literals (`:781`, `:833`, `:1364`,
+  `:1498`), so the slot is fully occupied and an options object is the only merge that survives. The quiet half
+  is the hazard: a **3-arg** call site compiles under either signature, so the merge goes green while one of the
+  two features silently reads zero. *The tell is that nothing is red.* The guard is a fixture where the 4th
+  argument is non-zero and the assertion moves — for **both** features.
+
+- **And it is a port, not a cherry-pick (`7c`).** At `1d67e895` the helper has no caller at all; `telegram.ts`
+  does not import it there. The fix branch wires it into `SalesTotals`; the deployed line independently wired the
+  *same helper* into Telegram. Two divergent wirings, neither aware of the other. A cherry-pick will apply
+  cleanly and land a second consumer — **a clean apply is not evidence of correctness here.**
+
+- **The membership-points item cannot be closed by looking at the toggle (`db`).** `portal.ts:329` reads
+  `normalizeBoolean(settings.loyalty_points_enabled, true)` and `LoyaltyPointsPage.tsx:385`
+  `String(settings.loyalty_points_enabled ?? 'true')`, so the UI renders *unset* and *explicitly true*
+  identically. Closing it needs a read of whether the settings row **exists**. If it never existed, the switch
+  has never been off for a moment — including while `0117` ran.
+
+- **Identifiers read as the wrong kind of thing was the day's dominant failure**, three distinct times: a version
+  UUID read as a sha, a `d1_migrations` row id read as a filename number, and a settings *unset* read as
+  *explicitly true*. Different subsystems, one shape.
+
+- **The docs are forked and neither side is complete.** `main` carries Parts 598 and 599 and not 600;
+  `rc/ee-integrate-2026-09-04` carries 600 and not 598 or 599. The board is forked the same way. Recorded as
+  union-required, with 601 taken here after grepping every `^## Part` header across **both** refs — `4a`'s point
+  that a tail read cannot detect an interleaved number.
+
+**Verified.** progress.md `172 0` on `git diff --numstat`, identical under `--ignore-cr-at-eol`, zero deleted
+lines; anchor located by **content match**, not line number; the file round-trips through `iconv -f UTF-8 -t
+UTF-8` as valid UTF-8 after a first attempt wrote the block through a latin1 path and mangled `📌`, `—`, `≈` and
+`×` — caught, reverted, redone with byte passthrough. Both target files confirmed clean and the shared index
+empty immediately before writing, and re-confirmed after `88` pushed `8a4ccdd3` to main mid-task. Provenance
+cross-checked from four independent sessions: `e83ee73f` **is** an ancestor of `c7ef7264` (nothing rolled back),
+`c7ef7264` is **not** an ancestor of `origin/main` (main still cannot be deployed), and `rc/deploy-2026-09-04` is
+**1 ahead / 25 behind** — diverged, not behind, which is `ba` and `db`'s wording and the wording that stops
+someone assuming a fast-forward.
+
+**Not done.**
+
+- **The live probes in the block could not be re-run at write time.** `curl` to both hosts returned `000` from
+  this session. `/health` is unconfirmed since ~11:40 UTC and the block says so rather than restating the
+  deploy-time result as current.
+- **The `$2,338.85` / `$5.50` figures are the fix commit's own**, not re-measured. Listed as a pick-up item.
+- **The discount fix is unclaimed.** `ee` and `88` both declined it deliberately; it needs its own lane with the
+  owner's report surfaces in front of it.
+- **The two owner-only items on `0117` remain open** — the points switch, and the authenticated balance read.
+- **65 dirty files sit in the shared checkout**, including root junk (`CHECKPOINT*`, `run-log.txt`, `tmp/`,
+  `outputs/`) and three files with mangled names. Owners unidentified; nothing touched.
+
+*Every finding above except the ledger row came from a peer re-deriving a claim rather than accepting it —
+including two corrections to this session's own broadcast. None would have surfaced from agreement.*
