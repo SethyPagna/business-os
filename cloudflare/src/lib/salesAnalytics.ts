@@ -78,6 +78,49 @@ export interface SalesFilters {
   // query in later pages stays on the same receipt set even while new sales
   // are being created. Absent for normal reports/dashboard paths.
   maxSaleId?: number | null
+  // ---- Shift window (S4-7) ------------------------------------------------
+  // An exact timestamp window, half-open [createdFrom, createdTo), for a
+  // report whose boundary is a MOMENT rather than a day: a cash-drawer shift
+  // runs from the minute the float was registered to the minute it was
+  // counted, and both of those sit mid-day. startDate/endDate cannot express
+  // that (whole local days) and startTime/endTime cannot either (a
+  // time-of-day mask that repeats on every day in the range).
+  //
+  // The value must be in SQLite's CURRENT_TIMESTAMP shape,
+  // 'YYYY-MM-DD HH:MM:SS' UTC -- NOT ISO-with-T. sales.created_at is stored
+  // in that shape (lib/clientTimestamp.ts normalises the offline path to it
+  // for exactly this reason), and at position 10 'T' sorts AFTER ' ', so an
+  // ISO bound would silently drop or admit rows. shiftWindowBound() below is
+  // the one converter; callers must not build these by hand.
+  //
+  // Deliberately NOT run through localDateRangeClause: these bounds are
+  // already absolute UTC instants, so shifting them by the business offset
+  // would move the window by seven hours.
+  createdFrom?: string | null
+  createdTo?: string | null
+  // The cashier who rang the sale up. A shift belongs to one employee, so
+  // every figure on their report is scoped to their own receipts; without
+  // this a two-till shop would report each till the other's takings.
+  // Matched on cashier_id (the account), never cashier_name (a snapshot two
+  // people can end up sharing after a rename).
+  cashierId?: number | string | null
+}
+
+/**
+ * Normalise any timestamp to the shape `sales.created_at` is stored in --
+ * 'YYYY-MM-DD HH:MM:SS' UTC. `shift_sessions.opened_at`/`closed_at` are full
+ * ISO strings with a 'T' and a 'Z' (routes/shifts.ts writes
+ * `new Date().toISOString()`), and comparing those against created_at
+ * lexicographically without this converter is wrong in a way that still
+ * produces plausible-looking numbers. Returns null for anything unparseable,
+ * and a null bound is simply not applied.
+ */
+export function shiftWindowBound(value: unknown): string | null {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return null
+  const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+  if (!Number.isFinite(parsed.getTime())) return null
+  return parsed.toISOString().slice(0, 19).replace('T', ' ')
 }
 
 export interface SalesTotals {
@@ -253,6 +296,25 @@ function whereActiveSales(alias: string, f: SalesFilters) {
   if (Number.isSafeInteger(Number(f.maxSaleId)) && Number(f.maxSaleId) > 0) {
     clauses.push(`${alias}.id <= @maxSaleId`)
     params.maxSaleId = Number(f.maxSaleId)
+  }
+  // Shift window (S4-7). Half-open so two back-to-back shifts on one till
+  // cannot both claim the sale that landed on the boundary second -- with
+  // `<=` on the upper bound, a sale rung at the exact moment the drawer was
+  // counted would appear on the closing report AND on the next shift's.
+  // Absent on every pre-existing caller, so those queries are unchanged.
+  const createdFrom = shiftWindowBound(f.createdFrom)
+  if (createdFrom) {
+    clauses.push(`${alias}.created_at >= @createdFrom`)
+    params.createdFrom = createdFrom
+  }
+  const createdTo = shiftWindowBound(f.createdTo)
+  if (createdTo) {
+    clauses.push(`${alias}.created_at < @createdTo`)
+    params.createdTo = createdTo
+  }
+  if (f.cashierId != null && String(f.cashierId).trim() !== '') {
+    clauses.push(`${alias}.cashier_id = @cashierId`)
+    params.cashierId = Number(f.cashierId)
   }
   const validTime = (v: unknown): v is string => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
   if (validTime(f.startTime) && validTime(f.endTime)) {
