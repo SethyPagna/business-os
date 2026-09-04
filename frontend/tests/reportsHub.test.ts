@@ -87,7 +87,7 @@ const adminTotals = {
   recognized_delivery_usd: 6,
   recognized_delivery_cost_usd: 1,
   refund_usd: 15,
-  revenue_usd: 215,
+  revenue_usd: 255,
   pending_revenue_usd: 40,
   collected_total_usd: 233,
   avg_order_usd: 35.83,
@@ -101,8 +101,8 @@ const adminTotals = {
   pending_delivery_usd: 4,
   pending_delivery_cost_usd: 3,
   cost_usd: 90,
-  profit_usd: 130,
-  margin_pct: 60.47,
+  profit_usd: 170,
+  margin_pct: 66.67,
   cost_missing_snapshot_lines: 2,
   pending_cost_usd: 18,
   pending_profit_usd: 23,
@@ -121,26 +121,24 @@ test('normalizeTotals copies the admin keys only when the server sent them', () 
   assert.equal(admin.cost_missing_snapshot_lines, 2)
   assert.ok(staff && !hasProfit(staff), 'staff totals do not')
   assert.ok(!('cost_usd' in staff) && !('profit_usd' in staff) && !('margin_pct' in staff), 'the keys are ABSENT, not 0')
-  assert.equal(staff.revenue_usd, 215)
+  assert.equal(staff.revenue_usd, 255)
   assert.equal(normalizeTotals(null), null)
   assert.equal(normalizeTotals('x'), null)
   // margin is derived when the server omitted it
   const derived = normalizeTotals({ ...adminTotals, margin_pct: undefined })
-  assert.equal(derived?.margin_pct, 60.5, "client-derived margin uses the model pct (1 decimal, the display precision)")
+  assert.equal(derived?.margin_pct, 66.7, "client-derived margin uses profit / revenue (1 decimal, the display precision)")
 })
 
 test('buildIncomeStatement: revenue and collected groups close arithmetically on kernel figures', () => {
   const lines = buildIncomeStatement({ sales: normalizeTotals(staffTotals), profitMode: 'net', khrToUsd, expenses: { usd: 10, khr: 0 } })
   const m = lineMap(lines)
-  assert.equal(m.gross_sales.usd, 300)
+  assert.equal(m.total_sales.usd, 300)
   assert.equal(m.net_sales.usd, 270, 'net sales = gross - store - membership discounts')
   assert.equal(m.net_sales.kind, 'total')
-  assert.equal(m.pending_credit.usd, 40)
   assert.equal(m.refunds.usd, 15)
-  assert.equal(m.revenue.usd, 215, 'REVENUE is the kernel figure, shown after net sales - pending - refunds')
-  assert.equal(m.net_sales.usd - m.pending_credit.usd - m.refunds.usd, m.revenue.usd, 'the revenue group is closed')
-  assert.equal(m.tax_delivery_collected.usd, 18, 'tax + customer-paid delivery = collected - revenue')
-  assert.equal(m.revenue.usd + m.tax_delivery_collected.usd, m.collected_total.usd, 'the collected group is closed')
+  assert.equal(m.revenue.usd, 255, 'REVENUE is the kernel figure for every non-cancelled sale')
+  assert.equal(m.net_sales.usd - m.refunds.usd, m.revenue.usd, 'the revenue group is closed without subtracting Not Paid')
+  assert.equal(m.collected_total.usd, 233, 'collected cash is displayed independently from business revenue')
   // No cost on the server side -> no profit group at all, regardless of the profit mode / expenses given.
   assert.ok(!('cogs' in m) && !('gross_profit' in m) && !('expenses' in m) && !('net_result' in m), 'no profit lines for a caller without cost')
   assert.ok(lines.every((l) => l.group !== 'profit'))
@@ -149,19 +147,17 @@ test('buildIncomeStatement: revenue and collected groups close arithmetically on
   // them. Only the cost-derived lines inside them drop away.
   assert.equal(m.delivery_charged.usd, 10)
   assert.equal(m.delivery_charged.kind, 'memo', 'the memo lines carry no operator')
-  assert.equal(m.pending_gross_sales.usd, 55)
   assert.equal(m.pending_revenue.usd, 40)
-  assert.ok(!('pending_cogs' in m) && !('pending_profit' in m), 'no cost -> no unpaid cost or unpaid profit either')
-  assert.equal(lines.length, 18)
+  assert.equal(m.pending_revenue.kind, 'memo')
 })
 
 test('buildIncomeStatement: the profit bridge names every term and never uses the residual', () => {
   const gross = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), profitMode: 'gross', khrToUsd, expenses: { usd: 10, khr: 40000 } }))
-  assert.equal(gross.revenue_carried.usd, 215, 'revenue is carried down so the first input of the bridge is on screen')
+  assert.equal(gross.revenue_carried.usd, 255, 'revenue is carried down so the first input of the bridge is on screen')
   assert.equal(gross.cogs.usd, 90)
   assert.equal(gross.delivery_collected.usd, 6, 'the RECOGNIZED delivery fee, not delivery_usd (10)')
   assert.equal(gross.delivery_paid.usd, 1, 'the RECOGNIZED courier cost, not delivery_actual_cost_usd (3)')
-  assert.equal(gross.gross_profit.usd, 130)
+  assert.equal(gross.gross_profit.usd, 170)
   // The pre-S4R3-6 shape: one residual line, `revenue - cost - profit`,
   // labelled "Store-paid delivery". It always footed and it always named the
   // wrong quantity, so its absence from the profit group is the fix.
@@ -193,7 +189,7 @@ test('buildIncomeStatement: the profit bridge names every term and never uses th
   assert.equal(net.expenses.usd, 20, '$10 + 40,000៛ at 4000 = $20')
   assert.equal(net.expenses.khr, 40000, 'the raw KHR is kept for display')
   assert.equal(net.expenses.hintKey, 'rpt_hint_expenses_line')
-  assert.equal(net.net_result.usd, 110, 'net result = gross profit - expenses')
+  assert.equal(net.net_result.usd, 150, 'net result = total profit - expenses')
   assert.equal(net.net_result.kind, 'total')
   // The mode no longer decides whether the gross-profit-to-total-profit step
   // EXISTS -- hiding it behind an off-by-default option is what made that step
@@ -220,18 +216,11 @@ test('buildIncomeStatement: the waterfall foots to the cent, and says so when co
     'revenue - cogs + delivery collected - delivery paid = gross profit',
   )
   assert.equal(m.gross_profit.usd - m.expenses.usd, m.net_result.usd, 'gross profit - expenses = total profit')
-  // ... and the unpaid cohort foots on the same bases.
-  const pendingRounding = m.pending_rounding ? m.pending_rounding.usd : 0
-  assert.equal(m.pending_gross_sales.usd - m.pending_discounts.usd, m.pending_revenue.usd, 'unpaid gross - unpaid discounts = unpaid net sales')
-  assert.equal(
-    m.pending_revenue.usd - m.pending_cogs.usd + m.pending_delivery_collected.usd - m.pending_delivery_paid.usd + pendingRounding,
-    m.pending_profit.usd,
-    'the unpaid block foots the same way the realised one does',
-  )
+  assert.equal(m.pending_revenue.usd, 40, 'Not Paid is one consolidated memo row')
 
   // A cent of rounding is CARRIED on its own line, never absorbed into a
   // labelled one.
-  const skew = lineMap(buildIncomeStatement({ sales: normalizeTotals({ ...adminTotals, profit_usd: 130.01 }), profitMode: 'net', khrToUsd }))
+  const skew = lineMap(buildIncomeStatement({ sales: normalizeTotals({ ...adminTotals, profit_usd: 170.01 }), profitMode: 'net', khrToUsd }))
   assert.equal(skew.profit_rounding.usd, 0.01, 'the cent is its own line')
   assert.equal(skew.cogs.usd, 90, 'and no other line moved to swallow it')
   assert.equal(
@@ -249,7 +238,7 @@ test('buildIncomeStatement: the waterfall foots to the cent, and says so when co
   assert.equal(m.delivery_paid.note?.total, 4)
 })
 
-test('buildIncomeStatement: the awaiting-payment block never contributes to a realised total', () => {
+test('buildIncomeStatement: Not Paid is one consolidated memo below business totals', () => {
   const opts = { profitMode: 'net' as const, khrToUsd, expenses: { usd: 10, khr: 40000 } }
   const base = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), ...opts }))
   // Move EVERY pending input to an unmistakable number. Not one realised line
@@ -273,11 +262,9 @@ test('buildIncomeStatement: the awaiting-payment block never contributes to a re
   for (const key of ['net_sales', 'revenue', 'collected_total', 'revenue_carried', 'cogs', 'delivery_collected', 'delivery_paid', 'gross_profit', 'net_result']) {
     assert.equal(m[key].usd, base[key].usd, `${key} is untouched by the unpaid cohort`)
   }
-  // `pending_credit` is the ONE realised line that reads a pending figure, and
-  // it is a SUBTRACTION: it takes unpaid net sales OUT of revenue.
-  assert.equal(base.pending_credit.kind, 'sub')
-  assert.equal(base.pending_credit.usd, base.pending_revenue.usd, 'the same unpaid net sales, removed above and reported below')
-  assert.equal(base.net_sales.usd - base.pending_credit.usd - base.refunds.usd, base.revenue.usd)
+  assert.equal(base.pending_revenue.kind, 'memo')
+  assert.equal(base.pending_revenue.usd, 40)
+  assert.equal(base.net_sales.usd - base.refunds.usd, base.revenue.usd)
 
   // The block is last, is its own group, and no realised line sits inside it.
   const groups = skewed.map((l) => l.group)
@@ -292,7 +279,7 @@ test('buildIncomeStatement: previous-period figures ride the same lines; none wi
   const prev = { ...adminTotals, gross_sales_usd: 200, revenue_usd: 150, collected_total_usd: 160, profit_usd: 80, cost_usd: 60 }
   const lines = buildIncomeStatement({ sales: normalizeTotals(adminTotals), prevSales: normalizeTotals(prev), profitMode: 'net', khrToUsd, expenses: { usd: 10, khr: 0 }, prevExpenses: { usd: 5, khr: 0 } })
   const m = lineMap(lines)
-  assert.equal(m.gross_sales.prevUsd, 200)
+  assert.equal(m.total_sales.prevUsd, 200)
   assert.equal(m.revenue.prevUsd, 150)
   assert.equal(m.gross_profit.prevUsd, 80)
   assert.equal(m.net_result.prevUsd, 75)
@@ -305,12 +292,12 @@ test('sumTotals sums additive figures, recomputes the average, and keeps profit 
   const b = normalizeTotals({ ...adminTotals, tx_count: 4, revenue_usd: 100.005, profit_usd: 30, cost_usd: 70, cost_missing_snapshot_lines: 1 }) as ReportTotals
   const both = sumTotals([a, b])
   assert.equal(both.tx_count, 10)
-  assert.equal(both.revenue_usd, 315.01, 'money re-rounded to cents')
-  assert.equal(both.avg_order_usd, 31.5, 'average = revenue / tx, never summed')
-  assert.equal(both.profit_usd, 160)
+  assert.equal(both.revenue_usd, 355.01, 'money re-rounded to cents')
+  assert.equal(both.avg_order_usd, 35.5, 'average = revenue / tx, never summed')
+  assert.equal(both.profit_usd, 200)
   assert.equal(both.cost_usd, 160)
   assert.equal(both.cost_missing_snapshot_lines, 3)
-  assert.equal(both.margin_pct, 50.8)
+  assert.equal(both.margin_pct, 56.3)
   // The awaiting-payment cohort has to accumulate too, or a grouped/period row
   // silently reports a $0.00 unpaid block while its parts are non-zero.
   assert.equal(both.pending_gross_sales_usd, 110)
@@ -331,7 +318,7 @@ test('sumTotals sums additive figures, recomputes the average, and keeps profit 
 
 test('basisValue / BASIS_LABELS: the three calculation bases read distinct kernel figures', () => {
   const t = normalizeTotals(adminTotals)
-  assert.equal(basisValue(t, 'revenue'), 215)
+  assert.equal(basisValue(t, 'revenue'), 255)
   assert.equal(basisValue(t, 'gross'), 300)
   assert.equal(basisValue(t, 'collected'), 233)
   assert.equal(basisValue(null, 'revenue'), 0)
@@ -480,13 +467,12 @@ test('the control row keeps every control at each width: nothing is dropped, not
   const tail = hub.slice(hub.indexOf('const collapsedTail'), hub.indexOf('const body'))
   assert.ok(tail.includes('{filtersButton}'), 'the tail carries the filter menu')
 
-  // Part 586: the view picker moved OUT of the tail and into the search slot,
-  // which ControlRow renders at all three tiers. That makes "never dropped"
-  // structural rather than a per-tier conditional -- but it must then appear
-  // exactly once, or a wide screen shows two pickers.
+  // Desktop and compact layouts share the same picker definition. Each
+  // mutually exclusive responsive branch renders it once.
   assert.ok(!tail.includes('viewPicker'), 'the picker is not in the tail any more (it would double up with the search slot)')
   assert.ok(/const searchSlot = \([\s\S]*?\{viewPicker\}/.test(hub), 'the search slot carries the view picker at every tier')
-  assert.equal((hub.match(/\{viewPicker\}/g) || []).length, 1, 'the view picker is rendered in exactly one place')
+  assert.ok(/reports-mobile-primary[\s\S]*?\{searchInput\}\{viewPicker\}/.test(hub), 'the compact tier keeps search and view together')
+  assert.equal((hub.match(/\{viewPicker\}/g) || []).length, 2, 'one picker reference exists in each responsive branch')
 
   // The four controls Part 586 folded into the one menu must not come back as
   // separate control-row citizens -- that crowding is what hid the search box.
@@ -512,7 +498,7 @@ test('the control row keeps every control at each width: nothing is dropped, not
 
   // The date range is the widest control on a phone row; it only fits because
   // the trigger becomes a full-width field whose labels can truncate.
-  assert.ok(hub.includes("triggerClassName={compact ? 'flex w-full min-w-0"), 'the range trigger goes full-width and shrinkable on phones')
+  assert.ok(hub.includes("triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0"), 'the range trigger goes full-width and shrinkable on phones')
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
   const spans = picker.match(/className=\{`min-w-0 truncate /g) || []
   assert.equal(spans.length, 2, 'both endpoint labels can actually truncate (min-w-0, not truncate alone)')
@@ -529,6 +515,22 @@ test('the control row keeps every control at each width: nothing is dropped, not
 // silently -- nothing throws -- so pin it here.
 const SURFACE_CSS = 'src/components/sales/reports/reports-surface.css'
 
+test('compact report filters match the stacked mobile control contract', () => {
+  const hub = read(HUB)
+  const css = read(SURFACE_CSS)
+  for (const preset of ['today', 'yesterday', '7d', '30d']) {
+    assert.ok(hub.includes(`id: '${preset}'`), `${preset} is offered as a compact quick range`)
+  }
+  assert.ok(hub.includes('aria-pressed={selectedMobilePreset === preset.id}'), 'quick ranges expose their selected state')
+  assert.ok(hub.includes("trh('show', 'Show')"), 'compact controls have a primary Show action')
+  assert.match(css, /\.reports-mobile-controls\s*\{[\s\S]*display:\s*grid/, 'mobile controls stack in a scoped grid')
+  assert.match(css, /\.reports-mobile-presets\s*\{[\s\S]*flex-wrap:\s*wrap/, 'quick ranges wrap instead of scrolling horizontally')
+  assert.match(css, /\.reports-mobile-range\s*\{\s*min-height:\s*44px/, 'the combined date/calendar target is at least 44px')
+  assert.match(css, /\.reports-mobile-show\s*\{[^}]*width:\s*100%/, 'Show fills the available action width')
+  assert.match(css, /font-variant-numeric:\s*tabular-nums/, 'report amounts use tabular numerals')
+  assert.match(css, /overflow-x:\s*clip/, 'the report surface cannot create page-level horizontal overflow')
+})
+
 test('every --ui-* token the reports surface reads is declared, and the density numbers are the tight ones', () => {
   const css = read(SURFACE_CSS)
   assert.ok(read(HUB).includes("import './reports/reports-surface.css'"), 'the hub imports the token layer')
@@ -543,7 +545,7 @@ test('every --ui-* token the reports surface reads is declared, and the density 
 
   // The density the user asked for ("much closer"), against P2-1's originals:
   // row 32px -> 24px, body 13px -> 12px, meta 12px -> 11px, cell pad 12px -> 6px.
-  assert.match(css, /--ui-row-h:\s*24px/, 'rows are 24px (was 32px in tokens.css)')
+  assert.match(css, /--ui-row-h:\s*36px/, 'report rows stay in the requested 34–38px readable range')
   assert.match(css, /--ui-size-body:\s*12px/, 'body text is 12px (was 13px)')
   assert.match(css, /--ui-size-meta:\s*11px/, 'meta text is 11px (was 12px)')
   assert.match(css, /--ui-cell-px:\s*6px/, 'cell padding is 6px a side (was 12px)')
@@ -579,7 +581,7 @@ test('Khmer keeps a line box tall enough that truncating cells cannot shear it',
   // surface override has to as well or it never lands.
   assert.ok(/\.text-xs[\s\S]{0,80}line-height:[^;]+!important/.test(kmBlocks), 'the .text-xs override can actually win')
   // A taller line box needs a taller row, or the row clips instead of the cell.
-  assert.match(kmBlocks, /--ui-row-h:\s*28px/, 'Khmer rows grow to fit the taller line box')
+  assert.match(kmBlocks, /--ui-row-h:\s*38px/, 'Khmer rows grow to fit the taller line box')
   // The fold is portalled to document.body, i.e. OUTSIDE [data-reports-hub],
   // so it needs its own hook or the menu keeps clipping.
   assert.ok(css.includes('[data-reports-fold]'), 'the portalled fold is covered too')

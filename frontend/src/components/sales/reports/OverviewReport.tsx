@@ -118,7 +118,6 @@ export default function OverviewReport(p: ReportViewProps) {
   const basisDelta = prevSales ? delta(basis, basisValue(prevSales, options.basis)) : null
   const profitLine = lines.find((l) => l.key === 'gross_profit') || null
   const netLine = lines.find((l) => l.key === 'net_result') || null
-  const pendingProfitLine = lines.find((l) => l.key === 'pending_profit') || null
   const basisLabel = tr(BASIS_LABELS[options.basis].key, BASIS_LABELS[options.basis].fallback)
 
   const summary = sales
@@ -128,12 +127,11 @@ export default function OverviewReport(p: ReportViewProps) {
         sales.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(sales.refund_usd)}` : null,
         returns ? countLabel(returns.count, REPORT_NOUNS.return, tr) : null,
         expenses ? `${tr('fees', 'Expenses')} ${fmtMoney(num(expenses.amount_usd), num(expenses.amount_khr))}` : null,
-        profitLine ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(profitLine.usd)} (${fmtPct(pct(profitLine.usd, basis))})` : null,
-        netLine ? `${tr('rpt_total_profit', 'Total profit (net result)')} ${fmtMoney(netLine.usd)}` : null,
+        profitLine ? `${tr('rpt_gross_profit', 'Total Profit')} ${fmtMoney(profitLine.usd)} (${fmtPct(pct(profitLine.usd, basis))})` : null,
+        netLine ? `${tr('rpt_total_profit', 'Final Profit')} ${fmtMoney(netLine.usd)}` : null,
         // The unpaid figures ride the summary too, always named as unpaid and
         // always after the realised ones -- never folded into any of them.
-        sales.pending_revenue_usd ? `${tr('rpt_pending_revenue', 'Unpaid net sales')} ${fmtMoney(sales.pending_revenue_usd)}` : null,
-        pendingProfitLine ? `${tr('rpt_pending_profit', 'Unpaid profit')} ${fmtMoney(pendingProfitLine.usd)}` : null,
+        sales.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(sales.pending_revenue_usd)}` : null,
       ])
     : !sales && (returns || expenses)
       ? joinSummary([
@@ -195,7 +193,7 @@ export default function OverviewReport(p: ReportViewProps) {
     { key: 'payment_method', label: tr('payment_method', 'Payment method'), primary: true, value: (r) => r.payment_method || tr('unknown', 'Unknown') },
     { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
     { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: true },
-    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Unpaid credit'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
     { key: 'collected_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_usd },
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.revenue_usd, payments.reduce((s, p) => s + p.revenue_usd, 0)), defaultVisible: false },
   ]

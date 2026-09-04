@@ -79,6 +79,35 @@ const RETIRED_PAYMENT_METHODS = new Set(['pi pay', 'transfer'])
 const PAYMENT_METHOD_FALLBACK = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR']
 const SEARCH_DEBOUNCE_MS = 250
 
+type MobileRangePreset = 'today' | 'yesterday' | '7d' | '30d'
+
+function localIso(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+export function mobilePresetRange(preset: MobileRangePreset, now = new Date()): DateTimeRange {
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const start = new Date(end)
+  if (preset === 'yesterday') {
+    start.setDate(start.getDate() - 1)
+    end.setDate(end.getDate() - 1)
+  } else if (preset === '7d') {
+    start.setDate(start.getDate() - 6)
+  } else if (preset === '30d') {
+    start.setDate(start.getDate() - 29)
+  }
+  return { startDate: localIso(start), endDate: localIso(end), startTime: '00:00', endTime: '23:59' }
+}
+
+export function activeMobilePreset(range: DateTimeRange, now = new Date()): MobileRangePreset | null {
+  for (const preset of ['today', 'yesterday', '7d', '30d'] as const) {
+    const candidate = mobilePresetRange(preset, now)
+    if (range.startDate === candidate.startDate && range.endDate === candidate.endDate) return preset
+  }
+  return null
+}
+
 /** The POS payment-method list from settings (JSON), retired methods dropped; the fallback when unset/malformed. */
 export function parsePaymentMethods(raw: unknown): string[] {
   try {
@@ -326,6 +355,23 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   // slot, which ControlRow renders at all three tiers.
   const collapsedTail = <>{filtersButton}</>
 
+  const mobilePresets: Array<{ id: MobileRangePreset; label: string }> = [
+    { id: 'today', label: trh('today', 'Today') },
+    { id: 'yesterday', label: trh('yesterday', 'Yesterday') },
+    { id: '7d', label: trh('last_7_days', 'Last 7 Days') },
+    { id: '30d', label: trh('last_30_days', 'Last 30 Days') },
+  ]
+  const selectedMobilePreset = activeMobilePreset(range)
+  const rangePicker = (
+    <DateTimeRangePicker
+      value={range}
+      onChange={setRange}
+      t={t}
+      showTime={supportsTime}
+      triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2' : undefined}
+    />
+  )
+
   const body = !viewProps || !view ? (
     <EmptyState icon={<BarChart3 className="h-5 w-5" />} title={trh('reports', 'Reports')} text={trh('rpt_no_access', 'No report is available for your permissions.')} />
   ) : view.id === 'overview' ? <OverviewReport {...viewProps} />
@@ -337,22 +383,33 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
 
   return (
     <div className={embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'} data-reports-hub>
-      <ControlRow
-        sticky
-        search={searchSlot}
-        range={(
-          <DateTimeRangePicker
-            value={range}
-            onChange={setRange}
-            t={t}
-            showTime={supportsTime}
-            triggerClassName={compact ? 'flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5' : undefined}
-          />
-        )}
-        filters={null}
-        actions={collapsedTail}
-        overflow={collapsedTail}
-      />
+      {compact ? (
+        <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
+          <div className="reports-mobile-primary">{searchInput}{viewPicker}</div>
+          {rangePicker}
+          <div className="reports-mobile-presets" aria-label={trh('quick_range', 'Quick range')}>
+            {mobilePresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="reports-mobile-preset"
+                aria-pressed={selectedMobilePreset === preset.id}
+                onClick={() => setRange(mobilePresetRange(preset.id))}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <div className="reports-mobile-actions">
+            {filtersButton}
+            <Button className="reports-mobile-show" onClick={() => { setSearch(searchText.trim()); setOptionsOpen(false) }}>
+              {trh('show', 'Show')}
+            </Button>
+          </div>
+        </section>
+      ) : (
+        <ControlRow sticky search={searchSlot} range={rangePicker} filters={null} actions={collapsedTail} overflow={collapsedTail} />
+      )}
 
       {body}
 

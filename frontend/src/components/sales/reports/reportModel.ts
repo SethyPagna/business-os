@@ -296,6 +296,8 @@ export interface ReportTotals {
   store_discount_usd: number
   membership_discount_usd: number
   discount_usd: number
+  item_discount_usd: number
+  total_discount_usd: number
   tax_usd: number
   delivery_usd: number
   store_delivery_usd: number
@@ -336,7 +338,7 @@ export interface ReportTotals {
 // looks like "the figure vanished" rather than like an error -- so a new
 // non-admin field on SalesTotals belongs in the interface above AND here.
 const TOTAL_KEYS: Array<keyof ReportTotals> = [
-  'tx_count', 'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'discount_usd', 'tax_usd', 'delivery_usd',
+  'tx_count', 'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'discount_usd', 'item_discount_usd', 'total_discount_usd', 'tax_usd', 'delivery_usd',
   'store_delivery_usd', 'delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_sale_count', 'delivery_margin_usd',
   'delivery_net_usd', 'recognized_delivery_usd', 'recognized_delivery_cost_usd',
   'refund_usd', 'revenue_usd', 'pending_revenue_usd', 'collected_total_usd', 'avg_order_usd',
@@ -487,14 +489,14 @@ export interface StatementInput {
 function statementFigures(t: ReportTotals): Record<string, number> {
   const netSales = round2(t.gross_sales_usd - t.store_discount_usd - t.membership_discount_usd)
   const fig: Record<string, number> = {
-    gross_sales: t.gross_sales_usd,
+    total_sales: round2(t.gross_sales_usd + t.item_discount_usd),
+    item_discounts: t.item_discount_usd,
     store_discounts: t.store_discount_usd,
     membership_discounts: t.membership_discount_usd,
     net_sales: netSales,
     pending_credit: t.pending_revenue_usd,
     refunds: t.refund_usd,
     revenue: t.revenue_usd,
-    tax_delivery_collected: round2(t.collected_total_usd - t.revenue_usd),
     collected_total: t.collected_total_usd,
     // ---- delivery reconciliation (memo; owner, Sep 4 2026: "so we know the
     // actual costs vs what was received or what we paid... a detailed
@@ -587,15 +589,14 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
     note,
   })
   const lines: StatementLine[] = [
-    line('gross_sales', 'gross_sales', 'Gross sales', 'add', 'revenue', ['rpt_hint_gross_sales', 'Item subtotals of every non-cancelled sale, before discounts.']),
+    line('total_sales', 'rpt_total_sales', 'Total sales', 'add', 'revenue', ['rpt_hint_total_sales', 'Value of every non-cancelled sale before line and invoice discounts.']),
+    line('item_discounts', 'rpt_item_discounts', 'Item discounts', 'sub', 'revenue'),
     line('store_discounts', 'rpt_store_discounts', 'Store discounts', 'sub', 'revenue'),
     line('membership_discounts', 'rpt_membership_discounts', 'Membership discounts', 'sub', 'revenue'),
     line('net_sales', 'rpt_net_sales', 'Net sales', 'total', 'revenue'),
-    line('pending_credit', 'rpt_pending_credit', 'Unpaid credit', 'sub', 'revenue', ['rpt_hint_pending', 'Sales awaiting payment. Counted as revenue once paid.']),
     line('refunds', 'refunds', 'Refunds', 'sub', 'revenue'),
-    line('revenue', 'revenue', 'Revenue', 'total', 'revenue', ['rpt_hint_revenue', 'Net sales of recognized sales minus customer refunds. Tax and delivery are excluded.']),
-    line('tax_delivery_collected', 'rpt_tax_delivery_collected', 'Tax + delivery collected', 'add', 'collected'),
-    line('collected_total', 'collected_total', 'Collected total', 'total', 'collected', ['rpt_hint_collected', 'Revenue plus tax and customer-paid delivery: the money that actually changed hands.']),
+    line('revenue', 'revenue', 'Revenue', 'total', 'revenue', ['rpt_hint_revenue', 'Net sales of all non-cancelled sales minus refunds. Tax and delivery are excluded.']),
+    line('collected_total', 'collected_total', 'Collected total', 'total', 'collected', ['rpt_hint_collected', 'Cash actually collected; Not Paid sales are excluded.']),
   ]
   if (hasProfit(sales)) {
     lines.push(
@@ -606,7 +607,7 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
     )
     const rounding = line('profit_rounding', 'rpt_rounding', 'Rounding', 'add', 'profit', ['rpt_hint_rounding', 'Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.'])
     if (rounding.usd !== 0) lines.push(rounding)
-    lines.push({ ...line('gross_profit', 'rpt_gross_profit', 'Gross profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees collected, minus the courier money paid out. Recognized sales only.']), headline: profitMode === 'gross' })
+    lines.push({ ...line('gross_profit', 'rpt_gross_profit', 'Total Profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees charged, minus courier costs. Includes Not Paid sales.']), headline: profitMode === 'gross' })
     // Expenses and the net result are no longer gated on the profit mode --
     // only on whether the caller may read expenses at all. `expenses` is null
     // exactly when the server withheld the block.
@@ -628,7 +629,7 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
       lines.push({
         key: 'net_result',
         labelKey: 'rpt_total_profit',
-        fallback: 'Total profit (net result)',
+        fallback: 'Final Profit',
         usd: round2(num(cur.gross_profit) - expUsd),
         prevUsd: prev && prevExpUsd != null ? round2(num(prev.gross_profit) - prevExpUsd) : null,
         kind: 'total',
@@ -705,22 +706,7 @@ function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): Statem
  */
 function pendingLines(t: ReportTotals, line: LineFactory): StatementLine[] {
   if (num(t.pending_tx_count) <= 0 && t.pending_revenue_usd === 0) return []
-  const out: StatementLine[] = [
-    line('pending_gross_sales', 'rpt_pending_gross_sales', 'Unpaid gross sales', 'add', 'pending', ['rpt_hint_pending_gross', 'Item subtotals of the sales still awaiting payment, before discounts.']),
-    line('pending_discounts', 'rpt_pending_discounts', 'Unpaid discounts', 'sub', 'pending'),
-    line('pending_revenue', 'rpt_pending_revenue', 'Unpaid net sales', 'total', 'pending', ['rpt_hint_pending_revenue', 'What these sales would add to revenue once paid. Not counted in revenue above.']),
-  ]
-  if (hasProfit(t)) out.push(line('pending_cogs', 'rpt_pending_cogs', 'Unpaid cost of goods', 'sub', 'pending', ['rpt_hint_pending_cogs', 'Cost of the goods already handed over on sales that have not been paid for.']))
-  out.push(
-    line('pending_delivery_collected', 'rpt_pending_delivery_collected', 'Unpaid delivery fees', 'add', 'pending'),
-    line('pending_delivery_paid', 'rpt_pending_delivery_paid', 'Delivery already paid on unpaid sales', 'sub', 'pending', ['rpt_hint_pending_delivery_paid', 'Courier money already paid out on sales the customer has not settled: cash out with nothing in yet.']),
-  )
-  if (hasProfit(t)) {
-    const rounding = line('pending_rounding', 'rpt_rounding', 'Rounding', 'add', 'pending')
-    if (rounding.usd !== 0) out.push(rounding)
-    out.push(line('pending_profit', 'rpt_pending_profit', 'Unpaid profit', 'total', 'pending', ['rpt_hint_pending_profit', 'What this period would earn once every outstanding sale is settled. Theoretical: no figure above includes it.']))
-  }
-  return out
+  return [line('pending_revenue', 'rpt_pending_credit', 'Not Paid', 'memo', 'pending', ['rpt_hint_pending', 'Included in sales, revenue, and profit, but excluded from collected cash.'])]
 }
 
 /**
@@ -737,7 +723,7 @@ export function statementGroupLabel(group: StatementGroup, tr: (key: string, fal
   if (group === 'revenue') return tr('revenue', 'Revenue')
   if (group === 'collected') return tr('rpt_collected_group', 'Collected')
   if (group === 'delivery') return tr('rpt_delivery_breakdown', 'Delivery: charged vs paid')
-  if (group === 'pending') return tr('rpt_pending_block', 'Awaiting payment (theoretical)')
+  if (group === 'pending') return tr('rpt_pending_credit', 'Not Paid')
   return tr('profit', 'Profit')
 }
 

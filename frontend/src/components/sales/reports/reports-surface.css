@@ -60,12 +60,12 @@
   /* --- density --- */
   --ui-size-body: 12px;
   --ui-size-meta: 11px;
-  --ui-row-h: 24px;
+  --ui-row-h: 36px;
   /* Cell padding, read by kit DenseTable. The single biggest source of the
      "fields and value are far apart" complaint: 12px each side put 24px of
      dead air between a label column and its value column. */
   --ui-cell-px: 6px;
-  --ui-cell-py: 1px;
+  --ui-cell-py: 5px;
   /* Receipt style: the label/value line box. */
   --ui-receipt-lh: 16px;
   --ui-receipt-gap: 0.75rem;
@@ -116,6 +116,95 @@
   border-top: 1px solid var(--ui-warn-line);
 }
 
+[data-reports-hub] table {
+  font-variant-numeric: tabular-nums;
+}
+
+[data-reports-hub] th,
+[data-reports-hub] td {
+  border-bottom-color: var(--ui-line);
+}
+
+[data-reports-hub] td:not(:first-child),
+[data-reports-hub] th:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+[data-reports-hub] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.reports-mobile-controls {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-ground);
+}
+
+.reports-mobile-primary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, 42%);
+  gap: 8px;
+}
+
+.reports-mobile-primary > * { min-width: 0; }
+.reports-mobile-primary input,
+.reports-mobile-primary button { min-height: 44px; height: 44px; }
+
+.reports-mobile-range { min-height: 44px; }
+.reports-mobile-range > span { overflow: visible; text-overflow: clip; white-space: nowrap; }
+
+.reports-mobile-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reports-mobile-preset {
+  min-height: 36px;
+  flex: 1 1 calc(25% - 6px);
+  border: 1px solid var(--ui-line-2);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: var(--ui-surface);
+  color: var(--ui-ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reports-mobile-preset[aria-pressed='true'] {
+  border-color: #2f3945;
+  background: #2f3945;
+  color: #fff;
+}
+
+.reports-mobile-actions {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.reports-mobile-actions > span,
+.reports-mobile-actions > span > button { width: 44px; min-width: 44px; height: 44px; }
+.reports-mobile-show { width: 100%; min-height: 44px; }
+
+@media (max-width: 359px) {
+  .reports-mobile-primary { grid-template-columns: 1fr; }
+  .reports-mobile-preset { flex-basis: calc(50% - 6px); }
+  .reports-mobile-range { font-size: 12px; gap: 4px; padding-inline: 8px; }
+}
+
 /* ---------------------------------------------------------------------------
    KHMER: the line box must not be shorter than the cluster's ink extent.
 
@@ -145,7 +234,7 @@
 
 body.lang-km [data-reports-hub] {
   /* A taller line box needs a taller row, or the row clips instead. */
-  --ui-row-h: 28px;
+  --ui-row-h: 38px;
   --ui-receipt-lh: 20px;
 }
 

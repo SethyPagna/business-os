@@ -305,12 +305,12 @@ export default function GroupedReport(p: ReportViewProps) {
   const columns: Array<ReportColumn<GroupRow>> = [
     { key: 'label', label: tr(view.labelKey, view.fallback), primary: true, value: (r) => groupRowLabel(by, r, tr), sortDir: 'asc' },
     { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
-    { key: 'gross_sales_usd', label: tr('gross_sales', 'Gross sales'), kind: 'money', value: (r) => r.gross_sales_usd, defaultVisible: options.basis === 'gross', emphasis: options.basis === 'gross' },
-    { key: 'discounts', label: tr('discounts', 'Discounts'), kind: 'money', value: (r) => round2(r.store_discount_usd + r.membership_discount_usd), defaultVisible: false },
+    { key: 'gross_sales_usd', label: tr('rpt_total_sales', 'Total sales'), kind: 'money', value: (r) => r.gross_sales_usd + r.item_discount_usd, defaultVisible: options.basis === 'gross', emphasis: options.basis === 'gross' },
+    { key: 'discounts', label: tr('discounts', 'Discounts'), kind: 'money', value: (r) => r.total_discount_usd, defaultVisible: false },
     { key: 'refund_usd', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd },
     { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: options.basis === 'revenue' },
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(basisValue(r, options.basis), totalBasis) },
-    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Unpaid credit'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
     { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
     { key: 'avg_order_usd', label: tr('avg_order', 'Avg order'), kind: 'money', value: (r) => r.avg_order_usd, defaultVisible: false },
     ...(showProfit
