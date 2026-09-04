@@ -3,6 +3,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { BUSINESS_TZ_FORWARD, localTodayExpr } from '../lib/businessDateWindow'
+import { sendTelegramShiftReport } from '../lib/telegram'
 import type { Env } from '../index'
 
 // Cash-drawer shift registration -- mounted at /api/shifts.
@@ -234,6 +235,26 @@ app.post('/close', async (c) => {
       opening_float_usd: shift.opening_float_usd,
       opening_float_khr: shift.opening_float_khr,
     })
+    // The shift report goes out here and nowhere else (S4-7). Until now
+    // sendTelegramShiftReport had no call site at all: closing a drawer pushed
+    // nothing, and the one message that carries BOTH the opening and the
+    // closing time was reachable only by someone typing /shift into the chat.
+    //
+    // Inside `changed > 0` on purpose -- that is the same UPDATE-matched-a-row
+    // condition that makes "end only once" true, so a double-tap or a retried
+    // request cannot send a second copy of the same report.
+    //
+    // waitUntil, not await: a slow or unreachable Telegram must never delay or
+    // fail the response the till is waiting on. The function catches
+    // everything and resolves false, so the promise is safe unattended -- and
+    // when the adapter provides no execution context (a test harness), the
+    // fallback is simply to let it run.
+    const report = sendTelegramShiftReport(c.env, shift.id)
+    try {
+      c.executionCtx.waitUntil(report)
+    } catch {
+      void report
+    }
   }
   return c.json({ shift: after, already_closed: changed === 0, is_open: false }, 200)
 })

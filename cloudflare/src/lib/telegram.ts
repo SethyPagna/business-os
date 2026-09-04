@@ -663,12 +663,14 @@ async function shiftReport(env: Env, date: string, nowMs: number): Promise<strin
 }
 
 /**
- * Push ONE shift's report to the alerts chat. This is the hand-off for the
- * lane that owns routes/shifts.ts: its `POST /close` handler can call
- * `c.executionCtx.waitUntil(sendTelegramShiftReport(c.env, shift.id))` after
- * the close succeeds and the report goes out with no other change. Returns
- * false (never throws) when Telegram is not configured or the id is unknown,
- * so it can never turn a successful close into a failed request.
+ * Push ONE shift's report to the alerts chat.
+ *
+ * Called from `POST /api/shifts/close` (routes/shifts.ts), inside the
+ * `changed > 0` branch and through `c.executionCtx.waitUntil(...)`, so it
+ * fires exactly once per close that actually wrote and never delays the till's
+ * response. Returns false (never throws) when Telegram is not configured or
+ * the id is unknown, so it can never turn a successful close into a failed
+ * request.
  */
 export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: number = Date.now()): Promise<boolean> {
   try {
