@@ -2430,6 +2430,60 @@ One line per open item; the full text lives in the master-plan phases below (sam
 IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 **[ ]** = not started.
 
+### Sep-4 round 3 — nine items (user, Sep 4 2026; taken by business-os-v1-c4)
+
+Sent mid-turn while the delivery/profit scoping was being written. Recorded here
+first, per the owner's standing instruction: *"if i add throughout the
+conversation as you fix giving new tasks as you work, you don't forget...always
+note in progress.md."* Every later message in this run goes in this section too.
+
+**[ ] S4R3-1 · Dashboard analytics is missing Returns and Gross sales.** Both
+figures exist in the kernel (`refund_usd`, `gross_sales_usd`) and are not
+rendered. Find out whether the panel drops them or the transport does.
+
+**[ ] S4R3-2 · Dashboard revenue is wildly low.** A 7-day range showed barely
+$1K while the Sales page shows more than that in a single day. Two figures over
+the same window that disagree by an order of magnitude is a scope defect, not a
+rounding one — suspects, in order: the status filter (see S4R3-5), the local-day
+window, and the awaiting-payment exclusion. Measure both surfaces over the SAME
+range against production before changing anything.
+
+**[ ] S4R3-3 · "A network or security layer in front of the server blocked this
+request…"** Reported on the Dashboard and on *each receipt report*. That string
+is our own client-side message for an edge/proxy block. Establish first whether
+a request is actually being blocked (status, ray id, which route) or whether we
+are printing that message for an ordinary error — printing an edge-policy
+explanation for an application 500 sends the owner to Cloudflare for a bug that
+is ours.
+
+**[ ] S4R3-4 · Reports filter bar overflows.** Filters run out of bounds; the
+date range needs to be compact; and the line/row above overlaps and blocks the
+filter menu. Compact the whole bar so it fits.
+
+**[ ] S4R3-5 · Reports "All" must mean all statuses.** Today "All" still
+computes completed sales only, so the revenue is wrong. This is very likely the
+same defect as S4R3-2 — fix the scope once, in the kernel, and let both
+surfaces read it.
+
+**[ ] S4R3-6 · Reports must carry the theoretical unpaid figures.** Report the
+full picture including awaiting-payment: profit, delivery, discounts, everything
+— then a **yellow-highlighted block at the bottom** with the unpaid subtotals on
+their own: total unpaid sales, total unpaid delivery, unpaid profit, etc. So:
+one total for everything, and beneath it the part that has not been paid yet.
+(The kernel already separates `pending_revenue_usd`; the rest of the pending
+figures need the same treatment.)
+
+**[ ] S4R3-7 · Payment method on a status change.** Moving a sale from
+awaiting-payment to completed must ask for the payment method, from the same
+searchable option list the POS uses, with auto-create for a new one.
+
+**[ ] S4R3-8 · Per-sale status-change history.** Each sale shows who changed the
+status, what changed, and when. (Overlaps S4-30's append-only amendment ledger —
+build one ledger, not two.)
+
+**[ ] S4R3-9 · Receipt open and closing time.** The sale's opened-at and
+closed-at times on the receipt. Today only the open time is shown.
+
 ### Sep-4 walkthrough — 26 items (user, Sep 4 2026; claimed by business-os-v1-c3, Part 589)
 
 The user's Sep-4 message, split into work items. IDs are stable; use them in commit
@@ -4005,6 +4059,15 @@ BACKUP_TABLES (`3a0a7cb2`). Still open:
   the value — reproduced live in POS (payment $20→$19 while scrolling the
   panel). Class fix: blur-on-wheel (or wheel preventDefault) on the shared
   number inputs; POS payment/discount fields first.
+  **[~] Claimed by business-os-v1-63, Sep 4 2026.** No shared numeric-input
+  component exists (77 hand-rolled `type="number"` inputs across 22 files,
+  confirmed by ee's read-only sweep) — mechanism is a single synchronous,
+  capture-phase, passive `wheel` listener in `frontend/src/index.tsx` that
+  blurs the focused element when it is a number input (blur, not
+  preventDefault, so the panel keeps scrolling). Building on `rc/s4-2026-09-04`
+  @ `2c497564` in its own worktree, not the shared tree (`App.tsx` is dirty
+  there). Cleared with 4a (S4-21/modal-chrome stale, no collision) and ee
+  (sweep owner).
 - **HIGH (layering):** InfoHint portals at z-[1000] but shared Modal is
   z-[1050] — every InfoHint inside any Modal renders its tooltip BEHIND the
   modal (ImportModeWizard, ExportFieldsModal, StockChangeSection, Branches,
