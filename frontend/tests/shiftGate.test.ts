@@ -71,11 +71,53 @@ ok(/if \(!state\) throw new Error/.test(transport),
   'the transport throws when route() resolves null instead of returning a shapeless state')
 
 // ---- 3. End Shift only exists while a shift is open ------------------------
-ok(/if \(!state\?\.can_end\) return null/.test(gate),
-  'EndShiftButton renders nothing unless the server says the shift can be ended')
-const endIdx = gate.indexOf('if (!state?.can_end) return null')
+// The TRIGGER is what carries "end only once": no open shift, no button. The
+// PANEL is exempt, because the closing time only exists on the response to the
+// close -- see section 3b. So the early return has to survive a shift that has
+// just been closed while its summary is still on screen, and the button
+// itself has to be gated separately.
+ok(/if \(!state\?\.can_end && !closed\) return null/.test(gate),
+  'EndShiftButton renders nothing when there is neither an open shift nor a summary to show')
+const endIdx = gate.indexOf('if (!state?.can_end && !closed) return null')
 ok(endIdx > 0 && gate.indexOf('<button', endIdx) > endIdx,
   'and the early return sits BEFORE the button markup, not after it')
+ok(/\{state\?\.can_end && \(\s*\n\s*<button/.test(gate),
+  'the End Shift button itself is still gated on can_end -- a closed shift offers no second press')
+
+// ---- 3b. The shift's two moments are rendered, not implied -----------------
+//
+// The owner, 2026-09-04: "sales open and closing time... currently, it only
+// shows open time". Before this, the close panel printed no formatted time at
+// all -- the one thing on it that read as a time was the shift CODE
+// (S-YYYYMMDD-HHMM, generated from opened_at), and the closing moment appeared
+// nowhere, because the component unmounted itself the instant `can_end` went
+// false and threw the close response away.
+//
+// So: both moments are formatted through the app's shared day-first 24-hour
+// formatter, they are on screen from first paint (not after some field is
+// answered), and the close keeps the panel up to show what was actually
+// written.
+const endBody = gate.slice(gate.indexOf('export function EndShiftButton'))
+ok(/import \{ fmtDateTime24, parseServerTimestampMs \} from '\.\.\/\.\.\/utils\/formatters\.ts'/.test(gate),
+  'times are formatted through the shared formatters, not a second local date format')
+ok(/fmtDateTime24\(shift\.opened_at\)/.test(endBody),
+  'the close panel prints the OPENING moment as a formatted date and time')
+ok(/fmtDateTime24\(closed\?\.closed_at \|\| now\)/.test(endBody),
+  'and the CLOSING moment: the stamped closed_at once it exists, the live clock before that')
+ok(/setClosed\(next\.shift\)/.test(endBody),
+  'a successful close keeps the server row so the panel can summarise it')
+ok(!/publishShift\(next\)\s*\n\s*setOpen\(false\)/.test(endBody),
+  'the close no longer discards its own response by closing the panel outright')
+ok(/t\('shift_opened_with'\)/.test(endBody) && /t\('shift_counted_close'\)/.test(endBody),
+  'the summary shows the drawer BEFORE (opening float) and AFTER (counted at close)')
+ok(/dirty: !closed &&/.test(endBody),
+  'and dismissing the summary raises no discard prompt -- there is nothing unsaved left')
+// The registration prompt names the moment it is about to stamp too, so a
+// device with a wrong clock is caught before the day is filed under it.
+ok(/t\('shift_starts_at'\)/.test(registerBlock) && /fmtDateTime24\(now\)/.test(registerBlock),
+  'the registration prompt shows the moment the shift will be opened at')
+ok(/function useWallClock\(/.test(gate) && /window\.setInterval/.test(gate),
+  'the not-yet-stamped moment is a live clock, not a value frozen when the panel opened')
 
 // ---- 4. No offline mirror for a physical cash count ------------------------
 const routeCalls = [...transport.matchAll(/route<ShiftState>\(\s*[\s\S]*?\n\s{4}null,/g)]
