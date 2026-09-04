@@ -197,6 +197,55 @@ Verified layers 1, 4 and 5 — both packages green, and driven in a real browser
 Worker (8899) and a **private copy** of the D1 state with all 115 migrations applied. Ready for a coordinator to
 fold into the next Stage-2 candidate; this session did not deploy and holds no deploy role.
 
+**`0117` MEASURED ON PRODUCTION before it runs (read-only, by session `ee`, Sep 4).** Part 599 was written
+before these numbers existed, so they live here:
+
+| Probe | Value |
+|---|---|
+| `COUNT(*) FROM sales` | 15053 |
+| still accruing — `COALESCE(loyalty_accrual,1)=1` | **45** |
+| of those, walk-ins with no `customer_id` | 13 |
+| **distinct customers holding a real balance** | **31** |
+| sales value behind them | $3,490 |
+| `LENGTH(sales_reset_ids)` the log will capture | 269 bytes |
+| `loyalty_point_adjustments` / `customer_share_submissions` | 0 / 0 |
+
+The other 15,008 sales are already explicitly `loyalty_accrual = 0` — the old-system import wrote them that
+way deliberately (`routes/portal.ts:1011` names migration 0061 and the historical-import / POS-opt-out cases;
+`:1014` is the gate). So the migration is far narrower than "zero all the membership points" sounds, **but it
+is not a no-op**: 31 named customers lose real balances. The unit for any approval of this is **31 customers,
+not 45 sales** — the same decision, but not the same disclosure. The owner confirmed with the corrected figure.
+
+**Which half actually answers the ask.** The durable answer is the *switch* (`loyalty_points_enabled`,
+resolved server-side and AND-ed over the request body); `0117` is the one-time clean-up of the 31. The two
+must ship together — zeroing balances without the switch would have the till re-accruing on the next sale,
+which is worse than doing neither. Verified closed on the deploy candidate: `rc/deploy-2026-09-04` contains
+`64aa0a51`, carries `0117_membership_points_reset.sql`, and carries `loyalty_points_enabled` at four Worker
+routes plus 9 occurrences in `LoyaltyPointsPage.tsx` (the switch is on the Loyalty Points page, **not**
+`Settings.tsx` — an empty grep there is a wrong path, not missing code).
+
+**Recovering WHO was affected, if the undo is ever needed.** Written down before it runs, rather than after
+someone needs it. `undo_sql` in `loyalty_points_reset_log` restores the flag; the *identities* come from the
+log by join, because `sales_reset_ids` holds the exact sale ids and `sales` carries `customer_id`:
+
+```sql
+SELECT DISTINCT s.customer_id
+FROM loyalty_points_reset_log l,
+     json_each('["' || replace(l.sales_reset_ids, ',', '","') || '"]') j
+JOIN sales s ON s.id = CAST(j.value AS INTEGER)
+WHERE s.customer_id IS NOT NULL;
+```
+
+**The post-deploy assertion that actually observes what was approved.** Counts over `sales` and
+`loyalty_points_reset_log` only re-ask the predicate the migration's own `WHERE` clause answered — they pass
+whether or not a customer's balance reads zero. The independent check is to pick one of the 31 and do an
+authenticated **read-only** GET on the contacts surface, expecting exactly `0`; that exercises
+`contacts.ts computeCustomerPointsMap`, the single ledger gateway. It is airtight rather than probable:
+balance is `Math.max(0, earned - deducted - redeemed + rewarded + manuallyAwarded)` (`portal.ts:1028`), and
+after `0117` `earned` -> 0 by the flag, `rewarded` and `manuallyAwarded` -> 0 by the void filters
+(`contacts.ts:348`/`:350`, `sales.ts:543`/`:552`, `notifications.ts:376`), while `deducted`/`redeemed` only
+subtract. **So a non-zero reading there is not rounding — it is a missing void filter at some site.**
+
 **Three things this lane found and deliberately did NOT fix — each is its own item:**
 
 1. **`buildLoyaltySection` (`routes/notifications.ts`) omits the manual-adjustment term.** It computes
