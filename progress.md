@@ -11597,3 +11597,23 @@ POS.tsx along the way — no behavior change needed there).
 **→ USER-REASSERTED DATA CONCERNS (logged via session-59, Sep 1 — NOTED for the data lane, NOT closed). After seeing the live dashboard the user reaffirms: (a) "time is not being written in many places", (b) supplier attribution wrong/blank, (c) stock off, (d) "calculations are not correct at all" — and reiterated they routed this data-corruption/error/loss concern to the fleet to coordinate. CRITICAL distinction so nobody marks this closed prematurely: coordinator 7b's read-only prod checks refuted the specific PRESENCE/integrity versions (sales created_at 0/14,939 missing; inventory_movements 0/21,375 missing; subtotal_usd populated, SUM=$1,873,656.34; 0 negative branch_stock/branch_batch_stock; 0 unnamed of 6,104; branches canonical = Warehouse id1 + Shop id2). BUT: "calculations are not correct" is a CORRECTNESS/RECONCILIATION claim that presence/null checks do NOT cover (e.g. does dashboard revenue = gross − discount − refund reconcile to the underlying sales? is COGS/profit right?), and "time not written" may mean a DIFFERENT timestamp field/surface than created_at (received date, stock-adjustment/transfer time, expiry). These stay OPEN — need a concrete offending record from the user OR a read-only reconciliation audit against prod before ANY data mutation. No prod writes without an explicit, specific user-confirmed target.**
 
 **\xe2\x86\x92 MERGE-VERIFICATION PASS (Sep 1, continued session): fixed all 4 pre-existing backend test failures at root cause (harness require-override gap for lib/businessDateWindow.ts in test-review-gate-pure.cjs; stale "misplaced stock" wording in test-route-permissions-pure.cjs vs source's already-correct "stock integrity"; TS 6.0.3 turning TS5112 into a hard error for test-stock-ledger-pure.cjs/test-stock-revert-pure.cjs, fixed with --ignoreConfig). File-by-file verified update_code.zip + business-os-update-20260901.zip against main: confirmed main-newer for compat.ts/inventory.ts route/Inventory.tsx/Products.tsx/StockAdjustModal.tsx/SalesDailyReport.tsx/test-image-normalize-pure.cjs + 4 frontend test files by reading real source (not assumed) -- kept main. Merged in the account-security/password-manager feature (users.ts, auth.ts, Users.tsx, UserProfileModal.tsx, Login.tsx, passwordManager.ts + tests) from the update package; per explicit user decision, REMOVED all primary-admin protection -- admins can now manage any admin account including the seeded primary admin, no account is special-cased. Wired passwordManagement.test.ts into test:utils. Fixed one genuinely stale pre-existing test (performanceLoadingUx.test.ts still asserted the old single-request CSV export shape) and one over-strict regex (actionStability.test.ts false-negatived on a legitimately-guarded multi-line ternary). Fixed zip-transfer node_modules corruption (0-byte files) via a clean frontend npm install. Full verification green: 147/147 backend tests + tsc clean, frontend tsc clean + full test:utils (858 checks) + a REAL vite build (not skipped) all pass. Two live bugs (branch Transfer button/function, "2Medium" search miss) still not investigated -- next up.**
+# Part 601 — reconciliation implementation prepared on deployed lineage (2026-09-05)
+
+- Work is based on `origin/rc/ee-integrate-2026-09-04`, not divergent dirty
+  `main`; the dirty source batch was already represented by reviewed commit
+  `7afc8a71` and was preserved untouched.
+- Added compact two-layer mobile hubs and wrapped section controls, dense mobile
+  report filters/presets, and unified report labels without horizontal overflow.
+- Awaiting-payment sales now participate in sales/revenue/COGS/profit while
+  remaining separately visible as **Not Paid** and excluded from collected cash.
+- Added per-account/shop-wide shift policy, optional admin exemption, immutable
+  manager amendments, history/settings/profile UI, branch-scoped POS cache,
+  Telegram close output and backup coverage.
+- Added POS-parity sale-detail product/batch selection, explicit status workflow,
+  and delivery-text sanitization.
+- Harvested the useful `hf/merge` stock-disposition flow with audit/undo while
+  retaining the newer production cost-average/outlier rule.
+- Recovered the September 4 legacy settlement SQL and quarantined it as evidence.
+  It must not be run: 18 completed-sale receivables require a fresh primary-key
+  manifest, and two partial payments require an explicit owner ruling. No remote
+  database mutation or deployment was performed.

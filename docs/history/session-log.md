@@ -19099,3 +19099,16 @@ checked against the expected union after merging — 5478 keys each, nothing re-
 - Escalated, not fixed: membership discount missing from the Telegram sale message (`telegram.ts`); Khmer
   mojibake in `printReceipt.ts` `buildTextOnlyPdf`; `recordDetailRowRhythm.test.ts` locks a rhythm that blocks
   refund-position parity between the receipt and the sale detail.
+# Part 601 — deployed-line reconciliation implementation (2026-09-05)
+
+Built `codex/business-os-reconcile` from production lineage
+`origin/rc/ee-integrate-2026-09-04` and preserved the divergent dirty `main`
+checkout. Implemented mobile hub/report density, awaiting-payment accounting,
+shift policy/history/amendments, sale-detail POS parity, and duplicate-product
+stock disposition with audit/undo. Focused tests and package gates are recorded
+in `docs/fleet/2026-09-05-reconciliation-ledger.md`.
+
+The archived legacy settlement SQL was recovered byte-for-byte and quarantined
+under `docs/fleet/evidence/`; no production write was attempted. A fresh
+read-only manifest and an owner decision about two partial payments are required
+before any operator-run repair can be generated.

@@ -1,0 +1,129 @@
+-- Sep 4 2026. Flip pre-Sep-4 (ICT) awaiting_payment sales to completed.
+-- Direct D1: routes/sales.ts and lib/importEngine.ts deduct stock for a status in
+-- STOCK_DEDUCTED_STATUSES, and the instruction is explicitly "not affecting stock".
+-- No BEGIN/COMMIT: D1 rejects SQL transactions and runs a --file batch atomically.
+--
+-- EXPECTED rows_written, in order -- read these off the wrangler output and compare:
+--   1 / 1   (the two restored sale_items)
+--   1 / 1   (the two total corrections; 0 means a total already moved -- stop and check)
+--   82      (the status flip)
+--   82      (the receivables)
+-- Any statement writing fewer rows than stated means the data moved since authoring.
+-- The batch is atomic, so a mismatch is recoverable by D1 Time Travel, but diagnose it
+-- rather than re-running.
+--
+-- IDEMPOTENT: every statement carries its own state guard, so a SECOND execution writes
+-- 0 rows everywhere and changes nothing. On a re-run, 0 / 0 / 0 / 0 / 0 / 0 is SUCCESS,
+-- not failure -- it means the first run already landed. Do not go hunting a problem.
+-- The guards, one per statement: NOT EXISTS on (sale_id, product_id) for the two
+-- restored lines; AND total_usd = <old value> on the two total corrections;
+-- AND sale_status = 'awaiting_payment' on the flip; AND status <> 'Paid' on the
+-- receivables. Pinning the AR ids replaced the join, NOT the state condition.
+--
+-- STRONGER THAN IDEMPOTENT: each guard tests the precondition THAT statement needs, not
+-- a shared "has this batch run" flag, so the file converges on the correct end state from
+-- ANY starting point -- fully unapplied, fully applied, or any partial mixture of the two.
+-- Worked example: had execution stopped after the inserts, a re-run no-ops them on
+-- NOT EXISTS, while the total corrections still see the OLD totals (they never ran) and
+-- so apply correctly, and the flip and receivables apply to whatever remains. (ba)
+--
+-- The batch SHOULD be atomic, so a partial state should not arise; the guards mean the
+-- file does not have to depend on that. The case this actually protects is the ordinary
+-- one: the connection drops and the operator does not know whether it committed. Re-run
+-- it. That is always safe and always correct, whichever way it went.
+
+-- 1. Restore the two lines dropped by the barcode normaliser, so no invoice is
+--    marked settled at a total that is provably short. No stock movement.
+--    SELECT ... WHERE NOT EXISTS, not VALUES: as bare inserts these were the only
+--    statements in this file that were NOT idempotent, and a second run would have
+--    duplicated both lines while the guarded total updates below no-opped -- leaving
+--    each sale with twice the line and the same total. (business-os-v1-ba)
+INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id, price_mode, product_discount_usd, product_discount_khr, base_price_usd, base_price_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr, returned_quantity)
+SELECT 16816, 10111, 'YSL Libre 10ml', 1, 'ដប', 25, 101250, 15.5, 0, 25, 101250, 2, 'custom', 0, 0, 25, 101250, 'fixed', 0, 0, 0, 0
+  WHERE NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id = 16816 AND product_id = 10111);
+INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id, price_mode, product_discount_usd, product_discount_khr, base_price_usd, base_price_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr, returned_quantity)
+SELECT 16812, 1369, 'Clinical Completely Clean 45g', 2, 'ដប', 13, 52650, 8.7, 0, 26, 105300, 2, 'custom', 0, 0, 13, 52650, 'fixed', 0, 0, 0, 0
+  WHERE NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id = 16812 AND product_id = 1369);
+
+-- 2. Bring those two sales up to the totals their source report states.
+--    These are guarded on the PRE-correction totals (54 and 105) -- a literal, not a
+--    value derived from the line items. That makes them independent of section 1: the six
+--    statements are order-insensitive, and reordering them would not break correctness or
+--    re-runnability. If anyone later rewrites this guard to compute the total from
+--    SUM(sale_items.total_usd), that stops being true and the ordering becomes
+--    load-bearing -- change the guard and the order together, or not at all.
+UPDATE sales SET subtotal_usd = 79, subtotal_khr = 319950, total_usd = 79, total_khr = 319950
+  WHERE id = 16816 AND total_usd = 54;  -- guarded: no-op if it already moved
+UPDATE sales SET subtotal_usd = 131, subtotal_khr = 530550, total_usd = 131, total_khr = 530550
+  WHERE id = 16812 AND total_usd = 105;  -- guarded: no-op if it already moved
+
+-- 3. The flip. amount_paid_usd = total_usd matches the convention on the 14,921
+--    already-completed legacy rows; amount_paid_khr stays 0 there and here.
+--    loyalty_accrual = 0 because historical sales must not accrue points.
+--
+--    STOCK_SKIPPED (added 2026-09-04, after migration 0114 reached production at 05:03:43).
+--    0114 added sales.stock_skipped and routes/sales.ts now re-reads it on EVERY later
+--    transition of the sale. Without the flag these 82 land as `completed` with nothing ever
+--    deducted, and held(completed) becomes a lie for them: a later cancel computes
+--    delta = 0 - qty and ADDS units that were never taken -- inventing stock. The flag is the
+--    only record that the units were never in the ledger, which is why 0114 makes it sticky.
+--    Setting it here is what makes this file agree with the app's own admin-only
+--    "Don't touch stock" path, instead of silently diverging from it.
+UPDATE sales SET sale_status = 'completed', amount_paid_usd = total_usd, loyalty_accrual = 0,
+    stock_skipped = 1, stock_skipped_at = datetime('now'), stock_skipped_by_name = 'legacy import (owner-directed)'
+  WHERE id IN (15843,15903,15904,15911,15920,15923,15934,15938,15939,15940,15941,15942,15943,15944,15945,15946,15947,15948,15949,15950,15951,15956,15961,16070,16071,16078,16086,16112,16196,16212,16300,16301,16356,16364,16365,16426,16439,16441,16512,16535,16539,16540,16578,16599,16610,16697,16707,16709,16713,16714,16715,16716,16717,16718,16719,16720,16721,16766,16767,16778,16779,16781,16782,16787,16790,16792,16793,16794,16797,16799,16800,16802,16804,16805,16806,16807,16808,16809,16810,16811,16812,16816) AND sale_status = 'awaiting_payment';
+
+-- 4. The matching receivables ledger rows, addressed by PRIMARY KEY, not by a join.
+--
+--    WHY EXPLICIT IDS: customer_receivables has no sale_id, and its invoice_no is NOT a
+--    key -- 10,676 of 13,304 rows (80%) share a number with another row. Its declared
+--    identity is UNIQUE(source_file, legacy_id), surfaced as this id. An earlier draft
+--    correlated on "legacy_receipt_number LIKE invoice_no || '@%'", which reached 152
+--    rows: these 82 plus 70 wrong-year rows ($9,809.75) belonging to other customers,
+--    excluded only incidentally by the status filter. Adding the date to that predicate
+--    fixed the over-match but replaced it with a silent under-match: invoice_date and
+--    the date inside legacy_receipt_number are independently sourced, so a one-day
+--    disagreement would drop a row from the result with no error (business-os-v1-ba).
+--    Both failure modes are removed by not joining at execution time.
+--
+--    These 82 ids were resolved read-only and the mapping proved strictly 1:1:
+--    82 pairs / 82 distinct sales / 82 distinct AR rows, covering all 82 target sales.
+--    Outstanding across them: $9,754.10.
+--
+--    EXPECTED: exactly 82 rows written. Fewer means a row was settled between authoring
+--    and execution -- re-derive before assuming it is benign. More is impossible here.
+--    18 other unpaid AR rows do not correspond to these sales and stay untouched.
+-- KHR TWINS SPLIT PER COLUMN in sale_items -- do not "fix" these inserts for symmetry.
+--    Measured over 36,277 rows: applied_price_khr 36,013 · base_price_khr 36,080 ·
+--    total_khr 36,013 · manual_discount_khr 24,139 populated, but cost_price_khr and
+--    product_discount_khr are ZERO rows -- both of them. So the two inserts above fill the
+--    price/total KHR columns and leave cost_price_khr and product_discount_khr at 0, which
+--    is the convention, not an omission. The two DISCOUNT columns behave oppositely, so a
+--    populated neighbour is not evidence about the column beside it.
+
+-- 4a. The SAME two dropped lines, on the receivables side.
+--
+--    Section 2 raises sales 16816 and 16812 from 54 -> 79 and 105 -> 131, because the
+--    source invoices billed 79 and 131 (IMPORT-RECORD table: 004430 $54->$79 YSL Libre 10ml
+--    $25; 004434 $105->$131 Clinical Completely Clean 45g x2 $26). Their receivables rows
+--    were imported from the SAME truncated totals and still read 54 and 105. Repairing only
+--    the sales side would settle these two invoices at 54 and 105 while the sales claim 79
+--    and 131 -- a $51 permanent split between the two ledgers, created by this file.
+--
+--    ORDER IS LOAD-BEARING HERE. Section 5 sets amount_paid_usd = total_amount_usd, so it
+--    must read the corrected totals. These two statements MUST precede it.
+--
+--    taxable_amount_usd MOVES WITH THE TOTAL. All 13,304 rows in this table satisfy
+--    taxable_amount_usd = total_amount_usd and vat_amount_usd = 0 (measured, not assumed).
+--    Raising only the total would leave exactly these 2 rows violating an invariant the
+--    other 13,302 keep.
+--
+--    Addressed by PRIMARY KEY, not invoice_no: 004430 has two rows (26519 at $54 dated
+--    2026-09-02, and 6489 at $37.50) -- invoice_no is not a key in this table.
+UPDATE customer_receivables SET total_amount_usd = 79, taxable_amount_usd = 79, outstanding_balance_usd = 79 - amount_paid_usd
+  WHERE id = 26519 AND total_amount_usd = 54;  -- guarded: no-op if it already moved
+UPDATE customer_receivables SET total_amount_usd = 131, taxable_amount_usd = 131, outstanding_balance_usd = 131 - amount_paid_usd
+  WHERE id = 26516 AND total_amount_usd = 105;  -- guarded: no-op if it already moved
+
+UPDATE customer_receivables SET status = 'Paid', amount_paid_usd = total_amount_usd, outstanding_balance_usd = 0
+  WHERE status <> 'Paid' AND id IN (1,2,13,14,33,34,35,36,37,38,39,40,41,42,43,49,138,149,171,205,206,212,237,306,307,315,375,382,395,440,441,532,537,625,643,653,654,655,775,776,777,778,779,780,781,782,783,784,785,786,787,788,789,790,802,808,813,814,822,823,888,26487,26488,26491,26494,26496,26497,26498,26501,26503,26504,26506,26508,26509,26510,26511,26512,26513,26514,26515,26516,26519);
