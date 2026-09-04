@@ -341,7 +341,7 @@ await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled
   // lives in utils/receiptLineMath, where a test can EXECUTE it instead of only
   // pattern-matching it, so this asserts the rule in its new home AND that the
   // component still consumes it -- together, what this lock was always after.
-  assert.match(receipt, /import \{ receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
+  assert.match(receipt, /import \{ receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
   assert.match(receipt, /const figures = receiptLineFigures\(item, showItemDiscount, exchangeRate\)/)
   const lineMath = fs.readFileSync(new URL('../src/utils/receiptLineMath.ts', import.meta.url), 'utf8')
   assert.match(lineMath, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ num\(item\.product_discount_usd\)/)

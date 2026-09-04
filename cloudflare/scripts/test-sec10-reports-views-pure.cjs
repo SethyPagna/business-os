@@ -92,6 +92,28 @@ db.exec(`
     product_id INTEGER,
     product_name TEXT
   );
+  -- delivery_actual_cost_usd on a sale is ignored when the SAME courier
+  -- payment was also written as a standalone fees row, so the kernel probes
+  -- fees; and COGS is stated net of restocked returns, so it reads
+  -- return_items. Both empty here -- this file is about the reports views.
+  CREATE TABLE fees (
+    id INTEGER PRIMARY KEY,
+    fee_type TEXT,
+    amount_usd REAL,
+    amount_khr REAL,
+    fee_date TEXT,
+    sale_id INTEGER,
+    branch_id INTEGER,
+    delivery_contact_id INTEGER
+  );
+  CREATE TABLE return_items (
+    id INTEGER PRIMARY KEY,
+    return_id INTEGER,
+    quantity REAL,
+    cost_price_usd REAL,
+    return_to_stock INTEGER,
+    stock_action TEXT
+  );
   CREATE TABLE returns (
     id INTEGER PRIMARY KEY,
     sale_id INTEGER,
@@ -154,11 +176,17 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
 
   // Sanity on the canonical figures the views must reconcile to:
   // recognized: S1 (90 net), S2 (50), S3 (80), S6 (20) = 240; refunds 10 -> revenue 230.
-  // pending: S4 = 40. COGS: 30 + 0 + 20 + 15 + 8 = 73. profit: 230 - 73 - 3 (store delivery) = 154.
+  // pending: S4 = 40. COGS: 30 + 0 + 20 + 15 + 8 = 73.
+  // Delivery: S3's fee of 3 was ABSORBED by the shop, so nothing was collected
+  // and no courier cost is recorded -- delivery contributes 0 here. It used to
+  // be subtracted, which charged the shop for a giveaway that had already been
+  // left out of the 230. profit: 230 - 73 + 0 = 157.
   check('fixture: canonical revenue = 230 (240 net - 10 refund)', near(totals.revenue_usd, 230))
   check('fixture: pending credit = 40 (the awaiting sale, not revenue)', near(totals.pending_revenue_usd, 40))
   check('fixture: COGS = 73 (NULL snapshot counts 0; awaiting + cancelled items excluded)', near(totals.cost_usd, 73))
-  check('fixture: profit = 154 (revenue - COGS - store-paid delivery 3)', near(totals.profit_usd, 154))
+  check('fixture: profit = 157 (revenue - COGS + delivery net, which is 0 here)', near(totals.profit_usd, 157))
+  check('the waived delivery fee is reported but not charged to profit (154 was the double minus)',
+    near(totals.store_delivery_usd, 3) && !near(totals.profit_usd, 154))
   check('fixture: tx_count = 5 (cancelled excluded, awaiting counted as a transaction)', totals.tx_count === 5)
 
   for (const groupBy of kernel.SALES_GROUP_KEYS) {
@@ -187,7 +215,9 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   const za = byCashier.find((r) => r.key === 'id:10')
   const mia = byCashier.find((r) => r.key === 'id:11')
   check('cashier: Za = S1 + S2 + S6 (3 tx, revenue 160)', !!za && za.tx_count === 3 && near(za.revenue_usd, 160) && za.label === 'Za')
-  check('cashier: Mia = S3 + S4 (2 tx, revenue 70, pending 40, profit 80-15-3-10=52)', !!mia && mia.tx_count === 2 && near(mia.revenue_usd, 70) && near(mia.pending_revenue_usd, 40) && near(mia.profit_usd, 52))
+  // S3 nets 80 less a 10 refund = 70; its 3 of delivery was absorbed, so it
+  // is reported and not charged. profit = 70 - 15 = 55 (was 52, the double minus).
+  check('cashier: Mia = S3 + S4 (2 tx, revenue 70, pending 40, profit 70-15=55)', !!mia && mia.tx_count === 2 && near(mia.revenue_usd, 70) && near(mia.pending_revenue_usd, 40) && near(mia.profit_usd, 55))
 
   // ---- payment method: case/space-insensitive key, blank -> 'unknown' ----
   const byPayment = await kernel.getSalesGroupedTotals(env, filters, 'payment_method')

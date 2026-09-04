@@ -62,6 +62,13 @@ db.exec(lift('sale_items'))
 // the real returns schema so that SQL resolves; this suite seeds no returns, so
 // refund_usd is 0 and the payment/delivery assertions below are unaffected.
 db.exec(lift('returns'))
+// COGS is now stated net of goods a return put back on the SELLABLE shelf, so
+// the kernel reads return_items -- and reads 0074's stock_action to tell a
+// restock from damaged stock or goods the customer kept. No returns are seeded
+// here, so the reversal is 0 and the assertions below are unaffected; the
+// convergence suite owns the reversal arithmetic.
+db.exec(lift('return_items'))
+db.exec('ALTER TABLE return_items ADD COLUMN stock_action TEXT')
 // getDeliveryContactTotals (fees lane) folds courier expense rows into the
 // delivery report: real fees schema (0018) + the 0105 link column, plus the
 // delivery_contacts table it joins for names. No fees are seeded here, so

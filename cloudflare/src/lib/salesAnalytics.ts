@@ -33,10 +33,50 @@
 //   collected_total_usd = revenue_usd + tax_usd + delivery_usd  -- secondary
 //                         "total collected": what actually changed hands with
 //                         the customer (delivery_usd = customer-paid only)
-//   cost_usd           = SUM(sale_items.cost_price_usd * quantity) over recognized sales
-//   profit_usd         = revenue_usd - cost_usd - store_delivery_usd
-//                         (store-absorbed delivery is a real cost, so it comes
-//                         out of profit even though it never touched revenue)
+//   returned_cost_usd  = SUM(return_items.cost_price_usd * quantity) for lines
+//                         that went back on the SELLABLE shelf (stock_action
+//                         'restock'), on non-cancelled customer returns
+//   cost_usd           = SUM(sale_items.cost_price_usd * quantity) over recognized
+//                         sales, MINUS returned_cost_usd -- goods that came back
+//                         are not cost of goods SOLD
+//   delivery_net_usd   = recognized customer-paid fees - recognized courier cost
+//                         actually recorded on the sale
+//   profit_usd         = revenue_usd - cost_usd + delivery_net_usd
+//
+// ---- Two corrections made Sep 4 2026, both of them double-counted minuses ---
+//
+// (a) profit used to read `- store_delivery_usd`: the fee the shop WAIVED,
+//     subtracted as though it were cash paid out. It is not. The shop never
+//     collected it, so it is already absent from every income figure here;
+//     subtracting it again charges the giveaway twice. Meanwhile the fee the
+//     shop DID collect never entered profit at all, and neither did the courier
+//     money actually paid out -- migration 0068 left that out on purpose and
+//     said folding it in "is its own explicit decision later". This is that
+//     decision. Delivery now contributes exactly what it is worth: collected
+//     minus paid out, once.
+//
+//     What is NOT folded in, deliberately: the standalone courier payments in
+//     `fees` (fee_type='delivery'). There are 2,540 of them and they are
+//     denominated in RIEL (51,127,200 KHR against $3.50), they carry no
+//     sale_id, and their calendar filter is fee_date rather than the sale's
+//     created_at. Folding them into a USD profit would require inventing an
+//     exchange rate that no other fee surface applies -- every one of them
+//     reports USD and KHR side by side and converts nothing -- and a rate that
+//     moves would silently restate historical profit. They are reported
+//     separately by getDeliveryContactTotals, which keeps them apart for the
+//     same reason. That is the honest scope: what can be attributed per sale
+//     and in one currency is in profit; what cannot is visible beside it.
+//
+// (b) a refund used to come off revenue at its full charged line price, but
+//     revenue is NET of the sale's store and membership discounts and a line
+//     price is not. Returning one line of a discounted sale therefore subtracted
+//     that line's share of the discount a second time. netRefundExpr scales the
+//     refund onto the same net basis revenue is measured on.
+//
+//     And the cost of goods that came BACK is no longer cost of goods SOLD.
+//     Only a 'restock' line qualifies: 'damaged' units are held in
+//     damaged_stock_lots with no sale value, and 'none' means the customer kept
+//     them -- in both cases the cost was really incurred and stays in cost_usd.
 import { getDb } from './db'
 import type { Env } from '../index'
 import {
@@ -99,6 +139,16 @@ export interface SalesTotals {
   delivery_actual_cost_count: number
   delivery_sale_count: number
   delivery_margin_usd: number
+  // The delivery contribution profit_usd actually uses: customer-paid fees
+  // minus recorded courier cost, both over RECOGNIZED sales only, so it is a
+  // matched pair with revenue_usd and cost_usd. Distinct from
+  // delivery_margin_usd, which describes EVERY delivery including cancelled
+  // ones and stays a descriptive figure.
+  delivery_net_usd: number
+  // Cost of goods that came back on the SELLABLE shelf and is therefore no
+  // longer cost of goods SOLD. Already subtracted inside cost_usd; reported so
+  // the reversal is visible rather than an unexplained dip.
+  returned_cost_usd: number
   // Canonical revenue = NET SALES (user directive Sep 1 2026): subtotal net of
   // both discounts, minus customer refunds, over RECOGNIZED sales only (neither
   // cancelled nor awaiting_payment). Tax and delivery fees are NOT revenue.
@@ -133,6 +183,7 @@ export function emptySalesTotals(): SalesTotals {
     tx_count: 0, gross_sales_usd: 0, store_discount_usd: 0, membership_discount_usd: 0,
     discount_usd: 0, tax_usd: 0, delivery_usd: 0, store_delivery_usd: 0,
     delivery_actual_cost_usd: 0, delivery_actual_cost_count: 0, delivery_sale_count: 0, delivery_margin_usd: 0,
+    delivery_net_usd: 0, returned_cost_usd: 0,
     refund_usd: 0, revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
   }
 }
@@ -193,10 +244,82 @@ export function collectedExpr(p: string): string {
 export function customerDeliveryFeeExpr(p: string): string {
   return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(${p}delivery_fee_usd, 0) END`
 }
-// The delivery fee the SHOP absorbed (customer not charged) -- a cost, not revenue.
+// The delivery fee the SHOP absorbed (customer not charged). Revenue FORGONE,
+// not cash paid out -- see correction (a) in the header. Reported because the
+// shop wants to see what it gives away; never subtracted from profit, because
+// the income figure already excludes it.
 function storeDeliveryExpr(p: string): string {
   return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN COALESCE(${p}delivery_fee_usd, 0) ELSE 0 END`
 }
+// The courier money actually paid out, as recorded ON THE SALE. Cash out.
+//
+// The NOT EXISTS is the anti-double-count: a sale whose courier payment was
+// also written as a standalone `fees` delivery row would otherwise be charged
+// twice, once here and once in that stream. No production row is linked that
+// way today (all 2,540 delivery fee rows have sale_id NULL), which is exactly
+// why the guard has to be written now rather than after the first one is.
+//
+// NULL means "not recorded", never zero. Measured Sep 4 2026: exactly 12 of
+// 15,044 sales carry a courier cost, they are ids 16836-16872, and every one of
+// them is still awaiting_payment -- so this expression contributes nothing to a
+// recognized figure yet and starts contributing the moment those sales are
+// marked paid. delivery_actual_cost_count reports how many sales recorded a
+// cost, so a near-empty column reads as missing data rather than free delivery.
+function deliveryActualCostExpr(p: string): string {
+  return `CASE WHEN EXISTS (
+      SELECT 1 FROM fees
+      WHERE fees.sale_id = ${p}id AND COALESCE(fees.fee_type, '') = 'delivery'
+    ) THEN 0 ELSE COALESCE(${p}delivery_actual_cost_usd, 0) END`
+}
+// The share of a refund that comes back OUT of net-sales revenue.
+//
+// revenue is (subtotal - store discount - membership discount); a refund is the
+// line's CHARGED price, which has neither discount taken off it. Subtracting it
+// whole removes the line's share of those discounts a second time -- they were
+// already removed when the sale was recognized. Scaling by net/subtotal puts the
+// refund on the same basis as the thing it is reducing.
+//
+// subtotal = 0 has no basis to scale against (a fully comped sale, or a manual
+// return with no sale behind it), so the refund passes through unscaled: the
+// money did leave the till.
+export function netRefundExpr(p: string, rf: string): string {
+  return `CASE WHEN COALESCE(${p}subtotal_usd, 0) > 0
+    THEN COALESCE(${rf}refund_usd, 0) * (${netSaleExpr(p)} / COALESCE(${p}subtotal_usd, 0))
+    ELSE COALESCE(${rf}refund_usd, 0) END`
+}
+// Goods that went back on the SELLABLE shelf, in SQL. This is
+// lib/returnsStock.ts's normalizeStockAction spelled for SQLite, and it has to
+// stay that way: routes/returns.ts decides what to restock with that function,
+// so if the two ever disagree the books say one thing and the shelf another.
+// An explicit stock_action wins; absent, the historical return_to_stock boolean
+// keeps its meaning (default TRUE).
+// The sale-level revenue block, written ONCE.
+//
+// Every query that feeds deriveTotals must measure revenue on the same basis or
+// the trend chart stops summing back to the headline above it. They were four
+// separate copies and they had already diverged; interpolating one constant is
+// what makes "the Dashboard and the Sales page agree" a property of the code
+// rather than a thing someone re-checks.
+//
+// Every query using it selects FROM sales unaliased, which is why the prefix is
+// '' and the correlated cost lookup says sales.id.
+export const RECOGNIZED_LEVEL_COLUMNS = `
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
+             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${deliveryActualCostExpr('sales.')} ELSE 0 END), 0) AS recognized_delivery_cost_usd,
+             -- The refund on the NET basis revenue is measured on (see the
+             -- header); refund_paid_out_usd keeps the cash figure beside it.
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netRefundExpr('', 'rf.')} ELSE 0 END), 0) AS refund_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_paid_out_usd`
+
+export const RESTOCKED_RETURN_LINE = `CASE
+    WHEN LOWER(TRIM(COALESCE(ri.stock_action, ''))) IN ('restock', 'damaged', 'none')
+      THEN LOWER(TRIM(ri.stock_action)) = 'restock'
+    ELSE COALESCE(ri.return_to_stock, 1) <> 0
+  END`
 // Pre-aggregated customer refunds per sale (non-cancelled customer returns), so
 // a sale carrying two returns still subtracts once. Refunds attribute to the
 // SALE's date bucket via sale_id -- identical to GET /api/sales/stats. Join it
@@ -284,12 +407,7 @@ async function salesLevelTotals(env: Env, f: SalesFilters) {
            COALESCE(SUM(CASE WHEN delivery_actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END), 0) AS delivery_actual_cost_count,
            COALESCE(SUM(CASE WHEN COALESCE(is_delivery, 0) = 1 THEN 1 ELSE 0 END), 0) AS delivery_sale_count,
            -- Canonical net-sales revenue components (recognized = not cancelled/awaiting):
-           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
-           COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
-           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
-           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
-           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
-           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_usd
+           ${RECOGNIZED_LEVEL_COLUMNS}
     FROM sales
     ${CUSTOMER_REFUND_JOIN}sales.id
     WHERE ${whereSql}
@@ -315,7 +433,53 @@ async function salesCost(env: Env, f: SalesFilters): Promise<number> {
   return num(row?.cost_usd)
 }
 
-export function deriveTotals(level: Record<string, number>, costUsd: number): SalesTotals {
+// Cost of the goods a return put BACK on the sellable shelf, over the same
+// window and the same recognized sales as salesCost. Scoped to non-cancelled
+// CUSTOMER returns, matching CUSTOMER_REFUND_JOIN exactly -- an internal
+// (supplier) return never touched a customer sale's revenue and must not touch
+// its cost either.
+//
+// Joined through the sale, not the return's own date: a return that lands in a
+// later month reverses the cost in the month the sale was booked, which is what
+// keeps revenue and cost a matched pair inside every bucket. The refund is
+// attributed to the sale's bucket for the same reason.
+// `bucketExpr` is any expression over the sale (aliased s) -- a local day, a
+// customer key -- or null for the whole window in one row. It has to be the
+// SAME expression the cost query buckets by, or a return lands in a different
+// row from the sale whose cost it reverses.
+function returnedCostSql(bucketExpr: string | null, whereSql: string): string {
+  return `
+    SELECT ${bucketExpr ? `${bucketExpr} AS bucket,` : `'' AS bucket,`}
+           COALESCE(SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END), 0) AS returned_cost_usd
+    FROM return_items ri
+    JOIN returns r ON r.id = ri.return_id
+    JOIN sales s ON s.id = r.sale_id
+    WHERE ${whereSql}
+      AND ${recognizedExpr('s.')}
+      AND COALESCE(r.status, 'completed') <> 'cancelled'
+      AND COALESCE(r.return_scope, 'customer') = 'customer'
+    ${bucketExpr ? 'GROUP BY bucket' : ''}
+  `
+}
+
+async function salesReturnedCost(env: Env, f: SalesFilters): Promise<number> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('s', f)
+  const row = await db.prepare(returnedCostSql(null, whereSql)).get<{ returned_cost_usd: number }>(params)
+  return num(row?.returned_cost_usd)
+}
+
+// Same aggregate, bucketed. Returns a Map keyed the way the caller's cost query
+// is keyed, so a missing bucket is simply zero reversal.
+async function returnedCostByBucket(env: Env, f: SalesFilters, bucketExpr: string): Promise<Map<string, number>> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('s', f)
+  const rows = await db.prepare(returnedCostSql(bucketExpr, whereSql))
+    .all<{ bucket: string | number | null; returned_cost_usd: number }>(params)
+  return new Map((rows || []).map((r) => [r.bucket == null ? '' : String(r.bucket), num(r.returned_cost_usd)]))
+}
+
+export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd = 0): SalesTotals {
   const txCount = num(level.tx_count)
   const grossSalesUsd = num(level.gross_sales_usd)
   const storeDiscountUsd = num(level.store_discount_usd)
@@ -338,10 +502,21 @@ export function deriveTotals(level: Record<string, number>, costUsd: number): Sa
   const recognizedTaxUsd = hasRecognized ? num(level.recognized_tax_usd) : taxUsd
   const recognizedDeliveryUsd = hasRecognized ? num(level.recognized_delivery_usd) : deliveryUsd
   const recognizedStoreDeliveryUsd = hasRecognized ? num(level.recognized_store_delivery_usd) : storeDeliveryUsd
+  const recognizedDeliveryCostUsd = hasRecognized ? num(level.recognized_delivery_cost_usd) : deliveryActualCostUsd
   const revenueUsd = recognizedNetUsd - refundUsd
-  // "Total collected" (secondary): recognized revenue + tax + customer delivery fee.
+  // "Total collected" (secondary): recognized revenue + tax + customer delivery
+  // fee. This one uses the refund the till actually PAID OUT, not the
+  // net-basis share, because it answers "what changed hands" rather than
+  // "what did we earn". refund_paid_out_usd is carried for exactly that.
   const collectedTotalUsd = revenueUsd + recognizedTaxUsd + recognizedDeliveryUsd
-  const profitUsd = revenueUsd - costUsd - recognizedStoreDeliveryUsd
+  // Goods back on the shelf are not cost of goods SOLD. Floored at zero: a
+  // return whose recorded cost exceeds the window's own COGS (a return against
+  // a sale outside the range, an imported cost) must not manufacture profit.
+  const netCostUsd = Math.max(0, costUsd - returnedCostUsd)
+  // Delivery contributes what it is worth, once: collected minus paid out. The
+  // absorbed fee is NOT subtracted here -- see correction (a) in the header.
+  const deliveryNetUsd = recognizedDeliveryUsd - recognizedDeliveryCostUsd
+  const profitUsd = revenueUsd - netCostUsd + deliveryNetUsd
   return {
     tx_count: txCount,
     gross_sales_usd: round2(grossSalesUsd),
@@ -357,19 +532,25 @@ export function deriveTotals(level: Record<string, number>, costUsd: number): Sa
     // Margin over the CHARGED fees: what customers paid for delivery minus
     // what the couriers were actually paid.
     delivery_margin_usd: round2(deliveryUsd - deliveryActualCostUsd),
+    delivery_net_usd: round2(deliveryNetUsd),
+    returned_cost_usd: round2(Math.min(costUsd, returnedCostUsd)),
     refund_usd: round2(refundUsd),
     revenue_usd: round2(revenueUsd),
     pending_revenue_usd: round2(pendingRevenueUsd),
     collected_total_usd: round2(collectedTotalUsd),
-    cost_usd: round2(costUsd),
+    cost_usd: round2(netCostUsd),
     profit_usd: round2(profitUsd),
     avg_order_usd: txCount > 0 ? round2(revenueUsd / txCount) : 0,
   }
 }
 
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
-  const [level, costUsd] = await Promise.all([salesLevelTotals(env, f), salesCost(env, f)])
-  return deriveTotals(level, costUsd)
+  const [level, costUsd, returnedCostUsd] = await Promise.all([
+    salesLevelTotals(env, f),
+    salesCost(env, f),
+    salesReturnedCost(env, f),
+  ])
+  return deriveTotals(level, costUsd, returnedCostUsd)
 }
 
 // Period-bucketed trend series (for the Dashboard revenue/cost/profit line
@@ -389,7 +570,7 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
   const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
 
-  const [levelRows, costRows] = await Promise.all([
+  const [levelRows, costRows, returnedByPeriod] = await Promise.all([
     db.prepare(`
       SELECT ${periodExprS} AS period, COUNT(*) AS tx_count,
              COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
@@ -399,12 +580,9 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
              COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
              COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
              -- Same canonical net-sales revenue basis as the headline, so the
-             -- per-period trend sums back to getSalesTotals' revenue_usd.
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_usd
+             -- per-period trend sums back to getSalesTotals' revenue_usd. Not a
+             -- copy of it: the same constant.
+             ${RECOGNIZED_LEVEL_COLUMNS}
       FROM sales
       ${CUSTOMER_REFUND_JOIN}sales.id
       WHERE ${whereLevel}
@@ -418,11 +596,12 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
       WHERE ${whereCost} AND ${recognizedExpr('s.')}
       GROUP BY ${periodExprJoined}
     `).all<{ period: string; cost_usd: number }>(paramsCost),
+    returnedCostByBucket(env, f, periodExprJoined),
   ])
 
   const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
   const rows = (levelRows || []).map((r) => {
-    const totals = deriveTotals(r, costByPeriod.get(r.period) || 0)
+    const totals = deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0)
     return {
       period: r.period,
       date: r.period,
@@ -751,7 +930,7 @@ export async function getSalesDayReport(
              -- (awaiting_payment / cancelled contribute 0), net of THIS sale's
              -- own customer refunds -- identical basis to deriveTotals, so
              -- SUM(revenue_usd) over the day == totals.revenue_usd.
-             ROUND(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} - COALESCE(rf.refund_usd, 0) ELSE 0 END, 2) AS revenue_usd,
+             ROUND(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} - ${netRefundExpr('', 'rf.')} ELSE 0 END, 2) AS revenue_usd,
              ROUND(COALESCE(discount_usd, 0) + COALESCE(membership_discount_usd, 0), 2) AS discount_usd,
              ROUND(${collectedExpr('')}, 2) AS collected_usd
       FROM sales
@@ -915,7 +1094,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
   const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
 
-  const [levelRows, costRows] = await Promise.all([
+  const [levelRows, costRows, returnedByKey] = await Promise.all([
     db.prepare(`
       SELECT ${level.key} AS grp_key, ${level.label} AS grp_label, ${level.id} AS grp_id,
              COUNT(*) AS tx_count,
@@ -925,12 +1104,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
              COALESCE(SUM(tax_usd), 0) AS tax_usd,
              COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
              COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_usd
+             ${RECOGNIZED_LEVEL_COLUMNS}
       FROM sales
       ${CUSTOMER_REFUND_JOIN}sales.id
       WHERE ${whereLevel}
@@ -945,6 +1119,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       WHERE ${whereCost} AND ${recognizedExpr('s.')}
       GROUP BY grp_key
     `).all<{ grp_key: string | number | null; cost_usd: number; missing_snapshot_lines: number }>(paramsCost),
+    returnedCostByBucket(env, f, joined.key),
   ])
 
   const keyOf = (v: string | number | null | undefined): string => (v == null ? '' : String(v))
@@ -957,7 +1132,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       label: r.grp_label == null ? '' : String(r.grp_label),
       entity_id: r.grp_id == null ? null : Number(r.grp_id),
       cost_missing_snapshot_lines: missingByKey.get(key) || 0,
-      ...deriveTotals(r, costByKey.get(key) || 0),
+      ...deriveTotals(r, costByKey.get(key) || 0, returnedByKey.get(key) || 0),
     }
   })
   if (groupBy === 'hour' || groupBy === 'weekday') {
@@ -1059,7 +1234,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
   const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
 
-  const [levelRows, costRows] = await Promise.all([
+  const [levelRows, costRows, returnedByPeriod] = await Promise.all([
     db.prepare(`
       SELECT ${periodExprS} AS period, COUNT(*) AS tx_count,
              COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
@@ -1068,12 +1243,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
              COALESCE(SUM(tax_usd), 0) AS tax_usd,
              COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
              COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_usd
+             ${RECOGNIZED_LEVEL_COLUMNS}
       FROM sales
       ${CUSTOMER_REFUND_JOIN}sales.id
       WHERE ${whereLevel}
@@ -1088,6 +1258,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
       WHERE ${whereCost} AND ${recognizedExpr('s.')}
       GROUP BY ${periodExprJoined}
     `).all<{ period: string; cost_usd: number; missing_snapshot_lines: number }>(paramsCost),
+    returnedCostByBucket(env, f, periodExprJoined),
   ])
 
   const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
@@ -1095,7 +1266,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
   const rows = (levelRows || []).map((r) => ({
     date: r.period,
     cost_missing_snapshot_lines: missingByPeriod.get(r.period) || 0,
-    ...deriveTotals(r, costByPeriod.get(r.period) || 0),
+    ...deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0),
   }))
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 }

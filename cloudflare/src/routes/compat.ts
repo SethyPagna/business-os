@@ -10,7 +10,7 @@ import { audit } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
+import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 
@@ -340,9 +340,15 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
   const analyticsParams = filters.branchId ? { ...params, branchId: filters.branchId } : params
   const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
   const activeSalesClause = (alias: string) => `${localDateRangeClause(`${alias}.created_at`)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
+  // Apportions a sale's net revenue across its lines by each line's share of
+  // subtotal_usd. The > 0 guard avoids a divide-by-zero, but note what it costs:
+  // a sale whose subtotal was never written contributes 0 to every by-product
+  // and by-category figure while still appearing in the by-payment-method and
+  // by-branch ones above, which read the sale row directly. That asymmetry is
+  // how the Sep 2-3 import's 22 zero-subtotal sales stayed invisible here.
   const attributedLineRevenue = `CASE
     WHEN COALESCE(s.subtotal_usd, 0) > 0
-      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0))
+      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
     ELSE 0
   END`
   const [
@@ -387,7 +393,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
       SELECT COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS method,
              COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS payment_method,
              COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
@@ -397,7 +403,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     db.prepare(`
       SELECT s.branch_id, COALESCE(s.branch_name, 'Unassigned') AS branch_name,
              COUNT(*) AS tx_count, COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
@@ -431,7 +437,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
              COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
              COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
              COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS net_revenue_usd
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS net_revenue_usd
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
@@ -441,7 +447,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     `).all(analyticsParams),
     db.prepare(`
       SELECT CAST(${localHourExpr('s.created_at')} AS INTEGER) AS hour, COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
