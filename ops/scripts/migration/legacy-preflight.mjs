@@ -5,7 +5,36 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 export const normalizeLegacyText = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
-export const barcodeKey = (value) => String(value ?? '').replace(/\D/g, '').replace(/^0+(?=\d)/, '')
+/**
+ * The ONE barcode-key rule every legacy migration script shares.
+ *
+ * A source code is a BARCODE ONLY WHEN IT IS ENTIRELY DIGITS.  Anything else --
+ * a SKU-style code, a spreadsheet header cell, a "Created By:..." banner row --
+ * returns '' so the caller falls through to its name path instead of chasing a
+ * barcode.  '' is deliberate: it is neither an error nor a throw, because every
+ * caller already reads an empty key as "this row carries no barcode".
+ *
+ * This helper used to strip non-digits, and stripping does NOT produce an empty
+ * key -- it produces a SHORT WRONG one.  "Libre10ml" became "10" and
+ * "CompletelyClean45g" became "45", and 44 live products carry the literal
+ * barcode "10" (the 10ml-perfume placeholder), 3 of them active.  The only
+ * reason this produced dropped lines rather than silent mis-booking into the
+ * wrong product is that the duplicate-barcode quarantine stood in front of it.
+ * Relax that quarantine and this becomes silent mis-booking against those 44
+ * products.  The Sep-1 transfer path is the sharpest edge: it calls
+ * resolveUniqueBarcode with no name fallback at all, so a short wrong key that
+ * hit exactly one active product would book stock against an unrelated product
+ * and look correct forever.
+ *
+ * A digits-only code keeps its leading-zero normalisation ("0012345" ->
+ * "12345") so an Excel-widened barcode still equals its stored form, and "0"
+ * stays "0" for the callers that reject it as a placeholder.
+ */
+export const barcodeKey = (value) => {
+  const code = String(value ?? '').trim()
+  if (!/^[0-9]+$/.test(code)) return ''
+  return code.replace(/^0+(?=\d)/, '')
+}
 // Keep this identical to cloudflare/src/lib/phone.ts::canonicalizePhone.
 // Unlike a barcode comparison key, a stored customer phone must retain its
 // national leading zero so portal/customer equality lookups keep working.
@@ -72,7 +101,15 @@ export function resolveLegacyCashier(rawName, users = []) {
   return { status: distinct.length ? 'ambiguous' : 'unmatched', rawName: String(rawName), canonical, user: null, candidates: distinct.map((user) => user.id) }
 }
 
-/** Never let a cost/name fallback silently choose among duplicate barcodes. */
+/**
+ * Never let a cost/name fallback silently choose among duplicate barcodes.
+ *
+ * Some callers (the Sep-1 stock-transfer path) have NO name fallback behind
+ * this, so `missing_barcode` there means the line is reported and skipped, not
+ * resolved by another route.  That is why the key must come from barcodeKey's
+ * entirely-digits rule and never from digit extraction: a short wrong key here
+ * has nothing standing behind it but the duplicate quarantine.
+ */
 export function resolveUniqueBarcode(barcode, candidates = []) {
   const key = barcodeKey(barcode)
   if (!key || key === '0') return { status: 'missing_barcode', key, product: null }

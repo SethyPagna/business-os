@@ -1,5 +1,11 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const path = require('node:path')
+
+// Anchored to __dirname, never the cwd: this file used to read the importers
+// through './ops/scripts/migration/...', which only resolved when it happened
+// to be run from the repository root.
+const migrationDir = __dirname
 
 ;(async () => {
   const helpers = await import('./legacy-preflight.mjs')
@@ -57,8 +63,8 @@ const fs = require('node:fs')
   assert.equal(manifest.invariants.receivableTotalUsd, 12)
   assert.equal(manifest.invariants.receivablePaidUsd, 10)
   assert.equal(manifest.invariants.receivableOutstandingUsd, 2)
-  const sepScript = fs.readFileSync('./ops/scripts/migration/import-sep01-legacy-reports.mjs', 'utf8')
-  const aug31Script = fs.readFileSync('./ops/scripts/migration/import-aug31-legacy-reports.mjs', 'utf8')
+  const sepScript = fs.readFileSync(path.join(migrationDir, 'import-sep01-legacy-reports.mjs'), 'utf8')
+  const aug31Script = fs.readFileSync(path.join(migrationDir, 'import-aug31-legacy-reports.mjs'), 'utf8')
   assert.ok(aug31Script.includes("resolveArchivedReport(legacyRoot, name)"), 'Aug-31 migration must prefer the preserved archive over loose Downloads copies')
   assert.ok(aug31Script.includes('new Set([4377, 4378, 4379, 4380, 4381])'), 'Aug-31 Rath attribution must be limited to the five receipts reconciled by the user report')
   assert.ok(aug31Script.includes("cashier: RATH_PROVEN_RECEIPTS.has(Number(first['Invoice No'])) ? cashierRath : null"), 'each Aug-31 sale carries evidence-scoped cashier identity')
