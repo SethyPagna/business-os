@@ -140,11 +140,14 @@ const LABELS = {
   yourChatId: { en: 'This chat id', km: 'លេខឆាតនេះ' },
 
   // --- shift report (S4-7) ---
-  // The line set, and its ORDER, is the shop owner's own: shop name, cashier,
-  // from/to, invoice counts (total, cancelled, edited), revenue, item
-  // discount, invoice discount, gross sale, credit, other expense, registered
-  // cash, final amount, then the two breakdowns. From/To/Cashier/Branch reuse
-  // the labels above rather than growing shift-specific twins.
+  // The line set, and its ORDER, is the shop owner's own, as amended after
+  // review: shop name, cashier, from/to, invoice counts (total, cancelled,
+  // edited), revenue, item discount, invoice discount, gross sale, other
+  // expense, registered cash, final amount -- THEN unpaid credit, printed
+  // below the total rather than above it, because a line above a total reads
+  // as an input to it and credit is explicitly not one (see the arithmetic
+  // note on formatShiftReport). From/To/Cashier/Branch reuse the labels above
+  // rather than growing shift-specific twins.
   shop: { en: 'Shop', km: 'ហាង' },
   shift: { en: 'Shift', km: 'វេន' },
   invoices: { en: 'Invoices', km: 'វិក្កយបត្រ' },
@@ -162,12 +165,18 @@ const LABELS = {
   itemDiscount: { en: 'Item discount', km: 'បញ្ចុះតម្លៃលើមុខទំនិញ' },
   invoiceDiscount: { en: 'Invoice discount', km: 'បញ្ចុះតម្លៃលើវិក្កយបត្រ' },
   grossSale: { en: 'Gross sale', km: 'ការលក់សរុប' },
-  credit: { en: 'Credit', km: 'ឥណទាន' },
   otherExpense: { en: 'Other expense', km: 'ចំណាយផ្សេងៗ' },
   registeredCash: { en: 'Registered cash', km: 'សាច់ប្រាក់ដែលបានចុះបញ្ជី' },
   cashCounted: { en: 'Cash counted', km: 'សាច់ប្រាក់ដែលបានរាប់' },
   difference: { en: 'Difference', km: 'ភាពខុសគ្នា' },
   finalAmount: { en: 'Final amount', km: 'ចំនួនទឹកប្រាក់ចុងក្រោយ' },
+  // Reuses the app's own term for pending revenue -- copied verbatim from
+  // en.json/km.json's `rpt_pending_credit` (the Sales reports' "Unpaid
+  // credit" column) rather than inventing new wording for the same figure.
+  // Printed BELOW Final amount (see formatShiftReport): the owner's ruling
+  // was that a line above a total reads as an input to it, and unpaid credit
+  // explicitly is not one.
+  unpaidCredit: { en: 'Unpaid credit', km: 'ឥណទានមិនទាន់បង់' },
   paymentMethod: { en: 'Payment method', km: 'វិធីទូទាត់' },
 } as const satisfies Record<string, LabelEntry>
 

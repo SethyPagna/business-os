@@ -257,8 +257,10 @@ async function inventorySummaryReport(env: Env): Promise<string> {
 //
 // The owner's line set, in the owner's order: shop name, cashier, from/to,
 // invoice counts (total / cancelled / edited), revenue, item discount,
-// invoice discount, gross sale, credit, other expense, registered cash,
-// final amount, then the payment-method and delivery-service breakdowns.
+// invoice discount, gross sale, other expense, registered cash, final
+// amount -- THEN unpaid credit (moved below the total on the owner's review
+// ruling; see the note at "Final amount" below) -- then the payment-method
+// and delivery-service breakdowns.
 //
 // WHAT A SHIFT IS SCOPED TO. One employee, one branch, one business day --
 // the key of migration 0116's `shift_sessions`, and the board's own words for
@@ -292,7 +294,12 @@ async function inventorySummaryReport(env: Env): Promise<string> {
 //     subtracted: unpaid credit was never collected, so it is never in the
 //     revenue figure to begin with, and subtracting it would count it twice.
 //     The two components are printed under the total so the arithmetic can be
-//     checked without opening the app.
+//     checked without opening the app. THE OWNER'S REVIEW RULING kept this
+//     arithmetic unchanged but moved the "Unpaid credit" line to print BELOW
+//     Final amount rather than above it: a line sitting above a total reads
+//     as an input to that total, and credit explicitly is not one. Below the
+//     total it reads as what it is -- informational, money owed rather than
+//     money in the drawer.
 //
 // Riel is never folded into dollars anywhere here -- the drawer holds both and
 // the shop counts them separately, the same convention migration 0116 and
@@ -365,7 +372,6 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     labeled('itemDiscount', usd(figures.itemDiscountUsd)),
     labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)),
     labeled('grossSale', usd(figures.grossSaleUsd)),
-    labeled('credit', usd(figures.creditUsd)),
     labeled('otherExpense', money(figures.otherExpenseUsd, figures.otherExpenseKhr)),
     labeled('registeredCash', money(shift.opening_float_usd, shift.opening_float_khr)),
   )
@@ -386,6 +392,12 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     '     registered cash + collected − expense',
     '     សាច់ប្រាក់ចុះបញ្ជី + ប្រាក់ទទួល − ចំណាយ',
   )
+
+  // Printed AFTER Final amount, deliberately: the owner's ruling was that a
+  // line above a total reads as an input to it, and unpaid credit is not one
+  // (see the section comment above). Below the total it reads as what it
+  // is -- money owed, not money that belongs in tonight's drawer count.
+  lines.push(labeled('unpaidCredit', usd(figures.creditUsd)))
 
   // The closing count only exists once the employee has ended the shift by
   // hand, so an open shift shows neither it nor a difference against it --

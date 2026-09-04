@@ -4,19 +4,23 @@
 // What this file is actually guarding:
 //
 //   * The owner gave a LINE SET and an ORDER (shop, cashier, from/to, invoice
-//     counts, revenue, item discount, invoice discount, gross sale, credit,
-//     other expense, registered cash, final amount, then the two breakdowns).
-//     Order is content here -- a cashier reads this on a phone at closing time
-//     and compares it against a drawer -- so the order is asserted, not just
-//     the presence of each line.
+//     counts, revenue, item discount, invoice discount, gross sale, other
+//     expense, registered cash, final amount, THEN unpaid credit, then the
+//     two breakdowns). Order is content here -- a cashier reads this on a
+//     phone at closing time and compares it against a drawer -- so the order
+//     is asserted, not just the presence of each line.
 //   * "Final amount" is a claim about physical cash. Its two components are
 //     printed under it, and this pins that the printed components actually
 //     add up to the printed total, so the arithmetic can never drift away
 //     from its own explanation.
 //   * Credit must NOT be subtracted from the final amount. Unpaid credit was
 //     never collected, so it is not in `collected` to begin with; subtracting
-//     it would take the money out twice. That is asserted directly, because
-//     it is the mistake the owner's own line ordering invites.
+//     it would take the money out twice. That is asserted directly.
+//   * "Unpaid credit" must print BELOW "Final amount", never above it -- the
+//     owner's own review ruling, on the reasoning that a line above a total
+//     reads as an input to that total and credit explicitly is not one. This
+//     is asserted as a POSITION check, not just membership in the line set,
+//     so a regression that puts it back above the total is caught.
 //   * An OPEN shift renders. Migration 0116 refuses to close a shift on a
 //     timer, so a till left running overnight is a normal state, and the
 //     report must not print a closing time that never happened or a
@@ -120,7 +124,7 @@ const ORDER = [
   'Shop', 'Cashier', 'Branch', 'Shift', 'From', 'To',
   'Invoices', 'Cancelled', 'Edited',
   'Revenue', 'Item discount', 'Invoice discount', 'Gross sale',
-  'Credit', 'Other expense', 'Registered cash', 'Final amount',
+  'Other expense', 'Registered cash', 'Final amount', 'Unpaid credit',
 ]
 let cursor = -1
 for (const english of ORDER) {
@@ -151,7 +155,7 @@ assert.equal(valueOf('Revenue'), '$210.00')
 assert.equal(valueOf('Item discount'), '$5.00')
 assert.equal(valueOf('Invoice discount'), '$3.00')
 assert.equal(valueOf('Gross sale'), '$218.00')
-assert.equal(valueOf('Credit'), '$18.00')
+assert.equal(valueOf('Unpaid credit'), '$18.00')
 assert.equal(valueOf('Other expense'), '$4.00')
 // Both currencies, never folded together -- the drawer holds dollars and riel
 // side by side and merging them would invent an exchange rate.
@@ -178,11 +182,11 @@ assert.equal(lines[finalIndex + 2].trim(), 'registered cash + collected − expe
 assert.ok(KHMER.test(lines[finalIndex + 3]), 'the formula caption has no Khmer line')
 assert.ok(!lines[finalIndex + 2].includes(SEP) && !lines[finalIndex + 3].includes(SEP), 'the caption was joined into one over-wide line')
 
-// THE ASSERTION THAT MATTERS: credit is not subtracted. The owner's line list
-// puts credit immediately before the expense and the float, which reads like a
-// running subtraction -- but unpaid credit is excluded from the collected
-// figure already (it is awaiting_payment, so the kernel never recognised it),
-// and taking it off again would remove $18 that was never in the drawer.
+// THE ASSERTION THAT MATTERS: credit is not subtracted. Unpaid credit is
+// excluded from the collected figure already (it is awaiting_payment, so the
+// kernel never recognised it), and subtracting it again would remove $18 that
+// was never in the drawer to begin with. The owner's arithmetic ruling kept
+// this unchanged -- only the LINE'S PLACEMENT moved (checked next).
 assert.notEqual(valueOf('Final amount'), '$238.00', 'credit was subtracted from the final amount -- it was never collected, so it is not in the total to remove')
 assert.equal(50 + 210 - 4, 256)
 
@@ -190,6 +194,17 @@ assert.equal(50 + 210 - 4, 256)
 assert.equal(valueOf('Cash counted').includes('$256.00'), true)
 assert.equal(valueOf('Difference'), '$0.00')
 console.log('PASS arithmetic: final amount equals its own printed components; credit is not double-counted')
+
+// THE OWNER'S PLACEMENT RULING, checked directly rather than only via the
+// ORDER loop above: "Unpaid credit" must render AFTER "Final amount", never
+// before it -- a line sitting above a total reads as an input to that total,
+// and credit explicitly is not one. A regression that moves the line back
+// above Final amount fails this by index comparison, not just by an eyeball
+// diff of the rendered message.
+const unpaidIndex = lines.findIndex((line) => line.startsWith(`Unpaid credit${SEP}`))
+assert.ok(unpaidIndex >= 0, `the report has no "Unpaid credit" line:\n${report}`)
+assert.ok(unpaidIndex > finalIndex, `"Unpaid credit" (line index ${unpaidIndex}) must print AFTER "Final amount" (line index ${finalIndex}), not above it:\n${report}`)
+console.log('PASS placement: "Unpaid credit" prints below "Final amount", per the owner\'s review ruling')
 
 // A short drawer shows the sign in front of the currency symbol.
 const short = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 251 }, FIGURES, NOW)
