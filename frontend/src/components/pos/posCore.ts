@@ -4,6 +4,7 @@ import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
+import { lotCodeAsDate } from '../../utils/batchLabel.ts'
 
 export type ProductRecord = ProductGroupRecord & {
   id?: unknown
@@ -539,6 +540,117 @@ export function buildVariantOptionLabels(
     ? 'Barcode'
     : (priceVaries ? 'Price' : 'Option')
   return { stepTitle, byId }
+}
+
+// ---------------------------------------------------------------------------
+// Lot / received-date picker order
+// ---------------------------------------------------------------------------
+
+// Only the fields the POS picker orders on. Deliberately structural (not
+// `ProductBatch` from batchesTransport.ts) so this stays a pure, directly
+// unit-testable comparator with no transport import.
+export type PickerBatchLike = {
+  lot_code?: string | null
+  received_at?: string | null
+  batch_number?: number | null
+  quantity?: unknown
+}
+
+// A `received_at` as stored by D1 ("YYYY-MM-DD HH:MM:SS", UTC, no offset)
+// turned into a sortable instant. Same "add a T, assume Z" treatment
+// batchLabel.ts's formatBatchReceivedDate uses for DISPLAY -- but a
+// date-only value ("2026-08-24") is handled explicitly, because
+// `"2026-08-24" + "Z"` is not a parseable date and would otherwise make a
+// perfectly good received date sort as "no date at all".
+function parseReceivedInstant(receivedAt: unknown): number | null {
+  const raw = String(receivedAt ?? '').trim()
+  if (!raw) return null
+  const hasClockTime = /\d{1,2}:\d{2}/.test(raw)
+  const isoish = raw.includes('T')
+    ? raw
+    : (hasClockTime ? `${raw.replace(' ', 'T')}Z` : `${raw}T00:00:00Z`)
+  const ms = Date.parse(isoish)
+  return Number.isFinite(ms) ? ms : null
+}
+
+/**
+ * The instant one lot was received, for ordering purposes -- the same
+ * information batchLabel.ts's batchDisplayLabel puts on the pill, in the
+ * same precedence: the stored `received_at` wins, else a lot code that is
+ * really an MMDDYYYY date wearing a code's clothes (dateToBatchCode's
+ * output) decoded back to a date. Returns null when neither is usable --
+ * a blank/malformed `received_at` and a genuine custom lot code (including
+ * production's synthetic `RECON-<productId>` codes) both land here, and
+ * the comparator below sorts those AFTER every dated lot rather than
+ * pretending they were received at epoch 0.
+ */
+export function batchReceivedInstant(batch: PickerBatchLike | null | undefined): number | null {
+  const stored = parseReceivedInstant(batch?.received_at)
+  if (stored != null) return stored
+  const codeAsDate = lotCodeAsDate(batch?.lot_code)
+  if (!codeAsDate) return null
+  const [mm, dd, yyyy] = codeAsDate.split('/').map((part) => Number(part))
+  if (!Number.isFinite(mm) || !Number.isFinite(dd) || !Number.isFinite(yyyy)) return null
+  return Date.UTC(yyyy, mm - 1, dd)
+}
+
+function compareBatchNumber(left: unknown, right: unknown): number {
+  const leftNumber = Number(left)
+  const rightNumber = Number(right)
+  const leftOk = Number.isFinite(leftNumber) && leftNumber > 0
+  const rightOk = Number.isFinite(rightNumber) && rightNumber > 0
+  if (leftOk !== rightOk) return leftOk ? -1 : 1
+  if (leftOk && rightOk && leftNumber !== rightNumber) return leftNumber - rightNumber
+  return 0
+}
+
+/**
+ * The order the POS lot picker lists lots in, per the cashier's rule:
+ * everything that HAS stock first, oldest received date to newest, then
+ * everything with nothing left in it, again oldest to newest.
+ *
+ * The server's own list order (lib/productBatches.ts's
+ * listBatchesForProduct) is soonest-expiry-first FIFO, which interleaves
+ * empty lots among sellable ones -- correct for the inventory/allocation
+ * surfaces that consume it, wrong for a cashier who is choosing something
+ * to sell right now. This re-orders for the picker only; nothing about the
+ * server's FIFO allocation changes.
+ *
+ * Ordering, in full:
+ *  1. available (quantity > 0) before unavailable (quantity <= 0),
+ *  2. lots WITH a usable received date before those without,
+ *  3. that date ascending -- earliest received first,
+ *  4. batch_number ascending (a numbered lot before an unnumbered one),
+ *  5. the incoming order, so the server's expiry-first FIFO survives as the
+ *     tie-break and the sort stays stable.
+ *
+ * A lot with a missing or malformed received date therefore never displaces
+ * a real one: it sinks to the end of its OWN availability group (still ahead
+ * of every out-of-stock lot if it has stock), which is where an
+ * undated/`RECON-…` row belongs -- visible and pickable, never first.
+ */
+export function sortBatchesForPicker<T extends PickerBatchLike>(batches: readonly T[] = []): T[] {
+  const rows = Array.isArray(batches) ? batches : []
+  return rows
+    .map((batch, index) => ({
+      batch,
+      index,
+      instant: batchReceivedInstant(batch),
+      available: Number(batch?.quantity || 0) > 0,
+    }))
+    .sort((left, right) => {
+      if (left.available !== right.available) return left.available ? -1 : 1
+      const leftDated = left.instant != null
+      const rightDated = right.instant != null
+      if (leftDated !== rightDated) return leftDated ? -1 : 1
+      if (leftDated && rightDated && left.instant !== right.instant) {
+        return (left.instant as number) - (right.instant as number)
+      }
+      const byNumber = compareBatchNumber(left.batch?.batch_number, right.batch?.batch_number)
+      if (byNumber !== 0) return byNumber
+      return left.index - right.index
+    })
+    .map((entry) => entry.batch)
 }
 
 // ---- Checkout result + guardrails -------------------------------------------
