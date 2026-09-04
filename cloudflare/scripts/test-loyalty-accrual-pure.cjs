@@ -82,7 +82,7 @@ assert.equal(getSalesImportAccrueLoyalty(JSON.stringify({ accrue_loyalty: false 
 assert.equal(getSalesImportAccrueLoyalty(null), false, 'absent policy defaults to no accrual')
 assert.equal(getSalesImportAccrueLoyalty('{bad json'), false, 'malformed policy defaults to no accrual')
 assert.match(engine, /accrueLoyalty,\n\s*\}\)/, 'apply loop threads accrueLoyalty into the sale writer')
-assert.match(salesRoute, /loyalty_accrual: body\.loyalty_accrual === false \? 0 : 1/, 'POS route: only an explicit false opts out')
+assert.match(salesRoute, /loyalty_accrual: !loyaltyPointsEnabled \|\| body\.loyalty_accrual === false \? 0 : 1/, 'POS route: the shop-wide switch is AND-ed over the body, and only an explicit false opts out')
 const contacts = read(path.join('routes', 'contacts.ts'))
 assert.match(contacts, /COALESCE\(loyalty_accrual, 1\) AS loyalty_accrual/, 'contacts feeds the flag into summarizePoints')
 const pos = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'pos', 'POS.tsx'), 'utf8').replace(/\r\n/g, '\n')
@@ -101,5 +101,141 @@ assert.match(salesRoute, /SUM\(points\), 0\) AS adjusted FROM loyalty_point_adju
 assert.match(salesRoute, /\+ rewarded \+ manuallyAwarded\)/, 'checkout balance includes the manual-award term')
 const portalRoute = read(path.join('routes', 'portal.ts'))
 assert.match(portalRoute, /\+ rewarded \+ manuallyAwarded\)/, 'summarizePoints keeps the same term (display/checkout parity)')
+
+// ---- 6. The shop-wide membership-points switch (settings key
+// `loyalty_points_enabled`). User, Sep 4 2026: "make the membership points on
+// off in settings", ruled FORWARD-ONLY -- off stops sales earning from that
+// moment and stops any balance being spent, and rewrites no existing row.
+//
+// The security of the whole thing is that the flag is resolved SERVER-SIDE.
+// The POS sends `loyalty_accrual` in the request body; a till tab left open
+// all day keeps sending true long after an admin flips the switch. If the
+// server trusted the body, the toggle would appear to work in a fresh tab and
+// silently fail on the one machine that matters. So: read the setting, AND it
+// over whatever arrived.
+assert.match(
+  salesRoute,
+  /SELECT value FROM settings WHERE key = 'loyalty_points_enabled'/,
+  'the sale writer reads the switch from settings rather than trusting the request',
+)
+
+// Take the REAL two lines out of the route and run them, so this proves the
+// shipped expression rather than a restatement of it.
+const switchReadMatch = salesRoute.match(/const loyaltyPointsEnabled = !\[[^\]]*\]\.includes\(String\(loyaltyEnabledRow\?\.value \?\? ''\)[^\n]*\)/)
+assert.ok(switchReadMatch, 'routes/sales.ts still resolves loyaltyPointsEnabled from the settings row')
+const writerMatch = salesRoute.match(/loyalty_accrual: (![^,]*\? 0 : 1)/)
+assert.ok(writerMatch, 'routes/sales.ts still writes loyalty_accrual through a single expression')
+
+const resolveAccrual = new Function('settingValue', 'bodyFlag', [
+  'const loyaltyEnabledRow = settingValue === undefined ? undefined : { value: settingValue }',
+  switchReadMatch[0],
+  'const body = { loyalty_accrual: bodyFlag }',
+  'return ' + writerMatch[1],
+].join('\n'))
+
+// The case that matters: switch OFF, stale client insists true -> 0.
+assert.equal(resolveAccrual('false', true), 0, 'switch off + client sends true must still write 0')
+for (const off of ['0', 'false', 'no', 'off', 'OFF', ' False ']) {
+  assert.equal(resolveAccrual(off, true), 0, `"${off}" must read as off`)
+  assert.equal(resolveAccrual(off, undefined), 0, `"${off}" must read as off with no body flag`)
+}
+// On, and absent, both accrue -- a shop that has never touched the switch is
+// unchanged, which is the whole reason the default is on.
+for (const on of [undefined, '', 'true', '1', 'yes', 'anything']) {
+  assert.equal(resolveAccrual(on, true), 1, `"${on}" must read as on`)
+  assert.equal(resolveAccrual(on, undefined), 1, `"${on}" must accrue by default`)
+}
+// The per-sale opt-out still works while the programme is on.
+assert.equal(resolveAccrual('true', false), 0, 'an explicit per-sale opt-out still opts out')
+
+// Off must also stop a redemption being TAKEN. Dropping it silently would
+// charge the full total while the cashier's screen still showed the discount,
+// so the route refuses instead.
+assert.match(
+  salesRoute,
+  /Membership points are turned off in Settings/,
+  'a redemption attempted while the programme is off is refused, not silently dropped',
+)
+
+// The switch is a sales-policy setting, so a sales_policy grant can flip it
+// and it is not buried behind full admin.
+const settingsRoute = read(path.join('routes', 'settings.ts'))
+assert.match(settingsRoute, /'loyalty_points_enabled'/, 'the switch is a recognised settings key')
+
+// Forward-only, precisely: the reported balance stays truthful and only
+// SPENDING is gated. A gate on `balance` would blank points a customer already
+// holds, which is the retroactive change the ruling excludes.
+assert.match(portalRoute, /const spendable = config\.loyaltyPointsEnabled !== false/, 'portal gates spending on the switch')
+assert.match(portalRoute, /const redeemableUnits = spendable \?/, 'redeemable units are what the switch zeroes')
+assert.ok(
+  !/loyaltyPointsEnabled === false[\s\S]{0,200}balance: 0/.test(portalRoute),
+  'the switch must NOT zero the reported balance -- that would be retroactive',
+)
+{
+  const offSummary = summarizePoints(
+    [{ sale_status: 'completed', total_usd: 500, total_khr: 0, membership_points_redeemed: 0, loyalty_accrual: 1 }],
+    [], [], { ...config, redeemValueUsd: 1, redeemValueKhr: 4100, loyaltyPointsEnabled: false },
+  )
+  assert.equal(offSummary.balance, 500, 'a balance already earned is still reported while the programme is off')
+  assert.equal(offSummary.redeemableUnits, 0, 'nothing is redeemable while the programme is off')
+  assert.equal(offSummary.redeemValueUsd, 0, 'no redemption value is offered while the programme is off')
+  assert.equal(offSummary.nextRedeemNeeded, 0, 'no "points to next reward" is dangled while the programme is off')
+
+  const onSummary = summarizePoints(
+    [{ sale_status: 'completed', total_usd: 500, total_khr: 0, membership_points_redeemed: 0, loyalty_accrual: 1 }],
+    [], [], { ...config, redeemValueUsd: 1, redeemValueKhr: 4100, loyaltyPointsEnabled: true },
+  )
+  assert.equal(onSummary.redeemableUnits, 5, 'switching back on restores redemption with nothing rewritten')
+}
+
+// The till must not do this arithmetic itself. It used to divide the balance
+// by the step, which would go on offering redemptions after the switch was
+// flipped, because the balance stays truthful by design.
+assert.match(pos, /membershipInfo\?\.points\?\.redeemableUnits/, 'the POS reads the redeemable count the server computed')
+
+// ---- 7. Voided ledger rows stop counting, at every site that counts them.
+// Migration 0117 MARKS rather than deletes: loyalty_point_adjustments carries
+// CHECK (points > 0), so a compensating negative row is schema-impossible, and
+// deleting an administrator's hand-issued ledger would destroy an audit trail.
+// A void filter that is missing anywhere means a "zeroed" balance comes back
+// non-zero on that one surface.
+for (const [label, source, needles] of [
+  ['contacts', contacts, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
+  ['notifications', notifications, [/customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
+  ['sales checkout', salesRoute, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
+]) {
+  for (const needle of needles) {
+    assert.match(source, needle, `${label} still counts voided ledger rows -- a reset would not hold there`)
+  }
+}
+
+// portal.ts owns the FORMULA but reads neither ledger: contacts.ts's
+// computeCustomerPointsMap is the single gateway that loads both and hands
+// them in. That is why the filters above live there and not here -- and it is
+// also the property worth pinning, because a second loader would be a fourth
+// place to forget a void filter.
+assert.match(portalRoute, /adjustments: Array<Record<string, unknown>> = \[\]/, 'summarizePoints receives adjustments rather than querying them')
+
+// The alert that chases customers toward a points target must go quiet while
+// the programme is off; it is a prompt to act on something switched off.
+assert.match(
+  notifications,
+  /loyalty_points_enabled[\s\S]{0,400}return null/,
+  'the loyalty notification section is gated on the switch',
+)
+
+// KNOWN, DELIBERATELY NOT FIXED HERE, AND RECORDED SO IT IS NOT LOST:
+// buildLoyaltySection computes `earned - deducted - redeemed + rewarded` and
+// omits the manual-adjustment term the other three sites include, so its
+// balance already disagrees with them. Pre-existing drift, its own item. It is
+// pinned here because migration 0117 will HIDE it -- once every term is zero
+// all four sites agree, and the disagreement only returns the first time
+// someone issues a new adjustment, by which point nothing connects it to the
+// reset. This assertion documents the state; change it when the drift is
+// fixed, do not delete it.
+assert.ok(
+  !/\+ rewarded \+ manuallyAwarded\)/.test(notifications),
+  'notifications still omits the manual-adjustment term (known drift, tracked separately) -- if this now fails, the drift was fixed and this assertion should be inverted',
+)
 
 console.log('test-loyalty-accrual-pure: all checks passed')

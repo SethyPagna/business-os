@@ -238,35 +238,151 @@ runTest('opening a return fetches the record that has the line items', () => {
   has('replacement_items: fresh.replacement_items ?? current.replacement_items', 'rebinding must keep the replacement items too')
 })
 
-// --- 9. S4-25: delivery is one thing, in one place -------------------------
+// --- 9. delivery: driver info reads as driver info -------------------------
 
 runTest('the sale detail has no separate Delivery card', () => {
-  // User, Sep 4 2026: "Delivery can merge into items as like receipt it shows
-  // near total". It used to be a SectionCard sitting beside Customer, so the
-  // reader held two names, two phones and two addresses apart before reaching
-  // the single fee those fields explain -- and on a zero-fee delivery the fee
-  // row did not render at all, which is the case where the driver matters
-  // most and was the only place their name appeared.
+  // Sep 4 2026, in two steps.
+  //
+  // S4-25 first killed the standalone Delivery SectionCard ("Delivery can
+  // merge into items as like receipt it shows near total") and hung all three
+  // delivery fields off the delivery-fee row's label instead. Killing the card
+  // was right and still holds. Hanging the fields off a money row was not: it
+  // grew three wrapped lines of contact detail out of the left of a totals row
+  // and pushed the amount column down with them, and it filed a person's name
+  // and phone number under money.
+  //
+  // The user's own correction, same day: "delivery only needs phone and driver
+  // name...this is driver info, for customer name, phone and address keep it
+  // same in customer section... make them compact...". So the two driver
+  // fields are ordinary compact rows in the SALE card, and the drop address --
+  // the one delivery field that can differ from what Customer already shows --
+  // is a row in the CUSTOMER card, rendered only when it actually differs.
   assert.ok(
     !/SectionCard title=\{translateOr\('delivery'/.test(saleDetail),
     'delivery must not be its own card any more',
   )
+  // The driver rows are in the Sale card, above the items table -- NOT in the
+  // money summary.
   const foot = saleDetail.slice(saleDetail.indexOf('<tfoot'), saleDetail.indexOf('</tfoot>'))
-  const at = foot.indexOf("'delivery_fee'")
-  assert.ok(at >= 0, 'the delivery fee row must still exist')
-  assert.match(foot.slice(at, at + 260), /note=\{deliveryContactNote\}/, 'the fee row must carry the driver, phone and address')
-  // The row must survive a free delivery.
+  assert.ok(foot.indexOf("'delivery_fee'") >= 0, 'the delivery fee row must still exist')
+  assert.ok(
+    !foot.includes('deliveryContactNote') && !foot.includes('deliveryDriverName'),
+    'the driver must not be rendered inside the money summary',
+  )
+  for (const [needle, why] of [
+    ["translateOr('driver', 'Driver'", 'the driver name row'],
+    ["translateOr('driver_phone', 'Driver phone'", 'the driver phone row'],
+    ['value={deliveryDriverName}', 'the driver name value'],
+    ['value={deliveryDriverPhone}', 'the driver phone value'],
+  ] as Array<[string, string]>) {
+    assert.ok(saleDetail.includes(needle), `the sale detail lost ${why}`)
+  }
+  // Compact means the shared row primitive, not a bespoke block: a driver row
+  // is a DetailRow like every other field in that card, so it hides itself
+  // when empty and a walk-in sale is unchanged.
+  const driverAt = saleDetail.indexOf("translateOr('driver', 'Driver'")
+  assert.match(
+    saleDetail.slice(driverAt - 60, driverAt),
+    /<DetailRow label=\{$/,
+    'the driver must ride the shared DetailRow, not a hand-rolled block',
+  )
+  // A free delivery still names its driver. This is now structural rather than
+  // conditional -- the driver rows do not depend on the fee row rendering at
+  // all, which is what made the zero-fee case fragile before.
   assert.match(
     saleDetail,
     /\{isDelivery \|\| deliveryFeeUsd > 0 \|\| deliveryFeeKhr > 0 \?/,
-    'a delivery with a zero fee must still show its driver',
+    'the fee row still renders for a delivery whose fee is zero',
   )
-  // note renders inside a <span>; a <div> there is invalid nesting.
-  const note = saleDetail.slice(saleDetail.indexOf('const deliveryContactLines'), saleDetail.indexOf('const paymentDetails ='))
-  assert.ok(note.length > 80, 'expected to find the delivery note builder')
-  assert.ok(!note.includes('<div'), 'the note is rendered inside a <span>, so it must not contain a <div>')
+  // Nothing was dropped: all three fields are still read.
+  const builder = saleDetail.slice(saleDetail.indexOf('const deliveryDriverName'), saleDetail.indexOf('const paymentDetails ='))
+  assert.ok(builder.length > 80, 'expected to find the delivery field derivation')
   for (const field of ['delivery_contact_name', 'delivery_contact_phone', 'delivery_contact_address']) {
-    assert.ok(note.includes(field), `the delivery note lost ${field}`)
+    assert.ok(builder.includes(field), `the delivery derivation lost ${field}`)
+  }
+  // The drop address is shown in the Customer card and ONLY when it differs
+  // from the customer's own address -- printing the same street twice under
+  // two labels is the duplication the user asked to stop.
+  assert.ok(
+    saleDetail.includes("translateOr('delivery_address', 'Delivery address'"),
+    'the drop address must still be reachable, in the Customer card',
+  )
+  assert.match(
+    builder,
+    /!sameAddressText\(deliveryAddress, String\(sale\.customer_address \|\| ''\)\)/,
+    'the drop address must render only when it differs from the customer address',
+  )
+})
+
+// --- 9b. one Edit column, one Edit label -----------------------------------
+
+runTest('every amend control on the items table sits in one aligned column', () => {
+  // User, Sep 4 2026: "the current edit in click to view detail is placed all
+  // over the place..you can align it with the edit volumn...for products,
+  // delivery etc... just call it 'Edit'."
+  //
+  // The delivery-fee editor used to be a bare <div> rendered as a direct child
+  // of <tfoot>. A table section may contain only rows, so the browser hoists
+  // such a child out of the table box entirely -- which is literally why that
+  // control appeared somewhere other than where it was written. Every amend
+  // control now travels in a cell of its own row.
+  // Structural, not textual: walk the tfoot and require that every <div> it
+  // contains is inside an open <td>. A <div> parked between two <tr>s is the
+  // exact defect -- a table section may contain only rows, so the browser
+  // hoists such a child clean out of the table box and drops it elsewhere.
+  // Comments are stripped first: this reads MARKUP, and the prose explaining
+  // the defect naturally quotes the tag it is about.
+  const tfoot = saleDetail
+    .slice(saleDetail.indexOf('<tfoot'), saleDetail.indexOf('</tfoot>'))
+    .replace(new RegExp("\\{/\\*[\\s\\S]*?\\*/\\}", 'g'), '')
+  let cellDepth = 0
+  for (const token of tfoot.match(/<\/?(?:td|div)\b/g) || []) {
+    if (token === '<td') cellDepth += 1
+    else if (token === '</td') cellDepth -= 1
+    else if (token === '<div') assert.ok(cellDepth > 0, 'a <div> in the money summary must live inside a table cell')
+  }
+  // MoneyRow can carry a control, in a trailing cell that lines up with the
+  // per-line Edit buttons above it.
+  assert.match(rows, /action\?: ReactNode/, 'MoneyRow must accept a row-level action')
+  assert.match(rows, /\{action \? <td className="[^"]*text-right[^"]*">\{action\}<\/td> : null\}/, 'the action must render as a trailing cell')
+  // The column has a visible header, not an sr-only one.
+  assert.ok(
+    !/<th[^>]*><span className="sr-only">\{translateOr\('amend_line'/.test(saleDetail),
+    'the Edit column header must be visible, not screen-reader-only',
+  )
+  // And one label everywhere: "Edit". Not "Edit line", not "Correct delivery
+  // fee" -- the user named it once.
+  assert.ok(!saleDetail.includes("'Edit line'"), 'the per-line control must just say Edit')
+  assert.ok(!saleDetail.includes("'Correct delivery fee'"), 'the delivery-fee control must just say Edit')
+  assert.equal(en.amend_line, 'Edit', 'the English pack must say Edit')
+  assert.ok(km.amend_line && km.amend_line !== 'Edit', 'the Khmer pack must carry its own word for Edit')
+  // The fee editor opens from that column and renders as a full-width row.
+  const feeAt = saleDetail.indexOf('canAmendThisSale && feeEditing')
+  assert.ok(feeAt >= 0, 'the fee editor must be gated on the Edit control being open')
+  assert.match(saleDetail.slice(feeAt, feeAt + 320), /<tr className=[\s\S]*?<td colSpan=\{5\}/, 'the fee editor must be a spanning table row')
+})
+
+// --- 9c. the note the cashier typed is a field of the sale -----------------
+
+runTest('the sale note reads inside the Sale card, not as a card above it', () => {
+  // User, Sep 4 2026: "the notes did not show in the notes area for sales, it
+  // went to above". The note was rendering as its own SectionCard in the
+  // top grid, so it appeared above and beside the record it annotates.
+  assert.ok(
+    !/<SectionCard title=\{t\('notes'\)/.test(saleDetail),
+    'the note must not be a card of its own',
+  )
+  const notesAt = saleDetail.indexOf("<DetailRow label={t('notes')")
+  assert.ok(notesAt >= 0, 'the note must render as a DetailRow')
+  assert.match(saleDetail.slice(notesAt, notesAt + 200), /value=\{sale\.notes\}/, 'the note row must read sale.notes')
+  // A multi-line note must survive as multiple lines.
+  assert.match(saleDetail.slice(notesAt, notesAt + 200), /whitespace-pre-wrap/, 'a multi-line note must keep its line breaks')
+  // It belongs to the Sale card: it must appear before the Customer card, not
+  // after the items table.
+  const saleCardAt = saleDetail.indexOf("<SectionCard title={t('sale')")
+  const customerCardAt = saleDetail.indexOf("<SectionCard title={t('customer')")
+  if (saleCardAt >= 0 && customerCardAt > saleCardAt) {
+    assert.ok(notesAt > saleCardAt && notesAt < customerCardAt, 'the note row belongs to the Sale card')
   }
 })
 

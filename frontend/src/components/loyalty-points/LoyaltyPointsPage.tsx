@@ -37,6 +37,8 @@ type LoyaltySettingsForm = {
   customer_portal_show_point_value: boolean
   customer_portal_membership_info_text: string
   customer_portal_submission_reward_points: string
+  /** The master switch for the whole programme (see the toggle's own note). */
+  loyalty_points_enabled: boolean
 }
 
 type CustomerPointRow = {
@@ -117,6 +119,9 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemValueUsd: 'Value per redemption unit (USD)',
     redeemValueKhr: 'Value per redemption unit (KHR)',
     showPointValue: 'Show point value on customer portal',
+    membershipPointsEnabled: 'Membership points',
+    membershipPointsEnabledHint: 'When off, new sales earn no points and no balance can be redeemed. Points already recorded are kept, so turning it back on restores them.',
+    membershipPointsOff: 'Points are off',
     infoText: 'Customer-facing membership note',
     infoTextHint: 'This note appears in the customer portal membership panel under the point summary and redemption rules.',
     submissionRewardPoints: 'Default reward points per approved share',
@@ -178,6 +183,9 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemValueUsd: 'តម្លៃក្នុងមួយឯកតាប្តូរ (USD)',
     redeemValueKhr: 'តម្លៃក្នុងមួយឯកតាប្តូរ (KHR)',
     showPointValue: 'បង្ហាញតម្លៃពិន្ទុនៅ Customer Portal',
+    membershipPointsEnabled: 'ពិន្ទុសមាជិក',
+    membershipPointsEnabledHint: 'ពេលបិទ ការលក់ថ្មីមិនទទួលបានពិន្ទុទេ ហើយមិនអាចប្តូរពិន្ទុបានទេ។ ពិន្ទុដែលបានកត់ត្រារួច នៅរក្សាទុកដដែល ដូច្នេះពេលបើកវិញ វាត្រឡប់មកដូចដើម។',
+    membershipPointsOff: 'ពិន្ទុត្រូវបានបិទ',
     infoText: 'សារពន្យល់សម្រាប់អតិថិជន',
     submissionRewardPoints: 'ពិន្ទុលំនាំដើមសម្រាប់ការអនុម័តការចែករំលែក',
     validationUsd: 'តម្លៃប្តូរជា USD ត្រូវប្រើជាចំនួនគត់ប៉ុណ្ណោះ។',
@@ -324,6 +332,7 @@ export default function LoyaltyPointsPage() {
     customer_portal_show_point_value: true,
     customer_portal_membership_info_text: '',
     customer_portal_submission_reward_points: '5',
+    loyalty_points_enabled: true,
   })
   const [saving, setSaving] = useState(false)
   const [membershipNumber, setMembershipNumber] = useState('')
@@ -369,6 +378,12 @@ export default function LoyaltyPointsPage() {
       customer_portal_show_point_value: String(settings.customer_portal_show_point_value ?? 'true') === 'true',
       customer_portal_membership_info_text: String(settings.customer_portal_membership_info_text || ''),
       customer_portal_submission_reward_points: String(settings.customer_portal_submission_reward_points || '5'),
+      // Absent reads as ON, so a shop that has never touched this switch is
+      // unchanged. Only the four explicit off-spellings turn it off, matching
+      // the Worker's own read of the same key.
+      loyalty_points_enabled: !['0', 'false', 'no', 'off'].includes(
+        String(settings.loyalty_points_enabled ?? 'true').trim().toLowerCase(),
+      ),
     })
   }, [settings])
 
@@ -498,6 +513,7 @@ export default function LoyaltyPointsPage() {
         customer_portal_show_point_value: form.customer_portal_show_point_value ? 'true' : 'false',
         customer_portal_membership_info_text: form.customer_portal_membership_info_text || '',
         customer_portal_submission_reward_points: String(rewardPoints),
+        loyalty_points_enabled: form.loyalty_points_enabled ? 'true' : 'false',
       })
       notify(copy('saved', 'Point rules saved.'))
     } catch (error) {
@@ -608,7 +624,49 @@ export default function LoyaltyPointsPage() {
                 </button>
               </div>
 
+              {/* The master switch. User, Sep 4 2026: "make the membership
+                  points on off in settings."
+
+                  It is FORWARD-ONLY and it is not a delete. Off means: a sale
+                  rung from now on is written with loyalty_accrual = 0 and earns
+                  nothing, and no balance can be redeemed while it is off. It
+                  does NOT rewrite a single existing row -- every sale, every
+                  hand-issued adjustment and every share reward stays exactly as
+                  recorded, so switching back on restores the shop's balances
+                  precisely as they were. Zeroing the history is a separate,
+                  explicit operation, never a side effect of a checkbox.
+
+                  The Worker resolves this same setting server-side when it
+                  writes a sale, so a till tab left open all day cannot keep
+                  earning points after the switch is flipped. It sits first
+                  because it governs every rule below it. */}
+              <label htmlFor="loyalty-points-enabled" className="mt-4 flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-gray-700">
+                <div className="pr-3">
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {copy('membershipPointsEnabled', 'Membership points')}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {copy(
+                      'membershipPointsEnabledHint',
+                      'When off, new sales earn no points and no balance can be redeemed. Points already recorded are kept, so turning it back on restores them.',
+                    )}
+                  </div>
+                </div>
+                <input
+                  id="loyalty-points-enabled"
+                  name="loyalty_points_enabled"
+                  type="checkbox"
+                  checked={!!form.loyalty_points_enabled}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('loyalty_points_enabled', event.target.checked)}
+                />
+              </label>
+
               <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                {!form.loyalty_points_enabled ? (
+                  <span className="rounded-full border border-gray-300 bg-gray-100 px-3 py-1 text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    {copy('membershipPointsOff', 'Points are off')}
+                  </span>
+                ) : null}
                 <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/20 dark:text-amber-300">
                   {policySummary}
                 </span>

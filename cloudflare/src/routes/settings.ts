@@ -7,6 +7,11 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
+// Shared with routes/sales.ts, which folds a method into this list the moment
+// a sale uses one. Both sides use the same rules so an automatic registration
+// and this file's manual backfill can never disagree about what counts as
+// "already configured", or resurrect a retired method.
+import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '../lib/paymentMethodRegistry'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -168,6 +173,12 @@ const SALES_POLICY_KEYS = new Set([
   // whole settings table.
   'pos_wholesale_auto_enabled',
   'pos_wholesale_auto_min_qty',
+  // The owner's master switch for membership points (user, Sep 4 2026: "make
+  // the membership points on off in settings"). Buckets here with tax_enabled
+  // for the same reason: it decides what a customer is charged and what they
+  // accrue, so a shop can hand someone sales policy without handing them the
+  // whole settings table.
+  'loyalty_points_enabled',
 ])
 
 function normalizeReferenceName(value: unknown): string {
@@ -183,6 +194,54 @@ async function loadPaymentMethods(env: Env): Promise<string[]> {
     return []
   }
 }
+
+/**
+ * Methods that sales already use but Settings does not list.
+ *
+ * From Sep 4 2026 a live sale registers its own methods (routes/sales.ts), so
+ * this closes the OTHER half: every sale recorded before that, plus every
+ * imported historical row, whose methods were never folded in. It is a read;
+ * the write is the POST below, because pulling a legacy CSV's spellings into
+ * the checkout list is an operator's decision, not something a GET should do
+ * behind their back.
+ *
+ * Reads `payment_method` only, not `payment_details`: the summary column is
+ * built from the detail methods joined with ' + ' by every writer in the
+ * system, and `saleMethodsUsed` splits it back apart -- so one cheap DISTINCT
+ * over a low-cardinality column sees exactly the same method set as a full
+ * scan of the JSON would, without reading 15k JSON blobs.
+ */
+app.get('/payment-methods/unregistered', async (c) => {
+  const rows = await getDb(c.env).prepare(
+    "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
+  ).all<{ payment_method: string }>()
+  const configured = parseConfiguredMethods((await getDb(c.env).prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>())?.value)
+  const used = rows.flatMap((row) => saleMethodsUsed({ payment_method: row.payment_method }))
+  const merged = mergePaymentMethods(configured, used)
+  return c.json({ configured, missing: merged.added, missing_count: merged.added.length })
+})
+
+app.post('/payment-methods/backfill', async (c) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
+  const db = getDb(c.env)
+  const rows = await db.prepare(
+    "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
+  ).all<{ payment_method: string }>()
+  const configured = parseConfiguredMethods((await db.prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>())?.value)
+  const merged = mergePaymentMethods(configured, rows.flatMap((row) => saleMethodsUsed({ payment_method: row.payment_method })))
+  if (!merged.changed) return c.json({ methods: merged.methods, added: [] })
+  await db.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+  ).run({ value: JSON.stringify(merged.methods) })
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'settings', 'pos_payment_methods', {
+    action: 'payment_methods_backfill',
+    added: merged.added,
+  })
+  c.executionCtx.waitUntil(Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'sales')]))
+  return c.json({ methods: merged.methods, added: merged.added })
+})
 
 // Preview and exact replacement for configured payment methods. Report/audit
 // evidence is explicit: linked mode updates the live sales reporting dimension

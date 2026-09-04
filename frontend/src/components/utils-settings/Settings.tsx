@@ -47,7 +47,7 @@ import {
   sanitizePersistedMediaPath,
 } from '../../utils/mediaUploadState.ts'
 import type { UploadAction } from '../../utils/mediaUploadState.ts'
-import { getPaymentMethodImpact, replacePaymentMethod } from '../../api/settingsTransport.ts'
+import { backfillPaymentMethods, getPaymentMethodImpact, getUnregisteredPaymentMethods, replacePaymentMethod } from '../../api/settingsTransport.ts'
 import { getTelegramStatus, sendTelegramTest, sendTelegramTodaySummary, type TelegramStatus } from '../../api/telegramTransport.ts'
 
 type TranslateFn = (key: string) => string
@@ -494,6 +494,11 @@ export default function Settings() {
   const canEditSettings = getPermissionTier('settings') === 'full'
   const [pmList, setPmList] = useState<string[]>([])
   const [newPm, setNewPm] = useState('')
+  // Methods the shop has taken money through that are not in the list above.
+  // Held as state rather than derived, because only the server can know it --
+  // it is a DISTINCT over the sales table, not anything the browser has.
+  const [unregisteredPm, setUnregisteredPm] = useState<string[]>([])
+  const [pmBackfilling, setPmBackfilling] = useState(false)
   const [form, setForm] = useState<SettingsRecord>({})
   const [previewNow, setPreviewNow] = useState(() => new Date())
   const [dragPinnedId, setDragPinnedId] = useState<string | null>(null)
@@ -790,6 +795,49 @@ export default function Settings() {
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Failed to save payment methods', 'error')
       return false
+    }
+  }
+
+  // A failure here is deliberately silent: this is an advisory strip, and an
+  // install whose Worker predates the endpoint must show the payment list
+  // exactly as it always did rather than an error the owner cannot act on.
+  const refreshUnregisteredPaymentMethods = useCallback(async () => {
+    try {
+      const result = await getUnregisteredPaymentMethods() as { missing?: unknown }
+      setUnregisteredPm(Array.isArray(result?.missing) ? result.missing.map((value) => String(value)) : [])
+    } catch {
+      setUnregisteredPm([])
+    }
+  }, [])
+
+  // Declared down here, not beside the other payment-methods effect near the
+  // top of the component: both `isAdmin` and the callback above are `const`s
+  // defined further down the body, and a dependency array is evaluated during
+  // render, so an effect placed above them would read them in the temporal
+  // dead zone and throw on first paint.
+  useEffect(() => {
+    if (!isAdmin) return
+    void refreshUnregisteredPaymentMethods()
+  }, [isAdmin, refreshUnregisteredPaymentMethods, settings.pos_payment_methods])
+
+  const addUsedPaymentMethods = async () => {
+    setPmBackfilling(true)
+    try {
+      const result = await backfillPaymentMethods() as { methods?: unknown; added?: unknown }
+      const added = Array.isArray(result?.added) ? result.added.map((value) => String(value)) : []
+      if (Array.isArray(result?.methods)) setPmList(normalizePaymentMethods(result.methods.map((value) => String(value))))
+      setUnregisteredPm([])
+      await loadSettings({ force: true })
+      notify(
+        added.length
+          ? `Added ${added.length} payment method${added.length === 1 ? '' : 's'} already used on sales.`
+          : 'Every method used on a sale was already in the list.',
+        'success',
+      )
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Failed to add the payment methods used on sales', 'error')
+    } finally {
+      setPmBackfilling(false)
     }
   }
 
@@ -1719,6 +1767,38 @@ export default function Settings() {
 
         {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('manage_payment_methods')} description={t('configure_payment_desc')}>
+
+          {/* User, Sep 4 2026: "the payment methods made and entered in sales
+              and so on did not get updated in the available payment methods".
+              New sales now register their own method server-side; this strip is
+              for the history taken before that. It names the methods and asks,
+              rather than quietly rewriting the shop's checkout list -- and it
+              renders nothing at all when there is nothing missing, so the
+              ordinary case is unchanged. */}
+          {unregisteredPm.length > 0 ? (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800/50 dark:bg-amber-900/20">
+              <div className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                {t('payment_methods_used_not_listed') || 'Used on sales but not in this list'}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {unregisteredPm.map((method) => (
+                  <span key={method} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                    {method}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn-primary mt-2 text-xs"
+                disabled={pmBackfilling}
+                onClick={() => void addUsedPaymentMethods()}
+              >
+                {pmBackfilling
+                  ? (t('loading') || 'Saving')
+                  : (t('add_payment_methods_used') || 'Add them to checkout choices')}
+              </button>
+            </div>
+          ) : null}
 
           <div className="space-y-2 mb-3 max-h-48 overflow-auto">
             {pmList.map((paymentMethod, index) => (
