@@ -73,6 +73,32 @@ runTest('stock adjustments, transfers, and ledger edits retain review plus feedb
   assert.match(ledger, /reason_updated/)
 })
 
+// S4-24b: adding a line to a sale that already exists deducts stock exactly
+// as checkout does, so it owes the same contract as every other stock write.
+runTest('adding items to a recorded sale reviews before the write and names what happened to stock', () => {
+  const detail = source('sales/SaleDetailModal.tsx')
+  const sales = source('sales/Sales.tsx')
+
+  // one review before the request...
+  assert.match(detail, /<ConfirmDialog/)
+  assert.match(detail, /onConfirm=\{submitAddItems\}/)
+  assert.match(detail, /add_items_submit/)
+  // ...which says out loud whether these units leave stock now
+  assert.match(detail, /add_items_moves_stock/)
+  assert.match(detail, /add_items_holds_stock/)
+  // the surface is only offered where the Worker would accept the write
+  assert.match(detail, /STATUSES_ACCEPTING_ADDED_ITEMS\.includes\(currentStatus\)/)
+  assert.match(detail, /hasRecordedReturns/)
+
+  // ...and a visible outcome afterwards, distinguishing the stock case
+  assert.match(sales, /sale_items_added_stock/)
+  assert.match(sales, /sale_items_added_no_stock/)
+  assert.match(sales, /sale_items_add_failed/)
+  // the permission is enforced on the server; the client withholds the prop
+  // rather than rendering an action that would 403.
+  assert.match(sales, /canAddSaleItems \? handleAddSaleItems : undefined/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} stock-mutation-safety-contract test(s) failed`)

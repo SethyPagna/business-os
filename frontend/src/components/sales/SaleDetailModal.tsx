@@ -1,6 +1,9 @@
-import { useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import { searchProducts } from '../../api/methods.ts'
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -91,6 +94,36 @@ interface SaleDetail {
 
 type ParsedPayment = { method: string; amount_usd: number; amount_khr: number }
 
+// S4-24b -- the product picker's rows, and a line staged for adding.
+interface AddProductCandidate {
+  id?: number | string | null
+  name?: string | null
+  barcode?: string | null
+  selling_price_usd?: number | string | null
+  stock_quantity?: number | string | null
+}
+
+type StagedAddLine = {
+  productId: number
+  name: string
+  quantity: number
+  unitPriceUsd: number
+  // The typed text is kept beside the number so a half-typed price ("1.")
+  // survives a keystroke; unitPriceUsd stays the single numeric authority.
+  priceText: string
+  // What the picker last saw on hand, so the form can WARN before the server
+  // refuses. Never a substitute for the server's check: this number is
+  // seconds old and another till may already have taken the units.
+  stockQuantity: number
+}
+
+// Which sale states accept a new line. Hand-synced twin of the Worker's
+// SALE_STATUSES_ACCEPTING_NEW_LINES (lib/saleLineAddition.ts) -- the server
+// is the authority and refuses anything else with a 400; this list only
+// decides whether the surface is offered, so a cashier is never invited into
+// a form whose submit is guaranteed to fail.
+const STATUSES_ACCEPTING_ADDED_ITEMS = ['completed', 'awaiting_delivery', 'awaiting_payment']
+
 function parsePaymentDetails(raw: SaleDetail['payment_details']): ParsedPayment[] {
   const list = Array.isArray(raw)
     ? raw
@@ -120,6 +153,11 @@ interface SaleDetailModalProps {
   // when the signed-in user lacks `returns:add` -- the identical
   // hide-by-omission pattern as onStatusChange / onAttachMembership above.
   onReturn?: (sale: SaleDetail) => void
+  // S4-24b: add product lines to this already-recorded sale. Omitted entirely
+  // when the signed-in user lacks `sales:add_items` -- the same
+  // hide-by-omission gate as the write callbacks above, and the Worker
+  // enforces the identical action server-side.
+  onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number }>) => Promise<boolean | unknown> | boolean | unknown
   t: TranslateFn
   fmtUSD: MoneyFormatter
   fmtKHR: MoneyFormatter
@@ -160,6 +198,7 @@ export default function SaleDetailModal({
   onAttachMembership,
   onPrint,
   onReturn,
+  onAddItems,
   t,
   fmtUSD,
   fmtKHR,
@@ -188,6 +227,65 @@ export default function SaleDetailModal({
   }
   const [membershipNumber, setMembershipNumber] = useState(sale?.customer_membership_number || '')
   const [membershipSaving, setMembershipSaving] = useState(false)
+  // S4-24b: "add items to this sale". Staged locally, written in one request,
+  // and reviewed in a ConfirmDialog first -- this write deducts real stock, so
+  // it gets the same review-before-commit treatment every other stock write on
+  // this app has.
+  const [addQuery, setAddQuery] = useState('')
+  const [addCandidates, setAddCandidates] = useState<AddProductCandidate[]>([])
+  const [addSearching, setAddSearching] = useState(false)
+  const [addLines, setAddLines] = useState<StagedAddLine[]>([])
+  const [addSaving, setAddSaving] = useState(false)
+  const [addConfirmOpen, setAddConfirmOpen] = useState(false)
+  const addSearchSeqRef = useRef(0)
+
+  useEffect(() => {
+    const text = addQuery.trim()
+    if (!onAddItems || text.length < 2) { setAddCandidates([]); setAddSearching(false); return }
+    const seq = ++addSearchSeqRef.current
+    setAddSearching(true)
+    const timer = window.setTimeout(async () => {
+      try {
+        const payload = await searchProducts({ query: text, pageSize: 8 }) as { items?: AddProductCandidate[] }
+        if (seq !== addSearchSeqRef.current) return
+        setAddCandidates(Array.isArray(payload?.items) ? payload.items : [])
+      } catch {
+        // Suggestions only -- typing again retries. Never a blocking error:
+        // the write itself is what has to be reliable, not the picker.
+        if (seq === addSearchSeqRef.current) setAddCandidates([])
+      } finally {
+        if (seq === addSearchSeqRef.current) setAddSearching(false)
+      }
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [addQuery, onAddItems])
+
+  const stageAddLine = (candidate: AddProductCandidate): void => {
+    const productId = Number(candidate?.id)
+    if (!Number.isFinite(productId) || productId <= 0) return
+    setAddQuery('')
+    setAddCandidates([])
+    setAddLines((current) => {
+      // A second pick of the same product bumps the quantity rather than
+      // adding a duplicate row -- the server would accept two lines, but the
+      // person meant "two of these".
+      const existing = current.findIndex((line) => line.productId === productId)
+      if (existing >= 0) {
+        const next = [...current]
+        next[existing] = { ...next[existing], quantity: next[existing].quantity + 1 }
+        return next
+      }
+      const price = toNumber(candidate?.selling_price_usd)
+      return [...current, {
+        productId,
+        name: String(candidate?.name || `#${productId}`),
+        quantity: 1,
+        unitPriceUsd: price,
+        priceText: price > 0 ? String(price) : '',
+        stockQuantity: toNumber(candidate?.stock_quantity),
+      }]
+    })
+  }
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const translateOr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
@@ -265,6 +363,50 @@ export default function SaleDetailModal({
   const needsPaymentEntry = currentStatus === 'awaiting_payment'
     && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
     && amountPaidUsd <= 0 && amountPaidKhr <= 0
+
+  // S4-24b. The surface is offered only where the Worker would actually
+  // accept the write: a status that takes new lines, and no recorded returns
+  // (a returned sale's contents belong to the Returns flow -- adding to it
+  // would change what "already came back" means for records already written).
+  const hasRecordedReturns = refundUsd > 0 || items.some((item) => toNumber(item.returned_quantity) > 0)
+  const canOfferAddItems = !!onAddItems
+    && STATUSES_ACCEPTING_ADDED_ITEMS.includes(currentStatus)
+    && !hasRecordedReturns
+  const addedSubtotalUsd = Math.round(addLines.reduce((sum, line) => sum + line.unitPriceUsd * line.quantity, 0) * 100) / 100
+  // Every other money field is frozen by the server (see
+  // lib/saleLineAddition.ts's decision 3), so the new total is exactly the
+  // old total plus what is being added -- which is what makes this preview
+  // safe to show before the write.
+  const projectedTotalUsd = Math.round((totalUsd + addedSubtotalUsd) * 100) / 100
+  // Same shape as outstandingUsd above -- one definition of "still owed"
+  // on this screen, so the projection cannot disagree with the figure it is
+  // projecting from.
+  const projectedOutstandingUsd = Math.max(0, Math.round((projectedTotalUsd - amountPaidUsd) * 100) / 100)
+  const addStockMoves = currentStatus !== 'awaiting_payment'
+
+  const submitAddItems = async (): Promise<void> => {
+    if (!onAddItems || !addLines.length) return
+    setAddSaving(true)
+    try {
+      const ok = await onAddItems(sale.id, addLines.map((line) => ({
+        product_id: line.productId,
+        quantity: line.quantity,
+        applied_price_usd: line.unitPriceUsd,
+      })))
+      // The caller raises its own success/failure notice (it is the one that
+      // knows whether stock actually moved), so this only clears the form and
+      // steps out of the way on success.
+      if (ok !== false) {
+        setAddLines([])
+        setAddConfirmOpen(false)
+        onClose()
+      } else {
+        setAddConfirmOpen(false)
+      }
+    } finally {
+      setAddSaving(false)
+    }
+  }
 
   const handleStatusUpdate = async (): Promise<void> => {
     if (!onStatusChange || newStatus === currentStatus) return
@@ -614,6 +756,167 @@ export default function SaleDetailModal({
             </div>
           </SectionCard>
 
+          {/* S4-24b: add more products to a sale that already exists. It sits
+              directly under the item list it extends, so the record still
+              reads top-to-bottom and still ends in its footer actions.
+              The write moves real stock, so it follows the house rule for a
+              material stock mutation: one review (the ConfirmDialog below)
+              before the request, and a visible outcome after it. */}
+          {canOfferAddItems ? (
+            <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                {translateOr('add_items_to_sale', 'Add items to this sale', 'បន្ថែមទំនិញទៅការលក់នេះ')}
+              </div>
+              <label htmlFor="sale-add-item-search" className="mb-1 block text-xs text-gray-400">
+                {t('product') || 'Product'}
+              </label>
+              <input
+                id="sale-add-item-search"
+                className="input h-10 text-sm"
+                value={addQuery}
+                onChange={(event) => setAddQuery(event.target.value)}
+                placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
+                autoComplete="off"
+              />
+              {addSearching ? (
+                <p className="mt-2 text-xs text-gray-400">{t('loading') || 'Loading'}</p>
+              ) : addQuery.trim().length >= 2 && addCandidates.length === 0 ? (
+                <p className="mt-2 text-xs text-gray-400">
+                  {translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}
+                </p>
+              ) : null}
+              {addCandidates.length > 0 ? (
+                <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                  {addCandidates.map((candidate) => (
+                    <li key={String(candidate.id)}>
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                        onClick={() => stageAddLine(candidate)}
+                      >
+                        <span className="min-w-0">
+                          <span className="block break-words font-medium text-gray-900 dark:text-white">{candidate.name}</span>
+                          <span className="block text-[11px] text-gray-400">
+                            {candidate.barcode ? <span className="font-mono">{candidate.barcode}</span> : null}
+                            {candidate.barcode ? ' · ' : ''}
+                            {`${t('current_stock') || 'Stock'}: ${toNumber(candidate.stock_quantity)}`}
+                          </span>
+                        </span>
+                        <span className="whitespace-nowrap tabular-nums text-gray-700 dark:text-gray-200">
+                          {fmtUSD(toNumber(candidate.selling_price_usd))}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {addLines.length === 0 ? (
+                <p className="mt-3 text-xs text-gray-400">
+                  {translateOr('add_items_none_staged', 'Pick a product above to add it to this sale.', 'ជ្រើសរើសផលិតផលខាងលើ ដើម្បីបន្ថែមទៅការលក់នេះ។')}
+                </p>
+              ) : (
+                <>
+                  <ul className="mt-3 space-y-2">
+                    {addLines.map((line) => (
+                      <li key={line.productId} className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-white">{line.name}</span>
+                          <span className="flex items-center gap-1">
+                            <label htmlFor={`sale-add-qty-${line.productId}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>
+                            <input
+                              id={`sale-add-qty-${line.productId}`}
+                              className="input h-9 w-16 text-right text-sm"
+                              inputMode="numeric"
+                              value={String(line.quantity)}
+                              onChange={(event) => {
+                                // Whole units only, never below one: a zero or
+                                // negative line would ask the server to move
+                                // stock the wrong way through an add.
+                                const next = Math.max(1, Math.floor(Number(event.target.value) || 1))
+                                setAddLines((current) => current.map((row) => (
+                                  row.productId === line.productId ? { ...row, quantity: next } : row
+                                )))
+                              }}
+                            />
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <label htmlFor={`sale-add-price-${line.productId}`} className="text-[11px] text-gray-400">{t('unit_price') || 'Unit price'}</label>
+                            <input
+                              id={`sale-add-price-${line.productId}`}
+                              className="input h-9 w-24 text-right text-sm"
+                              inputMode="decimal"
+                              value={line.priceText}
+                              onChange={(event) => {
+                                const text = event.target.value
+                                setAddLines((current) => current.map((row) => (
+                                  row.productId === line.productId
+                                    ? { ...row, priceText: text, unitPriceUsd: toNumber(text) }
+                                    : row
+                                )))
+                              }}
+                            />
+                          </span>
+                          <span className="w-20 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
+                            {fmtUSD(line.unitPriceUsd * line.quantity)}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={t('remove') || 'Remove'}
+                            className="rounded p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                            onClick={() => setAddLines((current) => current.filter((row) => row.productId !== line.productId))}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                        {addStockMoves && line.quantity > line.stockQuantity ? (
+                          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                            {translateOr('add_items_over_stock', 'More than the stock this product had a moment ago — the server will refuse if the units are not there.', 'លើសពីស្តុកដែលផលិតផលនេះមានមុននេះបន្តិច — ម៉ាស៊ីនមេនឹងបដិសេធ បើគ្មានចំនួននោះ។')}
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3">
+                    <DetailRowGroup>
+                      <DetailRow
+                        label={translateOr('add_items_added_subtotal', 'Added subtotal', 'សរុបរងបន្ថែម')}
+                        value={fmtUSD(addedSubtotalUsd)}
+                      />
+                      <DetailRow
+                        label={translateOr('add_items_new_total', 'New total', 'សរុបថ្មី')}
+                        value={fmtUSD(projectedTotalUsd)}
+                      />
+                      {outstandingUsd > 0 || projectedOutstandingUsd > 0 ? (
+                        <DetailRow
+                          label={translateOr('add_items_new_due', 'New amount due', 'ចំនួនត្រូវបង់ថ្មី')}
+                          value={fmtUSD(projectedOutstandingUsd)}
+                        />
+                      ) : null}
+                    </DetailRowGroup>
+                  </div>
+                  {/* Says out loud whether this write touches stock. The
+                      answer is the sale's status (see decision 2 in the
+                      Worker's lib/saleLineAddition.ts), and a cashier should
+                      not have to know the rule to predict the effect. */}
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    {addStockMoves
+                      ? translateOr('add_items_moves_stock', 'These units leave stock now, exactly as they would at checkout.', 'ចំនួននេះនឹងចេញពីស្តុកភ្លាមៗ ដូចពេលទូទាត់ដែរ។')
+                      : translateOr('add_items_holds_stock', 'This sale has not taken stock yet, so nothing leaves stock until it is completed.', 'ការលក់នេះមិនទាន់យកស្តុកទេ ដូច្នេះគ្មានអ្វីចេញពីស្តុក រហូតដល់វាបញ្ចប់។')}
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-primary mt-3 w-full text-xs"
+                    disabled={addSaving || addLines.length === 0}
+                    onClick={() => setAddConfirmOpen(true)}
+                  >
+                    {addSaving ? (t('loading') || 'Saving') : (translateOr('add_items_submit', 'Add to sale', 'បន្ថែមទៅការលក់'))}
+                  </button>
+                </>
+              )}
+            </section>
+          ) : null}
+
           {currentStatus === 'cancelled' ? (
             <section className="rounded-xl border border-red-200 bg-red-50/50 p-3 dark:border-red-800/60 dark:bg-red-900/15">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-300">
@@ -812,6 +1115,42 @@ export default function SaleDetailModal({
                 </button>
               ) : null}
             </div>
+          ) : null}
+
+          {/* The review step. A stock write never leaves this app on a single
+              click: the person sees each line, the money it adds, and whether
+              stock moves, and confirms that summary. */}
+          {addConfirmOpen ? (
+            <ConfirmDialog
+              t={t}
+              title={translateOr('add_items_to_sale', 'Add items to this sale', 'បន្ថែមទំនិញទៅការលក់នេះ')}
+              message={sale.receipt_number ? `#${sale.receipt_number}` : undefined}
+              items={[
+                ...addLines.map((line): ConfirmReviewItem => ({
+                  label: line.name,
+                  value: `${line.quantity} × ${fmtUSD(line.unitPriceUsd)} = ${fmtUSD(line.unitPriceUsd * line.quantity)}`,
+                })),
+                {
+                  label: translateOr('add_items_added_subtotal', 'Added subtotal', 'សរុបរងបន្ថែម'),
+                  value: fmtUSD(addedSubtotalUsd),
+                },
+                {
+                  label: translateOr('add_items_new_total', 'New total', 'សរុបថ្មី'),
+                  value: fmtUSD(projectedTotalUsd),
+                },
+                {
+                  label: t('stock') || 'Stock',
+                  value: addStockMoves
+                    ? translateOr('add_items_confirm_deducts', 'Deducted now', 'កាត់ភ្លាមៗ')
+                    : translateOr('add_items_confirm_no_deduct', 'Not deducted yet', 'មិនទាន់កាត់'),
+                },
+              ]}
+              note={translateOr('add_items_undo_note', 'You can undo this from the history bar right after.', 'អ្នកអាចត្រឡប់វិញភ្លាមៗបន្ទាប់ពីនេះ ពីរបារប្រវត្តិ។')}
+              confirmLabel={translateOr('add_items_submit', 'Add to sale', 'បន្ថែមទៅការលក់')}
+              working={addSaving}
+              onConfirm={submitAddItems}
+              onClose={() => { if (!addSaving) setAddConfirmOpen(false) }}
+            />
           ) : null}
         </div>
       </div>

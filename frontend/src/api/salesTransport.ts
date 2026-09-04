@@ -138,6 +138,54 @@ export async function attachSaleCustomer(
   }
 }
 
+export type SaleItemAddition = {
+  product_id: number
+  quantity: number
+  applied_price_usd?: number
+  branch_id?: number | null
+}
+
+/**
+ * S4-24b: add product lines to a sale that already exists (POST
+ * /api/sales/:id/items). Carries the same expected-updated-at stamp every
+ * other sale write does, so two people editing the same receipt get a write
+ * conflict rather than a silent last-write-wins.
+ *
+ * Deliberately NOT mirrored to the local db and NOT queued offline: it moves
+ * stock and changes what the customer owes against a row whose current state
+ * only the server knows. A replay from an outbox minutes later could deduct
+ * units a different sale has since taken.
+ */
+export async function addSaleItems(
+  id: number | string,
+  items: SaleItemAddition[] = [],
+  notes = '',
+): Promise<unknown> {
+  const body = await withExpectedUpdatedAt('sales', id, {
+    ...getDevicePayload(),
+    items,
+    notes,
+  })
+  try {
+    const result = await route(
+      'sales:addItems',
+      () => apiFetch('POST', `/api/sales/${encodeId(id)}/items`, body),
+      null,
+      true,
+    ) as ResultRecord
+    const db = await getLocalDb()
+    await db.table('sales').update(id, {
+      subtotal_usd: result?.subtotalUsd,
+      total_usd: result?.totalUsd,
+      total_khr: result?.totalKhr,
+      updated_at: getResultTimestamp(result),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    attachAttempted(error, { items, notes })
+  }
+}
+
 export function getSalesExport(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   return route(

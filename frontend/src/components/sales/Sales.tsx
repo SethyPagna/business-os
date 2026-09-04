@@ -57,6 +57,10 @@ import { exportColumnLabel } from '../../utils/exportOptions.ts'
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
 const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000
+// S4-24b: adding lines deducts stock and rewrites the sale's totals in one
+// atomic batch -- a longer ceiling than a status flip, but still bounded so a
+// stalled request cannot leave the cashier staring at a spinner.
+const SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS = 20000
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
@@ -153,9 +157,16 @@ interface SaleStatusEntry {
   status: string
 }
 
+interface SaleItemAddition {
+  product_id: number
+  quantity: number
+  applied_price_usd?: number
+}
+
 interface SalesApi {
   updateSaleStatus: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<unknown>
   attachSaleCustomer: (saleId: number | string, payload: SaleMembershipPayload) => Promise<unknown>
+  addSaleItems: (saleId: number | string, items: SaleItemAddition[], notes?: string) => Promise<unknown>
 }
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -241,6 +252,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // customer, import) is hidden here and refused by the backend. Full only.
   const canChangeSaleStatus = can('sales', 'status')
   const canChangeSaleCustomer = can('sales', 'customer')
+  // S4-24b: adding goods to a recorded sale is its own grant -- it moves
+  // stock and raises what the customer owes, so it is not covered by the
+  // section tier and is not the same act as changing a status. The Worker
+  // enforces the identical `sales -> add_items` action at Full tier; this
+  // client check only decides whether the surface is offered at all.
+  const canAddSaleItems = can('sales', 'add_items')
   const canImportSales = can('sales', 'import')
   const canExportSales = can('sales', 'export')
   const canViewFees = can('fees', 'view')
@@ -720,6 +737,54 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       return false
     } finally {
       finishKeyedAction(statusActionRef, actionKey)
+    }
+  }
+
+  // S4-24b: add product lines to a sale that already exists. The server does
+  // all the deciding (which statuses accept a line, how much stock moves,
+  // which lots, what the new totals are) and records its own undoable
+  // action_history row with a REAL payload, so there is deliberately no
+  // pushAction here: a client-side entry would be a duplicate row whose undo
+  // closure dies on reload, while the server row's Undo survives it. The
+  // history bar is refreshed so that row appears immediately.
+  const handleAddSaleItems = async (saleId: number | string, items: SaleItemAddition[]): Promise<boolean> => {
+    if (!canAddSaleItems) {
+      notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
+      return false
+    }
+    const numericId = Number(saleId)
+    if (!Number.isFinite(numericId) || !items.length) return false
+    try {
+      const result = await withLoaderTimeout(
+        () => getSalesApi().addSaleItems(saleId, items, ''),
+        'Add items to sale',
+        SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
+      ) as { addedLines?: number; stockMoved?: boolean } | null
+      const added = Number(result?.addedLines || items.length)
+      // The outcome names what actually happened to STOCK, because that is
+      // the part a shopkeeper cannot see from the receipt.
+      notify(
+        result?.stockMoved
+          ? (translateOr('sale_items_added_stock', 'Added {n} item(s) to the sale and took them out of stock.') || '').replace('{n}', String(added))
+          : (translateOr('sale_items_added_no_stock', 'Added {n} item(s) to the sale. Stock moves when the sale is completed.') || '').replace('{n}', String(added)),
+      )
+      await loadSales(true)
+      void loadSalesStats()
+      actionHistory.refreshServerItems()
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      return true
+    } catch (error) {
+      if (isWriteConflict(error)) {
+        await loadSales()
+        return false
+      }
+      notify(
+        `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${getErrorMessage(error, String(error || 'Unknown error'))}`,
+        'error',
+      )
+      return false
     }
   }
 
@@ -1545,6 +1610,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             // its status buttons and membership form entirely.
             onStatusChange={canChangeSaleStatus ? handleStatusChange : undefined}
             onAttachMembership={canChangeSaleCustomer ? handleAttachMembership : undefined}
+            // Same hide-by-omission gate as the other write callbacks: without
+            // `sales:add_items` the prop is absent and the whole Add-items
+            // section never renders.
+            onAddItems={canAddSaleItems ? handleAddSaleItems : undefined}
             onPrint={(sale) => setSelectedSale(sale as SaleRecord)}
             // Gated exactly like the write callbacks above: without
             // `returns:add` the prop is omitted and the action never renders.
