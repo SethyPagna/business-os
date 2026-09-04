@@ -238,6 +238,26 @@ export default function SaleDetailModal({
   const deliveryActualCostUsd = toNumber(sale.delivery_actual_cost_usd)
   const deliveryActualCostKhr = toNumber(sale.delivery_actual_cost_khr)
   const isDelivery = !!toNumber(sale.is_delivery) || !!String(sale.delivery_contact_name || '').trim()
+  // S4-25: what the standalone Delivery card used to hold, rendered under the
+  // delivery-fee row's label instead. `note` sits inside a <span>, so every
+  // line here is a span too -- a <div> in there is invalid nesting and React
+  // will not warn about it in a production build.
+  const deliveryContactLines: Array<[label: string, value: string]> = isDelivery
+    ? ([
+        [translateOr('driver', 'Delivery', 'ដឹកជញ្ជូន'), String(sale.delivery_contact_name || '').trim()],
+        [t('phone') || 'Phone', String(sale.delivery_contact_phone || '').trim()],
+        [t('address') || 'Address', String(sale.delivery_contact_address || '').trim()],
+      ] as Array<[string, string]>).filter(([, value]) => value !== '')
+    : []
+  const deliveryContactNote = deliveryContactLines.length > 0 ? (
+    <span className="mt-0.5 block text-left font-normal">
+      {deliveryContactLines.map(([label, value]) => (
+        <span key={label} className="block break-words">
+          <span className="text-gray-400">{label}</span> {value}
+        </span>
+      ))}
+    </span>
+  ) : null
   const paymentCurrency = String(sale.payment_currency || '').trim()
   const paymentDetails = parsePaymentDetails(sale.payment_details)
   // Outstanding balance: an on-credit / partially-paid sale (amount_paid below
@@ -455,15 +475,12 @@ export default function SaleDetailModal({
               </div>
             </SectionCard>
 
-            {isDelivery ? (
-              <SectionCard title={translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}>
-                <DetailRowGroup>
-                  <DetailRow label={translateOr('driver', 'Delivery', 'ដឹកជញ្ជូន')} value={sale.delivery_contact_name} />
-                  <DetailRow label={t('phone') || 'Phone'} value={sale.delivery_contact_phone} />
-                  <DetailRow label={t('address') || 'Address'} value={sale.delivery_contact_address} />
-                </DetailRowGroup>
-              </SectionCard>
-            ) : null}
+            {/* S4-25: delivery is no longer a card of its own. The driver,
+                their phone and the drop address now ride the delivery-fee row
+                inside the items table, which is where the receipt puts the
+                fee -- next to the total. A card sitting beside Customer made
+                the reader hold two addresses apart before reaching a single
+                number they both explain. */}
 
             {sale.notes ? (
               <SectionCard title={t('notes') || 'Notes'}>
@@ -551,9 +568,14 @@ export default function SaleDetailModal({
                   {taxUsd > 0 ? (
                     <MoneyRow label={t('tax') || 'Tax'} amount={fmtUSD(taxUsd)} sub={taxKhr > 0 ? fmtKHR(taxKhr) : null} />
                   ) : null}
-                  {deliveryFeeUsd > 0 || deliveryFeeKhr > 0 ? (
+                  {/* S4-25: the row renders when the sale IS a delivery even
+                      if the fee is zero -- a free delivery still has a driver,
+                      and dropping the row on a zero fee would have hidden the
+                      contact the old card used to show. */}
+                  {isDelivery || deliveryFeeUsd > 0 || deliveryFeeKhr > 0 ? (
                     <MoneyRow
                       label={translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}
+                      note={deliveryContactNote}
                       amount={fmtUSD(deliveryFeeUsd)}
                       sub={deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : null}
                     />

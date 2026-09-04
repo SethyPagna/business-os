@@ -240,5 +240,37 @@ runTest('opening a return fetches the record that has the line items', () => {
   has('replacement_items: fresh.replacement_items ?? current.replacement_items', 'rebinding must keep the replacement items too')
 })
 
+// --- 9. S4-25: delivery is one thing, in one place -------------------------
+
+runTest('the sale detail has no separate Delivery card', () => {
+  // User, Sep 4 2026: "Delivery can merge into items as like receipt it shows
+  // near total". It used to be a SectionCard sitting beside Customer, so the
+  // reader held two names, two phones and two addresses apart before reaching
+  // the single fee those fields explain -- and on a zero-fee delivery the fee
+  // row did not render at all, which is the case where the driver matters
+  // most and was the only place their name appeared.
+  assert.ok(
+    !/SectionCard title=\{translateOr\('delivery'/.test(saleDetail),
+    'delivery must not be its own card any more',
+  )
+  const foot = saleDetail.slice(saleDetail.indexOf('<tfoot'), saleDetail.indexOf('</tfoot>'))
+  const at = foot.indexOf("'delivery_fee'")
+  assert.ok(at >= 0, 'the delivery fee row must still exist')
+  assert.match(foot.slice(at, at + 260), /note=\{deliveryContactNote\}/, 'the fee row must carry the driver, phone and address')
+  // The row must survive a free delivery.
+  assert.match(
+    saleDetail,
+    /\{isDelivery \|\| deliveryFeeUsd > 0 \|\| deliveryFeeKhr > 0 \?/,
+    'a delivery with a zero fee must still show its driver',
+  )
+  // note renders inside a <span>; a <div> there is invalid nesting.
+  const note = saleDetail.slice(saleDetail.indexOf('const deliveryContactLines'), saleDetail.indexOf('const paymentCurrency'))
+  assert.ok(note.length > 80, 'expected to find the delivery note builder')
+  assert.ok(!note.includes('<div'), 'the note is rendered inside a <span>, so it must not contain a <div>')
+  for (const field of ['delivery_contact_name', 'delivery_contact_phone', 'delivery_contact_address']) {
+    assert.ok(note.includes(field), `the delivery note lost ${field}`)
+  }
+})
+
 if (failed > 0) process.exitCode = 1
 else console.log('PASS record detail surfaces share one row rhythm with an aligned money summary')
