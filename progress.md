@@ -2440,13 +2440,44 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   a line-height / overflow fix at the CSS level, not per component.
 - [ ] **S4-23 · Membership number for every customer, `LC-` prefix**, zero-padded to a fixed
   width so the digits fill the missing places at the back.
-- [~] **S4-24 · Sale detail = receipt-shaped.** *(claimed `business-os-v1-c3`, branch `s4/receipt-shape` off `e3678a39`.)* Clicking a sale shows what the receipt shows,
-  without the extra breakdowns: status, customer with membership, status update, and the
-  add-sale-products action. Returns: move the print buttons to the end of the page, off the
-  header beside the X.
-- [~] **S4-25 · Delivery merges into the items list** *(claimed `business-os-v1-c3`, same lane as S4-24 — same files.)*, the way the receipt places it next to
-  the total. *(Reading to confirm with the user: the delivery fee becomes a line in the
-  items list rather than its own block.)*
+- [x] **S4-24 · Sale detail reads like a receipt. Done** on `s4/receipt-shape` off `e3678a39`,
+  pushed — `840161ee`. The rule applied was literal: what a receipt prints, the detail prints;
+  what it does not, it does not. `Receipt.tsx`'s own field order was the reference, not taste.
+  - **Removed rows, and the user can veto any one of them:** Timezone and Device (till
+    telemetry), Payment currency, Points redeemed, Actual delivery cost. The last is the one
+    worth naming — it is what the shop **paid the driver**, and it sat under Change inviting the
+    reader to subtract it from a total it was never part of. That is the "difference" the ask
+    names. **No data was deleted**: every one of these is still on the sale row, in the exports
+    and in the reports.
+  - A split payment is still shown — as the payment row's own detail, which is how
+    `Receipt.tsx` prints it, instead of a row titled "Payment breakdown".
+  - Print, Return and the return's Edit left the header for a footer at the end of the record.
+    The status badge and the X are all that is left beside each other, and a test now asserts no
+    record action may sit beside a close button — in **both** detail modals, so the two records
+    cannot disagree about where actions live.
+  - **Three Sep-3 assertions were inverted, not deleted.** They were written for a restyle ("no
+    field was lost"); this is a scope decision the user made, so the cases now pin that the
+    removed rows stay removed and say why. `formatters.test.ts` got *stricter*: the sale detail
+    must never print a raw captured timezone, now that it prints none at all.
+  - Gate: `tsc` clean, `check:source` 454 files, `verify:i18n` OK, **every** `tests/*.test.ts`
+    green, `vite build` clean in 37s.
+- [ ] **S4-24b · "Add sale products" is not a layout change — it is a new stock-writing route.**
+  Split out deliberately rather than quietly dropped. There is no endpoint for it: `routes/sales.ts`
+  exposes `POST /`, `PATCH /:id/status`, `PATCH /:id/customer` and the read/report routes, and
+  **nothing that adds a line to an existing sale**. Building it means inserting sale items, moving
+  stock for them, deciding what happens on a sale that is already completed or already partly
+  returned, and an undo applier. That is `bos-stock` work with a Worker half, not a modal tweak —
+  board it as such before anyone starts.
+- [x] **S4-25 · Delivery merged into the items table. Done** — `1f655574`, same lane.
+  The standalone Delivery card is gone; the driver, their phone and the drop address now render
+  under the delivery-fee row **inside the items table**, which is where the receipt puts the fee —
+  next to the total. Reading taken: "merge into items" = one place, in the items table, not a
+  second card to hold apart from Customer. The fee stays in the footer rather than becoming a
+  line item on purpose: a fee row above the subtotal would make the item lines stop adding up to
+  the subtotal printed under them.
+  - Fixed a defect the card was hiding: the fee row only rendered when the fee was **above zero**,
+    so a free delivery showed no row — and with the card gone that would have been the only place
+    the driver's name appeared. It now renders whenever the sale is a delivery.
 
 **Reports**
 
