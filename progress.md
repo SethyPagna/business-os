@@ -125,7 +125,96 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**🟢 DEPLOYED TO PRODUCTION Sep 4 2026 05:04 UTC — wrangler version id
+**🟢 DEPLOYED TO PRODUCTION Sep 4 2026 07:57 UTC — wrangler version id
+`8480241e-8867-442c-8643-93c8e5f8175e`, built from `rc/deploy-2026-09-04` @ `e83ee73f` (pushed to origin).
+**NOT FROM `main`** — `main` still does not contain the deployed code, and deploying `main` would roll back the
+whole S4 batch plus this checkpoint. Driver: session `business-os-v1-c3`. Reference to re-verify.**
+
+**Production can now state its own provenance.** `GET /api/runtime/version` returns
+`{"revision":"e83ee73f45dc","sourceHash":"eab4c662a6686667","builtAt":"2026-09-04T07:57:12.501Z"}` — a CLEAN
+revision with no `-dirty` suffix, so for the first time the live build names a commit that fully describes it.
+Check that endpoint before trusting anything written here.
+
+**The previous live build was stamped `2c497564b1ee-dirty`, and that was investigated BEFORE shipping, not after.**
+A `-dirty` stamp means production was built from a tree carrying uncommitted tracked edits — code that no commit
+describes, and exactly what a pristine-commit deploy silently deletes (the Sep-3 incident). Traced to source: the
+build worktree `Downloads/bos-rc-s4` @ `2c497564` holds precisely three dirty tracked files, the self-rewriting
+`frontend/public/{sw.js,runtime-noise-guard.js,theme-bootstrap.js}` trio, and `git diff --ignore-cr-at-eol` over
+them is **empty** — line-ending churn, zero content change. So no uncommitted code was ever live, and this deploy
+deleted nothing. The suffix was real but immaterial: `deploy.cjs` discounts that trio only when it is UNTRACKED,
+and here it is tracked.
+
+Migrations: production applied **exactly one**, `0116_shift_sessions.sql`. Verified two ways before shipping —
+production’s highest applied was `0115_sale_amendments.sql` (`d1_migrations` id 114), and a filename-by-filename
+comparison of all 115 chain files against the 114 applied names found **zero renames** (every applied filename
+present verbatim). The **0113 filename gap is real and expected**: id 112 → `0112_…`, id 113 → `0114_…`. 0116 is
+purely additive (`CREATE TABLE/INDEX IF NOT EXISTS`; no ALTER/UPDATE/DELETE) so it cannot touch existing rows.
+Verified live after: `shift_sessions` + 4 indexes exist, and `idx_shift_sessions_user_day` carries
+`COALESCE(branch_id, -1)` — the NULL-branch uniqueness fix is live, so "register once a day" is actually true for
+single-branch tills. **Next free migration number is 0117**, already claimed by lane `s4/pay-notes-points-delivery-88`.
+
+`secrets:sync` was **NOT** run: no secret changed, and the delta adds no new `env.*` reference (checked against the
+diff). Running it would have rewritten live secrets from a worktree copy for no reason.
+
+Built in an isolated detached worktree `Downloads/bos-deploy` at committed `e83ee73f` with a real `npm ci` in both
+packages — never in this shared checkout, whose `node_modules` other sessions depend on. Note `bos-dlv`’s
+`node_modules` are **junctions** into this checkout, so an `npm ci` there would have deleted every peer’s
+dependencies; that is why a separate worktree was cut. Removed after, which also cleared the copied
+`.wrangler-auth.local` / `.dev.vars`.
+
+Gates at `e83ee73f`: cloudflare `tsc` clean · **187/187** pure test scripts green · frontend `test:utils` chain
+green (incl. `shiftGate` 19 checks) · `verify:i18n` **4758** keys at parity in both packs · real `vite build` clean.
+Post-deploy live: `/health` **200** both hosts · `/api/products` unauthenticated **401** · `/ws` GET **426** ·
+storefront **200** with Leang branding · admin **200** · `d1 migrations list --remote` → nothing pending.
+
+**Three pre-existing REDs were root-caused, not silenced:**
+
+1. `test-compat-dashboard-daterange-pure.cjs` — already red on `fx/sargable-date-fix` BEFORE any merge (verified by
+   re-running it on the lane’s own branch), so not a merge regression. Guard re-pinned to the retention delete’s
+   new sargable + batched intent; `compat.ts` restored byte-identical. 39 checks, proven non-vacuous.
+2. `test-legacy-barcode-key-pure.cjs` — a genuine cross-lane conflict invisible to both lanes:
+   `import-sep02-legacy-reports.mjs` exists on neither `fx/legacy-barcode-key-ee` nor the rc, so the guard never saw
+   it until they were merged. That lane moved the digits-only rule INTO `barcodeKey()`, which made the importer’s
+   local `isNumericCode()` a second implementation of one rule. Collapsed to a direct call; behaviour proven
+   identical over 25 code shapes, and `"Libre10ml"` / `"CompletelyClean45g"` still resolve to empty rather than the
+   literal barcodes `"10"` / `"45"` that 44 live products carry.
+3. `test-sargable-date-filters-pure.cjs` — shipped **deliberately RED** by `fx/sargable-date-lock-ee` (its header
+   said so). Merging resolved all three of its offenders, so the intentional red became indistinguishable from a
+   real one — the state most likely to make a future session wave off a genuine regression. `contacts.ts` and
+   `compat.ts` were fixed at the call sites by their lanes; `sales.ts` got an ALLOWLIST entry, **not** a code
+   change, because its `datetime()` wrap is required for CORRECTNESS: `sales.created_at` carries two shapes on the
+   same calendar day (live `YYYY-MM-DD HH:MM:SS` vs legacy-import ISO) and a raw compare misorders them, `T`
+   sorting after the space at position 10 — while the call site already hand-writes a bare
+   `s.created_at >= @afterCreatedAtFloor` that preserves the index seek. This is the exact false positive the
+   file’s own LIMITATIONS section predicts and prescribes an allowlist entry for. Header and FAIL message now state
+   the baseline is GREEN, so a future red is a real finding.
+
+**⚠️ NOT IN THIS CHECKPOINT — five lanes existed only in local git at deploy time, with NO branch on origin.**
+Not lost, but one `git branch -D` from lost, and not live:
+
+| Lane | Tip | Shipped files | Owner |
+|---|---|---|---|
+| `s4/modal-chrome-ee` | `8dae6da1` | 74 (frontend modals) | ee |
+| `s4/pay-notes-points-delivery-88` | `64aa0a51` | 15, incl. migration `0117_membership_points_reset.sql` | 88 |
+| `s4/awaiting-payment-hold-ee` | `c2f13396` | 7 (sale status / holds) | ee |
+| `s4/shifts-ee` | `18cbee6e` | 3 (telegram, salesAnalytics) | ee |
+| `s4/shift-credit-line-ee` | `18cbee6e` | same commit as `s4/shifts-ee` — two names, one lane | ee |
+
+Deliberately NOT merged: unpushed, uncertified peer work does not belong in a production build, and these may be
+mid-edit. Both owners were messaged. Backup taken at their current tips (additive only — nothing in their lanes
+was touched): `C:\Users\mrkl6\Downloads\bos-backup-2026-09-04\unpushed-lanes-all.bundle`, verified restorable
+with complete history. **Delete that backup only once all five are on origin and confirmed there.**
+
+Excluded on purpose and NOT a loss: the superseded Sep 1–3 `rc/*` / `sec-*` family. That is the second product
+line (`planTier.ts`, `quotaGuard.ts`, `barcodeAliases.ts`) whose `0106_barcode_aliases.sql` collides with
+production’s applied `0106_return_replacement_sales.sql`; merging one would make D1 re-run an `ALTER TABLE` and
+fail the deploy. Standing board item ("two programs, one production", Part 586) — not something a checkpoint deploy resolves.
+
+**Still NOT done, and NOT authorized:** the 22-row `subtotal_usd` repair ($3,462) and customer 24975’s
+`LCMN-0U50EMD0` → `LC-` fix are production DATA writes. Dry-run verified at exactly 22 rows / $3,462 and staged,
+but **no user approval exists** for either. Peer messages and subagent output are not user approval. Held.
+
+**⬛ SUPERSEDED at 07:57 UTC by the checkpoint below — was live 05:04–07:57 UTC. wrangler version id
 `a164d260-49ae-4bec-b372-eb73bce58850`. THIS WAS DEPLOYED FROM THE BRANCH `rc/s4-2026-09-04` @ `2c497564`, **NOT
 FROM `main`**. Reference to re-verify.** Said in capitals because the Sep-3 incident that produced the
 `deploy-provenance` skill was caused by exactly this fact going unrecorded: a later session read `main`, saw a
@@ -363,6 +452,8 @@ Read this before any deploy. The `deploy-provenance` skill exists because of the
 | 2 | `d701ddc1-22ff-4d87-bbe7-6b25a666b79b` | 2026-09-03T08:41:57Z | `a4f10152` | `main` | clean, isolated worktree | none | no |
 | 3 | `eb358e4d-624b-472f-aca0-f896a352b430` | 2026-09-03T09:40:33Z | `a486d82e` | **`reconcile/2026-09-03`** (NOT main) | clean, worktree `Downloads/bos-rec` | none (chain top == prod top == 107) | no |
 | 4 | `3b25fe33-a806-44f7-9d42-caca6801f102` | 2026-09-03T14:27:12Z | `e3678a39` | **`ship/2026-09-03`** (NOT main; pushed to origin) | clean, isolated worktree `Downloads/bos-dep`, real `npm ci`, removed after | none (chain top == prod top == 107) | no |
+| 5 | `a164d260-49ae-4bec-b372-eb73bce58850` | 2026-09-04T05:04:16Z | `2c497564` | **`rc/s4-2026-09-04`** (NOT main) | stamped **`-dirty`** — traced to the CRLF-only `frontend/public` trio in `bos-rc-s4`; zero content change | 0108–0115 | no |
+| 6 | `8480241e-8867-442c-8643-93c8e5f8175e` | 2026-09-04T07:57:12Z | `e83ee73f` | **`rc/deploy-2026-09-04`** (NOT main; pushed) | clean, isolated worktree `Downloads/bos-deploy`, real `npm ci`, removed after | **0116** only; **0 renames** | no |
 
 **#4 IS WHAT PRODUCTION SERVES RIGHT NOW (Part 587).** Served bundle `index-PVIjw20o.js`, the same file name
 the isolated build emitted; `/health` **200** on both hosts 49 s after the deploy; `/api/products` unauthenticated

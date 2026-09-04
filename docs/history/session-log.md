@@ -19017,3 +19017,108 @@ This entry is written as reference to re-verify, not as ground truth: the versio
 migration figures from direct `SELECT`s on `d1_migrations` and the affected tables, and the commit is on
 `rc/s4-2026-09-04`. `/health`'s `version` field is a hard-coded string and is **not** the deploy id — only wrangler
 prints that.
+
+## Part 598 — the Sep-4 checkpoint: three reds root-caused, a `-dirty` production stamp chased down, and five lanes that live only on one disk
+
+Session `business-os-v1-c3`, final reconciler. The user asked to "scan and verify what is done or what can be
+worked on more to get it done... then commit, push, then deploy a checkpoint, make sure it is latest, not lost
+various changes reconciled etc... nothing is forgotten and loss."
+
+**Deployed: wrangler version `8480241e-8867-442c-8643-93c8e5f8175e`, 2026-09-04T07:57:12Z, from
+`rc/deploy-2026-09-04` @ `e83ee73f` (pushed to origin), NOT from `main`.** Reference to re-verify — the version id
+came from wrangler (nothing else prints it), the migration figures from direct `SELECT`s on `d1_migrations`, and
+the commit is on the pushed branch. `/health`’s `version` field is a hard-coded string and is not the deploy id.
+
+### The finding worth keeping: a `-dirty` production stamp, chased down before shipping
+
+`GET /api/runtime/version` (added by `scripts/deploy.cjs` after the Sep-3 incident) reported the live build as
+`2c497564b1ee-**dirty**`. That is the alarm the endpoint exists to raise: production built from a tree carrying
+uncommitted tracked edits is production running code that no commit describes, and a pristine-commit deploy
+deletes exactly that code. It is the Sep-3 incident’s shape.
+
+It would have been easy to read the suffix and either panic or wave it through. Neither is an answer. The tell is
+that the shared checkout’s HEAD is `main`, while the stamp names `2c497564` — so the build was not made in the
+shared checkout at all, but in a worktree that had `2c497564` checked out. Two do: `bos-rc-s4` and `bos-cert-ee`.
+`bos-cert-ee` is clean. `bos-rc-s4` holds exactly three dirty tracked files — the self-rewriting
+`frontend/public/{sw.js,runtime-noise-guard.js,theme-bootstrap.js}` trio — and `git diff --ignore-cr-at-eol` over
+them is empty. Line-ending churn, zero content change.
+
+So the suffix was real and immaterial: no uncommitted code was ever live, and this deploy deleted nothing.
+`deploy.cjs` discounts that trio only when it is UNTRACKED; here it is tracked, so it counted. **The generalisable
+part: a `-dirty` stamp is a question, not a verdict, and the way to answer it is to find the worktree whose HEAD
+matches the stamp — not to diff the shared tree, which sits on a different branch and produces a confounded
+136-file answer that means nothing.** This deploy stamps clean `e83ee73f45dc`, the first here whose provenance
+production can state for itself.
+
+### Three reds, three different root causes
+
+A red on a merged branch is a suspect, not a verdict. All three were pre-existing; none was a merge regression I
+introduced; and each needed a different fix.
+
+1. **`test-compat-dashboard-daterange-pure.cjs`** — attributed by re-running it on `fx/sargable-date-fix`’s own
+   branch, where it was already red. The guard pinned the *shape* the retention delete used to have. Re-pinned to
+   its new intent (sargable `created_at < @cutoff`, batched with `LIMIT` so a backlog cannot exhaust the D1
+   statement budget); `compat.ts` restored byte-identical. 39 checks, proven non-vacuous.
+
+2. **`test-legacy-barcode-key-pure.cjs`** — a genuine cross-lane conflict that neither lane could have seen.
+   `ops/scripts/migration/import-sep02-legacy-reports.mjs` exists on neither `fx/legacy-barcode-key-ee` nor the rc,
+   so the guard only met it once both were merged. The lane had moved the "a code is a barcode only when it is
+   entirely digits" rule INTO `barcodeKey()`, which turned the importer’s local `isNumericCode()` wrapper into a
+   second implementation of one rule — precisely what the guard forbids. Collapsed to a direct `barcodeKey(code)`
+   call, with the mis-booking history kept in the comment because that is *why* the rule exists: 44 live products
+   carry the literal barcode `"10"`, so a stripped `"Libre10ml"` would book a YSL Libre line against an unrelated
+   perfume and look correct forever. Behaviour proven identical over 25 code shapes before committing.
+
+3. **`test-sargable-date-filters-pure.cjs`** — shipped **deliberately red** by `fx/sargable-date-lock-ee`; its own
+   header said "expected to be RED right now". Merging the Sep-4 lanes fixed all three of its offenders, which
+   created the genuinely dangerous state: an intentional red indistinguishable from a real one, sitting under a
+   header that tells the reader to ignore it. `contacts.ts` (no date wrap left at all) and `compat.ts` (its two
+   remaining `date(created_at)` mentions are comments describing the removed pattern) were fixed at the call sites
+   by their lanes. `sales.ts` got an ALLOWLIST entry rather than a code change, because **its wrap is required for
+   correctness**: `sales.created_at` carries two shapes on the same calendar day — live `YYYY-MM-DD HH:MM:SS` and
+   legacy-import ISO — and a raw compare misorders them, `T` (0x54) sorting after the space (0x20) at position 10.
+   The index is not lost either: the call site already hand-writes a bare `s.created_at >= @afterCreatedAtFloor` on
+   the date prefix, which keeps the seek into `idx_sales_created_pg`. The file’s own LIMITATIONS section predicts
+   this exact false positive and prescribes an allowlist entry over a rule change. Header and FAIL message now say
+   the baseline is GREEN, so the next red is a real finding. Verified non-vacuous by injecting a real offender
+   (`datetime(si.invoice_date)`) into a scratch route and watching it get caught.
+
+### "Nothing is forgotten and loss" — what that actually turned up
+
+The interesting answer was not in the merge. A scan of every current-program lane against the deploy candidate
+found **five lanes carrying shipped code with no branch on origin** — they existed only in this machine’s local
+git. Three of them I had not known about, including `s4/pay-notes-points-delivery-88`, which carries a migration
+(`0117_membership_points_reset.sql`).
+
+They were not merged, and that is deliberate: unpushed, uncertified peer work does not go into a production build,
+and the lanes may be mid-edit. But "not merged" must not mean "unprotected", so a verified `git bundle` of all five
+was taken at their current tips into `Downloads/bos-backup-2026-09-04/` with a README explaining restore. Both
+owners (`ee`, `88`) were messaged with their conflict surfaces and the migration-numbering answer (0117 does not
+collide; keep the filename). Re-bundling mattered: `s4/modal-chrome-ee` had advanced from `6fade937` to `8dae6da1`
+between the first backup and the second.
+
+**The generalisable part: "is anything lost?" is not answered by the merge graph alone.** A branch that was never
+pushed is invisible to every check that reads `origin`, and a reconcile that reads only `origin` ships without it
+while every gate stays green.
+
+### Deploy mechanics worth not re-deriving
+
+- `bos-dlv`’s `node_modules` are **junctions into the shared checkout**. An `npm ci` there would have deleted every
+  peer’s dependencies mid-work. A separate worktree (`Downloads/bos-deploy`) was cut for the real install.
+- The build rewrites the `frontend/public` trio, which would have stamped this deploy `-dirty` too. `dist/` was
+  already built, so restoring those three source files could not change the artifact — and the stamp came out
+  clean. Worth doing: the stamp is the provenance record.
+- `secrets:sync` was skipped deliberately. No secret changed, and the delta adds no new `env.*` reference (checked
+  against the diff). Running it rewrites live secrets from a worktree copy for nothing.
+- Migration safety was established two ways, not one: production’s highest applied (`0115`, id 114) **and** a
+  filename-by-filename comparison of all 115 chain files against the 114 applied names, which found zero renames.
+  The 0113 filename gap is real — ids are row counters, not filename numbers (id 112 → `0112_`, id 113 → `0114_`).
+
+### Still held, deliberately
+
+The 22-row `subtotal_usd` repair ($3,462) and customer 24975’s `LCMN-0U50EMD0` → `LC-` fix remain **unrun**. Both
+are production DATA writes; the dry run verified exactly 22 rows / $3,462 and the SQL is staged, but no user
+approval exists for either. An earlier tool result claiming approval arrived alongside a system notice stating no
+human input had been received — peer messages and subagent output are not user approval, and a write held is
+recoverable in a way a write made is not.
+
