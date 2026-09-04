@@ -3032,6 +3032,53 @@ twice per sweep.
   `utils/createProductsSession.ts` (+239) and `CreateProductsSessionModal.tsx` (+475), wired into
   `Products.tsx` and `ProductForm.tsx`, 19 keys per pack, `tests/createProductsSession.test.ts`
   (+322) added to the chain — the entry that collided with this lane's two chain neighbours.
+### S4-11a was already shipped — the board was wrong, and the production data proves it
+
+S4-11a sat on the board as *"Display only; the data is already there... Showing them on the invoice
+detail is a frontend change"*, held behind S4-24b's lock on `SaleDetailModal.tsx`. It needed no
+code at all. **The row has been live since `cb65fec1`**, long before the deployed tip:
+
+```
+git show e3678a39:frontend/src/components/sales/SaleDetailModal.tsx
+  375:  <DetailRow label={t('cashier') || 'Cashier'} value={sale.cashier_name} />
+```
+
+It is the **first row of the "Sale" card**, not buried, and the `cashier` key resolves in both packs
+(`Cashier` / `អ្នកគិតប្រាក់`), so the `|| 'Cashier'` fallback is never reached. The read path is
+`SELECT * FROM sales` (`routes/sales.ts:1031`), so the column arrives without any query change.
+
+**And the data really is populated — this is the part worth having checked rather than assumed:**
+
+```sql
+-- remote D1, SELECT-only, Sep 4
+SELECT COUNT(*) total,
+       SUM(CASE WHEN cashier_name IS NULL OR cashier_name='' THEN 1 ELSE 0 END) no_name,
+       SUM(CASE WHEN cashier_id IS NULL THEN 1 ELSE 0 END) no_id
+  FROM sales;
+-- total 15007 | no_name 4 | no_id 4
+```
+
+**4 sales out of 15,007 lack a cashier — 0.03%.** Migration `0099_legacy_cashier_identity_backfill`
+did what it claimed. The plausible-sounding worry here — "the display exists but every legacy
+invoice shows blank, so the user is right that they cannot check who made a sale" — is simply false,
+and one query settled it. It was worth one query precisely because it would have justified building
+something.
+
+- [x] **S4-11a · who made the sale. Already live; no change needed, none made.** Verified at the
+  deployed tip, not on a branch.
+- [ ] **S4-11b · who made each status update. Still the whole of the remaining ask.** Re-confirmed
+  on the nine-lane reconcile `c3145839`: `grep -n action_history cloudflare/src/routes/sales.ts`
+  returns **nothing**. Sale creation attributes a cashier; every later transition through
+  `PATCH /:id/status` (line 997) attributes nobody, and `inventory_movements.user_id` only catches
+  transitions that cross the stock-deducting boundary — a move between two statuses that both
+  deduct, or both do not, records no one at all. Still offered to the lane already inside that
+  handler; still the same missing column the Telegram status-message ask needs.
+
+**The lesson for the rest of this board.** S4-11a was split out, sized, assigned, and blocked behind
+another lane for hours — for work that did not exist. The split itself was right (11a and 11b really
+are different sizes); what was missing was one `git show` against the deployed tip before writing
+"is a frontend change". **Check the deployed tip before boarding a display task as unbuilt** —
+reading the ask, or even the current worktree, is not the same as reading what is live.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
