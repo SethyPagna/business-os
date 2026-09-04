@@ -246,6 +246,27 @@ after `0117` `earned` -> 0 by the flag, `rewarded` and `manuallyAwarded` -> 0 by
 (`contacts.ts:348`/`:350`, `sales.ts:543`/`:552`, `notifications.ts:376`), while `deducted`/`redeemed` only
 subtract. **So a non-zero reading there is not rounding — it is a missing void filter at some site.**
 
+**⚠️ THE DEPLOY DOES NOT LEAVE POINTS OFF — one owner action is required after it.** The switch **defaults to
+ON** and `0117` does not write the settings row (it names `loyalty_points_enabled` only in a comment; the blob
+was re-read to confirm). Both server sites treat absent as enabled: `routes/sales.ts:498` says in terms
+*"Absent = on, matching buildPortalConfig's default"*, and `routes/portal.ts:329` is
+`normalizeBoolean(settings.loyalty_points_enabled, true)`. That default is deliberate and should stay — a
+switch shipping OFF would silently kill a live feature on every deployment that had never heard of it. But it
+means that **after the deploy, membership points are ON with every balance at zero, and the next sale accrues
+again.** The owner asked to "make the membership points on off in settings"; the deploy delivers the switch and
+the reset, not the flipped state.
+
+The step is an **owner action, not a D1 write**: toggle off and save on the Loyalty Points page, which writes
+`loyalty_points_enabled: 'false'` (`LoyaltyPointsPage.tsx:497`). Reversible, audited through the normal
+settings path, no SQL. Nobody should set that row directly on production — the owner flipping it *is* the
+switch working.
+
+Consequence for any post-deploy verifier: **`accruing_rows -> 0` is not a stable assertion.** It holds only if
+no sale is made between `migrate:remote` and the switch being turned off, and a sale in that window makes it
+read 1 — reporting a failed migration when the migration worked. Scope the zero-check to the ids in
+`sales_reset_ids` instead (the claim the migration actually makes, immune to traffic), and report a new
+accruing sale as its own line rather than a red.
+
 **Three things this lane found and deliberately did NOT fix — each is its own item:**
 
 1. **`buildLoyaltySection` (`routes/notifications.ts`) omits the manual-adjustment term.** It computes
