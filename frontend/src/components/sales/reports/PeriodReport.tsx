@@ -27,10 +27,15 @@ import {
   num,
   pct,
   periodLabel,
+  receiptLineKind,
   REPORT_NOUNS,
   reportFileName,
   reportQueryParams,
   rowsToCsvObjects,
+  STATEMENT_GROUPS,
+  isTheoreticalGroup,
+  statementGroupLabel,
+  statementNoteText,
   sumTotals,
   type ReportGranularity,
   type ReportTotals,
@@ -180,12 +185,19 @@ export default function PeriodReport(p: ReportViewProps) {
                     { label: tr('avg_order', 'Avg order'), value: fmtMoney(openRow.avg_order_usd), kind: 'info' },
                   ],
                 },
-                ...(['revenue', 'collected', 'profit'] as const)
+                ...STATEMENT_GROUPS
                   .filter((grp) => openStatement.some((l) => l.group === grp))
                   .map((grp) => ({
                     key: grp,
-                    title: grp === 'revenue' ? tr('revenue', 'Revenue') : grp === 'collected' ? tr('rpt_collected_group', 'Collected') : tr('profit', 'Profit'),
-                    lines: openStatement.filter((l) => l.group === grp).map((l) => ({ key: l.key, label: tr(l.labelKey, l.fallback), value: fmtMoney(l.usd), kind: l.kind })),
+                    title: statementGroupLabel(grp, tr),
+                    highlight: isTheoreticalGroup(grp),
+                    lines: openStatement.filter((l) => l.group === grp).map((l) => ({
+                      key: l.key,
+                      label: tr(l.labelKey, l.fallback),
+                      value: fmtMoney(l.usd),
+                      kind: receiptLineKind(l.kind),
+                      note: l.note ? statementNoteText(l.note, tr) : undefined,
+                    })),
                   })),
               ]}
             />

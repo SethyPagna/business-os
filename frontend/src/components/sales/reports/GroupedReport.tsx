@@ -30,11 +30,16 @@ import {
   normalizeTotals,
   num,
   pct,
+  receiptLineKind,
   REPORT_NOUNS,
   reportFileName,
   reportQueryParams,
   round2,
   rowsToCsvObjects,
+  STATEMENT_GROUPS,
+  isTheoreticalGroup,
+  statementGroupLabel,
+  statementNoteText,
   sumTotals,
   WEEKDAY_LABEL_KEYS,
   type ReportGroupBy,
@@ -369,12 +374,19 @@ export default function GroupedReport(p: ReportViewProps) {
             <ReceiptSheet
               blocks={[
                 { key: 'meta', lines: [{ label: tr('sales', 'Sales'), value: fmtInt(open.tx_count), kind: 'info' }, { label: tr('avg_order', 'Avg order'), value: fmtMoney(open.avg_order_usd), kind: 'info' }, { label: tr('rpt_share', 'Share'), value: fmtPct(pct(basisValue(open, options.basis), totalBasis)), kind: 'info' }] },
-                ...(['revenue', 'collected', 'profit'] as const)
+                ...STATEMENT_GROUPS
                   .filter((grp) => statement.some((l) => l.group === grp))
                   .map((grp) => ({
                     key: grp,
-                    title: grp === 'revenue' ? tr('revenue', 'Revenue') : grp === 'collected' ? tr('rpt_collected_group', 'Collected') : tr('profit', 'Profit'),
-                    lines: statement.filter((l) => l.group === grp).map((l) => ({ key: l.key, label: tr(l.labelKey, l.fallback), value: fmtMoney(l.usd), kind: l.kind })),
+                    title: statementGroupLabel(grp, tr),
+                    highlight: isTheoreticalGroup(grp),
+                    lines: statement.filter((l) => l.group === grp).map((l) => ({
+                      key: l.key,
+                      label: tr(l.labelKey, l.fallback),
+                      value: fmtMoney(l.usd),
+                      kind: receiptLineKind(l.kind),
+                      note: l.note ? statementNoteText(l.note, tr) : undefined,
+                    })),
                   })),
               ]}
             />
