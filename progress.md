@@ -3721,6 +3721,71 @@ because a threshold whose whole point is that it never fires is one a later sess
 - Tests pinned red-before/green-after, including **the real production pair $5.00/$7.90 asserted NOT
   to trip the guard**, and the seven zero/blank/null cases asserted unchanged throughout — if any of
   those flips, the change broke the half that was already correct.
+### S4-30 — the owner's editable sales, and the two questions their own data answered
+
+- [x] **S4-30 · Sales are amendable inside a window, with an append-only ledger. Done** on
+  `s4/sale-amendments` (14 commits, tip `fb4df3fa`), merged at `0024ab19`. Migration **0115**, unrun.
+
+It answers the owner's request kind by kind — `delivery_fee_changed` (their leading example: $1.50
+then $0.50 more, both in the detail, $2.00 on the receipt), `line_added`, `line_removed`,
+`line_quantity_increased`, `line_quantity_decreased` — each stamped with user and time. Window is 120
+minutes from the **sale**, not from the last amendment, so a chain of edits cannot hold it open; `0`
+means admin-only.
+
+**The load-bearing question came back the good way: the receipt was already rendering net state.**
+`routes/sales.ts` builds the list response with an explicit `items:` key *after* the spread, which
+overwrites the stale denormalized `sales.items` JSON with live `sale_items` rows — and nothing on the
+read path parses that JSON. So canonical-tables-hold-net plus append-only-ledger was already the
+shape of the system, and the receipt renderer needed **zero changes**.
+
+#### Two of its three owner questions were retired by measuring instead of asking
+
+The lane raised three things for the owner. Two describe situations **this shop does not have**:
+
+- *"A sale taxed at a rate that is no longer configured keeps its amount when amended."*
+- *"Turning Charge tax off does not erase tax already recorded."*
+
+Production carries **no `tax_rate` row at all**, and **0 of 15,037 sales carry any tax — $0.00
+collected, ever**. Neither case can arise. Both were correct engineering decisions and both are now
+moot, so **the owner was told the answer rather than handed the question**. The `tax_enabled`
+fallback ("on iff a positive rate is set") reproduces today's behaviour exactly, so no install
+changes until the switch is touched.
+
+**The third is a real decision and stays open:** a line's **unit price** is deliberately not
+amendable. Add, remove and re-quantify cover "replace a product"; changing what a customer was
+charged for goods already taken is indistinguishable from a retroactive discount, and is the only
+amendment that moves revenue with nothing physical changing.
+
+#### The merge found a defect neither lane could see
+
+```
+src/routes/sales.ts(6,77):  error TS2300: Duplicate identifier 'isAdminControlUser'
+src/routes/sales.ts(59,10): error TS2300: Duplicate identifier 'isAdminControlUser'
+```
+
+S4-2 added the symbol to the existing grouped import to gate its `stock_skipped` admin check; S4-30
+independently added a standalone import of the same symbol from the same module. **Both sides
+compile; the merge does not.** Fixed in `1c8caaf6`.
+
+**And the chain union recovered four tests, not the one S4-30 predicted.** It correctly foresaw the
+`frontend/package.json` clash with S4-2 — but it could not see the wholesale or stock-session lanes,
+so its proposed two-way resolution would have dropped `mergeRulesParity`, `wholesaleAutoPricing`,
+`stockReceiptFields` and `saleStatusSkipStock` from CI. Union 185. **A lane's own conflict forecast
+is scoped to what it can see; the reconcile's is not.**
+
+**The pack auto-merge was checked, not trusted.** S4-30 branched before `4e581081` and so carried the
+pre-fix English values for the four `{n}` keys. All four fixes survived; packs land at **4,741 keys**
+(4,710 + its 31) with zero en-only or km-only keys.
+
+#### `1c8caaf6` certifies green
+
+`CF_TSC_OK` · **180** worker tests, zero red · `FE_TSC_OK` · `check:source` 487 files ·
+`verify:i18n` **4,741 keys** · **186** frontend tests, zero red · `vite build` 26.7s.
+
+Every count moved by exactly the expected amount (+1 worker test, +2 source files, +31 keys, +1
+frontend test), and 4,741 matches what was measured independently at this commit before the run
+started. **Production is confirmed at migration 107**, so 0108–0115 are all unrun and nothing here
+has touched live data.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
