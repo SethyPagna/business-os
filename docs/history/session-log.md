@@ -19427,3 +19427,40 @@ someone assuming a fast-forward.
 
 *Every finding above except the ledger row came from a peer re-deriving a claim rather than accepting it —
 including two corrections to this session's own broadcast. None would have surfaced from agreement.*
+
+### Part 601, addendum — two claims this session published and then had to withdraw
+
+Both were about line endings, both were measured correctly and *attributed* wrongly, and both were caught only
+because a peer refused the conclusion.
+
+**1. "The staleness check does no normalisation."** This session put an ⚠️ on the board saying it could not explain
+how `verify:public-runtime` passes on a pristine CRLF tree *and* after the builder rewrites those files to LF,
+citing `build-public-runtime-scripts.ts:83` as a raw `current !== expected`. `7c` came back with the opposite
+error — *"there is no mystery, because it does NOT pass in both states; your worktree was not pristine"* — and
+predicted a hard throw. Five experiments in disposable worktrees at `c7ef7264` settled it against both of us: the
+pristine tree measures `sw.js` at **CR=637** with **0 dirty files** and `--check` exits **0**; appending one byte
+makes it exit **1**, so the pass is not vacuous. The mechanism was in the file all along, at a line neither of us
+had read: `normalizeEol()` at **:24**, used at **:97**, with a comment stating the reason — a byte compare *"called
+a pristine checkout stale forever"*, and since this is step 2 of a chain that stops at the first red, it *"could
+stop a lane before a single one of its 170 test files ever ran."* My `:83` came from a `sed` window that ended at
+line 90 and cut the comparison off. **A window that stops short of the code you are describing looks exactly like
+a window that contains it** — which is why a citation has to quote the line's text, not just its number. `7c`'s
+urgency was equally unfounded: `1755bd6b` **is** that fix and **is** already an ancestor of the deployed commit.
+
+**2. "No `.gitattributes` anywhere."** Written into the `-dirty` reproduction as a supporting fact. One exists at
+`c7ef7264` — `2c497564` pins `cloudflare/migrations/*.sql text eol=lf`. I had measured the shared checkout's disk,
+where there genuinely is none, and reported it as a property of the commit. The mechanism survived (that pin is one
+line and does not cover `frontend/public`), but the sentence was false, and it was the kind of false that invites a
+peer to redo work already done.
+
+**The pattern under both, and under the `grep -c $'\r'` trap earlier the same day: a measurement taken in one place
+and reported as a property of another.** Wrong tree read as the commit. Disk read as the ref. Line count read as CR
+count. Version UUID read as a git sha. Each was a correct observation of the wrong subject, and none of them look
+wrong on the page — which is why every one of them survived until somebody re-derived it.
+
+**What this leaves for the fleet, and it is the useful half:** both fixes are live in production and **neither is on
+`main`**. `1755bd6b` means a lane certifying from `main` can still see a pristine tree reported stale with no test
+having run. `2c497564` is worse — without it, `wrangler d1 migrations apply --remote` truncates a `CREATE TRIGGER`
+at the `\r` and D1 answers "incomplete input", *after* the earlier migrations have applied, and the local
+`--file` path cannot reproduce it. Anyone authoring a migration off `main` today is exposed. Recorded on the board
+as a merge, not as a fix — the code exists.

@@ -307,11 +307,37 @@ all three states, single fresh worktree, in order:
 | shared checkout, trio clean | CR=**0** (LF) | **PASS** |
 
 **So a lane certifying in the shared tree and a lane certifying in a fresh worktree get the SAME answer**, which is
-the opposite of what both `7c` and I expected. ⚠️ **But HOW it passes in both is unexplained and someone should
-look:** the comparison at `ops/scripts/frontend/build-public-runtime-scripts.ts:83` is a strict `current !==
-expected` on two `readFileSync(..., 'utf8')` strings with **no normalisation**, and the builder demonstrably
-*changes* those files on a fresh tree (CR 637 → 0, 3 files dirty) — a byte-compare that passes both before and
-after a change that git can see is not yet accounted for. **Recorded as an observation, not a conclusion.**
+the opposite of what both `7c` and I expected. **✅ RESOLVED — and my earlier "unexplained" note here was wrong,
+because I read a truncated window.** The comparison is **not** at `:83` and it is **not** a raw byte compare. At
+`c7ef7264`, `ops/scripts/frontend/build-public-runtime-scripts.ts:24` defines
+`normalizeEol(text) { return String(text).replace(/\r\n/g, '\n') }`, and **line 97** is
+`if (normalizeEol(current) !== normalizeEol(expected))`. Both sides are normalised, so CRLF-on-disk vs LF-emitted
+compares equal — which is exactly why it passes before *and* after the builder runs. My `:83` citation came from a
+`sed` window that ended at line 90 and cut the comparison off; **I published "no normalisation" from a view that
+did not contain the comparison.** If you cite a line in this repo, quote its text — a window that stops short of
+the code you are describing reads exactly like a window that contains it.
+
+**The in-code comment states the intent, and it is the same argument this board made independently:** *"Compare
+CONTENT, not bytes … a raw byte comparison therefore called a pristine checkout stale forever -- and since this is
+step 2 of the `test:utils` chain, and that chain stops at the first red, it could stop a lane before a single one
+of its 170 test files ever ran."*
+
+**⚠️ `1755bd6b` (`fx/public-runtime-eol`) IS THE FIX, AND IT IS ALREADY IN THE DEPLOYED COMMIT** —
+`git merge-base --is-ancestor 1755bd6b c7ef7264` → **exit 0**. So there is no live exposure at `c7ef7264` and **no
+urgency**: the check does not depend on somebody having happened to run a build in the shared tree. Two
+consequences for whoever picks this up:
+
+- **It is NOT on `main`** — `git merge-base --is-ancestor 1755bd6b origin/main` → **exit 1**. Anyone certifying
+  from `origin/main`, or from a worktree branched off it, still gets the byte compare and can still see a pristine
+  tree reported stale, with the chain stopping before any test runs. **That is the real remaining exposure, and it
+  closes with a merge, not with a fix.**
+- The older entry further down (`TWO TOOLING DEFECTS FIXED`) still carries the pre-fix workaround — *"leave those
+  three files dirty, never stage them."* At `c7ef7264` that is unnecessary; it applies only while working off
+  `main`. Left in place deliberately rather than rewritten, because it is a correct record of the defect.
+
+**Negative control, so the PASS is not vacuous:** appending one byte to `frontend/public/sw.js` in the pristine
+worktree makes `--check` exit **1** with the staleness message. It detects real staleness and ignores line endings
+— which is the behaviour you want, and the reason a green here can be trusted.
 
 ### 🟡 THE DOCS ARE FORKED IN TWO PLACES — union, never pick a side
 
@@ -884,7 +910,7 @@ deploy it caught exactly the condition it exists for. **Read a future `-dirty` a
 a bug report.**
 
 **REPRODUCED on this machine (`ee`, after `7c` pointed out it was testable), at `c7ef7264`:** `core.autocrlf=true`,
-**no `.gitattributes` anywhere**, and all three blobs stored **LF**. A fresh detached worktree at `c7ef7264` is
+**nothing pinning `frontend/public/*.js`** (correcting an earlier line here that said "no `.gitattributes` anywhere" — see the note below), and all three blobs stored **LF**. A fresh detached worktree at `c7ef7264` is
 **completely clean — 0 dirty files** — with the trio checked out as **CRLF**. Running `build:public-runtime`, which
 every real deploy runs, rewrites all three back to **LF**, leaving **exactly those three files dirty with 0 content
 **RETRACTED — the corroboration was measured in the WRONG TREE (`7c` caught it).** I wrote that the shared
@@ -895,6 +921,21 @@ a *dirty-since*. The trio is dirty in **`bos-rc-workers/ee-integrate`**, a diffe
 read ran. **The reproduction above stands entirely on its own and needs no corroboration** — fresh worktree clean,
 builder run, exactly those three files, 0 content rows. Two separate errors in one sentence: the wrong tree, and an
 mtime read as a status.
+
+**CORRECTION to the line above, and it matters more than the wording (`ee`, self-caught).** I wrote "no
+`.gitattributes` anywhere". **One exists at `c7ef7264`** — added by `2c497564`, *"pin migration SQL to LF, because
+CRLF makes a trigger unshippable"* — and I measured the shared checkout's disk, where there is none, then
+attributed the result to the commit. The file is scoped to a single line, `cloudflare/migrations/*.sql text
+eol=lf`, which is why it does not touch the `frontend/public` trio and why the mechanism above still holds.
+
+**⚠️ AND IT IS NOT ON `main` EITHER** — `git ls-tree origin/main` finds no `.gitattributes`, and the shared
+checkout has none on disk. This is the **second** shipping-critical CRLF fix that is live in production and absent
+from `main`, alongside `1755bd6b`. The consequence is concrete and worse than the runtime-checker one: on a tree
+without it, `wrangler d1 migrations apply --remote` splits a `CREATE TRIGGER` on the regex `/\sEND[;\s]$/`, the
+`\r` sits past the `$` anchor, and D1 answers **"incomplete input: SQLITE_ERROR"** — after the migrations ahead of
+it have already applied. **`0115_sale_amendments.sql` failed exactly that way against production on Sep 4.** It
+passes `wrangler d1 execute --local --file`, which hands the whole file to SQLite and never splits, **so running
+the migration locally cannot catch it.** Anyone authoring a migration from `main` today is exposed.
 
 **FIX FOR EVERY FUTURE DEPLOY (`7c`) — UNCLAIMED, one line in the deploy-record template:** capture
 `git status --porcelain` **and** `git rev-parse HEAD` into the deploy record **at build time**. Today a `-dirty`
