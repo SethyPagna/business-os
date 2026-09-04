@@ -161,8 +161,18 @@
 .reports-mobile-primary input,
 .reports-mobile-primary button { min-height: 44px; height: 44px; }
 
-.reports-mobile-range { min-height: 44px; }
-.reports-mobile-range > span { overflow: visible; text-overflow: clip; white-space: nowrap; }
+.reports-mobile-range {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+  min-height: 44px;
+}
+.reports-mobile-range > span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
 
 .reports-mobile-presets {
   display: flex;

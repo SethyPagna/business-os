@@ -82,11 +82,13 @@ export function publishShift(key: string, next: ShiftState | null) {
 
 export function useSharedShift(branchId: number | null, userId: unknown, scopeMode: unknown) {
   const key = shiftCacheKey(userId, branchId, scopeMode)
+  const [loadedKey, setLoadedKey] = useState(key)
   const [state, setState] = useState<ShiftState | null>(() => sharedShifts.get(key) ?? null)
   const [loading, setLoading] = useState(() => !sharedShifts.has(key))
   const [failed, setFailed] = useState(() => sharedShiftFailures.has(key))
 
   useEffect(() => {
+    setLoadedKey(key)
     setState(sharedShifts.get(key) ?? null)
     setLoading(!sharedShifts.has(key))
     setFailed(sharedShiftFailures.has(key))
@@ -121,14 +123,12 @@ export function useSharedShift(branchId: number | null, userId: unknown, scopeMo
   const publish = (next: ShiftState | null) => {
     sharedShiftFailures.delete(key)
     publishShift(key, next)
-    // Sales has no branch selector and therefore subscribes through the
-    // server-resolved request-branch key. When POS has an explicit branch,
-    // keep that alias live too so opening/closing a shift is visible there
-    // immediately instead of only after a remount and refetch.
-    if (branchId != null) publishShift(shiftCacheKey(userId, null, scopeMode), next)
   }
 
-  return { state, loading, failed, refresh, publish }
+  // A branch/user change renders before its effect: hide the previous row.
+  // A specific branch must never populate the distinct unassigned cache.
+  return { state: loadedKey === key ? state : null, loading: loadedKey !== key || loading,
+    failed: loadedKey === key && failed, refresh, publish }
 }
 
 /**

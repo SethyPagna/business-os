@@ -11646,6 +11646,10 @@ POS.tsx along the way — no behavior change needed there).
   and production build passed, both language packs resolve 4,849 keys, Worker
   typecheck and focused shift/report/backup tests passed, and all 118 migrations
   apply to a fresh database with LF/trigger checks clean.
-- The only unresolved goal item remains the historical production settlement:
+- Superseded by the scope reread: the historical production settlement is not
+  the only unresolved goal item. True two-layer mobile navigation and the
+  replacement back/title header remain incomplete; full visual certification
+  is reopened. See `docs/fleet/2026-09-05-scope-review.md`.
+  Historical settlement remains pending:
   no remote D1 command or deployment was run. A fresh read-only production
   preflight and an owner ruling on the two partial payments are still required.

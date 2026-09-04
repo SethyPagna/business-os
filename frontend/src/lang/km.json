@@ -5582,5 +5582,19 @@
   "shift_current_live_note": "វេនកំពុងដំណើរការ · មិនស្ថិតក្នុងរយៈពេលរបាយការណ៍ដែលបានជ្រើសទេ",
   "shift_summary_hint": "វេននេះបានបញ្ចប់។ នេះជាម៉ោងបើក និងម៉ោងបិទដែលបានកត់ត្រា។",
   "shift_hours_short": "ម៉ោង",
-  "shift_minutes_short": "នាទី"
+  "shift_minutes_short": "នាទី",
+  "shift_history": "ប្រវត្តិវេន",
+  "shift_history_failed": "មិនអាចទាញយកប្រវត្តិវេនបានទេ។",
+  "shift_history_all": "ប្រវត្តិវេនហាងដែលអ្នកមានសិទ្ធិមើល",
+  "shift_history_own": "វេនដែលបានកត់ត្រារបស់អ្នក",
+  "shift_history_empty": "មិនទាន់មានវេនដែលបានកត់ត្រាទេ។",
+  "shift_no_amendments": "មិនទាន់មានការកែប្រែដែលបានកត់ត្រាទេ។",
+  "shift_amend": "កែប្រែវេន",
+  "shift_opening_note": "កំណត់សម្គាល់ពេលបើកវេន",
+  "shift_closing_note": "កំណត់សម្គាល់ពេលបិទវេន",
+  "shift_reason_required": "មូលហេតុ (ចាំបាច់)",
+  "shift_save_amendment": "រក្សាទុកការកែប្រែ",
+  "shift_amendments": "កំណត់ត្រាការកែប្រែ",
+  "shift_amend_saved": "បានរក្សាទុកការកែប្រែវេនជាមួយកំណត់ត្រាត្រួតពិនិត្យ។",
+  "shift_amend_failed": "មិនអាចកែប្រែវេនបានទេ។"
 }

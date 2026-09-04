@@ -19117,3 +19117,22 @@ The final security pass also closed forged-batch, low-privilege shift access,
 concurrent shift amendment, stale sale-addition undo, stale product-merge undo,
 and folded-batch return-allocation gaps. Full local frontend/backend certification
 passed. Deployment and production data repair were intentionally not run.
+
+## Part 603 — scope reread corrects completion claims (2026-09-05)
+
+Ask: reread completed work; keep everything scoped, consistent, compact,
+responsive and clear. Two independent read-only reviews plus lead source/browser
+checks found that the requested true two-layer mobile interaction remains open.
+The ledger and Part 602 claim are corrected. Preserved the unfinished shift
+attribution/lifecycle draft in evidence and removed it from executable changes;
+it introduced checkout restrictions and incomplete ownership/restore semantics.
+
+Fixed branch-cache aliasing, old-scope first-render state, stale history/save
+responses, unsaved cash/time/note edits, history-control translation, storage
+lookup safety and date/time overflow. Focused shift tests, both typechecks,
+i18n and frontend build passed. Local real-component EN/KM visual checks at
+320/375px passed for the sampled date/history form; cash-only dismissal warns.
+
+Not done: true two-layer/header implementation, complete authenticated responsive
+matrix, production financial/data reconciliation. No deployment or remote write.
+Details and verification boundaries: `docs/fleet/2026-09-05-scope-review.md`.

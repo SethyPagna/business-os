@@ -18,13 +18,15 @@ type CurrentShiftContext = {
  *
  * Transaction pages deliberately show identity and timing only. Drawer
  * counts, notes, costs and profit remain confined to authorized shift flows.
- * A failed/offline read renders nothing because shifts have no local mirror.
+ * A failed/offline read shows an explicit retry state.
  */
 function operationalBranchId(): number | null {
   if (typeof window === 'undefined') return null
-  const first = (window.sessionStorage.getItem('pos_branch') || '').split(',')[0]?.trim()
-  const parsed = Number(first)
-  return first && Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  try {
+    const first = (window.sessionStorage.getItem('pos_branch') || '').split(',')[0]?.trim()
+    const parsed = Number(first)
+    return first && Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  } catch { return null }
 }
 
 export default function CurrentShiftSummary({ className = '' }: Props) {

@@ -5582,5 +5582,19 @@
   "shift_current_live_note": "Live shift · not part of the selected report period",
   "shift_summary_hint": "This shift is ended. These are the opening and closing times recorded for it.",
   "shift_hours_short": "hr",
-  "shift_minutes_short": "min"
+  "shift_minutes_short": "min",
+  "shift_history": "Shift history",
+  "shift_history_failed": "Could not load shift history.",
+  "shift_history_all": "Authorized shop history",
+  "shift_history_own": "Your recorded shifts",
+  "shift_history_empty": "No shifts recorded.",
+  "shift_no_amendments": "No amendments recorded.",
+  "shift_amend": "Amend shift",
+  "shift_opening_note": "Opening note",
+  "shift_closing_note": "Closing note",
+  "shift_reason_required": "Reason (required)",
+  "shift_save_amendment": "Save amendment",
+  "shift_amendments": "Amendment record",
+  "shift_amend_saved": "Shift amendment saved with an audit record.",
+  "shift_amend_failed": "Could not amend shift."
 }

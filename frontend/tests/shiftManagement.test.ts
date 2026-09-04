@@ -41,10 +41,15 @@ for (const forbidden of ['opening_float_usd', 'opening_float_khr', 'closing_coun
 }
 ok(/Cashier/.test(summary) && /Opened/.test(summary) && /Closed/.test(summary) && /Duration/.test(summary), 'summary renders useful non-sensitive shift facts')
 ok(/canManage \?/.test(history), 'amendment form is hidden from ordinary history viewers')
-ok(/No amendments recorded/.test(history), 'history gives a clear immutable-ledger empty state')
+ok(/shift_no_amendments/.test(history), 'history translates its immutable-ledger empty state')
+ok(/JSON.stringify\(draft\) !== JSON.stringify\(initialDraft\(selected\)\)/.test(history), 'every draft field participates in unsaved-change protection')
+ok(/requestId === detailsRequest.current/.test(history) && /requestId === listRequest.current/.test(history), 'list and detail responses reject superseded requests')
+ok(/fieldset disabled=\{saving \|\| detailsLoading \|\| !!detailsError\}/.test(history), 'pending or failed history reads cannot overwrite editable fields')
+ok(history.indexOf("notify?.(t('shift_amend_saved')") < history.indexOf('const history = await fetchShiftHistory(result.shift.id)'), 'saved state is acknowledged before the optional history refresh')
 
 ok(/export function useSharedShift/.test(gate), 'transaction pages reuse the live POS shift state')
-ok(/publishShift\(shiftCacheKey\(userId, null, scopeMode\), next\)/.test(gate), 'an explicit POS branch also updates the server-resolved Sales alias')
+ok(!/publishShift\(shiftCacheKey\(userId, null, scopeMode\), next\)/.test(gate), 'a branch-specific write never aliases the unassigned branch')
+ok(/state: loadedKey === key \? state : null/.test(gate), 'a changed scope cannot render the previous branch row before effects')
 ok(/sessionStorage\.getItem\('pos_branch'\)/.test(currentSummary), 'current summary follows the operational POS branch rather than report filters')
 ok(/SHIFT_BRANCH_CHANGED_EVENT/.test(pos) && /addEventListener\(SHIFT_BRANCH_CHANGED_EVENT/.test(currentSummary), 'current summaries follow POS branch changes without a remount')
 ok(/useSharedShift\(branchId, user\?\.id, settings\?\.shift_scope_mode\)/.test(currentSummary), 'current summary partitions shift state by branch, user, and policy')
