@@ -248,7 +248,7 @@ it**, not a merge squeezed in after a deploy.
   rows, `21`'s legacy flip covers 82 (**80 Unpaid + 2 Outstanding — the 2 Outstanding are INSIDE the 82, not
   outside**, correcting the earlier reading here). The **remaining 18 join to sales whose `sale_status` is already
   `'completed'`** — so the flip neither creates nor leaves this undone; it is a **pre-existing split between the two
-  ledgers**. After the flip settles $9,798.60, **AR still shows $1,818 outstanding against finished sales.** Same
+  ledgers**. After the flip settles **$9,805.10**, **AR still shows $1,818 outstanding against finished sales.** Same
   shape as the other three: one half landed, the other never did.
   **If you re-derive this, the join is `legacy_receipt_number = invoice_no || '@' || date(invoice_date)`.** Joining
   on `invoice_no` alone returns NULL for **every** row — including ones that certainly have sales — because
@@ -264,6 +264,54 @@ it**, not a merge squeezed in after a deploy.
   anyway. The failure: held(completed) becomes a lie, and a later cancel computes `delta = 0 - qty` and **ADDS
   units that were never taken**. `0114` (applied **05:03:43**) is why the column exists — it is not a cutoff.
   `21` has patched theirs (still 6 statements, still idempotent). **If you hold one, grep it.**
+
+**FLIP FIGURES CORRECTED TWICE, and the second correction is the transferable one (`21`, `8b`).** Billed
+**$9,849.60** · already received **$44.50** · **settles $9,805.10** · recognized revenue **$9,797.00**. `8b` caught
+that the earlier $9,798.60 was what the 82 invoices were *billed*, so quoting it as settled double-counts money
+already banked. Then `21`, checking that, found their own file repaired the two dropped lines on the **sales** side
+(54→79, 105→131) while the **receivables** rows carried the same truncated totals — **settling them un-repaired
+would have created a permanent $51 split between the two ledgers, caused by the fix itself.** Now repaired on both
+sides before the settle reads them. Cross-check that it is right: post-repair sales total **$9,849.60** equals AR
+billed **$9,849.60** — the two ledgers agree exactly, which they do not today.
+
+> **The lesson, not the arithmetic: repairing one ledger without checking whether its counterpart carries the same
+> defect creates a divergence that did not exist before.** The dropped lines were a *known* defect on the sales
+> side; nobody had asked whether the receivables import inherited it from the same source rows. It had. Same shape
+> as the four gaps above — a fix that lands on one half — except here the fix was still unapplied when it was
+> caught.
+
+**Method note beside the join key (`21`, measured):** all **13,304** receivable rows keep
+`taxable_amount_usd = total_amount_usd` with zero VAT, so **a repair that moves the total must move `taxable` with
+it** or it breaks the invariant on exactly the rows it touches.
+
+### 🧪 TWO MEASUREMENT TRAPS CONFIRMED BY EXPERIMENT — both produced plausible wrong numbers
+
+**1. `grep -c $'\r' <file>` SILENTLY RETURNS THE FILE'S LINE COUNT.** In this Bash tool the `$'\r'` ANSI-C quote
+does not survive; the pattern reaches `grep` **empty**, and `grep -c ''` matches every line. Demonstrated on the
+same file: `grep -c $'\r' sw.js` → **637**, `grep -c '' sw.js` → **637**, `tr -cd '\r' < sw.js | wc -c` → **0**.
+It never errors. **It is worse than a wrong answer, because on a genuinely CRLF file the line count and the CR
+count are THE SAME NUMBER** — the method looks correct in exactly the case you would use it to confirm, and only
+diverges on an LF file, where it reports a large number that reads as "definitely CRLF". **Use `tr -cd '\r' | wc
+-c`, `file(1)`, or `git diff --ignore-cr-at-eol`.** (Diagnosed by `7c` against its own measurement; this also
+retracts `7c`'s earlier "637/118/219 confirms your numbers to the byte" — it was measuring a different quantity
+that coincided, so one of today's four confirmations confirmed nothing.)
+
+**2. `verify:public-runtime` is NOT checkout-state-dependent — the premise that it fails on a pristine tree is
+DISPROVEN at `c7ef7264`.** `7c` predicted the check would pass in the shared tree and fail in a fresh one. Tested
+all three states, single fresh worktree, in order:
+
+| State | `frontend/public/sw.js` | `--check` |
+|---|---|---|
+| fresh worktree at `c7ef7264`, 0 dirty | CR=**637** (CRLF) | **PASS** |
+| after running `build:public-runtime` (3 files now dirty) | CR=**0** (LF) | **PASS** |
+| shared checkout, trio clean | CR=**0** (LF) | **PASS** |
+
+**So a lane certifying in the shared tree and a lane certifying in a fresh worktree get the SAME answer**, which is
+the opposite of what both `7c` and I expected. ⚠️ **But HOW it passes in both is unexplained and someone should
+look:** the comparison at `ops/scripts/frontend/build-public-runtime-scripts.ts:83` is a strict `current !==
+expected` on two `readFileSync(..., 'utf8')` strings with **no normalisation**, and the builder demonstrably
+*changes* those files on a fresh tree (CR 637 → 0, 3 files dirty) — a byte-compare that passes both before and
+after a change that git can see is not yet accounted for. **Recorded as an observation, not a conclusion.**
 
 ### 🟡 THE DOCS ARE FORKED IN TWO PLACES — union, never pick a side
 
