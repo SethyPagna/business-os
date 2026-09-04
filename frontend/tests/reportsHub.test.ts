@@ -299,7 +299,7 @@ test('the hub persists view / style / options under the model\'s storage keys an
   assert.ok(hub.includes('REPORT_STORAGE_KEYS.view') && hub.includes('REPORT_STORAGE_KEYS.style') && hub.includes('REPORT_STORAGE_KEYS.options'))
   assert.ok(hub.includes('styleChoice ?? defaultReportStyle(compact)'), 'unset style follows the viewport (receipt on phones, excel wider)')
   assert.ok(hub.includes('<ControlRow') && hub.includes('sticky'), 'one shared sticky control row')
-  assert.ok(hub.includes('<ReportOptionsFold'), 'the calculation options fold is wired')
+  assert.ok(hub.includes('<ReportOptionsFold'), 'the filter menu is wired')
   // The business-summary workbook belongs to the business-workbook lane and
   // its endpoints are not on this line, so the hub deliberately ships without
   // it here. Pinned as an absence so it cannot creep back in half-wired.
@@ -315,22 +315,131 @@ test('the control row keeps every control at each width: nothing is dropped, not
   // ControlRow renders `overflow` INSTEAD of filters/sort/actions from 1023px
   // down. Passing a tail that held only the export menu silently deleted the
   // view picker and the filter selects between 768 and 1023 -- the tail has to
-  // be unconditional and carry them.
+  // be unconditional.
   assert.ok(/overflow=\{collapsedTail\}/.test(hub), 'the collapsed tail is passed at every width, not only when compact')
+  assert.ok(/actions=\{collapsedTail\}/.test(hub), 'the wide tier renders the SAME tail, so no control exists at only one width')
   const tail = hub.slice(hub.indexOf('const collapsedTail'), hub.indexOf('const body'))
-  assert.ok(tail.includes('{filtersButton}'), 'the tail carries the filters')
-  assert.ok(tail.includes("trh('rpt_options_title'"), 'the tail carries the calculation options')
-  assert.ok(tail.includes('viewPicker'), 'the tail carries the view picker')
-  // On the narrow tier the picker rides the search row instead, so exactly one
-  // of the two places renders it.
-  assert.ok(tail.includes('{compact ? null : viewPicker}'), 'the tail drops the picker on the narrow tier')
-  assert.ok(/const searchSlot = compact[\s\S]*?\{viewPicker\}/.test(hub), 'the narrow tier puts the picker on the search row')
+  assert.ok(tail.includes('{filtersButton}'), 'the tail carries the filter menu')
+
+  // Part 586: the view picker moved OUT of the tail and into the search slot,
+  // which ControlRow renders at all three tiers. That makes "never dropped"
+  // structural rather than a per-tier conditional -- but it must then appear
+  // exactly once, or a wide screen shows two pickers.
+  assert.ok(!tail.includes('viewPicker'), 'the picker is not in the tail any more (it would double up with the search slot)')
+  assert.ok(/const searchSlot = \([\s\S]*?\{viewPicker\}/.test(hub), 'the search slot carries the view picker at every tier')
+  assert.equal((hub.match(/\{viewPicker\}/g) || []).length, 1, 'the view picker is rendered in exactly one place')
+
+  // The four controls Part 586 folded into the one menu must not come back as
+  // separate control-row citizens -- that crowding is what hid the search box.
+  assert.ok(!hub.includes('<OverflowMenu'), 'no separate overflow menu beside the filter menu')
+  assert.ok(!hub.includes('const styleToggle'), 'the Excel/Receipt toggle lives in the menu, not on the row')
+  assert.ok(!hub.includes('const optionsButton'), 'the calculation options open from the same menu button')
+  assert.equal((hub.match(/<Fold\b/g) || []).length, 0, 'the hub opens ONE fold, and it is ReportOptionsFold')
+
+  // The search box is the control the user reported missing. It must render,
+  // carry a visible affordance, and hold a width floor so the range picker
+  // cannot squeeze it to nothing at the 768-1023 tier.
+  assert.ok(hub.includes('type="search"'), 'the search input is present')
+  assert.ok(hub.includes('<SearchIcon'), 'the search box reads as a search box')
+  assert.ok(/min-w-\[9rem\] flex-1/.test(hub), 'the search box keeps a width floor and takes the free space')
+
+  // The menu owns the filters AND the options, so its badge must count both,
+  // and its Reset must clear both -- a Reset that silently left a non-default
+  // basis in force would be worse than no Reset.
+  assert.ok(/filterControls=\{/.test(hub), 'the filter selects are passed into the menu')
+  assert.ok(/onStyleChange=\{/.test(hub), 'the style choice is made in the menu')
+  assert.ok(hub.includes('activeFilterCount + (optionsAreDefault ? 0 : 1)'), 'the badge counts filters and non-default options')
+  assert.ok(/onReset=\{\(\) => \{ clearFilters\(\); setOptions\(/.test(hub), 'one Reset clears the filters and the options together')
+
   // The date range is the widest control on a phone row; it only fits because
   // the trigger becomes a full-width field whose labels can truncate.
   assert.ok(hub.includes("triggerClassName={compact ? 'flex w-full min-w-0"), 'the range trigger goes full-width and shrinkable on phones')
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
   const spans = picker.match(/className=\{`min-w-0 truncate /g) || []
   assert.equal(spans.length, 2, 'both endpoint labels can actually truncate (min-w-0, not truncate alone)')
+})
+
+// --- Part 586: density, and the Khmer line box ----------------------------
+//
+// The reports surface reads ~18 `--ui-*` custom properties through the kit.
+// styles/tokens.css, which DECLARES them, is on the rc/p2-1-kit line and did
+// not come across with the kit port -- so every one of them was undefined and
+// `var(--ui-row-h)` etc. was invalid at computed-value time (no row rhythm,
+// no hairlines, no zebra, inherited 14px text). reports-surface.css declares
+// them on this line. If it ever goes missing again, the surface degrades
+// silently -- nothing throws -- so pin it here.
+const SURFACE_CSS = 'src/components/sales/reports/reports-surface.css'
+
+test('every --ui-* token the reports surface reads is declared, and the density numbers are the tight ones', () => {
+  const css = read(SURFACE_CSS)
+  assert.ok(read(HUB).includes("import './reports/reports-surface.css'"), 'the hub imports the token layer')
+
+  const sources = [HUB, ...VIEW_FILES, ...SHARED_FILES, 'src/components/shared/kit/DenseTable.tsx']
+    .map(read).join('\n')
+  const used = new Set([...sources.matchAll(/var\((--ui-[a-z0-9-]+)/g)].map((m) => m[1]))
+  // main.css owns these two already; everything else must come from our file.
+  const declaredElsewhere = new Set(['--ui-accent', '--ui-radius'])
+  const undeclared = [...used].filter((v) => !declaredElsewhere.has(v) && !new RegExp(`\\${v}\\s*:`).test(css))
+  assert.deepEqual(undeclared, [], `these tokens are read but declared nowhere:\n  ${undeclared.join('\n  ')}`)
+
+  // The density the user asked for ("much closer"), against P2-1's originals:
+  // row 32px -> 24px, body 13px -> 12px, meta 12px -> 11px, cell pad 12px -> 6px.
+  assert.match(css, /--ui-row-h:\s*24px/, 'rows are 24px (was 32px in tokens.css)')
+  assert.match(css, /--ui-size-body:\s*12px/, 'body text is 12px (was 13px)')
+  assert.match(css, /--ui-size-meta:\s*11px/, 'meta text is 11px (was 12px)')
+  assert.match(css, /--ui-cell-px:\s*6px/, 'cell padding is 6px a side (was 12px)')
+})
+
+test('the excel table hugs its columns and pays for density with padding, never with the line box', () => {
+  const dense = read('src/components/shared/kit/DenseTable.tsx')
+  // `w-full` stretched a 4-column table across a 1400px screen, which is what
+  // put a label at one edge and its number at the other.
+  assert.ok(dense.includes("fit ? 'w-auto min-w-max' : 'w-full min-w-max'"), 'DenseTable can hug its content')
+  assert.match(read('src/components/sales/reports/ReportTable.tsx'), /<DenseTable\s+fit\b/, 'the reports table asks for it')
+  // Padding is tokenised so a surface tunes density without forking the kit,
+  // and the 12px fallback keeps any other caller looking the way it did.
+  assert.ok(dense.includes('px-[var(--ui-cell-px,12px)]'), 'cell padding is a token with a back-compatible fallback')
+  assert.ok(!/\[&_tbody_td\]:px-3|\[&_thead_th\]:px-3/.test(dense), 'no hard-coded 12px cell padding is left')
+  // Compaction must never come out of line-height: that is what shears Khmer.
+  assert.ok(!/leading-\[1[0-4]px\]/.test(read('src/components/sales/reports/ReceiptSheet.tsx')), 'the receipt line box is not squeezed below 15px')
+})
+
+test('Khmer keeps a line box tall enough that truncating cells cannot shear it', () => {
+  const css = read(SURFACE_CSS)
+  // A Khmer cluster stacks a superscript sign above and a coeng subscript
+  // below the base, ~1.55-1.65em of ink. main.css's Aug-31 compaction pass
+  // pulled the km line-heights down to 1.38-1.52; a short line box inside an
+  // `overflow:hidden` box (Tailwind `.truncate`) clips the tops and tails.
+  // overflow-x cannot be clipped independently of overflow-y, so the only
+  // real fix is to give the line box its height back.
+  const kmBlocks = css.split('body.lang-km').slice(1).join('\n')
+  const heights = [...kmBlocks.matchAll(/line-height:\s*([0-9.]+)/g)].map((m) => Number(m[1]))
+  assert.ok(heights.length >= 3, 'the Khmer block sets line-height in more than one place')
+  for (const h of heights) assert.ok(h >= 1.6, `Khmer line-height ${h} is below the 1.6 clip threshold`)
+  // main.css's km `.text-xs` / `.text-sm` rules carry !important, so the
+  // surface override has to as well or it never lands.
+  assert.ok(/\.text-xs[\s\S]{0,80}line-height:[^;]+!important/.test(kmBlocks), 'the .text-xs override can actually win')
+  // A taller line box needs a taller row, or the row clips instead of the cell.
+  assert.match(kmBlocks, /--ui-row-h:\s*28px/, 'Khmer rows grow to fit the taller line box')
+  // The fold is portalled to document.body, i.e. OUTSIDE [data-reports-hub],
+  // so it needs its own hook or the menu keeps clipping.
+  assert.ok(css.includes('[data-reports-fold]'), 'the portalled fold is covered too')
+  assert.ok(read('src/components/sales/reports/ReportOptionsFold.tsx').includes('data-reports-fold'), 'the fold carries that hook')
+  // Scoped, not global: the app-wide fix is a separate board item.
+  assert.ok(!/^body\.lang-km\s*[,{]/m.test(kmBlocks.replace(/\[data-reports-(hub|fold)\]/g, 'X')), 'the Khmer fix stays scoped to this surface')
+})
+
+test('the receipt style puts the label and its value on a bounded line, and keeps Khmer out of the mono stack', () => {
+  const sheet = read('src/components/sales/reports/ReceiptSheet.tsx')
+  // A full-bleed tape flung the label to the far left and the number to the
+  // far right; the cap is what makes them "much closer" on a wide phone.
+  assert.ok(sheet.includes('max-w-[26rem]'), 'the one-tape layout is width-capped')
+  assert.ok(sheet.includes('md:max-w-none'), 'the cap is lifted where the grid already bounds each card')
+  // `font-mono` on the container put Khmer labels into a stack with no Khmer
+  // coverage, so they fell back per glyph at a different metric inside a
+  // truncate box. Mono belongs on the numbers only.
+  assert.ok(!/'font-mono text-/.test(sheet), 'font-mono is off the container')
+  assert.ok(sheet.includes('shrink-0 text-right font-mono'), 'font-mono rides the value span')
 })
 
 test('no view assigns a cost/profit key itself -- profit is shown only when the server sent it', () => {
