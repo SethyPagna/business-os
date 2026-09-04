@@ -24,10 +24,8 @@ import {
   buildAllocationStatements,
   guardSaleLineAddition,
   planSaleLineAddition,
-  recomputeSaleMoneyAfterLineChange,
   saleMoneyUpdateStatement,
   saleStatusDeductsStock,
-  type SaleMoneyRow,
 } from '../lib/saleLineAddition'
 // S4-30: amending a recorded sale, as an append-only ledger. Same discipline
 // as S4-24b above -- every rule about who may amend, for how long, what moves
@@ -42,13 +40,21 @@ import {
   planLineQuantityDecrease,
   planLineQuantityIncrease,
   recomputeSaleMoneyAfterAmendment,
+  resolveAmendedTaxUsd,
   resolveAmendmentWindowMinutes,
+  resolveTaxSettings,
   saleAmendmentMovesStock,
   saleSkipsStock,
+  saleTaxUpdateStatement,
   summarizeAmendments,
+  taxableBaseUsd,
+  TAX_ENABLED_SETTING_KEY,
+  TAX_RATE_SETTING_KEY,
   type AmendableSaleRow,
+  type AmendedTaxResult,
   type LedgerRow,
   type LineAllocation,
+  type TaxSettings,
 } from '../lib/saleAmendments'
 import { isAdminControlUser } from '../lib/permissions'
 import { recordSaleAddItemsUndoSnapshot } from '../lib/undoAppliers'
@@ -1695,18 +1701,29 @@ app.post('/:id/items', async (c) => {
 
   // ---- Totals (decision 3). Subtotal is re-summed from the sale's OWN
   // lines rather than added onto the stored column, so a row whose stored
-  // subtotal had drifted is corrected instead of carrying the drift; every
-  // other money field is frozen. See lib/saleLineAddition.ts. ----
+  // subtotal had drifted is corrected instead of carrying the drift. Both
+  // discounts and the tender stay frozen; TAX follows the lines when the sale
+  // was taxed at the rate `settings.tax_rate` holds today (S4-30 DECISION 4a).
+  // See lib/saleLineAddition.ts and lib/saleAmendments.ts. ----
   const existingSubtotalRow = await db
     .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
     .get<{ subtotal: number }>([saleId])
-  const changeRateRow = await db.prepare(
-    `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
-  ).get<{ value: string }>()
-  const money = recomputeSaleMoneyAfterLineChange({
-    sale: sale as SaleMoneyRow,
-    subtotalUsd: (Number(existingSubtotalRow?.subtotal) || 0) + plan.addedSubtotalUsd,
-    changeExchangeRate: changeRateRow?.value,
+  const moneySettings = await readAmendmentMoneySettings(db)
+  const subtotalBeforeUsd = Number(existingSubtotalRow?.subtotal) || 0
+  const subtotalAfterUsd = subtotalBeforeUsd + plan.addedSubtotalUsd
+  const taxPlan = planAmendedTax({
+    saleId,
+    sale: sale as AmendableSaleRow,
+    settings: moneySettings.tax,
+    subtotalBeforeUsd,
+    subtotalAfterUsd,
+    exchangeRate: Number(sale.exchange_rate) || 4100,
+  })
+  const money = recomputeSaleMoneyAfterAmendment({
+    sale: sale as AmendableSaleRow,
+    subtotalUsd: subtotalAfterUsd,
+    taxUsdOverride: taxPlan.taxUsdOverride,
+    changeExchangeRate: moneySettings.changeExchangeRate,
   })
   const moneyBefore = {
     subtotal_usd: Number(sale.subtotal_usd) || 0,
@@ -1776,6 +1793,7 @@ app.post('/:id/items', async (c) => {
     batchResults = await db.batch([
       ...plan.statements,
       saleMoneyUpdateStatement(saleId, moneyAfter),
+      ...taxPlan.statements,
       ...ledgerStatements,
     ]) as typeof batchResults
   } catch (error) {
@@ -2010,7 +2028,7 @@ app.post('/:id/amendments', async (c) => {
   const movesStock = saleAmendmentMovesStock(sale)
   const stockSkipped = saleSkipsStock(sale)
   const note = String(body.notes || '').trim().slice(0, 500) || null
-  const changeRateRow = await db.prepare(`SELECT value FROM settings WHERE key = 'change_exchange_rate'`).get<{ value: string }>()
+  const moneySettings = await readAmendmentMoneySettings(db)
   const subtotalRow = await db
     .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
     .get<{ subtotal: number }>([saleId])
@@ -2031,15 +2049,25 @@ app.post('/:id/amendments', async (c) => {
     if (feePlan.feeDeltaUsd === 0) {
       return c.json({ error: 'That is already the delivery fee on this sale.' }, 400)
     }
+    // A fee correction changes no line, so the taxable base is unchanged and
+    // planAmendedTax emits no write -- but it is still asked, so the response
+    // can say whether tax followed or was kept, in the same words every other
+    // amendment kind uses.
+    const feeTaxPlan = planAmendedTax({
+      saleId, sale, settings: moneySettings.tax,
+      subtotalBeforeUsd, subtotalAfterUsd: subtotalBeforeUsd, exchangeRate,
+    })
     const money = recomputeSaleMoneyAfterAmendment({
       sale,
       subtotalUsd: subtotalBeforeUsd,
       deliveryFeeUsdOverride: feePlan.feeAfterUsd,
-      changeExchangeRate: changeRateRow?.value,
+      taxUsdOverride: feeTaxPlan.taxUsdOverride,
+      changeExchangeRate: moneySettings.changeExchangeRate,
     })
     try {
       await db.batch([
         ...feePlan.statements,
+        ...feeTaxPlan.statements,
         saleMoneyUpdateStatement(saleId, {
           subtotal_usd: money.subtotalUsd,
           subtotal_khr: money.subtotalKhr,
@@ -2067,7 +2095,7 @@ app.post('/:id/amendments', async (c) => {
       kind, fee_before: feePlan.feeBeforeUsd, fee_after: feePlan.feeAfterUsd,
       total_before: totalBeforeUsd, total_after: money.totalUsd, outside_window: guard.outsideWindow, notes: note,
     })
-    return amendmentResponse(c, db, { saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped })
+    return amendmentResponse(c, db, { saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome })
   }
 
   // ---- Every other kind acts on ONE existing line. ----
@@ -2218,14 +2246,22 @@ app.post('/:id/amendments', async (c) => {
 
   // ---- Money. Subtotal is the sale's OWN lines re-summed and moved by this
   // amendment's delta, never the stored column carried forward, so a row whose
-  // subtotal had drifted is corrected. Everything else -- tax, both discounts,
-  // the tender -- is FROZEN by S4-24b's recompute, which is CALLED here rather
-  // than re-implemented, so an amendment cannot round differently from a
-  // checkout. ----
+  // subtotal had drifted is corrected. Both discounts and the tender stay
+  // FROZEN by S4-24b's recompute, which is CALLED here rather than
+  // re-implemented, so an amendment cannot round differently from a checkout.
+  // TAX follows the new base when this sale was taxed at today's configured
+  // rate, and is kept verbatim with a stated reason when it was not
+  // (DECISION 4a in lib/saleAmendments.ts). ----
+  const subtotalAfterUsd = round2(subtotalBeforeUsd + subtotalDeltaUsd)
+  const taxPlan = planAmendedTax({
+    saleId, sale, settings: moneySettings.tax,
+    subtotalBeforeUsd, subtotalAfterUsd, exchangeRate,
+  })
   const money = recomputeSaleMoneyAfterAmendment({
     sale,
-    subtotalUsd: round2(subtotalBeforeUsd + subtotalDeltaUsd),
-    changeExchangeRate: changeRateRow?.value,
+    subtotalUsd: subtotalAfterUsd,
+    taxUsdOverride: taxPlan.taxUsdOverride,
+    changeExchangeRate: moneySettings.changeExchangeRate,
   })
 
   // Every ledger entry in this act ends at the sale's real new total; the
@@ -2247,6 +2283,7 @@ app.post('/:id/amendments', async (c) => {
         change_usd: money.changeUsd,
         change_khr: money.changeKhr,
       }),
+      ...taxPlan.statements,
       ...ledgerEntries.map(amendmentEntryStatement),
     ])
   } catch (error) {
@@ -2268,16 +2305,78 @@ app.post('/:id/amendments', async (c) => {
     subtotal_after: money.subtotalUsd,
     total_before: totalBeforeUsd,
     total_after: money.totalUsd,
+    tax_after: taxPlan.outcome.taxUsd,
+    tax_recomputed: taxPlan.outcome.recomputed,
+    tax_reason: taxPlan.outcome.reason,
     outside_window: guard.outsideWindow,
     notes: note,
   })
 
-  return amendmentResponse(c, db, { saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped })
+  return amendmentResponse(c, db, { saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome })
 })
 
 type StatementList = Array<{ sql: string; params: Record<string, unknown> }>
 
 type AmendmentContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
+/**
+ * The three settings every amendment's money depends on, read in ONE query.
+ *
+ * `change_exchange_rate` is Part 534's; `tax_enabled` + `tax_rate` are the
+ * owner's tax switch (2026-09-04). Reading them together means a single path
+ * decides tax for additions, line changes and fee corrections alike -- three
+ * separate reads is how the three paths later disagree about whether tax moved.
+ */
+async function readAmendmentMoneySettings(db: ReturnType<typeof getDb>): Promise<{
+  changeExchangeRate: string | undefined
+  tax: TaxSettings
+}> {
+  // Bound, not interpolated. These three are module constants today, but a key
+  // name spliced into SQL is a shape that stops being safe the moment someone
+  // makes one configurable, and this file should not be the place that teaches
+  // that habit.
+  const rows = await db.prepare(
+    'SELECT key, value FROM settings WHERE key IN (?, ?, ?)',
+  ).all<{ key: string; value: string }>(['change_exchange_rate', TAX_ENABLED_SETTING_KEY, TAX_RATE_SETTING_KEY])
+  const map = Object.fromEntries(rows.map((row) => [row.key, row.value]))
+  return {
+    changeExchangeRate: map.change_exchange_rate,
+    tax: resolveTaxSettings(map[TAX_ENABLED_SETTING_KEY], map[TAX_RATE_SETTING_KEY]),
+  }
+}
+
+/**
+ * Tax for one amendment: the outcome to report, the override the totals need,
+ * and the statement (if any) that writes it back.
+ *
+ * The write is emitted ONLY when the amount actually moves, so a delivery-fee
+ * correction -- which changes no line and therefore no taxable base -- does not
+ * rewrite `tax_usd` with the value it already holds. Every non-recomputing case
+ * still reports its reason, because "your tax line did not move, and here is
+ * why" is information a shop needs at closing rather than a silence.
+ */
+function planAmendedTax(input: {
+  saleId: number
+  sale: AmendableSaleRow
+  settings: TaxSettings
+  subtotalBeforeUsd: number
+  subtotalAfterUsd: number
+  exchangeRate: number
+}): { outcome: AmendedTaxResult; taxUsdOverride: number | null; statements: StatementList } {
+  const outcome = resolveAmendedTaxUsd({
+    sale: input.sale,
+    taxableBaseBeforeUsd: taxableBaseUsd(input.sale, input.subtotalBeforeUsd),
+    taxableBaseAfterUsd: taxableBaseUsd(input.sale, input.subtotalAfterUsd),
+    settings: input.settings,
+  })
+  const storedTax = round2(Number(input.sale.tax_usd) || 0)
+  const moved = outcome.recomputed && Math.abs(outcome.taxUsd - storedTax) >= 0.005
+  return {
+    outcome,
+    taxUsdOverride: outcome.recomputed ? outcome.taxUsd : null,
+    statements: moved ? [saleTaxUpdateStatement(input.saleId, outcome.taxUsd, input.exchangeRate)] : [],
+  }
+}
 
 /**
  * One audit row per amendment, on top of the ledger entry.
@@ -2318,14 +2417,15 @@ async function amendmentResponse(
     stockMoved: boolean
     unitsMoved: number
     stockSkipped: boolean
+    tax: AmendedTaxResult
   },
 ) {
   const updated = await db.prepare('SELECT updated_at FROM sales WHERE id = ?').get<{ updated_at: string }>([input.saleId])
   return c.json({
     id: input.saleId,
     // DECISION 6: an amended sale keeps its ORIGINAL receipt number, and a
-    // reprint is a reprint. See lib/saleAmendments.ts for the reasoning and
-    // for the open question this leaves with the shop owner.
+    // reprint is a reprint -- settled by the owner on 2026-09-04. One sale,
+    // one number, so no revenue report can count it twice.
     receiptNumber: input.sale.receipt_number ?? null,
     subtotalUsd: input.money.subtotalUsd,
     totalUsd: input.money.totalUsd,
@@ -2334,10 +2434,17 @@ async function amendmentResponse(
     stockMoved: input.stockMoved,
     unitsMoved: input.unitsMoved,
     stockSkipped: input.stockSkipped,
-    // Surfaced rather than silently frozen: the client says so on the screen,
-    // because a shop that charges tax and sees the total move without the tax
-    // moving deserves to be told why rather than to discover it at closing.
-    taxFrozen: true,
+    // Tax, reported rather than left to be inferred. `taxRecomputed: false`
+    // with a reason is the interesting case: a shop that sees its total move
+    // while the tax line stands still deserves to be told why on the screen,
+    // not to discover it at closing. Reasons are in lib/saleAmendments.ts's
+    // DECISION 4a; 'no_tax_on_sale' simply means this sale never had tax, so
+    // there is no tax row to show at all.
+    taxUsd: input.tax.taxUsd,
+    taxRecomputed: input.tax.recomputed,
+    taxReason: input.tax.reason,
+    // Both discounts genuinely are frozen: absolute amounts with no stored
+    // rate, and changing one is a money decision rather than a correction.
     discountFrozen: true,
     updated_at: updated?.updated_at || null,
   })

@@ -46,13 +46,17 @@
 //
 // 4. MONEY -- subtotal is re-summed from the sale's own lines and the totals
 //    run through S4-24b's recomputeSaleMoneyAfterLineChange(), called, not
-//    re-implemented. Tax and both discounts stay FROZEN for the reason that
-//    module documents: `sales.tax_usd` is an absolute amount and no tax RATE
-//    is stored anywhere in this schema, so an amendment cannot recompute tax
-//    without inventing a rate nobody agreed to. The delivery fee is the one
-//    non-line money field that IS amendable, because it is the field the owner
-//    named and it is per-trip rather than per-item, so it does not scale with
-//    a line -- it is simply set to the corrected number.
+//    re-implemented. Both DISCOUNTS stay frozen: they are absolute amounts
+//    with no stored rate, and a discount is a deliberate money decision rather
+//    than an arithmetic consequence of the lines. TAX is recomputed from
+//    `settings.tax_enabled` + `settings.tax_rate` -- the owner ruled on
+//    2026-09-04 that tax is a settings switch -- but only when the sale was
+//    demonstrably taxed at today's rate; see DECISION 4a above
+//    resolveAmendedTaxUsd() for the four cases that keep the stored amount
+//    instead, and why each is a refusal rather than a guess. The delivery fee
+//    is the one non-line money field that is set outright, because it is the
+//    field the owner named and it is per-trip rather than per-item, so it does
+//    not scale with a line.
 //
 // 5. UNDO -- a compensating APPEND, never a rewrite. See the block above
 //    planCompensatingEntry().
@@ -104,12 +108,14 @@ export type { StockStatement }
 //
 // DECLINED, named rather than left silent:
 //
-//   tax                 No rate is stored anywhere in this schema
-//                       (`sales.tax_usd` is absolute). This is an inherited
-//                       open question, not re-litigated here: tax is frozen
-//                       and the API says so in its response rather than
-//                       inventing a rate.
-//   discount /          Also absolute amounts with no stored rate. Changing
+//   tax                 Not amendable DIRECTLY -- there is no "set the tax to
+//                       $X" amendment, because tax is not a number staff type.
+//                       It FOLLOWS the lines: when the sale was taxed at the
+//                       rate `settings.tax_rate` holds today, every amendment
+//                       recomputes it on the new post-discount base, and the
+//                       ledger records the change as part of the amendment that
+//                       caused it. DECISION 4a is the whole rule.
+//   discount /          Absolute amounts with no stored rate. Changing
 //   membership discount one is a deliberate money decision about a specific
 //                       sale, not a correction of a data-entry slip, and it
 //                       belongs on its own surface with its own permission.
@@ -707,6 +713,132 @@ export function planDeliveryFeeChange(input: {
 }
 
 // ---------------------------------------------------------------------------
+// DECISION 4a: TAX on an amended sale.
+//
+// The owner ruled (2026-09-04): "tax can turn on off in settings which will
+// show based on that, if off, doesn't show." So tax is a SETTING, not a value
+// frozen at sale time -- which overturns this lane's original inherited answer
+// (S4-24b froze `sales.tax_usd` because no rate was stored anywhere).
+//
+// A rate WAS already stored: `settings.tax_rate`, a percentage that
+// POS.tsx:1043 reads as `parseFloat(settings.tax_rate)/100` and applies to the
+// post-discount subtotal. This module reads the same two keys and applies the
+// same base, so an amended sale is taxed exactly as the till would have taxed
+// it. `settings.tax_enabled` is the owner's on/off; when the key is ABSENT it
+// falls back to "on iff the rate is positive", which is precisely today's
+// behaviour, so no existing install changes until the owner touches the switch.
+//
+// The four cases that do NOT recompute, and why each one is a refusal rather
+// than a guess:
+//
+//   storedTax <= 0    The sale was rung up without tax. Turning the setting on
+//                     later must not retroactively add tax to a receipt the
+//                     customer already holds. Nothing was charged; nothing is
+//                     charged; the row stays absent, which is the owner's
+//                     "if off, doesn't show".
+//   !enabled          Off means "stop charging it", NOT "erase what was
+//                     charged". Zeroing a historical tax amount would make that
+//                     receipt's own arithmetic wrong (subtotal + delivery would
+//                     no longer reach the recorded total) and would quietly
+//                     restate collected tax in every report. Kept, and reported
+//                     as not recomputed.
+//   rate <= 0         Same shape: no usable rate, so there is nothing to
+//                     recompute WITH.
+//   rate mismatch     The stored amount is not what today's rate would have
+//                     produced on the pre-amendment base -- a migrated sale, or
+//                     the rate changed since. Solving for the sale's own rate
+//                     is exactly the "retro-derive a rate" that was ruled out,
+//                     so the amount is kept verbatim and the caller is told.
+//
+// Every non-recomputing case returns `recomputed: false` with a machine-
+// readable reason, so the route can surface "tax was not recalculated" on the
+// screen instead of leaving staff to notice a stale line themselves.
+// ---------------------------------------------------------------------------
+export const TAX_ENABLED_SETTING_KEY = 'tax_enabled'
+export const TAX_RATE_SETTING_KEY = 'tax_rate'
+
+export type TaxSettings = { enabled: boolean; rate: number }
+
+/**
+ * `rawEnabled` and `rawRate` are the raw `settings.value` strings (or
+ * undefined when the row does not exist).
+ *
+ * The rate is a PERCENT in storage ("10" means 10%), matching what the
+ * Settings screen collects and what POS divides by 100.
+ */
+export function resolveTaxSettings(rawEnabled: unknown, rawRate: unknown): TaxSettings {
+  const percent = Number(String(rawRate ?? '').trim())
+  const rate = Number.isFinite(percent) && percent > 0 ? percent / 100 : 0
+  const enabledText = String(rawEnabled ?? '').trim().toLowerCase()
+  // Absent key => infer from the rate, so nothing changes for an install that
+  // has never seen this switch. Present key => the owner's explicit answer.
+  const enabled = enabledText === ''
+    ? rate > 0
+    : !(enabledText === '0' || enabledText === 'false' || enabledText === 'off' || enabledText === 'no')
+  return { enabled, rate }
+}
+
+/** The base tax is charged on: subtotal less both discounts, floored at 0. */
+export function taxableBaseUsd(sale: AmendableSaleRow, subtotalUsd: number): number {
+  const base = (Number(subtotalUsd) || 0)
+    - (Number(sale.discount_usd) || 0)
+    - (Number(sale.membership_discount_usd) || 0)
+  return round2(Math.max(0, base))
+}
+
+export type AmendedTaxResult = {
+  taxUsd: number
+  recomputed: boolean
+  reason: 'recomputed' | 'no_tax_on_sale' | 'tax_disabled' | 'no_rate' | 'rate_mismatch'
+}
+
+export function resolveAmendedTaxUsd(input: {
+  sale: AmendableSaleRow
+  /** The taxable base BEFORE the amendment (from the sale's stored subtotal). */
+  taxableBaseBeforeUsd: number
+  /** The taxable base AFTER it (from the re-summed sale_items). */
+  taxableBaseAfterUsd: number
+  settings: TaxSettings
+}): AmendedTaxResult {
+  const storedTax = round2(Number(input.sale.tax_usd) || 0)
+  if (storedTax <= 0) return { taxUsd: 0, recomputed: false, reason: 'no_tax_on_sale' }
+  if (!input.settings.enabled) return { taxUsd: storedTax, recomputed: false, reason: 'tax_disabled' }
+  const rate = Number(input.settings.rate) || 0
+  if (rate <= 0) return { taxUsd: storedTax, recomputed: false, reason: 'no_rate' }
+  const expected = round2((Number(input.taxableBaseBeforeUsd) || 0) * rate)
+  // One cent of tolerance: the stored amount went through the same round2 the
+  // till used, so anything further out is a different rate, not float drift.
+  //
+  // The DIFFERENCE is rounded before it is compared. Both operands are already
+  // 2-decimal money, but their subtraction is not: |1.00 - 1.01| evaluates to
+  // 0.010000000000000009 in binary floating point, which is greater than 0.01,
+  // and a one-cent gap would have been rejected as a different rate.
+  if (round2(Math.abs(expected - storedTax)) > 0.01) {
+    return { taxUsd: storedTax, recomputed: false, reason: 'rate_mismatch' }
+  }
+  return { taxUsd: round2((Number(input.taxableBaseAfterUsd) || 0) * rate), recomputed: true, reason: 'recomputed' }
+}
+
+/**
+ * The ONE statement that writes a recomputed tax back. Deliberately separate
+ * from S4-24b's saleMoneyUpdateStatement, which does not touch tax_usd: that
+ * function is shared with paths that must keep freezing it, and widening it
+ * would change their behaviour silently. The caller appends this only when
+ * resolveAmendedTaxUsd said `recomputed`.
+ */
+export function saleTaxUpdateStatement(saleId: number | string, taxUsd: number, exchangeRate: number): StockStatement {
+  const usd = round2(Math.max(0, Number(taxUsd) || 0))
+  return {
+    sql: `UPDATE sales SET tax_usd = @tax_usd, tax_khr = @tax_khr, updated_at = CURRENT_TIMESTAMP WHERE id = @sale_id`,
+    params: {
+      sale_id: saleId,
+      tax_usd: usd,
+      tax_khr: Math.round(usd * (Number(exchangeRate) || 4100)),
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // DECISION 4: totals after any amendment.
 //
 // Subtotal is RE-SUMMED from the sale's own lines (the caller passes
@@ -716,19 +848,26 @@ export function planDeliveryFeeChange(input: {
 // S4-24b's recomputeSaleMoneyAfterLineChange: CALLED, not re-implemented, so
 // an amendment can never round differently from an addition or a checkout.
 //
-// The delivery-fee override is passed as a shallow copy rather than by
-// mutating the sale row, so nothing downstream sees a half-updated object.
+// The delivery-fee and tax overrides are passed as a shallow copy rather than
+// by mutating the sale row, so nothing downstream sees a half-updated object.
 // ---------------------------------------------------------------------------
 export function recomputeSaleMoneyAfterAmendment(input: {
   sale: AmendableSaleRow
   subtotalUsd: number
   /** Set only by a delivery_fee_changed amendment; otherwise the stored fee. */
   deliveryFeeUsdOverride?: number | null
+  /** Set when resolveAmendedTaxUsd recomputed; otherwise the stored amount. */
+  taxUsdOverride?: number | null
   changeExchangeRate?: unknown
 }) {
-  const sale = input.deliveryFeeUsdOverride === null || input.deliveryFeeUsdOverride === undefined
-    ? input.sale
-    : { ...input.sale, delivery_fee_usd: input.deliveryFeeUsdOverride }
+  const overrides: Partial<AmendableSaleRow> = {}
+  if (input.deliveryFeeUsdOverride !== null && input.deliveryFeeUsdOverride !== undefined) {
+    overrides.delivery_fee_usd = input.deliveryFeeUsdOverride
+  }
+  if (input.taxUsdOverride !== null && input.taxUsdOverride !== undefined) {
+    overrides.tax_usd = input.taxUsdOverride
+  }
+  const sale = Object.keys(overrides).length === 0 ? input.sale : { ...input.sale, ...overrides }
   return recomputeSaleMoneyAfterLineChange({
     sale,
     subtotalUsd: input.subtotalUsd,
@@ -739,13 +878,13 @@ export function recomputeSaleMoneyAfterAmendment(input: {
 // ---------------------------------------------------------------------------
 // DECISION 6: the receipt number of an amended sale.
 //
-// It KEEPS its original number, and a reprint is a reprint.
+// It KEEPS its original number, and a reprint is a reprint. SETTLED by the
+// owner on 2026-09-04: the same number is reprinted showing the new totals.
 //
-// The owner's words were genuinely ambiguous -- "receipt treats as one receipt
+// The original wording was ambiguous -- "receipt treats as one receipt
 // finalized total without customer realize it is changed... but new receipt" --
-// which reads either as "print a fresh copy of the same receipt" or as "issue a
-// new receipt number". This lane builds the first because it is the safer of
-// the two and the other one is recoverable:
+// so it was put back to the owner, who chose one sale, one number. The reasons
+// it was also the safer default:
 //
 //   * receipt numbers carry a business format from migration 0107 and are the
 //     shop's own external reference; a second number for one sale means two
@@ -754,9 +893,8 @@ export function recomputeSaleMoneyAfterAmendment(input: {
 //     number would either need a second row (double-counted revenue) or would
 //     be a number with no row behind it.
 //
-// Flagged for the owner rather than decided quietly. Switching to the other
-// reading is a small change -- a new column on `sales` and a bump here -- not a
-// rewrite, because nothing downstream assumes the number is immutable.
+// This is now a fixed rule, not a default awaiting confirmation. Nothing in
+// this module or the routes it serves writes `receipt_number`.
 // ---------------------------------------------------------------------------
 export function amendedSaleKeepsReceiptNumber(): true {
   return true
