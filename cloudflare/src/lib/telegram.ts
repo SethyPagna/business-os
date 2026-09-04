@@ -6,7 +6,7 @@ import {
   parseReportDate, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import {
-  getDeliveryContactTotals, getItemDiscountUsd, getPaymentMethodBreakdown, getSalesTotals,
+  getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesTotals,
   shiftWindowWhere, type SalesFilters,
 } from './salesAnalytics'
 import type { Env } from '../index'
@@ -393,6 +393,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     // "Invoices / វិក្កយបត្រ: 12 receipt(s) / វិក្កយបត្រ" would print the same
     // Khmer word twice on one line. The breakdown bullets further down keep
     // the counted noun, because those lines carry no label.
+    '━━━━━━━━━━━━━━━━━━',
     labeled('invoices', figures.invoices),
     labeled('cancelled', figures.cancelled),
     labeled('edited', figures.edited),
@@ -428,6 +429,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   }
 
   lines.push(
+    '━━━━━━━━━━━━━━━━━━',
     labeled('otherExpense', money(figures.otherExpenseUsd, figures.otherExpenseKhr)),
     labeled('registeredCash', money(shift.opening_float_usd, shift.opening_float_khr)),
   )
@@ -469,13 +471,13 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   }
 
   if (figures.paymentMethods.length) {
-    lines.push('', `${label('paymentMethod')}:`)
+    lines.push('', '━━━━━━━━━━━━━━━━━━', `${label('paymentMethod')}:`)
     for (const row of figures.paymentMethods) {
       lines.push(`• ${localizeTelegramValue(cleanLine(row.method, 40))} — ${counted(row.count, 'receipt(s)')} · ${usd(row.collectedUsd)}`)
     }
   }
   if (figures.deliveryServices.length) {
-    lines.push('', `${label('deliveryService')}:`)
+    lines.push('', '━━━━━━━━━━━━━━━━━━', `${label('deliveryService')}:`)
     for (const row of figures.deliveryServices) {
       // charged − cost = margin, spelled as arithmetic rather than as three
       // more labels: the bullet carries no label of its own, and the sum is
@@ -562,9 +564,8 @@ async function shiftExpenses(env: Env, shift: ShiftReportSession, nowMs: number)
 
 async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number): Promise<ShiftReportFigures> {
   const filters = shiftFilters(shift, nowMs)
-  const [totals, itemDiscountUsd, counts, expenses, paymentMethods, deliveries] = await Promise.all([
+  const [totals, counts, expenses, paymentMethods, deliveries] = await Promise.all([
     getSalesTotals(env, filters),
-    getItemDiscountUsd(env, filters),
     shiftInvoiceCounts(env, shift, nowMs),
     shiftExpenses(env, shift, nowMs),
     getPaymentMethodBreakdown(env, filters),
@@ -576,7 +577,7 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     edited: counts.edited,
     // Canonical revenue, straight off the kernel -- never re-derived here.
     revenueUsd: totals.revenue_usd,
-    itemDiscountUsd,
+    itemDiscountUsd: totals.item_discount_usd,
     // The kernel's `discount_usd` is store + membership: both are taken off
     // the whole invoice rather than off a line, which is what makes them the
     // invoice discount. The two halves ride along beside the sum -- the
@@ -587,7 +588,7 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     // Pre-discount value of what left the shelf. `gross_sales_usd` is the sum
     // of subtotals, which are already net of the LINE discounts, so the item
     // discount is added back to reach the price the goods were listed at.
-    grossSaleUsd: Math.round((totals.gross_sales_usd + itemDiscountUsd) * 100) / 100,
+    grossSaleUsd: Math.round((totals.gross_sales_usd + totals.item_discount_usd) * 100) / 100,
     taxUsd: totals.tax_usd,
     // Customer refunds over the window, on the same net basis as revenue (they
     // are already subtracted from it). Attribution follows the kernel: a refund
@@ -605,7 +606,8 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     deliveryCostUsd: totals.delivery_actual_cost_usd,
     deliveryMarginUsd: totals.delivery_margin_usd,
     deliveryCostRecorded: totals.delivery_actual_cost_count,
-    // Unpaid credit, on the same net basis. Not revenue, and not in the till.
+    // Not Paid, on the same net basis. Included in business revenue/profit,
+    // but never in collected cash.
     creditUsd: totals.pending_revenue_usd,
     otherExpenseUsd: expenses.usd,
     otherExpenseKhr: expenses.khr,

@@ -152,6 +152,8 @@ export const BACKUP_TABLES = [
   'promotions',
   'promotion_rules',
   'ai_provider_configs',
+  'shift_sessions',
+  'shift_session_amendments',
   'sales',
   'sale_items',
   'sale_item_batch_allocations',

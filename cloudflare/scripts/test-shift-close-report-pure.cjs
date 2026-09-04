@@ -92,7 +92,7 @@ function d1(db) {
           const info = db.prepare(q.sql).run(...q.values)
           // D1 reports row counts under meta.changes, and routes/shifts.ts
           // reads exactly that to decide whether the close won the race.
-          return { meta: { changes: info.changes } }
+          return { changes: info.changes, meta: { changes: info.changes } }
         },
       }
     },
@@ -101,6 +101,8 @@ function d1(db) {
 
 const sqlite = new Database(':memory:')
 sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
+sqlite.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)')
+sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
 
 // ---- the route, with only auth/audit/telegram replaced ---------------------
 // businessDateWindow is passed through as the REAL module: the business-day
@@ -114,6 +116,7 @@ const shiftsRoute = loadReal('routes/shifts.ts', {
   '../lib/auth': {
     requireAuth: async (c, next) => { c.set('user', { id: 7, name: 'Za', username: 'za' }); await next() },
   },
+  '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false },
   '../lib/audit': { audit: async () => {} },
   '../lib/telegram': {
     // The spy stands where the real sender does. It records and returns; it
@@ -208,10 +211,13 @@ async function main() {
   // not from a missing table -- the sender here throws if it is ever reached.
   const empty = new Database(':memory:')
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
+  empty.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)')
+  empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
   const stranger = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': businessDateWindow,
     '../lib/db': { getDb: () => d1(empty) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 9, name: 'Nobody' }); await next() } },
+    '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false },
     '../lib/audit': { audit: async () => {} },
     '../lib/telegram': { sendTelegramShiftReport: async () => { throw new Error('a shift that does not exist must not be reported') } },
   })
