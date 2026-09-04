@@ -18550,3 +18550,109 @@ work living only in a worktree is one `git worktree remove` from gone. Both push
 Board: `49c59659` (S4-1 verdict), `7d640e96` (S4-19 findings, S4-19b, S4-2 reclaimed). No production
 write has been made, and none is authorised.
 
+
+## Part 594 — nine lanes unioned, a task that was already shipped, and a certification whose header lied
+
+`business-os-v1-c3`, Sep 4. Three things happened worth writing down: a merge that had to be
+resolved by counting rather than by eye, a board item that turned out to have shipped months ago,
+and a background verification run that reported the wrong commit.
+
+### The nine-lane reconcile
+
+`rc/s4-2026-09-04` took its eighth and ninth lanes. `s4/sale-add-items` (`859c8e57`, S4-24b) merged
+clean. `s4/create-products-header` (`19555765`, S4-12) conflicted on **all three** of the files this
+project has previously lost work in — `frontend/package.json` and both language packs — which is
+exactly the set the deploy-provenance skill names as unions rather than choices.
+
+Both merges were probed with `git merge-tree --write-tree`, chained through `git commit-tree` so the
+second probe ran against the result of the first, **before** either touched the worktree. The
+conflict was therefore known in advance rather than discovered halfway through a merge.
+
+The resolution and its proof:
+
+| File | base | ours | theirs | union |
+|---|---|---|---|---|
+| `test:utils` chain | 177 | 179 | 178 | **180** |
+| `en.json` / `km.json` | 4,542 | 4,674 | 4,559 | **4,691** |
+
++132 keys from ours, +17 from theirs, **zero lost from either side**, zero two-sided value clashes.
+Then, against the merged tree: `verify:i18n` 4,691 keys / 483 source files with every referenced key
+resolving in both packs; the chain-coverage guard green at 181 files; and the Khmer pack re-parsed —
+**4,645 values carrying Khmer script, zero replacement characters**.
+
+That last check is not ceremony. The resolver rewrites both packs through `JSON.stringify`, so a bad
+encoding round-trip would corrupt every Khmer string simultaneously **while leaving key parity
+perfect** — `verify:i18n` would pass, the build would pass, and the shop floor would get mojibake.
+The check that would catch it has to look at the values.
+
+### The union resolver now refuses to re-admit a retired key
+
+A naive three-way union resurrects any key a lane deliberately deleted, because "absent on one side"
+is indistinguishable from "never added" unless you diff against base in **both** directions. The
+resolver now computes retirements explicitly, keeps them out, and reports genuine two-sided value
+clashes instead of quietly letting insertion order decide. Both were zero this time; the check is
+what makes that a fact rather than an assumption.
+
+### S4-11a had already shipped
+
+S4-11a — "show who made the sale" — sat on the board as a frontend change, sized, assigned, and
+blocked behind another lane's lock on `SaleDetailModal.tsx` for hours. It needed no code:
+
+```
+git show e3678a39:frontend/src/components/sales/SaleDetailModal.tsx
+  375:  <DetailRow label={t('cashier') || 'Cashier'} value={sale.cashier_name} />
+```
+
+Live since `cb65fec1`, the first row of the "Sale" card, with the `cashier` key resolving in both
+packs so the English fallback never fires, and `SELECT * FROM sales` on the read path so the column
+arrives without a query change.
+
+The reasonable next worry was that the field renders but is blank on legacy invoices — which would
+have justified building something. One query settled it:
+
+```sql
+-- remote D1, SELECT-only
+SELECT COUNT(*) total,
+       SUM(CASE WHEN cashier_name IS NULL OR cashier_name='' THEN 1 ELSE 0 END) no_name
+  FROM sales;   -- total 15007 | no_name 4
+```
+
+**4 of 15,007, or 0.03%.** Migration `0099_legacy_cashier_identity_backfill` did what it claimed.
+
+What was missing when this was boarded was one `git show` against the **deployed tip**. Reading the
+user's ask, and even reading the current worktree, are both different from reading what is live.
+
+S4-11b remains the whole of the real ask, re-confirmed on the nine-lane reconcile: `grep -n
+action_history cloudflare/src/routes/sales.ts` returns **nothing**. Sale creation attributes a
+cashier; every later transition through `PATCH /:id/status` attributes nobody, and
+`inventory_movements.user_id` only catches transitions that cross the stock-deducting boundary — so
+a move between two statuses that both deduct, or both do not, records no one at all.
+
+### The certification whose header lied
+
+A background certification launched against `35d13f7e` (seven lanes) reported, in its later phases,
+**4,691 pack keys and 181 frontend tests**. Those are the *nine*-lane numbers. The run reads the
+shared reconcile worktree live at each step, so the two merges landed underneath it mid-sweep: its
+header named one commit and its frontend phase certified a different tree.
+
+It happened to come out green, and its numbers match the post-merge measurements exactly. That is
+luck, not method. **A certification that reads a worktree someone is still merging into is not
+certifying the commit in its header** — the same shape as the deploy-provenance failure, where a
+green check described a tree other than the one that shipped. Certify a static tree, or re-run.
+
+### Also closed: the 178th test file that was never missing
+
+The deployed tip has 178 test files on disk but only 177 chain entries, and
+`paginationSurfaceContract.test.ts` is the odd one out. It is **not** an orphan:
+`paginationRangeControl.test.ts:15` does `import './paginationSurfaceContract.test.ts'`, Node runs
+an imported module before its parent, and `testChainCoverage.test.ts` deliberately counts that as
+reachable — which is why the guard passes at 181 while the chain lists 180. The file runs in CI and
+is green. **Do not "fix" this by appending it to the chain**; it would then run twice per sweep.
+
+### Open for the shop owner, not for an engineer
+
+`sales.tax_usd` is an absolute amount and **no tax rate is stored anywhere in this schema**. Adding a
+line to an existing sale therefore raises the total but not the tax. For a shop that charges VAT
+that is wrong, but the fix is a stored rate on the sale or in settings — a schema *and* pricing
+policy decision. Surfaced rather than guessed.
+
