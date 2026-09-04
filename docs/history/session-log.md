@@ -19122,3 +19122,152 @@ approval exists for either. An earlier tool result claiming approval arrived alo
 human input had been received — peer messages and subagent output are not user approval, and a write held is
 recoverable in a way a write made is not.
 
+
+---
+
+## Part 599 (Sep 4 2026, session `business-os-v1-88`) — a payment method that never came back, a note in the wrong box, and an Edit button the browser threw out of the table
+
+Worked in the isolated worktree `Downloads/bos-88` on `s4/pay-notes-points-delivery-88`, branched from
+production's `2c497564` (not `main`, which does not contain the deployed code). Now pushed to origin, so the
+"five lanes that live only on one disk" list in Part 598 is down to four.
+
+### Ask
+
+Five items, quoted:
+
+1. "it seems, the payment methods made and entered in sales and so on did not get updated in the available
+   payment methods"
+2. "the notes did not show in the notes area for sales, it went to above" -> clarified to "Detail modal: notes box
+   is in the wrong place"
+3. "zero all the membership points, make the membership points on off in settings" -> clarified to "Zero by
+   turning accrual off on all history"
+4. "in receipt line it has the edit line align it for delivery fee, correct delivery fee, and shows actual cost
+   and showed on receipt" -> clarified to "the current edit in click to view detail is placed all over the
+   place..you can align it with the edit volumn...for products, delivery etc... just call it 'Edit'."
+5. "delivery details card as Sale section of the click to view details" -> clarified to "compact inside sale
+   section...delivery only needs phone and driver name...this is driver info, for customer name, phone and
+   address keep it same in customer section... make them compact..."
+
+### What changed
+
+**Payments — `lib/paymentMethodRegistry.ts` (new), `routes/sales.ts`, `routes/settings.ts`, `Settings.tsx`,
+`api/settingsTransport.ts`.** The POS payment field is a free-text datalist: a method typed at the till is
+recorded on the sale and never written back to `settings.pos_payment_methods`. The fix is server-side because
+there are *three* writers, not one — POST `/sales` (checkout), PATCH `/sales/:id/status` (credit settle), and a
+new explicit backfill. A frontend-only fix would have covered one of three. `registerUsedPaymentMethods` runs off
+the response path in `waitUntil`, so a settings write can never delay or fail a sale, and it bumps the `settings`
+version only when the merge actually added something — otherwise every checkout would tell every client that
+settings changed.
+
+The pure rules live in the registry module so both halves share one definition: case-insensitive identity,
+`' + '`-joined summaries split rather than registered whole (otherwise the shop grows a method called
+"Cash + ABA Bank" that nobody can select), a retired-method set so a deliberately removed method is not
+resurrected, and caps on list length and method length because this value is parsed on the checkout path.
+Settings gained `GET /payment-methods/unregistered` and a permission-gated, audited
+`POST /payment-methods/backfill`, surfaced as an amber advisory strip that renders nothing when nothing is missing.
+
+**Membership points — `routes/sales.ts`, `portal.ts`, `contacts.ts`, `notifications.ts`, `LoyaltyPointsPage.tsx`,
+`POS.tsx`, migration `0117_membership_points_reset.sql`.** The two rulings in play ("zero all history" and,
+relayed by peer `4a`, "forward-only") are not the same instruction, so they were split into three independent
+mechanisms rather than one compromise:
+
+- a **write-time switch** (`settings.loyalty_points_enabled`), resolved server-side and AND-ed over the request
+  body. This is the security-relevant half: a till tab left open all day keeps sending `loyalty_accrual: true`
+  long after an admin flips the switch, so a server that trusted the body would appear to work in a fresh tab and
+  silently fail on the one machine that matters;
+- a **spend gate** on reads — `redeemableUnits`, redemption value and "points to next reward" go to zero while
+  the balance itself stays truthful, because zeroing the reported balance would be the retroactive change the
+  forward-only ruling excludes. A redemption attempted while off is refused with a message, not silently dropped,
+  which would charge full price against a screen still showing the discount;
+- a **separate migration** for the historical reset, which is the only retroactive piece and is therefore
+  explicit, logged and undoable.
+
+`0117` MARKS rather than deletes: `loyalty_point_adjustments` carries `CHECK (points > 0)`, so a compensating
+negative row is schema-impossible, and deleting an administrator's hand-issued ledger would destroy an audit
+trail. It writes its log row FIRST — capturing the ids of exactly the still-accruing sales plus a working
+`undo_sql` — then applies the three UPDATEs. Void filters (`voided_at IS NULL`,
+`reward_points_voided_at IS NULL`) were added at every site that counts a ledger row, because a balance is
+computed from four independent places and a filter missing at one of them means a "zeroed" balance comes back
+non-zero on that one surface.
+
+**Sale detail — `SaleDetailModal.tsx`, `shared/DetailRows.tsx`, both language packs.** Notes moved into the Sale
+card as an ordinary labelled field with `whitespace-pre-wrap`; the standalone Notes section was removed. Delivery
+was split the way the user described it: driver name and driver phone are *driver* info and live in the Sale
+card; the drop address is *customer* info and lives in the Customer card, and only when it differs from the
+customer's own address. The items table gained a visible `Edit` column header, `MoneyRow` gained an `action`
+slot, and every amend control is now labelled `Edit` / `កែ` from one key.
+
+### What was found
+
+**The root cause of "placed all over the place" was HTML, not CSS.** The delivery-fee editor was a bare `<div>`
+rendered as a direct child of `<tfoot>`. A table section may contain only rows, so the browser hoists such a
+child out of the table box entirely — which is exactly the "all over the place" the user saw, and why nudging
+classes would never have fixed it. It is now `<tr><td colSpan={5}>`, and the live DOM check that proves it is
+structural: enumerate `tfoot`'s direct children and assert none is a non-`TR` element.
+
+**`buildLoyaltySection` in `routes/notifications.ts` omits the manual-adjustment term** that the other three
+balance sites include (`earned - deducted - redeemed + rewarded`, no `+ adjusted`). Pre-existing drift, not
+caused here, and recorded rather than fixed because it is its own item — but recorded loudly, because `0117`
+will HIDE it: once every term is zero all four sites agree, and the disagreement only returns the first time
+someone issues a new adjustment, by which point nothing connects it to the reset.
+
+**The POS membership panel is already dead code on the shipped system.** `POS.tsx` looks a membership number up
+through `lookupPortalMembership`, which calls `GET /api/portal/membership/:n` — and `routes/portal.ts` returns
+403 `feature_disabled` unconditionally ("Membership lookup is DISABLED (§2, user request)"). `setMembershipInfo`
+has no other non-null source in the file, so `membershipInfo` is always `null` and the whole membership-discount
+block is unreachable. Confirmed two ways: the source path, and a live authenticated `curl` that returned 403.
+This is not a regression from this lane and it was deliberately not "fixed" — re-enabling an endpoint the user
+disabled for privacy is not a side effect this lane gets to have. It does mean the POS half of the switch is
+inert today, and that the real enforcement is the server-side accrual write and the redemption refusal, both of
+which were verified live.
+
+### Verified
+
+Layer 1, both packages, on the lane's committed HEAD: cloudflare `tsc --noEmit` clean; every
+`cloudflare/scripts/test-*.cjs` run individually, all green, including the new
+`test-payment-method-registry-pure.cjs` (35 checks) and the extended `test-loyalty-accrual-pure.cjs`. Frontend
+typecheck, `check:source` (488 files), `verify:i18n` (4747 keys at parity in both packs), every
+`frontend/tests/*.test.ts` run individually, and a real `vite build`.
+
+The registry test found a real product defect while being written: `normalizeMethodList` coerced a non-string
+settings entry into a selectable method, so a corrupt `7` in the JSON became a payment method a cashier could
+select and record a sale against — worse than the corruption it came from, because it becomes real data. Fixed to
+skip non-strings.
+
+Layers 4 and 5, against an isolated local Worker (port 8899) and a **private copy** of the D1 state, never the
+shared one, with all 115 migrations applied including `0117` and a seeded delivery sale. Expected vs actual:
+
+| Probe | Expected | Actual |
+|---|---|---|
+| POST a sale paid by "TrueMoney" (not in the configured list) | method joins `pos_payment_methods` with no admin action | `["Cash","Card","ABA Bank","Wing","KHQR","ACLEDA","TrueMoney"]` OK |
+| `GET /settings/payment-methods/unregistered` | reports what sales used but settings lacks | `{"missing":["ACLEDA"],"missing_count":1}` OK |
+| Click "Add them to checkout choices" | list updated + audit row | settings row updated; audit `{"action":"payment_methods_backfill","added":["ACLEDA"]}` OK |
+| Sale detail, notes | inside the Sale card, line breaks kept | rendered as a `Notes` field under Driver phone, both lines OK |
+| Sale detail, delivery | driver name + phone in Sale; drop address in Customer | OK at desktop and 375px |
+| Delivery-fee Edit | same column as the per-item Edit buttons | aligned at both widths OK |
+| `tfoot` direct children | no non-`TR` element | `[]` OK |
+| Apply fee $1.50 -> $2.50 | D1 row changes, amendment recorded | `delivery_fee_usd 2.5`, `delivery_fee_khr 10250`, `total_usd 38.5`, `sale_amendments` row `delivery_fee_changed` OK |
+| Switch OFF, stale client sends `loyalty_accrual: true` | server writes 0 anyway | sale 16 -> `loyalty_accrual 0` (sale 15, switch on -> `1`) OK |
+| Redeem while OFF | refused, not silently dropped | `400 {"error":"Membership points are turned off in Settings, so points cannot be redeemed."}` OK |
+| `0117` against a real migrated DB | log row first, exact ids, undo present | `sales_reset_count 12`, `sales_reset_ids 1,2,4,...,13`, working `undo_sql` OK |
+| Advisory strip, dark mode | readable, matches the sibling amber pattern | `bg rgba(120,53,15,.2)`, text `#fafafa` OK |
+
+The dev-server trap in the fleet notes was confirmed again and worked around rather than assumed away: a preview
+started from an `rc/*` worktree silently serves the **main** checkout. Probing
+`/src/components/sales/SaleDetailModal.tsx` on the shared 5175 server returned zero occurrences of `amend_line`,
+i.e. the pre-change file. The lane was verified on its own vite instance (5199) after proving that same probe
+returned the changed source.
+
+### Not done
+
+- **The actual courier cost is still NOT printed on the receipt.** It was in the original wording of item 4, but
+  the clarification redirected that item to Edit alignment and the delivery answer says "delivery only needs
+  phone and driver name". `routes/sales.ts` also carries a recorded decision — "P6: staff-entered actual courier
+  cost — never printed on receipts" — and reversing that is the user's call, not a side effect of this lane. Open
+  question, put back to the user.
+- The `buildLoyaltySection` manual-adjustment drift (above) — own board item, not fixed here.
+- The dead POS membership lookup (above) — own board item, not fixed here.
+- The receipt itself was verified by source path only (`Receipt.tsx` reads `sale.delivery_fee_usd`, which the
+  amendment updates, and the DB confirms the new value); the print pipeline was not driven in the browser
+  because it goes through an image/PDF render and a native dialog.
+- Not deployed. This lane is not in the Sep-4 checkpoint; it is on origin awaiting a coordinator's Stage 2.

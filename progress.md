@@ -189,13 +189,47 @@ storefront **200** with Leang branding · admin **200** · `d1 migrations list -
    file’s own LIMITATIONS section predicts and prescribes an allowlist entry for. Header and FAIL message now state
    the baseline is GREEN, so a future red is a real finding.
 
+**🟢 LANE `s4/pay-notes-points-delivery-88` (session `business-os-v1-88`) — DONE, PUSHED, NOT DEPLOYED.**
+Branch on origin at `64aa0a51`, cut from production’s `2c497564`. Five user items: payment-method write-back,
+the sale-detail notes box, the membership-points switch + historical reset (migration **`0117`**), the `Edit`
+column alignment, and the compact driver/delivery split. Narrative and the expected-vs-actual ledger: **Part 599**.
+Verified layers 1, 4 and 5 — both packages green, and driven in a real browser against an **isolated** local
+Worker (8899) and a **private copy** of the D1 state with all 115 migrations applied. Ready for a coordinator to
+fold into the next Stage-2 candidate; this session did not deploy and holds no deploy role.
+
+**Three things this lane found and deliberately did NOT fix — each is its own item:**
+
+1. **`buildLoyaltySection` (`routes/notifications.ts`) omits the manual-adjustment term.** It computes
+   `earned - deducted - redeemed + rewarded`; the other three balance-computing sites (`portal.ts`
+   `summarizePoints`, `contacts.ts` `computeCustomerPointsMap`, the `sales.ts` checkout re-validation) include
+   `+ adjusted`. So the loyalty notification already disagrees with every other surface for any customer who has
+   ever had a hand-issued adjustment. Pre-existing. **Urgency is in the timing, not the size: `0117` will HIDE
+   it** — with every term zeroed all four sites agree, and the disagreement only reappears the first time someone
+   issues a new adjustment, by which point nothing connects it back to the reset. Pinned by an assertion in
+   `test-loyalty-accrual-pure.cjs` that documents the current (drifted) state; invert that assertion when fixing.
+
+2. **The POS membership panel is unreachable on the shipped system.** `POS.tsx` resolves a membership number
+   through `lookupPortalMembership` → `GET /api/portal/membership/:n`, and `routes/portal.ts` returns 403
+   `feature_disabled` **unconditionally** (“Membership lookup is DISABLED (§2, user request)”). `setMembershipInfo`
+   has no other non-null source, so `membershipInfo` is always `null` and the whole membership-discount block is
+   dead code. Confirmed from source and from a live authenticated request. **Not fixed here on purpose:**
+   re-enabling an endpoint the user disabled for privacy is a decision, not a side effect. Consequence to know:
+   the POS-side points UI is inert, so the membership-points switch is enforced by the server (accrual write +
+   redemption refusal, both verified live), not by the till.
+
+3. **The actual courier cost is still not printed on the receipt** — open question back to the user. It appeared
+   in the original wording of the ask, but the clarification redirected that item to `Edit` alignment and the
+   delivery answer says “delivery only needs phone and driver name”. `routes/sales.ts` also carries the recorded
+   decision “P6: staff-entered actual courier cost — never printed on receipts”, and reversing that is the
+   user’s call.
+
 **⚠️ NOT IN THIS CHECKPOINT — five lanes existed only in local git at deploy time, with NO branch on origin.**
 Not lost, but one `git branch -D` from lost, and not live:
 
 | Lane | Tip | Shipped files | Owner |
 |---|---|---|---|
 | `s4/modal-chrome-ee` | `8dae6da1` | 74 (frontend modals) | ee |
-| `s4/pay-notes-points-delivery-88` | `64aa0a51` | 15, incl. migration `0117_membership_points_reset.sql` | 88 |
+| ~~`s4/pay-notes-points-delivery-88`~~ | `64aa0a51` | 15, incl. migration `0117_membership_points_reset.sql` | 88 — **PUSHED to origin Sep 4, no longer local-only. Four lanes left on one disk.** |
 | `s4/awaiting-payment-hold-ee` | `c2f13396` | 7 (sale status / holds) | ee |
 | `s4/shifts-ee` | `18cbee6e` | 3 (telegram, salesAnalytics) | ee |
 | `s4/shift-credit-line-ee` | `18cbee6e` | same commit as `s4/shifts-ee` — two names, one lane | ee |
