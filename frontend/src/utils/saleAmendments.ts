@@ -152,6 +152,15 @@ export function toAmendmentDisplayRow(
     stockNote,
     via: String(row.via || 'amend'),
     actor: row.user_name || null,
+    // RAW, on purpose, and it must stay that way. This is D1's
+    // CURRENT_TIMESTAMP -- "YYYY-MM-DD HH:MM:SS", UTC, no zone marker -- and
+    // the render site formats it through formatters.fmtDateTime24, which is
+    // what converts it to business time and to whatever the app's current
+    // date order is. Baking a display string in here would put a formatted
+    // date where a timestamp belongs, and anything that later sorts or
+    // compares these entries would be parsing prose. S4-33 hit precisely that
+    // in posCore: a lot sort key built by splitting a rendered date moved lots
+    // into the wrong year the moment the display order changed.
     at: row.created_at || null,
     note: row.note || null,
   }

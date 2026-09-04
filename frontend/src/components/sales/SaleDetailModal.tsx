@@ -4,7 +4,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { searchProducts } from '../../api/methods.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
-import { fmtTime } from '../../utils/formatters.ts'
+import { fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 // S4-30: the STAFF-facing half of an amended sale. The receipt uses none of
 // this -- it renders the net state the backend keeps in sale_items and the
@@ -1318,9 +1318,24 @@ export default function SaleDetailModal({
                               : entry.row.subject}
                           </div>
                           {/* who, and when -- the two questions a shop asks
-                              of a changed receipt before any other. */}
+                              of a changed receipt before any other.
+
+                              Formatted HERE, not in utils/saleAmendments.ts,
+                              which deliberately keeps `at` as the raw server
+                              value. D1's CURRENT_TIMESTAMP is "YYYY-MM-DD
+                              HH:MM:SS" in UTC with no zone marker, and
+                              fmtDateTime24 is what converts it to business
+                              time (Asia/Phnom_Penh, +7) instead of printing an
+                              ISO-ish string seven hours off. Keeping the raw
+                              value in the shaped row is the point: a display
+                              string is not a timestamp, and anything that ever
+                              sorts or compares these entries must read the
+                              real one. S4-33 hit exactly that bug in posCore,
+                              where a lot sort key built by splitting a
+                              rendered date moved lots into the wrong year the
+                              moment the display went day-first. */}
                           <div className="tabular-nums text-[11px] text-gray-500 dark:text-gray-400">
-                            {[head.actor, head.at].filter(Boolean).join(' · ')}
+                            {[head.actor, head.at ? fmtDateTime24(head.at) : null].filter(Boolean).join(' · ')}
                           </div>
                         </div>
                         {entry.type === 'replacement' ? (

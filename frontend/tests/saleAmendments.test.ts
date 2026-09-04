@@ -9,6 +9,7 @@
 // still described after the line it describes is gone, and that a quantity
 // change which moved no stock says WHY rather than looking like a bug.
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   formatSignedUnits,
   formatUnits,
@@ -233,6 +234,32 @@ await runTest('a malformed or empty ledger renders as nothing, never as a crash'
   assert.equal(junk.kind, '')
   assert.equal(junk.beforeText, '0')
   assert.equal(junk.deltaText, '0')
+})
+
+// A live bug, found by S4-33 in review: `at` was reaching the screen raw, so
+// each amendment printed "2026-09-04 14:22:00" -- an ISO-ish string, in UTC,
+// seven hours off the business day. Fixed at the RENDER site
+// (SaleDetailModal formats through formatters.fmtDateTime24), which is why
+// this shaper must keep handing back the untouched server value.
+//
+// Pinned in both directions, because both mistakes are easy to make again:
+// formatting here would leave a display string where a timestamp belongs, and
+// the render site dropping the formatter would put UTC back on the shop floor.
+// S4-33's own posCore bug was the first half of that pair -- a lot sort key
+// built by splitting a rendered date moved lots into the wrong year as soon as
+// the display went day-first.
+await runTest('the shaped row keeps the raw server timestamp, and the screen is what formats it', () => {
+  const row = toAmendmentDisplayRow(ROW({ created_at: '2026-09-04 14:22:00' }), usd)
+  assert.equal(row.at, '2026-09-04 14:22:00',
+    'at must be the untouched D1 value -- anything that sorts these entries has to read a real timestamp, not prose')
+  assert.equal(toAmendmentDisplayRow(ROW({ created_at: undefined }), usd).at, null,
+    'a missing timestamp stays null rather than becoming the string "undefined"')
+
+  const modal = readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
+  assert.ok(modal.includes('fmtDateTime24(head.at)'),
+    'the amendment history must render its timestamp through the shared formatter, which converts UTC to business time and follows the app-wide date order')
+  assert.ok(!/\{\[head\.actor, head\.at\]/.test(modal),
+    'and must never print head.at raw again')
 })
 
 if (failed > 0) {
