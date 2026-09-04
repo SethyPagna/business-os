@@ -1,3 +1,4 @@
+import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -63,6 +64,7 @@ interface AppUser {
 }
 
 interface AppSettings {
+  ui_mobile_section_nav?: unknown
   business_name?: string
   customer_portal_logo_image?: string
   customer_portal_favicon_image?: string
@@ -1643,6 +1645,7 @@ export default function App() {
   } = useSyncErrorBanner(authReady ? user : null)
   const mountedPages = useMountedPages(page)
   const mobileHeaderVisible = useMobileHeaderAutoHide(page)
+  const inlineMobileNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
   const mainRef = useRef<HTMLElement | null>(null)
   // Swipe-down-to-refresh: listens on the shell's <main> (an ancestor of
   // whichever page's own `.page-scroll` div is actually scrolling --
@@ -1920,7 +1923,7 @@ export default function App() {
 
           <main
             ref={mainRef}
-            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? (appUpdate ? 'pt-16' : 'pt-[calc(4rem+env(safe-area-inset-top))]') : (appUpdate ? 'pt-0' : 'pt-[env(safe-area-inset-top)]')}`}
+            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? (inlineMobileNavigation ? (appUpdate ? 'pt-28' : 'pt-[calc(7rem+env(safe-area-inset-top))]') : (appUpdate ? 'pt-16' : 'pt-[calc(4rem+env(safe-area-inset-top))]')) : (appUpdate ? 'pt-0' : 'pt-[env(safe-area-inset-top)]')}`}
           >
             <PullToRefreshIndicator pullDistance={pullDistance} refreshing={pullRefreshing} />
             <div className="flex min-w-0 items-center gap-3">

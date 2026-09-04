@@ -5,6 +5,8 @@ import {
   MOBILE_SECTION_NAV_SETTINGS_KEY,
   MOBILE_SECTION_NAV_STORAGE_KEY,
   readMobileSectionNavMode,
+  writeMobileSectionNavMode,
+  subscribeMobileSectionNavMode,
 } from '../src/utils/sectionNavPreference.ts'
 
 // Gate 1 audit, Area 5: five "hub" pages (Branches, Sales, Settings,
@@ -120,17 +122,66 @@ await runTest('mobile section-nav preference constants are stable (host pages / 
   assert.equal(MOBILE_SECTION_NAV_SETTINGS_KEY, 'ui_mobile_section_nav')
 })
 
-await runTest('shared mobile navigation is compact, touch-safe, and never horizontally scrolls', () => {
+await runTest('mobile body has no intermediate picker or extra history, legacy pills remain touch-safe', () => {
   const navSource = fs.readFileSync(new URL('../src/components/shared/HubSectionNav.tsx', import.meta.url), 'utf8')
-  assert.match(navSource, /hub-section-grid grid grid-cols-2/, 'layer 2 should remain a two-column grid')
-  assert.match(navSource, /hub-section-tile[^"']*min-h-\[6\.5rem\]/, 'tiles should be compact rectangles with a reliable height floor')
-  assert.doesNotMatch(navSource, /aspect-square/, 'hub tiles must not reserve square-card empty space')
-  assert.match(navSource, /hub-section-pills[^"']*flex-wrap/, 'legacy section controls should wrap')
-  assert.doesNotMatch(navSource, /hub-section-pills[^"']*overflow-x-auto/, 'legacy section controls should not scroll horizontally')
-  assert.match(navSource, /hub-section-pill[^"']*min-h-11/, 'section controls should expose a 44px compact touch target')
-  assert.match(navSource, /aria-pressed=\{isActive\}/, 'section controls should expose selected state')
-  assert.match(navSource, /h-11 w-11/, 'layer-3 back should expose a 44px touch target')
-  assert.match(navSource, /hub-section-label[^"']*break-words/, 'tile labels should wrap safely for Khmer')
+  assert.doesNotMatch(navSource, /pushState|history.back|hub-section-grid|HUB_HISTORY_MARKER/)
+  assert.match(navSource, /if \(layered \|\| visible.length <= 1\) return <>{children}<\/>/)
+  assert.match(navSource, /hub-section-pills[^"']*flex-wrap/)
+  assert.match(navSource, /hub-section-pill[^"']*min-h-11/)
+  assert.match(navSource, /aria-pressed=\{isActive\}/)
+  const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
+  assert.match(sidebar, /mobileGroupAction/)
+  assert.match(sidebar, /navigateTo\(item.id, hubAnchor\(item.id, section.id\)\)/)
+  assert.match(sidebar, /grid min-w-0 grid-cols-2/)
+})
+
+await runTest('Review & Logs participates in shared section navigation', () => {
+  const source = fs.readFileSync(new URL('../src/components/review/ReviewLogsPage.tsx', import.meta.url), 'utf8')
+  assert.match(source, /<HubSectionNav/)
+  assert.match(source, /useHubSection<ReviewLogsSection>/)
+  assert.match(source, /desktopNavigation=/, 'its original desktop switcher remains available only on desktop')
+})
+
+await runTest('preference immediately notifies every consumer and survives blocked storage', () => {
+  const events = new EventTarget()
+  const values = new Map<string, string>()
+  let blocked = false
+  let quotaExceeded = false
+  const fakeWindow = Object.assign(events, {
+    localStorage: {
+      getItem: (key: string) => { if (blocked) throw new Error('storage blocked'); return values.get(key) ?? null },
+      setItem: (key: string, value: string) => { if (blocked || quotaExceeded) throw new Error('storage blocked'); values.set(key, value) },
+    },
+  })
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: fakeWindow })
+  let first = 0, second = 0
+  const offFirst = subscribeMobileSectionNavMode(() => first++)
+  const offSecond = subscribeMobileSectionNavMode(() => second++)
+  try {
+    writeMobileSectionNavMode('sections')
+    assert.equal(readMobileSectionNavMode('pages'), 'sections')
+    assert.deepEqual([first, second], [1, 1])
+    blocked = true
+    writeMobileSectionNavMode('pages')
+    assert.equal(readMobileSectionNavMode('sections'), 'pages')
+    assert.deepEqual([first, second], [2, 2])
+    blocked = false
+    values.set(MOBILE_SECTION_NAV_STORAGE_KEY, 'sections')
+    fakeWindow.dispatchEvent(Object.assign(new Event('storage'), { key: MOBILE_SECTION_NAV_STORAGE_KEY }))
+    assert.equal(readMobileSectionNavMode(), 'sections')
+    assert.deepEqual([first, second], [3, 3])
+    values.clear()
+    fakeWindow.dispatchEvent(Object.assign(new Event('storage'), { key: null }))
+    assert.equal(readMobileSectionNavMode('pages'), 'pages')
+    offFirst()
+    quotaExceeded = true
+    writeMobileSectionNavMode('sections')
+    assert.equal(readMobileSectionNavMode('pages'), 'sections', 'a failed write must override successful but stale reads in memory')
+    assert.deepEqual([first, second], [4, 5])
+  } finally {
+    offFirst(); offSecond()
+    Reflect.deleteProperty(globalThis, 'window')
+  }
 })
 
 // i18n coverage: every hub-section description key (fed to HubSectionNav's

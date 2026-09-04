@@ -1,3 +1,4 @@
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, SVGProps } from 'react'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
@@ -36,6 +37,8 @@ import { calculateProductDiscount, isProductDiscountActive } from '../../utils/p
 // Same minimal-context cast pattern as FeesPage/LoyaltyPointsPage --
 // AppContext's useApp is untyped, each page names just what it reads.
 type PromotionsAppContext = {
+  navigateTo: (pageId: string, anchor?: string) => void
+  hasPermission: (key: string) => boolean
   t: (key: string, fallback?: string) => string
   notify: (message: string, type?: string) => void
   fmtUSD: (value: number) => string
@@ -172,7 +175,7 @@ function ruleTypeIcon(ruleType: string): ComponentType<SVGProps<SVGSVGElement>> 
 type PromotionsSection = 'rules' | 'discounts' | 'loyalty'
 
 export default function PromotionsPage() {
-  const { t, notify, fmtUSD, getPermissionTier, can } = useApp()
+  const { t, notify, fmtUSD, getPermissionTier, can, hasPermission, navigateTo } = useApp()
   // G2 section gates: the page door admits either grant (see
   // AppContext.canAccessPage); each section still needs its own.
   const canPromotions = getPermissionTier('promotions') !== 'none'
@@ -188,7 +191,7 @@ export default function PromotionsPage() {
   // products tier (review or full can write; review queues for approval).
   const canManageDiscounts = getPermissionTier('products') !== 'none'
   const canLoyalty = getPermissionTier('customer_portal') !== 'none'
-  const [activeSection, setActiveSection] = useState<PromotionsSection>(canPromotions ? 'rules' : 'loyalty')
+  const [activeSection, setActiveSection] = useHubSection<PromotionsSection>('promotions', canPromotions ? 'rules' : 'loyalty', getHubDestinations('promotions', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
   const [rules, setRules] = useState<PromotionRuleRow[]>([])
   const [rulesLoading, setRulesLoading] = useState(true)
   const [rulesError, setRulesError] = useState('')
@@ -491,7 +494,6 @@ export default function PromotionsPage() {
           onChange={(id) => setActiveSection(id as PromotionsSection)}
           storageKey="bos:hub:promotions:active"
           pageId="promotions"
-          title={t('promotions') || 'Promotions'}
         >
         {activeSection === 'loyalty' ? (
           // G2: the whole former Loyalty Points page, embedded (its own

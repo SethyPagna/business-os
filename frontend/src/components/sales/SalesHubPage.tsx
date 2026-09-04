@@ -1,4 +1,5 @@
-import { Suspense, lazy, useState } from 'react'
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { Suspense, lazy } from 'react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
@@ -22,6 +23,8 @@ const FeesSection = lazy(() => import('../fees/FeesPage.tsx'))
 const ReportsSection = lazy(() => import('./ReportsHub'))
 
 type SalesHubAppContext = {
+  navigateTo: (pageId: string, anchor?: string) => void
+  hasPermission: (key: string) => boolean
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
 }
@@ -31,26 +34,24 @@ type SalesHubSection = 'sales' | 'returns' | 'fees' | 'reports'
 
 const SALES_HUB_STORAGE_KEY = 'bos:hub:sales:active'
 
-function initialSection(canSales: boolean, canReturns: boolean, canFees: boolean): { section: SalesHubSection; deepLinked: boolean } {
-  // Deep link: the old standalone URLs keep meaning what they said. A deep
-  // link always wins, and (unlike a plain visit) starts straight on layer 3
-  // in the mobile three-layer nav -- see HubSectionNav's initialEntered.
+function initialSection(canSales: boolean, canReturns: boolean, canFees: boolean): SalesHubSection {
+  // Old standalone URLs retain their section; the shared hook also resolves hub anchors.
   if (typeof window !== 'undefined') {
     const segment = String(window.location.pathname || '').toLowerCase()
-    if (segment.includes('return') && canReturns) return { section: 'returns', deepLinked: true }
-    if (segment.includes('fee') && canFees) return { section: 'fees', deepLinked: true }
+    if (segment.includes('return') && canReturns) return 'returns'
+    if (segment.includes('fee') && canFees) return 'fees'
   }
-  const validIds = (['sales', 'returns', 'fees'] as SalesHubSection[]).filter((id) =>
-    (id === 'sales' && canSales) || (id === 'returns' && canReturns) || (id === 'fees' && canFees))
+  const validIds = (['sales', 'returns', 'fees', 'reports'] as SalesHubSection[]).filter((id) =>
+    (id === 'sales' && canSales) || (id === 'returns' && canReturns) || (id === 'fees' && canFees) || (id === 'reports' && (canSales || canReturns || canFees)))
   const stored = readStoredHubSection(SALES_HUB_STORAGE_KEY, validIds) as SalesHubSection | null
-  if (stored) return { section: stored, deepLinked: false }
-  if (canSales) return { section: 'sales', deepLinked: false }
-  if (canReturns) return { section: 'returns', deepLinked: false }
-  return { section: 'fees', deepLinked: false }
+  if (stored) return stored
+  if (canSales) return 'sales'
+  if (canReturns) return 'returns'
+  return 'fees'
 }
 
 export default function SalesHubPage() {
-  const { t, getPermissionTier } = useApp()
+  const { t, getPermissionTier, hasPermission, navigateTo } = useApp()
   // t() returns the KEY on a miss (stale/failed pack) -- guard so chips fall back to readable English, never snake_case keys.
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
   const canSales = getPermissionTier('sales') !== 'none'
@@ -59,8 +60,7 @@ export default function SalesHubPage() {
   // Reports draws on all three areas, so anyone who can see any one of them
   // gets the tab (the hub then only offers the report types they can view).
   const canReports = canSales || canReturns || canFees
-  const [initial] = useState(() => initialSection(canSales, canReturns, canFees))
-  const [section, setSection] = useState<SalesHubSection>(initial.section)
+  const [section, setSection] = useHubSection<SalesHubSection>('sales', () => initialSection(canSales, canReturns, canFees), getHubDestinations('sales', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
 
   const tabs: HubSectionDef[] = [
     { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, hidden: !canSales, tone: 'text-blue-600', description: trh('hub_desc_sales_sales', 'Ring up and record sales') },
@@ -77,15 +77,12 @@ export default function SalesHubPage() {
         onChange={(id) => setSection(id as SalesHubSection)}
         storageKey={SALES_HUB_STORAGE_KEY}
         pageId="sales"
-        title={trh('sales', 'Sales')}
-        initialEntered={initial.deepLinked}
       >
       {/* One scroll root for the hosted section. It renders straight into
           this page instead of owning a fixed-height nested scroller, so its
           list grows to fit its content and the whole thing scrolls naturally
           -- same contract as before, just page-scroll now lives here instead
-          of on the hub's own outer element (HubSectionNav's layer-3 header,
-          when present, needs to sit OUTSIDE the scrolling box). */}
+          of on the hub's own outer element). */}
       <div className="page-scroll flex min-h-0 min-w-0 flex-1 flex-col">
         <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
           {section === 'returns' && canReturns ? <ReturnsSection embedded />
