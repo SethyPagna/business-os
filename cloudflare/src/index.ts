@@ -24,6 +24,7 @@ import usersRoute from './routes/users'
 import devicesRoute from './routes/devices'
 import notesRoute from './routes/notes'
 import batchesRoute from './routes/batches'
+import shiftsRoute from './routes/shifts'
 import feesRoute from './routes/fees'
 import reportsRoute from './routes/reports'
 import telegramRoute from './routes/telegram'
@@ -312,6 +313,7 @@ app.route('/api/action-history', actionHistoryRoute)
 app.route('/api/runtime', runtimeRoute)
 app.route('/api/notes', notesRoute)
 app.route('/api/batches', batchesRoute)
+app.route('/api/shifts', shiftsRoute)
 app.route('/api/fees', feesRoute)
 app.route('/api/reports', reportsRoute)
 app.route('/api/telegram', telegramRoute)
