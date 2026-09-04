@@ -180,8 +180,11 @@ const sale16433 = {
 // only ever carried a CUSTOMER-paid fee, so printing the stored fee on a
 // shop-absorbed delivery left the receipt's own column not adding up.
 {
-  // Production shape: 11,879 deliveries are customer-paid ($8,228.05 of fees),
-  // 3 are shop-absorbed ($5.50). Both shapes are asserted.
+  // Production shape (measured Sep 4 2026): of 15,044 sales, 4,412 carry a
+  // delivery fee -- $8,380.80 charged to customers and $7.50 absorbed by the
+  // shop across 4 sales. All 4 of those are still awaiting_payment, so the
+  // absorbed case has never yet printed on a settled receipt. Both shapes are
+  // asserted, because the untested one is the one about to arrive.
   const charged = receiptDeliveryFigures(
     { delivery_fee_usd: 2, delivery_fee_khr: 8200, delivery_fee_paid_by: 'customer' },
     RATE,

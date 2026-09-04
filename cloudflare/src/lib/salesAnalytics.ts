@@ -259,9 +259,12 @@ function storeDeliveryExpr(p: string): string {
 // way today (all 2,540 delivery fee rows have sale_id NULL), which is exactly
 // why the guard has to be written now rather than after the first one is.
 //
-// NULL means "not recorded", never zero: 11 of 11,882 deliveries carry a cost.
-// delivery_actual_cost_count reports how many, so a near-empty column reads as
-// missing data rather than as free delivery.
+// NULL means "not recorded", never zero. Measured Sep 4 2026: exactly 12 of
+// 15,044 sales carry a courier cost, they are ids 16836-16872, and every one of
+// them is still awaiting_payment -- so this expression contributes nothing to a
+// recognized figure yet and starts contributing the moment those sales are
+// marked paid. delivery_actual_cost_count reports how many sales recorded a
+// cost, so a near-empty column reads as missing data rather than free delivery.
 function deliveryActualCostExpr(p: string): string {
   return `CASE WHEN EXISTS (
       SELECT 1 FROM fees
