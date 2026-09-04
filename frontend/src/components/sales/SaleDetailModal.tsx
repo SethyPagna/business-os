@@ -17,11 +17,13 @@ import {
   type SaleAmendmentRow,
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
-import AppSelect from '../shared/AppSelect.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
+import StatusBadge, { getStatusLabel } from './StatusBadge.tsx'
+import SaleDetailProductPicker, { type SaleDetailProductCandidate, type SaleDetailProductChoice } from './SaleDetailProductPicker.tsx'
+import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
+import { sanitizeSaleDetailText } from './saleDetailText.ts'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -39,6 +41,7 @@ interface SaleLineItem {
   price_khr?: number | string | null
   price?: number | string | null
   branch_name?: string | null
+  branch_id?: number | string | null
   returned_quantity?: number | string | null
 }
 
@@ -67,6 +70,7 @@ interface SaleDetail {
   cashier_name?: string | null
   payment_method?: string | null
   branch_name?: string | null
+  branch_id?: number | string | null
   device_tz?: string | null
   device_name?: string | null
   customer_name?: string | null
@@ -115,13 +119,7 @@ interface SaleDetail {
 type ParsedPayment = { method: string; amount_usd: number; amount_khr: number }
 
 // S4-24b -- the product picker's rows, and a line staged for adding.
-interface AddProductCandidate {
-  id?: number | string | null
-  name?: string | null
-  barcode?: string | null
-  selling_price_usd?: number | string | null
-  stock_quantity?: number | string | null
-}
+type AddProductCandidate = SaleDetailProductCandidate
 
 // S4-30: what this modal asks the server to change. Mirrors
 // api/salesTransport.ts's SaleAmendmentRequest -- one shape, so the button and
@@ -147,6 +145,12 @@ type StagedAddLine = {
   // refuses. Never a substitute for the server's check: this number is
   // seconds old and another till may already have taken the units.
   stockQuantity: number
+  barcode: string
+  batchId: number | null
+  batchLabel: string
+  batchReceivedAt: string
+  batchExpiryDate: string
+  batchQuantity: number | null
 }
 
 // Which sale states accept a new line. Hand-synced twin of the Worker's
@@ -189,7 +193,7 @@ interface SaleDetailModalProps {
   // when the signed-in user lacks `sales:add_items` -- the same
   // hide-by-omission gate as the write callbacks above, and the Worker
   // enforces the identical action server-side.
-  onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number }>) => Promise<boolean | unknown> | boolean | unknown
+  onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number; batch_id?: number; batch_label?: string; batch_expiry_date?: string }>) => Promise<boolean | unknown> | boolean | unknown
   // S4-30: amend this already-recorded sale -- change a line's quantity,
   // remove a line, replace one product with another, or correct the delivery
   // fee. Omitted entirely when the signed-in user lacks `sales:amend`, the
@@ -283,6 +287,7 @@ export default function SaleDetailModal({
   const [addLines, setAddLines] = useState<StagedAddLine[]>([])
   const [addSaving, setAddSaving] = useState(false)
   const [addConfirmOpen, setAddConfirmOpen] = useState(false)
+  const [addPicking, setAddPicking] = useState<AddProductCandidate | null>(null)
   const addSearchSeqRef = useRef(0)
 
   // S4-30. `amendments === null` means "not loaded / could not load"; an empty
@@ -348,8 +353,8 @@ export default function SaleDetailModal({
     return () => window.clearTimeout(timer)
   }, [addQuery, onAddItems])
 
-  const stageAddLine = (candidate: AddProductCandidate): void => {
-    const productId = Number(candidate?.id)
+  const stageAddLine = (choice: SaleDetailProductChoice): void => {
+    const productId = Number(choice.productId)
     if (!Number.isFinite(productId) || productId <= 0) return
     setAddQuery('')
     setAddCandidates([])
@@ -357,22 +362,29 @@ export default function SaleDetailModal({
       // A second pick of the same product bumps the quantity rather than
       // adding a duplicate row -- the server would accept two lines, but the
       // person meant "two of these".
-      const existing = current.findIndex((line) => line.productId === productId)
+      const existing = current.findIndex((line) => line.productId === productId && line.batchId === choice.batchId)
       if (existing >= 0) {
         const next = [...current]
         next[existing] = { ...next[existing], quantity: next[existing].quantity + 1 }
         return next
       }
-      const price = toNumber(candidate?.selling_price_usd)
+      const price = toNumber(choice.unitPriceUsd)
       return [...current, {
         productId,
-        name: String(candidate?.name || `#${productId}`),
+        name: String(choice.name || `#${productId}`),
         quantity: 1,
         unitPriceUsd: price,
         priceText: price > 0 ? String(price) : '',
-        stockQuantity: toNumber(candidate?.stock_quantity),
+        stockQuantity: choice.batchQuantity ?? toNumber(choice.stockQuantity),
+        barcode: choice.barcode,
+        batchId: choice.batchId,
+        batchLabel: choice.batchLabel,
+        batchReceivedAt: choice.batchReceivedAt,
+        batchExpiryDate: choice.batchExpiryDate,
+        batchQuantity: choice.batchQuantity,
       }]
     })
+    setAddPicking(null)
   }
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const translateOr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
@@ -563,8 +575,8 @@ export default function SaleDetailModal({
   // block, which is where money lives, not people. The two fields that are
   // genuinely about the driver now sit in the Sale card as ordinary compact
   // rows, on the same label/value rhythm as everything else there.
-  const deliveryDriverName = String(sale.delivery_contact_name || '').trim()
-  const deliveryDriverPhone = String(sale.delivery_contact_phone || '').trim()
+  const deliveryDriverName = sanitizeSaleDetailText(sale.delivery_contact_name)
+  const deliveryDriverPhone = sanitizeSaleDetailText(sale.delivery_contact_phone)
   // The drop address is the one delivery field that can legitimately differ
   // from what the Customer card already shows -- "keep it same in customer
   // section" is where an address belongs, so it is shown THERE, and only when
@@ -621,6 +633,9 @@ export default function SaleDetailModal({
         product_id: line.productId,
         quantity: line.quantity,
         applied_price_usd: line.unitPriceUsd,
+        ...(line.batchId != null ? { batch_id: line.batchId } : {}),
+        ...(line.batchLabel ? { batch_label: line.batchLabel } : {}),
+        ...(line.batchExpiryDate ? { batch_expiry_date: line.batchExpiryDate } : {}),
       })))
       // The caller raises its own success/failure notice (it is the one that
       // knows whether stock actually moved), so this only clears the form and
@@ -1244,7 +1259,7 @@ export default function SaleDetailModal({
                       <button
                         type="button"
                         className="flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                        onClick={() => stageAddLine(candidate)}
+                        onClick={() => setAddPicking(candidate)}
                       >
                         <span className="min-w-0">
                           <span className="block break-words font-medium text-gray-900 dark:text-white">{candidate.name}</span>
@@ -1262,6 +1277,17 @@ export default function SaleDetailModal({
                   ))}
                 </ul>
               ) : null}
+              {addPicking ? (
+                <SaleDetailProductPicker
+                  candidate={addPicking}
+                  candidates={addCandidates}
+                  branchId={sale.branch_id ?? null}
+                  fmtUSD={fmtUSD}
+                  t={t}
+                  onCancel={() => setAddPicking(null)}
+                  onChoose={stageAddLine}
+                />
+              ) : null}
 
               {addLines.length === 0 ? (
                 <p className="mt-3 text-xs text-gray-400">
@@ -1271,9 +1297,13 @@ export default function SaleDetailModal({
                 <>
                   <ul className="mt-3 space-y-2">
                     {addLines.map((line) => (
-                      <li key={line.productId} className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
+                      <li key={`${line.productId}:${line.batchId ?? 'stock'}`} className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-white">{line.name}</span>
+                          <span className="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-white">
+                            {line.name}
+                            {line.barcode ? <span className="mt-0.5 block font-mono text-[11px] font-normal text-gray-400">{line.barcode}</span> : null}
+                            {line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{line.batchLabel}{line.batchReceivedAt ? ` · ${translateOr('received_date', 'Received', 'ថ្ងៃទទួល')}: ${line.batchReceivedAt.slice(0, 10)}` : ''}{line.batchExpiryDate ? ` · ${t('expiry_date') || 'Expiry'}: ${line.batchExpiryDate}` : ''}</span> : null}
+                          </span>
                           <span className="flex items-center gap-1">
                             <label htmlFor={`sale-add-qty-${line.productId}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>
                             <input
@@ -1287,7 +1317,7 @@ export default function SaleDetailModal({
                                 // stock the wrong way through an add.
                                 const next = Math.max(1, Math.floor(Number(event.target.value) || 1))
                                 setAddLines((current) => current.map((row) => (
-                                  row.productId === line.productId ? { ...row, quantity: next } : row
+                                  row.productId === line.productId && row.batchId === line.batchId ? { ...row, quantity: next } : row
                                 )))
                               }}
                             />
@@ -1302,7 +1332,7 @@ export default function SaleDetailModal({
                               onChange={(event) => {
                                 const text = event.target.value
                                 setAddLines((current) => current.map((row) => (
-                                  row.productId === line.productId
+                                  row.productId === line.productId && row.batchId === line.batchId
                                     ? { ...row, priceText: text, unitPriceUsd: toNumber(text) }
                                     : row
                                 )))
@@ -1316,7 +1346,7 @@ export default function SaleDetailModal({
                             type="button"
                             aria-label={t('remove') || 'Remove'}
                             className="rounded p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-                            onClick={() => setAddLines((current) => current.filter((row) => row.productId !== line.productId))}
+                            onClick={() => setAddLines((current) => current.filter((row) => row.productId !== line.productId || row.batchId !== line.batchId))}
                           >
                             <Trash2 size={16} />
                           </button>
@@ -1534,41 +1564,16 @@ export default function SaleDetailModal({
               <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t('update_status') || 'Update status'}
               </div>
-              <div className="grid gap-3 md:grid-cols-[220px,1fr]">
-                <div>
-                  <label htmlFor="sale-status-select" className="mb-1 block text-xs text-gray-400">
-                    {t('status') || 'Status'}
-                  </label>
-                  <AppSelect
-                    id="sale-status-select"
-                    value={newStatus}
-                    onChange={(nextValue) => setNewStatus(nextValue)}
-                    ariaLabel={t('status') || 'Status'}
-                    className="w-full"
-                    buttonClassName="h-10 w-full text-sm"
-                    menuClassName="min-w-[13rem]"
-                    optionClassName="text-sm"
-                    options={ALL_STATUSES
-                      .filter((status) => !['partial_return', 'returned'].includes(status))
-                      // Once returns exist, only cancellation is still a
-                      // manual transition (the returns flow owns the rest)
-                      .filter((status) => currentStatus !== 'partial_return' || status === 'cancelled' || status === currentStatus)
-                      .map((status) => ({ value: status, label: getStatusLabel(status, t) }))}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="sale-status-notes" className="mb-1 block text-xs text-gray-400">
-                    {t('notes') || 'Notes'}
-                  </label>
-                  <textarea
-                    id="sale-status-notes"
-                    className="input min-h-[92px] resize-none text-sm"
-                    value={statusNotes}
-                    onChange={(event) => setStatusNotes(event.target.value)}
-                    placeholder={t('status_notes_placeholder') || 'Optional notes about this status change'}
-                  />
-                </div>
-              </div>
+              <SaleStatusWorkflow
+                currentStatus={currentStatus}
+                selectedStatus={newStatus}
+                notes={statusNotes}
+                saving={statusSaving}
+                t={t}
+                onSelect={setNewStatus}
+                onNotesChange={setStatusNotes}
+                onConfirm={handleStatusUpdate}
+              >
               {needsPaymentEntry ? (
                 <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-800/70 dark:bg-emerald-950/20">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
@@ -1613,23 +1618,7 @@ export default function SaleDetailModal({
                   {payError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{payError}</p> : null}
                 </div>
               ) : null}
-              <button
-                type="button"
-                className="btn-primary mt-3 w-full text-xs"
-                disabled={statusSaving || newStatus === currentStatus}
-                onClick={handleStatusUpdate}
-              >
-                {statusSaving
-                  ? (t('loading') || 'Saving')
-                  // The translation is a template ("Update to {status}") --
-                  // substitute the placeholder instead of appending after it,
-                  // which rendered a literal "{status}" in the button.
-                  : (() => {
-                      const template = t('update_to_status') || 'Update to {status}'
-                      const statusLabel = getStatusLabel(newStatus, t)
-                      return template.includes('{status}') ? template.replace('{status}', statusLabel) : `${template} ${statusLabel}`
-                    })()}
-              </button>
+              </SaleStatusWorkflow>
             </section>
           ) : null}
 
