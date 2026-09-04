@@ -39,6 +39,8 @@ type ShiftGateContext = {
   // drawer figures on this screen are printed exactly as POS prints them.
   fmtUSD: (value: unknown) => string
   fmtKHR: (value: unknown) => string
+  user?: { id?: string | number | null }
+  settings?: { shift_scope_mode?: unknown }
 }
 
 /**
@@ -57,42 +59,55 @@ type ShiftGateContext = {
  * and every write goes through here, so a registration or a close is visible to
  * both immediately.
  */
-let sharedShift: ShiftState | null = null
-const shiftSubscribers = new Set<(next: ShiftState | null) => void>()
+const sharedShifts = new Map<string, ShiftState | null>()
+const shiftSubscribers = new Set<(key: string, next: ShiftState | null) => void>()
 // De-dupes the mount fetch: both components mount together on POS open, and
 // without this they would each ask the Worker for the same row.
-let shiftInFlight: Promise<void> | null = null
+const shiftInflight = new Map<string, Promise<void>>()
 
-/** Publish a new shift state to every mounted consumer. Writes call this. */
-export function publishShift(next: ShiftState | null) {
-  sharedShift = next
-  for (const notify of shiftSubscribers) notify(next)
+export function shiftCacheKey(userId: unknown, branchId: number | null, scopeMode: unknown): string {
+  const user = String(userId ?? 'anonymous')
+  const branch = branchId == null ? 'request-branch' : String(branchId)
+  const mode = scopeMode === 'shop_wide' ? 'shop_wide' : 'per_account'
+  return `${user}:${branch}:${mode}`
 }
 
-function useSharedShift(branchId: number | null) {
-  const [state, setState] = useState<ShiftState | null>(sharedShift)
+/** Publish a new shift state to every mounted consumer. Writes call this. */
+export function publishShift(key: string, next: ShiftState | null) {
+  sharedShifts.set(key, next)
+  for (const notify of shiftSubscribers) notify(key, next)
+}
+
+function useSharedShift(branchId: number | null, userId: unknown, scopeMode: unknown) {
+  const key = shiftCacheKey(userId, branchId, scopeMode)
+  const [state, setState] = useState<ShiftState | null>(() => sharedShifts.get(key) ?? null)
 
   useEffect(() => {
-    shiftSubscribers.add(setState)
-    return () => { shiftSubscribers.delete(setState) }
-  }, [])
+    setState(sharedShifts.get(key) ?? null)
+    const subscriber = (changedKey: string, next: ShiftState | null) => {
+      if (changedKey === key) setState(next)
+    }
+    shiftSubscribers.add(subscriber)
+    return () => { shiftSubscribers.delete(subscriber) }
+  }, [key])
 
   const refresh = useCallback(() => {
-    if (!shiftInFlight) {
-      shiftInFlight = fetchCurrentShift(branchId)
-        .then((next) => { publishShift(next) })
+    if (!shiftInflight.has(key)) {
+      const request = fetchCurrentShift(branchId)
+        .then((next) => { publishShift(key, next) })
         // Leave the shared state null. A read failure must NOT be treated as
         // "registered" -- that would silently skip the prompt for the whole
         // day. Null shows nothing yet and the next open re-asks.
-        .catch(() => { publishShift(null) })
-        .finally(() => { shiftInFlight = null })
+        .catch(() => { publishShift(key, null) })
+        .finally(() => { shiftInflight.delete(key) })
+      shiftInflight.set(key, request)
     }
-    return shiftInFlight
-  }, [branchId])
+    return shiftInflight.get(key) as Promise<void>
+  }, [branchId, key])
 
   useEffect(() => { void refresh() }, [refresh])
 
-  return { state, refresh }
+  return { state, refresh, publish: (next: ShiftState | null) => publishShift(key, next) }
 }
 
 /**
@@ -151,22 +166,12 @@ function ShiftFactRow({ label, value }: { label: string; value: React.ReactNode 
   )
 }
 
-export default function ShiftGate({ children }: { children?: React.ReactNode }) {
-  // useApp() is fully typed -- no cast. It carries no till branch today, so the
-  // branch is left null and the Worker falls back to the request's own
-  // X-Branch-Id (routes/shifts.ts, branchIdFrom). Casting a branch_id onto the
-  // context to read it here would have compiled and always been undefined,
-  // which is the same null by a route that hides the fact.
-  const { t, notify } = useApp() as ShiftGateContext
-  // The context carries no till branch today, so the branch is left null and
-  // the Worker falls back to the request's own X-Branch-Id header
-  // (routes/shifts.ts, branchIdFrom). Naming a branch_id in the cast above
-  // would compile and always read undefined -- the same null, by a route that
-  // hides the fact.
-  const branchId = null
-  const branchName = null
-
-  const { state } = useSharedShift(branchId)
+export default function ShiftGate({ children, branchId = null, branchName = null }: { children?: React.ReactNode; branchId?: number | null; branchName?: string | null }) {
+  // Branch identity is supplied by the till. Until the POS owner wires that
+  // existing active-branch value into this prop, null retains the route's
+  // legacy unscoped behavior without inventing a branch from unrelated state.
+  const { t, notify, user, settings } = useApp() as ShiftGateContext
+  const { state, publish } = useSharedShift(branchId, user?.id, settings?.shift_scope_mode)
   const [busy, setBusy] = useState(false)
   const [floatUsd, setFloatUsd] = useState('')
   const [floatKhr, setFloatKhr] = useState('')
@@ -186,7 +191,7 @@ export default function ShiftGate({ children }: { children?: React.ReactNode }) 
       })
       // Publish, not setState: this is what makes End Shift appear the moment
       // the drawer is registered, instead of only after a reload.
-      publishShift(next)
+      publish(next)
       // The toast carries the moment that was actually STAMPED, not the one
       // this screen predicted a second ago: the gate unmounts on success, so
       // this is the only confirmation the employee gets of what was written.
@@ -295,11 +300,10 @@ export default function ShiftGate({ children }: { children?: React.ReactNode }) 
  * open time"). So the close keeps the panel up and turns it into the summary
  * of what was written -- before and after, side by side.
  */
-export function EndShiftButton({ onEnded }: { onEnded?: () => void }) {
-  const { t, notify, fmtUSD, fmtKHR } = useApp() as ShiftGateContext
-  const branchId = null
+export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => void; branchId?: number | null }) {
+  const { t, notify, fmtUSD, fmtKHR, user, settings } = useApp() as ShiftGateContext
 
-  const { state } = useSharedShift(branchId)
+  const { state, publish } = useSharedShift(branchId, user?.id, settings?.shift_scope_mode)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [countedUsd, setCountedUsd] = useState('')
@@ -323,7 +327,7 @@ export function EndShiftButton({ onEnded }: { onEnded?: () => void }) {
         closingCountedKhr: Number(countedKhr) || 0,
         closingNote: note.trim() || null,
       })
-      publishShift(next)
+      publish(next)
       // Stay open on the summary. A shift with no row back (a shape the
       // transport permits but the route does not produce) has nothing to
       // summarise, so that one case closes as before rather than showing an

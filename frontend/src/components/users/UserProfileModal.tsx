@@ -16,6 +16,7 @@ import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAp
 import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
+import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -29,7 +30,7 @@ const PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS = 20000
 const PROFILE_AVATAR_UPLOAD_TIMEOUT_MS = 30000
 
 type EntityId = string | number
-type ProfileSection = 'personal' | 'login_methods' | 'security' | 'organization'
+type ProfileSection = 'personal' | 'login_methods' | 'security' | 'organization' | 'shifts'
 type OtpMode = 'setup' | 'disable' | null
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
@@ -1040,6 +1041,9 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                 <ProfileSectionButton active={activeSection === 'organization'} onClick={() => setActiveSection('organization')}>
                   {tr('organization', 'Organization')}
                 </ProfileSectionButton>
+                <ProfileSectionButton active={activeSection === 'shifts'} onClick={() => setActiveSection('shifts')}>
+                  {tr('shift_summary_title', 'Shifts')}
+                </ProfileSectionButton>
               </div>
               {/* align="right" so the history menu + its hover preview open
                   INWARD from the bar's right edge instead of spilling off
@@ -1187,6 +1191,17 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
 
               </div>
             </section>
+            ) : null}
+
+            {activeSection === 'shifts' ? (
+              <section className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
+                <ShiftHistoryPanel
+                  userId={currentUserId}
+                  canManage={hasPermission('settings') || hasPermission('all')}
+                  compact
+                  notify={notify}
+                />
+              </section>
             ) : null}
 
             {activeSection === 'security' ? (

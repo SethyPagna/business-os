@@ -49,6 +49,7 @@ import {
 import type { UploadAction } from '../../utils/mediaUploadState.ts'
 import { backfillPaymentMethods, getPaymentMethodImpact, getUnregisteredPaymentMethods, replacePaymentMethod } from '../../api/settingsTransport.ts'
 import { getTelegramStatus, sendTelegramTest, sendTelegramTodaySummary, type TelegramStatus } from '../../api/telegramTransport.ts'
+import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
@@ -1223,6 +1224,31 @@ export default function Settings() {
         </SettingsSection>
         ) : null}
 
+        {canEditSettings && showSettingsSection('business') ? (
+          <SettingsSection title="Shift registration" description="Configure who must register the cash drawer each business day.">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">Shift registration</div>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">Choose whether each account opens its own shift or one shared branch shift covers the whole shop.</p>
+            <fieldset className="mt-3 grid gap-2 sm:grid-cols-2">
+              <legend className="sr-only">Shift scope</legend>
+              {([
+                ['per_account', 'Per account', 'Each staff account opens and closes its own daily shift.'],
+                ['shop_wide', 'Shop-wide', 'One staff member opens the branch shift and any staff member can close it.'],
+              ] as const).map(([value, label, hint]) => (
+                <label key={value} className={`flex cursor-pointer gap-2 rounded-lg border p-3 ${String(form.shift_scope_mode || 'per_account') === value ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' : 'border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-900'}`}>
+                  <input type="radio" name="shift_scope_mode" value={value} checked={String(form.shift_scope_mode || 'per_account') === value} onChange={() => setValue('shift_scope_mode', value)} />
+                  <span><span className="block text-sm font-medium text-gray-800 dark:text-gray-100">{label}</span><span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{hint}</span></span>
+                </label>
+              ))}
+            </fieldset>
+            <label className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900">
+              <span><span className="block text-sm font-medium text-gray-800 dark:text-gray-100">Exempt administrators</span><span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">Administrators can enter POS without opening a shift. Turn this off when administrators also operate a cash drawer.</span></span>
+              <input type="checkbox" checked={String(form.shift_admin_exempt ?? 'true') !== 'false'} onChange={(event) => setValue('shift_admin_exempt', event.target.checked ? 'true' : 'false')} />
+            </label>
+          </div>
+          </SettingsSection>
+        ) : null}
+
         {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('pos_settings') || 'POS Settings'}>
           <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
@@ -1274,6 +1300,12 @@ export default function Settings() {
             </div>
           ) : null}
         </SettingsSection>
+        ) : null}
+
+        {canEditSettings && showSettingsSection('business') ? (
+          <SettingsSection title="Shift history" description="Review every authorized shift and amend mistakes without deleting the original record.">
+            <ShiftHistoryPanel canManage notify={notify} limit={50} />
+          </SettingsSection>
         ) : null}
 
         {showSettingsSection('appearance') ? (

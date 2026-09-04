@@ -63,7 +63,7 @@ ok(!/setNeedsRegistration|onClose=\{\(\) => set/.test(registerBlock),
 // went red when the two components were merged onto one shared store even
 // though the behaviour was unchanged. A check that fails on a rename is
 // pinning the implementation, not the rule.
-ok(/catch\b[\s\S]{0,400}(setState|publishShift)\(null\)/.test(gate),
+ok(/catch\b[\s\S]{0,400}publishShift\(key, null\)/.test(gate),
   'a failed read resets shift state to null rather than assuming a shift exists')
 ok(/needs_registration === true/.test(gate),
   'the prompt condition tests the server flag with ===, so null/undefined never suppresses it')
@@ -171,6 +171,11 @@ ok(used.every((k) => !k.includes('.')),
 // publishes to it.
 ok(/function useSharedShift\(/.test(gate), 'there is a single shared shift-state hook')
 ok(/export function publishShift\(/.test(gate), 'and a single publish path for writes')
+ok(/export function shiftCacheKey\(/.test(gate), 'the shared state has an explicit composite cache key')
+ok(/userId[\s\S]{0,200}branchId[\s\S]{0,200}scopeMode/.test(gate), 'the cache key includes user, branch, and policy mode')
+ok(/const sharedShifts = new Map<string, ShiftState \| null>/.test(gate), 'shift states are partitioned instead of one process-global row')
+ok(/ShiftGate\(\{ children, branchId = null, branchName = null \}/.test(gate), 'the POS gate accepts the active branch identity')
+ok(/EndShiftButton\(\{ onEnded, branchId = null \}/.test(gate), 'the close control accepts the same active branch identity')
 
 {
   const gateStart = gate.indexOf('export default function ShiftGate')
@@ -181,18 +186,18 @@ ok(/export function publishShift\(/.test(gate), 'and a single publish path for w
     ['EndShiftButton', gate.slice(endStart)],
   ] as const
   for (const [name, body] of bodies) {
-    ok(/useSharedShift\(branchId\)/.test(body), name + ' reads the shared shift state')
+    ok(/useSharedShift\(branchId, user\?\.id, settings\?\.shift_scope_mode\)/.test(body), name + ' reads the correctly scoped shared shift state')
     ok(!/useState<ShiftState/.test(body), name + ' keeps no private copy of the shift state')
     ok(!/fetchCurrentShift\(/.test(body), name + ' does not fetch the shift itself')
     // A write must reach the OTHER component, which only publishing does.
-    ok(/publishShift\(next\)/.test(body), name + ' publishes its write, so the other surface updates at once')
+    ok(/publish\(next\)/.test(body), name + ' publishes its write, so the other surface updates at once')
   }
 }
 
 // Both components mount together on POS open, so the mount fetch is de-duped.
-ok(/shiftInFlight/.test(gate), 'the shared hook de-dupes the mount fetch')
+ok(/shiftInflight/.test(gate), 'the shared hook de-dupes the mount fetch per composite key')
 
 // A failed read must still not read as "registered".
-ok(/publishShift\(null\)/.test(gate), 'a failed shift read publishes null, never a registered-looking state')
+ok(/publishShift\(key, null\)/.test(gate), 'a failed shift read publishes null, never a registered-looking state')
 
 console.log(`\nshiftGate: all ${checks} checks passed`)

@@ -1962,6 +1962,9 @@ export default function POS() {
   // Single-branch context (adding to cart, "display stock for this branch") uses the
   // first selected branch even when several are selected for browsing/filtering.
   const primaryBranchFilterId = branchFilterIds.length ? branchFilterIds[0] : null
+  const primaryBranchName = primaryBranchFilterId == null
+    ? null
+    : (branches.find((branch) => Number(branch?.id) === Number(primaryBranchFilterId))?.name || null)
 
   // Which products currently carry active batch/expiry tracking, scoped to
   // the branch filter -- refetched whenever it changes.
@@ -3327,7 +3330,7 @@ export default function POS() {
                 "end only once" is visible in the UI as well as enforced in the
                 UPDATE: once ended, there is no button to press again. */}
             <div className="ml-auto flex-shrink-0 pl-2">
-              <EndShiftButton />
+              <EndShiftButton branchId={primaryBranchFilterId} />
             </div>
           </div>
 
@@ -3930,7 +3933,7 @@ export default function POS() {
       {/* Opening-cash prompt (S4R4-5). Mounted last so it overlays the till,
           and non-dismissible: the owner's rule is that the first use of POS
           each day keeps prompting until the drawer float is registered. */}
-      <ShiftGate />
+      <ShiftGate branchId={primaryBranchFilterId} branchName={primaryBranchName} />
 
       {/* Product detail bottom-sheet */}
       {detailProduct ? (
