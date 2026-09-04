@@ -4059,6 +4059,15 @@ BACKUP_TABLES (`3a0a7cb2`). Still open:
   the value — reproduced live in POS (payment $20→$19 while scrolling the
   panel). Class fix: blur-on-wheel (or wheel preventDefault) on the shared
   number inputs; POS payment/discount fields first.
+  **[~] Claimed by business-os-v1-63, Sep 4 2026.** No shared numeric-input
+  component exists (77 hand-rolled `type="number"` inputs across 22 files,
+  confirmed by ee's read-only sweep) — mechanism is a single synchronous,
+  capture-phase, passive `wheel` listener in `frontend/src/index.tsx` that
+  blurs the focused element when it is a number input (blur, not
+  preventDefault, so the panel keeps scrolling). Building on `rc/s4-2026-09-04`
+  @ `2c497564` in its own worktree, not the shared tree (`App.tsx` is dirty
+  there). Cleared with 4a (S4-21/modal-chrome stale, no collision) and ee
+  (sweep owner).
 - **HIGH (layering):** InfoHint portals at z-[1000] but shared Modal is
   z-[1050] — every InfoHint inside any Modal renders its tooltip BEHIND the
   modal (ImportModeWizard, ExportFieldsModal, StockChangeSection, Branches,
