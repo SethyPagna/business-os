@@ -2251,6 +2251,7 @@
   "import_took": "ចំណាយពេល",
   "import_waiting_for_worker": "កំពុងរង់ចាំដំណើរការ",
   "import_warning_kind_barcode_collision": "លេខបាកូដដូចគ្នា ប៉ុន្តែឈ្មោះខុសគ្នា",
+  "import_warning_kind_cost_outlier": "ថ្លៃដើមខុសគ្នាខ្លាំងពេក មិនអាចយកមធ្យមភាគបានទេ (រក្សាថ្លៃដើមខ្ពស់ជាង)",
   "import_warning_kind_duplicate_row_match": "ជួរដេកពីរនៅក្នុងឯកសារនេះត្រូវគ្នានឹងទំនាក់ទំនងដែលមានស្រាប់តែមួយ",
   "import_warning_kind_membership_mismatch": "លេខសមាជិកជាកម្មសិទ្ធិរបស់ឈ្មោះផ្សេងនៅក្នុងឯកសារ",
   "import_warning_kind_membership_phone_conflict": "លេខទូរស័ព្ទជាកម្មសិទ្ធិរបស់អតិថិជនផ្សេងនៅក្នុងឯកសារ",

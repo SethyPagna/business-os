@@ -39,6 +39,14 @@
 // Rounded up, never down, so an averaged cost can never understate what was
 // actually paid and quietly overstate profit.
 //
+// The averaging applies to costs that are ALIKE. The owner's follow-up ruling
+// (2026-09-04, verbatim): "the add and divide is only for those similar
+// costs...not the 0 cost etc...". A 0 is not a cost at all and is excluded;
+// and two figures more than COST_OUTLIER_RATIO apart are one cost and one
+// probable typo, so the dearest is kept rather than a mean nobody ever paid.
+// Both halves live in resolveMergedCostDetail, which reports the refusal
+// instead of applying it silently.
+//
 // Selling price and special price are likewise NOT details. They are
 // what we plan to charge, they are adjusted for sales/POS, and two rows
 // differing only in what we hope to sell for are the same product. When
@@ -162,8 +170,38 @@ export function roundCostUp4(value: unknown): number {
 }
 
 /**
+ * The ratio between the cheapest and the dearest DISTINCT recorded cost above
+ * which averaging is refused -- see resolveMergedCostDetail.
+ *
+ * MEASURED, NOT TUNED. Across the 353 active merge-candidate name groups in
+ * production on 2026-09-04: 258 groups have one costed row or none (nothing to
+ * average), 79 agree within 10%, 15 within 50%, exactly 1 spreads up to 3x, and
+ * 0 spread further. The widest genuine pair is 1.58x -- "maybelline concealer
+ * eraser n.110" at $5.00 and $7.90, alongside a Charlotte eyeshadow at $27 vs
+ * $38 and three Estee Lauder Double Wear shades: every one of them the same
+ * article restocked at a different supplier price, exactly what the mean is
+ * for. So at 2x this guard fires on NOTHING in today's catalogue. It is purely
+ * a FORWARD guard against a mistyped cost (a $2 item entered as $200) turning
+ * into a $101 number nobody ever paid. Do not "tune" it down towards the real
+ * data -- the real data is what it must never fire on.
+ */
+export const COST_OUTLIER_RATIO = 2
+
+/** One field whose distinct costs were too far apart to average -- see resolveMergedCostDetail. */
+export type MergedCostOutlier = {
+  field: keyof MergeableCost
+  /** Cheapest distinct recorded cost seen. */
+  min: number
+  /** Dearest distinct recorded cost seen -- and what was stored. */
+  max: number
+  /** The value written, i.e. `max`. Named separately so the shape survives a later policy change. */
+  chosen: number
+}
+
+/**
  * Resolves the cost for a merge: the mean of the DISTINCT costs across the
- * rows, per currency field, rounded up to 4 decimals.
+ * rows, per currency field, rounded up to 4 decimals -- and reports any field
+ * where the guard below refused to average.
  *
  * Distinct, not per-row, because the user's rule is "add different costs
  * together and divide by the number different costs" -- ten rows at $4 and
@@ -177,12 +215,29 @@ export function roundCostUp4(value: unknown): number {
  * the cost and double the reported profit. If no row carries a cost, the
  * result is 0 -- unchanged from what every row already said.
  *
- * Returns only the fields at least one row actually carried, so the result
- * can be spread over an existing row without clobbering it with zeros.
+ * SIMILARITY GUARD (owner ruling, 2026-09-04: "the add and divide is only for
+ * those similar costs... not the 0 cost etc"). The 0 half is the exclusion
+ * above. The other half is here: when the dearest distinct cost is more than
+ * COST_OUTLIER_RATIO times the cheapest, the two figures are not two prices
+ * for one article, they are one figure and one probable mistake -- and the
+ * mean of $5 and a mistyped $200 is $102.50, a number nobody ever paid for
+ * anything. Above the threshold the HIGHEST is stored instead, on the same
+ * reasoning as roundCostUp4 rounding up: understating cost overstates profit,
+ * so when the rule cannot know which figure is real it must not pick the one
+ * that flatters the margin. The refusal is reported in `outliers` rather than
+ * being silent -- a merge that quietly rewrote a cost is precisely the failure
+ * mode this guard exists to make visible.
+ *
+ * `merged` carries only the fields at least one row actually carried, so the
+ * result can be spread over an existing row without clobbering it with zeros.
  */
-export function resolveMergedCost(rows: MergeableCost[]): Partial<Record<keyof MergeableCost, number>> {
+export function resolveMergedCostDetail(rows: MergeableCost[]): {
+  merged: Partial<Record<keyof MergeableCost, number>>
+  outliers: MergedCostOutlier[]
+} {
   const fields: (keyof MergeableCost)[] = ['cost_price_usd', 'cost_price_khr']
   const merged: Partial<Record<keyof MergeableCost, number>> = {}
+  const outliers: MergedCostOutlier[] = []
   for (const field of fields) {
     const distinct = new Set<number>()
     let sawField = false
@@ -196,11 +251,29 @@ export function resolveMergedCost(rows: MergeableCost[]): Partial<Record<keyof M
     }
     if (!sawField) continue
     if (!distinct.size) { merged[field] = 0; continue }
+    const values = [...distinct]
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    if (values.length > 1 && max > min * COST_OUTLIER_RATIO) {
+      merged[field] = max
+      outliers.push({ field, min, max, chosen: max })
+      continue
+    }
     let sum = 0
-    for (const value of distinct) sum += value
-    merged[field] = roundCostUp4(sum / distinct.size)
+    for (const value of values) sum += value
+    merged[field] = roundCostUp4(sum / values.length)
   }
-  return merged
+  return { merged, outliers }
+}
+
+/**
+ * The merged costs alone, for the many callers that only spread the result
+ * over a row. Callers that can SHOW the operator something -- the importer's
+ * per-row warnings, the merge endpoints' audit entry and response -- should
+ * call resolveMergedCostDetail and surface `outliers` instead of this.
+ */
+export function resolveMergedCost(rows: MergeableCost[]): Partial<Record<keyof MergeableCost, number>> {
+  return resolveMergedCostDetail(rows).merged
 }
 
 export type MergeablePricing = {

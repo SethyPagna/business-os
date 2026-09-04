@@ -18,7 +18,8 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
-import { normalizeProductGroupName, resolveMergedCost, resolveMergedPricing } from '../lib/productDetailRule'
+import { normalizeProductGroupName, resolveMergedCostDetail, resolveMergedPricing } from '../lib/productDetailRule'
+import type { MergedCostOutlier } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, type MergeReversal } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -2388,6 +2389,11 @@ export async function foldDuplicateProductInto(
   quantityMoved: number
   salesReparented: number
   movementsReparented: number
+  // Empty on every ordinary fold. Non-empty when the two rows' costs were too
+  // far apart to average and the higher was kept instead -- the one outcome of
+  // a merge where the stored cost equals neither row's own previous figure, so
+  // it is reported rather than applied silently.
+  costOutliers: MergedCostOutlier[]
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
   reversal: MergeReversal
@@ -2435,7 +2441,15 @@ export async function foldDuplicateProductInto(
   // Cost is no longer identity (Sep 4 2026), so folding a duplicate must also
   // reconcile the two costs rather than silently keeping the keeper's: the
   // survivor carries the mean of the distinct costs, rounded up to 4dp.
-  const mergedCost = resolveMergedCost([canonicalBefore || {}, dupPricing || {}])
+  //
+  // Detail form, not the plain resolveMergedCost: the rule refuses to average
+  // two costs more than COST_OUTLIER_RATIO apart (it keeps the higher one
+  // instead of inventing a mean nobody paid), and a merge that rewrote a cost
+  // on that basis must say so. `costOutliers` rides out through the audit
+  // entry and both merge responses.
+  const costResolution = resolveMergedCostDetail([canonicalBefore || {}, dupPricing || {}])
+  const mergedCost = costResolution.merged
+  const costOutliers: MergedCostOutlier[] = costResolution.outliers
   const dupBatchRows = await db
     .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
     .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: dup.id })
@@ -2641,6 +2655,10 @@ export async function foldDuplicateProductInto(
     imagesMoved: imagesMovedThisDup,
     salesReparented: reparentedSaleItemIds.length,
     movementsReparented: reparentedMovementIds.length,
+    // Only present on the rare fold that refused to average two costs, so an
+    // ordinary merge's audit payload is unchanged -- but when it happens the
+    // audit log is where it can still be found months later.
+    ...(costOutliers.length ? { costOutliers } : {}),
   })
 
   return {
@@ -2650,6 +2668,7 @@ export async function foldDuplicateProductInto(
     quantityMoved,
     salesReparented: reparentedSaleItemIds.length,
     movementsReparented: reparentedMovementIds.length,
+    costOutliers,
     reparentedSaleItemIds,
     reparentedMovementIds,
     // Everything undo needs to restore both products to their exact pre-fold
@@ -2789,6 +2808,11 @@ app.post('/merge-duplicates', async (c) => {
     mergedNames: (string | null)[]
   }> = []
   let mergedProductsCount = 0
+  // Folds that refused to average two costs (see resolveMergedCostDetail's
+  // similarity guard). Normally empty; returned so a bulk run that silently
+  // rewrote a cost on one row out of hundreds is still visible in the result
+  // rather than only in the audit log.
+  const costOutlierReports: Array<{ keeperId: number; mergedId: number; field: string; min: number; max: number; kept: number }> = []
   // Every fold's reversal, in application order, so the whole run can be undone
   // (and redone) as ONE action -- see recordBulkMergeUndoSnapshot below. Kept
   // server-side only; never returned in the response (it's large).
@@ -2807,7 +2831,7 @@ app.post('/merge-duplicates', async (c) => {
     // folds into -- batches an earlier one already moved (the same
     // "growing set" the old per-group snapshot provided).
     for (const dup of group.duplicates) {
-      const { reversal } = await foldDuplicateProductInto(
+      const { reversal, costOutliers } = await foldDuplicateProductInto(
         c.env, db, user,
         { id: canonicalId, name: canonicalName },
         dup,
@@ -2815,6 +2839,9 @@ app.post('/merge-duplicates', async (c) => {
         'branch-only duplicate cleanup',
       )
       reversals.push(reversal)
+      for (const outlier of costOutliers) {
+        costOutlierReports.push({ keeperId: canonicalId, mergedId: dup.id, field: String(outlier.field), min: outlier.min, max: outlier.max, kept: outlier.chosen })
+      }
       mergedIds.push(dup.id)
       mergedNames.push(dup.name)
       mergedProductsCount += 1
@@ -2845,6 +2872,7 @@ app.post('/merge-duplicates', async (c) => {
     mergedGroups: groups.length,
     mergedProducts: mergedProductsCount,
     groups: groupSummaries,
+    costOutliers: costOutlierReports,
     actionHistoryId: undoRecord?.actionHistoryId ?? null,
   })
 })

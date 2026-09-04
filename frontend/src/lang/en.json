@@ -2251,6 +2251,7 @@
   "import_took": "Took",
   "import_waiting_for_worker": "Waiting for worker",
   "import_warning_kind_barcode_collision": "Same barcode, different name",
+  "import_warning_kind_cost_outlier": "Costs too far apart to average (highest kept)",
   "import_warning_kind_duplicate_row_match": "Two rows in this file matched the same existing contact",
   "import_warning_kind_membership_mismatch": "Membership number belongs to a different name on file",
   "import_warning_kind_membership_phone_conflict": "Phone number belongs to a different customer on file",

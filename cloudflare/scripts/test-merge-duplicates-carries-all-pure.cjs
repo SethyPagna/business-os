@@ -110,9 +110,11 @@ check('the audit entry reports what was moved, including images', () => {
 check('both merge endpoints route through the ONE shared fold helper -- they can never drift', () => {
   const groupLoopAt = routeSrc.indexOf('for (const dup of group.duplicates)')
   assert.ok(groupLoopAt > 0, 'whole-catalog merge loop not found')
-  // The bulk path now destructures the fold's return ({ reversal }) to record
-  // one composite undo for the whole run, so allow that optional prefix.
-  assert.ok(/for \(const dup of group\.duplicates\) \{\s*\n\s*(?:const \{ reversal \} = )?await foldDuplicateProductInto\(/.test(routeSrc), 'POST /merge-duplicates must fold via the shared helper')
+  // The bulk path now destructures the fold's return ({ reversal, and since
+  // S4-32 costOutliers }) to record one composite undo for the whole run and
+  // report any refused cost average, so allow that optional prefix with any
+  // field list.
+  assert.ok(/for \(const dup of group\.duplicates\) \{\s*\n\s*(?:const \{ reversal(?:, [A-Za-z]+)* \} = )?await foldDuplicateProductInto\(/.test(routeSrc), 'POST /merge-duplicates must fold via the shared helper')
   const pairRouteAt = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
   assert.ok(pairRouteAt > 0, 'the one-pair review merge route must exist')
   assert.ok(routeSrc.indexOf('foldDuplicateProductInto(', pairRouteAt) > pairRouteAt, 'POST /possible-duplicates/merge must fold via the shared helper')
