@@ -267,16 +267,18 @@ async function main() {
     })
 
     await check('a merge that RAISES the keeper\'s price says so, field by field, and stays undoable', () => {
-      // A merge adopts the higher of the two rows' selling/special prices, so
+      // A merge adopts the higher of the two rows' selling/wholesale prices, so
       // resolving a twin pair can move what the shop rings up. Defensible rule,
       // indefensible surprise: it has to be visible before AND after.
       assert.equal(one(d1, `SELECT selling_price_usd FROM products WHERE id = ${KEEPER}`).selling_price_usd, 25,
         'the higher price is adopted (existing rule)')
       const entry = auditCalls.find((c) => c.action === 'merge_duplicate')
       assert.deepEqual(entry.detail.priceChanges, [{ field: 'selling_price_usd', from: 22, to: 25 }],
-        'only the price that actually moved is reported -- the unchanged special price must not be noise')
+        'only the price that actually moved is reported -- unchanged wholesale prices must not be noise')
       assert.deepEqual(stats.reversal.keeperPricingBefore, {
-        selling_price_usd: 22, selling_price_khr: 0, special_price_usd: 20, special_price_khr: 0,
+        selling_price_usd: 22, selling_price_khr: 0,
+        wholesale_price_usd: 0, wholesale_price_khr: 0,
+        cost_price_usd: 8, cost_price_khr: 0,
       }, 'undo must restore the exact pre-merge prices')
     })
 
