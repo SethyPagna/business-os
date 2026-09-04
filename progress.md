@@ -2530,6 +2530,21 @@ would have been silently false for almost everyone.
 `test-shift-sessions-pure.cjs` caught it by registering the same NULL-branch till
 twice and requiring the second to be refused.
 
+**Certified and pushed. Commits `9d1a8f82` (backend) and `82bd0f50` (frontend)
+on `s4/shift-register`.** Frontend gate: `test:utils` exit 0 (189 files, the
+chain now ends on `shiftGate`), `verify:i18n` exit 0 (4758 keys, both packs),
+`vite build` exit 0. Worker gate: `tsc --noEmit` clean and every
+`scripts/test-*.cjs` green, `test-shift-sessions-pure.cjs` at 22 checks.
+
+**Ready to integrate, deliberately NOT merged.** `git merge-tree` against
+`origin/rc/s4-2026-09-04` is clean — zero conflicts — so the merge itself is a
+formality. It is being left to the deploy driver on purpose: merging it puts
+**migration 0116 into the branch the next deploy builds from**, and applying a
+migration is irreversible. Whoever merges it is choosing to ship 0116 on their
+next deploy, and should say so out loud first. The rc is at 0115 and production
+is at 0115, so today a deploy applies zero migrations; after this merge it
+applies exactly one.
+
 Files — backend `9d1a8f82`: `cloudflare/migrations/0116_shift_sessions.sql`,
 `src/routes/shifts.ts`, `src/index.ts` (2 mount lines),
 `scripts/test-shift-sessions-pure.cjs` (22 checks).
