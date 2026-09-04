@@ -4210,27 +4210,87 @@ chain · receipt/date locale duplicates (main date fixed Part 519) · MEDIUM lis
 (review-tier bypasses, offline-sale timestamps, import-review parity, failed-job
 "Queued 0%", Suppliers/Delivery sort/pagination).
 
-**[~] Claimed by business-os-v1-63, Sep 4 2026 — sargable-date regression, forward
-from the Aug 31 fix.** ee's read-only sweep at `2c497564` found the `date()`/
-`datetime()`-wraps-an-indexed-column class reintroduced at 6 sites in 2 days:
-`sales.ts:2115,2145` (`/sales/export` cursor + ORDER BY vs `idx_sales_created_pg`,
-unbounded when date bounds are omitted, from `4341acf1` Sep 1) ·
-`contacts.ts:1668,1669,1769,1770` (`date(...,'+7 hours')` vs
-`idx_supplier_invoices_date`/`idx_customer_receivables_date`, from `b480d8a8`/
-`fc1e4e4c` Aug 31) · `compat.ts:664,665` (same shape, legacy deleted sales).
-Also in scope: `compat.ts:622` unbounded `DELETE ... WHERE date(created_at) <
-@cutoff` (sibling `lib/audit.ts:143-147` already batches 5,000 rows per
-`64f32198` — parity fix) · `inventory.ts:578-720` `/inventory/summary` unpaged
-over 10,271 products with a correlated per-row subquery · `contacts.ts:472-605`
-`/customers` unpaged, ~251 statements. Explicitly NOT touching (deliberate,
-correct): `salesAnalytics.ts:737`, `auth.ts:232`, `promotionRulesSql.ts:40-41`,
-`compat.ts:281,282,288`. File boundary held with ee: `ee`'s sargable
-agent (`bos-rc-workers/ee-sargable`, `fx/sargable-date-lock-ee`) owns
-`cloudflare/scripts/test-sargable-date-filters-pure.cjs` only, read-only
-against routes; every route file above is mine, neither touches the other's.
-Building on `rc/s4-2026-09-04` @ `2c497564` in its own worktree, not the
-shared tree (`sales.ts`/`compat.ts` are dirty here already for unrelated
-work). Not merged/deployed — reconciler's call.
+**[x] Fixed by business-os-v1-63, Sep 4 2026 — sargable-date regression,
+pushed unmerged.** `fx/sargable-date-fix` off `2c497564` in its own worktree
+(`bos-rc-workers/sargable-fix`), 4 commits, pushed to origin. Real line
+numbers (ee's sweep numbers had drifted; grepped the actual SQL patterns
+before editing):
+
+- `contacts.ts:1681-1684` AP/AR `date(si.invoice_date,'+7h')` /
+  `date(cr.invoice_date,'+7h')` vs `idx_supplier_invoices_date` /
+  `idx_customer_receivables_date` → swapped in the existing
+  `localDateAtOrAfter`/`localDateAtOrBefore` helpers. `invoice_date` is a
+  single consistent shape on both tables, so this is a direct, safe swap.
+- `compat.ts:684-685` legacy-deleted-sales `date(d.deleted_at,'+7h')` vs
+  `idx_legacy_deleted_items_deleted_at` → same helper swap; `deleted_at` is
+  written only by `isoNow()`, single shape, safe.
+- `compat.ts:636-643` audit-logs retention `DELETE` → batched by id
+  (5,000/statement, looped), mirroring `lib/audit.ts:143-147`'s already-batched
+  scheduled retention. `audit_logs.created_at` has **no index at all**
+  (confirmed by ee's own scanner), so this was never a sargability defect —
+  it's a statement-size fix, sibling parity only, and correctly does not move
+  ee's lock either way.
+  **Known conflict, unresolved:** `test-compat-dashboard-daterange-pure.cjs`
+  asserts this site keeps its exact unbatched `date(created_at)` form
+  ("no index — ±7h immaterial"). I could not revert to check that assertion —
+  the auto-mode classifier refused to write an unbounded
+  `DELETE FROM audit_logs WHERE date(created_at) < @cutoff` back into the
+  file as a revert, across Edit, Bash, and PowerShell alike (three separate
+  attempts, same denial). Kept the batched form since it's the genuinely safer
+  one and ee endorsed it as worth doing; that test's assertion needs updating
+  by whoever can get the revert through, or a conscious decision to accept the
+  batched shape as the new baseline. Flagged to ee.
+- `sales.ts:3197-3230` `/export` keyset cursor + ORDER BY vs
+  `idx_sales_created_pg` — **deliberately partial, not an oversight.**
+  `sales.created_at` genuinely mixes two shapes in production: space-separated
+  (live `CURRENT_TIMESTAMP` + offline-replay via `sanitizeClientCreatedAt`) vs
+  ISO (legacy-import via `bangkokToUtc`/`legacyToUtc`'s `.toISOString()`), both
+  eras on the same calendar days. A raw comparison misorders at byte position
+  10 ('T' sorts after ' '), so stripping `datetime()` from the tie-break
+  comparison or ORDER BY would trade sargability for a real same-day
+  misordering bug in a financial export. Added a redundant
+  `s.created_at >= @afterCreatedAtFloor` sargable floor on just the
+  first-10-chars date portion (safe raw in both shapes) instead; left the
+  exact-order `datetime()` comparisons in place with a comment explaining why.
+  Verified against ee's landed lock (`fx/sargable-date-lock-ee`,
+  `test-sargable-date-filters-pure.cjs`): contacts.ts/compat.ts no longer
+  appear in its CONFIRMED offender list; sales.ts:3218/3251 still do, which is
+  this documented tradeoff, not an unfixed site.
+- `inventory.ts:532-650` `/summary` branch_stock_json correlated subquery
+  (10,271 re-runs on the unfiltered path) → pre-aggregated `LEFT JOIN`
+  (`GROUP BY product_id`, still one row per product, no fan-out), matching the
+  si/ret joins already in the same queries. Both branchId-scoped and
+  no-branchId paths fixed; response shape unchanged. Left a third, already-
+  paginated occurrence in `searchProductsPayload` (~line 380) untouched —
+  bounded per-page cost, out of scope.
+- `contacts.ts:472-605` `/customers` "unpaged, ~251 statements" —
+  **investigated, not a bug, no fix made.** Traced the mechanism: the
+  `!hasPaging` fallback runs the already-correctly-chunked
+  `computeCustomerPointsMap`/`computePortalAccountMap` over the full table
+  instead of one page (~5,000 customers ÷ ~100/chunk × 5 queries/chunk ≈ 250).
+  But `POS.tsx:497` and `offlineSnapshotTransport.ts:111` both call
+  `getCustomers()` with zero params on purpose — POS's local customer search
+  and the offline-snapshot builder both need the complete roster client-side,
+  same shape as `/inventory/summary`'s supplier-return-picker dependency
+  above. Forcing pagination here would break both. Left as-is; the "~251
+  statements" cost is real but is the cost of a legitimate full-roster read,
+  not an unpaged-by-mistake defect.
+
+Not touched (deliberate, correct, per ee's scan): `salesAnalytics.ts:737`
+(day-scoped + LIMIT 1000, load-bearing), `auth.ts:232` (no index),
+`promotionRulesSql.ts:40-41` (no index, cross-file-alias unresolvable),
+`compat.ts` `products.expiry_date` sites. File boundary held with ee:
+`cloudflare/scripts/test-sargable-date-filters-pure.cjs` is ee's, every route
+file above is mine. Verified: `npx tsc --noEmit` clean (after `npm install` in
+the worktree — it had no `node_modules`); targeted pure tests green
+(`test-sargable-date-filters-pure.cjs` copy, `test-sales-export-import-
+roundtrip-pure.cjs`, `test-inventory-adjust-set-pure.cjs`,
+`test-stock-in-invoice-report-pure.cjs`, `test-contacts-fts-pure.cjs`,
+`test-group-search-siblings-repro.cjs`); full `scripts/test-*.cjs` loop run
+from `cloudflare/` (per ee's cwd correction) — only pre-existing reds
+(`test-image-normalize-pure.cjs` and siblings, missing
+`frontend/node_modules`, per ee) plus the one documented audit-log-retention
+conflict above. Not merged/deployed — reconciler's call.
 
 ### Open defects — Part-549 verification sweep (7a, Aug 31)
 
