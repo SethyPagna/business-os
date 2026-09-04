@@ -82,7 +82,12 @@ await runTest('timezone labels say Phnom Penh, never Bangkok (user, Aug 30 2026)
   const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
   assert.match(auditLog, /fmtTimezoneLabel\(log\?\.device_tz\)/)
   const saleDetail = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
-  assert.match(saleDetail, /fmtTimezoneLabel\(sale\.device_tz\)/)
+  // S4-24 (user, Sep 4 2026): the sale detail stopped showing a Timezone row
+  // at all -- it reads like a receipt now, and no receipt prints one. The rule
+  // this case exists for is unchanged and gets stricter here: the surface must
+  // not print a captured zone RAW either, which is the only way Bangkok could
+  // still reach a reader from this file.
+  assert.doesNotMatch(saleDetail, /{s*sale.device_tzs*}/, 'the sale detail must never print a raw captured timezone')
   const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
   assert.match(serverPage, /fmtTimezoneLabel\(settings\?\.display_timezone \|\| displayTimezone\)/)
   assert.match(serverPage, /fmtTimezoneLabel\(deviceTimezone\)/)

@@ -150,10 +150,12 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
             />
             <div className="mt-1 text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
           </div>
+          {/* S4-24 (user, Sep 4 2026): "returns, print buttons end of page...
+              not on top near the x close button". Edit moved to the footer,
+              the same treatment the sale detail got, so the two records do not
+              disagree about where a record's actions live. X stays: it is how
+              you leave, not something you do to the return. */}
           <div className="flex shrink-0 items-center gap-2">
-            {onEdit ? (
-              <button type="button" onClick={onEdit} className="btn-secondary px-3 py-1.5 text-xs">{tr('edit', 'Edit')}</button>
-            ) : null}
             <button type="button" onClick={onClose} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
           </div>
         </div>
@@ -362,6 +364,13 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                 </table>
               </div>
             </section>
+          ) : null}
+
+          {/* S4-24: the record's actions, at the end of the record. */}
+          {onEdit ? (
+            <div className="flex flex-col gap-2 border-t border-gray-200 pt-4 sm:flex-row sm:justify-end dark:border-gray-700">
+              <button type="button" onClick={onEdit} className="btn-secondary w-full px-4 py-2 text-sm sm:w-auto">{tr('edit', 'Edit')}</button>
+            </div>
           ) : null}
         </div>
       </div>

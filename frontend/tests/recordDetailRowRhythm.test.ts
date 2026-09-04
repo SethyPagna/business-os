@@ -125,7 +125,6 @@ runTest('the sale money summary keeps every line it used to show', () => {
     "t('subtotal')",
     "t('discount')",
     "t('membership_discount')",
-    "t('points_redeemed')",
     "t('tax')",
     "'delivery_fee'",
     "t('returns_refunded')",
@@ -133,7 +132,6 @@ runTest('the sale money summary keeps every line it used to show', () => {
     "t('amount_paid')",
     "'outstanding_balance'",
     "t('change')",
-    "'delivery_actual_cost'",
   ]
   let cursor = -1
   for (const label of expected) {
@@ -170,8 +168,8 @@ runTest('the sale money summary keeps every line it used to show', () => {
 
 runTest('every field the sale detail used to show is still rendered', () => {
   const fields = [
-    'sale.cashier_name', 'sale.payment_method', 'paymentCurrency', 'paymentDetails',
-    'sale.branch_name', 'sale.source_return_id', 'sale.device_tz', 'sale.device_name',
+    'sale.cashier_name', 'sale.payment_method', 'paymentDetails',
+    'sale.branch_name', 'sale.source_return_id',
     'sale.customer_name', 'sale.customer_phone', 'sale.customer_address',
     'sale.customer_membership_number', 'sale.notes',
     'sale.delivery_contact_name', 'sale.delivery_contact_phone', 'sale.delivery_contact_address',
@@ -238,6 +236,104 @@ runTest('opening a return fetches the record that has the line items', () => {
   // A background list refresh must not undo the hydrate.
   has('items: fresh.items ?? current.items', 'rebinding an open detail to a fresh list row must keep its items')
   has('replacement_items: fresh.replacement_items ?? current.replacement_items', 'rebinding must keep the replacement items too')
+})
+
+// --- 9. S4-25: delivery is one thing, in one place -------------------------
+
+runTest('the sale detail has no separate Delivery card', () => {
+  // User, Sep 4 2026: "Delivery can merge into items as like receipt it shows
+  // near total". It used to be a SectionCard sitting beside Customer, so the
+  // reader held two names, two phones and two addresses apart before reaching
+  // the single fee those fields explain -- and on a zero-fee delivery the fee
+  // row did not render at all, which is the case where the driver matters
+  // most and was the only place their name appeared.
+  assert.ok(
+    !/SectionCard title=\{translateOr\('delivery'/.test(saleDetail),
+    'delivery must not be its own card any more',
+  )
+  const foot = saleDetail.slice(saleDetail.indexOf('<tfoot'), saleDetail.indexOf('</tfoot>'))
+  const at = foot.indexOf("'delivery_fee'")
+  assert.ok(at >= 0, 'the delivery fee row must still exist')
+  assert.match(foot.slice(at, at + 260), /note=\{deliveryContactNote\}/, 'the fee row must carry the driver, phone and address')
+  // The row must survive a free delivery.
+  assert.match(
+    saleDetail,
+    /\{isDelivery \|\| deliveryFeeUsd > 0 \|\| deliveryFeeKhr > 0 \?/,
+    'a delivery with a zero fee must still show its driver',
+  )
+  // note renders inside a <span>; a <div> there is invalid nesting.
+  const note = saleDetail.slice(saleDetail.indexOf('const deliveryContactLines'), saleDetail.indexOf('const paymentDetails ='))
+  assert.ok(note.length > 80, 'expected to find the delivery note builder')
+  assert.ok(!note.includes('<div'), 'the note is rendered inside a <span>, so it must not contain a <div>')
+  for (const field of ['delivery_contact_name', 'delivery_contact_phone', 'delivery_contact_address']) {
+    assert.ok(note.includes(field), `the delivery note lost ${field}`)
+  }
+})
+
+// --- 10. S4-24: what the receipt does not print, this does not print -------
+
+runTest('the sale detail shows what a receipt shows, and stops there', () => {
+  // User, Sep 4 2026: "in sales the click to view details for receipt, show
+  // data like receipt... no need so much break downs and difference".
+  //
+  // The rows below are gone ON PURPOSE. This is the inverse of the Sep-3 rule
+  // one section above ("no field was lost"), which was written for a restyle;
+  // this is a scope decision the user made, and it is pinned here so nobody
+  // re-adds a row by reflex. Every reference is to what SaleDetailModal
+  // renders -- the data itself is untouched on the sale row, in the exports
+  // and in the reports.
+  const gone: Array<[needle: string, why: string]> = [
+    ['sale.device_tz', 'Timezone is device telemetry; no receipt prints it'],
+    ['sale.device_name', 'Device is device telemetry; no receipt prints it'],
+    ["translateOr('payment_currency'", 'Payment currency is not a receipt line'],
+    ["t('points_redeemed')", 'points are the mechanism behind the membership discount printed above them'],
+    ["translateOr('delivery_actual_cost'", 'what the shop paid the driver is not part of what the customer owes'],
+    ['deliveryActualCostUsd', 'the local it was computed from is dead too'],
+  ]
+  for (const [needle, why] of gone) {
+    assert.ok(!saleDetail.includes(needle), `the sale detail put "${needle}" back -- ${why}`)
+  }
+
+  // What the user named as must-keep, kept.
+  for (const [needle, why] of [
+    ["t('status')", 'status'],
+    ['sale.customer_membership_number', 'customer with membership'],
+    ['handleMembershipAttach', 'attaching a membership to the sale'],
+    ["t('update_status')", 'the status update section'],
+    ['handleStatusUpdate', 'the status update action'],
+  ] as Array<[string, string]>) {
+    assert.ok(saleDetail.includes(needle), `the sale detail lost ${why}`)
+  }
+
+  // A split payment is still shown -- as the payment row's own detail, the way
+  // the receipt prints it, not as a row called "Payment breakdown".
+  assert.ok(!saleDetail.includes("'payment_breakdown'"), 'the split payment must not be its own labelled row')
+  // Two rows carry this label -- the awaiting-payment affordance comes first,
+  // so anchor on the badge that only the settled row renders.
+  const payAt = saleDetail.indexOf('<span className="badge-blue text-xs">{sale.payment_method}</span>')
+  assert.ok(payAt >= 0, 'expected the settled payment-method row')
+  assert.ok(
+    saleDetail.slice(payAt, payAt + 1200).includes('paymentDetails.map'),
+    'the payment methods must be listed under the payment row itself',
+  )
+})
+
+runTest('both record details put their actions at the end, not beside the close button', () => {
+  // The two modals must agree. Fixing only the sale would leave a shopkeeper
+  // reaching for Edit in a different place depending on which record is open,
+  // which is the same disagreement the Sep-3 row rhythm was written to end.
+  for (const [name, source, action] of [
+    ['sale detail', saleDetail, 'onPrint(sale)'],
+    ['return detail', returnDetail, 'onClick={onEdit}'],
+  ] as Array<[string, string, string]>) {
+    const closeAt = source.indexOf("aria-label={tr('close'") >= 0
+      ? source.indexOf("aria-label={tr('close'")
+      : source.indexOf("aria-label={t('close')")
+    assert.ok(closeAt >= 0, `expected ${name} to have a close control`)
+    const actionAt = source.indexOf(action)
+    assert.ok(actionAt >= 0, `${name} lost its action`)
+    assert.ok(actionAt > closeAt, `${name} still renders its action beside the close button`)
+  }
 })
 
 if (failed > 0) process.exitCode = 1
