@@ -106,7 +106,7 @@ const idsOf = (cluster) => cluster.products.map((x) => x.id).sort((a, b) => a - 
 const findCluster = (clusters, sev, ids) => clusters.find((c) => c.severity === sev && idsOf(c) === ids)
 
 async function run() {
-  check('cleanup normalization removes exactly one numeric leading zero',
+  check('cleanup normalization removes every numeric leading zero (idempotent)',
     normalizeLeadingZeroBarcodeForCleanup('0123456789') === '123456789')
   check('placeholder barcode 0 is not normalized into a blank barcode',
     normalizeLeadingZeroBarcodeForCleanup('0') === '0')

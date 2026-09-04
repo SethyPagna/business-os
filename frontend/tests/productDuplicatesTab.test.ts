@@ -34,8 +34,15 @@ test('bulk merge excludes manual-only conflicts and keeps stock/clean barcode', 
   assert.match(src, /cluster\.products\.length !== 2/, 'a 3+ cluster needs a human-picked keeper')
   assert.match(src, /normalizeProductGroupName\(a\.name\).*normalizeProductGroupName\(b\.name\)/s, 'names must match exactly after normal grouping')
   assert.match(src, /cost_price_usd/, 'cost must match before an automatic merge')
-  assert.match(src, /isLeadingZeroPair && aExtraZero !== bExtraZero/, 'an extra-zero pair must preserve the clean barcode')
-  assert.match(src, /aExtraZero \? 1 : -1/, 'the clean barcode must beat the extra-zero copy')
+  // S4-29: this used to pin a was-it-normalized BOOLEAN
+  // (`isLeadingZeroPair && aExtraZero !== bExtraZero`). That boolean ties two
+  // rows that BOTH carry leading zeros -- '008339327539' vs '08339327539' --
+  // so the dirtier row won the id tie-break and survived, putting the extra
+  // zero back into the catalog. The ordering now ranks on HOW MANY leading
+  // zeros each row would shed, which orders every case the boolean did and
+  // the double-zero case it could not.
+  assert.match(src, /isLeadingZeroPair/, 'an extra-zero pair must preserve the clean barcode')
+  assert.match(src, /zerosShed\(a\) - zerosShed\(b\)/, 'the cleaner barcode must beat the extra-zero copy, counted in zeros shed')
   assert.match(src, /const stockDiff =/, 'ordinary exact-barcode duplicates must prefer the stocked row')
   assert.match(src, /mergePossiblySameProducts\(keeper\.id, other\.id\)/)
   assert.match(src, /bulk_merge_skipped_multiway/, 'manual-only groups are reported as skipped, not silent')

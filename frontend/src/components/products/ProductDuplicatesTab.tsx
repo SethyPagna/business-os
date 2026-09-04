@@ -76,9 +76,18 @@ function clusterIsExact(cluster: Cluster): boolean {
   return names.size === 1 && !names.has('')
 }
 
+// MIRROR of normalizeLeadingZeroBarcodeForCleanup in
+// cloudflare/src/lib/productIdentity.ts -- keep the two byte-identical in
+// behaviour. Strips EVERY leading zero (idempotent: stripping exactly one
+// moved both sides of a pair in lockstep, so '08339327539' and
+// '008339327539' never met), numeric codes only, and only when four or more
+// digits survive -- so placeholder '0' and the MAC shade codes '0601'/'601'
+// stay untouched, and '1234' can never fold into '12345'.
 function cleanupBarcode(value: string | null): string {
   const barcode = String(value || '').trim().toLowerCase()
-  return /^0[0-9]{4,}$/.test(barcode) ? barcode.slice(1) : barcode
+  if (!/^[0-9]+$/.test(barcode)) return barcode
+  const stripped = barcode.replace(/^0+/, '')
+  return stripped.length >= 4 ? stripped : barcode
 }
 
 // Only these pairs are safe for an automatic bulk decision: same exact name,
@@ -96,10 +105,19 @@ function clusterIsSafeAutoMerge(cluster: Cluster): boolean {
 function chooseAutomaticKeeper(products: ClusterProduct[]): [ClusterProduct, ClusterProduct] {
   const rawBarcodes = new Set(products.map((product) => String(product.barcode || '').trim().toLowerCase()))
   const isLeadingZeroPair = rawBarcodes.size > 1
+  // MIRROR of the survivor ordering in findDuplicateProductGroups. Rank on the
+  // NUMBER of leading zeros a row would shed, not on a was-it-normalized
+  // boolean: '008339327539' and '08339327539' are both "normalized", so the
+  // boolean tied them and the dirtier row won the id tie-break.
+  const zerosShed = (product: ClusterProduct) => {
+    const raw = String(product.barcode || '').trim().toLowerCase()
+    return raw.length - cleanupBarcode(raw).length
+  }
   const ordered = [...products].sort((a, b) => {
-    const aExtraZero = cleanupBarcode(a.barcode) !== String(a.barcode || '').trim().toLowerCase()
-    const bExtraZero = cleanupBarcode(b.barcode) !== String(b.barcode || '').trim().toLowerCase()
-    if (isLeadingZeroPair && aExtraZero !== bExtraZero) return aExtraZero ? 1 : -1
+    if (isLeadingZeroPair) {
+      const zeroDiff = zerosShed(a) - zerosShed(b)
+      if (zeroDiff) return zeroDiff
+    }
     const stockDiff = (Number(b.stock_quantity) || 0) - (Number(a.stock_quantity) || 0)
     if (stockDiff) return stockDiff
     return a.id - b.id
