@@ -44,7 +44,9 @@ function database() {
   const db = new Database(':memory:')
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
   db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT); CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER DEFAULT 1)')
+  db.exec(fs.readFileSync(path.join(root, 'migrations', '0089_system_flags.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
+  db.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
   db.prepare('INSERT INTO branches(id,name,is_active) VALUES (1,?,1),(2,?,0)').run('Canonical Shop', 'Inactive')
   return db
 }
@@ -87,6 +89,9 @@ async function main() {
   assert.deepEqual([a.status, b.status].sort(), [200, 409], 'only one concurrent amendment reports success')
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM shift_session_amendments').get().n, 1, 'loser writes no false amendment')
   assert.equal(audits, 2, 'only open and the winning amendment are audited')
+  assert.throws(() => sqlite.prepare('DELETE FROM shift_session_amendments').run(), /immutable/, 'ordinary code cannot delete amendment history')
+  sqlite.prepare("INSERT INTO system_flags(key,value) VALUES ('maintenance', ?)").run(JSON.stringify({ mode: 'restore', token: 'test' }))
+  assert.doesNotThrow(() => sqlite.prepare('DELETE FROM shift_session_amendments').run(), 'authorized restore maintenance can replace amendment history')
   console.log('OK shift security/integrity: permissions, canonical branch, lifecycle, concurrent amendment')
 }
 main().catch((error) => { console.error(error); process.exit(1) })

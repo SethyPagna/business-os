@@ -70,6 +70,15 @@ check('the other silently-dropped business tables are covered too', () => {
   }
 })
 
+check('shift sessions and their immutable amendment ledger are restored together', () => {
+  assert.ok(BACKUP_TABLES.includes('shift_sessions'))
+  assert.ok(BACKUP_TABLES.includes('shift_session_amendments'))
+  assert.ok(BACKUP_TABLES.indexOf('shift_session_amendments') > BACKUP_TABLES.indexOf('shift_sessions'))
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0119_shift_restore_guard.sql'), 'utf8')
+  assert.match(migration, /key = 'maintenance'/)
+  assert.match(migration, /json_extract\(value, '\$\.mode'\) = 'restore'/)
+})
+
 check('FK dependency order holds: every child sits after every parent it references', () => {
   const at = (t) => BACKUP_TABLES.indexOf(t)
   const before = (parent, child) => assert.ok(

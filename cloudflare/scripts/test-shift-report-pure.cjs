@@ -80,6 +80,7 @@ const SEP = lang.BILINGUAL_SEPARATOR
 
 // A closed shift: opened 08:15 local (01:15Z), counted 17:02 local (10:02Z).
 const CLOSED = {
+  scope_mode: 'per_account',
   shift_code: 'S-20260904-0815',
   user_id: 7,
   user_name: 'Za',
@@ -440,6 +441,11 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(!/<> 'cancelled'/.test(counts.sql), 'the count query inherited the hide-cancelled guard, so it can only ever report 0 cancelled')
   assert.ok(/sale_amendments/.test(counts.sql), '"edited" is not counted from the amendment ledger')
   console.log(`PASS wiring: /shift issued ${statements.length} statements, ${windowed.length} of them window-bound, counts see cancelled receipts`)
+
+  const shopWide = { ...CLOSED, scope_mode: 'shop_wide' }
+  assert.equal(telegram.shiftFilters(shopWide, NOW).cashierId, null, 'shop-wide reports do not narrow sales to the opener')
+  const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
+  assert.match(telegramSource, /if \(shift\.scope_mode !== 'shop_wide'\)[\s\S]{0,180}fees\.created_by = @createdBy/, 'shop-wide expenses do not narrow to the opener')
 
   // An unknown day answers, rather than rendering an empty skeleton.
   statements.length = 0

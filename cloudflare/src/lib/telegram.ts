@@ -263,14 +263,10 @@ async function inventorySummaryReport(env: Env): Promise<string> {
 // ruling; see the note at "Final amount" below) -- then the payment-method
 // and delivery-service breakdowns.
 //
-// WHAT A SHIFT IS SCOPED TO. One employee, one branch, one business day --
-// the key of migration 0116's `shift_sessions`, and the board's own words for
-// S4-10 ("the shift report covers whichever user is signed in"). So every
-// figure below is scoped to that cashier's own receipts inside the window
-// between the minute they registered the float and the minute they counted
-// it. A shift whose branch_id is NULL (a single-branch till, the common shop
-// here) is not narrowed by branch, because there is only one; the cashier
-// scope still holds it to that employee's takings.
+// WHAT A SHIFT IS SCOPED TO. Per-account policy means one employee, one
+// branch and one business day. Shop-wide policy means every employee in that
+// branch during the one shared shift window. A shift whose branch_id is NULL
+// (a single-branch till, the common shop here) is not narrowed by branch.
 //
 // WHY IT GOES THROUGH THE SALES KERNEL. Revenue has exactly one definition in
 // this system -- net sales, over recognized (neither cancelled nor
@@ -308,6 +304,7 @@ async function inventorySummaryReport(env: Env): Promise<string> {
 
 export type ShiftReportSession = {
   shift_code: string
+  scope_mode?: 'per_account' | 'shop_wide'
   user_id: number
   user_name: string | null
   branch_id: number | null
@@ -492,17 +489,19 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   return lines.join('\n')
 }
 
-const SHIFT_COLUMNS = `shift_code, user_id, user_name, branch_id, branch_name, business_date,
+const SHIFT_COLUMNS = `shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
   opened_at, opening_float_usd, opening_float_khr,
   closed_at, closing_counted_usd, closing_counted_khr`
 
 /** The filter that turns "this shift" into a query the sales kernel accepts. */
-function shiftFilters(shift: ShiftReportSession, nowMs: number): SalesFilters {
+export function shiftFilters(shift: ShiftReportSession, nowMs: number): SalesFilters {
   return {
     createdFrom: shift.opened_at,
     // An open shift is reported up to now. shiftWindowBound normalises both.
     createdTo: shift.closed_at || new Date(nowMs).toISOString(),
-    cashierId: shift.user_id,
+    // A shop-wide shift belongs to the branch, not only to the employee who
+    // opened it. Per-account retains the original cashier boundary.
+    cashierId: shift.scope_mode === 'shop_wide' ? null : shift.user_id,
     // Falsy (null) branch is not a filter -- see the section comment.
     branchId: shift.branch_id ?? null,
   }
@@ -537,8 +536,8 @@ async function shiftInvoiceCounts(env: Env, shift: ShiftReportSession, nowMs: nu
 }
 
 /**
- * Expenses paid out of THIS drawer: recorded inside the window by the same
- * employee. `created_at` is the moment the record was written and shares
+ * Expenses paid out of THIS drawer: recorded inside the window, and by the
+ * same employee only under per-account policy. `created_at` shares
  * sales' timestamp shape; `fee_date` is a bare day and could not tell two
  * shifts on one date apart.
  */
@@ -548,8 +547,10 @@ async function shiftExpenses(env: Env, shift: ShiftReportSession, nowMs: number)
   // clause the sales table owns and add the fees one.
   const feeClauses = clauses.filter((clause) => !clause.includes('cashier_id'))
   delete params.cashierId
-  feeClauses.push('fees.created_by = @createdBy')
-  params.createdBy = shift.user_id
+  if (shift.scope_mode !== 'shop_wide') {
+    feeClauses.push('fees.created_by = @createdBy')
+    params.createdBy = shift.user_id
+  }
   if (shift.branch_id) {
     feeClauses.push('fees.branch_id = @branchId')
     params.branchId = shift.branch_id
