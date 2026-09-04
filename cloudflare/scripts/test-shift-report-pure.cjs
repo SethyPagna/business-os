@@ -52,6 +52,12 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
+// saleTotals is a pure module with no imports of its own, so it is loaded for
+// real rather than stubbed. telegram.ts does not import it on this branch, but
+// the receipt lane adds that import (a shop-absorbed delivery fee must not be
+// billed into the alert Total); a stub returning a plausible shape would let
+// that regress invisibly, and a missing key makes loadReal throw on merge.
+const saleTotals = loadReal('lib/saleTotals.ts')
 const lang = loadReal('lib/telegramLang.ts')
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const analytics = loadReal('lib/salesAnalytics.ts', {
@@ -62,6 +68,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
+  './saleTotals': saleTotals,
   './salesAnalytics': analytics,
 })
 
@@ -400,6 +407,7 @@ const wired = loadReal('lib/telegram.ts', {
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
+  './saleTotals': saleTotals,
   './salesAnalytics': loadReal('lib/salesAnalytics.ts', {
     './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow,
   }),
@@ -437,6 +445,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './db': { getDb: () => emptyDb },
     './businessDateWindow': businessDateWindow,
     './telegramLang': lang,
+    './saleTotals': saleTotals,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow }),
   })
   return wiredEmpty.telegramCommandReply({}, '/shift 03/09/2026', NOW)
@@ -513,6 +522,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './db': { getDb: () => mappingDb },
     './businessDateWindow': businessDateWindow,
     './telegramLang': lang,
+    './saleTotals': saleTotals,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => mappingDb }, './businessDateWindow': businessDateWindow }),
   })
   return wiredMapping.telegramCommandReply({}, '/shift 04/09/2026', NOW)
