@@ -11,6 +11,7 @@ import {
   shouldSuppressRuntimeError,
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier.ts'
+import { installNumberInputWheelGuard } from './runtime/numberInputWheelGuard.ts'
 
 type GuardedInsertRule = CSSStyleSheet['insertRule'] & { __businessOsGuarded?: boolean }
 type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }
@@ -168,6 +169,14 @@ function installFormFieldAccessibility() {
     scan(document)
     observer.observe(document.body, { childList: true, subtree: true })
   }, { once: true })
+}
+
+// Armed synchronously, before first paint -- a wheel over a focused number
+// input can silently change its value from the moment a user can scroll,
+// so this cannot wait for the idle callback `scheduleFormFieldAccessibility`
+// below uses for its cosmetic pass.
+if (typeof document !== 'undefined') {
+  installNumberInputWheelGuard()
 }
 
 // Keep known browser-extension and CSS-injection noise away from React startup.
