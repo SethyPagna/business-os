@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
+import { useFormDirty } from '../../../utils/formDirty.ts'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
@@ -155,6 +156,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(parent?.id ?? 'new'))
   const saveInFlightRef = useRef(false)
   const { notify } = useApp()
 
@@ -259,17 +262,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       title={`${t('add_variant_to') || 'Add Variant to:'} ${parent.name}`}
       onClose={onClose}
       size="lg"
-      headerExtra={(
-        <button
-          type="button"
-          className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden"
-          onClick={handleSave}
-          disabled={saving}
-        >
-          {saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
-        </button>
-      )}
-    >
+      unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-4">
         <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
           {tr('variant_helper_text', 'Variants of the same product group can have different prices, barcodes, and suppliers.', 'វ៉ារីយ៉ង់ក្នុងក្រុមផលិតផលដូចគ្នា អាចមានតម្លៃ បារកូដ និងអ្នកផ្គត់ផ្គង់ខុសគ្នា។')}
@@ -430,7 +423,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
             CustomerFormModal.tsx's own fix. */}
-        <div className="sticky bottom-0 -mx-5 -mb-5 hidden gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex">
+        <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
           <button type="button" className="btn-primary min-h-11 flex-1" onClick={handleSave} disabled={saving}>
             {saving ? (t('saving') || 'Saving...') : (t('add_variant') || 'Add Variant')}
           </button>

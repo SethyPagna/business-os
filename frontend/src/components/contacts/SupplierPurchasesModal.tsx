@@ -92,7 +92,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
   const qty = (value: unknown): string => (value == null ? '--' : String(Number(value) || 0))
 
   return (
-    <Modal title={`${tr('supplier_purchases', 'Purchases')} -- ${supplierName}`} onClose={onClose} wide>
+    <Modal title={`${tr('supplier_purchases', 'Purchases')} -- ${supplierName}`} onClose={onClose} wide unsavedChanges="read-only">
       <div className="space-y-3">
         {loading ? (
           <div className="py-8 text-center text-sm text-gray-400">{tr('loading', 'Loading...')}</div>

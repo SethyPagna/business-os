@@ -7,6 +7,7 @@
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -511,20 +512,12 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">⚡ {tr('fast_stockin_title', 'Fast stock-in')}</h2>
           <div className="flex shrink-0 items-center gap-1">
-            {/* Phones commit from the header; the footer below is sm-and-up.
-                Same split ReceiveBatchModal and TransferModal use, so the
-                primary is never behind a scroll at any breakpoint. */}
-            <button type="button" className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden" disabled={saving || !received.length} onClick={commitSession}>
-              {saving ? (tr('saving_label', 'Saving…')) : tr('complete_stock_session', 'Complete')}
-            </button>
             {onMinimize ? (
-              <button type="button" disabled={saving}
-                onClick={() => { if (!saving) { onMinimize(tr('fast_stockin_title', 'Fast stock-in')); onClose() } }}
-                aria-label={tr('minimize', 'Minimize')}
-                title={tr('minimize_hint', 'Minimize — continue later from the chip')}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700">
-                <span className="text-base leading-none">−</span>
-              </button>
+              <MinimizeButton
+                disabled={saving}
+                tr={tr}
+                onMinimize={() => { onMinimize(tr('fast_stockin_title', 'Fast stock-in')); onClose() }}
+              />
             ) : null}
             <button type="button" onClick={closeIfIdle} disabled={saving} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
           </div>
@@ -719,7 +712,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             panel is flex-col and the body carries flex-1 with min-height 0.
             One commit control at every breakpoint, so Complete never scrolls
             out of reach behind a long queue. */}
-        <div className="hidden flex-shrink-0 flex-wrap items-center gap-2 border-t border-gray-200 p-4 sm:flex dark:border-gray-700">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
             {received.length} {tr('lines_queued', 'queued')} · ${sessionCostTotal.toFixed(2)}
           </span>

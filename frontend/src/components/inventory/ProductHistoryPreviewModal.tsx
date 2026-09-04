@@ -54,7 +54,7 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
     : T('view_stock_history', 'Stock history')
 
   return (
-    <Modal title={title} onClose={onClose} size="sm">
+    <Modal title={title} onClose={onClose} size="sm" unsavedChanges="read-only">
       {loading ? (
         <div className="py-8 text-center text-sm text-gray-400">{T('loading', 'Loading...')}</div>
       ) : error ? (

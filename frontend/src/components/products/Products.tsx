@@ -4590,9 +4590,12 @@ function ProductsFullEditor() {
             initialTab={formInitialTab}
             onSave={(payload) => handleSaveWithGallery((payload || {}) as unknown as ProductRecord)}
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
+            // S4-20: minimizing is silent otherwise -- the form just
+            // vanishes, which reads as lost work. Say where it went.
             onMinimize={!modalProduct ? (label: string) => {
               minimizeWork({ key: 'add-product', kind: 'add_product', pageId: 'products', label })
               setModal(null); setSelected(null); setFormInitialTab('basic')
+              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
             } : undefined}
             onDelete={selected ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
             t={t}

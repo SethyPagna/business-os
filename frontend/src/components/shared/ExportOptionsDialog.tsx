@@ -113,7 +113,7 @@ export default function ExportOptionsDialog({
   )
 
   return (
-    <Modal title={title} onClose={onClose}>
+    <Modal title={title} onClose={onClose} unsavedChanges="read-only">
       <div className="space-y-3">
         <div className="flex gap-2">
           {formatButton('xlsx', tr(t, 'export_format_excel', 'Excel'), tr(t, 'export_format_excel_hint', '.xlsx — opens in Excel, Khmer-safe'))}

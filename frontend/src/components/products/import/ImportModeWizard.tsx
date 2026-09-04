@@ -48,7 +48,8 @@ export default function ImportModeWizard({ onClose, onDone, t }: ImportModeWizar
           />
         )}
         onClose={() => { onDone(); onClose() }}
-      >
+      
+        unsavedChanges="read-only">
         <Suspense fallback={null}>
           <ImportHub
             t={t}

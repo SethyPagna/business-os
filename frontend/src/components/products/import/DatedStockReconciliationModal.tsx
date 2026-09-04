@@ -374,7 +374,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
   }
 
   return (
-    <Modal title={T('dated_stock_reconciliation_title', 'Dated Stock Reconciliation')} onClose={onClose} size="lg" draggable>
+    <Modal title={T('dated_stock_reconciliation_title', 'Dated Stock Reconciliation')} onClose={onClose} size="lg" draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {error ? (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

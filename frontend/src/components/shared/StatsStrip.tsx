@@ -258,7 +258,8 @@ export default function StatsStrip({
           onClose={() => setOpenKey(null)}
           size="sm"
           draggable
-        >
+        
+          unsavedChanges="read-only">
           {/* ONE detail per row, full width (user, Aug 31: "each stats instead
               of a two columns can do a one row"). The label takes the row's
               spare width and truncates; a clipped label reveals its full text

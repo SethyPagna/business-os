@@ -2394,7 +2394,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   const cancelledImportRecovery = currentJob && ['cancelled', 'cancelling'].includes(String(currentJob.status || '').toLowerCase())
 
   return (
-    <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide draggable>
+    <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide draggable unsavedChanges={{ dirty: Boolean(csvData) }}>
       {step === 1 && onTopModeChange ? <ProductImportModeTabs value={topMode} onChange={onTopModeChange} /> : null}
 
       <div className="mb-5 flex gap-1.5">

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
@@ -137,10 +140,31 @@ type FeeFormProps = {
   onClose: () => void
 }
 
+// S4-21: the registry key for this form's unsaved work, exported so the
+// modal hosting the form asks about the SAME entry the form registers.
+export function feeFormWorkKey(feeId?: string | number | null): string {
+  return `fee-form-${feeId ?? 'new'}`
+}
+
 export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }: FeeFormProps) {
   const { t } = useApp()
   const [form, setForm] = useState<FeeFormState>(() => feeToFormState(fee))
   const [saving, setSaving] = useState(false)
+  // One declaration; the ✕ above, the navigation guard, beforeunload, the
+  // sidebar dot and the update gate all read it. Latched off on a real
+  // save so closing after saving never prompts.
+  const { dirty } = useFormDirty(form, String(fee?.id ?? 'new'))
+  const savedRef = useRef(false)
+  const dirtyRef = useRef(false)
+  dirtyRef.current = dirty && !savedRef.current
+  const requestClose = useModalClose(onClose)
+  useEffect(() => registerDirtyWork({
+    key: feeFormWorkKey(fee?.id),
+    pageId: 'fees',
+    label: `${t('expense') || 'Expense'}${form.label ? ` — ${form.label}` : ''}`,
+    isDirty: () => dirtyRef.current,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [fee?.id])
   const [touched, setTouched] = useState(false)
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   // Saved labels from the server (every distinct label ever used, with its
@@ -285,6 +309,10 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
         branch_id: Number.isFinite(branchId as number) ? branchId : null,
         notes: form.notes.trim() || null,
       })
+      // Saved for real -- latch before closing so the close below cannot
+      // raise the discard prompt.
+      savedRef.current = true
+      dirtyRef.current = false
       onClose()
     } finally {
       setSaving(false)
@@ -468,7 +496,9 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
         <button className="btn-primary flex-1" type="submit" disabled={saving}>
           {saving ? (t('saving') || 'Saving...') : (t('save_fee') || 'Save Expense')}
         </button>
-        <button className="btn-secondary" type="button" onClick={onClose}>
+        {/* Cancel is a dismissal: through the modal's guard, not straight
+            to onClose (S4-21). */}
+        <button className="btn-secondary" type="button" onClick={requestClose}>
           {t('cancel') || 'Cancel'}
         </button>
       </div>

@@ -345,7 +345,6 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // reached 'done' is never resubmitted; a failed row keeps its request
   // verbatim and carries the server's reason for inline display.
   const [rows, setRows] = useState<StockAdjustRow<Parameters<typeof adjustStock>[0]>[]>([])
-  const [confirmDiscard, setConfirmDiscard] = useState(false)
   const attemptIdRef = useRef<string>(resumeAttemptId || `attempt-${Date.now().toString(36)}`)
   const resumeRef = useRef(resumeRow)
   const storage = useMemo(() => browserStockStorage(), [])
@@ -612,25 +611,27 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     }
   }, [pendingAdjust, rows, adjustSaving, notify, tr, onDone, onClose, storage, userKey, persistFailedAttempt])
 
-  // Closing with an unresolved failure asks first (shared ConfirmDialog, never
-  // window.confirm): discard the failed attempt, or keep editing it.
-  const requestClose = useCallback(() => {
-    if (adjustSaving) return
-    if (hasUnsavedFailures(rows)) { setConfirmDiscard(true); return }
-    onClose()
-  }, [adjustSaving, rows, onClose])
-
+  // S4-21: closing with an unresolved failure still asks first, but the
+  // ASKING is no longer this file's job. InventoryStockModals (the shared
+  // adjust chrome this page renders) now routes its ✕, backdrop and Cancel
+  // through the one close guard, so the private "Discard the unsaved
+  // adjustment?" ConfirmDialog that used to live here has been retired --
+  // it was a second implementation of the same question. What was specific
+  // to this surface is kept and handed down: the failed attempt's values
+  // (adjustDiscardItems) still appear in the prompt, and Discard still runs
+  // this cleanup rather than a generic close.
   const discardFailedAndClose = useCallback(() => {
-    dropFailedStockAttempt(storage, userKey, attemptIdRef.current)
-    emitFailedAttemptsChanged()
-    setConfirmDiscard(false)
+    if (hasUnsavedFailures(rows)) {
+      dropFailedStockAttempt(storage, userKey, attemptIdRef.current)
+      emitFailedAttemptsChanged()
+    }
     onClose()
-  }, [storage, userKey, onClose])
+  }, [rows, storage, userKey, onClose])
 
   // Step 1: product picker.
   if (!selectedProduct) {
     return (
-      <Modal title={tr('adjust_pick_product', 'Choose a product to adjust')} onClose={onClose} size="sm">
+      <Modal title={tr('adjust_pick_product', 'Choose a product to adjust')} onClose={onClose} size="sm" unsavedChanges="read-only">
         <div className="space-y-3">
           <div className="flex gap-2">
             <div className="min-w-0 flex-1">
@@ -744,7 +745,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         setAdjustForm={setAdjustForm}
         adjustSaving={adjustSaving}
         onAdjust={onAdjust}
-        onCloseAdjust={requestClose}
+        onCloseAdjust={discardFailedAndClose}
+        adjustDiscardItems={buildAdjustReviewItems()}
         adjustNotice={failureNotice}
         adjustSubmitLabel={submitState.mode === 'retry'
           ? `${tr('retry', 'Retry')} (${submitState.failedCount})`
@@ -809,23 +811,6 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         >
           {failureNotice}
         </ConfirmDialog>
-      ) : null}
-      {confirmDiscard ? (
-        <ConfirmDialog
-          t={t}
-          danger
-          title={tr('discard_failed_adjustment', 'Discard the unsaved adjustment?', 'បោះបង់ការកែស្តុកដែលមិនបានរក្សាទុក?')}
-          message={tr(
-            'discard_failed_adjustment_desc',
-            'This entry was never saved. Discard it, or keep editing to fix and retry.',
-            'ធាតុនេះមិនត្រូវបានរក្សាទុកទេ។ បោះបង់វា ឬបន្តកែដើម្បីព្យាយាមម្ដងទៀត។',
-          )}
-          items={buildAdjustReviewItems()}
-          confirmLabel={tr('discard', 'Discard', 'បោះបង់')}
-          cancelLabel={tr('keep_editing', 'Keep editing', 'បន្តកែ')}
-          onConfirm={discardFailedAndClose}
-          onClose={() => setConfirmDiscard(false)}
-        />
       ) : null}
     </>
   )

@@ -830,7 +830,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       </div>
 
       {detail ? (
-        <Modal title={`${detail.product_name}`} onClose={closeDetail}>
+        <Modal title={`${detail.product_name}`} onClose={closeDetail} unsavedChanges="read-only">
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">

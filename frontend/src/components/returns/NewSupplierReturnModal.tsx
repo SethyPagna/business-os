@@ -15,6 +15,8 @@ import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ContactPicker from '../contacts/ContactPicker.tsx'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { normalizeBarcodeKey, searchTermBarcodeKey, sortBySearchRelevance } from '../../utils/searchMatch.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500
@@ -415,8 +417,20 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   // Cancel button below already guards on `submitting` for this reason,
   // same pattern ReceiveBatchModal.tsx/ManageBatchesModal.tsx/
   // InventoryBatchModal.tsx use, but backdrop/X bypassed it entirely.
+  // S4-21: the losable work is the picked supplier/branch plus every
+  // quantity typed against a product row. Branch alone is pre-filled noise,
+  // so it does not count on its own.
+  const supplierReturnDirty = Boolean(supplierId)
+    || reason.trim().length > 0
+    || notes.trim().length > 0
+    || compensationUsd.trim().length > 0
+    || compensationKhr.trim().length > 0
+    || Object.values(quantities).some((value) => Number(value) > 0)
+  const closeGuard = useCloseGuard({ dirty: supplierReturnDirty }, () => { onClose?.() })
+
+  // The backdrop, the ✕ and Cancel all land here.
   const closeIfIdle = () => {
-    if (!submitting) onClose?.()
+    if (!submitting) closeGuard.requestClose()
   }
 
   return createPortal(
@@ -428,7 +442,6 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
             <p className="truncate text-xs text-gray-500 dark:text-gray-400">{tr('supplier_return_hint', 'Send stock back to supplier and record compensation/loss.')}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" onClick={submit} disabled={loading || loadingProducts || submitting}>{submitting ? `${tr('saving_label', 'Saving')}...` : tr('save', 'Save')}</button>
             <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
           </div>
         </div>
@@ -617,13 +630,14 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           </div>
         )}
 
-        <div className="hidden items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
+        <div className="flex items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <button className="btn-secondary flex-1" onClick={closeIfIdle} disabled={submitting}>{tr('cancel', 'Cancel')}</button>
           <button className="btn-primary flex-1" onClick={submit} disabled={loading || loadingProducts || submitting}>
             {submitting ? `${tr('saving_label', 'Saving')}...` : tr('save', 'Save')}
           </button>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

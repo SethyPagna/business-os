@@ -145,6 +145,7 @@ export default function ShiftGate({ children }: { children?: React.ReactNode }) 
           title={t('shift_register_title')}
           size="sm"
           onClose={() => { /* intentionally not dismissible -- see the file comment */ }}
+          unsavedChanges={{ dirty: floatUsd.trim() !== '' || floatKhr.trim() !== '' || note.trim() !== '' }}
         >
           <div className="space-y-4">
             <p className="text-sm text-gray-600 dark:text-gray-300">
@@ -252,7 +253,12 @@ export function EndShiftButton({ onEnded }: { onEnded?: () => void }) {
         {t('shift_end')}
       </button>
       {open && (
-        <Modal title={t('shift_end')} size="sm" onClose={() => setOpen(false)}>
+        <Modal
+          title={t('shift_end')}
+          size="sm"
+          onClose={() => setOpen(false)}
+          unsavedChanges={{ dirty: countedUsd.trim() !== '' || countedKhr.trim() !== '' || note.trim() !== '' }}
+        >
           <div className="space-y-4">
             <p className="text-sm text-gray-600 dark:text-gray-300">
               {t('shift_end_hint')}

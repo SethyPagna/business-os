@@ -593,7 +593,7 @@ export default function ManageBrandsModal({
   }
 
   return (
-    <Modal title={`${t('brand') || 'Brand'} ${t('manage') || 'Manage'}`} onClose={onClose}>
+    <Modal title={`${t('brand') || 'Brand'} ${t('manage') || 'Manage'}`} onClose={onClose} unsavedChanges={{ dirty: Boolean(newBrand.trim()) || Boolean(renamingBrand) }}>
       <div className="space-y-4">
         {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{error}</div> : null}
         <ActionHistoryBar history={actionHistoryForBar} t={t} />

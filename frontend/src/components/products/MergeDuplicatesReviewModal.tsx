@@ -92,7 +92,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const canMerge = !previewLoading && !previewError && groups.length > 0
 
   return (
-    <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={onClose} size="lg">
+    <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={onClose} size="lg" unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
           <GitMerge className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />

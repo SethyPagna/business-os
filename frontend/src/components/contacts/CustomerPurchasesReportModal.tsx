@@ -86,7 +86,7 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
   )
 
   return (
-    <Modal title={`${tr(t, 'customer_purchases', 'Purchases')} -- ${customerName}`} onClose={onClose}>
+    <Modal title={`${tr(t, 'customer_purchases', 'Purchases')} -- ${customerName}`} onClose={onClose} unsavedChanges="read-only">
       <div className="space-y-3">
         <DateTimeRangePicker
           value={range}

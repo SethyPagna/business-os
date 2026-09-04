@@ -90,7 +90,7 @@ export default function ExpenseLabelManagerModal({ onClose, onChanged, notify, t
   }
 
   return (
-    <Modal title={tr('manage_expense_labels', 'Expense labels')} onClose={onClose} size="sm">
+    <Modal title={tr('manage_expense_labels', 'Expense labels')} onClose={onClose} size="sm" unsavedChanges={{ dirty: renaming !== null }}>
       <div className="space-y-2">
         <p className="text-xs text-slate-500 dark:text-slate-400">{tr('expense_labels_help', 'Labels come from expense records. Preview exact linked records before renaming, merging, or changing their category.')}</p>
         <div className="max-h-80 space-y-1 overflow-y-auto">

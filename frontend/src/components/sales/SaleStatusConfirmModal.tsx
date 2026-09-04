@@ -86,7 +86,6 @@ export default function SaleStatusConfirmModal({
             <div className="mt-0.5 truncate text-xs text-gray-400">{label}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" className="min-h-9 max-w-28 truncate rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:hidden" onClick={() => onConfirm(skipStock)} disabled={saving}>{saving ? tr('saving', 'Saving...') : tr('confirm', 'Confirm')}</button>
             <button type="button" onClick={onClose} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
               <X className="h-4 w-4" />
             </button>
@@ -172,7 +171,7 @@ export default function SaleStatusConfirmModal({
           ) : null}
         </div>
 
-        <div className="hidden items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={onClose} disabled={saving}>{tr('cancel', 'Cancel', 'បោះបង់')}</button>
           <button type="button" className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => onConfirm(skipStock)} disabled={saving}>
             {saving ? tr('saving', 'Saving...') : tr('confirm', 'Confirm')}

@@ -129,7 +129,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   }
 
   return (
-    <Modal title={tr('stock_import_title', 'Import Stock Actions', 'នាំចូលសកម្មភាពស្តុក')} onClose={onClose} draggable>
+    <Modal title={tr('stock_import_title', 'Import Stock Actions', 'នាំចូលសកម្មភាពស្តុក')} onClose={onClose} draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {reviewJob ? (
         <ServerImportReviewScreen
           jobId={reviewJob.id}

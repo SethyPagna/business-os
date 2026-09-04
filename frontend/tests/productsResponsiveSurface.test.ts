@@ -89,16 +89,58 @@ assert.match(detail, /break-words font-bold text-gray-900 dark:text-white">\{pro
 assert.match(detail, /whitespace-nowrap text-left font-mono/, 'product detail barcodes must remain on one line without truncation')
 assert.match(inventoryDetail, /break-words font-bold text-gray-900 dark:text-white">\{p\.name\}/, 'inventory product-detail titles must wrap in full')
 assert.match(inventoryDetail, /shrink-0 whitespace-nowrap font-mono text-xs text-gray-400">&middot; \{p\.barcode\}/, 'inventory product-detail barcodes must remain on one line')
-assert.match(productForm, /headerExtra=\{\([\s\S]*sm:hidden[\s\S]*onClick=\{saveForm\}/, 'product edits must expose Save in the fixed mobile header')
-assert.match(productForm, /hidden gap-3[\s\S]*sm:flex/, 'product edits must not rely on a bottom-only mobile footer')
-assert.match(variantForm, /headerExtra=\{\([\s\S]*onClick=\{handleSave\}/, 'variant edits must expose Save in the fixed mobile header')
-assert.match(confirmDialog, /headerExtra=\{\([\s\S]*onClick=\{onConfirm\}/, 'confirmation dialogs must expose Confirm in the fixed mobile header')
+// S4-20: the primary action belongs at the END of the panel, never beside the
+// ✕. These lines used to pin the exact opposite -- a phone-only Save copied
+// into each fixed header -- and they were not wrong at the time: the reason
+// recorded in ProductForm.tsx was that "on compact PWA/iOS viewports the
+// persistent footer can fall behind browser chrome". That constraint is now
+// met by the footer itself rather than by a duplicate button. Each footer is
+// either `sticky bottom-0` inside a panel bounded by .modal-panel-safe
+// (100dvh minus the safe-area insets) or a flex-shrink-0 sibling placed AFTER
+// .modal-scroll, so it is pinned at every breakpoint without being a second
+// Save that a mis-tap next to Close can fire instead of dismissing.
+//
+// Pinned as a position, not as a pattern: the submit handler must be wired
+// exactly ONCE in the file, and that one wiring must come after the footer
+// container opens. A restored header copy makes the count 2; moving the
+// button back up top makes the index smaller. Either way this fails.
+const endOfPanelPrimaries: Array<[string, string, string, string]> = [
+  ['ProductForm', productForm, 'onClick={saveForm}', 'className="sticky bottom-0'],
+  ['VariantFormModal', variantForm, 'onClick={handleSave}', 'className="sticky bottom-0'],
+  ['ConfirmDialog', confirmDialog, 'onClick={onConfirm}', 'className="sticky bottom-0'],
+  ['InventoryStockModals (adjust)', stockModals, 'onClick={onAdjust}', 'flex flex-shrink-0 gap-2 border-t'],
+  ['InventoryStockModals (transfer)', stockModals, 'onClick={onTransfer}', 'flex flex-shrink-0 gap-2 border-t'],
+  ['ReceiveBatchModal', receiveBatch, 'onClick={submit}', 'flex items-center justify-end gap-2 border-t'],
+  ['FastStockInModal', fastStockIn, 'onClick={commitSession}', 'flex flex-shrink-0 flex-wrap'],
+  ['TransferModal', transfer, 'onClick={handleBulkTransfer}', 'flex gap-3 border-t'],
+]
+for (const [name, source, handler, footerMarker] of endOfPanelPrimaries) {
+  const wirings = source.split(handler).length - 1
+  assert.equal(wirings, 1, `${name} must wire its primary action exactly once, not once per breakpoint (found ${wirings})`)
+  const footerAt = source.indexOf(footerMarker)
+  assert.ok(footerAt >= 0, `${name} must keep its end-of-panel footer container`)
+  assert.ok(source.indexOf(handler) > footerAt, `${name} must place its primary action inside the end-of-panel footer, not beside the ✕`)
+}
+
+assert.doesNotMatch(productForm, /hidden gap-3[\s\S]*sm:flex/, 'the product edit footer must be visible on phones, not desktop-only')
+assert.match(productForm, /headerExtra=\{\([\s\S]{0,1200}?<MinimizeButton/, 'the product edit header must keep the minimize control')
 assert.match(stockModals, /return createPortal\(modals, document\.body\)/, 'stock-adjust and transfer dialogs must escape page stacking contexts')
-assert.match(stockModals, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*sm:hidden/, 'stock dialogs must be iPhone-safe and expose their action in the header')
+assert.match(stockModals, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*modal-panel-safe/, 'stock dialogs must stay iPhone-safe above fixed app bars')
 assert.match(receiveBatch, /return createPortal\(modal, document\.body\)/, 'receive stock must escape parent stacking contexts')
-assert.match(receiveBatch, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*sm:hidden[\s\S]*receive_stock/, 'receive stock must expose its primary action in the phone-safe header')
-assert.match(fastStockIn, /modal-viewport-safe[\s\S]*modal-panel-safe[\s\S]*sm:hidden[\s\S]*commitSession/, 'fast stock-in must retain a reachable mobile completion action')
-assert.match(transfer, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*sm:hidden[\s\S]*handleBulkTransfer/, 'branch transfers must use one safe one-or-many flow with a mobile header action')
+assert.match(receiveBatch, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*modal-panel-safe/, 'receive stock must stay iPhone-safe above fixed app bars')
+assert.match(fastStockIn, /modal-viewport-safe[\s\S]*modal-panel-safe/, 'fast stock-in must remain within the usable viewport and safe areas')
+assert.match(transfer, /modal-viewport-safe[\s\S]*z-\[1050\]/, 'branch transfers must sit above fixed app bars')
+
+// The same rule applied to the shape that produced the duplicate header Save
+// in the first place: a breakpoint-conditional primary. `sm:hidden` sitting
+// just above a btn-primary is that shape, so it is what this pins out.
+for (const [name, source] of endOfPanelPrimaries.map(([n, s]) => [n, s] as [string, string])) {
+  assert.doesNotMatch(
+    source,
+    /sm:hidden[\s\S]{0,400}?className="[^"]*btn-primary/,
+    `${name} must not restore a phone-only primary action beside the close button`,
+  )
+}
 assert.doesNotMatch(transfer, /role="tablist" aria-label="Transfer mode"/, 'branch transfers must not restore separate single and multiple modes')
 assert.match(transfer, /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\]\.join\(' '\), query\)/, 'the unified transfer picker must search product name, SKU, and barcode')
 assert.match(transfer, /const catalogRequested = Boolean\(debouncedSearch\.trim\(\)\) \|\| showAllProducts[\s\S]*if \(!catalogRequested\) return undefined/, 'the transfer picker must not load the entire catalog before search or Show all products')

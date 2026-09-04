@@ -130,7 +130,7 @@ export default function DeleteConfirmModal({
   const hasImpact = summary.totalStockUnits > 0 || summary.productsWithImages > 0 || summary.productsWithBatches > 0
 
   return (
-    <Modal title={title} onClose={onClose} size="sm">
+    <Modal title={title} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />

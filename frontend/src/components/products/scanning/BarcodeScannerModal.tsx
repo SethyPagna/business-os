@@ -543,7 +543,7 @@ export default function BarcodeScannerModal({
             }
 
   return (
-    <Modal title={title} onClose={closeScanner} size="lg" layer="nested">
+    <Modal title={title} onClose={closeScanner} size="lg" layer="nested" unsavedChanges="read-only">
       <div className="space-y-3">
         {/* Sized off the viewport instead of a fixed 4:3 ratio, and with a
             bigger guide box relative to the frame -- the old fixed ratio

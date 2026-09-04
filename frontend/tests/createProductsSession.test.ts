@@ -282,10 +282,19 @@ runTest('the session shows the header it captured', () => {
 })
 
 runTest('Close on a dirty header offers Discard / Back', () => {
-  assert.match(modalSource, /import ConfirmDialog from '\.\.\/shared\/ConfirmDialog\.tsx'/, 'the shared confirm helper, not a new one')
-  assert.match(modalSource, /if \(headerDirty && rows\.length === 0\) \{ setConfirmDiscard\(true\); return \}/)
-  assert.match(modalSource, /confirmLabel=\{tr\('discard', 'Discard'\)\}/)
-  assert.match(modalSource, /cancelLabel=\{tr\('back', 'Back'\)\}/)
+  // S4-21 RE-POINTED this assertion; it did not weaken it. The behaviour
+  // is unchanged -- dismissing with a typed-but-unused header still asks
+  // Discard/Back -- but the dialog is no longer a copy living in this one
+  // file. The modal now DECLARES its dirtiness and the single app-wide
+  // guard in shared/Modal.tsx raises the single app-wide prompt, which is
+  // the entire point of the item ("not a one-off"). The prompt's own
+  // behaviour is DRIVEN, not pattern-matched, in
+  // tests/unsavedChangesGuard.test.ts.
+  assert.match(modalSource, /const closeIsGuarded = headerDirty && rows\.length === 0/)
+  assert.match(modalSource, /unsavedChanges=\{\{ dirty: closeIsGuarded \}\}/)
+  // And the local copy stays gone -- if it returns there are two prompts.
+  assert.doesNotMatch(modalSource, /setConfirmDiscard/, 'the one-off discard dialog must not come back')
+  assert.doesNotMatch(modalSource, /import ConfirmDialog from/, 'nothing here needs its own confirm dialog now')
 })
 
 runTest('the session survives a reload, like the stock-in session draft does', () => {

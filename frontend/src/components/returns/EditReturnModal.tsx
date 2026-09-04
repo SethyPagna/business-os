@@ -8,6 +8,9 @@ import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts
 import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
 
@@ -220,8 +223,23 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   // InventoryBatchModal.tsx already use for this exact reason (only the
   // Save button here was disabled during `submitting`; the other three
   // close paths could still unmount the modal mid-request).
+  // S4-21: an EDIT form, so "dirty" means "differs from the return as it
+  // was opened". The comparison uses `finalReason` -- the value that would
+  // actually be saved -- rather than the raw reason/customReason pair,
+  // because a stored reason outside RETURN_REASONS is PRESENTED as Other
+  // plus custom text (see the state init and the back-fill effect above).
+  // The same saved value therefore has two on-screen shapes, and comparing
+  // the raw pair would call a return dirty for re-reaching the reason it
+  // already had.
+  const editDirty = useFormDirty(
+    { finalReason, returnType, notes, items: items.map((item) => ({ id: item.id, returnQty: item.returnQty, stock_action: item.stock_action })) },
+    ret.id ?? null,
+  )
+  const closeGuard = useCloseGuard({ dirty: editDirty.dirty }, onClose)
+
+  // The backdrop, the ✕ and Cancel all land here.
   const closeIfIdle = () => {
-    if (!submitting) onClose()
+    if (!submitting) closeGuard.requestClose()
   }
 
   return createPortal(
@@ -235,7 +253,6 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
             <div className="text-xs text-gray-400 font-mono mt-0.5">{ret.return_number}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" onClick={handleSubmit} disabled={submitting || !finalReason.trim()} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden">{submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save')}`}</button>
             <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={T('close', 'Close')} className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center disabled:opacity-50"><X className="h-4 w-4" /></button>
           </div>
         </div>
@@ -365,19 +382,22 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
             </div>
           )}
 
-          {/* Buttons */}
-          <div className="hidden gap-2 pt-1 sm:flex">
-            <button onClick={closeIfIdle} disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50">
-              {T('cancel','Cancel')}
-            </button>
-            <button onClick={handleSubmit}
-              disabled={submitting || !finalReason.trim()}
-              className="btn-primary text-sm flex-1 disabled:opacity-50">
-              {submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save Changes')}`}
-            </button>
-          </div>
+        </div>
+        {/* S4-20: the actions live at the END of the form and nowhere else.
+            Outside .modal-scroll, so they are the last thing in the panel
+            without being the last thing behind a scroll. */}
+        <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+          <button onClick={closeIfIdle} disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50">
+            {T('cancel','Cancel')}
+          </button>
+          <button onClick={handleSubmit}
+            disabled={submitting || !finalReason.trim()}
+            className="btn-primary text-sm flex-1 disabled:opacity-50">
+            {submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save Changes')}`}
+          </button>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

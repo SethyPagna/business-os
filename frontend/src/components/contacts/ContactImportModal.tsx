@@ -543,7 +543,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   }
 
   return (
-    <Modal title={tr('contacts_import_title', 'Import {type}').replace('{type}', typeLabel)} onClose={onClose} wide draggable>
+    <Modal title={tr('contacts_import_title', 'Import {type}').replace('{type}', typeLabel)} onClose={onClose} wide draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {postStartStep === 'polling' ? (
         <div className="space-y-4">
           <div className="flex flex-col items-center justify-center gap-3 py-10 text-center text-gray-500 dark:text-gray-400">

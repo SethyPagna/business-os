@@ -502,7 +502,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
   }
 
   return (
-    <Modal title={t('manage_units') || 'Manage Units'} onClose={onClose}>
+    <Modal title={t('manage_units') || 'Manage Units'} onClose={onClose} unsavedChanges={{ dirty: Boolean(newName.trim()) || editing !== null }}>
       <div className="space-y-4">
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
         <ActionHistoryBar history={actionHistoryForBar} t={t} />

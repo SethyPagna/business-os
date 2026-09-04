@@ -9,6 +9,9 @@ import { dateToBatchCode } from '../../utils/batchCode.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { isStockInSubmission } from '../../utils/stockReceiptFields.ts'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt, { type UnsavedChangesPromptItem } from '../shared/UnsavedChangesPrompt.tsx'
 
 type MoneyFormatter = (value: number) => string
 
@@ -121,6 +124,10 @@ type InventoryStockModalsProps = {
   // failed row is still unsaved. Both default to the previous behaviour, so
   // Inventory.tsx and every other caller stay unchanged.
   adjustNotice?: ReactNode
+  // S4-21: what the host knows is at risk on THIS adjust (the values of an
+  // attempt that failed and was never retried). Handed to the one shared
+  // prompt so the host does not need a private discard dialog of its own.
+  adjustDiscardItems?: UnsavedChangesPromptItem[]
   adjustSubmitLabel?: ReactNode
   adjustSaving: boolean
   adjustTargetOptions: InventoryProduct[]
@@ -156,6 +163,7 @@ export default function InventoryStockModals({
   adjustForm,
   adjustModal,
   adjustNotice = null,
+  adjustDiscardItems,
   adjustSubmitLabel,
   adjustSaving,
   adjustTargetOptions,
@@ -285,12 +293,30 @@ export default function InventoryStockModals({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adjustLotAttributedName])
 
+  // S4-21: both forms live in the PARENT page's state (adjustForm /
+  // transferForm are props), so there is no local "pristine" copy to
+  // compare against -- useFormDirty takes the snapshot itself on the first
+  // render of each opening. The reset key goes null while the modal is
+  // shut, which is what makes a second open re-baseline instead of
+  // inheriting the previous session's snapshot.
+  const adjustDirty = useFormDirty(adjustForm, adjustModal ? `adjust-${adjustModal.id}` : null)
+  const transferDirty = useFormDirty(transferForm, transferModal ? `transfer-${transferModal.id}` : null)
+  // The backdrop, the ✕ and Cancel all reach the same prop today; each is
+  // routed through the guard so none of the three can slip past it.
+  const adjustGuard = useCloseGuard({ dirty: adjustDirty.dirty }, onCloseAdjust)
+  const transferGuard = useCloseGuard({ dirty: transferDirty.dirty }, onCloseTransfer)
+  // Same in-flight rule the other stock modals use: a dismissal during a
+  // save is ignored outright rather than raising a prompt about a form the
+  // request is still reading.
+  const requestCloseAdjust = () => { if (!adjustSaving) adjustGuard.requestClose() }
+  const requestCloseTransfer = () => { if (!transferSaving) transferGuard.requestClose() }
+
   if (!adjustModal && !transferModal) return null
 
   const modals = (
     <>
       {adjustModal ? (
-        <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onCloseAdjust}>
+        <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={requestCloseAdjust}>
           <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <div className="min-w-0">
@@ -298,8 +324,7 @@ export default function InventoryStockModals({
                 <div className="truncate text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={onAdjust} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
-                <button type="button" onClick={onCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
+                <button type="button" onClick={requestCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -639,17 +664,22 @@ export default function InventoryStockModals({
               {/* The failed-submit reason sits with the values that produced
                   it, above the actions, so it survives the toast. */}
               {adjustNotice}
-              <div className="hidden gap-2 pt-1 sm:flex">
-                <button onClick={onAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
-                <button onClick={onCloseAdjust} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
-              </div>
+            </div>
+            {/* S4-20: the actions live at the END of the form -- outside
+                .modal-scroll, so they are the last thing in the panel
+                without being the last thing behind a scroll. There is no
+                second Save beside the ✕ any more. */}
+            <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+              <button onClick={onAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
+              <button onClick={requestCloseAdjust} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
             </div>
           </div>
+          <UnsavedChangesPrompt guard={adjustGuard} items={adjustDiscardItems} />
         </div>
       ) : null}
 
       {transferModal ? (
-        <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onCloseTransfer}>
+        <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={requestCloseTransfer}>
           <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div className="min-w-0">
@@ -657,8 +687,7 @@ export default function InventoryStockModals({
                 <div className="mt-0.5 truncate text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={onTransfer} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" disabled={transferSaving}>{transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}</button>
-                <button type="button" onClick={onCloseTransfer} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
+                <button type="button" onClick={requestCloseTransfer} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -717,16 +746,21 @@ export default function InventoryStockModals({
                 ) : null}
                 <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder')} />
               </label>
-              <div className="hidden gap-2 pt-1 sm:flex">
-                <button type="button" onClick={onTransfer} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
-                  {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
-                </button>
-                <button type="button" onClick={onCloseTransfer} className="btn-secondary text-sm" disabled={transferSaving}>
-                  {t('cancel') || 'Cancel'}
-                </button>
-              </div>
+            </div>
+            {/* S4-20: the actions live at the END of the form -- outside
+                .modal-scroll, so they are the last thing in the panel
+                without being the last thing behind a scroll. There is no
+                second Save beside the ✕ any more. */}
+            <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+              <button type="button" onClick={onTransfer} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
+                {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
+              </button>
+              <button type="button" onClick={requestCloseTransfer} className="btn-secondary text-sm" disabled={transferSaving}>
+                {t('cancel') || 'Cancel'}
+              </button>
             </div>
           </div>
+          <UnsavedChangesPrompt guard={transferGuard} />
         </div>
       ) : null}
 

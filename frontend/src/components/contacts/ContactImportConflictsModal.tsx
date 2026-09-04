@@ -84,6 +84,10 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   const [renameDrafts, setRenameDrafts] = useState<Record<number, string>>({})
   const [resolvedRows, setResolvedRows] = useState<Set<number>>(() => new Set())
   const [savingRow, setSavingRow] = useState<number | null>(null)
+  // S4-21: every CHOICE here is applied per row by its own button, so
+  // the only thing a dismissal can lose is rename text typed and not
+  // yet applied. That, and only that, is what raises the prompt.
+  const hasTypedRenameDraft = Object.values(renameDrafts).some((value) => String(value || '').trim().length > 0)
   const [savingBulk, setSavingBulk] = useState(false)
   const [selectedRows, setSelectedRows] = useState<Set<number>>(() => new Set())
   const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set())
@@ -375,7 +379,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   }, [loading, total, unresolvedCount, rows.length])
 
   return (
-    <Modal title={tr('contacts_import_conflicts_title', 'Resolve name conflicts').replace('{type}', entityLabel)} onClose={onClose} size="lg" draggable>
+    <Modal title={tr('contacts_import_conflicts_title', 'Resolve name conflicts').replace('{type}', entityLabel)} onClose={onClose} size="lg" draggable unsavedChanges={{ dirty: hasTypedRenameDraft }}>
       <div className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {tr(

@@ -9,6 +9,7 @@ import Trash2Icon from 'lucide-react/dist/esm/icons/trash-2.js'
 import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
 import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
+import MinimizeButton from '../../shared/MinimizeButton.tsx'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
@@ -785,6 +786,11 @@ export default function ProductForm({
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreateMode, form.name, form.barcode])
+  // S4-21: ONE key, used both to register this form's dirtiness and to tell
+  // the modal chrome which registry entry its ✕ must consult. Two literals
+  // would drift and the ✕ would silently stop guarding.
+  const dirtyWorkKey = `product-form-${product?.id ?? 'new'}`
+
   const askCreateVerdict = () => new Promise<'back' | 'group' | 'new'>((resolve) => {
     createVerdictResolveRef.current = resolve
     setCreateVerdictOpen(true)
@@ -811,7 +817,7 @@ export default function ProductForm({
     }
     const productLabel = String(product?.name || form.name || '').trim()
     return registerDirtyWork({
-      key: `product-form-${product?.id ?? 'new'}`,
+      key: dirtyWorkKey,
       pageId: 'products',
       label: `${t('product_form') || 'Product form'}${productLabel ? ` — ${productLabel}` : ''}`,
       isDirty: () => formDirtyRef.current,
@@ -1113,36 +1119,28 @@ export default function ProductForm({
       wide
       headerExtra={(
         <>
-          {/* On compact PWA/iOS viewports the persistent footer can fall
-              behind browser chrome or the app navigation. Save is therefore
-              also available in the fixed modal header; Close remains Cancel. */}
-          <button
-            type="button"
-            className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden"
-            onClick={saveForm}
-            disabled={saving || imageUploading}
-          >
-            {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
-          </button>
+          {/* S4-20: the header no longer carries a phone-sized Save. It used
+              to, because "on compact PWA/iOS viewports the persistent footer
+              can fall behind browser chrome" -- a real problem, but the fix
+              belongs in the footer, not in a second Save button beside the
+              ✕ where a mis-tap saves instead of closing. The footer is
+              `sticky bottom-0` inside a panel bounded by .modal-panel-safe
+              (100dvh minus the safe-area insets, styles/main.css), so it now
+              sits at the end of the form and stays on screen at every
+              breakpoint. Only the minimize control remains up here. */}
           {onMinimize ? (
-            <button
-              type="button"
+            <MinimizeButton
               disabled={saving}
-              onClick={() => {
-                if (saving) return
+              tr={tr}
+              onMinimize={() => {
                 const typedName = String(form.name || '').trim()
                 onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
               }}
-              aria-label={tr('minimize', 'Minimize', 'បង្រួម')}
-              title={tr('minimize_hint', 'Minimize — continue later from the chip', 'បង្រួម — បន្តពេលក្រោយពីស្លាក')}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700"
-            >
-              <span className="text-base leading-none">−</span>
-            </button>
+            />
           ) : null}
         </>
       )}
-    >
+      unsavedChanges={{ workKey: dirtyWorkKey }}>
       <div className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => (
@@ -1713,7 +1711,7 @@ export default function ProductForm({
           cancels the modal's own p-5 padding so the bar spans full width
           and sits flush against the bottom edge; px-5 pb-5 pt-4 puts it
           back inside the bar. */}
-      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 hidden gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex">
+      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
         {/* Disabled while imageUploading, not just `saving`: previously a
             fast Save click during an in-flight image upload would save the
             product with the pre-upload imageList (the just-picked file
@@ -1804,7 +1802,8 @@ export default function ProductForm({
               : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
           onClose={() => resolveCreateVerdict('back')}
           size="sm"
-        >
+        
+          unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className={`flex items-start gap-3 rounded-lg border p-3 ${createVerdict.kind === 'exact_twin'
               ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30'
@@ -1866,7 +1865,7 @@ export default function ProductForm({
         </Modal>
       ) : null}
       {nameUnlockConfirmOpen ? (
-        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm">
+        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm" unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
               <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />

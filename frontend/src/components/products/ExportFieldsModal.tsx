@@ -74,7 +74,7 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
   const activeCount = scopes?.find((scope) => scope.id === selectedScopeId)?.count ?? rowCount
 
   return (
-    <ModalBase title={tr('export_products_title', 'Export products')} onClose={onClose} size="sm">
+    <ModalBase title={tr('export_products_title', 'Export products')} onClose={onClose} size="sm" unsavedChanges="read-only">
       {scopes && scopes.length > 1 && onScopeChange ? (
         <div className="mb-4">
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">

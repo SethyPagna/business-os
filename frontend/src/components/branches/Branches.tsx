@@ -22,7 +22,7 @@ import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/Pagi
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
-import BranchForm from './BranchForm'
+import BranchForm, { branchFormWorkKey } from './BranchForm'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -1745,7 +1745,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       ) : null}
 
       {modal === 'form' ? (
-        <Modal title={selected ? `${tr('edit_branch', 'Edit Branch')}: ${selected.name}` : `+ ${tr('add_branch', 'Add Branch')}`} onClose={() => setModal(null)}>
+        <Modal title={selected ? `${tr('edit_branch', 'Edit Branch')}: ${selected.name}` : `+ ${tr('add_branch', 'Add Branch')}`} onClose={() => setModal(null)} unsavedChanges={{ workKey: branchFormWorkKey(selected?.id) }}>
           <BranchForm branch={selected} onSave={handleSaveBranch} onClose={() => setModal(null)} />
         </Modal>
       ) : null}
@@ -1780,7 +1780,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         </Suspense>
       ) : null}
       {transferDetail ? (
-        <Modal title={`${tr('transfer_history', 'Transfer History')} · ${formatTransferReference(transferDetail.id)}`} onClose={() => setTransferDetail(null)}>
+        <Modal title={`${tr('transfer_history', 'Transfer History')} · ${formatTransferReference(transferDetail.id)}`} onClose={() => setTransferDetail(null)} unsavedChanges="read-only">
           <div className="space-y-3 text-sm">
             <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
               {[
@@ -1825,7 +1825,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       ) : null}
 
       {statDetail ? (
-        <Modal title={statDetail.title} onClose={() => setStatDetail(null)}>
+        <Modal title={statDetail.title} onClose={() => setStatDetail(null)} unsavedChanges="read-only">
           <div className="space-y-3">
             <div className="rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/70">
               <div className="text-xs font-semibold uppercase text-slate-400">{statDetail.title}</div>

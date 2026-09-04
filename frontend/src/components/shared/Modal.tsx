@@ -1,6 +1,10 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import type { UnsavedChangesDeclaration } from '../../utils/closeGuard.ts'
+import { ModalCloseContext } from './modalCloseContext.ts'
+import UnsavedChangesPrompt from './UnsavedChangesPrompt.tsx'
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -25,9 +29,22 @@ type ModalProps = {
   // modal. Give them an explicit higher layer so their controls and scan
   // result cannot fall behind or interact with the parent workflow.
   layer?: 'default' | 'nested'
+  // S4-21: REQUIRED, and required on purpose. Every modal must say whether
+  // closing it can lose work; a new modal that says nothing does not
+  // compile, which is the only version of "every modal and float in the
+  // app, not a one-off" that survives the next twenty modals.
+  //   'read-only'   nothing here can be edited and lost
+  //   { workKey }   the utils/dirtyWork.ts key this modal registered
+  //   { dirty }     a direct answer, for work that cannot outlive the modal
+  // Scoped to THIS modal: a nested tool (the barcode camera opened from
+  // inside a product form) declares its own 'read-only' and closes
+  // straight through -- the parent form's key is never consulted by the
+  // child's ✕.
+  unsavedChanges: UnsavedChangesDeclaration
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, layer = 'default' }: ModalProps) {
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, layer = 'default', unsavedChanges }: ModalProps) {
+  const closeGuard = useCloseGuard(unsavedChanges, onClose)
   const widthClass =
     size === 'sm' ? 'max-w-lg' :
     size === 'lg' ? 'max-w-3xl' :
@@ -142,7 +159,7 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           {headerExtra}
           <button
             type="button"
-            onClick={onClose}
+            onClick={closeGuard.requestClose}
             aria-label="Close"
             /* Z5: the ✕ was text-gray-400 (~2.5:1 on white, fails WCAG AA);
                gray-600/gray-300 gives a legible close affordance in both
@@ -151,8 +168,14 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           ><X className="h-4 w-4" /></button>
           </div>
         </div>
-        <div className="modal-scroll p-3 sm:p-4">{children}</div>
+        {/* The guarded close is published to the content so a Cancel button
+            inside the modal goes through the SAME check as the ✕ -- see
+            modalCloseContext.ts. */}
+        <ModalCloseContext.Provider value={closeGuard.requestClose}>
+          <div className="modal-scroll p-3 sm:p-4">{children}</div>
+        </ModalCloseContext.Provider>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>
   )
 

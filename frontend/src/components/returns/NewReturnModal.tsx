@@ -20,6 +20,8 @@ import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 // Long enough that a fast typist does not fire a request per keystroke, short
@@ -758,8 +760,23 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // already use for this exact reason (an outside click or the X button
   // used to close the modal mid-request even though the Confirm button
   // itself was correctly disabled during `submitting`).
+  // S4-21: what an accidental dismissal would really cost here is the
+  // looked-up receipt plus every line, lot, reason and replacement chosen
+  // against it -- minutes of work at a counter. A receipt number typed and
+  // nothing else is NOT worth a prompt (retyping it is the same keystrokes),
+  // so the guard starts once a sale is actually loaded and something has
+  // been chosen on it.
+  const returnDirty = Boolean(foundSale) && (
+    activeItems.length > 0
+    || replacements.length > 0
+    || notes.trim().length > 0
+    || customReason.trim().length > 0
+  )
+  const closeGuard = useCloseGuard({ dirty: returnDirty }, onClose)
+
+  // Both the backdrop and the ✕ land here.
   const closeIfIdle = () => {
-    if (!submitting) onClose()
+    if (!submitting) closeGuard.requestClose()
   }
 
   const reviewReturn = () => {
@@ -780,8 +797,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         <div className="flex items-center justify-between gap-2 p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
           <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">↩️ {T('new_return','New Return')}</h2>
           <div className="flex shrink-0 items-center gap-2">
-            {step === 'items' ? <button type="button" onClick={reviewReturn} className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden">{T('confirm','Review')}</button> : null}
-            {step === 'confirm' ? <button type="button" onClick={handleSubmit} disabled={submitting} className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden">{submitting ? T('submitting','Processing…') : T('confirm','Confirm')}</button> : null}
             <div className="hidden items-center gap-2 sm:flex">{STEPS.map((s, i) => (
               <div key={s} className="flex items-center gap-1">
                 <div className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold transition-colors
@@ -1246,14 +1261,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   value={notes} onChange={e => setNotes(e.target.value)} />
               </div>
 
-              <div className="flex gap-2 pt-1">
-                <button onClick={() => setStep('search')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
-                <button onClick={reviewReturn} className="btn-primary text-sm flex-1">
-                  {T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
-                  {activeItems.length < selectedItems.filter((it) => (it.remaining ?? toNumber(it.quantity)) > 0).length
-                    ? ` (${T('status_partial_return','partial')})` : ''}
-                </button>
-              </div>
             </div>
           )}
 
@@ -1332,17 +1339,39 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 </div>
               )}
 
-              <div className="flex gap-2 pt-1">
-                <button onClick={() => setStep('items')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
-                <button onClick={handleSubmit} disabled={submitting}
-                  className="btn-primary text-sm flex-1 disabled:opacity-50">
-                  {submitting ? `⏳ ${T('submitting','Processing…')}` : `✅ ${T('submit_return','Confirm Return')}`}
-                </button>
-              </div>
             </div>
           )}
         </div>
+        {/* S4-20: one footer for the whole wizard, at the END of the panel
+            and outside .modal-scroll. Each step used to end with its own
+            Back/Next row buried at the bottom of the scrolling content, plus
+            a duplicate phone-only primary up beside the ✕ to make it
+            reachable. Now the step's action is always the last thing in the
+            panel and always on screen, so neither the scroll nor a mis-tap
+            next to Close is in the way. The search step has no action of its
+            own -- finding a sale advances by itself -- so it renders no
+            footer rather than a disabled one. */}
+        {step === 'items' ? (
+          <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+            <button onClick={() => setStep('search')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
+            <button onClick={reviewReturn} className="btn-primary text-sm flex-1">
+              {T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
+              {activeItems.length < selectedItems.filter((it) => (it.remaining ?? toNumber(it.quantity)) > 0).length
+                ? ` (${T('status_partial_return','partial')})` : ''}
+            </button>
+          </div>
+        ) : null}
+        {step === 'confirm' ? (
+          <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+            <button onClick={() => setStep('items')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
+            <button onClick={handleSubmit} disabled={submitting}
+              className="btn-primary text-sm flex-1 disabled:opacity-50">
+              {submitting ? `⏳ ${T('submitting','Processing…')}` : `✅ ${T('submit_return','Confirm Return')}`}
+            </button>
+          </div>
+        ) : null}
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

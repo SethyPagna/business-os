@@ -4,6 +4,9 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, useSync } from '../../AppContext.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import AppSelect from '../shared/AppSelect.tsx'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import {
@@ -500,6 +503,20 @@ export default function CustomTables() {
     }
   }
 
+  // S4-21: two editors on this page, both hand-rolled. The table builder's
+  // losable work is the name and the columns added to it; the row editor is
+  // an edit form, so it compares against the row as it opened. Neither
+  // post-save close goes through the guard -- those call setCreateModal /
+  // setRowModal directly, which is correct: a saved form has nothing to ask
+  // about.
+  const newTableDirty = newTable.display_name.trim().length > 0 || newTable.schema.length > 0
+  const createGuard = useCloseGuard({ dirty: newTableDirty }, () => setCreateModal(false))
+  const rowKey = rowModal === null ? null : rowModal === 'create' ? 'create' : `edit-${String(rowModal.id ?? '')}`
+  const rowDirty = useFormDirty(rowForm, rowKey)
+  const rowGuard = useCloseGuard({ dirty: rowDirty.dirty }, () => setRowModal(null))
+  const requestCloseCreate = () => { if (!savingTable) createGuard.requestClose() }
+  const requestCloseRow = () => { if (!savingRow) rowGuard.requestClose() }
+
   const openAddRow = () => {
     const initial: Record<string, unknown> = {}
     activeSchema.forEach((column) => { initial[column.name] = column.type === 'boolean' ? '0' : '' })
@@ -611,7 +628,7 @@ export default function CustomTables() {
           <div className="fade-in flex max-h-modal-85 w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800">
             <div className="flex items-center justify-between border-b border-gray-200 p-5 dark:border-gray-700">
               <h2 className="text-lg font-bold text-gray-900 dark:text-white">Create Custom Table</h2>
-              <button type="button" onClick={() => setCreateModal(false)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" disabled={savingTable} aria-label={t('close') || 'Close'}><X className="h-4 w-4" /></button>
+              <button type="button" onClick={requestCloseCreate} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" disabled={savingTable} aria-label={t('close') || 'Close'}><X className="h-4 w-4" /></button>
             </div>
             <div className="page-scroll space-y-4 p-5">
               <div>
@@ -664,9 +681,10 @@ export default function CustomTables() {
               <button className="btn-primary flex-1" onClick={handleCreateTable} disabled={savingTable}>
                 {savingTable ? (t('saving') || 'Saving...') : (t('create_table') || 'Create Table')}
               </button>
-              <button className="btn-secondary" onClick={() => setCreateModal(false)} disabled={savingTable}>{t('cancel') || 'Cancel'}</button>
+              <button className="btn-secondary" onClick={requestCloseCreate} disabled={savingTable}>{t('cancel') || 'Cancel'}</button>
             </div>
           </div>
+          <UnsavedChangesPrompt guard={createGuard} />
         </div>
       ) : null}
 
@@ -720,9 +738,10 @@ export default function CustomTables() {
               <button className="btn-primary flex-1" onClick={handleSaveRow} disabled={savingRow}>
                 {savingRow ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
               </button>
-              <button className="btn-secondary" onClick={() => setRowModal(null)} disabled={savingRow}>{t('cancel') || 'Cancel'}</button>
+              <button className="btn-secondary" onClick={requestCloseRow} disabled={savingRow}>{t('cancel') || 'Cancel'}</button>
             </div>
           </div>
+          <UnsavedChangesPrompt guard={rowGuard} />
         </div>
       ) : null}
     </div>
