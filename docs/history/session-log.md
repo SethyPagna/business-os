@@ -18172,3 +18172,68 @@ word. `StockChangeSection.tsx:748` and `StockInSessionsSection.tsx:260,265` belo
 `business-os-v1-ba`, told the same. Both messages went out twice: once to claim the boundary, once
 after the Khmer term changed under them.
 
+## Part 591 (Sep 4 2026, session business-os-v1-c3, lane S4-24 + S4-25, worktree `bos-rc-workers/s4-rs`) — the record detail reads like a receipt, and the one word in the ask that turned out to be a Worker feature
+
+Branch `s4/receipt-shape` off `e3678a39`, two commits, pushed: `1f655574` delivery, `840161ee` the
+receipt shape. Reference to re-verify, not ground truth.
+
+Taken here rather than left waiting on a reply, because S4-24 and S4-25 are **one surface** — both
+land in `SaleDetailModal.tsx`, `ReturnDetailModal.tsx` and the receipt renderer — and handing them
+to two of the three idle sessions would have put two lanes in the same three files.
+
+### The scope call, made from the receipt rather than from taste
+
+"Show data like receipt" is a rule you can actually apply: `Receipt.tsx`'s own field order
+(`header, order_info, customer, delivery, items, subtotal, discount, tax, total, payment, change,
+footer`) says what a receipt prints. Everything the detail printed that is not on that list went:
+**Timezone**, **Device**, **Payment currency**, **Points redeemed**, **Actual delivery cost**.
+
+The last one is the one to defend, and it is probably the "difference" the user's sentence names: it
+is what the shop **paid the driver**, and it rendered under Change — inviting a reader to subtract
+it from a total it was never part of. None of these are deleted data; all five are still on the
+sale row, in the exports and in the reports. Any single one can be put back on a word from the user;
+they are listed individually on the board for exactly that reason.
+
+A split payment survived, moved rather than cut: it is the payment row's own detail now, which is
+precisely how `Receipt.tsx` prints it (`order_info` passes the same list as the payment row's
+`subValue`). A row titled "Payment breakdown" was the thing being objected to, not the information.
+
+### Why delivery did NOT become a line item
+
+The literal reading of "delivery can merge into items" is a delivery row inside the items list. That
+reading is wrong arithmetic: a fee row above the subtotal makes the item lines stop adding to the
+subtotal printed directly under them. What the ask is actually describing is already true of the
+receipt — the fee sits **next to the total**. So the standalone Delivery card is gone and the driver,
+their phone and the drop address now render under the delivery-fee row **inside the items table**.
+One place, no second address to hold apart from the customer's, and the numbers still add up.
+
+That change also fixed something the card was hiding: the fee row only rendered when the fee was
+above zero, so a **free delivery** showed no row at all — and once the card is gone, that row is the
+only place the driver's name appears.
+
+### The half that is not a layout change
+
+"and add sale products functions" reads like part of a modal item. It is not. `routes/sales.ts`
+exposes `POST /`, `PATCH /:id/status`, `PATCH /:id/customer` and the read/report routes, and
+**nothing that adds a line to an existing sale**. Building it means inserting sale items, moving
+stock for them, deciding what a sale that is already completed or already partly returned does, and
+an undo applier — Worker work with stock correctness at stake. It is on the board as **S4-24b** with
+that written down, rather than being quietly absent from a ticked item.
+
+### Four tests were inverted, not deleted
+
+The Sep-3 pass had pinned "no field was lost turning blocks into rows" — correct for a restyle,
+wrong as a veto on a scope decision the user made a day later. So the cases were turned around and
+now pin that the removed rows **stay** removed, with the reason on each. `formatters.test.ts` came
+out stricter, not weaker: its Aug-30 rule (a captured zone must never read "Bangkok") used the sale
+detail's `fmtTimezoneLabel` call as its proof; the detail prints no timezone at all now, so the case
+asks the stronger question — this surface must never print a raw captured zone.
+`saleReceiptIdAndReturnAction.test.ts` kept every guarantee about the Return action and only moved
+which slice it reads, plus a new assertion that **no record action may sit beside a close button**,
+checked in both modals so the two records cannot drift apart again.
+
+Gate at `840161ee`: `tsc` clean, `check:source` 454 files, `verify:i18n` OK (4,542 keys), every
+`frontend/tests/*.test.ts` green, `vite build` clean in 37s. Layout was **not** verified in a
+browser: a preview started from an `rc/*` worktree silently serves the main checkout, so a
+screenshot from here would have shown the wrong tree.
+
