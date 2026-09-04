@@ -27,7 +27,7 @@
 //      and refuses rather than silently downgrading; the skip is persisted
 //      on the sale AND in the audit payload; it is re-read on every later
 //      transition; damaged lots are skipped with the rest.
-//   7. Migration 0109 actually adds the columns the route writes.
+//   7. Migration 0114 actually adds the columns the route writes.
 //
 // Run: node scripts/test-sale-status-skip-stock-pure.cjs
 const fs = require('fs')
@@ -222,11 +222,11 @@ function snapshot(sqlite) {
   console.log('PASS 6: route enforces admin server-side and records the skip on the sale + in the audit trail')
 }
 
-// ---- 7. migration 0109 provides the columns the route writes -------------
+// ---- 7. migration 0114 provides the columns the route writes -------------
 {
-  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0109_sales_stock_skipped.sql'), 'utf8')
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0114_sales_stock_skipped.sql'), 'utf8')
   for (const column of ['stock_skipped', 'stock_skipped_at', 'stock_skipped_by_name']) {
-    assert.ok(migration.includes(`ADD COLUMN ${column}`), `migration 0109 must add sales.${column}`)
+    assert.ok(migration.includes(`ADD COLUMN ${column}`), `migration 0114 must add sales.${column}`)
   }
   assert.match(migration, /stock_skipped INTEGER NOT NULL DEFAULT 0/, 'existing rows must default to today\'s behaviour')
   // The migration has to actually run on a sales-shaped table.
@@ -235,7 +235,7 @@ function snapshot(sqlite) {
   sqlite.exec(migration.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n'))
   sqlite.prepare("INSERT INTO sales (id, sale_status) VALUES (1, 'completed')").run()
   assert.strictEqual(sqlite.prepare('SELECT stock_skipped FROM sales WHERE id = 1').get().stock_skipped, 0, 'a fresh row is not stock-skipped')
-  console.log('PASS 7: migration 0109 applies and defaults every existing sale to unchanged behaviour')
+  console.log('PASS 7: migration 0114 applies and defaults every existing sale to unchanged behaviour')
 }
 
 console.log('All sale status skip-stock tests passed')

@@ -1038,7 +1038,7 @@ app.patch('/:id/status', async (c) => {
     receipt_number: string | null
     status_before_cancel: string | null
     cancel_fee_id: number | null
-    // migration 0109; absent (undefined) on a database that has not run it.
+    // migration 0114; absent (undefined) on a database that has not run it.
     stock_skipped: number | null
   }>([id])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
@@ -1205,7 +1205,7 @@ app.patch('/:id/status', async (c) => {
   }
 
   // S4-2: WRITE DOWN that stock was deliberately not moved (migration
-  // 0109). Without this a sale whose deduction was skipped on purpose is
+  // 0114). Without this a sale whose deduction was skipped on purpose is
   // indistinguishable, next month, from one whose deduction was lost to a
   // bug -- and the flag is also what makes the skip sticky, so the sale's
   // later transitions cannot invent the units back. Stamped once, on the

@@ -93,7 +93,7 @@ interface SaleRecord extends Record<string, unknown> {
   receipt_number?: string
   created_at?: string
   sale_status?: string
-  // S4-2 (migration 0109): 1 when an admin deliberately changed this sale's
+  // S4-2 (migration 0114): 1 when an admin deliberately changed this sale's
   // status without moving stock. The sale stays outside the stock ledger
   // from then on, so the confirmation says so instead of promising a
   // deduction that will not happen.
