@@ -7,11 +7,21 @@
 //
 //   held(status) = how many units of a line are PHYSICALLY OUT of stock
 //                  while the sale sits in that status
-//     completed / awaiting_delivery / partial_return / returned:
+//     completed / awaiting_payment / awaiting_delivery / partial_return /
+//     returned:
 //         quantity - alreadyReturned   (the returns flow restocks returned
 //                                       units the moment each return is
 //                                       recorded, whatever the label says)
-//     awaiting_payment / cancelled:  0
+//     cancelled:  0
+//
+// S4-3/S4-4: awaiting_payment joined the holding group. An unpaid order has
+// still taken the goods off the shelf -- they are promised to that buyer and
+// cannot be sold to anyone else -- so `cancelled` is now the only live
+// status that holds nothing. WHICH statuses hold is stated once, in
+// salesStatus.ts's STOCK_DEDUCTED_STATUSES; the early return below is only
+// for the statuses that hold NOTHING. The two are one rule with two gates,
+// and scripts/test-sale-stock-holding-parity-pure.cjs drives every status
+// through both so a future edit cannot move one and forget the other.
 //
 // and every transition moves exactly held(new) - held(old), per line, on
 // branch stock, the product total, AND the line's batch. That closes the
@@ -49,7 +59,9 @@ export function cancelReasonLabel(reason: CancelReason): string {
 
 export function heldQuantity(status: string, quantity: number, returnedQuantity: number): number {
   const normalized = status || 'completed'
-  if (normalized === 'cancelled' || normalized === 'awaiting_payment') return 0
+  // Only the statuses that hold NOTHING belong here. Anything that holds is
+  // decided by STOCK_DEDUCTED_STATUSES below -- never by a second list.
+  if (normalized === 'cancelled') return 0
   if (STOCK_DEDUCTED_STATUSES.has(normalized) || RETURN_STATUSES.has(normalized)) {
     return Math.max(0, (Number(quantity) || 0) - Math.max(0, Number(returnedQuantity) || 0))
   }
@@ -171,11 +183,20 @@ export type SaleStockTransitionPlan = {
 // WHY IT EXISTS. The Sep-2 2026 reconciliation rewrote every product's
 // quantity to the physically-counted truth, and that count ALREADY assumes
 // the migrated old-system sales are completed. Flipping such a sale
-// awaiting_payment -> completed therefore deducts units a second time --
+// awaiting_payment -> completed therefore deducted units a second time --
 // on Sep 3 a bulk flip of 7 migrated sales took 9 units that were already
 // accounted for. For those sales the correct stock delta is zero, and no
 // amount of held() arithmetic can know that: it is a fact about where the
 // data came from, not about the lifecycle.
+//
+// S4-3 narrowed that particular transition to a no-op (awaiting_payment now
+// holds, so the delta is 0), but it did NOT make this flag redundant -- it
+// made it more necessary. A migrated sale must never move stock in EITHER
+// direction, and the transitions that still move units for everyone else
+// (cancel, un-cancel, and every amendment) would move them for a migrated
+// sale too. The flag is the only thing that knows the units were never in
+// the ledger to begin with, which is why it is sticky and lives on the
+// sale rather than on one action.
 //
 // WHAT skipStock DOES. The transition still happens in every other respect
 // (status, payment fields, cancellation record, audit, notifications); the
@@ -233,7 +254,9 @@ export function planSaleStockTransition(input: {
     }
 
     if (delta > 0) {
-      // Taking stock (e.g. un-cancel, or awaiting_payment -> completed).
+      // Taking stock (un-cancel back into a holding status). Since S4-3
+      // awaiting_payment -> completed moves NOTHING: both hold, so the
+      // delta is 0 and the units left the shelf when the order was taken.
       deductedUnits += delta
       const key = `${item.product_id}:${item.branch_id}`
       const existing = deductionMap.get(key)
@@ -306,7 +329,9 @@ export function planSaleStockTransition(input: {
         },
       })
     } else {
-      // Giving stock back (cancellation, or completed -> awaiting_payment).
+      // Giving stock back. Since S4-3 that means cancellation (the only
+      // status holding nothing) -- completed -> awaiting_payment no longer
+      // restores, because an unpaid order still holds its units.
       const restore = -delta
       restoredUnits += restore
       statements.push({

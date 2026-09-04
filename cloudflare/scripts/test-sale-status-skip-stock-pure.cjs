@@ -77,6 +77,40 @@ const baseInput = (extra = {}) => ({
   ...extra,
 })
 
+// S4-3 CHANGED WHAT THIS INCIDENT LOOKS LIKE, without making this flag
+// redundant.
+//
+// awaiting_payment now HOLDS stock, so the exact flip that caused the
+// incident (awaiting_payment -> completed) is a zero-delta no-op for EVERY
+// sale, flag or no flag. That is S4-3's own fix and it is pinned in case 0
+// below. But it only closes that one transition: a migrated sale can still be
+// cancelled, un-cancelled or amended, and each of those moves units the
+// system never took. The flag is the only thing that knows they were never
+// in the ledger -- so the "reports what it withheld" cases below run on a
+// transition that genuinely moves stock under today's rule.
+const movingInput = (extra = {}) => baseInput({
+  oldStatus: 'cancelled',
+  newStatus: 'completed',
+  reason: 'Sale cancellation reverted (back to completed)',
+  ...extra,
+})
+
+// ---- 0. S4-3: the incident's own transition is now a no-op for everyone ---
+{
+  const plain = planSaleStockTransition(baseInput())
+  assert.deepStrictEqual(plain.statements, [],
+    'S4-3: awaiting_payment holds stock, so settling an unpaid order moves nothing for ANY sale')
+  assert.strictEqual(plain.deductedUnits, 0, 'and above all deducts nothing a second time')
+  assert.strictEqual(plain.restoredUnits, 0)
+
+  // With nothing to move, there is nothing to withhold either.
+  const skipped = planSaleStockTransition(baseInput({ skipStock: true }))
+  assert.deepStrictEqual(skipped.statements, [])
+  assert.strictEqual(skipped.skippedUnits, 0,
+    'skippedUnits counts units WITHHELD; a transition that moves nothing withholds nothing')
+  console.log('PASS 0: S4-3 makes awaiting_payment -> completed a no-op, so the Sep-3 incident cannot recur')
+}
+
 function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
@@ -113,7 +147,7 @@ function snapshot(sqlite) {
 
 // ---- 1 + 4. the skip emits nothing at all --------------------------------
 {
-  const skipped = planSaleStockTransition(baseInput({ skipStock: true }))
+  const skipped = planSaleStockTransition(movingInput({ skipStock: true }))
   assert.deepStrictEqual(skipped.statements, [], 'skipStock must emit ZERO stock statements')
   assert.deepStrictEqual(skipped.deductions, [], 'skipStock must claim no stock, so nothing to pre-flight')
   assert.strictEqual(skipped.restoredUnits, 0, 'skipStock restored nothing')
@@ -131,12 +165,12 @@ function snapshot(sqlite) {
 {
   const sqlite = setup()
   const before = snapshot(sqlite)
-  const skipped = planSaleStockTransition(baseInput({ skipStock: true }))
+  const skipped = planSaleStockTransition(movingInput({ skipStock: true }))
   apply(sqlite, skipped.statements)
   assert.strictEqual(snapshot(sqlite), before, 'a skipped transition must leave every stock table byte-identical')
   assert.strictEqual(sqlite.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n, 0, 'no inventory movement was written')
   // ... while the SAME transition without the flag really does deduct 9.
-  const moved = planSaleStockTransition(baseInput())
+  const moved = planSaleStockTransition(movingInput())
   apply(sqlite, moved.statements)
   assert.strictEqual(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id = 10 AND branch_id = 2').get().quantity, 36, 'without the flag branch stock still drops by 4')
   assert.strictEqual(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id = 11 AND branch_id = 2').get().quantity, 45, 'without the flag branch stock still drops by 5')

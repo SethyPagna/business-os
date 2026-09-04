@@ -8,15 +8,17 @@
 //   2. cancel from partial_return   -> restores exactly the UN-returned
 //                                      remainder (old code restored 0:
 //                                      those units silently vanished)
-//   3. cancel from awaiting_payment -> no stock was out; nothing moves
+//   3. cancel from awaiting_payment -> S4-3: the units WERE out (an unpaid
+//                                      order holds them), so they come back,
+//                                      net of anything already returned
 //   4. un-cancel                    -> re-deducts INCLUDING the line's
 //                                      batch (old deduct path skipped
 //                                      batches), only back to
 //                                      status_before_cancel
-//   5. completed -> awaiting_payment with a prior partial return
-//                                   -> restores qty - returned, not qty
-//                                      (old code double-added the
-//                                      returned portion)
+//   5. completed <-> awaiting_payment -> S4-3: both hold, so the delta is 0
+//                                      in BOTH directions -- the fix that
+//                                      stops a settle re-deducting units the
+//                                      order already took
 //   6. guards: manual flips into partial_return/returned are refused;
 //      out of partial_return only cancellation is allowed
 //   7. allocateReturnedQuantities: item-level + product-level rows both
@@ -97,7 +99,10 @@ assert.deepStrictEqual([...CANCEL_REASONS], ['mistake', 'buyer_refused', 'other'
 assert.strictEqual(heldQuantity('completed', 5, 0), 5)
 assert.strictEqual(heldQuantity('partial_return', 5, 2), 3)
 assert.strictEqual(heldQuantity('returned', 5, 5), 0)
-assert.strictEqual(heldQuantity('awaiting_payment', 5, 0), 0)
+// S4-3: an unpaid order HOLDS its units -- the goods are promised to that
+// buyer, so they are off the shelf from the moment the order is taken.
+// `cancelled` is now the only status that holds nothing.
+assert.strictEqual(heldQuantity('awaiting_payment', 5, 0), 5)
 assert.strictEqual(heldQuantity('cancelled', 5, 2), 0)
 console.log('PASS reasons + held() math')
 
@@ -143,6 +148,9 @@ console.log('PASS reasons + held() math')
 }
 
 // ---- 3: cancel from awaiting_payment --------------------------------------
+// S4-3 REVERSED THIS CASE. An unpaid order holds its units, so cancelling one
+// puts them back -- it is a real restore, not a no-op. The units are netted
+// against anything already returned, exactly as a cancel from completed is.
 {
   const plan = planSaleStockTransition({
     saleId: 1, oldStatus: 'awaiting_payment', newStatus: 'cancelled', items: [ITEM],
@@ -150,8 +158,20 @@ console.log('PASS reasons + held() math')
     reason: 'Sale cancelled (Buyer didn\'t buy)',
     userId: 9, userName: 'Sokha',
   })
-  assert.strictEqual(plan.statements.length, 0, 'nothing was out, nothing moves')
-  console.log('PASS cancel from awaiting_payment moves no stock')
+  assert.strictEqual(plan.restoredUnits, 5, 'the units were held for this order, so cancelling returns them')
+  assert.strictEqual(plan.deductedUnits, 0)
+  assert.ok(plan.statements.length > 0, 'a real restore, not a no-op')
+
+  // And the netting rule holds here too: units already back through a return
+  // are not restored a second time.
+  const partly = planSaleStockTransition({
+    saleId: 1, oldStatus: 'awaiting_payment', newStatus: 'cancelled', items: [ITEM],
+    returnedByItem: new Map([[11, 2]]),
+    reason: 'Sale cancelled (Buyer didn\'t buy)',
+    userId: 9, userName: 'Sokha',
+  })
+  assert.strictEqual(partly.restoredUnits, 3, 'restores qty - returned, never the full qty')
+  console.log('PASS cancel from awaiting_payment restores the held units (net of returns)')
 }
 
 // ---- 4: un-cancel re-deducts INCLUDING the batch --------------------------
@@ -187,16 +207,30 @@ console.log('PASS reasons + held() math')
   console.log('PASS un-cancel re-deducts shelf + batch atomically (strict, like a sale)')
 }
 
-// ---- 5: completed -> awaiting_payment after a partial return --------------
+// ---- 5: completed <-> awaiting_payment is now a stock no-op ---------------
+// S4-3 REVERSED THIS CASE TOO. Both statuses hold, so moving between them
+// moves nothing -- which is precisely what stops the double-deduction that
+// took 9 units in production on Sep 3. The netting rule this case used to
+// guard (restore qty - returned, not qty) is still pinned, in case 3 above.
 {
-  const plan = planSaleStockTransition({
+  const back = planSaleStockTransition({
     saleId: 1, oldStatus: 'completed', newStatus: 'awaiting_payment', items: [ITEM],
     returnedByItem: new Map([[11, 2]]),
     reason: 'Sale status changed from completed to awaiting_payment',
     userId: 9, userName: 'Sokha',
   })
-  assert.strictEqual(plan.restoredUnits, 3, 'restores qty - returned; the old code restored the full 5, double-adding the returned 2')
-  console.log('PASS completed -> awaiting_payment restores only what is still out')
+  assert.strictEqual(back.restoredUnits, 0, 'both statuses hold: nothing comes back')
+  assert.strictEqual(back.statements.length, 0, 'a zero delta emits no statements at all')
+
+  const forward = planSaleStockTransition({
+    saleId: 1, oldStatus: 'awaiting_payment', newStatus: 'completed', items: [ITEM],
+    returnedByItem: new Map([[11, 2]]),
+    reason: 'Sale status changed from awaiting_payment to completed',
+    userId: 9, userName: 'Sokha',
+  })
+  assert.strictEqual(forward.deductedUnits, 0, 'settling an unpaid order must NOT deduct a second time')
+  assert.strictEqual(forward.statements.length, 0)
+  console.log('PASS completed <-> awaiting_payment moves no stock in either direction')
 }
 
 // ---- 6: transition guards -------------------------------------------------

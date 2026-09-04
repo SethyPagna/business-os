@@ -13,7 +13,10 @@
 //   3. multi-lot FIFO split        -> both lots drawn oldest-first, the
 //                                     movement's batch_id left NULL (not
 //                                     attributable), one allocation row per lot
-//   4. awaiting_payment sale       -> NOTHING moves, but the lot attribution
+//   4a. awaiting_payment sale      -> S4-3: stock DOES move; an unpaid order
+//                                     holds its units from the moment the
+//                                     line is added
+//   4b. stock-skipped sale (S4-2)  -> NOTHING moves, but the lot attribution
 //                                     is still recorded with
 //                                     released_quantity = quantity
 //   5. two lines, one product      -> the second cannot re-take the units
@@ -159,10 +162,13 @@ for (const status of ['cancelled', 'returned', 'partial_return']) {
 // real return records is refused too.
 assert.strictEqual(guardSaleLineAddition('completed', true).ok, false)
 assert.match(guardSaleLineAddition('completed', true).error, /Returns flow/i)
-// And only the two deducted statuses move stock.
+// S4-3: every status that accepts a new line now moves stock for it -- an
+// unpaid order holds its units just like a completed one does. `cancelled` is
+// the only status holding nothing, and it is refused a new line outright.
 assert.strictEqual(saleStatusDeductsStock('completed'), true)
 assert.strictEqual(saleStatusDeductsStock('awaiting_delivery'), true)
-assert.strictEqual(saleStatusDeductsStock('awaiting_payment'), false)
+assert.strictEqual(saleStatusDeductsStock('awaiting_payment'), true)
+assert.strictEqual(saleStatusDeductsStock('cancelled'), false)
 console.log('PASS 1 -- which statuses accept a new line, and which move stock for it')
 
 // ---- 2: a line added to a completed sale moves real stock ------------------
@@ -234,12 +240,32 @@ console.log('PASS 2 -- a line added to a completed sale deducts branch, product,
 }
 console.log('PASS 3 -- a multi-lot line drains FIFO and records one allocation row per lot')
 
-// ---- 4: awaiting_payment records the line and moves NOTHING ----------------
+// ---- 4a: S4-3 -- a line added to an unpaid order DOES move stock ----------
+// The units are promised to that buyer the moment the line is added, so they
+// leave the shelf now rather than at some later completing transition.
 {
   const { sqlite, apply } = setup()
   seedShelf(sqlite)
   const lines = allocateNewSaleLines([LINE(5)], lotsFor(), 'awaiting_payment')
-  assert.strictEqual(lines[0].heldUnits, 0, 'nothing has left the shelf on an unpaid sale')
+  assert.strictEqual(lines[0].heldUnits, 5, 'S4-3: an unpaid order holds its units')
+  const plan = planSaleLineAddition({ saleId: 77, saleStatus: 'awaiting_payment', lines, exchangeRate: 4100, userId: null, userName: null })
+  assert.strictEqual(plan.deductedUnits, 5)
+  apply(plan.statements)
+  assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 15, 'the shelf really drops')
+  assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_batch_stock WHERE batch_id = 501'), 3, 'and so does the lot')
+  assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM inventory_movements'), 1, 'with a real movement behind it')
+}
+console.log('PASS 4a -- a line added to an unpaid order takes its units off the shelf now')
+
+// ---- 4b: a STOCK-SKIPPED sale records the line and moves NOTHING ----------
+// S4-2's sticky flag, passed explicitly as skipStock. This used to be tested
+// by passing status 'awaiting_payment', which only worked while that status
+// happened to hold nothing -- the exact coincidence S4-3 removed.
+{
+  const { sqlite, apply } = setup()
+  seedShelf(sqlite)
+  const lines = allocateNewSaleLines([LINE(5)], lotsFor(), 'awaiting_payment', true)
+  assert.strictEqual(lines[0].heldUnits, 0, 'a stock-skipped sale is outside the stock ledger')
   const plan = planSaleLineAddition({ saleId: 77, saleStatus: 'awaiting_payment', lines, exchangeRate: 4100, userId: null, userName: null })
   assert.strictEqual(plan.deductedUnits, 0)
   assert.deepStrictEqual(plan.deductions, [])
@@ -257,7 +283,7 @@ console.log('PASS 3 -- a multi-lot line drains FIFO and records one allocation r
     'the lot attribution is recorded as fully released -- the later completing transition draws it back down')
   assert.ok(alloc.released_at, 'and stamped, same shape POST / gives a non-deducting sale')
 }
-console.log('PASS 4 -- a line added to an awaiting-payment sale moves no stock but still records its lots')
+console.log('PASS 4b -- a line added to a stock-skipped sale moves no stock but still records its lots')
 
 // ---- 5: two lines of one product cannot double-take a lot -----------------
 {
@@ -400,7 +426,9 @@ console.log('PASS 7 -- undo reverses the line, its lots, its stock and the sale 
 {
   const { sqlite, apply } = setup()
   seedShelf(sqlite)
-  const lines = allocateNewSaleLines([LINE(5)], lotsFor(), 'awaiting_payment')
+  // Non-deducting because the SALE is stock-skipped (S4-2), not because of
+  // its status -- since S4-3 awaiting_payment deducts like any other.
+  const lines = allocateNewSaleLines([LINE(5)], lotsFor(), 'awaiting_payment', true)
   const plan = planSaleLineAddition({ saleId: 78, saleStatus: 'awaiting_payment', lines, exchangeRate: 4100, userId: null, userName: null })
   const results = apply(plan.statements)
   const saleItemId = Number(results[plan.saleItemStatementIndexByLine[0]].lastInsertRowid)

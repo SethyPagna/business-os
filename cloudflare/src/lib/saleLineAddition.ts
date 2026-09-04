@@ -20,10 +20,11 @@
 // 1. WHICH STATUSES ACCEPT A NEW LINE -- see
 //    SALE_STATUSES_ACCEPTING_NEW_LINES / guardSaleLineAddition below.
 //
-// 2. STOCK -- a line added to a status that already holds stock deducted
-//    (completed / awaiting_delivery, i.e. STOCK_DEDUCTED_STATUSES) moves
-//    stock NOW; a line added to awaiting_payment moves none, exactly as
-//    POST / records an awaiting_payment cart. The units moved are not a
+// 2. STOCK -- a line added to a status that holds stock deducted (since
+//    S4-3 that is completed / awaiting_payment / awaiting_delivery, i.e.
+//    STOCK_DEDUCTED_STATUSES) moves stock NOW; a line added to a sale that
+//    holds nothing (cancelled is refused outright, and a stock_skipped sale
+//    passes skipStock) moves none. The units moved are not a
 //    second opinion: they are heldQuantity(status, quantity, 0) straight
 //    out of lib/saleTransitions.ts, the same invariant PATCH /:id/status
 //    moves stock by. The lots are picked by allocateAcrossLots over
@@ -66,11 +67,11 @@ export type StockStatement = { sql: string; params: Record<string, unknown> }
 //   awaiting_delivery  YES -- same reasoning: the goods are already
 //                      committed and on their way, and an added line rides
 //                      the same delivery.
-//   awaiting_payment   YES -- nothing has left the shelf yet, so the line is
-//                      recorded and NOTHING moves. Its FIFO lot attribution
-//                      is still written (released_quantity = quantity), the
-//                      same shape POST / gives a non-deducting sale, so the
-//                      later completing transition draws the same lots.
+//   awaiting_payment   YES -- and since S4-3 the added line's stock goes out
+//                      too, exactly like `completed`. An unpaid order holds
+//                      its units (they are promised to that buyer), so an
+//                      added line takes its units off the shelf now rather
+//                      than at some later completing transition.
 //   cancelled          NO  -- a cancelled sale is a corrective record of a
 //                      sale that did not happen. Adding goods to it would
 //                      claim a sale nobody made, and un-cancelling would
@@ -112,7 +113,14 @@ export function guardSaleLineAddition(status: string, hasRecordedReturns = false
   return { ok: true }
 }
 
-/** True when a sale in this status holds its stock deducted. */
+/**
+ * True when a sale in this status holds its stock deducted.
+ *
+ * STATUS ONLY. A sale carrying S4-2's sticky `stock_skipped` flag holds
+ * nothing regardless of what its status says, and this function cannot see
+ * that -- callers must combine it with saleAmendments.saleSkipsStock(sale),
+ * which is what `skipStock` below exists to carry.
+ */
 export function saleStatusDeductsStock(status: string): boolean {
   return STOCK_DEDUCTED_STATUSES.has(String(status || 'completed'))
 }
@@ -160,16 +168,25 @@ export type PlannedSaleLine = NewSaleLineInput & {
  * An explicit batchId short-circuits the FIFO walk (the cashier picked the
  * lot); a line whose product has no lot ledger at all gets no takes and
  * simply rides branch_stock, exactly as an untracked checkout line does.
+ *
+ * `skipStock` is S4-2's sticky "this sale is outside the stock ledger" flag,
+ * passed EXPLICITLY rather than smuggled in as a status the caller knows
+ * holds nothing. Callers used to pass a literal 'awaiting_payment' for that,
+ * which was correct only for as long as awaiting_payment happened to hold
+ * nothing -- S4-3 made it hold, and that sentinel would have inverted into a
+ * full deduction on exactly the sales that must never move stock. The plan
+ * takes the fact it needs, not a status stand-in for it.
  */
 export function allocateNewSaleLines(
   lines: NewSaleLineInput[],
   lotsByKey: Map<string, FifoLotAvailability[]>,
   saleStatus: string,
+  skipStock = false,
 ): PlannedSaleLine[] {
   return lines.map((line) => {
     const quantity = Math.max(0, Number(line.quantity) || 0)
     const unitPriceUsd = Number(line.unitPriceUsd) || 0
-    const heldUnits = heldQuantity(saleStatus, quantity, 0)
+    const heldUnits = skipStock ? 0 : heldQuantity(saleStatus, quantity, 0)
     let takes: FifoLotTake[] = []
     if (line.branchId && quantity > 0) {
       if (line.batchId) {
@@ -279,9 +296,10 @@ export function planSaleLineAddition(input: {
       },
     })
 
-    // heldUnits is 0 for awaiting_payment: the line is recorded, no stock
-    // moves. This is the ONE place that decides, and it defers to
-    // heldQuantity() rather than re-deriving "does this status deduct".
+    // heldUnits is 0 only when the sale holds nothing (a stock_skipped
+    // sale): the line is recorded and no stock moves. This is the ONE place
+    // that decides, and it defers to heldQuantity() rather than re-deriving
+    // "does this status deduct".
     if (!line.branchId || line.heldUnits <= 0) continue
 
     deductedUnits += line.heldUnits
@@ -335,8 +353,8 @@ export function planSaleLineAddition(input: {
  * The sale_item_batch_allocations rows for the added lines, written once the
  * atomic batch above has told us each new sale_item's real id. Same
  * released_quantity convention as POST /: 0 when the units are physically
- * out with the sale, the full take when they are not (awaiting_payment), so
- * the later completing transition consumes them back down.
+ * out with the sale, the full take when they are not (a stock_skipped sale),
+ * so a later transition that does move stock consumes them back down.
  */
 export function buildAllocationStatements(
   lines: PlannedSaleLine[],
@@ -378,7 +396,7 @@ export type AddedSaleLineRecord = {
   productName: string | null
   quantity: number
   branchId: number | null
-  /** Units this line actually took off the shelf (0 on an awaiting_payment sale). */
+  /** Units this line actually took off the shelf (0 on a stock_skipped sale). */
   heldUnits: number
   unitPriceUsd: number
   lineTotalUsd: number
@@ -471,7 +489,7 @@ export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMon
  * stock and the product rollup as new 'return' movements, then drop the
  * allocation rows and the sale_items rows themselves.
  *
- * A line whose heldUnits is 0 (added to an awaiting_payment sale) moves no
+ * A line whose heldUnits is 0 (added to a stock_skipped sale) moves no
  * stock on the way out either -- it only loses its rows. Symmetry with the
  * forward plan is the whole point: whatever heldQuantity said on the way in
  * is what comes back on the way out.

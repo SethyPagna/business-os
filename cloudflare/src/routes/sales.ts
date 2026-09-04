@@ -1706,7 +1706,15 @@ app.post('/:id/items', async (c) => {
     }
   }
 
-  const deductsStock = saleStatusDeductsStock(saleStatus)
+  // S4-2 + S4-3: the status is only half the question. A sale carrying the
+  // sticky `stock_skipped` flag is permanently outside the stock ledger, and
+  // adding a line to it must not take units the system never took. Before
+  // S4-3 this hole was invisible -- the only stock_skipped sales were
+  // migrated ones sitting in awaiting_payment, which held nothing anyway --
+  // but now that awaiting_payment holds, the flag is the ONLY thing standing
+  // between a migrated sale and a deduction it must never make.
+  const skipStock = saleSkipsStock(sale as AmendableSaleRow)
+  const deductsStock = saleStatusDeductsStock(saleStatus) && !skipStock
 
   // ---- Plan the lines: FIFO lots first (the checkout's own rule, called) --
   const lotsByKey = await readFifoLotAvailabilityForCart(
@@ -1733,6 +1741,7 @@ app.post('/:id/items', async (c) => {
     }),
     lotsByKey,
     saleStatus,
+    skipStock,
   )
 
   const exchangeRate = Number(sale.exchange_rate) || 4100
@@ -1845,7 +1854,7 @@ app.post('/:id/items', async (c) => {
       totalBeforeUsd,
       totalAfterUsd,
       unitsMoved: -line.heldUnits || 0,
-      stockSkipped: saleSkipsStock(sale as AmendableSaleRow),
+      stockSkipped: skipStock,
       note: String(body.notes || '').trim().slice(0, 500) || null,
       userId: user?.id ?? null,
       userName: user?.name ?? null,
@@ -2280,13 +2289,20 @@ app.post('/:id/amendments', async (c) => {
     // The replacement line is planned by S4-24b's own addition kernel --
     // called, not re-implemented -- so a replaced-in product draws its lots by
     // the same FIFO rule and emits the same unclamped statements a checkout
-    // would. The sale's status is what decides how much moves; a stock-skipped
-    // sale is forced to zero afterwards by the same single check.
+    // would. `movesStock` (status AND the sticky stock_skipped flag) is passed
+    // as the kernel's explicit skipStock argument.
+    //
+    // S4-3: this used to pass a literal 'awaiting_payment' as a stand-in for
+    // "hold nothing". That was only ever true by coincidence, and the moment
+    // awaiting_payment started holding stock the stand-in would have inverted
+    // -- planning a FULL deduction for precisely the stock_skipped sales that
+    // must never move a unit. The kernel now takes the fact, not a status
+    // that happens to imply it.
     const plannedLines = allocateNewSaleLines([{
       productId, productName: product.name || `product #${productId}`, quantity, branchId,
       unitPriceUsd, costPriceUsd: Number(product.cost_price_usd) || 0, costPriceKhr: Number(product.cost_price_khr) || 0,
       batchId: null, batchLabel: null, batchExpiryDate: null,
-    }], lotsByKey, movesStock ? saleStatus : 'awaiting_payment')
+    }], lotsByKey, saleStatus, !movesStock)
 
     if (movesStock && branchId) {
       const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
@@ -2296,8 +2312,11 @@ app.post('/:id/amendments', async (c) => {
       }
     }
 
+    // The plan works purely off each line's heldUnits (already 0 when this
+    // sale moves no stock), so the status is carried for the record only --
+    // no second sentinel.
     const additionPlan = planSaleLineAddition({
-      saleId, saleStatus: movesStock ? saleStatus : 'awaiting_payment', lines: plannedLines,
+      saleId, saleStatus, lines: plannedLines,
       exchangeRate, userId: user?.id ?? null, userName: user?.name ?? null,
     })
     statements.push(...additionPlan.statements)
