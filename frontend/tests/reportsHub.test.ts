@@ -5,8 +5,11 @@
 //   - buildIncomeStatement is arithmetically closed on the canonical kernel
 //     figures it is given (gross -> discounts -> net sales -> pending ->
 //     refunds -> REVENUE; revenue + tax/delivery -> COLLECTED; revenue -
-//     COGS - store delivery -> GROSS PROFIT; - expenses -> NET RESULT) and
-//     never shows a profit line for a caller the server hid cost from.
+//     COGS + delivery collected - delivery paid to couriers -> GROSS PROFIT;
+//     - operating expenses -> TOTAL PROFIT) and never shows a profit line for
+//     a caller the server hid cost from.
+//   - the awaiting-payment cohort is broken out the same way and kept strictly
+//     below and out of every realised total (S4R3-6).
 //   - normalizeTotals / sumTotals copy the admin-only keys ONLY when the
 //     server sent them (absence, not 0, is the "hidden" signal).
 //   - reportQueryParams sends the clock window / status / payment only to
@@ -22,6 +25,7 @@ import {
   EMPTY_REPORT_FILTERS,
   REPORT_STORAGE_KEYS,
   REPORT_VIEWS,
+  STATEMENT_GROUPS,
   basisValue,
   buildIncomeStatement,
   defaultReportStyle,
@@ -57,8 +61,15 @@ const readJson = (rel: string): Record<string, unknown> => JSON.parse(read(rel))
 // A canonical totals block as the server sends it to an ADMIN. Figures chosen
 // so every derived line is a distinct number: gross 300, store discount 20,
 // membership 10 -> net sales 270; pending 40; refunds 15 -> revenue 215;
-// collected 233 (= revenue + tax 8 + customer delivery 10); cost 90; store
-// delivery 5 -> profit 120.
+// collected 233 (= revenue + tax 8 + customer delivery 10).
+//
+// The delivery figures are deliberately SKEWED apart (S4R3-6). delivery_usd 10
+// is every customer-paid fee in the window; recognized_delivery_usd 6 is the
+// recognized share of it, and recognized_delivery_cost_usd 1 the recognized
+// courier cost -- so delivery_net is 5 while delivery_margin (10 - 3) is 7. A
+// fixture where those coincide cannot tell the profit-bearing delivery figure
+// from the descriptive one, and the whole point of this lane is that they are
+// different quantities. cost 90, delivery net 5 -> profit 130.
 const adminTotals = {
   tx_count: 6,
   gross_sales_usd: 300,
@@ -68,21 +79,38 @@ const adminTotals = {
   tax_usd: 8,
   delivery_usd: 10,
   store_delivery_usd: 5,
-  delivery_actual_cost_usd: 0,
-  delivery_actual_cost_count: 0,
-  delivery_sale_count: 1,
-  delivery_margin_usd: 0,
+  delivery_actual_cost_usd: 3,
+  delivery_actual_cost_count: 2,
+  delivery_sale_count: 4,
+  delivery_margin_usd: 7,
+  delivery_net_usd: 5,
+  recognized_delivery_usd: 6,
+  recognized_delivery_cost_usd: 1,
   refund_usd: 15,
   revenue_usd: 215,
   pending_revenue_usd: 40,
   collected_total_usd: 233,
   avg_order_usd: 35.83,
+  // The awaiting-payment cohort: unpaid gross 55 - unpaid discounts (9 + 6)
+  // -> unpaid net sales 40; unpaid COGS 18; unpaid delivery 4 collected and 3
+  // already paid out -> unpaid profit 23.
+  pending_tx_count: 2,
+  pending_gross_sales_usd: 55,
+  pending_store_discount_usd: 9,
+  pending_membership_discount_usd: 6,
+  pending_delivery_usd: 4,
+  pending_delivery_cost_usd: 3,
   cost_usd: 90,
-  profit_usd: 120,
-  margin_pct: 55.81,
+  profit_usd: 130,
+  margin_pct: 60.47,
   cost_missing_snapshot_lines: 2,
+  pending_cost_usd: 18,
+  pending_profit_usd: 23,
 }
-const { cost_usd: _c, profit_usd: _p, margin_pct: _m, cost_missing_snapshot_lines: _l, ...staffTotals } = adminTotals
+const {
+  cost_usd: _c, profit_usd: _p, margin_pct: _m, cost_missing_snapshot_lines: _l,
+  pending_cost_usd: _pc, pending_profit_usd: _pp, ...staffTotals
+} = adminTotals
 const khrToUsd = (khr: number) => khr / 4000
 const lineMap = (lines: ReturnType<typeof buildIncomeStatement>) => Object.fromEntries(lines.map((l) => [l.key, l]))
 
@@ -98,7 +126,7 @@ test('normalizeTotals copies the admin keys only when the server sent them', () 
   assert.equal(normalizeTotals('x'), null)
   // margin is derived when the server omitted it
   const derived = normalizeTotals({ ...adminTotals, margin_pct: undefined })
-  assert.equal(derived?.margin_pct, 55.8, "client-derived margin uses the model pct (1 decimal, the display precision)")
+  assert.equal(derived?.margin_pct, 60.5, "client-derived margin uses the model pct (1 decimal, the display precision)")
 })
 
 test('buildIncomeStatement: revenue and collected groups close arithmetically on kernel figures', () => {
@@ -116,26 +144,132 @@ test('buildIncomeStatement: revenue and collected groups close arithmetically on
   // No cost on the server side -> no profit group at all, regardless of the profit mode / expenses given.
   assert.ok(!('cogs' in m) && !('gross_profit' in m) && !('expenses' in m) && !('net_result' in m), 'no profit lines for a caller without cost')
   assert.ok(lines.every((l) => l.group !== 'profit'))
-  assert.equal(lines.length, 9)
+  // The delivery memo and the awaiting-payment block are NOT cost-gated: they
+  // are measured money in and money out, not a margin, so a staff caller sees
+  // them. Only the cost-derived lines inside them drop away.
+  assert.equal(m.delivery_charged.usd, 10)
+  assert.equal(m.delivery_charged.kind, 'memo', 'the memo lines carry no operator')
+  assert.equal(m.pending_gross_sales.usd, 55)
+  assert.equal(m.pending_revenue.usd, 40)
+  assert.ok(!('pending_cogs' in m) && !('pending_profit' in m), 'no cost -> no unpaid cost or unpaid profit either')
+  assert.equal(lines.length, 18)
 })
 
-test('buildIncomeStatement: the profit group closes (gross) and subtracts expenses (net) with KHR converted', () => {
+test('buildIncomeStatement: the profit bridge names every term and never uses the residual', () => {
   const gross = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), profitMode: 'gross', khrToUsd, expenses: { usd: 10, khr: 40000 } }))
+  assert.equal(gross.revenue_carried.usd, 215, 'revenue is carried down so the first input of the bridge is on screen')
   assert.equal(gross.cogs.usd, 90)
-  assert.equal(gross.store_delivery.usd, 5, 'store-paid delivery = revenue - cost - profit')
-  assert.equal(gross.gross_profit.usd, 120)
-  assert.equal(gross.revenue.usd - gross.cogs.usd - gross.store_delivery.usd, gross.gross_profit.usd, 'the profit group is closed')
-  assert.ok(!('expenses' in gross) && !('net_result' in gross), 'gross mode stops at gross profit')
+  assert.equal(gross.delivery_collected.usd, 6, 'the RECOGNIZED delivery fee, not delivery_usd (10)')
+  assert.equal(gross.delivery_paid.usd, 1, 'the RECOGNIZED courier cost, not delivery_actual_cost_usd (3)')
+  assert.equal(gross.gross_profit.usd, 130)
+  // The pre-S4R3-6 shape: one residual line, `revenue - cost - profit`,
+  // labelled "Store-paid delivery". It always footed and it always named the
+  // wrong quantity, so its absence from the profit group is the fix.
+  assert.ok(!('store_delivery' in gross), 'the residual delivery plug is gone from the profit group')
+  assert.equal(gross.delivery_absorbed.group, 'delivery', 'store-paid delivery is a memo now, not a profit term')
+  // delivery_margin_usd (7 here) is the descriptive figure over ALL deliveries;
+  // substituting it for the recognized halves would miss by 2 and still look
+  // plausible, which is why the fixture skews them apart.
+  assert.notEqual(gross.delivery_collected.usd - gross.delivery_paid.usd, 7, 'the bridge does not use delivery_margin_usd')
+  assert.equal(gross.delivery_net.usd, 5, 'delivery contribution = recognized fees - recognized courier cost')
 
   const net = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), profitMode: 'net', khrToUsd, expenses: { usd: 10, khr: 40000 } }))
   assert.equal(net.expenses.usd, 20, '$10 + 40,000៛ at 4000 = $20')
   assert.equal(net.expenses.khr, 40000, 'the raw KHR is kept for display')
   assert.equal(net.expenses.hintKey, 'rpt_hint_expenses_line')
-  assert.equal(net.net_result.usd, 100, 'net result = gross profit - expenses')
+  assert.equal(net.net_result.usd, 110, 'net result = gross profit - expenses')
   assert.equal(net.net_result.kind, 'total')
-  // net mode without an expenses block (caller cannot read expenses) shows no net lines
+  // The mode no longer decides whether the gross-profit-to-total-profit step
+  // EXISTS -- hiding it behind an off-by-default option is what made that step
+  // invisible. It only moves which total the summary leads with.
+  assert.ok('expenses' in gross && 'net_result' in gross, 'gross mode still shows the step down to total profit')
+  assert.equal(gross.gross_profit.headline, true)
+  assert.equal(gross.net_result.headline, false)
+  assert.equal(net.net_result.headline, true)
+  assert.equal(net.gross_profit.headline, false)
+  // No expenses block at all (the caller cannot read expenses) -> no net lines.
   const netNoExp = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), profitMode: 'net', khrToUsd }))
   assert.ok(!('expenses' in netNoExp) && !('net_result' in netNoExp))
+})
+
+test('buildIncomeStatement: the waterfall foots to the cent, and says so when cost is missing', () => {
+  const m = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), profitMode: 'net', khrToUsd, expenses: { usd: 10, khr: 40000 } }))
+  // Total revenue - COGS + delivery collected - actual delivery cost = gross
+  // profit, with every input on screen. `profit_rounding` exists only when the
+  // independently round2'd terms miss; it is a term of the chain when it does.
+  const rounding = m.profit_rounding ? m.profit_rounding.usd : 0
+  assert.equal(
+    m.revenue_carried.usd - m.cogs.usd + m.delivery_collected.usd - m.delivery_paid.usd + rounding,
+    m.gross_profit.usd,
+    'revenue - cogs + delivery collected - delivery paid = gross profit',
+  )
+  assert.equal(m.gross_profit.usd - m.expenses.usd, m.net_result.usd, 'gross profit - expenses = total profit')
+  // ... and the unpaid cohort foots on the same bases.
+  const pendingRounding = m.pending_rounding ? m.pending_rounding.usd : 0
+  assert.equal(m.pending_gross_sales.usd - m.pending_discounts.usd, m.pending_revenue.usd, 'unpaid gross - unpaid discounts = unpaid net sales')
+  assert.equal(
+    m.pending_revenue.usd - m.pending_cogs.usd + m.pending_delivery_collected.usd - m.pending_delivery_paid.usd + pendingRounding,
+    m.pending_profit.usd,
+    'the unpaid block foots the same way the realised one does',
+  )
+
+  // A cent of rounding is CARRIED on its own line, never absorbed into a
+  // labelled one.
+  const skew = lineMap(buildIncomeStatement({ sales: normalizeTotals({ ...adminTotals, profit_usd: 130.01 }), profitMode: 'net', khrToUsd }))
+  assert.equal(skew.profit_rounding.usd, 0.01, 'the cent is its own line')
+  assert.equal(skew.cogs.usd, 90, 'and no other line moved to swallow it')
+  assert.equal(
+    skew.revenue_carried.usd - skew.cogs.usd + skew.delivery_collected.usd - skew.delivery_paid.usd + skew.profit_rounding.usd,
+    skew.gross_profit.usd,
+  )
+
+  // Absent cost data is LABELLED, not silently rendered as $0.00 of free goods.
+  const noCost = lineMap(buildIncomeStatement({ sales: normalizeTotals({ ...adminTotals, cost_usd: 0, cost_missing_snapshot_lines: 4 }), profitMode: 'gross', khrToUsd }))
+  assert.equal(noCost.cogs.usd, 0)
+  assert.equal(noCost.cogs.note?.key, 'rpt_note_cost_unavailable', 'a zero COGS with missing snapshots says "not available"')
+  assert.equal(noCost.cogs.note?.count, 4)
+  assert.equal(m.cogs.note?.key, 'rpt_note_cost_partial', 'a partial one says how many lines are uncosted')
+  assert.equal(m.delivery_paid.note?.key, 'rpt_note_delivery_partial', 'courier cost states its coverage: 2 of 4 deliveries')
+  assert.equal(m.delivery_paid.note?.total, 4)
+})
+
+test('buildIncomeStatement: the awaiting-payment block never contributes to a realised total', () => {
+  const opts = { profitMode: 'net' as const, khrToUsd, expenses: { usd: 10, khr: 40000 } }
+  const base = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), ...opts }))
+  // Move EVERY pending input to an unmistakable number. Not one realised line
+  // may follow it (binding ruling: unpaid money stays out of the realised
+  // arithmetic and is reported below it).
+  const skewed = buildIncomeStatement({
+    sales: normalizeTotals({
+      ...adminTotals,
+      pending_tx_count: 99,
+      pending_gross_sales_usd: 999,
+      pending_store_discount_usd: 99,
+      pending_membership_discount_usd: 99,
+      pending_delivery_usd: 99,
+      pending_delivery_cost_usd: 99,
+      pending_cost_usd: 999,
+      pending_profit_usd: 999,
+    }),
+    ...opts,
+  })
+  const m = lineMap(skewed)
+  for (const key of ['net_sales', 'revenue', 'collected_total', 'revenue_carried', 'cogs', 'delivery_collected', 'delivery_paid', 'gross_profit', 'net_result']) {
+    assert.equal(m[key].usd, base[key].usd, `${key} is untouched by the unpaid cohort`)
+  }
+  // `pending_credit` is the ONE realised line that reads a pending figure, and
+  // it is a SUBTRACTION: it takes unpaid net sales OUT of revenue.
+  assert.equal(base.pending_credit.kind, 'sub')
+  assert.equal(base.pending_credit.usd, base.pending_revenue.usd, 'the same unpaid net sales, removed above and reported below')
+  assert.equal(base.net_sales.usd - base.pending_credit.usd - base.refunds.usd, base.revenue.usd)
+
+  // The block is last, is its own group, and no realised line sits inside it.
+  const groups = skewed.map((l) => l.group)
+  const firstPending = groups.indexOf('pending')
+  assert.ok(firstPending > 0, 'the block exists')
+  assert.ok(groups.slice(firstPending).every((g) => g === 'pending'), 'nothing realised follows the unpaid block')
+  assert.ok(groups.lastIndexOf('profit') < firstPending, 'the final realised total precedes it')
+  assert.equal(STATEMENT_GROUPS[STATEMENT_GROUPS.length - 1], 'pending', 'and the render order the three surfaces share agrees')
 })
 
 test('buildIncomeStatement: previous-period figures ride the same lines; none without a previous block', () => {
@@ -157,10 +291,19 @@ test('sumTotals sums additive figures, recomputes the average, and keeps profit 
   assert.equal(both.tx_count, 10)
   assert.equal(both.revenue_usd, 315.01, 'money re-rounded to cents')
   assert.equal(both.avg_order_usd, 31.5, 'average = revenue / tx, never summed')
-  assert.equal(both.profit_usd, 150)
+  assert.equal(both.profit_usd, 160)
   assert.equal(both.cost_usd, 160)
   assert.equal(both.cost_missing_snapshot_lines, 3)
-  assert.equal(both.margin_pct, 47.6)
+  assert.equal(both.margin_pct, 50.8)
+  // The awaiting-payment cohort has to accumulate too, or a grouped/period row
+  // silently reports a $0.00 unpaid block while its parts are non-zero.
+  assert.equal(both.pending_gross_sales_usd, 110)
+  assert.equal(both.pending_revenue_usd, 80)
+  assert.equal(both.pending_delivery_cost_usd, 6)
+  assert.equal(both.pending_cost_usd, 36)
+  assert.equal(both.pending_profit_usd, 46)
+  assert.equal(both.recognized_delivery_usd, 12)
+  assert.equal(both.recognized_delivery_cost_usd, 2)
   const mixed = sumTotals([a, normalizeTotals(staffTotals) as ReportTotals])
   assert.ok(!hasProfit(mixed), 'one row without cost -> no profit on the total (never a misleading partial sum)')
   assert.ok(!('cost_usd' in mixed))
@@ -458,6 +601,44 @@ test('no view assigns a cost/profit key itself -- profit is shown only when the 
   const overview = read('src/components/sales/reports/OverviewReport.tsx')
   assert.ok(overview.includes("lines.find((l) => l.key === 'gross_profit')"), 'the Overview takes gross profit from the statement lines')
   assert.ok(overview.includes('buildIncomeStatement('), 'the Overview builds its statement through the model')
+})
+
+test('the awaiting-payment block is set apart in the warning tint on every surface that renders a statement', () => {
+  // The owner asked for it in as many words: "a yellow-highlighted block at
+  // the bottom with the unpaid subtotals on their own". The tint is
+  // load-bearing -- it is what stops a theoretical figure being read as a
+  // realised one -- so it is pinned, and pinned on all three statement
+  // surfaces rather than only the Overview.
+  const css = read(SURFACE_CSS)
+  const dark = css.slice(css.indexOf('.dark {'))
+  for (const token of ['--ui-warn-soft', '--ui-warn-line', '--ui-warn-ink']) {
+    assert.ok(new RegExp(`${token}\\s*:`).test(css), `${token} is declared`)
+    // A light-mode-only amber is a white slab on the dark card, which reads as
+    // an error rather than a highlight.
+    assert.ok(dark.includes(`${token}:`), `${token} has a dark-mode value`)
+  }
+  assert.ok(css.includes("tr[data-statement-group='pending']"), 'the excel style tints the block by group')
+  const sheet = read('src/components/sales/reports/ReceiptSheet.tsx')
+  assert.ok(/highlight\?: boolean/.test(sheet), 'the receipt style takes a highlight flag')
+  assert.ok(sheet.includes('bg-[var(--ui-warn-soft)]'), 'and paints it in the warning tint')
+  // Khmer: the tinted box buys its separation with PADDING. A box that hugs
+  // the Latin metric shears the tops and tails of a Khmer cluster.
+  const hl = sheet.slice(sheet.indexOf('block.highlight'), sheet.indexOf('block.highlight') + 200)
+  assert.ok(/px-[\d.]+ py-[\d.]+/.test(hl), 'the tinted box is padded')
+  assert.ok(!/leading-|line-height/.test(hl), 'and never shortens the line box')
+
+  // Parity: the group order, the group label and the tint predicate all come
+  // from the model, so a new group cannot appear on one surface and not the
+  // others. These three files each carried their own ['revenue','collected',
+  // 'profit'] literal before S4R3-6, which is why the delivery and pending
+  // groups would have rendered on none of them.
+  for (const rel of ['src/components/sales/reports/OverviewReport.tsx', 'src/components/sales/reports/PeriodReport.tsx', 'src/components/sales/reports/GroupedReport.tsx']) {
+    const src = read(rel)
+    assert.ok(src.includes('STATEMENT_GROUPS'), `${rel} reads the shared group order`)
+    assert.ok(src.includes('statementGroupLabel('), `${rel} reads the shared group labels`)
+    assert.ok(src.includes('isTheoreticalGroup('), `${rel} tints the theoretical block`)
+    assert.ok(!/\['revenue', ?'collected', ?'profit'\]/.test(src), `${rel} keeps no local copy of the group list`)
+  }
 })
 
 if (failed) {
