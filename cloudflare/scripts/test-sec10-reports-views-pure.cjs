@@ -90,7 +90,9 @@ db.exec(`
     total_usd REAL,
     branch_id INTEGER,
     product_id INTEGER,
-    product_name TEXT
+    product_name TEXT,
+    product_discount_usd REAL DEFAULT 0,
+    manual_discount_usd REAL DEFAULT 0
   );
   -- delivery_actual_cost_usd on a sale is ignored when the SAME courier
   -- payment was also written as a standalone fees row, so the kernel probes
@@ -162,7 +164,7 @@ insItem.run(1, 1, 1, 30, 90, 1, 101, 'A')     // S1: cost 30
 insItem.run(2, 1, 1, null, 10, 1, 102, 'B')   // S1: NULL cost snapshot (counts 0, flagged)
 insItem.run(3, 2, 2, 10, 50, 1, 101, 'A')     // S2: 2 x A, cost 20
 insItem.run(4, 3, 1, 15, 80, 1, 104, 'D')     // S3: cost 15
-insItem.run(5, 4, 1, 12, 40, 1, 104, 'D')     // S4 (awaiting): must not count anywhere
+insItem.run(5, 4, 1, 12, 40, 1, 104, 'D')     // S4 (awaiting): recognized, but remains Not Paid
 insItem.run(6, 5, 1, 500, 999, 1, 101, 'A')   // S5 (cancelled): must not count anywhere
 insItem.run(7, 6, 1, 8, 20, 2, 105, 'E')      // S6: cost 8
 
@@ -175,18 +177,19 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   const totals = await kernel.getSalesTotals(env, filters)
 
   // Sanity on the canonical figures the views must reconcile to:
-  // recognized: S1 (90 net), S2 (50), S3 (80), S6 (20) = 240; refunds 10 -> revenue 230.
-  // pending: S4 = 40. COGS: 30 + 0 + 20 + 15 + 8 = 73.
+  // recognized: S1 (90 net), S2 (50), S3 (80), S4 (40), S6 (20) = 280;
+  // refunds 10 -> revenue 270. Pending remains separately visible: S4 = 40.
+  // COGS: 30 + 0 + 20 + 15 + 12 + 8 = 85.
   // Delivery: S3's fee of 3 was ABSORBED by the shop, so nothing was collected
   // and no courier cost is recorded -- delivery contributes 0 here. It used to
   // be subtracted, which charged the shop for a giveaway that had already been
-  // left out of the 230. profit: 230 - 73 + 0 = 157.
-  check('fixture: canonical revenue = 230 (240 net - 10 refund)', near(totals.revenue_usd, 230))
-  check('fixture: pending credit = 40 (the awaiting sale, not revenue)', near(totals.pending_revenue_usd, 40))
-  check('fixture: COGS = 73 (NULL snapshot counts 0; awaiting + cancelled items excluded)', near(totals.cost_usd, 73))
-  check('fixture: profit = 157 (revenue - COGS + delivery net, which is 0 here)', near(totals.profit_usd, 157))
+  // left out of collected cash. Profit: 270 - 85 + 0 = 185.
+  check('fixture: canonical revenue = 270 (280 net - 10 refund)', near(totals.revenue_usd, 270))
+  check('fixture: Not Paid = 40 while the awaiting sale remains recognized revenue', near(totals.pending_revenue_usd, 40))
+  check('fixture: COGS = 85 (NULL snapshot counts 0; awaiting included; cancelled excluded)', near(totals.cost_usd, 85))
+  check('fixture: profit = 185 (revenue - COGS + delivery net, which is 0 here)', near(totals.profit_usd, 185))
   check('the waived delivery fee is reported but not charged to profit (154 was the double minus)',
-    near(totals.store_delivery_usd, 3) && !near(totals.profit_usd, 154))
+    near(totals.store_delivery_usd, 3) && !near(totals.profit_usd, 182))
   check('fixture: tx_count = 5 (cancelled excluded, awaiting counted as a transaction)', totals.tx_count === 5)
 
   for (const groupBy of kernel.SALES_GROUP_KEYS) {
@@ -206,9 +209,9 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   const walkIn = byCustomer.find((r) => r.key === 'name:walk in')
   check('customer: Alice keyed by id ("id:1"), labelled by name, entity_id 1', !!alice && alice.label === 'Alice' && alice.entity_id === 1)
   check('customer: Alice revenue 90 (the cancelled 999 sale never counts)', !!alice && near(alice.revenue_usd, 90))
-  check('customer: Bob revenue 70 (80 - 10 refund), pending 40 kept apart', !!bob && near(bob.revenue_usd, 70) && near(bob.pending_revenue_usd, 40))
+  check('customer: Bob revenue 110 (80 + 40 awaiting - 10 refund), Not Paid 40 shown separately', !!bob && near(bob.revenue_usd, 110) && near(bob.pending_revenue_usd, 40))
   check('customer: "Walk in" and "walk in " fold into one name bucket (2 tx, 70 revenue)', !!walkIn && walkIn.tx_count === 2 && near(walkIn.revenue_usd, 70) && walkIn.entity_id === null)
-  check('customer: sorted by revenue desc', byCustomer[0].key === 'id:1' && byCustomer[1].key === 'id:2')
+  check('customer: sorted by revenue desc', byCustomer[0].key === 'id:2' && byCustomer[1].key === 'id:1')
 
   // ---- cashier ----
   const byCashier = await kernel.getSalesGroupedTotals(env, filters, 'cashier')
@@ -217,7 +220,7 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   check('cashier: Za = S1 + S2 + S6 (3 tx, revenue 160)', !!za && za.tx_count === 3 && near(za.revenue_usd, 160) && za.label === 'Za')
   // S3 nets 80 less a 10 refund = 70; its 3 of delivery was absorbed, so it
   // is reported and not charged. profit = 70 - 15 = 55 (was 52, the double minus).
-  check('cashier: Mia = S3 + S4 (2 tx, revenue 70, pending 40, profit 70-15=55)', !!mia && mia.tx_count === 2 && near(mia.revenue_usd, 70) && near(mia.pending_revenue_usd, 40) && near(mia.profit_usd, 55))
+  check('cashier: Mia = S3 + S4 (2 tx, revenue 110, Not Paid 40, profit 110-27=83)', !!mia && mia.tx_count === 2 && near(mia.revenue_usd, 110) && near(mia.pending_revenue_usd, 40) && near(mia.profit_usd, 83))
 
   // ---- payment method: case/space-insensitive key, blank -> 'unknown' ----
   const byPayment = await kernel.getSalesGroupedTotals(env, filters, 'payment_method')
@@ -246,7 +249,7 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   const abaTotals = await kernel.getSalesTotals(env, { ...filters, paymentMethod: 'ABA Bank' })
   check('paymentMethod filter: grouped rows still reconcile to getSalesTotals (revenue 50)', near(sum(abaOnly, 'revenue_usd'), abaTotals.revenue_usd) && near(abaTotals.revenue_usd, 50))
   const limited = await kernel.getSalesGroupedTotals(env, filters, 'customer', 1)
-  check('limit caps the row count (top by revenue)', limited.length === 1 && limited[0].key === 'id:1')
+  check('limit caps the row count (top by revenue)', limited.length === 1 && limited[0].key === 'id:2')
 
   // ---- product ranking ----
   const products = await kernel.getProductSalesRanking(env, filters)
@@ -255,7 +258,7 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   const d = products.find((r) => r.product_id === 104)
   check('products: A = S1 + S2 lines only (2 sales, qty 3, line sales 140, cost 50) -- the cancelled sale\'s A line is excluded', !!a && a.sale_count === 2 && a.qty === 3 && near(a.line_sales_usd, 140) && near(a.cost_usd, 50) && near(a.profit_usd, 90))
   check('products: B flags its NULL cost snapshot (cost 0, 1 missing line)', !!b && near(b.cost_usd, 0) && b.cost_missing_snapshot_lines === 1)
-  check('products: D counts the completed S3 line only, not the awaiting S4 line (qty 1, 80)', !!d && d.qty === 1 && near(d.line_sales_usd, 80))
+  check('products: D counts completed S3 and awaiting S4 (qty 2, line sales 120)', !!d && d.qty === 2 && near(d.line_sales_usd, 120))
   check('products: ranked by line sales desc', products.every((r, i) => i === 0 || products[i - 1].line_sales_usd >= r.line_sales_usd))
   const productsAba = await kernel.getProductSalesRanking(env, { ...filters, paymentMethod: 'ABA Bank' })
   check('products: the payment filter narrows the ranking (only S2\'s A line: qty 2, 50)', productsAba.length === 1 && productsAba[0].product_id === 101 && productsAba[0].qty === 2)

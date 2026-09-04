@@ -172,7 +172,7 @@ check('the merge endpoints report the refusal in the audit entry and the respons
   // carries costOutliers with no extra plumbing -- pin that spread so a future
   // edit cannot quietly start allow-listing fields and drop it.
   assert.ok(/const \{ reversal: _reversal[^\n]*\.\.\.publicStats \} = stats/.test(routeSrc))
-  assert.ok(/return c\.json\(\{ success: true, keptId: keeper\.id, mergedId: dup\.id, actionHistoryId: undoRecord\.actionHistoryId, \.\.\.publicStats \}\)/.test(routeSrc))
+  assert.ok(/return c\.json\(\{[\s\S]*?actionHistoryId: undoRecord\.actionHistoryId,[\s\S]*?\.\.\.publicStats,[\s\S]*?\}\)/.test(routeSrc))
 })
 
 check('the frontend translates the new kind and files it under "needs attention"', () => {

@@ -57,6 +57,7 @@ const lift = (tableName) => liftFrom('0001_init.sql', tableName)
 const db = new Database(':memory:')
 db.exec(lift('sales'))
 db.exec(lift('sale_items'))
+db.exec('ALTER TABLE sale_items ADD COLUMN manual_discount_usd REAL DEFAULT 0')
 // getSalesTotals now LEFT JOINs a per-sale customer-refund subquery over the
 // `returns` table (net-sales revenue is stated net of customer refunds). Provide
 // the real returns schema so that SQL resolves; this suite seeds no returns, so

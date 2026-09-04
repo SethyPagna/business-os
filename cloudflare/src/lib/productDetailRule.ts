@@ -142,6 +142,28 @@ export function isSameProductIdentity(
   return productIdentitySignature(a) === productIdentitySignature(b)
 }
 
+export type CostVerdict = 'same' | 'missing' | 'differs'
+
+export function compareCostField(a: unknown, b: unknown): CostVerdict {
+  const asCents = (value: unknown) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? Math.round(parsed * 100) : 0
+  }
+  const aCents = asCents(a)
+  const bCents = asCents(b)
+  if (aCents === 0 && bCents === 0) return 'same'
+  if (aCents === 0 || bCents === 0) return 'missing'
+  return aCents === bCents ? 'same' : 'differs'
+}
+
+export function compareCosts(a: ProductDetailInput, b: ProductDetailInput): CostVerdict {
+  const usd = compareCostField(a.cost_price_usd, b.cost_price_usd)
+  const khr = compareCostField(a.cost_price_khr, b.cost_price_khr)
+  if (usd === 'differs' || khr === 'differs') return 'differs'
+  if (usd === 'missing' || khr === 'missing') return 'missing'
+  return 'same'
+}
+
 /** The cost fields that merge by averaging rather than by splitting a row. */
 export type MergeableCost = {
   cost_price_usd?: unknown
