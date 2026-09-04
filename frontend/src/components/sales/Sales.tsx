@@ -43,6 +43,10 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'sales-receipt')
 const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale-detail-modal')
 const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-cancel-sale-modal')
+// S4-2: the confirmation every sale status change now goes through -- it
+// states the old status, the new one and what happens to stock, and carries
+// the admin-only, lock-gated "Don't touch stock" option.
+const SaleStatusConfirmModal = lazyRetry(() => import('./SaleStatusConfirmModal'), 'sales-status-confirm-modal')
 const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal')
 const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'sales-export-options')
@@ -57,6 +61,15 @@ import { exportColumnLabel } from '../../utils/exportOptions.ts'
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
 const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000
+
+// S4-2: which statuses hold units OUT of stock -- the same set
+// lib/saleTransitions.ts's heldQuantity() uses (STOCK_DEDUCTED_STATUSES
+// plus the two return statuses). A transition moves stock only when it
+// crosses this line, which is what the confirmation dialog states up front.
+const STOCK_HOLDING_STATUSES = new Set(['completed', 'awaiting_delivery', 'partial_return', 'returned'])
+const transitionMovesStock = (fromStatus: string, toStatus: string): boolean => (
+  STOCK_HOLDING_STATUSES.has(String(fromStatus || 'completed')) !== STOCK_HOLDING_STATUSES.has(String(toStatus || 'completed'))
+)
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
@@ -80,6 +93,11 @@ interface SaleRecord extends Record<string, unknown> {
   receipt_number?: string
   created_at?: string
   sale_status?: string
+  // S4-2 (migration 0109): 1 when an admin deliberately changed this sale's
+  // status without moving stock. The sale stays outside the stock ledger
+  // from then on, so the confirmation says so instead of promising a
+  // deduction that will not happen.
+  stock_skipped?: number
   cashier_name?: string
   payment_method?: string
   notes?: string
@@ -303,6 +321,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     | null
   >(null)
   const [cancelSaving, setCancelSaving] = useState(false)
+  // S4-2 status confirmation: what is about to change, before it changes.
+  // 'single' re-enters handleStatusChange with confirmed=true, 'bulk' does
+  // the same for handleBulkStatusUpdate. `skipStock` (admin + unlock) rides
+  // back as the request's skip_stock flag.
+  const [statusPrompt, setStatusPrompt] = useState<
+    | { mode: 'single'; saleId: number; newStatus: string; notes: string; recordHistory: boolean; label: string; fromLabel: string; movesStock: boolean; alreadySkipped: boolean }
+    | { mode: 'bulk'; nextStatus: string; count: number; label: string; fromLabel: string; mixed: boolean; movesStock: boolean; alreadySkipped: boolean }
+    | null
+  >(null)
+  const [statusConfirmSaving, setStatusConfirmSaving] = useState(false)
   // Group-by dropped (user, Aug 31: "the group by seems a bit redundant
   // with the arrange by") — the list always groups by day; sorting by a
   // non-date field flattens it. Kept as a const so the grouping pipeline
@@ -656,7 +684,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
   // `extra` also carries the Y10 payment payload when SaleDetailModal
   // completes an awaiting-payment sale (payment_method/amount_paid_*).
-  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null): Promise<boolean> => {
+  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<boolean> => {
     // View-only (Part 557): status changes are Full-Access only. The backend
     // already refuses these through sales.status, so this matching client
     // guard also honors a Full role whose one action was switched off.
@@ -683,17 +711,30 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       })
       return false
     }
+    // S4-2: the confirmation is a real dialog now, not window.confirm --
+    // it has to show the old status and the new one, and carry the
+    // admin-only "Don't touch stock" lock. Same shape as the cancel prompt
+    // above: first entry opens it and returns, the dialog calls back with
+    // confirmed=true (and skip_stock folded into `extra` when the admin
+    // unlocked and ticked it). An undo/redo replay (recordHistory=false)
+    // and the already-collected cancel payload skip the dialog, exactly as
+    // the old window.confirm did.
+    if (recordHistory && !extra && !confirmed) {
+      setStatusPrompt({
+        mode: 'single',
+        saleId: numericId,
+        newStatus,
+        notes,
+        recordHistory,
+        label: String(previousSale?.receipt_number || `#${numericId}`),
+        fromLabel: getStatusLabel(previousStatus, t),
+        movesStock: transitionMovesStock(previousStatus, newStatus),
+        alreadySkipped: Number(previousSale?.stock_skipped || 0) === 1,
+      })
+      return false
+    }
     const actionKey = String(numericId)
     if (!beginKeyedAction(statusActionRef, actionKey)) return false
-    if (recordHistory && !extra) {
-      const warningText = ['cancelled', 'awaiting_payment', 'completed', 'awaiting_delivery'].includes(newStatus)
-        ? translateOr('confirm_sale_status_change_stock', `Change sale ${previousSale?.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}? This can change stock totals.`)
-        : translateOr('confirm_sale_status_change', `Change sale ${previousSale?.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}?`)
-      if (!window.confirm(warningText)) {
-        finishKeyedAction(statusActionRef, actionKey)
-        return false
-      }
-    }
     try {
       await runSaleStatusMutation(saleId, newStatus, notes, extra)
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
@@ -1157,7 +1198,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     openExportOptions(selectedSales, 'sales-selected')
   }, [openExportOptions, selectedSales])
 
-  const applySaleStatusEntries = useCallback(async (entries: SaleStatusEntry[] = [], notes = '', extra: SaleCancelPayload | null = null) => {
+  const applySaleStatusEntries = useCallback(async (entries: SaleStatusEntry[] = [], notes = '', extra: SaleCancelPayload | Record<string, unknown> | null = null) => {
     const statusRun = await runConcurrentTasks<SaleStatusEntry, number>(entries, async (entry: SaleStatusEntry) => {
       const saleId = Number(entry?.id || 0)
       const nextStatus = String(entry?.status || '').trim()
@@ -1189,7 +1230,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
   }, [loadSales, runSaleStatusMutation])
 
-  const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | null = null) => {
+  const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false) => {
     // View-only (Part 557): bulk status writes share sales.status with single
     // status changes, including the per-action override.
     if (!canChangeSaleStatus) {
@@ -1202,6 +1243,30 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (nextStatus === 'cancelled' && !extra) {
       finishSingleAction(bulkStatusInFlightRef)
       setCancelPrompt({ mode: 'bulk', count: selectedSales.length })
+      return
+    }
+    // S4-2: a BULK status flip is exactly what deducted 9 already-counted
+    // units on Sep 3 2026 -- it used to apply the moment the button was
+    // pressed, with no confirmation at all. It now goes through the same
+    // dialog as a single change, which states the before/after and offers
+    // the admin-only "Don't touch stock" lock for the whole batch.
+    if (!confirmed && !extra) {
+      const distinctStatuses = Array.from(new Set(selectedSales.map((sale) => String(sale.sale_status || 'completed'))))
+      finishSingleAction(bulkStatusInFlightRef)
+      setStatusPrompt({
+        mode: 'bulk',
+        nextStatus,
+        count: selectedSales.length,
+        label: translateOr('sale_status_confirm_count', '{n} sales', 'ការលក់ {n}').replace('{n}', String(selectedSales.length)),
+        fromLabel: distinctStatuses.map((status) => getStatusLabel(status, t)).join(', '),
+        mixed: distinctStatuses.length > 1,
+        // "Can this batch move stock at all" -- true if ANY selected sale's
+        // own transition crosses the held() line.
+        movesStock: distinctStatuses.some((status) => transitionMovesStock(status, nextStatus)),
+        // Only meaningful when the whole batch is already outside the stock
+        // ledger; a mixed batch still moves stock for the rest.
+        alreadySkipped: selectedSales.length > 0 && selectedSales.every((sale) => Number(sale.stock_skipped || 0) === 1),
+      })
       return
     }
     const previousStatuses = selectedSales.map((sale) => ({
@@ -1574,6 +1639,42 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             }}
             fmtUSD={fmtUSD}
             notify={notify as (message: string, kind?: string) => void}
+          />
+        </Suspense>
+      ) : null}
+
+      {statusPrompt ? (
+        <Suspense fallback={null}>
+          <SaleStatusConfirmModal
+            label={statusPrompt.label}
+            fromLabel={statusPrompt.fromLabel}
+            toLabel={getStatusLabel(statusPrompt.mode === 'single' ? statusPrompt.newStatus : statusPrompt.nextStatus, t)}
+            mixed={statusPrompt.mode === 'bulk' ? statusPrompt.mixed : false}
+            movesStock={statusPrompt.movesStock}
+            // Admin only, both here and in the Worker (isAdminControlUser).
+            canSkipStock={isAdmin}
+            alreadySkipped={statusPrompt.alreadySkipped}
+            saving={statusConfirmSaving}
+            onClose={() => { if (!statusConfirmSaving) setStatusPrompt(null) }}
+            onConfirm={async (skipStock) => {
+              if (!statusPrompt || statusConfirmSaving) return
+              // skip_stock only ever leaves here when an admin unlocked and
+              // ticked it; the Worker refuses it for anyone else with a 403
+              // rather than quietly performing a stock-moving transition.
+              const skipExtra = skipStock ? { skip_stock: true } : null
+              setStatusConfirmSaving(true)
+              try {
+                if (statusPrompt.mode === 'single') {
+                  await handleStatusChange(statusPrompt.saleId, statusPrompt.newStatus, statusPrompt.notes, statusPrompt.recordHistory, skipExtra, true)
+                } else {
+                  await handleBulkStatusUpdate(statusPrompt.nextStatus, skipExtra, true)
+                }
+                setStatusPrompt(null)
+              } finally {
+                setStatusConfirmSaving(false)
+              }
+            }}
+            t={t}
           />
         </Suspense>
       ) : null}
