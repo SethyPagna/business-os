@@ -370,7 +370,11 @@ type PaymentDetail = {
 
 type MembershipInfo = {
   customer?: { membership_number?: string }
-  points?: { balance?: number }
+  // `redeemableUnits` is the server's own answer to "how many whole units can
+  // this member spend right now", and it is the single place the membership-
+  // points switch is applied to spending. The till reads it rather than
+  // dividing the balance itself -- see maxMembershipUnits.
+  points?: { balance?: number; redeemableUnits?: number }
 }
 
 type ProductFilterMeta = {
@@ -2582,7 +2586,18 @@ export default function POS() {
   const membershipDiscUsd = parseFloat(active.membershipDiscountUsd) || 0
   const membershipDiscKhr = Math.round(parseFloat(active.membershipDiscountKhr) || CURRENCY.usdToKhr(membershipDiscUsd, exchangeRate))
   const membershipRedeemUnits = Math.max(0, parseInt(active.membershipRedeemUnits || '0', 10) || 0)
-  const maxMembershipUnits = Math.max(0, Math.floor((membershipInfo?.points?.balance || 0) / redeemPointsStep))
+  // ONE rule, ONE implementation. This used to be `balance / redeemPointsStep`
+  // computed here, which is the same arithmetic the Worker does -- and that is
+  // exactly the problem: when membership points are switched off the Worker
+  // reports redeemableUnits = 0 while the balance itself stays truthful (the
+  // switch is forward-only and erases nothing), so a till doing its own
+  // division would go on offering redemptions the shop has turned off. The
+  // local division survives only as a fallback for a Worker old enough not to
+  // send the field.
+  const serverRedeemableUnits = Number(membershipInfo?.points?.redeemableUnits)
+  const maxMembershipUnits = Number.isFinite(serverRedeemableUnits)
+    ? Math.max(0, Math.floor(serverRedeemableUnits))
+    : Math.max(0, Math.floor((membershipInfo?.points?.balance || 0) / redeemPointsStep))
 
   const afterDiscUsd = Math.max(0, subtotalUsd - discUsd - membershipDiscUsd)
   const afterDiscKhr = Math.max(0, subtotalKhr - discKhr - membershipDiscKhr)
@@ -3427,6 +3442,11 @@ export default function POS() {
                         <div className="rounded-lg bg-white/90 px-3 py-2 text-xs text-emerald-900">
                           <div>{posCopy('1 unit')} = {redeemPointsStep} pts = {fmtUSD(redeemValueUsdStep)}</div>
                           <div className="mt-1">{posCopy('Available units')}: {maxMembershipUnits}</div>
+                          {maxMembershipUnits === 0 && (membershipInfo?.points?.balance || 0) >= redeemPointsStep ? (
+                            <div className="mt-1 text-[11px] text-gray-500">
+                              {posCopy('Membership points are turned off in Settings.', 'ពិន្ទុសមាជិកត្រូវបានបិទក្នុងការកំណត់។')}
+                            </div>
+                          ) : null}
                           <div className="mt-1">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}: {fmtUSD(membershipDiscUsd)} / {fmtKHR(membershipDiscKhr)}</div>
                         </div>
                       </div>

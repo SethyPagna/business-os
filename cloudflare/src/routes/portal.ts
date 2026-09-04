@@ -313,6 +313,20 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     gridColumnsDesktop: Math.min(8, Math.max(2, Math.round(toNumber(settings.customer_portal_grid_columns_desktop, 4)))),
     googleMapsEmbed: normalizeGoogleMapsEmbed(settings.customer_portal_google_maps_embed),
     showGoogleMap: normalizeBoolean(settings.customer_portal_show_google_map, true),
+    // The owner's master switch for the whole membership-points programme
+    // (user, Sep 4 2026: "make the membership points on off in settings").
+    //
+    // It lives on `config` rather than being read at each call site because
+    // `summarizePoints` below is the ONE balance formula three surfaces share
+    // (portal.ts here, contacts.ts's computeCustomerPointsMap, and sales.ts's
+    // checkout re-validation). Gating anywhere else would let one surface keep
+    // showing a balance the shop has switched off -- which is exactly the
+    // Part-77 defect: POS displayed a balance and checkout then refused it.
+    //
+    // Defaults to ON. A shop that has never touched this setting must accrue
+    // exactly as it did before the switch existed; only an explicit off
+    // changes anything.
+    loyaltyPointsEnabled: normalizeBoolean(settings.loyalty_points_enabled, true),
     pointsBasis,
     pointsPerUsd,
     pointsPerKhr: toNumber(settings.customer_portal_points_per_khr, derivedPointsPerKhr),
@@ -1012,7 +1026,22 @@ export function summarizePoints(sales: Array<Record<string, unknown>>, returns: 
   for (const adjustment of adjustments) manuallyAwarded += toNumber(adjustment.points)
 
   const balance = Math.max(0, earned - deducted - redeemed + rewarded + manuallyAwarded)
-  const redeemableUnits = Math.floor(balance / Math.max(1, config.redeemPoints))
+
+  // Membership points switched off. The user's ruling: off "turns off the
+  // calculation for sales from this point onwards" -- forward-only, existing
+  // sales and the balances derived from them untouched. So this function keeps
+  // REPORTING the balance a customer already holds; blanking it would be
+  // exactly the retroactive rewrite the ruling excludes, and it would also
+  // make the switch look destructive when it is not.
+  //
+  // What the switch does stop is SPENDING: no redeemable units, no redeem
+  // value, nothing for a checkout to offer. That is what makes "off" mean off
+  // without touching a row. The accrual side is handled where it belongs --
+  // at write time, in the sale insert, resolved server-side from this same
+  // setting so a stale POS tab cannot keep earning. Zeroing the historical
+  // DATA is a third, separate, explicit operation (migration 0116).
+  const spendable = config.loyaltyPointsEnabled !== false
+  const redeemableUnits = spendable ? Math.floor(balance / Math.max(1, config.redeemPoints)) : 0
 
   return {
     earned: Number(earned.toFixed(2)),
@@ -1024,7 +1053,9 @@ export function summarizePoints(sales: Array<Record<string, unknown>>, returns: 
     redeemableUnits,
     minimumRedeemPoints: config.redeemPoints,
     nextRedeemAt: config.redeemPoints,
-    nextRedeemNeeded: Math.max(0, Number((config.redeemPoints - (balance % config.redeemPoints || 0)).toFixed(2)) % config.redeemPoints),
+    nextRedeemNeeded: spendable
+      ? Math.max(0, Number((config.redeemPoints - (balance % config.redeemPoints || 0)).toFixed(2)) % config.redeemPoints)
+      : 0,
     redeemValueUsd: Number((redeemableUnits * config.redeemValueUsd).toFixed(2)),
     redeemValueKhr: Number((redeemableUnits * config.redeemValueKhr).toFixed(0)),
   }

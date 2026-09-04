@@ -348,6 +348,12 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
 
 async function buildLoyaltySection(env: Env, threshold: number): Promise<NotificationSection | null> {
   const db = getDb(env)
+  // Membership points can be switched off shop-wide (settings key `loyalty_points_enabled`).
+  // This is the fourth and last site that computes a balance; without the gate the shop keeps
+  // getting "N customers reached X+ points" alerts for a programme it has turned off.
+  const loyaltySwitch = await db.prepare(`SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`)
+    .get<{ value: string }>()
+  if (['0', 'false', 'no', 'off'].includes(String(loyaltySwitch?.value ?? '').trim().toLowerCase())) return null
   const [salesRows, returnRows, rewardRows] = await Promise.all([
     db.prepare(`
       SELECT customer_id,
@@ -367,7 +373,7 @@ async function buildLoyaltySection(env: Env, threshold: number): Promise<Notific
     db.prepare(`
       SELECT customer_id, COALESCE(SUM(COALESCE(reward_points, 0)), 0) AS rewarded
       FROM customer_share_submissions
-      WHERE customer_id IS NOT NULL AND status = 'approved'
+      WHERE customer_id IS NOT NULL AND status = 'approved' AND reward_points_voided_at IS NULL
       GROUP BY customer_id
     `).all<{ customer_id: number; rewarded: number }>(),
   ])
