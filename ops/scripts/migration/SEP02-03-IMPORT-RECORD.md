@@ -203,6 +203,43 @@ That is also why `SUM(products.stock_quantity)` holding at **23,085** is the loa
 "no deduction" here; the flat `COUNT(inventory_movements)` at 23,079 only rules out offsetting
 writes.
 
+
+## Two warnings worth more than the counts
+
+**1. The outcome was benign because a guard held, not because the key was harmless.**
+(`business-os-v1-ee` and `business-os-v1-7c`.) `"Libre10ml"` normalises to `"10"`, and
+**44 live products carry that literal barcode** — the 10ml-perfume placeholder. Only the
+duplicate-barcode quarantine turned a mis-book into a drop, and it did so by accident:
+with exactly one active match the line would have been written against an unrelated
+perfume and looked correct forever. **If that quarantine is ever relaxed, this class
+becomes silent mis-booking against those 44 products.** The bound says 2 lines and $51;
+that number describes how lucky the data was, not how safe the code was.
+
+**2. "No stock movement" is a property of writing D1 directly, NOT a property of the
+change.** (`business-os-v1-ba`.) These rows are `completed`, and `completed` is in
+`STOCK_DEDUCTED_STATUSES`, which **is** load-bearing: `routes/sales.ts:225` gates
+`shouldDeductStock` on it and `lib/saleTransitions.ts:53` gates transitions on it. The
+same rows created or re-applied **through the route or the UI would deduct**, because
+that is what the status is supposed to mean. A later session that repeats this work "the
+normal way" on the strength of a note saying "this does not affect stock" would take
+deductions nobody expects. Say the method, not just the outcome.
+
+## Why some legacy sales carry sale movements and others do not
+
+Established read-only while scoping a later status flip, and recorded here because it
+looks alarming and is not. Some legacy sales sit in `awaiting_payment` — a status **not**
+in `STOCK_DEDUCTED_STATUSES` — while carrying `movement_type = 'sale'` rows. That is not a
+route deducting against the constant, and not a status regression that failed to reverse.
+Every one of those movement rows carries `reason LIKE 'Old-system sale%'`: they were
+written deliberately by the legacy reconciliation to record the old system's own stock
+effects. Most are attributed to `user_name = 'Old system'`; a couple are attributed to the
+real cashier instead, which is attribution, not a different mechanism.
+
+`movement_type = 'sale'` rows do not exist in this database before **2026-08-28** at all.
+Legacy sales older than that have no movements because none was ever recorded — the same
+reason all **14,921** already-completed legacy sales have none. Stock for that era arrived
+as a migrated snapshot.
+
 ## Sources
 
 Archived under explicit dated names in `Migration from old system/` (untracked):
