@@ -2960,6 +2960,78 @@ Only five files are touched by more than one lane, out of 103 changed:
 **`importEngine.ts` is the file to watch.** Three lanes edit it and one of them rewrites 114 lines.
 Git merged it without complaint, which means the hunks did not touch — not that the *behaviour*
 composes. The certification run is what decides that, not the merge exit code.
+### The reconcile is at nine lanes — `c3145839`, and the three hot files were unions again
+
+`rc/s4-2026-09-04` (worktree `C:/Users/mrkl6/Downloads/bos-rc-s4`) took the eighth and ninth lanes:
+`s4/sale-add-items` (`859c8e57`) merged clean, `s4/create-products-header` (`19555765`) conflicted
+on **all three** of the files this project has already lost work to — `frontend/package.json` and
+both language packs. Probed with `git merge-tree --write-tree` before touching the worktree, so the
+conflict was known before the merge started.
+
+Resolved as unions and **verified by counting, not by eye**:
+
+| File | base | ours | theirs | union | Proof |
+|---|---|---|---|---|---|
+| `test:utils` chain | 177 | 179 | 178 | **180** | only-ours `mergedCostRule`, `reportsHub`; only-theirs `createProductsSession`; all three present |
+| `en.json` / `km.json` | 4,542 | 4,674 | 4,559 | **4,691** | +132 ours, +17 theirs, **0 lost from either side**, 0 value clashes, 0 keys retired-then-re-admitted |
+
+Post-union checks, run against the merged tree: `verify:i18n` **4,691 keys / 483 source files, every
+referenced key resolves in both packs**; the chain-coverage guard **181 files all reachable**; and
+the Khmer pack re-parsed — **4,645 values carrying Khmer script, zero replacement characters**. That
+last one is not ceremony: the resolver rewrites both packs through `JSON.stringify`, and a bad
+encoding round-trip would corrupt every Khmer string at once while leaving key parity perfect.
+
+**The union resolver now refuses to re-admit a retired key.** A naive union of base+ours+theirs
+resurrects any key a lane deliberately deleted, because "absent on one side" is indistinguishable
+from "never added" unless you diff against base in *both* directions. It reports retirements and
+genuine two-sided value clashes rather than silently ordering its way past them. Both were zero
+here; the check is what makes that a fact instead of an assumption.
+
+#### The 178th test file that was never missing
+
+Chased down and closed, because the next session to count will find the same discrepancy: the
+deployed tip has **178 test files on disk but only 177 chain entries**, and
+`paginationSurfaceContract.test.ts` is the odd one out. It is **not** an orphan.
+`paginationRangeControl.test.ts:15` does `import './paginationSurfaceContract.test.ts'`, Node runs
+an imported module before its parent, and `testChainCoverage.test.ts` deliberately treats that as
+reachable — which is why the guard passes at 181 while the chain lists 180. The file runs in CI
+and is green (5 checks). **Do not "fix" this by appending it to the chain**: it would then execute
+twice per sweep.
+
+- [x] **S4-24b · Add items to an existing sale. Done** on `s4/sale-add-items` (`cc85cae4` Worker,
+  `859c8e57` frontend), pushed, merged into the reconcile. **No migration** — every table it writes
+  already exists at 0107, so `0111` stays free.
+  - **Stock reuses the checkout's own rules rather than a second opinion**: how much moves is
+    `heldQuantity()` from `saleTransitions.ts` (the same invariant `PATCH /:id/status` uses), which
+    lots is `allocateAcrossLots` over `readFifoLotAvailabilityForCart`, including its shared-
+    availability mutation so two lines of one product cannot draw the same lot twice. Decrements
+    stay strict and unclamped so `CHECK(quantity >= 0)` remains the real race guard.
+  - It deliberately did **not** route through `planSaleStockTransition`: with `allocations: []` and
+    `batch_id: null` — the multi-lot case — that planner emits no batch statement at all, which
+    would leave lot totals permanently high. A reasonable-looking reuse that silently corrupts lots.
+  - **Returns gate on data, not on the label.** A sale carrying return rows is refused whatever its
+    status column says, proved by a real `return_items JOIN returns` read, because every return was
+    recorded against the line set that existed at the time.
+  - Totals: subtotal recomputed from `SUM(sale_items.total_usd)`; discount, tax and delivery fee
+    **frozen**, because none is stored as a rate — "recomputing" one means inferring a rate from the
+    old subtotal and giving away more discount than anyone agreed to.
+  - Two test weaknesses fixed and worth copying: the route check now **parses `routes/sales.ts` with
+    the TypeScript compiler** and requires the registration to be top-level (a grep passed on a
+    nested, unreachable route), and the applier check **loads `undoAppliers.ts` and calls
+    `resolveUndoApplier`** rather than grepping for the name — the exact "Undo does nothing" shape
+    this repo has shipped before.
+
+- [ ] **OPEN, needs the shop owner — tax on an added line.** `sales.tax_usd` is an absolute amount
+  and **there is no tax rate stored anywhere in this schema**, so adding a line to a sale raises the
+  total but not the tax. For a shop that charges VAT that is wrong. The fix is a stored rate (on the
+  sale or in settings), which is a schema *and* pricing-policy decision — not one to guess. Ask
+  before building.
+
+- [x] **S4-12 · Create-products header step. Done** on `s4/create-products-header` (`19555765`),
+  pushed, merged. Brand, supplier and branch are typed once for the session:
+  `utils/createProductsSession.ts` (+239) and `CreateProductsSessionModal.tsx` (+475), wired into
+  `Products.tsx` and `ProductForm.tsx`, 19 keys per pack, `tests/createProductsSession.test.ts`
+  (+322) added to the chain — the entry that collided with this lane's two chain neighbours.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
