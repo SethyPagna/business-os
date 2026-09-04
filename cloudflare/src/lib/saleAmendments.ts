@@ -281,10 +281,13 @@ function formatWindow(minutes: number): string {
 // Two independent reasons an amendment moves no stock, and they must be asked
 // in one place so a future kind cannot honour one and forget the other:
 //
-//   * the sale's status does not hold stock deducted (awaiting_payment): the
-//     units never left the shelf, so there is nothing to take back and adding
-//     a line takes nothing now. This is heldQuantity()'s invariant, deferred
-//     to rather than re-derived.
+//   * the sale's status does not hold stock deducted: the units never left
+//     the shelf, so there is nothing to take back and adding a line takes
+//     nothing now. This is heldQuantity()'s invariant, deferred to rather
+//     than re-derived. Since S4-3 the only such status is `cancelled`
+//     (awaiting_payment now holds), and an amendment to a cancelled sale is
+//     already refused upstream -- so in practice the flag below is what
+//     makes this branch fire.
 //
 //   * the sale carries S4-2's sticky `stock_skipped` flag: an admin completed
 //     it WITHOUT moving stock. held() would say the units are out, so a naive

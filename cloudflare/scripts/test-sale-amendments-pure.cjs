@@ -22,8 +22,8 @@
 //                    is DELETED (not zeroed -- a 0-qty row would print)
 //    7. a STOCK-SKIPPED sale (S4-2's sticky flag) moves NOTHING in either
 //       direction -- no take on an increase, no invented stock on a decrease
-//    8. an awaiting_payment sale moves nothing either, and its allocation
-//       rows carry released_quantity = quantity
+//    8. an awaiting_payment sale HOLDS stock (S4-3), so an amendment moves
+//       it and its allocation rows carry released_quantity = 0
 //    9. a sale with RECORDED RETURNS is refused, for every kind, whatever
 //       the status label says
 //   10. the EDIT WINDOW: inside it anyone may amend, outside it only an
@@ -460,24 +460,30 @@ console.log('PASS 6 -- a removed line is deleted, not zeroed')
 }
 console.log('PASS 7 -- a stock-skipped sale moves nothing either way, and an absent flag changes nothing')
 
-// ---- 8: an awaiting_payment sale holds no stock ----------------------------
+// ---- 8: S4-3 -- an awaiting_payment sale HOLDS stock, so amendments move it
+// This case asserted the opposite until S4-3. The units of an unpaid order
+// are promised to that buyer and are off the shelf, so amending the order
+// amends what is off the shelf, exactly as for a completed sale. "Moves
+// nothing" now belongs solely to the stock_skipped flag, which case 7 covers.
 {
   const { sqlite, apply } = setup()
   seedShelf(sqlite)
   const sale = seedSale(sqlite, { sale_status: 'awaiting_payment' })
-  assert.strictEqual(saleAmendmentMovesStock(sale), false)
+  assert.strictEqual(saleAmendmentMovesStock(sale), true, 'S4-3: an unpaid order holds its units')
   const plan = planLineQuantityIncrease({
     saleId: 77, sale, line: LINE(), addedQuantity: 2,
     lots: lotsFor(), exchangeRate: 4100, userId: 9, userName: 'Sokha',
   })
-  assert.strictEqual(plan.unitsMoved, 0, 'nothing has left the shelf for this sale yet')
+  // Negative = units leaving the shelf, the same sign convention case 4 uses.
+  assert.strictEqual(plan.unitsMoved, -2, 'two more units are promised, so two more leave the shelf')
   apply(plan.statements)
-  assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 20)
+  assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 18, 'the shelf really drops')
   const allocations = allocationsOf(sqlite)
-  assert.strictEqual(allocations.length, 1, 'the lot attribution is still recorded')
-  assert.strictEqual(allocations[0].released_quantity, 2, 'with released_quantity = quantity, so completing draws them')
+  assert.strictEqual(allocations.length, 1, 'the lot attribution is recorded')
+  assert.strictEqual(allocations[0].released_quantity, 0,
+    'and the units are OUT with the sale, so none are marked released')
 }
-console.log('PASS 8 -- an awaiting_payment sale records the lot attribution and moves no stock')
+console.log('PASS 8 -- an awaiting_payment sale holds stock, so an amendment moves it')
 
 // ---- 9: recorded returns refuse EVERY kind ---------------------------------
 {

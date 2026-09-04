@@ -3756,7 +3756,11 @@ export default function POS() {
                 label={t('status_stock_effect_label') || 'What each sale status does to stock'}
                 text={[
                   `${getPosStatusLabel('completed', t)}: ${t('pos_status_completed_desc') || 'Payment received - stock deducted now'}`,
-                  `${getPosStatusLabel('awaiting_payment', t)}: ${t('pos_status_awaiting_payment_desc') || 'Order placed, payment pending - stock held (not deducted)'}`,
+                  // S4-3: the fallback said "(not deducted)", which stopped
+                  // being true when awaiting_payment started holding stock.
+                  // Both lang packs already said "stock held" and needed no
+                  // change; only this hardcoded English copy was stale.
+                  `${getPosStatusLabel('awaiting_payment', t)}: ${t('pos_status_awaiting_payment_desc') || 'Order placed, payment pending - stock held'}`,
                   `${getPosStatusLabel('awaiting_delivery', t)}: ${t('pos_status_awaiting_delivery_desc') || 'Paid, not yet delivered - stock deducted'}`,
                 ].join('\n\n')}
               />
