@@ -91,7 +91,19 @@ const FIGURES = {
   revenueUsd: 210,
   itemDiscountUsd: 5,
   invoiceDiscountUsd: 3,
+  // The two halves of the invoice discount, which must add up to it.
+  storeDiscountUsd: 2,
+  membershipDiscountUsd: 1,
   grossSaleUsd: 218,
+  taxUsd: 7,
+  refundUsd: 12,
+  avgOrderUsd: 17.5,
+  costUsd: 120,
+  profitUsd: 93,
+  deliveryFeeUsd: 6,
+  deliveryCostUsd: 3.5,
+  deliveryMarginUsd: 2.5,
+  deliveryCostRecorded: 2,
   creditUsd: 18,
   otherExpenseUsd: 4,
   otherExpenseKhr: 0,
@@ -101,7 +113,7 @@ const FIGURES = {
     { method: 'ABA', count: 3, collectedUsd: 30 },
   ],
   deliveryServices: [
-    { name: 'Vireak Buntham', deliveries: 2, chargedUsd: 6 },
+    { name: 'Vireak Buntham', deliveries: 2, chargedUsd: 6, costUsd: 3.5, marginUsd: 2.5, costRecorded: 2 },
   ],
 }
 
@@ -167,6 +179,81 @@ assert.ok(/100,?000\s?៛/.test(valueOf('Registered cash')), `registered cash lo
 assert.equal(valueOf('From'), '04/09/2026 08:15')
 assert.equal(valueOf('To'), '04/09/2026 17:02')
 console.log('PASS figures: money, both currencies, and dd/mm/yyyy 24-hour local times')
+
+// --- 3b. the fuller breakdown ------------------------------------------------
+// The owner, Sep 4 2026: "proper detailed summary breakdowns of each aspects".
+// Measured against what the Reports hub carries for the same admin audience,
+// this message was missing the tax, the returns money, the average sale, the
+// SPLIT of the invoice discount, and everything about what a delivery cost as
+// opposed to what it charged. Each of those is asserted on its value AND on
+// its position, because a figure printed in the wrong place is read as the
+// wrong figure.
+
+// Indented component lines (5 spaces) are found separately: they belong to the
+// line above them, which is the whole reason they are indented.
+const componentLine = (english) => {
+  const found = lines.find((line) => line.trimStart().startsWith(`${english}${SEP}`) && line.startsWith('     '))
+  assert.ok(found, `no indented "${english}" component line:\n${report}`)
+  return found
+}
+const indexOfLine = (english) => lines.findIndex((line) => line.trimStart().startsWith(`${english}${SEP}`))
+
+assert.equal(valueOf('Tax'), '$7.00')
+assert.equal(valueOf('Refund'), '$12.00')
+assert.equal(valueOf('Avg order value'), '$17.50')
+assert.equal(valueOf('Cost of goods'), '$120.00')
+assert.equal(valueOf('Profit'), '$93.00')
+assert.equal(valueOf('Delivery fee'), '$6.00')
+
+// The discount split sits UNDER the sum it explains, indented, and the two
+// halves actually add up to it -- a split that does not reconcile is worse
+// than no split.
+assert.ok(componentLine('Store discount').endsWith(': $2.00'))
+assert.ok(componentLine('Membership discount').endsWith(': $1.00'))
+assert.equal(FIGURES.storeDiscountUsd + FIGURES.membershipDiscountUsd, FIGURES.invoiceDiscountUsd)
+assert.ok(indexOfLine('Store discount') === indexOfLine('Invoice discount') + 1
+  && indexOfLine('Membership discount') === indexOfLine('Invoice discount') + 2,
+  `the discount split must sit directly under the invoice discount:\n${report}`)
+
+// Delivery cost and margin sit under the fee, and the margin is the
+// subtraction it claims to be.
+assert.ok(componentLine('Delivery cost').endsWith(': $3.50'))
+assert.ok(componentLine('Delivery margin').endsWith(': $2.50'))
+assert.equal(Math.round((FIGURES.deliveryFeeUsd - FIGURES.deliveryCostUsd) * 100) / 100, FIGURES.deliveryMarginUsd)
+assert.ok(indexOfLine('Delivery cost') === indexOfLine('Delivery fee') + 1,
+  'the courier cost must sit directly under the fee it is deducted from')
+
+// Every indented component line is bilingual too -- the loop in section 2
+// deliberately skips them, so without this they could ship English-only.
+for (const line of lines.filter((entry) => entry.startsWith('     ') && entry.includes(': '))) {
+  const labelPart = line.trimStart().slice(0, line.trimStart().indexOf(': '))
+  assert.ok(KHMER.test(labelPart) && labelPart.includes(SEP), `component label "${labelPart}" is not a bilingual pair`)
+}
+
+// A courier's own row carries the same three parts as arithmetic.
+const courierLine = lines.find((line) => line.startsWith('• Vireak Buntham'))
+assert.ok(courierLine.endsWith('2 · $6.00 − $3.50 = $2.50'), `the courier row lost its cost and margin: ${courierLine}`)
+
+// THE HONESTY RULE. delivery_actual_cost_usd is NULL when nothing was
+// recorded, never 0 -- so a shift whose deliveries recorded no courier cost
+// must print NEITHER a $0.00 cost NOR the margin that would follow from it,
+// which would read as "delivery was free" and inflate the apparent margin to
+// the whole fee. Measured Sep 4 2026: 12 of 15,044 sales carry a cost, so
+// this is the COMMON case, not the edge one.
+const noCost = telegram.formatShiftReport('Shop', CLOSED, {
+  ...FIGURES,
+  deliveryCostUsd: 0,
+  deliveryMarginUsd: 6,
+  deliveryCostRecorded: 0,
+  deliveryServices: [{ name: 'Vireak Buntham', deliveries: 2, chargedUsd: 6, costUsd: 0, marginUsd: 6, costRecorded: 0 }],
+}, NOW)
+assert.ok(!noCost.includes('Delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
+assert.ok(!noCost.includes('Delivery margin'), 'and must not print the margin that a missing cost would invent')
+assert.ok(noCost.split('\n').some((line) => line.startsWith(`Delivery fee${SEP}`) && line.endsWith(': $6.00')),
+  'the charged fee is still reported')
+assert.ok(noCost.split('\n').find((line) => line.startsWith('• Vireak Buntham')).endsWith('2 · $6.00'),
+  'and the courier row falls back to the charged figure alone')
+console.log('PASS breakdown: tax, refund, avg order, cost, profit, the discount split and the three delivery parts -- each in its place, and no invented margin')
 
 // --- 4. the final amount is what the lines under it say it is ---------------
 
@@ -260,6 +347,9 @@ console.log('PASS breakdowns: payment methods then delivery services; empty ones
 const empty = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 50, closing_counted_khr: 100000 }, {
   invoices: 0, cancelled: 0, edited: 0,
   revenueUsd: 0, itemDiscountUsd: 0, invoiceDiscountUsd: 0, grossSaleUsd: 0,
+  storeDiscountUsd: 0, membershipDiscountUsd: 0,
+  taxUsd: 0, refundUsd: 0, avgOrderUsd: 0, costUsd: 0, profitUsd: 0,
+  deliveryFeeUsd: 0, deliveryCostUsd: 0, deliveryMarginUsd: 0, deliveryCostRecorded: 0,
   creditUsd: 0, otherExpenseUsd: 0, otherExpenseKhr: 0, collectedUsd: 0,
   paymentMethods: [], deliveryServices: [],
 }, NOW)
