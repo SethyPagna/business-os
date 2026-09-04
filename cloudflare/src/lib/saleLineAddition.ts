@@ -144,6 +144,59 @@ export type NewSaleLineInput = {
   batchExpiryDate?: string | null
 }
 
+export type ExplicitBatchResolution =
+  | { ok: true; lines: NewSaleLineInput[] }
+  | { ok: false; error: string }
+
+/**
+ * Resolve every client-selected lot against the authoritative active stock
+ * read for that product and branch. A missing entry deliberately covers all
+ * unsafe identities (unknown, another product, inactive, or another branch):
+ * none is a sellable lot for this line. Quantities are consumed in a private
+ * availability copy so repeated lines cannot collectively overdraw one lot.
+ * Client lot metadata is never retained.
+ */
+export function resolveExplicitSaleLineBatches(
+  lines: NewSaleLineInput[],
+  lotsByKey: Map<string, FifoLotAvailability[]>,
+): ExplicitBatchResolution {
+  const remaining = new Map<string, number>()
+  const resolved: NewSaleLineInput[] = []
+
+  for (const [index, line] of lines.entries()) {
+    if (!line.batchId) {
+      resolved.push(line)
+      continue
+    }
+    if (!line.branchId) {
+      return { ok: false, error: `Added item #${index + 1} cannot use a batch without a branch.` }
+    }
+
+    const key = `${line.productId}:${line.branchId}`
+    const batchId = Number(line.batchId)
+    const lot = (lotsByKey.get(key) || []).find((entry) => entry.batchId === batchId)
+    if (!lot) {
+      return { ok: false, error: `Batch #${batchId} is not an active, available lot for added item #${index + 1} at this branch.` }
+    }
+
+    const availabilityKey = `${key}:${batchId}`
+    const available = remaining.has(availabilityKey) ? remaining.get(availabilityKey)! : lot.available
+    const quantity = Math.max(0, Number(line.quantity) || 0)
+    if (quantity > available) {
+      return { ok: false, error: `Insufficient batch stock for added item #${index + 1}: requested ${quantity}, available ${available}.` }
+    }
+    remaining.set(availabilityKey, available - quantity)
+    resolved.push({
+      ...line,
+      batchId,
+      batchLabel: lot.lotCode ?? null,
+      batchExpiryDate: lot.expiryDate ?? null,
+    })
+  }
+
+  return { ok: true, lines: resolved }
+}
+
 export type PlannedSaleLine = NewSaleLineInput & {
   lineTotalUsd: number
   /** heldQuantity(status, quantity, 0): the units this line takes off the shelf now. */

@@ -29,6 +29,7 @@ import {
   buildAllocationStatements,
   guardSaleLineAddition,
   planSaleLineAddition,
+  resolveExplicitSaleLineBatches,
   saleMoneyUpdateStatement,
   saleStatusDeductsStock,
 } from '../lib/saleLineAddition'
@@ -1831,22 +1832,27 @@ app.post('/:id/items', async (c) => {
       .filter((item) => item.branchId)
       .map((item) => ({ productId: item.productId, branchId: item.branchId as number })),
   )
+  const candidateLines = requested.map((item) => {
+    const product = productMap.get(item.productId)
+    return {
+      productId: item.productId,
+      productName: product?.name || `product #${item.productId}`,
+      quantity: item.quantity,
+      branchId: item.branchId,
+      unitPriceUsd: item.appliedPriceUsd ?? Number(product?.selling_price_usd || 0),
+      costPriceUsd: Number(product?.cost_price_usd || 0),
+      costPriceKhr: Number(product?.cost_price_khr || 0),
+      batchId: item.batchId,
+      batchLabel: item.batchLabel,
+      batchExpiryDate: item.batchExpiryDate,
+    }
+  })
+  const explicitBatchResolution = resolveExplicitSaleLineBatches(candidateLines, lotsByKey)
+  if (!explicitBatchResolution.ok) {
+    return c.json({ error: explicitBatchResolution.error }, 409)
+  }
   const planned = allocateNewSaleLines(
-    requested.map((item) => {
-      const product = productMap.get(item.productId)
-      return {
-        productId: item.productId,
-        productName: product?.name || `product #${item.productId}`,
-        quantity: item.quantity,
-        branchId: item.branchId,
-        unitPriceUsd: item.appliedPriceUsd ?? Number(product?.selling_price_usd || 0),
-        costPriceUsd: Number(product?.cost_price_usd || 0),
-        costPriceKhr: Number(product?.cost_price_khr || 0),
-        batchId: item.batchId,
-        batchLabel: item.batchLabel,
-        batchExpiryDate: item.batchExpiryDate,
-      }
-    }),
+    explicitBatchResolution.lines,
     lotsByKey,
     saleStatus,
     skipStock,

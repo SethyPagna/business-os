@@ -70,6 +70,7 @@ const {
   SALE_STATUSES_ACCEPTING_NEW_LINES,
   guardSaleLineAddition,
   saleStatusDeductsStock,
+  resolveExplicitSaleLineBatches,
   allocateNewSaleLines,
   planSaleLineAddition,
   buildAllocationStatements,
@@ -294,6 +295,45 @@ console.log('PASS 4b -- a line added to a stock-skipped sale moves no stock but 
 }
 console.log('PASS 5 -- two lines of the same product share one pool of lot availability')
 
+// ---- 5b: explicit lot picks are server-resolved before any write ----------
+{
+  const invalidPicks = [
+    ['foreign product', LINE(2, { batchId: 601 }), lotsFor()],
+    ['nonexistent', LINE(2, { batchId: 999 }), lotsFor()],
+    ['inactive', LINE(2, { batchId: 503 }), lotsFor()],
+    ['wrong branch', LINE(2, { batchId: 501, branchId: 2 }), lotsFor()],
+    ['insufficient', LINE(9, { batchId: 501 }), lotsFor()],
+  ]
+  for (const [name, line, availability] of invalidPicks) {
+    const { sqlite } = setup()
+    seedShelf(sqlite)
+    const before = sqlite.serialize()
+    const resolved = resolveExplicitSaleLineBatches([line], availability)
+    assert.strictEqual(resolved.ok, false, `${name} explicit batch must be rejected`)
+    assert.match(resolved.error, /batch|lot/i)
+    assert.deepStrictEqual(sqlite.serialize(), before, `${name} rejection must perform zero writes`)
+    assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM sale_items'), 0)
+    assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM inventory_movements'), 0)
+  }
+
+  const spoofed = LINE(3, {
+    batchId: 501,
+    batchLabel: 'CLIENT-SPOOFED',
+    batchExpiryDate: '1900-01-01',
+  })
+  const resolved = resolveExplicitSaleLineBatches([spoofed], lotsFor())
+  assert.strictEqual(resolved.ok, true)
+  assert.strictEqual(resolved.lines[0].batchLabel, 'L-501', 'lot label comes from the server read')
+  assert.strictEqual(resolved.lines[0].batchExpiryDate, '2027-01-01', 'expiry comes from the server read')
+
+  const repeated = resolveExplicitSaleLineBatches([
+    LINE(5, { batchId: 501 }),
+    LINE(4, { batchId: 501 }),
+  ], lotsFor())
+  assert.strictEqual(repeated.ok, false, 'two lines cannot collectively overdraw one explicitly selected lot')
+}
+console.log('PASS 5b -- explicit batch picks are validated cumulatively and metadata is server-derived before writes')
+
 // ---- 6: the totals rules --------------------------------------------------
 {
   // A sale of $40 with a $5 cash discount, $2 tax, a $3 customer-paid
@@ -508,6 +548,8 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   assert.match(route, /getActionTier\(user, 'sales', 'add_items'\) !== 'full'/, 'and is gated SERVER-side on the granular action at full tier')
   assert.match(route, /guardSaleLineAddition\(saleStatus, !!returnedRow\)/, 'the status guard is given the returns evidence, not just the label')
   assert.match(route, /readFifoLotAvailabilityForCart/, 'lots come from the checkout FIFO reader, not a second copy')
+  assert.match(route, /resolveExplicitSaleLineBatches\(candidateLines, lotsByKey\)/,
+    'explicit batch identity, availability and metadata are resolved before the write plan')
   assert.match(route, /assertUpdatedAtMatch\('sale', sale, getExpectedUpdatedAt\(body\)\)/, 'optimistic concurrency, same as the other sale writes')
   assert.match(route, /recordSaleAddItemsUndoSnapshot/, 'a real undo payload is recorded')
   assert.match(route, /saleMoneyUpdateStatement\(saleId, moneyAfter\)/, 'the money update rides the SAME atomic batch as the lines')
