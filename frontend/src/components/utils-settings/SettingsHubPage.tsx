@@ -1,4 +1,5 @@
-import { Suspense, lazy, useState } from 'react'
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { Suspense, lazy } from 'react'
 import SettingsIcon from 'lucide-react/dist/esm/icons/settings.js'
 import UsersIcon from 'lucide-react/dist/esm/icons/users.js'
 import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
@@ -16,6 +17,7 @@ const UsersSection = lazy(() => import('../users/Users'))
 const BackupSection = lazy(() => import('./Backup'))
 
 type SettingsHubAppContext = {
+  navigateTo: (pageId: string, anchor?: string) => void
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
   hasPermission: (key: string) => boolean
@@ -26,23 +28,23 @@ type SettingsHubSection = 'settings' | 'users' | 'backup'
 
 const SETTINGS_HUB_STORAGE_KEY = 'bos:hub:settings:active'
 
-function initialSection(canSettings: boolean, canUsers: boolean, canBackup: boolean): { section: SettingsHubSection; deepLinked: boolean } {
+function initialSection(canSettings: boolean, canUsers: boolean, canBackup: boolean): SettingsHubSection {
   if (typeof window !== 'undefined') {
     const segment = String(window.location.pathname || '').toLowerCase()
-    if (segment.includes('user') && canUsers) return { section: 'users', deepLinked: true }
-    if (segment.includes('backup') && canBackup) return { section: 'backup', deepLinked: true }
+    if (segment.includes('user') && canUsers) return 'users'
+    if (segment.includes('backup') && canBackup) return 'backup'
   }
   const validIds = (['settings', 'users', 'backup'] as SettingsHubSection[]).filter((id) =>
     (id === 'settings' && canSettings) || (id === 'users' && canUsers) || (id === 'backup' && canBackup))
   const stored = readStoredHubSection(SETTINGS_HUB_STORAGE_KEY, validIds) as SettingsHubSection | null
-  if (stored) return { section: stored, deepLinked: false }
-  if (canSettings) return { section: 'settings', deepLinked: false }
-  if (canUsers) return { section: 'users', deepLinked: false }
-  return { section: 'backup', deepLinked: false }
+  if (stored) return stored
+  if (canSettings) return 'settings'
+  if (canUsers) return 'users'
+  return 'backup'
 }
 
 export default function SettingsHubPage() {
-  const { t, getPermissionTier, hasPermission } = useApp()
+  const { t, getPermissionTier, hasPermission, navigateTo } = useApp()
   // The settings SECTION door matches the old page's own nuances: the
   // narrower per-field grants (business_identity / sales_policy /
   // drive_credentials) open Settings too -- Settings.tsx self-gates which
@@ -58,8 +60,7 @@ export default function SettingsHubPage() {
   // holder an empty, no-op section. hasPermission('all') === isAdminControlUser.
   const canUsers = hasPermission('all')
   const canBackup = getPermissionTier('backup') !== 'none'
-  const [initial] = useState(() => initialSection(canSettings, canUsers, canBackup))
-  const [section, setSection] = useState<SettingsHubSection>(initial.section)
+  const [section, setSection] = useHubSection<SettingsHubSection>('settings', () => initialSection(canSettings, canUsers, canBackup), getHubDestinations('settings', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
 
   const tabs: HubSectionDef[] = [
     { id: 'settings', label: t('settings') || 'Settings', icon: SettingsIcon, hidden: !canSettings, tone: 'text-blue-600', description: t('hub_desc_settings_settings') || 'Business and app preferences' },
@@ -78,8 +79,6 @@ export default function SettingsHubPage() {
         onChange={(id) => setSection(id as SettingsHubSection)}
         storageKey={SETTINGS_HUB_STORAGE_KEY}
         pageId="settings"
-        title={t('settings') || 'Settings'}
-        initialEntered={initial.deepLinked}
       >
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
         {section === 'users' && canUsers ? <UsersSection />

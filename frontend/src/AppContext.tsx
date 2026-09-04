@@ -1,3 +1,4 @@
+import { navigationHash, needsNavigationGuard } from './components/shared/hubNavigation.ts'
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
@@ -2130,23 +2131,38 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     return false
   }, [user, getPermissionTier, hasPermission])
 
+  const committedLocationRef = useRef(typeof window === 'undefined' ? null : {
+    href: window.location.href,
+    state: window.history.state,
+  })
+  useEffect(() => {
+    const remember = () => {
+      const state = window.history.state || {}
+      if (!Number.isInteger(state.bosNavigationIndex)) {
+        window.history.replaceState({ ...state, bosNavigationIndex: 0 }, '', window.location.href)
+      }
+      committedLocationRef.current = { href: window.location.href, state: window.history.state }
+    }
+    remember()
+    window.addEventListener(APP_NAVIGATION_EVENT, remember)
+    return () => window.removeEventListener(APP_NAVIGATION_EVENT, remember)
+  }, [])
   const navigateNow = useCallback((pageId: string, anchor?: string) => {
     if (!canAccessPage(pageId)) return
     if (typeof window !== 'undefined') {
       const nextPath = getAdminPathForPage(pageId)
       const currentUrl = new URL(window.location.href)
-      // An explicit anchor (e.g. a notification pointing at a specific tab
-      // on the target page) overrides whatever hash happens to be in the
-      // URL already; otherwise leave the current hash alone.
-      const nextHash = anchor ? `#${anchor}` : currentUrl.hash
+      const nextHash = navigationHash(getAdminPageFromPath(currentUrl.pathname) || 'dashboard', pageId, currentUrl.hash, anchor)
       if (nextPath && (currentUrl.pathname !== nextPath || nextHash !== currentUrl.hash)) {
-        window.history.pushState(window.history.state, '', `${nextPath}${currentUrl.search}${nextHash}`)
+        const index = Number(committedLocationRef.current?.state?.bosNavigationIndex || 0)
+        window.history.pushState({ bosNavigationIndex: index + 1 }, '', `${nextPath}${currentUrl.search}${nextHash}`)
       }
+      committedLocationRef.current = { href: window.location.href, state: window.history.state }
       window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
         detail: {
           page: pageId,
           path: nextPath,
-          anchor: anchor || null,
+          anchor: nextHash.slice(1) || null,
         },
       }))
     }
@@ -2158,14 +2174,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // N2: the navigation guard. Page switches consult the dirty-work
   // registry (utils/dirtyWork.ts) first -- unsaved work opens the
   // three-option modal (App.tsx renders it off this state) instead of
-  // being silently stranded. Same-page navigation (tab/anchor moves inside
-  // the page) passes through: the work stays mounted either way.
+  // being silently stranded. Hub section switches also consult this guard because switching bodies
+  // unmounts the previous section; ordinary anchors keep their existing behavior.
   const [navGuard, setNavGuard] = useState<null | { pageId: string; anchor?: string; entries: DirtyWorkEntry[] }>(null)
   const pageRef = useRef(page)
   pageRef.current = page
   const navigateTo = useCallback((pageId: string, anchor?: string) => {
     if (!canAccessPage(pageId)) return
-    if (pageId !== pageRef.current) {
+    const currentHash = typeof window === 'undefined' ? '' : window.location.hash
+    if (needsNavigationGuard(pageRef.current, pageId, currentHash, navigationHash(pageRef.current, pageId, currentHash, anchor))) {
       const dirty = getDirtyWork()
       if (dirty.length > 0) {
         setNavGuard({ pageId, anchor, entries: dirty })
@@ -2224,17 +2241,33 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   useEffect(() => {
     if (typeof window === 'undefined') return
     const onPopState = () => {
-      const target = getAdminPageFromPath(window.location.pathname) || 'dashboard'
-      if (target === pageRef.current || !canAccessPage(target)) return
-      const dirty = getDirtyWork()
-      if (dirty.length > 0) {
-        const currentPath = getAdminPathForPage(pageRef.current)
-        if (currentPath) {
-          window.history.pushState(window.history.state, '', `${currentPath}${window.location.search}${window.location.hash}`)
+      const targetUrl = new URL(window.location.href)
+      const target = getAdminPageFromPath(targetUrl.pathname) || 'dashboard'
+      const previous = committedLocationRef.current
+      // Fold/modal history uses the same URL. It must never change the host section.
+      if (previous?.href === targetUrl.href) return
+      const previousHash = previous ? new URL(previous.href).hash : ''
+      const dirty = needsNavigationGuard(pageRef.current, target, previousHash, targetUrl.hash) ? getDirtyWork() : []
+      if (!canAccessPage(target) || dirty.length > 0) {
+        if (previous) {
+          const from = previous.state?.bosNavigationIndex
+          const to = window.history.state?.bosNavigationIndex
+          if (Number.isInteger(from) && Number.isInteger(to) && from !== to) {
+            // Return to the committed entry without destroying Forward on Stay.
+            window.history.go(from - to)
+          } else {
+            window.history.pushState(previous.state, '', previous.href)
+          }
         }
-        setNavGuard({ pageId: target, entries: dirty })
+        if (dirty.length > 0 && canAccessPage(target)) {
+          setNavGuard({ pageId: target, anchor: targetUrl.hash.slice(1), entries: dirty })
+        }
         return
       }
+      committedLocationRef.current = { href: targetUrl.href, state: window.history.state }
+      window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
+        detail: { page: target, path: targetUrl.pathname, anchor: targetUrl.hash.slice(1) || null },
+      }))
       startTransition(() => setPage(target))
     }
     window.addEventListener('popstate', onPopState)

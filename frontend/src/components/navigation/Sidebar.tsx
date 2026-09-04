@@ -1,4 +1,9 @@
-import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState, useSyncExternalStore } from 'react'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import { getHubDestinations, hubAnchor, mobileGroupAction, resolveHubSection } from '../shared/hubNavigation.ts'
+import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
+import { useIsCompactViewport } from '../../utils/useViewport.ts'
+import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
+import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { getRegisteredWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
 import { restartIntoLatestApp } from '../../utils/appUpdate.ts'
 import type { LucideIcon } from 'lucide-react'
@@ -25,7 +30,7 @@ import Users from 'lucide-react/dist/esm/icons/users.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
+import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem } from '../shared/navigationConfig'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import MinimizedWorkTray from '../shared/MinimizedWorkTray.tsx'
@@ -56,6 +61,7 @@ interface SidebarUser {
 }
 
 interface SidebarSettings {
+  ui_mobile_section_nav?: unknown
   ui_nav_order?: unknown
   ui_mobile_pinned?: unknown
   language?: string | null
@@ -67,12 +73,13 @@ interface SidebarSettings {
 
 interface SidebarAppContext {
   page: string
-  navigateTo: (pageId: string) => void
+  navigateTo: (pageId: string, anchor?: string) => void
   user?: SidebarUser | null
   logout: () => void
   t: TranslateFn
   settings?: SidebarSettings | null
-  hasPermission: (permission: NavigationPermission) => boolean
+  hasPermission: (permission: string) => boolean
+  getPermissionTier: (key: string) => string
   canAccessPage: (pageId: string) => boolean
   syncUrl?: string | null
   syncConnected?: boolean
@@ -195,12 +202,48 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     t,
     settings,
     hasPermission,
+    getPermissionTier,
     canAccessPage,
     syncUrl,
     syncConnected,
   } = useApp()
 
   const [moreOpen, setMoreOpen] = useState(false)
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
+  const mode = useMobileSectionNavMode(settings?.ui_mobile_section_nav)
+  const compact = useIsCompactViewport()
+  const inline = compact && mode === 'pages'
+  const [location, setLocation] = useState(() => ({ pathname: window.location.pathname, hash: window.location.hash }))
+  useEffect(() => {
+    const committed = () => {
+      setLocation({ pathname: window.location.pathname, hash: window.location.hash })
+      setMoreOpen(false)
+      setAccountOpen(false)
+    }
+    window.addEventListener(APP_NAVIGATION_EVENT, committed)
+    return () => window.removeEventListener(APP_NAVIGATION_EVENT, committed)
+  }, [])
+  useEffect(() => { setMoreOpen(false); setExpandedGroup(null) }, [inline])
+  const destinations = (id: string) => canAccessPage(id) ? getHubDestinations(id, { getPermissionTier, hasPermission }) : []
+  const currentSections = destinations(page)
+  let remembered = ''
+  try { remembered = window.localStorage.getItem(`bos:hub:${page}:active`) || '' } catch { /* private mode */ }
+  const currentSectionId = resolveHubSection(page, location.pathname, location.hash, currentSections.map((section) => section.id), page === 'branches' ? 'overview' : remembered)
+  const currentSection = currentSections.find((section) => section.id === currentSectionId)
+  const sectionLabel = (section: { key: string; label: string }) => {
+    const label = t(section.key)
+    return label && label !== section.key ? label : section.label
+  }
+  const openMobileGroup = (id: string) => {
+    const action = mobileGroupAction(expandedGroup, id, destinations(id), inline)
+    setExpandedGroup(action.expanded)
+    if (action.navigate) navigateTo(id)
+    else { setAccountOpen(false); setMoreOpen(true) }
+  }
+  const openSectionMenu = () => {
+    setExpandedGroup(currentSections.length ? page : null)
+    setMoreOpen(true)
+  }
   const [profileOpen, setProfileOpen] = useState(false)
   // The footer account row is a full-width toggle that expands into an account
   // panel -- Profile / Settings / Receipt Settings / Update / Exit -- so those
@@ -265,6 +308,10 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   }, [visibleItems, mobilePinnedIds])
 
   const drawerItems = visibleItems.filter((item) => !mobilePinnedIds.includes(item.id))
+  const inlineItems = [
+    ...visibleItems,
+    ...NAV_CONFIG_ITEMS.filter((item) => item.id === 'settings' && canAccessPage(item.id)).map((item) => ({ ...item, icon: getIconForItem(item.id) })),
+  ]
 
   const language = settings?.language || 'en'
   const brandLogo = settings?.customer_portal_logo_image || ''
@@ -305,7 +352,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   type AccountAction = { id: string; label: string; icon: LucideIcon; onClick: () => void; tone?: 'blue' | 'red' }
   const accountActions: AccountAction[] = [
     { id: 'profile', label: t('profile') || 'Profile', icon: User, onClick: () => setProfileOpen(true) },
-    ...(canAccessPage('settings') ? [{ id: 'settings', label: t('settings') || 'Settings', icon: Settings, onClick: () => navigateTo('settings') } as AccountAction] : []),
+    ...(canAccessPage('settings') ? [{ id: 'settings', label: t('settings') || 'Settings', icon: Settings, onClick: () => inline ? openMobileGroup('settings') : navigateTo('settings') } as AccountAction] : []),
     ...(canAccessPage('receipt_settings') ? [{ id: 'receipt_settings', label: t('receipt_settings') || 'Receipt Settings', icon: Receipt, onClick: () => navigateTo('receipt_settings') } as AccountAction] : []),
     { id: 'update', label: t('refresh_app') || 'Update', icon: RefreshCw, onClick: runAppUpdate, tone: 'blue' },
     { id: 'logout', label: t('logout') || 'Exit', icon: LogOut, onClick: logout, tone: 'red' },
@@ -324,7 +371,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
         key={item.id}
         type="button"
         onClick={() => { setAccountOpen(false); item.onClick() }}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors ${accountActionToneClass(item.tone)}`}
+        className={`flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors md:min-h-0 ${accountActionToneClass(item.tone)}`}
       >
         <Icon className="h-4 w-4 shrink-0" />
         <span className="truncate">{item.label}</span>
@@ -460,8 +507,19 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           background still extends fully behind the notch; App.tsx's <main>
           padding-top is matched to this same total height. */}
       <header
-        className={`fixed left-0 right-0 z-40 flex items-center justify-between border-b border-gray-200 bg-white pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] transition-[transform,top] duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${appUpdateVisible ? 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]'} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        data-bos-mobile-header={inline ? 'inline' : 'sections'}
+        className={`fixed left-0 right-0 z-40 flex items-center justify-between border-b border-gray-200 bg-white pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] transition-[transform,top] duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${appUpdateVisible ? (inline ? 'top-[calc(3rem+env(safe-area-inset-top))] h-28 pt-0' : 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0') : (inline ? 'top-0 h-[calc(7rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]')} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'} ${inline ? 'flex-wrap content-center gap-y-1' : ''}`}
       >
+        {inline ? (
+          <div className="flex min-h-11 w-full min-w-0 items-center gap-1">
+            <button type="button" onClick={openSectionMenu} aria-label={t('back') || 'Back'} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800">
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <div className="min-w-0 flex-1 break-words text-sm font-semibold leading-snug">
+              {currentSection ? sectionLabel(currentSection) : (getNavLabel(NAV_CONFIG_ITEMS.find((item) => item.id === page) || { id: page, key: page, permission: null }, t, language))}
+            </div>
+          </div>
+        ) : (
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200/80 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80">
             {brandLogo ? (
@@ -473,10 +531,11 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             )}
           </div>
         </div>
-        <div className="mx-2 min-w-0 flex-1">
+        )}
+        <div className="mx-2 min-w-0 flex-1 [&_button]:min-h-11 [&_button]:min-w-11">
           <MinimizedWorkTray variant="mobile" />
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 [&_button]:min-h-11 [&_button]:min-w-11">
           {notificationSlot}
           {showQuickPreferences ? (
             <Suspense fallback={<QuickPreferenceTogglesFallback />}>
@@ -531,7 +590,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               aria-label={label}
               data-bos-nav-id={item.id}
               onFocus={() => announcePageIntent(item.id, 'focus')}
-              onClick={() => { navigateTo(item.id); setMoreOpen(false) }}
+              onClick={() => openMobileGroup(item.id)}
               onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
               onTouchStart={() => announcePageIntent(item.id, 'touch')}
               className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (isActiveItem ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
@@ -547,7 +606,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
         <button
           aria-label={t('more') || 'More'}
           data-bos-nav-id="more"
-          onClick={() => setMoreOpen((open) => !open)}
+          onClick={() => { setExpandedGroup(null); setMoreOpen((open) => !open) }}
           className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (moreOpen ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
           style={moreOpen ? mobileActiveStyle : mobileInactiveStyle}
         >
@@ -568,6 +627,40 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             <div className="sticky top-0 bg-white px-3 pb-1 pt-3 dark:bg-gray-900">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" />
             </div>
+            {inline ? (
+              <div className="space-y-1 px-3 pb-4">
+                {inlineItems.map((item) => {
+                  const Icon = item.icon
+                  const sections = destinations(item.id)
+                  const expanded = expandedGroup === item.id
+                  return (
+                    <div key={item.id} className="min-w-0 rounded-xl bg-gray-50 dark:bg-gray-800">
+                      <button type="button" data-bos-nav-id={item.id} aria-expanded={sections.length ? expanded : undefined}
+                        aria-controls={sections.length ? `mobile-sections-${item.id}` : undefined}
+                        onClick={() => openMobileGroup(item.id)}
+                        className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium">
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="min-w-0 flex-1 break-words">{getNavLabel(item, t, language)}</span>
+                        {dirtyPageIds.has(item.id) ? <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" /> : null}
+                        {sections.length ? <ChevronUp className={`h-4 w-4 shrink-0 ${expanded ? '' : 'rotate-180'}`} /> : null}
+                      </button>
+                      {expanded && sections.length ? (
+                        <div id={`mobile-sections-${item.id}`} className="grid min-w-0 grid-cols-2 gap-1 px-2 pb-2">
+                          {sections.map((section) => (
+                            <button key={section.id} type="button" data-bos-section={`${item.id}:${section.id}`}
+                              aria-current={page === item.id && currentSectionId === section.id ? 'page' : undefined}
+                              onClick={() => navigateTo(item.id, hubAnchor(item.id, section.id))}
+                              className="min-h-11 min-w-0 break-words rounded-lg border border-gray-200 bg-white px-2 py-2 text-left text-sm leading-snug hover:bg-blue-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-700">
+                              {sectionLabel(section)}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
             <div className="grid grid-cols-4 gap-2 px-3 pb-4">
               {drawerItems.map((item) => {
                 const Icon = item.icon
@@ -579,7 +672,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                     aria-label={label}
                     data-bos-nav-id={item.id}
                     onFocus={() => announcePageIntent(item.id, 'focus')}
-                    onClick={() => { navigateTo(item.id); setMoreOpen(false) }}
+                    onClick={() => openMobileGroup(item.id)}
                     onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
                     onTouchStart={() => announcePageIntent(item.id, 'touch')}
                     className={`relative flex flex-col items-center gap-1.5 rounded-xl p-3 text-xs font-medium transition-colors ${!sidebarTextColor ? (isActiveItem ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-400') : (isActiveItem ? 'bg-white/70 dark:bg-slate-800/70' : 'bg-gray-50 dark:bg-gray-800')}`}
@@ -594,6 +687,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                 )
               })}
             </div>
+            )}
           </div>
         </>
       ) : null}

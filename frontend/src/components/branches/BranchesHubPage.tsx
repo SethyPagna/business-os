@@ -1,3 +1,4 @@
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import { Suspense, lazy, useEffect, useState } from 'react'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
@@ -15,9 +16,10 @@ const BranchesSection = lazy(() => import('./Branches'))
 const InventorySection = lazy(() => import('../inventory/Inventory.tsx'))
 
 type BranchesHubAppContext = {
+  hasPermission: (key: string) => boolean
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
-  navigateTo: (pageId: string) => void
+  navigateTo: (pageId: string, anchor?: string) => void
 }
 const useApp = useAppHook as unknown as () => BranchesHubAppContext
 
@@ -50,21 +52,11 @@ function initialSection(canBranchList: boolean, canInventory: boolean): Branches
 }
 
 export default function BranchesHubPage() {
-  const { t, getPermissionTier, navigateTo } = useApp()
+  const { t, getPermissionTier, navigateTo, hasPermission } = useApp()
   const trh = (key: string, fallback: string): string => { const value = t(key); return value && value !== key ? value : fallback }
   const canBranchList = getPermissionTier('branches') !== 'none'
   const canInventory = getPermissionTier('inventory') !== 'none'
-  const [section, setSection] = useState<BranchesHubSection>(() => initialSection(canBranchList, canInventory))
-  // A deep link (Dashboard's inventory-focus hand-off) resolved at
-  // construction time above lands straight on layer 3 for that section on
-  // mobile; a plain visit (no hand-off, section defaults to 'overview')
-  // lands on layer 2. See HubSectionNav's `initialEntered` doc comment.
-  const [initialEntered] = useState(() => section !== 'overview')
-  // Bumped alongside setSection('rfid') below when the SAME hand-off
-  // arrives while this hub is already mounted in the background (isActive
-  // flips true) -- HubSectionNav can't see that setSection call itself, so
-  // this tells it to force layer 3 open for whatever `active` becomes.
-  const [enterSignal, setEnterSignal] = useState(0)
+  const [section, setSection] = useHubSection<BranchesHubSection>('branches', () => initialSection(canBranchList, canInventory), getHubDestinations('branches', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
   // The hub owns one range. Product stats and Transfer History receive the
   // exact same controlled value after a section switch.
   const [sharedDateRange, setSharedDateRange] = useState<DateTimeRange>(() => ({
@@ -77,7 +69,8 @@ export default function BranchesHubPage() {
 
   useEffect(() => {
     if (!isActive || typeof window === 'undefined') return
-    const raw = window.sessionStorage.getItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+    let raw: string | null = null
+    try { raw = window.sessionStorage.getItem(DASHBOARD_INVENTORY_FOCUS_KEY) } catch { return }
     if (!raw) return
     let payload: { section?: unknown; stockFilter?: unknown } = {}
     try {
@@ -96,7 +89,7 @@ export default function BranchesHubPage() {
       return
     }
     if (focus === 'movements') navigateTo('products')
-    else if (focus === 'rfid' && canInventory) { setSection('rfid'); setEnterSignal((value) => value + 1) }
+    else if (focus === 'rfid' && canInventory) { setSection('rfid') }
     else setSection('overview')
   }, [canBranchList, canInventory, isActive, navigateTo])
 
@@ -123,9 +116,6 @@ export default function BranchesHubPage() {
         onChange={(id) => setSection(id as BranchesHubSection)}
         storageKey="bos:hub:branches:active"
         pageId="branches"
-        title={trh('branches', 'Branches')}
-        initialEntered={initialEntered}
-        enterSignal={enterSignal}
       >
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
         {active === 'overview' ? (

@@ -36,7 +36,7 @@ import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { readMobileSectionNavMode, writeMobileSectionNavMode, MOBILE_SECTION_NAV_SETTINGS_KEY, type MobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
+import { useMobileSectionNavMode, writeMobileSectionNavMode, MOBILE_SECTION_NAV_SETTINGS_KEY, type MobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
@@ -501,6 +501,7 @@ export default function Settings() {
   const [unregisteredPm, setUnregisteredPm] = useState<string[]>([])
   const [pmBackfilling, setPmBackfilling] = useState(false)
   const [form, setForm] = useState<SettingsRecord>({})
+  const mobileSectionNavMode = useMobileSectionNavMode(form.ui_mobile_section_nav)
   const [previewNow, setPreviewNow] = useState(() => new Date())
   const [dragPinnedId, setDragPinnedId] = useState<string | null>(null)
   const [dragNavId, setDragNavId] = useState<string | null>(null)
@@ -1703,11 +1704,11 @@ export default function Settings() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/70">
             <div className="flex items-center gap-1.5">
               <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{copy('mobile_section_nav_title', 'Mobile navigation')}</div>
-              <InfoHint label={copy('mobile_section_nav_title', 'Mobile navigation')} text={copy('mobile_section_nav_hint', 'How hub pages show their sections on a phone: full-screen pages, or the tab row.')} />
+              <InfoHint label={copy('mobile_section_nav_title', 'Mobile navigation')} text={copy('mobile_section_nav_hint', 'Expand groups in the main menu and open a section directly, or keep the section tabs.')} />
             </div>
             <div className="flex gap-2">
               {MOBILE_SECTION_NAV_MODE_KEYS.map(([modeValue, copyKey, defaultLabel]) => {
-                const currentMode = readMobileSectionNavMode(form.ui_mobile_section_nav)
+                const currentMode = mobileSectionNavMode
                 const isActive = currentMode === modeValue
                 return (
                   <button
@@ -1718,7 +1719,7 @@ export default function Settings() {
                       setValue(MOBILE_SECTION_NAV_SETTINGS_KEY, modeValue)
                     }}
                     aria-pressed={isActive}
-                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                    className={`min-h-11 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                   >
                     {copy(copyKey, defaultLabel)}
                   </button>

@@ -1,5 +1,6 @@
-// Mobile section-navigation preference: "pages" (default -- the mobile
-// three-layer nav: main menu -> section cards -> full-screen section) or
+import { useSyncExternalStore } from 'react'
+
+// Mobile section-navigation preference: "pages" (inline groups -> section body) or
 // "sections" (today's chip row, kept on mobile too). See
 // components/shared/HubSectionNav.tsx for where this is consumed and
 // components/utils-settings/Settings.tsx's "Navigation Layout" block for
@@ -21,17 +22,21 @@ export const MOBILE_SECTION_NAV_STORAGE_KEY = 'bos:ui:mobile-section-nav'
 export const MOBILE_SECTION_NAV_SETTINGS_KEY = 'ui_mobile_section_nav'
 export const DEFAULT_MOBILE_SECTION_NAV_MODE: MobileSectionNavMode = 'pages'
 
+let sessionMode: MobileSectionNavMode | null = null
+const PREFERENCE_EVENT = 'bos:mobile-section-nav'
+
 function normalizeMode(value: unknown): MobileSectionNavMode | null {
   return value === 'pages' || value === 'sections' ? value : null
 }
 
 export function readMobileSectionNavMode(accountValue?: unknown): MobileSectionNavMode {
   if (typeof window !== 'undefined') {
+    if (sessionMode) return sessionMode
     try {
       const stored = normalizeMode(window.localStorage.getItem(MOBILE_SECTION_NAV_STORAGE_KEY))
       if (stored) return stored
     } catch {
-      // Private-mode / storage-disabled: fall through to the account value.
+      // The account/default value remains available when reads are blocked.
     }
   }
   return normalizeMode(accountValue) || DEFAULT_MOBILE_SECTION_NAV_MODE
@@ -39,10 +44,36 @@ export function readMobileSectionNavMode(accountValue?: unknown): MobileSectionN
 
 export function writeMobileSectionNavMode(mode: MobileSectionNavMode): void {
   if (typeof window === 'undefined') return
+  sessionMode = mode
   try {
     window.localStorage.setItem(MOBILE_SECTION_NAV_STORAGE_KEY, mode)
   } catch {
     // Ignore private-mode storage failures -- the in-memory preference for
     // this session still works, it just won't survive a reload.
   }
+  window.dispatchEvent(new Event(PREFERENCE_EVENT))
+}
+
+export function subscribeMobileSectionNavMode(notify: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const storage = (event: StorageEvent) => {
+    if (event.key === MOBILE_SECTION_NAV_STORAGE_KEY || event.key === null) {
+      sessionMode = null
+      notify()
+    }
+  }
+  window.addEventListener(PREFERENCE_EVENT, notify)
+  window.addEventListener('storage', storage)
+  return () => {
+    window.removeEventListener(PREFERENCE_EVENT, notify)
+    window.removeEventListener('storage', storage)
+  }
+}
+
+export function useMobileSectionNavMode(accountValue?: unknown): MobileSectionNavMode {
+  return useSyncExternalStore(
+    subscribeMobileSectionNavMode,
+    () => readMobileSectionNavMode(accountValue),
+    () => normalizeMode(accountValue) || DEFAULT_MOBILE_SECTION_NAV_MODE,
+  )
 }

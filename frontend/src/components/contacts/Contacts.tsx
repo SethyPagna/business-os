@@ -1,3 +1,4 @@
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import type { ComponentType, SVGProps } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { Suspense, useState } from 'react'
@@ -17,6 +18,8 @@ type ContactTabIcon = ComponentType<SVGProps<SVGSVGElement>>
 interface AppContextValue {
   t: TranslateFn
   notify: NotifyFn
+  navigateTo: (page: string, anchor?: string) => void
+  getPermissionTier: (key: string) => string
   hasPermission: (key: string) => boolean
 }
 
@@ -132,7 +135,7 @@ function ContactTabFallback({ t, label }: ContactTabFallbackProps) {
 }
 
 export default function Contacts() {
-  const { t, notify, hasPermission } = useApp()
+  const { t, notify, hasPermission, getPermissionTier, navigateTo } = useApp()
   const isActive = useIsPageActive('contacts')
   // Supplier privacy (Part 383 R2): the Suppliers section is admin-managed
   // -- an employee only sees it when granted 'contacts_suppliers' (admins
@@ -141,11 +144,11 @@ export default function Contacts() {
   // the same gate on every /suppliers endpoint, so hiding the tab is
   // presentation, not the security boundary.
   const canSeeSuppliers = hasPermission('contacts_suppliers')
-  const [tab, setTab] = useState<ContactTabId>(() => {
+  const [tab, setTab] = useHubSection<ContactTabId>('contacts', () => {
     const validIds = (['customers', 'suppliers', 'delivery', 'duplicates'] as ContactTabId[]).filter((id) =>
       id !== 'suppliers' || canSeeSuppliers)
     return (readStoredHubSection(CONTACTS_HUB_STORAGE_KEY, validIds) as ContactTabId | null) || 'customers'
-  })
+  }, getHubDestinations('contacts', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
   // Set when "Resolve" is clicked on a cluster in the Possible Duplicates
   // tab -- switches to the record's real tab and seeds that tab's own
   // search box with the contact's name, so the matching records land
@@ -179,7 +182,6 @@ export default function Contacts() {
         onChange={(id) => setTab(id as ContactTabId)}
         storageKey={CONTACTS_HUB_STORAGE_KEY}
         pageId="contacts"
-        title={t('contacts') || 'Contacts'}
       >
       <div className="page-scroll min-h-0 flex-1 p-3 sm:p-6">
         {tab === 'customers' ? (
