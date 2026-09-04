@@ -1,0 +1,14 @@
+# Migration SQL must be LF, and this is a shipping requirement, not style.
+#
+# `wrangler d1 migrations apply --remote` splits a file into statements and
+# decides a CREATE TRIGGER body has closed with the regex /\sEND[;\s]$/. On a
+# CRLF file the chunk ends "END;\r", so the $ anchor sits past the \r, the
+# match fails, the trigger statement is sent truncated, and D1 answers
+# "incomplete input: SQLITE_ERROR". 0115_sale_amendments.sql failed exactly
+# that way against production on Sep 4 2026, after the six migrations ahead of
+# it had already applied. It passes `wrangler d1 execute --local --file`,
+# because the local path hands the whole file to SQLite and never splits --
+# so this cannot be caught by running the migration locally.
+#
+# Backstop: cloudflare/scripts/test-migration-line-endings-pure.cjs
+cloudflare/migrations/*.sql text eol=lf
