@@ -3569,6 +3569,69 @@ params. A test now pins all three shapes.
     pricing contract still names `special_price_*`, so **the stock-adjust modals cannot write the
     wholesale tier at all**. Warned that `/adjust` is a write path old till tabs still POST to, so it
     accepts both keys and prefers the wholesale one rather than taking a straight rename.
+### `cc2b7bff` certifies green — and the check that found what the certification could not
+
+The 15-lane reconcile has a valid verdict at last. The previous run reported `CF_TSC_FAIL` from a
+newline **my own conflict resolution dropped**, and the run before that was reading the worktree
+while merges landed underneath it.
+
+| Phase | Result |
+|---|---|
+| `cloudflare npx tsc --noEmit` | OK |
+| cloudflare pure tests, per file | **179 files, zero red** |
+| `frontend npx tsc --noEmit` | OK |
+| `check:source` | 485 source files parsed |
+| `verify:i18n` | **4,710 keys**, both packs |
+| frontend tests, per file | **185 files, zero red** |
+| `vite build` | built in 33.5s |
+
+**This run is trustworthy for a reason worth stating:** its key and file counts (4,710 / 485) match
+what was measured independently at `cc2b7bff` beforehand. A certification names a commit in its
+header but re-reads the working tree at each phase — when those numbers disagree, the run is
+describing a different tree and the header is a lie. They agree here.
+
+**185 test files against a 184-entry chain is correct, not a gap** — `paginationSurfaceContract` is
+reached by static import from `paginationRangeControl`, so Node runs it. Appending it to the chain
+would make it run twice.
+
+**Migration ledger re-checked across every unmerged branch, not just the reconcile:** no two lanes
+claim a number. Above 0105 the set is 0106–0112 plus 0114 on the reconcile and 0115 on
+`s4/sale-amendments`; **0113 is genuinely free**. The only duplicate number in the whole directory
+is the known `0018` pair, both applied in production and therefore **frozen** — renaming either
+makes D1 re-run its DDL.
+
+#### The defect a green certification cannot see
+
+Everything above passed, so a slot-parity check was run by hand against the packs — and found four
+keys where **the Khmer value carried a `{n}` the English value did not**. Two are live:
+
+```
+BulkImportModal.tsx:2902   t('match_import_images').replace('{n}', String(count))
+ServerPage.tsx:843         t('sync_online_devices').replace('{n}', String(onlineCount))
+```
+
+`.replace()` on a string with no `{n}` **does not throw — it is a no-op**. So the button read
+"Match & Import Images" and the sync panel read "Online devices", each with the number silently
+gone, while **Khmer rendered both correctly**. The broken pack was English. `git log -S` puts it in
+`13155c61`, the initial import: pre-existing, not a lane regression, and live in production today.
+
+**Why every existing check missed it.** `verify:i18n` proves key-*set* parity, and both packs have
+these keys — only the values differ. Typecheck sees a `string`. The tests never asserted the
+rendered label. Nothing in the pipeline compares one pack's value against the other's.
+
+Fixed as a class rather than as two instances (`4e581081`): **`verify:i18n` check 4** now asserts
+that a key's interpolation slots are identical in both packs. **Written red first** — it caught
+exactly those four keys before any value was touched, and is green after. That ordering is the
+whole evidence that the guard guards.
+
+- `returns_count_label` and `still_need_decision` have **no call site anywhere** — frontend, worker,
+  tests or scripts. Given the slot only to keep the guard green; **deletion belongs with the four
+  orphaned `special_price*` keys in the owner's dedicated commit**, not smuggled into a fix.
+- A second hand-check found **41 Khmer values with no Khmer glyph** — every one legitimate: brand
+  names, acronyms (POS, CSV, SKU, RFID), font names, and `factory_reset_confirm_word`, which **must**
+  be byte-identical in both packs because the user types it to confirm. One nit for a later pass:
+  `google_login` keeps the English word "login" that its siblings `google_signin` and
+  `login_with_google` both drop.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
