@@ -117,3 +117,75 @@ export function receiptLineSavingsUsd(
     0,
   )
 }
+
+/**
+ * The delivery fee, split by who actually paid it.
+ *
+ * THE RULE (owner, Sep 4 2026): "if free/paid by shop in receipt note 'Free'
+ * and a delivery fee crossed out fee. so Free crossed out $N."
+ *
+ * The defect underneath that rule is an arithmetic one, not a wording one.
+ * `sales.total_usd` only ever includes a CUSTOMER-paid delivery fee (see the
+ * ground-truth header in the Worker's lib/salesAnalytics.ts), but the receipt
+ * printed the stored fee whoever paid it. So on a delivery the shop absorbed,
+ * the printed column did not add up:
+ *
+ *     subtotal - discount + tax + delivery  !=  TOTAL
+ *
+ * by exactly the absorbed fee. Printing "Free" reads as zero in that column,
+ * which is what the total already assumed, while the struck-through figure
+ * still tells the customer what the delivery was worth.
+ *
+ * The invariant this guarantees, and which the test asserts directly:
+ *
+ *     chargedUsd + absorbedUsd === faceUsd
+ *
+ * and `chargedUsd` is exactly the amount `total_usd` already carries. Nothing
+ * here changes any stored money.
+ */
+export interface ReceiptDeliveryInput {
+  delivery_fee_usd?: number | string | null
+  delivery_fee_khr?: number | string | null
+  delivery_fee_paid_by?: string | null
+}
+
+export interface ReceiptDeliveryFigures {
+  /** The fee as stored, whoever paid it -- the figure struck through when free. */
+  faceUsd: number
+  faceKhr: number
+  /** What the customer was charged; the only part total_usd carries. */
+  chargedUsd: number
+  chargedKhr: number
+  /** What the shop absorbed. Never added to the printed column. */
+  absorbedUsd: number
+  absorbedKhr: number
+  /** True when the row must read "Free" with the fee struck through. */
+  printsAsFree: boolean
+}
+
+/**
+ * Matches the Worker's `customerDeliveryFeeExpr` / `storeDeliveryExpr` exactly:
+ * only the literal 'store' means absorbed, and a missing value is a
+ * customer-paid fee (the column's own default). Any other spelling is treated
+ * as customer-paid rather than guessed at -- the receipt must never invent a
+ * discount the till did not give.
+ */
+export function receiptDeliveryFigures(
+  sale: ReceiptDeliveryInput,
+  exchangeRate: number,
+): ReceiptDeliveryFigures {
+  const faceUsd = num(sale.delivery_fee_usd)
+  const faceKhr = num(sale.delivery_fee_khr) || faceUsd * exchangeRate
+  const absorbed = String(sale.delivery_fee_paid_by || 'customer') === 'store'
+  return {
+    faceUsd,
+    faceKhr,
+    chargedUsd: absorbed ? 0 : faceUsd,
+    chargedKhr: absorbed ? 0 : faceKhr,
+    absorbedUsd: absorbed ? faceUsd : 0,
+    absorbedKhr: absorbed ? faceKhr : 0,
+    // Only a fee that actually exists can be given away. A zero fee has
+    // nothing to strike through, and the row is hidden anyway.
+    printsAsFree: absorbed && faceUsd > 0,
+  }
+}

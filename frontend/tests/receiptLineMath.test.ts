@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { receiptLineFigures, receiptLineSavingsUsd } from '../src/utils/receiptLineMath.ts'
+import { receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd } from '../src/utils/receiptLineMath.ts'
 
 const RATE = 4100
 const round2 = (n: number) => Math.round(n * 100) / 100
@@ -138,7 +138,7 @@ const sale16433 = {
 // --- the component must consume the shared math, not re-derive it ----------
 {
   const src = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
-  assert.match(src, /import \{ receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
+  assert.match(src, /import \{ receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
   assert.match(src, /const lineSavingsUsd = receiptLineSavingsUsd\(items, showItemDiscount, exchangeRate\)/)
   assert.match(src, /const displayedSubtotalUsd = subtotalUsd \+ lineSavingsUsd/)
   assert.match(src, /const displayedDiscountUsd = discountUsd \+ lineSavingsUsd/)
@@ -153,8 +153,93 @@ const sale16433 = {
     /const unitUsd = toNumber\(item\.applied_price_usd/,
     'the line price must come from the shared math, not straight off applied_price_usd',
   )
+  // The delivery row reads the shared split and prints Free from it.
+  assert.match(src, /const delivery = receiptDeliveryFigures\(sale, exchangeRate\)/)
+  assert.match(src, /const deliveryPaidByStore = delivery\.printsAsFree/)
+  assert.match(src, /deliveryPaidByStore \? \(/)
+  assert.match(src, /labelFor\(lang, 'free'\)/)
+  assert.match(src, /line-through/)
+  assert.doesNotMatch(
+    src,
+    /delivery_fee_paid_by \|\| 'customer'/,
+    'the payer test must come from the shared math, not be re-derived in the component',
+  )
+  // Both label packs carry the word, or a Khmer receipt prints an empty cell.
+  assert.match(src, /free: 'Free',/)
+  assert.match(src, /free: '\u17a5\u178f\u1782\u17b7\u178f\u1790\u17d2\u179b\u17c3',/)
+
   // total_usd must stay untouched -- the whole change is display-only.
   assert.match(src, /const totalUsd = toNumber\(sale\.total_usd \?\? sale\.total\)/)
 }
 
-console.log('receiptLineMath: selling price on the line, every discount in the Discount row, total unchanged')
+// --- the delivery fee, split by who paid it -------------------------------
+// "if free/paid by shop in receipt note 'Free' and a delivery fee crossed out
+// fee. so Free crossed out $N." (owner, Sep 4 2026)
+//
+// The wording is the visible half. The half that matters is that total_usd
+// only ever carried a CUSTOMER-paid fee, so printing the stored fee on a
+// shop-absorbed delivery left the receipt's own column not adding up.
+{
+  // Production shape: 11,879 deliveries are customer-paid ($8,228.05 of fees),
+  // 3 are shop-absorbed ($5.50). Both shapes are asserted.
+  const charged = receiptDeliveryFigures(
+    { delivery_fee_usd: 2, delivery_fee_khr: 8200, delivery_fee_paid_by: 'customer' },
+    RATE,
+  )
+  assert.equal(charged.chargedUsd, 2, 'a customer-paid fee is charged in full')
+  assert.equal(charged.absorbedUsd, 0)
+  assert.equal(charged.printsAsFree, false, 'a customer-paid fee must never print as Free')
+  assert.equal(charged.chargedKhr, 8200)
+
+  const absorbed = receiptDeliveryFigures(
+    { delivery_fee_usd: 2, delivery_fee_khr: 8200, delivery_fee_paid_by: 'store' },
+    RATE,
+  )
+  assert.equal(absorbed.chargedUsd, 0, 'a shop-absorbed fee is not charged to the customer')
+  assert.equal(absorbed.absorbedUsd, 2)
+  assert.equal(absorbed.printsAsFree, true)
+  assert.equal(absorbed.faceUsd, 2, 'the struck-through figure still shows what it was worth')
+
+  // The column now adds up. This is the defect stated as arithmetic:
+  // total_usd = subtotal - discount + tax + CUSTOMER-paid delivery, so the
+  // delivery row has to print chargedUsd and nothing else. Before the fix an
+  // absorbed fee printed faceUsd here and the printed column overshot TOTAL by
+  // exactly that amount.
+  const subtotal = 100
+  const discount = 10
+  const tax = 0
+  assert.equal(
+    subtotal - discount + tax + absorbed.chargedUsd,
+    90,
+    'an absorbed fee must not be added to the printed total',
+  )
+  assert.equal(
+    subtotal - discount + tax + charged.chargedUsd,
+    92,
+    'a customer-paid fee must still be added',
+  )
+
+  // The invariant the split is built on, asserted rather than assumed.
+  for (const figures of [charged, absorbed]) {
+    assert.equal(round2(figures.chargedUsd + figures.absorbedUsd), figures.faceUsd)
+    assert.equal(figures.chargedKhr + figures.absorbedKhr, figures.faceKhr)
+  }
+
+  // A missing payer is the column's own default: customer. Historical rows
+  // predate the column, and reading a blank as "store" would silently print
+  // Free across the whole archive.
+  const legacy = receiptDeliveryFigures({ delivery_fee_usd: 1.5 }, RATE)
+  assert.equal(legacy.chargedUsd, 1.5)
+  assert.equal(legacy.printsAsFree, false, 'a missing payer must read as customer-paid')
+  assert.equal(legacy.faceKhr, 1.5 * RATE, 'riel falls back to the rate when not stored')
+
+  // Any other spelling is customer-paid too -- the receipt must never invent a
+  // discount the till did not give.
+  assert.equal(receiptDeliveryFigures({ delivery_fee_usd: 3, delivery_fee_paid_by: 'shop' }, RATE).printsAsFree, false)
+  assert.equal(receiptDeliveryFigures({ delivery_fee_usd: 3, delivery_fee_paid_by: 'Store' }, RATE).printsAsFree, false)
+
+  // Nothing to give away, nothing to strike through.
+  assert.equal(receiptDeliveryFigures({ delivery_fee_usd: 0, delivery_fee_paid_by: 'store' }, RATE).printsAsFree, false)
+}
+
+console.log('receiptLineMath: selling price on the line, every discount in the Discount row, an absorbed delivery fee prints Free, total unchanged')

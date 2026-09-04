@@ -7,7 +7,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
-import { receiptLineFigures, receiptLineSavingsUsd } from '../../utils/receiptLineMath'
+import { receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd } from '../../utils/receiptLineMath'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
@@ -70,6 +70,11 @@ interface ReceiptSale {
   tax_khr?: number | string | null
   delivery_fee_usd?: number | string | null
   delivery_fee_khr?: number | string | null
+  // Who the fee fell on. Only ever meaningful with is_delivery: `store`
+  // means the shop absorbed it and the customer was NOT charged, so it is
+  // absent from total_usd. Anything else (including missing, which is the
+  // column's default) means the customer paid it.
+  delivery_fee_paid_by?: string | null
   total_usd?: number | string | null
   total?: number | string | null
   total_khr?: number | string | null
@@ -220,6 +225,7 @@ const LABELS = {
     address: 'Address:',
     membership: 'Membership:',
     delivery: 'Delivery Fee:',
+    free: 'Free',
     driver: 'Delivery:',
     subtotal: 'Subtotal:',
     discount: 'Discount:',
@@ -248,6 +254,7 @@ const LABELS = {
     address: 'អាសយដ្ឋាន:',
     membership: 'លេខសមាជិក:',
     delivery: 'ថ្លៃដឹកជញ្ជូន:',
+    free: 'ឥតគិតថ្លៃ',
     driver: 'ដឹកជញ្ជូន:',
     subtotal: 'សរុបរង:',
     discount: 'បញ្ចុះតម្លៃ:',
@@ -364,8 +371,10 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const membershipPointsRedeemed = toNumber(sale.membership_points_redeemed)
   const taxUsd = toNumber(sale.tax_usd ?? sale.tax)
   const taxKhr = toNumber(sale.tax_khr) || taxUsd * exchangeRate
-  const deliveryFeeUsd = toNumber(sale.delivery_fee_usd)
-  const deliveryFeeKhr = toNumber(sale.delivery_fee_khr) || deliveryFeeUsd * exchangeRate
+  const delivery = receiptDeliveryFigures(sale, exchangeRate)
+  const deliveryFeeUsd = delivery.faceUsd
+  const deliveryFeeKhr = delivery.faceKhr
+  const deliveryPaidByStore = delivery.printsAsFree
   // The owner's rule (Sep 4 2026): a line prints its SELLING price, and every
   // discount is carried in the Discount row -- "selling price (-discount)",
   // not "discounted price (-discount)".
@@ -545,7 +554,18 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       <Row key="tax" label={labelFor(lang, 'tax')} value={fmtUSD(taxUsd)} subValue={taxKhr > 0 ? fmtKHR(taxKhr) : ''} />
     ) : null,
     delivery_fee: tpl.show_delivery !== false && tpl.delivery_show_fee !== false && deliveryFeeUsd > 0 ? (
-      <Row key="delivery_fee" label={labelFor(lang, 'delivery')} value={fmtUSD(deliveryFeeUsd)} subValue={tpl.show_delivery_khr !== false && deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : ''} />
+      <Row
+        key="delivery_fee"
+        label={labelFor(lang, 'delivery')}
+        value={deliveryPaidByStore ? (
+          <>
+            {labelFor(lang, 'free')} <span className="text-gray-500 line-through">{fmtUSD(deliveryFeeUsd)}</span>
+          </>
+        ) : fmtUSD(deliveryFeeUsd)}
+        subValue={tpl.show_delivery_khr !== false && deliveryFeeKhr > 0 ? (
+          deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr)
+        ) : ''}
+      />
     ) : null,
     refund: refundUsd > 0 ? (
       <Row key="refund" label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" />
