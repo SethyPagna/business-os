@@ -307,6 +307,28 @@ count established at authoring time. That is the same lesson as the constructed 
 that was valid against the HEAD it was built from and inverted when HEAD moved: **a
 predicate verified against the data it was authored against has exactly that property.**
 
+**And the re-run question found the one statement that was genuinely unsafe.**
+`business-os-v1-ba` asked whether a second execution is a no-op, reasoning that pinning
+the AR ids might have dropped the state condition along with the join. It had not — the
+receivables update still carries `status <> 'Paid'`. But the question was right and the
+answer was worse than the case that prompted it: **the two `sale_items` restorations were
+bare `INSERT ... VALUES` with no guard at all.** A second run would have duplicated both
+lines, while the total corrections below them — guarded on `AND total_usd = <old>` — would
+have correctly no-opped. The result is a sale carrying **twice the line at the same total**:
+worse than either failing or succeeding, and reached by an operator doing the reasonable
+thing after an ambiguous first run.
+
+Both are now `INSERT ... SELECT ... WHERE NOT EXISTS (sale_id, product_id)`. Verified
+read-only that neither line is present today (0 and 0), so the guard is inert on the first
+run and total on every one after it.
+
+**All six statements now carry their own state guard**, so the file is idempotent end to
+end: `NOT EXISTS` on the two restored lines, `AND total_usd = <old>` on the two total
+corrections, `AND sale_status = 'awaiting_payment'` on the flip, `AND status <> 'Paid'` on
+the receivables. The header says so, and says the thing an operator actually needs: **on a
+re-run, 0 rows written everywhere is success, not failure.** A guard that makes re-running
+safe is worth little if the person holding the file reads its silence as a fault.
+
 **Rule for the next reconciliation script:** `customer_receivables` is reachable by
 `(source_file, legacy_id)` / `id`. Use that wherever the sale side can reach it, and the
 reconstructed `invoice_no` + date only where it cannot — and say in the script which of the
