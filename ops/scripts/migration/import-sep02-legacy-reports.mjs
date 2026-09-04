@@ -87,6 +87,14 @@ const UNRESOLVED_CUSTOMER_POLICY = 'keep_reported_name_unlinked'
 // are already in production as awaiting_payment, so they are flipped too.
 const FLIP_EXISTING_TO_PAID = true
 
+// Two already-live invoices are short a line each because the Sep-2
+// reconciliation extracted digits from a SKU-style code and then matched
+// nothing: 004430 is missing "YSL Libre 10ml" ($25, live 54 vs report 79) and
+// 004434 is missing "Clinical Completely Clean 45g" x2 ($26, live 105 vs
+// report 131).  They are excluded from the paid flip until the user rules on
+// restoring the lines -- marking a short invoice settled hides the defect.
+const SHORT_LIVE_INVOICES = Object.freeze(['004430', '004434'])
+
 // The source reports carry no cashier column.  The fifteen Sep-2 invoices
 // already in production (004420-004434) were all imported as 'Za', so that is
 // the only value consistent with the rest of the batch.  Overridden with
@@ -416,6 +424,36 @@ for (const row of payables) {
 const blockedSuppliers = payables.filter((row) => !row.supplier)
 console.log('')
 
+// ------------------------------------------------------ customer receivables
+// The AR ledger stops at the same invoice the sales did (004434), so it
+// carries the identical 22-invoice gap.  Rows are emitted as settled: the
+// user's ruling for this batch is that every one of these invoices is paid.
+const receivableRows = tableRows(files.receivable).slice(5, -1).filter((row) => row.length > 5)
+const missingInvoiceNumbers = new Set(missing.map((sale) => sale.invoiceNo))
+const receivables = receivableRows
+  .map((row, index) => ({ row, sourceRow: index + 1 }))
+  .filter(({ row }) => missingInvoiceNumbers.has(row[3]))
+  .map(({ row, sourceRow }) => {
+    const sale = missing.find((entry) => entry.invoiceNo === row[3])
+    return {
+      legacyId: Number(row[0]),
+      sourceRow,
+      customerCode: row[1].trim(),
+      customerName: row[2].trim(),
+      invoiceNo: row[3].trim(),
+      invoiceDate: sale.createdAtUtc,
+      customerId: sale.customer.customer ? sale.customer.customer.id : null,
+      taxable: money(row[5]),
+      vat: money(row[6]),
+      total: money(row[7]),
+    }
+  })
+console.log('--- customer receivables (AR) to add ---')
+console.log(`${receivables.length} of ${missing.length} inserted sales have an AR row in the export`)
+const receivableGap = missing.filter((sale) => !receivables.some((r) => r.invoiceNo === sale.invoiceNo))
+if (receivableGap.length) console.log(`no AR row in export for: ${receivableGap.map((s) => s.invoiceNo).join(', ')}`)
+console.log('')
+
 // ------------------------------------------------------------------- verdict
 const blockers = []
 if (blockedLines.length) blockers.push(`${blockedLines.length} unresolved product line(s)`)
@@ -438,7 +476,8 @@ if (blockers.length) {
 if (wantSql && !blockers.length) {
   const out = []
   out.push('-- Sep 2-3 2026 legacy import. Review before running. Applies NO stock movement.')
-  out.push('BEGIN TRANSACTION;')
+  // No BEGIN/COMMIT: D1 rejects explicit SQL transactions and already runs a
+  // --file batch atomically, so an explicit one is both refused and redundant.
   for (const sale of missing) {
     const itemsJson = JSON.stringify(sale.lines.map((line) => ({
       product_id: line.resolution.product ? line.resolution.product.id : null,
@@ -456,14 +495,24 @@ VALUES (${sqlText(sale.receipt)}, ${sqlText(CASHIER)}, ${sqlNum(cashier.user.id)
   ${sqlText(sale.createdAtUtc)}, ${sqlText(sale.createdAtUtc)});`)
     for (const line of sale.lines) {
       out.push(`INSERT INTO sale_items (sale_id, product_id, product_name, quantity, applied_price_usd, cost_price_usd, total_usd, product_discount_usd)
-VALUES (last_insert_rowid(), ${line.resolution.product ? sqlNum(line.resolution.product.id) : 'NULL'},
+VALUES ((SELECT id FROM sales WHERE receipt_number = ${sqlText(sale.receipt)}), ${line.resolution.product ? sqlNum(line.resolution.product.id) : 'NULL'},
   ${sqlText(line.resolution.product ? line.resolution.product.name : line.name)}, ${sqlNum(line.quantity)},
   ${sqlNum(line.unitPrice)}, ${sqlNum(line.cost)}, ${sqlNum(line.total)}, ${sqlNum(line.discount)});`)
     }
   }
   if (FLIP_EXISTING_TO_PAID) {
-    const toFlip = present.filter((sale) => sale.existing.sale_status !== TARGET_STATUS
+    const toFlip = present.filter((sale) => (sale.existing.sale_status !== TARGET_STATUS
       || Math.abs(Number(sale.existing.amount_paid_usd) - Number(sale.existing.total_usd)) >= 0.005)
+      // Held back deliberately: these two live rows are SHORT a line each
+      // (the reconciliation's digit-extraction drop), so their live total is
+      // not the invoice's real total. Marking a short invoice paid turns a
+      // visible exception into a closed record -- raised by peer session
+      // business-os-v1-ba. They flip only once the lines are restored.
+      && !SHORT_LIVE_INVOICES.includes(sale.invoiceNo))
+    for (const invoiceNo of SHORT_LIVE_INVOICES) {
+      const sale = present.find((entry) => entry.invoiceNo === invoiceNo)
+      if (sale) out.push(`-- HELD: ${invoiceNo} (${sale.receipt}) not flipped -- live total ${sale.existing.total_usd} vs report ${sale.grandTotal}, missing a line.`)
+    }
     out.push(`-- Flip the ${toFlip.length} already-imported invoices to paid. Matched on the exact`)
     out.push('-- receipt id, and total_usd is left alone: amount_paid follows what the row')
     out.push('-- already holds, so the two TOTAL MISMATCH rows are not silently rewritten.')
@@ -481,7 +530,15 @@ VALUES ('shop', ${sqlNum(row.legacyId)}, ${sqlNum(row.supplier.id)}, ${sqlText(r
   ${sqlNum(row.total)}, ${sqlNum(row.paid)}, ${sqlNum(row.outstanding)}, ${sqlText(row.status)},
   ${sqlText('account-payable-report-supplier-sep02-04.xls')}, ${sqlNum(row.sourceRow)});`)
   }
-  out.push('COMMIT;')
+  for (const row of receivables) {
+    out.push(`INSERT INTO customer_receivables (legacy_id, customer_id, customer_code, customer_name, invoice_no,
+  invoice_date, taxable_amount_usd, vat_amount_usd, total_amount_usd, amount_paid_usd, outstanding_balance_usd,
+  status, source_file, source_row)
+VALUES (${sqlNum(row.legacyId)}, ${row.customerId ? sqlNum(row.customerId) : 'NULL'}, ${sqlText(row.customerCode)},
+  ${sqlText(row.customerName)}, ${sqlText(row.invoiceNo)}, ${sqlText(row.invoiceDate)}, ${sqlNum(row.taxable)},
+  ${sqlNum(row.vat)}, ${sqlNum(row.total)}, ${sqlNum(row.total)}, 0, 'Paid',
+  ${sqlText('account-receivable-report-sep02-04.xls')}, ${sqlNum(row.sourceRow)});`)
+  }
   console.log('')
   console.log(out.join('\n'))
 }
