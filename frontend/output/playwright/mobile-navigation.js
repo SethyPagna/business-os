@@ -37,7 +37,7 @@ function Fixture(){
  const app=useApp();
  return h(React.Fragment,null,
  h(Sidebar,{showQuickPreferences:true,notificationSlot:h('button',{'aria-label':'Fixture notifications',style:{width:40,height:40}},'🔔')}),
- h('main',{style:{padding:'90px 12px 130px',maxWidth:'100%',minWidth:0}},
+ h('main',{style:{padding:'120px 12px 130px',maxWidth:'100%',minWidth:0}},
  h('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},h('button',{onClick:()=>writeMobileSectionNavMode('pages'),style:{minHeight:44}},'Fixture: inline mode'),h('button',{onClick:()=>writeMobileSectionNavMode('sections'),style:{minHeight:44}},'Fixture: old tabs')),
  ['sales','branches','settings','contacts','promotions','review'].map(pageId=>h(Host,{key:pageId,pageId})),
  !['sales','branches','settings','contacts','promotions','review'].includes(app.page)?h('h1',null,app.page):null,
