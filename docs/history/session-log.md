@@ -18832,3 +18832,65 @@ safe half of the trade, but it is not a free one, and the shop should hear it.
 **Finally, the thing no test can catch:** typing `9032026` still renders `09/03/2026`, and that string now means
 **9 March** rather than 3 September. The placeholder and error text say "day first" loudly. Staff muscle memory
 will still produce wrong dates that look entirely right, and a word to the counter will do more than either.
+
+## Part 597 (Sep 4 2026, session business-os-v1-c3, COORDINATOR) — the S4 batch is live, and a line ending nearly stopped it
+
+**Production is now running `a164d260-49ae-4bec-b372-eb73bce58850`, DEPLOYED FROM THE BRANCH `rc/s4-2026-09-04`
+@ `2c497564` — NOT FROM `main`.** That sentence is in capitals for one reason: on Sep 3 a session read `main`, found
+a clean and fully certified tree, deployed it, and silently rolled 24 commits of live hotfix work out of production.
+Every check it ran was green. The user found the regression. The `deploy-provenance` skill exists because of it, and
+its closing instruction is to say the branch in capitals when it is not `main`. **`main` still does not contain the
+deployed code.** Until that merge lands, deploying `main` rolls the entire S4 batch back.
+
+The previous live version was `3b25fe33-a806-44f7-9d42-caca6801f102` (Sep 3 14:27 UTC). The build was made in an
+isolated detached worktree at `C:/Users/mrkl6/Downloads/bos-dep` with a real `npm ci` — never in the shared
+checkout, whose `node_modules` a dozen sessions depend on — and from committed `HEAD`, never a dirty tree.
+`secrets:sync` was deliberately not run: no secret changed, and running it would have rewritten live secrets from a
+worktree's copy of the local auth files.
+
+**Seven migrations went to the production D1 and five of them rewrote data**, taking the highest applied id from 107
+to 114. The user was told what those five do individually before the go, because a single "deploy?" understates
+them. Each one was then proved by a `SELECT` taken before and again after, rather than by the migration exiting 0 —
+which is the difference between "it ran" and "it did what it says". `0108` relabelled the RECON lot codes: RECON
+**9,920 → 0**, ADJ **0 → 9,920**. `0110` put every customer on the `LC-` sequence: customers with no number
+**4,966 → 0**, with **4,976** now carrying one. `0111` moved the VIP price into `wholesale_price_*`:
+`special_price` **9,552 → 0**, `wholesale_price` **0 → 9,552**. `0112` deleted the YSL placeholder: products
+**10,272 → 10,271**. `0109` folded the barcode-only duplicate costs. Sales stayed at **15,041** across all of it,
+which is the control that says nothing else moved. `0114` and `0115` are schema only.
+
+**Mid-deploy, `0115` failed against production** with `incomplete input: SQLITE_ERROR [code: 7500]` — after the six
+migrations ahead of it had already applied, which is the worst moment for a migration to fail. The cause is not in
+the SQL. `wrangler d1 migrations apply --remote` splits the file into statements before sending them, and it decides
+a `CREATE TRIGGER` body has closed with the regex `/\sEND[;\s]$/`. This checkout is `autocrlf`, so the accumulated
+chunk ends `END;\r`, the `$` anchor sits past the `\r`, the match fails, wrangler never sees the trigger close, and
+it sends a truncated statement that D1 correctly rejects.
+
+The part worth remembering is why no amount of local testing would have caught it. `wrangler d1 execute --local
+--file` hands the **whole file** to SQLite, which parses multi-statement input natively and never splits it. A
+migration can therefore be green locally, green in review, green in every check this project runs, and still be
+unshippable. So it was closed as a class rather than patched as a file: `.gitattributes` now pins
+`cloudflare/migrations/*.sql` to `eol=lf` so the files are born correct on an `autocrlf` clone; the existing chain
+was normalised; and `cloudflare/scripts/test-migration-line-endings-pure.cjs` re-derives **wrangler's own regex**
+against every `END;` in every migration, so the guard fails for the same reason wrangler would, not for a proxy of
+it. It also rejects the sibling form documented in `0010`'s own header — a lowercase `begin` opening a trigger body,
+which mis-parses identically (workers-sdk #10998). Red before the fix, green after: *114 migrations LF; 10 contain
+triggers, 36 bodies wrangler can close*. The first version of that guard split on `/CREATE\s+TRIGGER/i` and
+immediately tripped over `0010`, which discusses triggers in its prose; iterating `END;` occurrences directly is
+what made it honest.
+
+**Post-deploy, with the expected value written next to the observed one**, because a probe without both is not
+evidence: `/health` → 200 `status: ok` on both hosts · `/api/products` unauthenticated → **401**, not 200, which is
+the one that would have mattered · storefront → 200 with Leang branding · `/ws` → **426**, an upgrade-required
+rather than a 500 · `migrations list --remote` → nothing pending · `migrate:import:remote` → nothing to apply. The
+admin SPA loads to the sign-in screen; its only console error is the unauthenticated `401 / invalid_session`, which
+is what an unauthenticated load is supposed to produce.
+
+**Rollback, while it lasts.** The Worker reverts to the previous version id. The *data* does not come back with it —
+D1 Time Travel is the only route and it restores by timestamp. The migrations ran at **04:54:56–04:55:00 UTC**, so
+`--timestamp=2026-09-04T04:50:00Z` is the pre-migration state, and Time Travel's 30-day window closes **Oct 4
+2026**. A restore is destructive and is the user's call, not a session's.
+
+This entry is written as reference to re-verify, not as ground truth: the version id came from wrangler, the
+migration figures from direct `SELECT`s on `d1_migrations` and the affected tables, and the commit is on
+`rc/s4-2026-09-04`. `/health`'s `version` field is a hard-coded string and is **not** the deploy id — only wrangler
+prints that.

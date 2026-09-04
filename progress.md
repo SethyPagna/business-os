@@ -125,21 +125,54 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**🟡 STAGE 1 COMPLETE ON `rc/s4-2026-09-04` @ `979338e9` (Sep 4 2026, session business-os-v1-c3) — every S4
-lane merged and certified, and NOTHING DEPLOYED. Reference to re-verify.** That branch, not `main`, is the deploy
-candidate: `main` is 40-odd docs commits ahead of it and carries **no code** the branch lacks. Certified on the
-merged tree, which is byte-identical to committed `HEAD` (the worktree is clean apart from the three self-rewriting
-`frontend/public/*` files): frontend `tsc` clean · **188/188** tests · `check:source` 488 files · `verify:i18n`
-**4742** keys at parity in both packs · a real `vite build`; cloudflare `tsc` clean · **183/183** pure scripts. The
-`test:utils` chain is **190** entries and was proven a superset of every merged parent, not merely non-empty.
+**🟢 DEPLOYED TO PRODUCTION Sep 4 2026 05:04 UTC — wrangler version id
+`a164d260-49ae-4bec-b372-eb73bce58850`. THIS WAS DEPLOYED FROM THE BRANCH `rc/s4-2026-09-04` @ `2c497564`, **NOT
+FROM `main`**. Reference to re-verify.** Said in capitals because the Sep-3 incident that produced the
+`deploy-provenance` skill was caused by exactly this fact going unrecorded: a later session read `main`, saw a
+clean certified tree, deployed it, and silently rolled production back. **`main` still does not contain the
+deployed code.** Anyone deploying `main` before that merge lands will roll back the whole S4 batch. The previous
+live version was `3b25fe33-a806-44f7-9d42-caca6801f102` (Sep 3 14:27 UTC). `secrets:sync` was **not** run — no
+secret changed, and running it would have rewritten live secrets from a worktree copy.
 
-- **⚠️ THE DEPLOY IS NOT FREE — this is the gate decision, and it is the user's.** Chain top is **0115**;
-  production D1 is still at **107** (re-verified by direct `SELECT` on `d1_migrations`, Sep 4). A deploy therefore
-  applies **seven** unrun migrations, and **five of them rewrite production data**: `0108` relabels the RECON lot
-  codes to `ADJ`+date, `0109` folds barcode-only duplicate costs, `0110` backfills every customer onto the `LC-`
-  sequence, `0111` moves the VIP price into `wholesale_price_*`, `0112` deletes the YSL placeholder product.
-  `0114` and `0115` are schema only. **Name those five to the user individually before asking for the go** — a
-  single "deploy?" understates what they do.
+Built in an isolated detached worktree at `C:/Users/mrkl6/Downloads/bos-dep` with a real `npm ci` (never in this
+shared checkout), from committed `HEAD`, never a dirty tree. Certified before shipping: frontend `tsc` clean ·
+**188/188** tests · `check:source` 488 files · `verify:i18n` **4742** keys at parity in both packs · a real
+`vite build`; cloudflare `tsc` clean · **183/183** pure scripts; the `test:utils` chain **190** entries and proven
+a superset of every merged parent, not merely non-empty.
+
+- **Seven migrations applied to the production D1, five of which rewrote data. Highest applied id is now 114**
+  (`0115_sale_amendments.sql`); it was **107** before. Each data migration was proved by a `SELECT` taken before
+  and again after, not by the migration exiting 0:
+  `0108` RECON lot codes → `ADJ`+date (RECON **9,920 → 0**, ADJ **0 → 9,920**) · `0109` barcode-only duplicate
+  costs folded · `0110` every customer onto the `LC-` sequence (customers with no number **4,966 → 0**, and
+  **4,976** now carry an `LC-`) · `0111` the VIP price moved into `wholesale_price_*` (`special_price`
+  **9,552 → 0**, `wholesale_price` **0 → 9,552**) · `0112` the YSL placeholder deleted (products **10,272 →
+  10,271**). `0114` and `0115` are schema only. Sales stayed at **15,041** throughout, which is the control.
+
+- **⏪ ROLLBACK POINTS, while they last.** The Worker rolls back to version
+  `3b25fe33-a806-44f7-9d42-caca6801f102`. The **data** does not roll back with it: D1 Time Travel is the only
+  route, and it restores by timestamp — the migrations ran at **2026-09-04 04:54:56–04:55:00 UTC**, so
+  `wrangler d1 time-travel restore business-os --timestamp=2026-09-04T04:50:00Z` is the pre-migration state.
+  Time Travel keeps **30 days**, so this expires **Oct 4 2026**. The current (post-deploy) bookmark is
+  `00001273-00000061-000050dc-2a1b5f431cafd4977f68c1fa0530e4c7`. A restore is destructive and is the user’s call.
+
+- **Post-deploy probes, expected vs actual.** `/health` → 200 `status: ok` on **both** hosts (expected 200/ok) ·
+  `/api/products` unauthenticated → **401** (expected 401, not 200) · storefront → **200** with Leang branding ·
+  `/ws` → **426** (expected an upgrade-required, not a 500) · `wrangler d1 migrations list --remote` → **nothing
+  pending** · `migrate:import:remote` → nothing to apply. The admin SPA loads to the sign-in screen and its only
+  console error is the expected unauthenticated `401 / invalid_session`, which is not a defect: no session exists.
+
+- **A production-blocking tooling defect was found mid-deploy and closed as a class** (`2c497564`). `0115` failed
+  against production with `incomplete input: SQLITE_ERROR [code: 7500]` **after the six ahead of it had already
+  applied**. Cause: `wrangler d1 migrations apply --remote` closes a `CREATE TRIGGER` body with the regex
+  `/\sEND[;\s]$/`, and on this `autocrlf` checkout the chunk ends `END;\r`, so the `$` anchor misses, the
+  statement is sent truncated, and D1 rejects it. **This cannot be caught by running the migration locally** —
+  `--local` hands the whole file to SQLite, which parses multi-statement input natively and never splits. So a
+  migration can be green locally and still be unshippable. Fixed with `.gitattributes` pinning
+  `cloudflare/migrations/*.sql` to `eol=lf`, a normalisation pass, and
+  `test-migration-line-endings-pure.cjs`, which re-derives wrangler’s own regex against every `END;` in the
+  chain and also rejects the sibling lowercase-`begin` form (workers-sdk #10998). Red before the fix, green after:
+  *114 migrations LF; 10 contain triggers, 36 bodies wrangler can close*.
 
 - **The receipt now prints the selling price, and every discount reaches the total** (`9fdf327b`) — the owner's
   Sep-4 rule, *"selling price (-discount), not discounted price(-discount)"*. The line printed `applied_price_usd`
