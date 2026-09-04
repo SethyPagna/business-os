@@ -43,7 +43,7 @@ async function readCatalogProducts(
     for (const slice of chunkForBinding(values, 1)) {
       const { sql, params } = buildInClause('v', slice)
       const matches = await db.prepare(`
-        SELECT id, name, barcode, selling_price_usd, special_price_usd, cost_price_usd
+        SELECT id, name, barcode, selling_price_usd, wholesale_price_usd, cost_price_usd
         FROM products
         WHERE is_active = @active AND ${columnSql} IN (${sql})
       `).all<UnifiedStockCatalogProduct>({ ...params, active: 1 })

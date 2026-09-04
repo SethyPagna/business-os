@@ -488,7 +488,10 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
     return db.prepare(`
       SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
              p.selling_price_usd, p.selling_price_khr,
-             p.special_price_usd, p.special_price_khr,
+             -- special_price_* is deliberately no longer selected: migration
+             -- 0111 zeroed it and the wholesale pair below now carries those
+             -- numbers. Shipping a dead all-zero column to every client just
+             -- invites something to read it back as a real price.
              p.wholesale_price_usd, p.wholesale_price_khr,
              p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
              p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
@@ -643,7 +646,6 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 
   const selectColumns = `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr,
-           p.special_price_usd, p.special_price_khr,
            p.wholesale_price_usd, p.wholesale_price_khr,
            p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
            p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
@@ -1417,7 +1419,12 @@ app.get('/stock-ledger', async (c) => {
 // (bulk edits are not a review-tier action), and there is deliberately NO
 // undo at this scope -- the audit entry records the parameters and count,
 // and the confirm says so before anything runs.
-const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr', 'cost_price_usd', 'cost_price_khr'])
+// Note the tier pair here is wholesale_*, not the old special_* (VIP): after
+// the 2026-09-04 ruling and migration 0111, special_price_* is a zeroed dead
+// column, so leaving it in this allow-list would have let a bulk price
+// adjustment write real money into a column nothing reads -- silently doing
+// nothing while reporting "changed N products".
+const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
 app.post('/bulk-price-adjust', async (c) => {
   const user = c.get('user')
   if (getPermissionTier(user, 'products') !== 'full') {

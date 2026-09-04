@@ -158,6 +158,13 @@ const SALES_POLICY_KEYS = new Set([
   'display_currency',
   'pos_show_item_discount',
   'pos_payment_methods',
+  // The wholesale auto-apply automation ("wholesale only > N", 2026-09-04).
+  // It decides what a customer is charged, so it belongs with tax_rate and
+  // the exchange rates under sales_policy rather than the blanket `settings`
+  // grant -- a shop can hand someone pricing policy without handing them the
+  // whole settings table.
+  'pos_wholesale_auto_enabled',
+  'pos_wholesale_auto_min_qty',
 ])
 
 function normalizeReferenceName(value: unknown): string {

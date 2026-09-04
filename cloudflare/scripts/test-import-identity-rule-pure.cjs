@@ -80,7 +80,7 @@ function makeDb() {
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, sku TEXT, barcode TEXT, unit TEXT,
       category TEXT, brand TEXT, selling_price_usd REAL DEFAULT 0, selling_price_khr REAL DEFAULT 0,
-      special_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0, cost_price_khr REAL DEFAULT 0,
+      wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0, cost_price_khr REAL DEFAULT 0,
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
@@ -182,9 +182,9 @@ function seedCatalog(sqlite) {
   // ---- §12 stockActionImport.matchProduct ---------------------------------
   {
     const products = [
-      { id: 1, name: 'Dior Lip Glow', barcode: 'B1', selling_price_usd: 10, special_price_usd: 8, cost_price_usd: 4 },
-      { id: 2, name: 'YSL Rouge 21', barcode: 'B1', selling_price_usd: 12, special_price_usd: 9, cost_price_usd: 5 },
-      { id: 3, name: 'Solo Cream', barcode: 'D1', selling_price_usd: 15, special_price_usd: 11, cost_price_usd: 6 },
+      { id: 1, name: 'Dior Lip Glow', barcode: 'B1', selling_price_usd: 10, wholesale_price_usd: 8, cost_price_usd: 4 },
+      { id: 2, name: 'YSL Rouge 21', barcode: 'B1', selling_price_usd: 12, wholesale_price_usd: 9, cost_price_usd: 5 },
+      { id: 3, name: 'Solo Cream', barcode: 'D1', selling_price_usd: 15, wholesale_price_usd: 11, cost_price_usd: 6 },
     ]
     const branches = [{ id: 1, name: 'Shop' }, { id: 2, name: 'Warehouse' }]
     const row = (rowNumber, fields) => ({ _rowNumber: rowNumber, date: '2026-08-28', action: 'add', shop: '1', ...fields })
