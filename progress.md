@@ -207,11 +207,20 @@ fix, and abandoning the branch abandons the fix.
   resolves** — the signature has to be redesigned. Production has **four** 4-arg call sites, all passing object
   literals: `:781`, `:833`, `:1364`, `:1498`. **Use an options object, not a fifth positional.** (Found by `88`;
   the four-call-site count added by `ee`.)
-- **The quiet half, and it is the one to guard (`88`).** A **3-arg** call site compiles under *either* signature
-  and **both** 4th params default. So the merge goes green while one of the two features silently reads zero —
-  the pending cost or the item discount, depending which side won. *The tell is that nothing is red.* The guard
-  is a fixture where the 4th argument is non-zero and the assertion moves — **for both features**, not just the
-  one being merged. Locking only the merged one reproduces the same green.
+- **CORRECTED (`7c` measured it): the merge fails LOUD at all eight sites, and that is the danger.** `88`'s
+  quiet-read-zero mechanism is sound in principle but **has no instance today** — there are four 4-arg call sites
+  on each side and **no 3-arg site anywhere** in `cloudflare/src` (`c7ef7264`: `:781 :833 :1364 :1498`, all passing
+  `{ costUsd: … }`; `1d67e895`: `:706 :759 :1297 :1433`, all passing a number). So under either surviving signature
+  the other side's four calls are type errors. **The typechecker forces a decision at all eight sites but not the
+  RIGHT decision:** a resolver faced with four red call sites will naturally rewrite the arguments to match
+  whichever signature won — which compiles, goes green, and silently drops the other feature's data. *Loud errors
+  that invite a lossy mechanical fix are more dangerous than they look, because the green build afterwards reads as
+  proof.* (A future 3-arg call site would reintroduce `88`'s quiet instance.)
+- **And the plumbing differs, not just the 4th argument (`7c`).** The live side reads `cost.cost_usd` /
+  `pending_cost_usd`; the fix branch reads `cost.costUsd` / `cost.itemDiscountUsd` — two different cost-input
+  shapes. **The correct resolution is one options object carrying BOTH (`{ costUsd?, itemDiscountUsd? }`), with all
+  eight sites updated deliberately** — not picking a signature and repairing the losers. "Make it compile" and
+  "make it correct" diverge here, and only the first is enforced.
 - **Scoping correction (`7c`): this is a port, not a cherry-pick.** At `1d67e895` the helper has **no caller** —
   `telegram.ts` does not import it on that commit. So the fix branch wires the helper into `SalesTotals` while
   the deployed line independently wired the *same helper* into Telegram. **Two divergent wirings of one helper,
@@ -223,6 +232,23 @@ fix, and abandoning the branch abandons the fix.
 `reportModel.ts`, `GroupedReport.tsx`, `PeriodReport.tsx`, both language packs and three pure tests, all
 rewritten underneath it by the S4 lanes. **It needs its own lane with the owner's report surfaces in front of
 it**, not a merge squeezed in after a deploy.
+
+### 🔵 THREE LIVE DATA GAPS — shipped code whose data half never landed (`21`, measured on production)
+
+- **S4-2 skip-stock is fully live and has NEVER been used.** `SELECT COUNT(*) FROM sales WHERE stock_skipped = 1`
+  → **0**. The whole path is in `c7ef7264` (`routes/sales.ts` `skip_stock` + the `isAdminControlUser` gate at
+  `:1150`, `planSaleStockTransition`, `saleAmendments`, `saleLineAddition`, `SaleStatusConfirmModal`, `Sales.tsx`
+  single **and** bulk, both lang packs) and migration `0114` applied 05:03:43. **The feature the owner asked for on
+  Sep 3 shipped; the 82 legacy `awaiting_payment` rows it was built for are still sitting there unmigrated.**
+- **`customer_receivables` has NO app-side settle path.** On `c7ef7264` the only writers are `contacts.ts`, and only
+  for rename/merge repointing — **nothing marks a receivable Paid**. Live AR: 13,204 Paid / **98 Unpaid
+  ($11,470.10)** / 2 Outstanding ($102). So even after the app completes those sales, **the AR ledger stays unpaid
+  unless something writes it.** Unclaimed.
+- **⚠️ Any hand-written status flip authored before Sep 4 05:43 UTC has a hole.** `21`'s `flip.sql` for the 82 rows
+  predated `0114` and set `sale_status='completed'` with **no** `stock_skipped` — exactly the state `0114`'s header
+  warns about: held(completed) becomes a lie, and a later cancel computes `delta = 0 - qty` and **ADDS units that
+  were never taken**. `21` has patched theirs (still 6 statements, still idempotent). **If you are holding a similar
+  flip, it has the same hole.**
 
 ### 🟡 THE DOCS ARE FORKED IN TWO PLACES — union, never pick a side
 
@@ -240,6 +266,13 @@ by this entry. Grep every `^## Part` header across *both* refs at the moment you
 including `fx/add-stock-barcode-identity` (`4741a921`), `rc/s4-2026-09-04`, `ship/2026-09-03`,
 `reconcile/2026-09-03`, all `hf/*`, `lane-a`, `lane-b`. ~70 branches. If your lane's tip is an ancestor of
 `c7ef7264`, **your work is live** — check with `git merge-base --is-ancestor <tip> c7ef7264` before re-doing it.
+
+> ⚠️ **CORRECTION (`8b`) — ancestry proves your CODE shipped, NOT that your lane is done.** "Code is deployed" is a
+> *necessary* condition for a lane being finished and nowhere near a *sufficient* one. **Check whether your item
+> also had a data, migration or backfill half, because that half did NOT ship with the code.** `8b`'s own lane is
+> the counterexample: `4741a921` is live, and the defect the owner reported this morning is **still fully present
+> for them** — the forward fix stops new forks while **28 already-stranded units** sit untouched, needing a
+> production write that has not happened. **Any lane that touched existing rows is in this category.**
 
 **NOT in production, still open:**
 
@@ -779,7 +812,7 @@ Read this before any deploy. The `deploy-provenance` skill exists because of the
 | 4 | `3b25fe33-a806-44f7-9d42-caca6801f102` | 2026-09-03T14:27:12Z | `e3678a39` | **`ship/2026-09-03`** (NOT main; pushed to origin) | clean, isolated worktree `Downloads/bos-dep`, real `npm ci`, removed after | none (chain top == prod top == 107) | no |
 | 5 | `a164d260-49ae-4bec-b372-eb73bce58850` | 2026-09-04T05:04:16Z | `2c497564` | **`rc/s4-2026-09-04`** (NOT main) | stamped **`-dirty`** — traced to the CRLF-only `frontend/public` trio in `bos-rc-s4`; zero content change | 0108–0115 | no |
 | 6 | `8480241e-8867-442c-8643-93c8e5f8175e` | 2026-09-04T07:57:12Z | `e83ee73f` | **`rc/deploy-2026-09-04`** (NOT main; pushed) | clean, isolated worktree `Downloads/bos-deploy`, real `npm ci`, removed after | **0116** only; **0 renames** | no |
-| 7 | `798d9e19-76d0-4909-8db3-6a7a4ad43ad7` | 2026-09-04T11:37:39Z | `c7ef7264` | **`rc/ee-integrate-2026-09-04`** (NOT main; pushed) | clean, isolated worktree, real `npm ci`, removed after | **0117** applied 11:37:39Z; `d1_migrations` row id **116** (ids are row counters, not filename numbers) | no |
+| 7 | `798d9e19-76d0-4909-8db3-6a7a4ad43ad7` | 2026-09-04T11:37:39Z | `c7ef7264` | **`rc/ee-integrate-2026-09-04`** (NOT main; pushed) | isolated worktree, real `npm ci`, removed after — but production stamps **`c7ef726438f0-dirty`** (reported by `8b`; DNS unreachable from `ee`, so not independently confirmed). Cause almost certainly the CRLF-only `frontend/public` trio, which shows **zero** content rows under `--ignore-cr-at-eol`; **not provable now**, the deploy worktree was removed | **0117** applied 11:37:39Z; `d1_migrations` row id **116** (ids are row counters, not filename numbers) | no |
 
 **#4 IS WHAT PRODUCTION SERVES RIGHT NOW (Part 587).** Served bundle `index-PVIjw20o.js`, the same file name
 the isolated build emitted; `/health` **200** on both hosts 49 s after the deploy; `/api/products` unauthenticated
