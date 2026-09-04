@@ -219,24 +219,32 @@ for (const supplier of suppliers) {
 const liveByReceipt = new Map(liveSales.map((sale) => [String(sale.receipt_number), sale]))
 
 // ------------------------------------------------------------- resolutions
-/**
- * A source code is only a BARCODE when it is entirely digits.
+/*
+ * A source code is only a BARCODE when it is entirely digits, and that rule now
+ * lives in ONE place: legacy-preflight.mjs's barcodeKey(), which returns '' for
+ * anything that is not all digits.
  *
- * legacy-preflight.mjs's barcodeKey() strips non-digits, which silently turns
- * a SKU-style code into a short numeric key: "Libre10ml" -> "10" and
- * "CompletelyClean45g" -> "45".  That is not a near-miss: 44 live products
- * carry the literal barcode "10" (the placeholder used for 10ml perfumes),
- * three of them active, so feeding "10" into the barcode index would book a
- * YSL Libre line against an unrelated perfume and look correct forever.  A
- * dropped line is visibly short and recoverable; a mis-booked one is not.
+ * Why the rule exists, because it must not be re-litigated: barcodeKey() used
+ * to strip non-digits, which silently turned a SKU-style code into a short
+ * numeric key -- "Libre10ml" -> "10", "CompletelyClean45g" -> "45". That is not
+ * a near-miss. 44 live products carry the literal barcode "10" (the placeholder
+ * used for 10ml perfumes), three of them active, so feeding "10" into the
+ * barcode index would book a YSL Libre line against an unrelated perfume and
+ * look correct forever. A dropped line is visibly short and recoverable; a
+ * mis-booked one is not.
  *
- * Caught by peer session business-os-v1-4a during the pre-write review.
+ * Caught by peer session business-os-v1-4a during the pre-write review, and
+ * originally guarded here with a local digits-only wrapper. fx/legacy-barcode-
+ * key-ee then moved the same rule into barcodeKey itself, which made this
+ * file's copy a second implementation of one rule -- exactly what
+ * test-legacy-barcode-key-pure.cjs forbids. The wrapper is gone and the call is
+ * direct; the behaviour is identical, proven over 25 code shapes, because
+ * barcodeKey now returns '' for a non-digit code just as the wrapper did.
  */
-const isNumericCode = (code) => /^[0-9]+$/.test(String(code ?? '').trim())
 
 /** Barcode first, then SKU, then an exact single active name. Never guesses. */
 function resolveProduct(code, name) {
-  const key = isNumericCode(code) ? barcodeKey(code) : ''
+  const key = barcodeKey(code)
   if (key && key !== '0') {
     const ruled = AMBIGUOUS_BARCODE_RULINGS[String(code).trim()]
     const active = activeByBarcode.get(key) || []
