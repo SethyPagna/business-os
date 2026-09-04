@@ -38,6 +38,7 @@ import PeriodReport from './reports/PeriodReport.tsx'
 import ReportOptionsFold from './reports/ReportOptionsFold.tsx'
 import ReturnsReport from './reports/ReturnsReport.tsx'
 import SalesListReport from './reports/SalesListReport.tsx'
+import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
 import {
   DEFAULT_REPORT_OPTIONS,
   REPORT_STORAGE_KEYS,
@@ -383,6 +384,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
 
   return (
     <div className={embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'} data-reports-hub>
+      <CurrentShiftSummary />
       {compact ? (
         <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
           <div className="reports-mobile-primary">{searchInput}{viewPicker}</div>

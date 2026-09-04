@@ -60,10 +60,12 @@ type ShiftGateContext = {
  * both immediately.
  */
 const sharedShifts = new Map<string, ShiftState | null>()
+const sharedShiftFailures = new Set<string>()
 const shiftSubscribers = new Set<(key: string, next: ShiftState | null) => void>()
 // De-dupes the mount fetch: both components mount together on POS open, and
 // without this they would each ask the Worker for the same row.
 const shiftInflight = new Map<string, Promise<void>>()
+export const SHIFT_BRANCH_CHANGED_EVENT = 'business-os:pos-branch-changed'
 
 export function shiftCacheKey(userId: unknown, branchId: number | null, scopeMode: unknown): string {
   const user = String(userId ?? 'anonymous')
@@ -78,27 +80,36 @@ export function publishShift(key: string, next: ShiftState | null) {
   for (const notify of shiftSubscribers) notify(key, next)
 }
 
-function useSharedShift(branchId: number | null, userId: unknown, scopeMode: unknown) {
+export function useSharedShift(branchId: number | null, userId: unknown, scopeMode: unknown) {
   const key = shiftCacheKey(userId, branchId, scopeMode)
   const [state, setState] = useState<ShiftState | null>(() => sharedShifts.get(key) ?? null)
+  const [loading, setLoading] = useState(() => !sharedShifts.has(key))
+  const [failed, setFailed] = useState(() => sharedShiftFailures.has(key))
 
   useEffect(() => {
     setState(sharedShifts.get(key) ?? null)
+    setLoading(!sharedShifts.has(key))
+    setFailed(sharedShiftFailures.has(key))
     const subscriber = (changedKey: string, next: ShiftState | null) => {
-      if (changedKey === key) setState(next)
+      if (changedKey === key) {
+        setState(next)
+        setLoading(false)
+        setFailed(sharedShiftFailures.has(key))
+      }
     }
     shiftSubscribers.add(subscriber)
     return () => { shiftSubscribers.delete(subscriber) }
   }, [key])
 
   const refresh = useCallback(() => {
+    setLoading(true)
     if (!shiftInflight.has(key)) {
       const request = fetchCurrentShift(branchId)
-        .then((next) => { publishShift(key, next) })
+        .then((next) => { sharedShiftFailures.delete(key); publishShift(key, next) })
         // Leave the shared state null. A read failure must NOT be treated as
         // "registered" -- that would silently skip the prompt for the whole
         // day. Null shows nothing yet and the next open re-asks.
-        .catch(() => { publishShift(key, null) })
+        .catch(() => { sharedShiftFailures.add(key); publishShift(key, null) })
         .finally(() => { shiftInflight.delete(key) })
       shiftInflight.set(key, request)
     }
@@ -107,7 +118,17 @@ function useSharedShift(branchId: number | null, userId: unknown, scopeMode: unk
 
   useEffect(() => { void refresh() }, [refresh])
 
-  return { state, refresh, publish: (next: ShiftState | null) => publishShift(key, next) }
+  const publish = (next: ShiftState | null) => {
+    sharedShiftFailures.delete(key)
+    publishShift(key, next)
+    // Sales has no branch selector and therefore subscribes through the
+    // server-resolved request-branch key. When POS has an explicit branch,
+    // keep that alias live too so opening/closing a shift is visible there
+    // immediately instead of only after a remount and refetch.
+    if (branchId != null) publishShift(shiftCacheKey(userId, null, scopeMode), next)
+  }
+
+  return { state, loading, failed, refresh, publish }
 }
 
 /**

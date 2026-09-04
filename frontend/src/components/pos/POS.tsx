@@ -33,6 +33,7 @@ import {
 import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
 import ShiftGate, { EndShiftButton } from './ShiftGate'
+import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
@@ -733,7 +734,7 @@ export default function POS() {
   // components/shared/CategoryFilterOptions.tsx.
   const setPersistedCatBatch = (values: string[], checked: boolean) => { const next = toggleMultiValues(categoryFilter, values, checked); sessionStorage.setItem('pos_cat', next); setCategoryFilter(next) }
   const setPersistedBrand    = (v: string) => { const next = toggleMultiValue(brandFilter,    v); sessionStorage.setItem('pos_brand',    next); setBrandFilter(next) }
-  const setPersistedBranch   = (v: string) => { const next = toggleMultiValue(branchFilter,   v); sessionStorage.setItem('pos_branch',   next); setBranchFilter(next) }
+  const setPersistedBranch   = (v: string) => { const next = toggleMultiValue(branchFilter,   v); sessionStorage.setItem('pos_branch', next); setBranchFilter(next); window.dispatchEvent(new Event(SHIFT_BRANCH_CHANGED_EVENT)) }
   const setPersistedStock    = (v: string) => { const next = toggleMultiValue(stockFilter,    v); sessionStorage.setItem('pos_stock',    next); setStockFilter(next) }
   const setPersistedGroup    = (v: string) => { const next = toggleMultiValue(groupFilter,    v); sessionStorage.setItem('pos_group',    next); setGroupFilter(next) }
   const setPersistedSupplier = (v: string) => { const next = toggleMultiValue(supplierFilter, v); sessionStorage.setItem('pos_supplier', next); setSupplierFilter(next) }
@@ -1231,6 +1232,7 @@ export default function POS() {
     if (nextBranch !== branchFilter) {
       sessionStorage.setItem('pos_branch', nextBranch)
       setBranchFilter(nextBranch)
+      window.dispatchEvent(new Event(SHIFT_BRANCH_CHANGED_EVENT))
     }
     const nextBrand = pruneAgainst(brandFilter, knownBrands)
     if (nextBrand !== brandFilter) {

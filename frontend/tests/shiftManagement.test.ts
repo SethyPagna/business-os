@@ -10,6 +10,12 @@ const settings = read('src/components/utils-settings/Settings.tsx')
 const profile = read('src/components/users/UserProfileModal.tsx')
 const history = read('src/components/shifts/ShiftHistoryPanel.tsx')
 const summary = read('src/components/shifts/ShiftSummary.tsx')
+const currentSummary = read('src/components/shifts/CurrentShiftSummary.tsx')
+const gate = read('src/components/pos/ShiftGate.tsx')
+const sales = read('src/components/sales/Sales.tsx')
+const fees = read('src/components/fees/FeesPage.tsx')
+const reports = read('src/components/sales/ReportsHub.tsx')
+const pos = read('src/components/pos/POS.tsx')
 
 let checks = 0
 const ok = (value: unknown, message: string) => { assert.ok(value, message); checks += 1 }
@@ -36,5 +42,16 @@ for (const forbidden of ['opening_float_usd', 'opening_float_khr', 'closing_coun
 ok(/Cashier/.test(summary) && /Opened/.test(summary) && /Closed/.test(summary) && /Duration/.test(summary), 'summary renders useful non-sensitive shift facts')
 ok(/canManage \?/.test(history), 'amendment form is hidden from ordinary history viewers')
 ok(/No amendments recorded/.test(history), 'history gives a clear immutable-ledger empty state')
+
+ok(/export function useSharedShift/.test(gate), 'transaction pages reuse the live POS shift state')
+ok(/publishShift\(shiftCacheKey\(userId, null, scopeMode\), next\)/.test(gate), 'an explicit POS branch also updates the server-resolved Sales alias')
+ok(/sessionStorage\.getItem\('pos_branch'\)/.test(currentSummary), 'current summary follows the operational POS branch rather than report filters')
+ok(/SHIFT_BRANCH_CHANGED_EVENT/.test(pos) && /addEventListener\(SHIFT_BRANCH_CHANGED_EVENT/.test(currentSummary), 'current summaries follow POS branch changes without a remount')
+ok(/useSharedShift\(branchId, user\?\.id, settings\?\.shift_scope_mode\)/.test(currentSummary), 'current summary partitions shift state by branch, user, and policy')
+ok(/shift_current_unavailable/.test(currentSummary) && /onClick=\{\(\) => void refresh\(\)\}/.test(currentSummary), 'failed current-shift reads remain visible and retryable')
+for (const [surface, source] of [['Sales', sales], ['Expenses', fees], ['Income', reports]] as const) {
+  ok(/<CurrentShiftSummary\b/.test(source), `${surface} mounts the shared current-shift summary`)
+}
+ok(!/CurrentShiftSummary branchId=\{branchFilter\}/.test(fees) && !/CurrentShiftSummary branchId=\{branchFilter\}/.test(reports), 'historical report filters never redefine the operational shift')
 
 console.log(`shiftManagement: all ${checks} checks passed`)

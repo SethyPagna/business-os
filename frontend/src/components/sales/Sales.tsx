@@ -32,6 +32,7 @@ import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStats
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
@@ -1561,6 +1562,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col px-3 pb-3 pt-0 sm:px-6 sm:pb-6 sm:pt-0`}>
+      <CurrentShiftSummary className="mt-3 mb-3" />
       {/* Import/Manage/History action row. The Sales daily/reports view moved
           out to its own top-level Reports hub section (ReportsHub.tsx), so
           Sales now shows only the receipts list. Import/Export each take an

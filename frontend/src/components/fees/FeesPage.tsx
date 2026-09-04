@@ -41,6 +41,7 @@ import {
 import FeeForm, { FEE_TYPE_OPTIONS, feeFormWorkKey } from './FeeForm.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
@@ -491,6 +492,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
+      <CurrentShiftSummary className="mb-3" />
       {/* Page title removed (Aug 19 2026 UI request): no other page in the
           app repeats its own name in an h1 here -- the sidebar nav item
           already names the page -- so Fees having one was the odd one out,
