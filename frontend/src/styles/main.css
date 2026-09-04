@@ -54,7 +54,32 @@ body[data-public-portal='true'] {
    the km line-heights toward the Latin baseline while leaving the font-SIZES and
    the earlier legibility floors (Z7/Aug-29) untouched -- line-height is what drives
    row height, so this compacts rows without shrinking or lightening the glyphs.
-   Values stay above Latin (~1.33) so stacked coeng subscripts never clip. */
+   Values stay above Latin (~1.33) so stacked coeng subscripts never clip.
+
+   S4-22 (user, Sep 4: "Khmer glyphs are clipped. Ascenders and descenders are cut
+   across the app"). The sentence above -- "so stacked coeng subscripts never clip"
+   -- was wrong, and here is the measurement that shows it. Rendering every Khmer
+   cluster in km.json (628 distinct clusters) in headless Chrome and reading the
+   INK back out of the screenshot gives, as a multiple of font-size:
+
+     Noto Sans Khmer  1.532-1.546em    Battambang       1.576-1.606em
+     Khmer UI         1.262-1.321em    Leelawadee UI    1.162-1.214em
+
+   The first two are the fonts this stack asks for by name; the last two are what
+   Windows substitutes. So the compaction pass to 1.38-1.52 put the line box BELOW
+   the ink for every device that has the font we actually request, and .truncate
+   (overflow:hidden) shears whatever leaves the box. --km-line-height is that
+   measured floor, applied to every Khmer-scoped line-height below.
+
+   The floor alone is not the whole fix, because Noto's ink is not centred in its
+   own line box: measured against the box, the ink sits ~0.18em LOW, so the coeng
+   subscripts run out of the bottom while the top has room to spare. Half-leading is
+   symmetric, so clearing a one-sided 0.18em offset by line-height alone would cost
+   0.36em on top of the ink -- 1.91 on .text-xs, measured, a 32% taller row
+   everywhere, which would undo the Aug-31 ask above. The asymmetric half is handled
+   by overflow-clip-margin further down instead, which costs no layout at all. */
+:root { --km-line-height: 1.6; }
+
 body.lang-km,
 body.lang-km button,
 body.lang-km input,
@@ -65,7 +90,7 @@ body.lang-km th,
 body.lang-km td {
   font-family: "Noto Sans Khmer", "Khmer OS Siemreap", "Battambang", "Khmer OS", sans-serif;
   font-weight: 400;
-  line-height: 1.5;
+  line-height: var(--km-line-height, 1.6);
   letter-spacing: 0;
   text-rendering: optimizeLegibility;
   font-feature-settings: "kern" 1, "liga" 1;
@@ -79,7 +104,7 @@ body.lang-km td {
   text-rendering: optimizeLegibility;
   font-feature-settings: "kern" 1, "liga" 1;
   font-kerning: normal;
-  line-height: 1.5;
+  line-height: var(--km-line-height, 1.6);
   font-synthesis: none;
 }
 
@@ -90,7 +115,7 @@ body:not(.lang-km) .khmer-text {
 body:not(.lang-km) .khmer-text.text-xs,
 body:not(.lang-km) .khmer-text.text-\[10px\],
 body:not(.lang-km) .khmer-text.text-\[11px\] {
-  line-height: 1.45;
+  line-height: var(--km-line-height, 1.6);
 }
 
 body.lang-km:not([data-public-portal='true']) button,
@@ -119,7 +144,7 @@ body.lang-km:not([data-public-portal='true']) nav.safe-area-inset-bottom button 
 body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button,
 body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button span {
   font-weight: 600 !important;
-  line-height: 1.4;
+  line-height: var(--km-line-height, 1.6);
 }
 
 body.lang-km:not([data-public-portal='true']) .app-topbar .font-medium,
@@ -130,22 +155,22 @@ body.lang-km:not([data-public-portal='true']) .app-topbar .font-bold {
 
 body.lang-km .text-xs {
   font-size: calc(0.79rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.45 !important;
+  line-height: var(--km-line-height, 1.6) !important;
 }
 
 body.lang-km .text-sm {
   font-size: calc(0.92rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.48 !important;
+  line-height: var(--km-line-height, 1.6) !important;
 }
 
 body.lang-km .text-base {
   font-size: calc(1.02rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.52 !important;
+  line-height: var(--km-line-height, 1.6) !important;
 }
 
 body.lang-km .text-lg {
   font-size: calc(1.16rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.48 !important;
+  line-height: var(--km-line-height, 1.6) !important;
 }
 
 body.lang-km h1,
@@ -156,14 +181,22 @@ body.lang-km h5,
 body.lang-km h6,
 body.lang-km .page-title,
 body.lang-km .section-title {
-  line-height: 1.38;
+  line-height: var(--km-line-height, 1.6);
+}
+
+/* `.page-scroll > h1` further down sets 1.1 for the 28px page title -- display
+   leading that works for Latin and cuts Khmer in half. Same specificity as
+   `body.lang-km h1` and it wins on source order, so the km floor has to be
+   restated here at a specificity that beats it. */
+body.lang-km .page-scroll > h1 {
+  line-height: var(--km-line-height, 1.6);
 }
 
 body.lang-km input,
 body.lang-km textarea,
 body.lang-km select,
 body.lang-km .input {
-  line-height: 1.45;
+  line-height: var(--km-line-height, 1.6);
 }
 
 /* Z7 (user, Aug 29): Khmer glyphs have thinner strokes than Latin, so the
@@ -879,7 +912,7 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .compact-analytics-legend::-webkit-scrollbar { display: none; }
 body.lang-km .compact-analytics-legend {
   font-size: .625rem;
-  line-height: 1.25;
+  line-height: var(--km-line-height, 1.6);
 }
 
 .dense-data-shell {
@@ -953,6 +986,46 @@ body.lang-km .compact-analytics-legend {
 .dark .dense-data-table .dense-day-row td { background:#202024; color:#a1a1aa; }
 .dense-cell-truncate { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dense-id { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:.68rem; letter-spacing:-.025em; }
+
+/* S4-22. The dense table's line boxes are absolute (1rem on a .75rem cell = 1.33em,
+   .9rem on a .68rem header = 1.32em), which is below the 1.55-1.61em of ink a Khmer
+   cluster carries. Restate the km floor here, at a specificity that beats
+   `.dense-data-table th.dense-th-wrap`. The `height` on th/td is a minimum in table
+   layout, and 1.6em still fits inside it, so single-line rows do NOT grow -- only the
+   deliberately two-line `.dense-th-wrap` header gets taller, in Khmer only. */
+body.lang-km .dense-data-table th,
+body.lang-km .dense-data-table th.dense-th-wrap,
+body.lang-km .dense-data-table td { line-height: var(--km-line-height, 1.6); }
+
+/* S4-22, the half a line-height floor cannot reach. Noto Sans Khmer -- the family this
+   app names first and the one Android supplies -- declares a descent about 0.23em
+   shallower than its own coeng subscripts, so its ink sits low in the line box rather
+   than centred in it. `.truncate` is `overflow:hidden`, and overflow cannot be clipped
+   on one axis alone, so that overhang is sheared off every truncated row. Buying the
+   room with line-height costs double (1.91 on .text-xs, measured) because half-leading
+   is symmetric; `overflow-clip-margin` buys exactly the overhang and costs no layout.
+   Verified in Chrome: `text-overflow: ellipsis` still ellipsizes under `overflow: clip`,
+   the horizontal cut lands on the same pixel as `hidden`, and `scrollWidth` still
+   exceeds `clientWidth`, which is what `TruncatedText.tsx` reads to decide whether to
+   offer the full string. Guarded by @supports, so a browser without it keeps today's
+   behaviour rather than losing the clip. Deliberately NOT applied to line-clamp, even
+   though Chrome was measured to clamp identically under `clip` (same box height, same
+   scrollHeight): -webkit-line-clamp is a prefixed -webkit-box behaviour and there is no
+   way to check WebKit from here, and if it stopped clamping a catalog description would
+   grow without bound -- a far worse defect than the ~1.5px of last-line coeng that the
+   1.6 floor leaves on a clamped Khmer paragraph.
+   The one behavioural difference is that `clip` does not establish a block formatting
+   context and `hidden` does, so a truncating box wrapping a block child could reflow.
+   Checked: of the 363 `truncate` elements in src/, none has a block-level child. */
+@supports (overflow-clip-margin: 0.3em) {
+  body.lang-km .truncate,
+  body.lang-km .dense-cell-truncate,
+  .khmer-text.truncate,
+  [lang='km'].truncate {
+    overflow: clip;
+    overflow-clip-margin: 0.3em;
+  }
+}
 
 @media (min-width:768px) {
   .desktop-dense-only { display:block; }
