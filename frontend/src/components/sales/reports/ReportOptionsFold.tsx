@@ -1,13 +1,26 @@
-// ReportOptionsFold -- the "calculation options" the user asked for (Part
-// 581: "multiple calculations options"), in one Fold off the control row's
-// Options button. Each option is a single-select chip group; the canonical
-// definition is always the default and labelled as such, so a person can
-// never lose the app-wide revenue definition by accident. Choices persist
-// (localStorage bos:reports:options) through ReportsHub.
-import type { RefObject } from 'react'
+// ReportOptionsFold -- THE filter menu for the Reports surface (user, Part
+// 586: "make sure the search is shown, the various options into filtermenu").
+//
+// It used to be only the "calculation options" (Part 581), sitting beside a
+// SEPARATE Filters fold, a separate style toggle and a separate overflow
+// menu -- four controls competing with the search box for the one row, which
+// is why the search kept getting squeezed. Everything except search, the date
+// range and the view picker now lives in here, in one menu, in this order:
+//
+//   Filters          branch / status / payment selects (the caller's nodes)
+//   Display settings Excel vs Receipt style
+//   Basis · Profit · Compare · Currency   the calculation options
+//
+// Each option is a single-select chip group; the canonical definition is
+// always the default and labelled as such, so a person can never lose the
+// app-wide revenue definition by accident. Choices persist (localStorage
+// bos:reports:options) through ReportsHub. One Reset clears the whole menu.
+import type { ReactNode, RefObject } from 'react'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import Table2 from 'lucide-react/dist/esm/icons/table-2.js'
 import InfoHint from '../../shared/InfoHint.tsx'
 import { Button, Chip, Fold } from '../../shared/kit'
-import { DEFAULT_REPORT_OPTIONS, type ReportBasis, type ReportCurrency, type ReportOptions, type ReportProfitMode } from './reportModel.ts'
+import { DEFAULT_REPORT_OPTIONS, type ReportBasis, type ReportCurrency, type ReportOptions, type ReportProfitMode, type ReportStyle } from './reportModel.ts'
 import type { Tr } from './reportTypes.ts'
 
 export interface ReportOptionsFoldProps {
@@ -22,6 +35,13 @@ export interface ReportOptionsFoldProps {
   showProfit: boolean
   /** "Net after expenses" needs the Expenses permission. */
   showExpenses: boolean
+  /** The branch / status / payment selects, rendered as an opaque slot. */
+  filterControls?: ReactNode
+  /** Excel vs Receipt -- the former standalone toggle, now a chip group. */
+  style: ReportStyle
+  onStyleChange: (next: ReportStyle) => void
+  /** True when BOTH the filters and the options are at their defaults. */
+  resetDisabled?: boolean
 }
 
 function Group({ title, hint, hintLabel, children }: { title: string; hint?: string; hintLabel?: string; children: React.ReactNode }) {
@@ -36,7 +56,7 @@ function Group({ title, hint, hintLabel, children }: { title: string; hint?: str
   )
 }
 
-export default function ReportOptionsFold({ open, onClose, anchorRef, options, onChange, onReset, tr, showProfit, showExpenses }: ReportOptionsFoldProps) {
+export default function ReportOptionsFold({ open, onClose, anchorRef, options, onChange, onReset, tr, showProfit, showExpenses, filterControls, style, onStyleChange, resetDisabled }: ReportOptionsFoldProps) {
   const bases: Array<{ id: ReportBasis; label: string }> = [
     { id: 'revenue', label: `${tr('revenue', 'Revenue')} (${tr('rpt_default', 'default')})` },
     { id: 'gross', label: tr('gross_sales', 'Gross sales') },
@@ -52,20 +72,37 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
     { id: 'khr', label: 'KHR' },
     { id: 'both', label: tr('rpt_currency_both', 'Both') },
   ]
-  const isDefault = JSON.stringify(options) === JSON.stringify({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity })
+  const optionsAreDefault = JSON.stringify(options) === JSON.stringify({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity })
+  const isDefault = resetDisabled ?? optionsAreDefault
   return (
     <Fold
       open={open}
       onClose={onClose}
       anchorRef={anchorRef}
-      title={tr('rpt_options_title', 'Calculation options')}
+      title={tr('filters', 'Filters')}
       actions={
         <Button size="sm" variant="ghost" onClick={onReset} disabled={isDefault}>
           {tr('reset', 'Reset')}
         </Button>
       }
     >
-      <div className="space-y-3 p-3">
+      <div className="space-y-2.5 p-2.5" data-reports-fold="">
+        {filterControls ? (
+          <Group title={tr('filters', 'Filters')}>
+            <div className="flex w-full flex-col gap-1.5">{filterControls}</div>
+          </Group>
+        ) : null}
+        {/* No InfoHint here on purpose: a hint would need a new rpt_* key in
+            both language packs, and the two labelled+iconed chips already say
+            what they do. The lang packs are the fleet's hottest merge file. */}
+        <Group title={tr('display', 'Display settings')}>
+          <Chip selected={style === 'excel'} onClick={() => onStyleChange('excel')}>
+            <span className="inline-flex items-center gap-1"><Table2 className="h-3 w-3" />{tr('rpt_style_excel', 'Excel style')}</span>
+          </Chip>
+          <Chip selected={style === 'receipt'} onClick={() => onStyleChange('receipt')}>
+            <span className="inline-flex items-center gap-1"><Receipt className="h-3 w-3" />{tr('rpt_style_receipt', 'Receipt style')}</span>
+          </Chip>
+        </Group>
         <Group
           title={tr('rpt_basis', 'Basis')}
           hint={tr('rpt_basis_hint', 'The figure that leads the summary line and divides the margin. Revenue is the app-wide definition: net sales of recognized sales minus refunds, tax and delivery excluded.')}

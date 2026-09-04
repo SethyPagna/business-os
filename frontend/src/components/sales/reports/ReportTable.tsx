@@ -217,6 +217,7 @@ export default function ReportTable<Row>({
   return (
     <div className={className}>
       <DenseTable
+        fit
         columnChooser={hasOptional ? <ColumnChooser columns={columnDefs.filter((c) => !columns.find((col) => col.key === c.key)?.primary)} isVisible={prefs.isVisible} toggle={prefs.toggle} reset={prefs.reset} label={labels.columns} resetLabel={labels.reset} /> : undefined}
         className={maxHeight ? '[&>div:last-child]:max-h-[var(--report-max-h)] [&>div:last-child]:overflow-y-auto' : ''}
       >
@@ -234,7 +235,7 @@ export default function ReportTable<Row>({
                 onClick={onRowClick ? (e) => onRowClick(row, e.currentTarget) : undefined}
               >
                 {visibleColumns.map((c) => (
-                  <td key={c.key} className={[isNumericKind(c.kind) ? 'text-right whitespace-nowrap' : 'max-w-[260px] truncate', c.emphasis ? 'font-semibold' : ''].join(' ').trim()} title={c.kind === 'text' || !c.kind ? String(c.value(row) ?? '') : undefined}>
+                  <td key={c.key} className={[isNumericKind(c.kind) ? 'text-right whitespace-nowrap' : 'max-w-[200px] truncate', c.emphasis ? 'font-semibold' : ''].join(' ').trim()} title={c.kind === 'text' || !c.kind ? String(c.value(row) ?? '') : undefined}>
                     {formatCell(c, row, fmtMoney)}
                   </td>
                 ))}
@@ -246,7 +247,7 @@ export default function ReportTable<Row>({
           <tfoot>
             <tr className="h-[var(--ui-row-h)] bg-[var(--ui-surface-2)] font-semibold">
               {visibleColumns.map((c, i) => (
-                <td key={c.key} className={['px-3 border-t border-[var(--ui-line-2)]', isNumericKind(c.kind) ? 'text-right whitespace-nowrap' : ''].join(' ').trim()}>
+                <td key={c.key} className={['px-[var(--ui-cell-px,12px)] border-t border-[var(--ui-line-2)]', isNumericKind(c.kind) ? 'text-right whitespace-nowrap' : ''].join(' ').trim()}>
                   {i === 0 ? labels.total : isNumericKind(c.kind) ? formatCell(c, totalsRow, fmtMoney) : ''}
                 </td>
               ))}

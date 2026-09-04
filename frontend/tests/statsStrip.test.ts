@@ -195,7 +195,11 @@ test('Part 549/552: the Reports status/method filters are compact chip-selects',
   const report = read('src/components/sales/ReportsHub.tsx')
   // Compact h-7 chip-selects (not the old full-height dropdowns), matching
   // the Returns/Fees report density.
-  assert.ok(report.includes("buttonClassName=\"h-7 py-0 px-2 text-[11px]\""), 'status/method use the compact chip-select size')
+  // Part 586 moved these selects into the one filter menu, where they take
+  // the menu column's full width -- so pin the DENSITY (h-7 / 11px / no
+  // vertical padding), which is the thing this test is actually about,
+  // rather than the exact class literal.
+  assert.ok(/buttonClassName="h-7 (?:w-full )?py-0 px-2 text-\[11px\]"/.test(report), 'status/method use the compact chip-select size')
   assert.ok(report.includes('options={statusOptions}') && report.includes('options={paymentOptions}'), 'both selects render')
 })
 
@@ -278,7 +282,14 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   assert.ok(!/<Icon className="h-4 w-4" \/> \{label\}/.test(hub), 'ReportsHub no longer renders its own standalone section title row')
   // The branch select rides the shared control row's filters slot, not its own line.
   assert.ok(/const filterSelects = \([\s\S]{0,120}branches\.length \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
-  assert.ok(hub.includes('<ControlRow') && hub.includes('filters={compact ? null : filterSelects}'), 'the hub renders the shared ControlRow (filters inline on wide screens, in a Fold on phones)')
+  // Part 586: the selects no longer sit inline on wide screens at all -- they
+  // are in the one filter menu at every width (user: "the various options
+  // into filtermenu"), which is what gave the search box back its room. The
+  // invariant that still matters is that they reach the user through the
+  // shared ControlRow's menu rather than being dropped; reportsHub.test.ts
+  // pins the "nothing is dropped at any tier" side of it.
+  assert.ok(hub.includes('<ControlRow'), 'the hub renders the shared ControlRow')
+  assert.ok(/filterControls=\{hasFilterControls \? filterSelects : null\}/.test(hub), 'the branch/status/method selects reach the user through the filter menu')
 
   // The hub tab row fits one row on phones: equal grid cells with complete,
   // wrapping labels, including Khmer, instead of hiding Reports with an

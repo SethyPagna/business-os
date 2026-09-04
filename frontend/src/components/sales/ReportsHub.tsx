@@ -2,10 +2,13 @@
 // per-sale profit list, multiple views, excel style + receipt style for
 // mobile, multiple calculation options).
 //
-// One control row drives every view: search · Start→End date/time range ·
-// branch / status / payment filters (inline on wide screens, in a Filters
-// fold on phones) · the View picker · the Excel/Receipt style toggle · the
-// calculation Options fold · the workbook export. Below it exactly ONE view
+// One control row drives every view, and since Part 586 it holds exactly
+// four things: the search box · the View picker · the Start→End date/time
+// range · one Filters menu. Everything that used to compete with the search
+// box for that row -- a separate Filters fold, the Excel/Receipt style
+// toggle, an Options button and an OverflowMenu -- is inside that one menu
+// now (user: "make sure the search is shown, the various options into
+// filtermenu"). Below the row exactly ONE view
 // renders (Overview, By period, Sales list, Products, Customers, Cashiers,
 // Payment methods, Hours, Days of week, Branches, Couriers, Returns,
 // Expenses); each view is a ReportFrame with its own title-row actions,
@@ -15,16 +18,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import Filter from 'lucide-react/dist/esm/icons/filter.js'
-import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
-import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
-import Table2 from 'lucide-react/dist/esm/icons/table-2.js'
+import SearchIcon from 'lucide-react/dist/esm/icons/search.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
-import { Button, ControlRow, EmptyState, Fold, IconButton, OverflowMenu } from '../shared/kit'
+import { Button, ControlRow, EmptyState, IconButton } from '../shared/kit'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
+// Declares the `--ui-*` tokens the kit primitives read (they were ported onto
+// this line without styles/tokens.css, so every one of them was undefined)
+// plus this surface's density numbers and its Khmer line-box floor. See the
+// long header in that file.
+import './reports/reports-surface.css'
 import ExpensesReport from './reports/ExpensesReport.tsx'
 import GroupedReport from './reports/GroupedReport.tsx'
 import OverviewReport from './reports/OverviewReport.tsx'
@@ -223,22 +229,27 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
     if (patch.view) setViewId((cur) => resolveReportView(patch.view, perms) ?? cur)
   }, [perms])
 
-  // ---- folds & dialogs ----
-  const [filtersOpen, setFiltersOpen] = useState(false)
+  // ---- the one filter menu ----
+  // Part 586 folded the former four control-row citizens (a Filters fold, a
+  // style IconButton, an Options button and an OverflowMenu) into ONE menu,
+  // so the row is just: search · view · range · Filters. That is what freed
+  // the width the search box had been losing.
   const [optionsOpen, setOptionsOpen] = useState(false)
-  const filtersAnchor = useRef<HTMLElement | null>(null)
   const optionsAnchor = useRef<HTMLElement | null>(null)
   const branchId = branchFilter || undefined
 
   const searchInput = supportsSearch ? (
-    <input
-      type="search"
-      value={searchText}
-      onChange={(e) => setSearchText(e.target.value)}
-      placeholder={trh('search', 'Search')}
-      aria-label={trh('search', 'Search')}
-      className="h-7 w-full rounded-[var(--ui-radius-sm)] border border-[var(--ui-line)] bg-[var(--ui-surface)] px-2 text-[length:var(--ui-size-body)] text-[var(--ui-ink)] placeholder:text-[var(--ui-ink-3)] focus:outline-none focus:ring-2 focus:ring-[var(--ui-focus)]"
-    />
+    <div className="relative min-w-0">
+      <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ui-ink-3)]" aria-hidden="true" />
+      <input
+        type="search"
+        value={searchText}
+        onChange={(e) => setSearchText(e.target.value)}
+        placeholder={trh('search', 'Search')}
+        aria-label={trh('search', 'Search')}
+        className="h-7 w-full rounded-[var(--ui-radius-sm)] border border-[var(--ui-line)] bg-[var(--ui-surface)] pl-7 pr-2 text-[length:var(--ui-size-body)] text-[var(--ui-ink)] placeholder:text-[var(--ui-ink-3)] focus:outline-none focus:ring-2 focus:ring-[var(--ui-focus)]"
+      />
+    </div>
   ) : null
 
   const viewPicker = (
@@ -251,54 +262,48 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
       showChevron
     />
   )
-  const searchSlot = compact
-    ? (
-      <div className="flex min-w-0 items-center gap-2">
-        {searchInput ? <div className="min-w-0 flex-1">{searchInput}</div> : null}
-        {viewPicker}
-      </div>
-    )
-    : searchInput
+  // The picker rides the SEARCH slot at every tier, not just when compact.
+  // ControlRow always renders the search slot, so putting it here makes
+  // "the picker is never dropped" structural instead of a per-tier rule --
+  // and on the four views that have no text search it stops ControlRow's
+  // `flex-1` search cell from collapsing to a dead gap that shoved the rest
+  // of the row against the right edge.
+  const searchSlot = (
+    <div className="flex min-w-0 items-center gap-1.5">
+      {searchInput ? <div className="min-w-[9rem] flex-1 sm:max-w-[22rem]">{searchInput}</div> : null}
+      {viewPicker}
+    </div>
+  )
 
-  const styleToggle = (
-    <IconButton
-      label={style === 'excel' ? trh('rpt_style_receipt', 'Receipt style') : trh('rpt_style_excel', 'Excel style')}
-      icon={style === 'excel' ? <Receipt className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />}
-      onClick={() => setStyleChoice(style === 'excel' ? 'receipt' : 'excel')}
-    />
-  )
-  const optionsButton = (
-    <span ref={(el) => { optionsAnchor.current = el }}>
-      <Button size="sm" variant={JSON.stringify({ ...options, granularity: 'day' }) === JSON.stringify({ ...DEFAULT_REPORT_OPTIONS, granularity: 'day' }) ? 'secondary' : 'primary'} icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={() => setOptionsOpen((o) => !o)}>
-        {trh('options', 'Options')}
-      </Button>
-    </span>
-  )
   const filterSelects = (
     <>
-      {branches.length ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-7 py-0 px-2 text-[11px]" showChevron /> : null}
-      {supportsSaleFilters ? <AppSelect value={statusFilter} options={statusOptions} onChange={setStatusFilter} ariaLabel={trh('status', 'Status')} buttonClassName="h-7 py-0 px-2 text-[11px]" showChevron /> : null}
-      {supportsSaleFilters ? <AppSelect value={paymentFilter} options={paymentOptions} onChange={setPaymentFilter} ariaLabel={trh('payment_method', 'Payment method')} buttonClassName="h-7 py-0 px-2 text-[11px]" showChevron /> : null}
+      {branches.length ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-7 w-full py-0 px-2 text-[11px]" showChevron /> : null}
+      {supportsSaleFilters ? <AppSelect value={statusFilter} options={statusOptions} onChange={setStatusFilter} ariaLabel={trh('status', 'Status')} buttonClassName="h-7 w-full py-0 px-2 text-[11px]" showChevron /> : null}
+      {supportsSaleFilters ? <AppSelect value={paymentFilter} options={paymentOptions} onChange={setPaymentFilter} ariaLabel={trh('payment_method', 'Payment method')} buttonClassName="h-7 w-full py-0 px-2 text-[11px]" showChevron /> : null}
     </>
   )
   const hasFilterControls = branches.length > 0 || supportsSaleFilters
-  const filtersLabel = `${trh('filters', 'Filters')}${activeFilterCount ? ` · ${activeFilterCount}` : ''}`
-  const filtersButton = hasFilterControls ? (
-    <span ref={(el) => { filtersAnchor.current = el }}>
+  const optionsAreDefault = JSON.stringify({ ...options, granularity: 'day' }) === JSON.stringify({ ...DEFAULT_REPORT_OPTIONS, granularity: 'day' })
+  // The badge counts everything the menu now owns, so a person can see at a
+  // glance that a non-default basis/currency is in force without opening it.
+  const menuCount = activeFilterCount + (optionsAreDefault ? 0 : 1)
+  const filtersLabel = `${trh('filters', 'Filters')}${menuCount ? ` · ${menuCount}` : ''}`
+  const filtersButton = (
+    <span ref={(el) => { optionsAnchor.current = el }}>
       {compact ? (
         <IconButton
           label={filtersLabel}
           icon={<Filter className="h-3.5 w-3.5" />}
-          variant={activeFilterCount ? 'primary' : 'secondary'}
-          onClick={() => setFiltersOpen((o) => !o)}
+          variant={menuCount ? 'primary' : 'secondary'}
+          onClick={() => setOptionsOpen((o) => !o)}
         />
       ) : (
-        <Button size="sm" variant={activeFilterCount ? 'primary' : 'secondary'} icon={<Filter className="h-3.5 w-3.5" />} onClick={() => setFiltersOpen((o) => !o)}>
+        <Button size="sm" variant={menuCount ? 'primary' : 'secondary'} icon={<Filter className="h-3.5 w-3.5" />} onClick={() => setOptionsOpen((o) => !o)}>
           {filtersLabel}
         </Button>
       )}
     </span>
-  ) : null
+  )
 
   const viewProps: ReportViewProps | null = view ? {
     view,
@@ -316,16 +321,10 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
     onOptionsChange,
   } : null
 
-  const collapsedTail = (
-    <>
-      {compact ? null : viewPicker}
-      {filtersButton}
-      <OverflowMenu label={trh('options', 'Options')} items={[
-        { label: style === 'excel' ? trh('rpt_style_receipt', 'Receipt style') : trh('rpt_style_excel', 'Excel style'), icon: style === 'excel' ? <Receipt className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />, onSelect: () => setStyleChoice(style === 'excel' ? 'receipt' : 'excel') },
-        { label: trh('rpt_options_title', 'Calculation options'), icon: <SlidersHorizontal className="h-3.5 w-3.5" />, onSelect: () => setOptionsOpen(true) },
-      ]} />
-    </>
-  )
+  // One tail for every tier: the menu is the ONLY thing that can move, and it
+  // never disappears. The view picker is not here -- it lives in the search
+  // slot, which ControlRow renders at all three tiers.
+  const collapsedTail = <>{filtersButton}</>
 
   const body = !viewProps || !view ? (
     <EmptyState icon={<BarChart3 className="h-5 w-5" />} title={trh('reports', 'Reports')} text={trh('rpt_no_access', 'No report is available for your permissions.')} />
@@ -350,26 +349,27 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
             triggerClassName={compact ? 'flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5' : undefined}
           />
         )}
-        filters={compact ? null : filterSelects}
-        actions={compact ? null : <>{viewPicker}{styleToggle}{optionsButton}</>}
+        filters={null}
+        actions={collapsedTail}
         overflow={collapsedTail}
       />
 
       {body}
 
-      <Fold open={filtersOpen} onClose={() => setFiltersOpen(false)} anchorRef={filtersAnchor} title={trh('filters', 'Filters')} actions={<Button size="sm" variant="ghost" onClick={clearFilters} disabled={!activeFilterCount}>{trh('reset', 'Reset')}</Button>}>
-        <div className="flex flex-col gap-2 p-3">{filterSelects}</div>
-      </Fold>
       <ReportOptionsFold
         open={optionsOpen}
         onClose={() => setOptionsOpen(false)}
         anchorRef={optionsAnchor}
         options={options}
         onChange={onOptionsChange}
-        onReset={() => setOptions({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity })}
+        onReset={() => { clearFilters(); setOptions({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity }) }}
         tr={trh}
         showProfit={isAdminHint}
         showExpenses={canFees}
+        filterControls={hasFilterControls ? filterSelects : null}
+        style={style}
+        onStyleChange={setStyleChoice}
+        resetDisabled={!menuCount}
       />
 
     </div>
