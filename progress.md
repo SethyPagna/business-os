@@ -2430,6 +2430,41 @@ One line per open item; the full text lives in the master-plan phases below (sam
 IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 **[ ]** = not started.
 
+### DEPLOY BLOCKER — main is ten migrations behind production (measured Sep 4 2026, business-os-v1-c3)
+
+The owner asked for a deploy. **Do not deploy from `main`.** Measured, not inferred:
+
+| source | highest migration |
+|---|---|
+| production D1 (`d1_migrations`, applied) | `0115_sale_amendments.sql` |
+| `origin/rc/s4-2026-09-04` | `0115_sale_amendments.sql` ← matches |
+| `origin/s4/delivery-scope` | `0115_sale_amendments.sql` |
+| `origin/ship/2026-09-03` | `0107_receipt_numbers_business_format.sql` |
+| **`origin/main`** | **`0105_fee_delivery_contacts.sql`** |
+
+Production has applied through 0115; `origin/main` tops out at 0105. A deploy
+from `main` would ship a Worker that has never seen the schema behind
+0107–0115 and would roll the live build back by everything those ten migrations
+belong to — the same failure as the Sep-3 incident the `deploy-provenance` skill
+was written for, and it would again pass every check.
+
+**`origin/rc/s4-2026-09-04` is the deploy source**, on the strongest evidence
+available: its highest migration equals production's highest applied one exactly.
+Migrations are numbered, ordered and irreversible, which is why that match counts
+for more than commit ancestry — and ancestry cannot see a build that was never
+made from a commit on this branch.
+
+Consequences for everyone:
+
+- **A new migration takes 0116 or later**, never 0107. Filenames applied in
+  production are frozen: renumbering an applied migration makes D1 re-run its
+  `ALTER TABLE` and fails the deploy.
+- Any lane branched from `main` (this session's `fx/legacy-import-subtotal`
+  among them) is behind the live schema and must be merged into the rc before it
+  can ship.
+- The rc→main merge still needs a coordinated moment. Until it happens, `main`
+  is **not** a superset of production and must not be treated as one.
+
 ### Sep-4 round 4 — ten items (user, Sep 4 2026; recorded by business-os-v1-c3)
 
 Recorded before any of it is built, per the owner's standing instruction: *"Make
