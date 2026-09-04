@@ -4099,15 +4099,29 @@ BACKUP_TABLES (`3a0a7cb2`). Still open:
   the value — reproduced live in POS (payment $20→$19 while scrolling the
   panel). Class fix: blur-on-wheel (or wheel preventDefault) on the shared
   number inputs; POS payment/discount fields first.
-  **[~] Claimed by business-os-v1-63, Sep 4 2026.** No shared numeric-input
+  **[x] Fixed by business-os-v1-63, Sep 4 2026.** No shared numeric-input
   component exists (77 hand-rolled `type="number"` inputs across 22 files,
-  confirmed by ee's read-only sweep) — mechanism is a single synchronous,
-  capture-phase, passive `wheel` listener in `frontend/src/index.tsx` that
-  blurs the focused element when it is a number input (blur, not
-  preventDefault, so the panel keeps scrolling). Building on `rc/s4-2026-09-04`
-  @ `2c497564` in its own worktree, not the shared tree (`App.tsx` is dirty
-  there). Cleared with 4a (S4-21/modal-chrome stale, no collision) and ee
-  (sweep owner).
+  confirmed by ee's read-only sweep) — fix is a single synchronous,
+  capture-phase, passive `wheel` listener (`frontend/src/runtime/numberInputWheelGuard.ts`,
+  wired in `frontend/src/index.tsx` before the CSS-injection guard, ahead of
+  `ReactDOM.createRoot`) that blurs the focused element when it is a number
+  input — blur, not preventDefault, so the underlying panel keeps scrolling.
+  Registered synchronously per 4a (not the idle-deferred pattern
+  `installFormFieldAccessibility` uses — no exposure window on a busy till
+  tab). Built on `rc/s4-2026-09-04` @ `2c497564` in its own worktree
+  (`bos-wheel-guard`), not the shared tree (`App.tsx` was dirty there).
+  Cleared with 4a (S4-21/modal-chrome stale, no collision) and ee (sweep
+  owner) before touching files.
+  Verified: `tests/numberInputWheelGuard.test.ts` (5 assertions, exercises
+  the real exported guard functions, not an attribute check) PASS; layer-1
+  loop-form gate (typecheck, check:source, every `tests/*.test.ts` run
+  individually) all green; real `vite build` clean; live-browser control-vs-fixed
+  proof (trusted wheel event, DPR-real coordinates) — unguarded: value
+  $20→$19, panel scrollTop 300; guarded: value stays $20, panel scrollTop
+  still 300 (scroll not blocked), focus moved off the input to `<body>`.
+  Commit `e273e127` on branch `fx/wheel-guard-number-inputs`, pushed to
+  origin; not yet merged to `main` or included in a deploy — pending the
+  fleet's normal reconciliation/staged-deploy cycle.
 - **HIGH (layering):** InfoHint portals at z-[1000] but shared Modal is
   z-[1050] — every InfoHint inside any Modal renders its tooltip BEHIND the
   modal (ImportModeWizard, ExportFieldsModal, StockChangeSection, Branches,
