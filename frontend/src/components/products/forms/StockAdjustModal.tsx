@@ -14,6 +14,7 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
+import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire } from '../../../utils/stockReceiptFields.ts'
 import {
   applyRowOutcome,
   browserStockStorage,
@@ -66,6 +67,12 @@ type AdjustForm = {
   received_date: string
   supplier_id: number | ''
   supplier_name: string
+  // S4-15/S4-16: mirrors InventoryStockModals.tsx's matching receipt fields --
+  // what this stock-in cost per unit and how it was paid. Offered for an 'add'
+  // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
+  unit_cost_usd: InventoryFormValue
+  payment_status: string
+  credit_due_date: string
 }
 
 // 4-union reason type -- matches BranchStockAdjuster.tsx and
@@ -313,7 +320,16 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     received_date: todayIsoDate(),
     supplier_id: '',
     supplier_name: '',
+    unit_cost_usd: '',
+    payment_status: 'paid',
+    credit_due_date: '',
   }))
+  // S4-15: one id for everything typed in this modal opening, so several
+  // lines land in the Sessions list as ONE receipt rather than one row per
+  // second. Same shape FastStockInModal mints: routes/inventory.ts stores it
+  // as the movement's reference_id, which is the key stockInSessionsQuery
+  // groups on in preference to the created_at/user/branch/supplier fallback.
+  const receiptSessionIdRef = useRef(Date.now())
   const [adjustSaving, setAdjustSaving] = useState(false)
   const submitRef = useRef(false)
   // Part 563: the built, validated adjustment request awaiting the operator's
@@ -367,6 +383,9 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       received_date: todayIsoDate(),
       supplier_id: '',
       supplier_name: '',
+      unit_cost_usd: '',
+      payment_status: 'paid',
+      credit_due_date: '',
     })
     // Resuming an unsaved failed attempt: put back exactly what the operator
     // had typed (type, quantity, reason, branch, lot, date) on top of the
@@ -442,6 +461,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
       if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
     }
+    // Same figure InventoryStockModals shows as "Current" and gates its own
+    // receipt fields on, recomputed here so the wire and the form agree.
+    const currentQuantity = numericBranchId ? Number(selectedBranchStock?.quantity || 0) : stockQtyOf(product)
+    const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
+    if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
+      notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
+      return
+    }
     const adjustmentRequest = {
       productId: product.id,
       productName: product.name,
@@ -453,13 +480,17 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       userName: user?.name || user?.username,
       unlockPricing,
       batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
-      receivedDate: adjustForm.type === 'add'
-          && (unlockPricing || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+      // S4-16: a 'set' above the current figure has no batch picker but
+      // always creates or date-matches a lot server-side, so it carries the
+      // date, supplier and receipt fields exactly as an explicit add does.
+      receivedDate: isStockIn
+          && (unlockPricing || adjustForm.type === 'set' || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,
-      supplierId: adjustForm.type === 'add' && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
-      supplierName: adjustForm.type === 'add' && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      supplierId: isStockIn && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
+      supplierName: isStockIn && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      ...stockReceiptWire(adjustForm, receiptSessionIdRef.current, isStockIn),
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
         selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,

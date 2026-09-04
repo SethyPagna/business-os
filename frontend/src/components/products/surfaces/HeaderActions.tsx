@@ -117,7 +117,7 @@ export default function ProductsHeaderActions({
   const productHint = tr('add_product_button_hint', 'Create a new product from scratch')
   const addStockLabel = tr('add_stock', 'Add Stock')
   const addStockHint = tr('add_stock_menu_hint', 'Receive stock — set the shipment info once, then add one product or many, line by line')
-  const addNewProductLabel = tr('add_new_product', 'Add New Product')
+  const addNewProductLabel = tr('add_new_product', 'Create Products')
   const mergeDuplicatesLabel = tr('merge_duplicate_products', 'Merge duplicate products')
   const mergeDuplicatesHint = tr('merge_duplicates_button_hint', 'Combine branch-only duplicate rows of the same item into one')
   const wireImagesLabel = tr('wire_images_title', 'Wire images to products')

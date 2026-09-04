@@ -8,6 +8,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
+import { isStockInSubmission } from '../../utils/stockReceiptFields.ts'
 
 type MoneyFormatter = (value: number) => string
 
@@ -80,6 +81,15 @@ type AdjustForm = {
   // honest -- first attribution sticks server-side either way.
   supplier_id: number | ''
   supplier_name: string
+  // S4-15/S4-16: the receipt facts the Sessions list has always had columns
+  // for. Shown for any stock-IN (an 'add', or a 'set' that raises the figure
+  // -- see utils/stockReceiptFields.ts), because the route converts exactly
+  // that 'set' into an add and records these on the movement and its lot.
+  // Blank cost stays blank: the Sessions list reports "no receipt-level cost"
+  // honestly rather than borrowing the product's stored cost price.
+  unit_cost_usd: InventoryFormValue
+  payment_status: string
+  credit_due_date: string
 }
 
 type TransferForm = {
@@ -197,6 +207,15 @@ export default function InventoryStockModals({
   const showBatchPicker = (adjustForm.type === 'add' || adjustForm.type === 'remove')
     && !unlockPricing
     && Boolean(adjustBranchId)
+  // S4-16: a 'set' above the current figure IS a receipt -- routes/inventory.ts
+  // turns it into an add of the difference and runs it through the same batch
+  // ledger. It has no batch picker (nothing to pick against a total), so it
+  // always creates or date-matches a lot, which is why it gates the same
+  // received-date / supplier / cost / payment fields an explicit add does.
+  const isStockIn = isStockInSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity)
+  const createsOrFillsLot = isStockIn
+    && (unlockPricing || adjustForm.type === 'set' || (showBatchPicker && adjustForm.batch_id !== ''))
+  const creditDueMissing = adjustForm.payment_status === 'credit' && String(adjustForm.credit_due_date || '').trim() === ''
 
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
@@ -471,7 +490,7 @@ export default function InventoryStockModals({
                   existing lot keeps its own date. The code preview matters
                   because the date DERIVES the lot code, and a matching code
                   tops up that lot instead of creating a twin. */}
-              {adjustForm.type === 'add' && (unlockPricing || (showBatchPicker && adjustForm.batch_id === 'new')) ? (
+              {isStockIn && (unlockPricing || adjustForm.type === 'set' || (showBatchPicker && adjustForm.batch_id === 'new')) ? (
                 <div>
                   <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('received_date', 'Received date')}</label>
                   {/* Typed, not a native picker (Sep 3): staff key the date
@@ -494,7 +513,7 @@ export default function InventoryStockModals({
               {/* D5a: supplier attribution for the lot this add creates or
                   fills -- the same picker, same rules, as ReceiveBatchModal
                   and BranchStockAdjuster. Adds only. */}
-              {adjustForm.type === 'add' && (unlockPricing || (showBatchPicker && adjustForm.batch_id !== '')) ? (
+              {createsOrFillsLot ? (
                 <SupplierPickerField
                   idPrefix="inventory-adjust"
                   value={{ supplierId: adjustForm.supplier_id === '' ? null : adjustForm.supplier_id, supplierName: adjustForm.supplier_name }}
@@ -505,6 +524,71 @@ export default function InventoryStockModals({
                     ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.')
                     : null}
                 />
+              ) : null}
+              {/* S4-15/S4-16: what this receipt COST and how it was paid. The
+                  Sessions list has always had a Total cost and a Payment
+                  column; before this block there was nowhere on this form to
+                  answer either, so every receipt taken from the Products
+                  section, the Stock-changes ledger or the Inventory page
+                  landed there blank. Same fields, same defaults and same
+                  credit rule as FastStockInModal, so the two receipt surfaces
+                  record the same facts. Deliberately NOT prefilled from the
+                  product's stored cost: an unentered cost is reported as
+                  unentered rather than guessed. */}
+              {isStockIn ? (
+                <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label htmlFor="inventory-adjust-unit-cost" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('receipt_cost', 'Receipt cost')} ({usdSymbol}/{tr('unit', 'unit')})</label>
+                      <input
+                        id="inventory-adjust-unit-cost"
+                        name="inventory_adjust_unit_cost"
+                        className="input text-sm"
+                        type="number"
+                        step="any"
+                        min="0"
+                        placeholder={tr('not_recorded', 'Not recorded')}
+                        value={adjustForm.unit_cost_usd}
+                        onChange={e => setAdjustForm(f => ({ ...f, unit_cost_usd: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('payment', 'Payment')}</span>
+                      <div className="flex gap-1.5">
+                        {(['paid', 'credit'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            aria-pressed={adjustForm.payment_status === mode}
+                            onClick={() => setAdjustForm(f => ({ ...f, payment_status: mode, credit_due_date: mode === 'credit' ? f.credit_due_date : '' }))}
+                            className={`flex-1 rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${adjustForm.payment_status === mode
+                              ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                          >
+                            {mode === 'credit' ? tr('on_credit', 'On credit') : tr('paid', 'Paid')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  {adjustForm.payment_status === 'credit' ? (
+                    <div className="mt-2">
+                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('due_date', 'Due date')}</label>
+                      <DateEntryInput
+                        id="inventory-adjust-credit-due-date"
+                        name="inventory_adjust_credit_due_date"
+                        className="text-sm"
+                        t={t}
+                        ariaLabel={tr('due_date', 'Due date')}
+                        value={adjustForm.credit_due_date}
+                        onChange={iso => setAdjustForm(f => ({ ...f, credit_due_date: iso }))}
+                      />
+                      {creditDueMissing ? (
+                        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'On-credit stock needs a due date')}</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {branchCount > 1 ? (
                 <div>

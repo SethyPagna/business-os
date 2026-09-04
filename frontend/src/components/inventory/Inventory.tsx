@@ -66,6 +66,7 @@ import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import type { QueryParams } from '../../api/query.ts'
 import {
@@ -167,6 +168,12 @@ type AdjustForm = {
   // trust them; see its comment).
   supplier_id: number | ''
   supplier_name: string
+  // S4-15/S4-16: mirrors InventoryStockModals.tsx's matching receipt fields --
+  // what this stock-in cost per unit and how it was paid. Offered for an 'add'
+  // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
+  unit_cost_usd: InventoryFormValue
+  payment_status: string
+  credit_due_date: string
 }
 
 type TransferForm = {
@@ -440,6 +447,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
     cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
     supplier_id: '', supplier_name: '',
+    unit_cost_usd: '', payment_status: 'paid', credit_due_date: '',
   })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
@@ -1044,6 +1052,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
       if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
     }
+    const isStockIn = isStockInSubmission(adjustForm.type, qty, previousQuantity)
+    if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
+      notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
+      return
+    }
     const adjustmentRequest = {
       productId: selectedAdjustProduct.id,
       productName: selectedAdjustProduct.name,
@@ -1059,16 +1072,20 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // (InventoryStockModals.tsx's own visibility condition, recomputed
       // here) -- a value lingering from a hidden input must never re-date
       // some other kind of change. Group containers included since D4b.
-      receivedDate: adjustForm.type === 'add'
-          && (unlockPricing || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+      // S4-16: a 'set' above the current figure is a receipt server-side
+      // (routes/inventory.ts converts it to an add of the difference), so it
+      // carries the same date, supplier and receipt facts an add does.
+      receivedDate: isStockIn
+          && (unlockPricing || adjustForm.type === 'set' || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,
       // D5a: sent only for adds, mirroring the picker's own visibility.
       // The modal already cleared these when an attributed lot was picked
       // (first attribution sticks), so what's here is what was on screen.
-      supplierId: adjustForm.type === 'add' && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
-      supplierName: adjustForm.type === 'add' && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      supplierId: isStockIn && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
+      supplierName: isStockIn && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      ...stockReceiptWire(adjustForm, receiptSessionIdRef.current, isStockIn),
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
         selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
@@ -1171,8 +1188,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setSearch(value)
   }, [])
 
+  // S4-15: minted per modal OPENING, not per component mount -- a page-wide
+  // id would fold every adjustment made all day into one Sessions row.
+  const receiptSessionIdRef = useRef(Date.now())
   const openAdjust = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
+    receiptSessionIdRef.current = Date.now()
     setAdjustModal(p)
     const defaultBranchId = defaultBranch?.id?.toString() || ''
     // pricingLocked starts true (the fast "add to this row" path) --
@@ -1207,8 +1228,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // stale-draft rule ReceiveBatchModal documents for its own date).
       received_date: todayIsoDate(),
       // D5a: same stale-value rule -- last adjustment's supplier must
-      // never silently attribute the next lot.
+      // never silently attribute the next lot. S4-15's receipt fields reset
+      // for the same reason: a cost or a credit due date from the previous
+      // receipt must never ride along into this one.
       supplier_id: '', supplier_name: '',
+      unit_cost_usd: '', payment_status: 'paid', credit_due_date: '',
     })
   }
 

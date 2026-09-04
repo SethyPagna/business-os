@@ -6,6 +6,7 @@ import { getStockInSessionLines, getStockInSessions } from '../../api/productRea
 import { revertStockMovement } from '../../api/inventoryWriteTransport.ts'
 import { updateBatch } from '../../api/batchesTransport.ts'
 import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
+import { stockSessionId } from '../../utils/timestampId.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import Modal from '../shared/Modal.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
@@ -216,9 +217,9 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         <div className="scroll-x">
           <table className="dense-data-table min-w-[900px]" aria-label={tr('stock_in_sessions', 'Stock-in Sessions')}>
             <colgroup><col className="w-[8rem]" /><col className="w-[18%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[12%]" /><col className="w-[8rem]" /><col className="w-[7rem]" /><col /></colgroup>
-            <thead><tr><th>{tr('receipt', 'Receipt')}</th><th data-tone="blue">{tr('supplier', 'Supplier')}</th><th>{tr('branch', 'Branch')}</th><th>{tr('cashier_user', 'User')}</th><th data-tone="violet">{tr('payment', 'Payment')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('total_cost', 'Total cost')}</th><th>{tr('recorded', 'Recorded')}</th></tr></thead>
+            <thead><tr><th>{tr('session_id', 'Session ID')}</th><th data-tone="blue">{tr('supplier', 'Supplier')}</th><th>{tr('branch', 'Branch')}</th><th>{tr('cashier_user', 'User')}</th><th data-tone="violet">{tr('payment', 'Payment')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('total_cost', 'Total cost')}</th><th>{tr('recorded', 'Recorded')}</th></tr></thead>
             <tbody>{sessions.map((session) => <tr key={session.key} data-clickable="true" tabIndex={0} onClick={() => void open(session)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void open(session) } }} aria-label={`${session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}, ${session.quantity}`}>
-              <td><span className="dense-cell-truncate dense-id font-semibold text-blue-700 dark:text-blue-300" title={session.key}>{session.key}</span></td>
+              <td><span className="dense-cell-truncate dense-id font-semibold text-blue-700 dark:text-blue-300" title={session.key}>{stockSessionId(session.createdAt) || session.key}</span></td>
               <td><span className="dense-cell-truncate font-semibold" title={session.supplier.supplierName}>{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span></td>
               <td><span className="dense-cell-truncate" title={session.branchName}>{session.branchName || '—'}</span></td>
               <td><span className="dense-cell-truncate" title={session.userName}>{session.userName || tr('unknown_user', 'Unknown user')}</span></td>
@@ -231,13 +232,15 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         </div>
       </div>
       <div className="mobile-cards-only space-y-1.5">{sessions.map((session) => <button key={session.key} type="button" disabled={opening} onClick={() => void open(session)} className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left shadow-sm hover:border-blue-300 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900">
-        <span className="min-w-0"><span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span><span className="block truncate dense-id text-gray-400">{session.key} · {fmtDateTime24(session.createdAt)}</span><span className="block truncate text-[11px] text-gray-400">{session.branchName || '—'} · {session.userName || tr('unknown_user', 'Unknown user')}</span></span>
+        <span className="min-w-0"><span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span><span className="block truncate dense-id text-gray-400" title={session.key}>{stockSessionId(session.createdAt) || session.key} · {fmtDateTime24(session.createdAt)}</span><span className="block truncate text-[11px] text-gray-400">{session.branchName || '—'} · {session.userName || tr('unknown_user', 'Unknown user')}</span></span>
         <span className="shrink-0 text-right"><span className="block text-sm font-bold text-emerald-600">+{session.quantity}</span><span className="block text-[11px] font-semibold text-gray-500">{session.costUsd == null ? '—' : `$${session.costUsd.toFixed(2)}`}</span></span>
       </button>)}</div>
     </>)}
     <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalSessions} label={tr('stock_in_sessions', 'stock-in sessions')} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div>
 
-    {selected ? <Modal title={tr('stock_in_session', 'Stock-in session')} onClose={() => setSelected(null)} size="lg">
+    {/* S4-14: the id the list row shows is repeated in the title, so the row
+        an operator clicked and the receipt they read back are the same thing. */}
+    {selected ? <Modal title={`${tr('stock_in_session', 'Stock-in session')}${stockSessionId(selected.createdAt) ? ` · ${stockSessionId(selected.createdAt)}` : ''}`} onClose={() => setSelected(null)} size="lg">
       <div className="space-y-3">
         {editing ? <div className="grid grid-cols-2 gap-2 rounded-lg bg-gray-50 p-2.5 dark:bg-gray-800/60">
           <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('received_date', 'Received date')} value={String(editDate || '').slice(0, 10)} onChange={(iso) => setEditDate(iso)} /></label>

@@ -64,9 +64,14 @@ assert.match(receiveModal, /supplierId: lotAttributedName \? null : supplierId/,
 ok('ReceiveBatchModal: locked lot sends nothing (visibility-mirror rule)')
 
 assert.match(inventoryModals, /supplier_id: '', supplier_name: ''/, 'InventoryStockModals clears supplier when an attributed lot is picked')
-assert.match(inventoryPage, /supplierId: adjustForm\.type === 'add' && adjustForm\.supplier_id !== ''/, "Inventory.tsx sends supplier only for adds")
-assert.match(inventoryPage, /supplierName: adjustForm\.type === 'add' && String\(adjustForm\.supplier_name \|\| ''\)\.trim\(\) !== ''/, 'Inventory.tsx name likewise add-only')
-ok('Inventory adjust: form cleared on attributed lots, wire is add-only')
+// S4-16 widened "adds only" to "stock-ins only": a 'set' above the current
+// figure is converted to an add of the difference by routes/inventory.ts and
+// creates a real lot, so it attributes that lot exactly as an add does. A
+// remove -- and a set that lowers the figure -- still carries no supplier.
+assert.match(inventoryPage, /supplierId: isStockIn && adjustForm\.supplier_id !== ''/, 'Inventory.tsx sends supplier only for stock-ins')
+assert.match(inventoryPage, /supplierName: isStockIn && String\(adjustForm\.supplier_name \|\| ''\)\.trim\(\) !== ''/, 'Inventory.tsx name likewise stock-in only')
+assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity\)/, 'Inventory.tsx derives that from the shared rule, not its own copy')
+ok('Inventory adjust: form cleared on attributed lots, wire is stock-in only')
 
 assert.match(branchAdjuster, /supplierId: row\.type === 'add' && row\.supplierId != null \? row\.supplierId : undefined/, 'BranchStockAdjuster sends supplier only on add rows')
 assert.match(branchAdjuster, /onChange\(\{ supplierId: null, supplierName: '' \}\)/, 'BranchStockAdjuster clears the row when its lot is attributed')
