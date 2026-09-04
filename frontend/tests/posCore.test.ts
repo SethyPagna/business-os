@@ -544,16 +544,36 @@ await runTest('ProductDetailSheet preselects the card badge branch, not alphabet
 // ---------------------------------------------------------------------------
 const ids = (rows: Array<{ id: number }>) => rows.map((row) => row.id)
 
-await runTest('lot order: every available lot comes before every empty one', () => {
+// S4-18 (the owner's exact words): "earliest to latest, with available
+// first, not split into available/unavailable sections". This is the
+// regression guard for the "not split into sections" clause specifically --
+// a test that only checked chronological order (the next test below) would
+// stay green even if a future edit re-partitioned by availability, since a
+// partitioned list can still be internally date-sorted within each half.
+// The negative control: reverting the `if (left.available ...)` line back
+// above the date check (the 9c282599 shape) turns this red, because it
+// re-groups every available lot ahead of every empty one regardless of date.
+await runTest('lot order: date dominates -- an old empty lot still lists ahead of a fresh available one', () => {
   const sorted = sortBatchesForPicker([
     { id: 1, received_at: '2026-01-05 08:00:00', quantity: 0 },
     { id: 2, received_at: '2026-06-01 08:00:00', quantity: 4 },
     { id: 3, received_at: '2026-02-01 08:00:00', quantity: 0 },
     { id: 4, received_at: '2026-03-01 08:00:00', quantity: 9 },
   ])
-  // Available (2026-03-01, then 2026-06-01), then empty (2026-01-05, then
-  // 2026-02-01) -- never interleaved, each half oldest-received first.
-  assert.deepEqual(ids(sorted), [4, 2, 1, 3])
+  // Earliest to latest by date alone: 01-05 (empty), 02-01 (empty), 03-01
+  // (available), 06-01 (available) -- the two empty lots interleave ahead of
+  // both available ones because they were received first. Never grouped.
+  assert.deepEqual(ids(sorted), [1, 3, 4, 2])
+})
+
+// "Available first" is real, but only as a tie-break where the date can't
+// already decide the order -- two lots received at the exact same instant.
+await runTest('lot order: available breaks a tie on the exact same received date', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: '2026-05-01 08:00:00', quantity: 0 },
+    { id: 2, received_at: '2026-05-01 08:00:00', quantity: 3 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 1])
 })
 
 await runTest('lot order: within a group it is earliest received date to latest', () => {
@@ -583,11 +603,14 @@ await runTest('lot order: an MMDDYYYY lot code stands in for a missing received_
   assert.deepEqual(ids(sorted), [2, 1])
 })
 
-await runTest('lot order: an undated or malformed lot sinks to the end of its OWN group', () => {
+await runTest('lot order: an undated or malformed lot sorts after every dated one, tied by availability', () => {
   // Production holds ~9,900 synthetic `RECON-<productId>` lot codes; they are
   // not dates, so a lot carrying one and nothing else must not sort as if it
-  // had been received at epoch 0 -- and must not be pushed behind empty lots
-  // either, since it still has stock to sell.
+  // had been received at epoch 0. An unknown date can't be placed on the
+  // timeline, so it can't outrank a lot with a real date either way -- it
+  // clusters with the other undated lots at the end, and THERE (an actual
+  // tie) availability decides: the still-stocked RECON lot lists ahead of
+  // the empty one, not behind it.
   assert.equal(batchReceivedInstant({ lot_code: 'RECON-7321', received_at: null }), null)
   assert.equal(batchReceivedInstant({ lot_code: '13992026', received_at: 'not-a-date' }), null)
   const sorted = sortBatchesForPicker([
@@ -596,7 +619,7 @@ await runTest('lot order: an undated or malformed lot sinks to the end of its OW
     { id: 3, received_at: '2026-06-01 08:00:00', quantity: 5 },
     { id: 4, lot_code: 'RECON-7322', received_at: '', quantity: 0 },
   ])
-  assert.deepEqual(ids(sorted), [3, 1, 2, 4])
+  assert.deepEqual(ids(sorted), [2, 3, 1, 4])
 })
 
 await runTest('lot order: a RECON lot code with a real received_at still sorts by that date', () => {
@@ -638,6 +661,29 @@ await runTest('ProductDetailSheet drops the duplicate row-id option step and ord
   assert.doesNotMatch(sheet, /pagedBatches = batches\.slice/, 'the lot pills must page over the ORDERED list')
   assert.match(sheet, /lotSourceProductIds/, 'merged mode must fetch every indistinguishable row\'s lots')
   assert.doesNotMatch(sheet, /'3\. Batch'/, 'the lot step number must be counted, not hardcoded')
+})
+
+// S4-18's remaining two clauses: every lot pill states its quantity, and the
+// list is never rendered as two headed blocks (an "Available" / "Out of
+// stock" divider would satisfy a naive ordering test while still splitting
+// the list the ruling forbids).
+await runTest('ProductDetailSheet: every lot pill states its quantity, and no availability header splits the list', () => {
+  const sheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+  const quantityOnPill = sheet.match(/\(\{batch\.quantity\}/g) || []
+  // Two lot-picker blocks share this pill shape: the merged/group flow and
+  // the flat-product flow (see ProductDetailSheet.tsx's two `pagedBatches.map`
+  // call sites). Both must show quantity, not just one of them.
+  assert.equal(quantityOnPill.length, 2, 'both the group-flow and flat-flow lot pills must print the quantity')
+  assert.match(sheet, /selectedBatch\.quantity \|\| 0\)/, 'the collapsed trigger must also show the picked lot\'s quantity')
+  // Not "no occurrence of the word available" (that also appears in unrelated
+  // comments and the empty-list message "No lots available at this branch")
+  // -- specifically, no posCopy call that would print an "Available" / "Out
+  // of stock" heading as a divider between two blocks of lot pills.
+  assert.doesNotMatch(
+    sheet,
+    /posCopy\('(Available|Unavailable|Out of stock)'/i,
+    'the lot list must not carry an availability section heading',
+  )
 })
 
 if (failed > 0) {

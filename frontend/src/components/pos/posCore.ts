@@ -757,9 +757,16 @@ function compareBatchNumber(left: unknown, right: unknown): number {
 }
 
 /**
- * The order the POS lot picker lists lots in, per the cashier's rule:
- * everything that HAS stock first, oldest received date to newest, then
- * everything with nothing left in it, again oldest to newest.
+ * The order the POS lot picker lists lots in, per S4-18's ruling (the owner's
+ * exact words): "earliest to latest, with available first, not split into
+ * available/unavailable sections". A first pass at this (9c282599) read
+ * "available first" as a hard partition -- every available lot, oldest to
+ * newest, THEN every empty lot, oldest to newest, "never interleaved" -- which
+ * is precisely the two-block grouping the ruling's own "not split into
+ * sections" clause forbids: an old empty lot could push a fresher available
+ * one down a whole screen. Date is now the single dominant key; availability
+ * only breaks a tie the date can't. It is a tie-break, not a section, so it
+ * only ever fires between lots that would otherwise print in the same slot.
  *
  * The server's own list order (lib/productBatches.ts's
  * listBatchesForProduct) is soonest-expiry-first FIFO, which interleaves
@@ -769,17 +776,20 @@ function compareBatchNumber(left: unknown, right: unknown): number {
  * server's FIFO allocation changes.
  *
  * Ordering, in full:
- *  1. available (quantity > 0) before unavailable (quantity <= 0),
- *  2. lots WITH a usable received date before those without,
- *  3. that date ascending -- earliest received first,
+ *  1. lots WITH a usable received date before those without (an unknown
+ *     date can't be placed on a timeline, so it can't outrank a real one),
+ *  2. that date ascending -- earliest received first, ACROSS availability:
+ *     an empty lot from last week still lists ahead of a fresh one today,
+ *  3. on an exact date tie (including two undated lots) available breaks
+ *     before unavailable -- this is the only place "available first" acts,
  *  4. batch_number ascending (a numbered lot before an unnumbered one),
  *  5. the incoming order, so the server's expiry-first FIFO survives as the
  *     tie-break and the sort stays stable.
  *
- * A lot with a missing or malformed received date therefore never displaces
- * a real one: it sinks to the end of its OWN availability group (still ahead
- * of every out-of-stock lot if it has stock), which is where an
- * undated/`RECON-…` row belongs -- visible and pickable, never first.
+ * Undated/`RECON-…` lots (~9,921 rows, tracked separately by S4-19 for a
+ * rename to a real `ADJ<date>` lot code) therefore cluster at the end, tied
+ * against each other and broken by availability, rather than being scattered
+ * by an epoch-0 date or hidden below every dated lot regardless of stock.
  */
 export function sortBatchesForPicker<T extends PickerBatchLike>(batches: readonly T[] = []): T[] {
   const rows = Array.isArray(batches) ? batches : []
@@ -791,13 +801,13 @@ export function sortBatchesForPicker<T extends PickerBatchLike>(batches: readonl
       available: Number(batch?.quantity || 0) > 0,
     }))
     .sort((left, right) => {
-      if (left.available !== right.available) return left.available ? -1 : 1
       const leftDated = left.instant != null
       const rightDated = right.instant != null
       if (leftDated !== rightDated) return leftDated ? -1 : 1
       if (leftDated && rightDated && left.instant !== right.instant) {
         return (left.instant as number) - (right.instant as number)
       }
+      if (left.available !== right.available) return left.available ? -1 : 1
       const byNumber = compareBatchNumber(left.batch?.batch_number, right.batch?.batch_number)
       if (byNumber !== 0) return byNumber
       return left.index - right.index
