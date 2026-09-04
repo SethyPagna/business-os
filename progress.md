@@ -2918,6 +2918,48 @@ applied migration as new and re-run its DDL, which fails the deploy. Only unrun 
   - Three existing tests pinned the old behaviour and were moved to the new contract:
     `test-import-engine-pure.cjs`, `test-portal-accounts-pure.cjs`, and
     `frontend/tests/{performanceLoadingUx,pricingContacts}.test.ts`.
+### `rc/s4-2026-09-04` — the Sep-4 reconcile, built and probed before the gate opens
+
+Worktree `C:/Users/mrkl6/Downloads/bos-rc-s4`, branched off the deployed tip **`e3678a39`** (never
+`main`, which is two migrations behind live). Seven lanes merged, in this order:
+`s4/identity-cost` -> `s4/received-date` -> `s4/receipt-shape` -> `s4/reports` -> `s4/membership-lc`
+-> `s4/adj-prefix` -> `s4/cost-merge-survey`. Not a deploy candidate yet — S4-2, S4-12, S4-24b,
+S4-28 and S4-29 are still in flight and go on top.
+
+**Every lane merges cleanly onto `e3678a39` on its own.** That is the reading that lulls you: the
+conflict only exists *cumulatively*. Probed with `git merge-tree --write-tree`, chaining each
+result into the next, before touching a real worktree.
+
+#### The one conflict, and why taking a side would have passed every check
+
+`frontend/package.json` — the `test:utils` chain, which is **one very long single line**.
+`s4/identity-cost` had appended `node tests/mergedCostRule.test.ts`; `s4/reports` had appended
+`node tests/reportsHub.test.ts`. Both to the same line.
+
+**Resolving it by picking a side is invisible.** It conflicts, you choose, the merge completes, the
+typecheck passes, every test that still runs is green — and one lane's test has been dropped from
+the chain CI runs, permanently. A chain running 178 files looks exactly like one running 179.
+Resolved as a **union**, and verified by counting rather than by eye: base **177**, each side
+**178**, union **179**, with the two exclusive entries named and both present.
+
+The **language packs auto-merged across three lanes with no conflict**. That is the good outcome,
+but it is not one to assume — it is the other file that historically eats a lane's work, and the
+reason to probe now rather than discover it at ship time.
+
+#### File overlap across the seven lanes
+
+Only five files are touched by more than one lane, out of 103 changed:
+
+| File | Lanes | Kind |
+|---|---|---|
+| `frontend/src/lang/{en,km}.json` | membership-lc, received-date, reports | union — auto-merged |
+| `cloudflare/src/lib/importEngine.ts` | identity-cost (+114/-40), membership-lc (+17/-24), received-date (+2/-2) | real code — auto-merged, but the file to re-read after any future merge |
+| `frontend/package.json` | identity-cost, reports | the chain — **conflicted**, unioned |
+| `cloudflare/scripts/test-import-engine-pure.cjs` | identity-cost, membership-lc | real code — auto-merged |
+
+**`importEngine.ts` is the file to watch.** Three lanes edit it and one of them rewrites 114 lines.
+Git merged it without complaint, which means the hunks did not touch — not that the *behaviour*
+composes. The certification run is what decides that, not the merge exit code.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
