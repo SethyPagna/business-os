@@ -19,6 +19,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { stripTypeScriptTypes } from 'node:module'
 import {
   BASIS_LABELS,
   DEFAULT_REPORT_OPTIONS,
@@ -525,7 +526,7 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.ok(hub.includes("trh('show', 'Show')"), 'compact controls have a primary Show action')
   assert.match(css, /\.reports-mobile-controls\s*\{[\s\S]*display:\s*grid/, 'mobile controls stack in a scoped grid')
   assert.match(css, /\.reports-mobile-presets\s*\{[\s\S]*flex-wrap:\s*wrap/, 'quick ranges wrap instead of scrolling horizontally')
-  assert.match(css, /\.reports-mobile-range\s*\{\s*min-height:\s*44px/, 'the combined date/calendar target is at least 44px')
+  assert.match(css, /\.reports-mobile-range\s*\{[^}]*\bmin-height:\s*44px\s*;/, 'the combined date/calendar target is at least 44px, regardless of declaration order')
   assert.match(css, /\.reports-mobile-show\s*\{[^}]*width:\s*100%/, 'Show fills the available action width')
   assert.match(css, /font-variant-numeric:\s*tabular-nums/, 'report amounts use tabular numerals')
   assert.match(css, /overflow-x:\s*clip/, 'the report surface cannot create page-level horizontal overflow')
@@ -657,6 +658,183 @@ test('the awaiting-payment block is set apart in the warning tint on every surfa
     assert.ok(src.includes('isTheoreticalGroup('), `${rel} tints the theoretical block`)
     assert.ok(!/\['revenue', ?'collected', ?'profit'\]/.test(src), `${rel} keeps no local copy of the group list`)
   }
+})
+
+// Execute the actual hook bodies with a small deterministic hook scheduler.
+// Render and passive effects are deliberately separate so these regressions
+// catch stale exports in the interval BEFORE effect cleanup/reset runs.
+function hookHarness(file: string, name: string) {
+  const slots: any[] = []
+  let index = 0
+  let writes = 0
+  let pending: Array<() => void> = []
+  const changed = (a: unknown[] | undefined, b: unknown[]) => !a || a.length !== b.length || b.some((v, i) => !Object.is(v, a[i]))
+  const useState = (initial: unknown) => {
+    const i = index++
+    if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial
+    return [slots[i], (next: any) => { writes++; slots[i] = typeof next === 'function' ? next(slots[i]) : next }]
+  }
+  const useRef = (initial: unknown) => {
+    const i = index++
+    return slots[i] ??= { current: initial }
+  }
+  const useCallback = (fn: Function, deps: unknown[]) => {
+    const i = index++
+    if (changed(slots[i]?.deps, deps)) slots[i] = { fn, deps }
+    return slots[i].fn
+  }
+  const useEffect = (fn: () => void | (() => void), deps: unknown[]) => {
+    const i = index++
+    if (changed(slots[i]?.deps, deps)) pending.push(() => {
+      slots[i]?.cleanup?.()
+      slots[i] = { deps, cleanup: fn() }
+    })
+  }
+  const source = read(file).slice(read(file).indexOf(`export function ${name}`)).replace('export function', 'function')
+  const hook = new Function('useState', 'useRef', 'useCallback', 'useEffect', `${stripTypeScriptTypes(source)}; return ${name}`)(useState, useRef, useCallback, useEffect)
+  return {
+    render(...args: any[]) { index = 0; return hook(...args) },
+    effects() { const jobs = pending; pending = []; jobs.forEach((job) => job()) },
+    unmount() { slots.forEach((slot) => slot?.cleanup?.()); pending = [] },
+    get writes() { return writes },
+  }
+}
+
+function deferred() {
+  let resolve!: (value: any) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<any>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
+const asyncTest = async (name: string, fn: () => Promise<void>) => {
+  try { await fn(); console.log(`PASS ${name}`) } catch (e) { failed++; console.error(`FAIL ${name}`); console.error(e) }
+}
+
+for (const paged of [false, true]) {
+  const name = paged ? 'usePagedReport' : 'useReportData'
+  const file = `src/components/sales/reports/${paged ? 'usePagedReport.ts' : 'ReportFrame.tsx'}`
+  const result = (value: string) => paged ? { rows: [value], has_more: true, next_cursor: { id: value }, snapshot_max_id: 42 } : value
+  const visible = (state: any) => paged ? state.rows : state.data
+  const empty = paged ? [] : null
+
+  await asyncTest(`${name}: key/refresh renders revoke prior results and failed refresh cannot restore them`, async () => {
+    const h = hookHarness(file, name)
+    let request = deferred()
+    const load = () => request.promise
+    const render = (key = 'A', enabled = true) => h.render(load, key, enabled, (row: unknown) => row)
+    render(); h.effects(); await settle()
+    request.resolve(result('old')); await settle()
+    let state = render()
+    assert.deepEqual(visible(state), paged ? ['old'] : 'old')
+    const oldLoadMore = state.loadMore
+    request = deferred()
+    state = render('B')
+    assert.deepEqual(visible(state), empty, 'new labels never accompany old values, even before effects')
+    assert.equal(state.loading, true)
+    if (paged) {
+      assert.equal(state.hasMore, false)
+      const before = h.writes
+      state.loadMore(); oldLoadMore()
+      assert.equal(h.writes, before, 'neither the new nor a retained old handler may use the old cursor')
+    }
+    h.effects(); await settle()
+    request.reject(new Error('new scope failed')); await settle()
+    state = render('B')
+    assert.deepEqual(visible(state), empty)
+    assert.equal(state.error, 'new scope failed')
+    request = deferred()
+    state.reload(); state = render('B')
+    assert.equal(state.error, null)
+    h.effects(); await settle()
+    request.resolve(result('fresh')); await settle()
+    state = render('B')
+    assert.deepEqual(visible(state), paged ? ['fresh'] : 'fresh')
+    request = deferred()
+    state.reload(); state = render('B')
+    assert.deepEqual(visible(state), empty, 'same-key refresh also revokes exportable values before effects')
+    h.effects(); await settle()
+    request.reject(new Error('refresh failed')); await settle()
+    assert.deepEqual(visible(render('B')), empty)
+    h.unmount()
+  })
+
+  await asyncTest(`${name}: old success/error is rejected before cleanup, while disabled, and after unmount`, async () => {
+    for (const reject of [false, true]) {
+      for (const boundary of ['key', 'disabled', 'unmount']) {
+        const h = hookHarness(file, name)
+        const request = deferred()
+        const load = () => request.promise
+        const render = (key = 'A', enabled = true) => h.render(load, key, enabled, (row: unknown) => row)
+        render(); h.effects(); await settle()
+        if (boundary === 'unmount') h.unmount()
+        else {
+          const state = render(boundary === 'key' ? 'B' : 'A', boundary !== 'disabled')
+          assert.deepEqual(visible(state), empty)
+          if (boundary === 'disabled') assert.equal(state.loading, false)
+        }
+        const before = h.writes
+        if (reject) request.reject(new Error('obsolete'))
+        else request.resolve(result('obsolete'))
+        await settle()
+        assert.equal(h.writes, before, `${boundary}: obsolete ${reject ? 'error' : 'success'} performs no state writes`)
+        h.unmount()
+      }
+    }
+  })
+
+  await asyncTest(`${name}: returning to a prior key or re-enabling never resurrects its old request`, async () => {
+    for (const disable of [false, true]) {
+      const h = hookHarness(file, name)
+      const old = deferred()
+      const fresh = deferred()
+      let request = old
+      const load = () => request.promise
+      const render = (key = 'A', enabled = true) => h.render(load, key, enabled, (row: unknown) => row)
+      render(); h.effects(); await settle()
+      render(disable ? 'A' : 'B', !disable); h.effects()
+      request = fresh
+      assert.deepEqual(visible(render()), empty)
+      h.effects(); await settle()
+      fresh.resolve(result('fresh')); await settle()
+      assert.deepEqual(visible(render()), paged ? ['fresh'] : 'fresh')
+      const before = h.writes
+      old.resolve(result('old')); await settle()
+      assert.equal(h.writes, before)
+      assert.deepEqual(visible(render()), paged ? ['fresh'] : 'fresh')
+      h.unmount()
+    }
+  })
+}
+
+await asyncTest('usePagedReport: load-more failure preserves rows/cursor, retry appends, duplicate clicks issue one request', async () => {
+  const h = hookHarness('src/components/sales/reports/usePagedReport.ts', 'usePagedReport')
+  const requests: ReturnType<typeof deferred>[] = []
+  const pages: unknown[] = []
+  const load = (page: unknown) => { pages.push(page); const d = deferred(); requests.push(d); return d.promise }
+  const render = () => h.render(load, 'A', true, (row: unknown) => row)
+  render(); h.effects(); await settle()
+  requests[0].resolve({ rows: ['first'], snapshot_max_id: 42, has_more: true, next_cursor: { id: 7 } }); await settle()
+  let state = render()
+  state.loadMore(); state.loadMore(); await settle()
+  assert.equal(requests.length, 2)
+  assert.deepEqual(pages[1], { snapshotMaxId: 42, cursor: { id: 7 } })
+  assert.deepEqual(render().rows, ['first'])
+  requests[1].reject(new Error('page failed')); await settle()
+  state = render()
+  assert.deepEqual(state.rows, ['first'])
+  assert.equal(state.error, 'page failed')
+  assert.equal(state.hasMore, true)
+  state.loadMore(); await settle()
+  assert.deepEqual(pages[2], pages[1], 'retry uses the same snapshot and cursor')
+  requests[2].resolve({ rows: ['second'], has_more: false }); await settle()
+  state = render()
+  assert.deepEqual(state.rows, ['first', 'second'])
+  assert.equal(state.hasMore, false)
+  assert.equal(state.error, null)
+  state.reload(); render(); h.effects(); await settle()
+  assert.deepEqual(pages[3], { snapshotMaxId: null, cursor: null }, 'refresh starts a new snapshot')
+  h.unmount()
 })
 
 if (failed) {
