@@ -85,7 +85,9 @@ db.exec(`
     total_usd REAL,
     branch_id INTEGER,
     product_id INTEGER,
-    product_name TEXT
+    product_name TEXT,
+    product_discount_usd REAL DEFAULT 0,
+    manual_discount_usd REAL DEFAULT 0
   );
   CREATE TABLE returns (
     id INTEGER PRIMARY KEY,
@@ -147,7 +149,7 @@ sale({ id: 1, created_at: AT(10), sale_status: 'completed', subtotal_usd: 100, d
 sale({ id: 2, created_at: AT(11), sale_status: '', subtotal_usd: 50, discount_usd: 0, membership_discount_usd: 0, tax_usd: 4, total_usd: 54 })
 // S3 NULL status (-> completed), STORE-absorbed delivery (a cost, not collected)
 sale({ id: 3, created_at: AT(12), sale_status: null, subtotal_usd: 40, discount_usd: 5, membership_discount_usd: 0, tax_usd: 0, total_usd: 35, delivery_fee_usd: 3, delivery_fee_paid_by: 'store', is_delivery: 1 })
-// S4 awaiting_payment -> PENDING (net), never revenue
+// S4 awaiting_payment -> business revenue/profit and separately Not Paid; never collected cash
 sale({ id: 4, created_at: AT(13), sale_status: 'awaiting_payment', subtotal_usd: 200, discount_usd: 20, membership_discount_usd: 0, tax_usd: 10, total_usd: 190 })
 // S5 cancelled -> excluded entirely
 sale({ id: 5, created_at: AT(14), sale_status: 'cancelled', subtotal_usd: 999, discount_usd: 0, membership_discount_usd: 0, tax_usd: 50, total_usd: 1049 })
@@ -158,7 +160,7 @@ const insItem = db.prepare('INSERT INTO sale_items (id, sale_id, quantity, cost_
 insItem.run(1, 1, 1, 30, 90, 1, 101, 'A')   // S1 cost 30
 insItem.run(2, 2, 1, 10, 50, 1, 102, 'B')   // S2 cost 10
 insItem.run(3, 3, 1, 8, 35, 1, 103, 'C')    // S3 cost 8
-insItem.run(4, 4, 1, 500, 180, 1, 104, 'D') // S4 awaiting cost 500 -> excluded from recognized COGS
+insItem.run(4, 4, 1, 50, 180, 1, 104, 'D') // S4 awaiting cost is included in business COGS
 insItem.run(5, 5, 1, 999, 999, 1, 105, 'E') // S5 cancelled -> excluded
 insItem.run(6, 6, 1, 12, 60, 1, 106, 'F')   // S6 cost 12
 
@@ -183,17 +185,17 @@ insRetItem.run(4, 4, 1, 40, 1, 'restock')  // return 4 is SUPPLIER scope -- out 
 
 // ---- 3. Hand-computed expectations (the canonical net-sales definition) ------
 const EXPECT = {
-  recognizedNet: 85 + 50 + 35 + 60, // S1 85, S2 50, S3 35, S6 60  = 230
+  recognizedNet: 85 + 50 + 35 + 180 + 60, // every non-cancelled sale = 410
   // Refunds come off revenue on the SAME net basis revenue is measured on.
   // S1 refunded 20 of a sale charged 100 that netted 85 -> 20 * 0.85 = 17.
   // S6 refunded 20 of a sale charged 80 that netted 60  -> 20 * 0.75 = 15.
   // Taking the charged 40 instead would subtract those sales' discounts a
   // SECOND time -- they were already gone when the sale was recognized.
-  refunds: 17 + 15,                  //                             = 32
+  refunds: 17 + 15 + 27,             // includes S4's 30 * 180/200 = 27
   refundsChargedBasis: 20 + 20,      // the old, doubled figure     = 40
-  revenue: 230 - 32,                 //                             = 198
+  revenue: 410 - 59,                 //                             = 351
   pending: 180,                      // S4 net (200-20)             = 180
-  grossCost: 30 + 10 + 8 + 12,       // recognized items only       = 60
+  grossCost: 30 + 10 + 8 + 50 + 12,  // all non-cancelled items      = 110
   returnedCost: 12,                  // S1's restocked unit -- back on the shelf
   storeDelivery: 3,                  // S3 store-absorbed: reported, NOT a cost
   recognizedTax: 8 + 4,              // S1 + S2                     = 12
@@ -207,7 +209,7 @@ EXPECT.cost = EXPECT.grossCost - EXPECT.returnedCost                     // 60-1
 // so it is already absent from revenue.
 EXPECT.deliveryNet = EXPECT.recognizedDelivery - EXPECT.deliveryCost     // 6-4  = 2
 EXPECT.profit = EXPECT.revenue - EXPECT.cost + EXPECT.deliveryNet        // 198-48+2 = 152
-EXPECT.collected = EXPECT.revenue + EXPECT.recognizedTax + EXPECT.recognizedDelivery // 198+12+6 = 216
+EXPECT.collected = 230 + EXPECT.recognizedTax + EXPECT.recognizedDelivery - EXPECT.refundsChargedBasis // awaiting excluded from cash
 
 let passed = 0
 const check = (label, cond) => { assert.ok(cond, label); passed++; console.log(`PASS ${label}`) }
@@ -222,8 +224,8 @@ const kernel = await lib.getSalesTotals({ __db: db }, filters)
 check(`kernel revenue_usd == net sales minus refunds (${EXPECT.revenue})`, kernel.revenue_usd === EXPECT.revenue)
 check('kernel refund_usd counts recognized CUSTOMER refunds only (supplier and cancelled returns ignored)',
   kernel.refund_usd === EXPECT.refunds)
-check(`kernel pending_revenue_usd == awaiting-payment net, held OUT of revenue (${EXPECT.pending})`, kernel.pending_revenue_usd === EXPECT.pending)
-check(`kernel cost_usd counts recognized items only, net of restocked returns (${EXPECT.cost})`, kernel.cost_usd === EXPECT.cost)
+check(`kernel pending_revenue_usd separately identifies Not Paid (${EXPECT.pending})`, kernel.pending_revenue_usd === EXPECT.pending)
+check(`kernel cost_usd counts all non-cancelled items, net of restocked returns (${EXPECT.cost})`, kernel.cost_usd === EXPECT.cost)
 check(`kernel returned_cost_usd reports the reversal rather than hiding it (${EXPECT.returnedCost})`, kernel.returned_cost_usd === EXPECT.returnedCost)
 check('only a RESTOCK reverses COGS -- damaged and kept goods were really consumed (would be 12+9+7=28)',
   kernel.returned_cost_usd === 12)
@@ -236,7 +238,7 @@ check(`kernel refund_usd is apportioned onto the net basis (${EXPECT.refunds}), 
   kernel.refund_usd === EXPECT.refunds && kernel.refund_usd !== EXPECT.refundsChargedBasis)
 check(`kernel collected_total_usd = revenue + tax + customer delivery (${EXPECT.collected})`, kernel.collected_total_usd === EXPECT.collected)
 check('kernel gross_sales_usd still reports the raw pre-discount subtotal line (unchanged display field)', kernel.gross_sales_usd === 100 + 50 + 40 + 200 + 80) // all non-cancelled subtotals = 470
-check('awaiting-payment revenue is NOT folded into revenue (would be 190+180=370 if it were)', kernel.revenue_usd !== EXPECT.revenue + EXPECT.pending)
+check('awaiting-payment contributes positively to revenue while remaining Not Paid', kernel.revenue_usd === EXPECT.revenue && kernel.pending_revenue_usd === EXPECT.pending)
 
 // ---- 5. Per-period trend must SUM to the headline (shared deriveTotals) ------
 const daySeries = await lib.getSalesPeriodSeries({ __db: db }, filters, 'day')

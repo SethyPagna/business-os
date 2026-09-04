@@ -126,7 +126,7 @@ test('the realised waterfall foots: revenue - COGS + delivery collected - courie
   )
 })
 
-test("profit_usd's definition is unchanged -- the pending argument moves nothing realised", () => {
+test('Not Paid detail does not get added twice by deriveTotals', () => {
   const withoutPending = lib.deriveTotals(level, 120, 20)
   const movedPending = lib.deriveTotals(
     { ...level, pending_revenue_usd: 999, pending_delivery_usd: 999, pending_delivery_cost_usd: 999, pending_gross_sales_usd: 999 },
@@ -173,22 +173,21 @@ test('emptySalesTotals carries every new key at 0 (no undefined on an empty wind
 
 // ---- SQL shape: the pending split happens in the CASEs, not the WHERE ------
 
-test('the shared item-cost columns keep COGS recognized-only while summing pending beside it', () => {
+test('the shared item-cost columns count every non-cancelled sale and identify Not Paid beside it', () => {
   const cols = lib.ITEM_COST_COLUMNS
   const clause = lib.ITEM_COST_STATUS_CLAUSE
   assert.ok(/AS cost_usd/.test(cols) && /AS pending_cost_usd/.test(cols) && /AS missing_snapshot_lines/.test(cols))
   // cost_usd is gated on the recognized expression INSIDE the CASE, so
   // relaxing the WHERE to admit awaiting rows cannot change it.
   assert.ok(
-    /CASE WHEN [^\n]*NOT IN \('cancelled', 'awaiting_payment'\)[^\n]*THEN si\.cost_price_usd \* si\.quantity/.test(cols),
-    'cost_usd sums recognized lines only',
+    /CASE WHEN [^\n]*<> 'cancelled'[^\n]*THEN si\.cost_price_usd \* si\.quantity/.test(cols),
+    'cost_usd sums all non-cancelled lines',
   )
   assert.ok(
     /CASE WHEN [^\n]*= 'awaiting_payment'[^\n]*THEN si\.cost_price_usd \* si\.quantity/.test(cols),
     'pending_cost_usd sums awaiting lines only',
   )
-  assert.ok(clause.includes("NOT IN ('cancelled', 'awaiting_payment')") && clause.includes("= 'awaiting_payment'"), 'the WHERE admits both cohorts and nothing else')
-  assert.ok(!/cancelled/.test(cols.replace(/NOT IN \('cancelled', 'awaiting_payment'\)/g, '')), 'no cancelled sale reaches either sum')
+  assert.ok(clause.includes("<> 'cancelled'") && clause.includes("= 'awaiting_payment'"), 'the WHERE admits business sales and identifies Not Paid')
 })
 
 test('the level columns carry the whole pending cohort, and every cost query uses the shared fragment', () => {

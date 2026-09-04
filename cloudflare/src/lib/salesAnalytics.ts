@@ -206,6 +206,8 @@ export interface SalesTotals {
   store_discount_usd: number
   membership_discount_usd: number
   discount_usd: number
+  item_discount_usd: number
+  total_discount_usd: number
   tax_usd: number
   delivery_usd: number
   store_delivery_usd: number
@@ -312,7 +314,7 @@ export interface SalesPeriodRow {
 export function emptySalesTotals(): SalesTotals {
   return {
     tx_count: 0, gross_sales_usd: 0, store_discount_usd: 0, membership_discount_usd: 0,
-    discount_usd: 0, tax_usd: 0, delivery_usd: 0, store_delivery_usd: 0,
+    discount_usd: 0, item_discount_usd: 0, total_discount_usd: 0, tax_usd: 0, delivery_usd: 0, store_delivery_usd: 0,
     delivery_actual_cost_usd: 0, delivery_actual_cost_count: 0, delivery_sale_count: 0, delivery_margin_usd: 0,
     delivery_net_usd: 0, recognized_delivery_usd: 0, recognized_delivery_cost_usd: 0,
     pending_tx_count: 0, pending_gross_sales_usd: 0, pending_store_discount_usd: 0, pending_membership_discount_usd: 0,
@@ -346,8 +348,11 @@ function round2(n: number): number {
 // COALESCE(NULLIF(...,''),'completed') -- so a blank status counts as completed
 // on BOTH surfaces and the two revenue numbers converge to the byte.
 export function saleStatusExpr(p: string): string { return `COALESCE(NULLIF(${p}sale_status, ''), 'completed')` }
-export function recognizedExpr(p: string): string { return `${saleStatusExpr(p)} NOT IN ('cancelled', 'awaiting_payment')` }
+// Business results count every sale that has left stock, including receivables.
+// Cash collection is a separate concern (see collectedSaleExpr).
+export function recognizedExpr(p: string): string { return `${saleStatusExpr(p)} <> 'cancelled'` }
 export function awaitingExpr(p: string): string { return `${saleStatusExpr(p)} = 'awaiting_payment'` }
+export function collectedSaleExpr(p: string): string { return `${saleStatusExpr(p)} NOT IN ('cancelled', 'awaiting_payment')` }
 // Net sale value (subtotal minus both discounts) -- tax and delivery excluded.
 export function netSaleExpr(p: string): string {
   return `(COALESCE(${p}subtotal_usd, 0) - COALESCE(${p}discount_usd, 0) - COALESCE(${p}membership_discount_usd, 0))`
@@ -444,10 +449,13 @@ export const RECOGNIZED_LEVEL_COLUMNS = `
              COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
              COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
              COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${deliveryActualCostExpr('sales.')} ELSE 0 END), 0) AS recognized_delivery_cost_usd,
+             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS collected_net_usd,
+             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN tax_usd ELSE 0 END), 0) AS collected_tax_usd,
+             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS collected_delivery_usd,
              -- The refund on the NET basis revenue is measured on (see the
              -- header); refund_paid_out_usd keeps the cash figure beside it.
              COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netRefundExpr('', 'rf.')} ELSE 0 END), 0) AS refund_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_paid_out_usd,
+             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_paid_out_usd,
              -- The awaiting-payment cohort, split the same way (S4R3-6). Each
              -- of these is the pending twin of a recognized column above, so
              -- the theoretical block reads on the same bases as the realised
@@ -578,10 +586,12 @@ async function salesLevelTotals(env: Env, f: SalesFilters) {
 export const ITEM_COST_COLUMNS = `
              COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS cost_usd,
              COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} AND si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS pending_cost_usd`
+             COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS pending_cost_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0) ELSE 0 END), 0) AS item_discount_usd,
+             COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0) ELSE 0 END), 0) AS pending_item_discount_usd`
 export const ITEM_COST_STATUS_CLAUSE = `(${recognizedExpr('s.')} OR ${awaitingExpr('s.')})`
 
-interface ItemCostRow { cost_usd: number; missing_snapshot_lines: number; pending_cost_usd: number }
+interface ItemCostRow { cost_usd: number; missing_snapshot_lines: number; pending_cost_usd: number; item_discount_usd: number; pending_item_discount_usd: number }
 
 // Item-level cost aggregate. Joins to sales only to apply the date/branch/
 // status filter -- the summed field itself (cost_price_usd * quantity)
@@ -603,6 +613,8 @@ async function salesCost(env: Env, f: SalesFilters): Promise<ItemCostRow> {
     cost_usd: num(row?.cost_usd),
     missing_snapshot_lines: num(row?.missing_snapshot_lines),
     pending_cost_usd: num(row?.pending_cost_usd),
+    item_discount_usd: num(row?.item_discount_usd),
+    pending_item_discount_usd: num(row?.pending_item_discount_usd),
   }
 }
 
@@ -684,11 +696,13 @@ export async function getItemDiscountUsd(env: Env, f: SalesFilters): Promise<num
  * A separate parameter rather than a fifth positional number so the call
  * sites read as what they are (S4R3-6).
  */
-export interface PendingCostInput {
+export interface DeriveTotalsOptions {
   costUsd?: number
+  itemDiscountUsd?: number
+  pendingItemDiscountUsd?: number
 }
 
-export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd = 0, pending: PendingCostInput = {}): SalesTotals {
+export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd = 0, options: DeriveTotalsOptions = {}): SalesTotals {
   const txCount = num(level.tx_count)
   const grossSalesUsd = num(level.gross_sales_usd)
   const storeDiscountUsd = num(level.store_discount_usd)
@@ -717,7 +731,10 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   // fee. This one uses the refund the till actually PAID OUT, not the
   // net-basis share, because it answers "what changed hands" rather than
   // "what did we earn". refund_paid_out_usd is carried for exactly that.
-  const collectedTotalUsd = revenueUsd + recognizedTaxUsd + recognizedDeliveryUsd
+  const collectedNetUsd = hasRecognized ? num(level.collected_net_usd) : recognizedNetUsd
+  const collectedTaxUsd = hasRecognized ? num(level.collected_tax_usd) : recognizedTaxUsd
+  const collectedDeliveryUsd = hasRecognized ? num(level.collected_delivery_usd) : recognizedDeliveryUsd
+  const collectedTotalUsd = collectedNetUsd + collectedTaxUsd + collectedDeliveryUsd - num(level.refund_paid_out_usd)
   // Goods back on the shelf are not cost of goods SOLD. Floored at zero: a
   // return whose recorded cost exceeds the window's own COGS (a return against
   // a sale outside the range, an imported cost) must not manufacture profit.
@@ -731,7 +748,7 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   // formula, so "what this period would be worth once the outstanding sales
   // are paid" is directly comparable with what it is worth today. Nothing
   // here is added into revenueUsd, collectedTotalUsd, netCostUsd or profitUsd.
-  const pendingCostUsd = num(pending.costUsd)
+  const pendingCostUsd = num(options.costUsd)
   const pendingDeliveryUsd = num(level.pending_delivery_usd)
   const pendingDeliveryCostUsd = num(level.pending_delivery_cost_usd)
   const pendingProfitUsd = pendingRevenueUsd - pendingCostUsd + (pendingDeliveryUsd - pendingDeliveryCostUsd)
@@ -741,6 +758,8 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     store_discount_usd: round2(storeDiscountUsd),
     membership_discount_usd: round2(membershipDiscountUsd),
     discount_usd: round2(discountUsd),
+    item_discount_usd: round2(num(options.itemDiscountUsd)),
+    total_discount_usd: round2(discountUsd + num(options.itemDiscountUsd)),
     tax_usd: round2(taxUsd),
     delivery_usd: round2(deliveryUsd),
     store_delivery_usd: round2(storeDeliveryUsd),
@@ -778,7 +797,7 @@ export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTo
     salesCost(env, f),
     salesReturnedCost(env, f),
   ])
-  return deriveTotals(level, cost.cost_usd, returnedCostUsd, { costUsd: cost.pending_cost_usd })
+  return deriveTotals(level, cost.cost_usd, returnedCostUsd, { costUsd: cost.pending_cost_usd, itemDiscountUsd: cost.item_discount_usd, pendingItemDiscountUsd: cost.pending_item_discount_usd })
 }
 
 // Period-bucketed trend series (for the Dashboard revenue/cost/profit line
@@ -829,8 +848,10 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
 
   const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
   const pendingCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_cost_usd)]))
+  const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
+  const pendingItemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_item_discount_usd)]))
   const rows = (levelRows || []).map((r) => {
-    const totals = deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0, { costUsd: pendingCostByPeriod.get(r.period) || 0 })
+    const totals = deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0, { costUsd: pendingCostByPeriod.get(r.period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(r.period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(r.period) || 0 })
     return {
       period: r.period,
       date: r.period,
@@ -1354,6 +1375,8 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
   const costByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.cost_usd)]))
   const missingByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.missing_snapshot_lines)]))
   const pendingCostByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.pending_cost_usd)]))
+  const itemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.item_discount_usd)]))
+  const pendingItemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.pending_item_discount_usd)]))
   const rows: SalesGroupedRow[] = (levelRows || []).map((r) => {
     const key = keyOf(r.grp_key)
     return {
@@ -1361,7 +1384,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       label: r.grp_label == null ? '' : String(r.grp_label),
       entity_id: r.grp_id == null ? null : Number(r.grp_id),
       cost_missing_snapshot_lines: missingByKey.get(key) || 0,
-      ...deriveTotals(r, costByKey.get(key) || 0, returnedByKey.get(key) || 0, { costUsd: pendingCostByKey.get(key) || 0 }),
+      ...deriveTotals(r, costByKey.get(key) || 0, returnedByKey.get(key) || 0, { costUsd: pendingCostByKey.get(key) || 0, itemDiscountUsd: itemDiscountByKey.get(key) || 0, pendingItemDiscountUsd: pendingItemDiscountByKey.get(key) || 0 }),
     }
   })
   if (groupBy === 'hour' || groupBy === 'weekday') {
@@ -1492,10 +1515,12 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
   const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
   const missingByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.missing_snapshot_lines)]))
   const pendingCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_cost_usd)]))
+  const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
+  const pendingItemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_item_discount_usd)]))
   const rows = (levelRows || []).map((r) => ({
     date: r.period,
     cost_missing_snapshot_lines: missingByPeriod.get(r.period) || 0,
-    ...deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0, { costUsd: pendingCostByPeriod.get(r.period) || 0 }),
+    ...deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0, { costUsd: pendingCostByPeriod.get(r.period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(r.period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(r.period) || 0 }),
   }))
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 }
