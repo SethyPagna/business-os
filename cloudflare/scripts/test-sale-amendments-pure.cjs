@@ -30,12 +30,17 @@
 //       admin, and an unparseable created_at does not grant a free pass
 //   11. DELIVERY FEE: $1.50 -> $2.00, the sale row shows the net $2.00 and
 //       the total moves by exactly $0.50, while the ledger shows both
-//   12. money: subtotal re-summed, tax and discounts FROZEN
+//   12. money: subtotal re-summed, both discounts FROZEN
 //   13. an oversell aborts the whole batch through the CHECK constraint
 //   14. summarizeAmendments: a removal that was undone is not still
 //       reported as removed
 //   15. source locks: routes/sales.ts and lib/undoAppliers.ts are actually
 //       wired to the ledger
+//   16. TAX follows the owner's settings switch rather than being frozen:
+//       the switch itself (including the absent-key fallback that keeps an
+//       existing shop unchanged), the one case that recomputes, and the four
+//       that deliberately keep the recorded amount and say why -- plus a
+//       source lock that the till and the Worker read the switch identically
 //
 // Run: node scripts/test-sale-amendments-pure.cjs
 const fs = require('fs')
@@ -96,6 +101,10 @@ const {
   amendmentEntryStatement,
   reversingKind,
   summarizeAmendments,
+  resolveTaxSettings,
+  taxableBaseUsd,
+  resolveAmendedTaxUsd,
+  saleTaxUpdateStatement,
 } = subject
 
 // ---------------------------------------------------------------------------
@@ -601,18 +610,23 @@ console.log('PASS 10 -- the edit window, its default, its setting, the admin byp
   assert.strictEqual(entry.total_before_usd, 7.1)
   assert.strictEqual(entry.total_after_usd, 7.6)
 
-  // FROZEN, and proved rather than asserted in a comment: tax and both
-  // discounts are untouched by any amendment, because no RATE is stored.
-  assert.strictEqual(num(sqlite, 'SELECT tax_usd FROM sales WHERE id = 77'), 0.6)
+  // Both DISCOUNTS are frozen, proved rather than asserted in a comment: they
+  // are absolute amounts with no stored rate, and changing one is a money
+  // decision rather than a correction.
   assert.strictEqual(num(sqlite, 'SELECT discount_usd FROM sales WHERE id = 77'), 1)
+  // A fee correction touches no line, so it changes no taxable base and
+  // therefore writes no tax -- the stored amount is still exactly what the till
+  // recorded. Case 16 below is where tax that DOES follow the lines is proved.
+  assert.strictEqual(num(sqlite, 'SELECT tax_usd FROM sales WHERE id = 77'), 0.6)
   const grown = recomputeSaleMoneyAfterAmendment({ sale: stored, subtotalUsd: 12, changeExchangeRate: null })
-  assert.strictEqual(grown.totalUsd, 13.1, 'doubling the subtotal did NOT double the tax or the discount')
+  assert.strictEqual(grown.totalUsd, 13.1,
+    'with no tax override the stored amount rides through: recomputing tax is a decision the caller makes, never a side effect of re-totalling')
 
   // The receipt number never changes.
   assert.strictEqual(amendedSaleKeepsReceiptNumber(), true)
   assert.strictEqual(sqlite.prepare('SELECT receipt_number FROM sales WHERE id = 77').get().receipt_number, 'RCP-000123')
 }
-console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt and shows both in the ledger; tax and discounts frozen')
+console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt and shows both in the ledger; discounts frozen, tax untouched by a fee-only change')
 
 // ---- 13: an oversell aborts the whole batch --------------------------------
 {
@@ -702,5 +716,119 @@ console.log('PASS 14 -- the detail summary describes the sale, not a moment in i
   }
 }
 console.log('PASS 15 -- routes and the undo applier are wired to the one ledger, and nothing rewrites it')
+
+// ---------------------------------------------------------------------------
+// 16. TAX is a settings switch, not a value frozen at sale time.
+//
+// The owner ruled on 2026-09-04: "tax can turn on off in settings which will
+// show based on that, if off, doesn't show." These cases pin the switch itself
+// and every case where an amendment DECLINES to recompute -- the declines are
+// the interesting half, because each one keeps a real recorded amount rather
+// than inventing a rate for it.
+// ---------------------------------------------------------------------------
+{
+  // The absent key is the whole compatibility story: an install that has never
+  // seen this switch behaves exactly as it did before it existed.
+  assert.deepStrictEqual(resolveTaxSettings(undefined, '10'), { enabled: true, rate: 0.1 },
+    'with the switch unset, a positive rate means tax is on -- the behaviour before the switch existed')
+  assert.deepStrictEqual(resolveTaxSettings(undefined, '0'), { enabled: false, rate: 0 },
+    'and a zero rate means off, which is what POS already inferred')
+  assert.deepStrictEqual(resolveTaxSettings(undefined, ''), { enabled: false, rate: 0 })
+  // An explicit answer overrides the inference in BOTH directions.
+  assert.strictEqual(resolveTaxSettings('false', '10').enabled, false, 'off wins over a set rate')
+  assert.strictEqual(resolveTaxSettings('true', '10').enabled, true)
+  // These values reach the settings table from more than one writer, so
+  // anything a shop would read as "no" counts as off.
+  for (const off of ['0', 'off', 'no', 'FALSE', ' false ']) {
+    assert.strictEqual(resolveTaxSettings(off, '10').enabled, false, `"${off}" must read as off`)
+  }
+  // The rate stays a percent in storage and a multiplier in code.
+  assert.strictEqual(resolveTaxSettings('true', '7.5').rate, 0.075)
+  assert.strictEqual(resolveTaxSettings('true', 'abc').rate, 0, 'garbage is not a rate')
+  assert.strictEqual(resolveTaxSettings('true', '-5').rate, 0, 'and neither is a negative one')
+
+  // The base is subtotal less BOTH discounts, floored at zero -- the same base
+  // POS.tsx applies the rate to.
+  const discounted = { discount_usd: 2, membership_discount_usd: 1 }
+  assert.strictEqual(taxableBaseUsd(discounted, 20), 17)
+  assert.strictEqual(taxableBaseUsd({ discount_usd: 50 }, 20), 0, 'a discount larger than the sale cannot make the base negative')
+
+  const on = { enabled: true, rate: 0.1 }
+
+  // The everyday case: this sale WAS taxed at today's rate, so tax follows the
+  // lines. $10 of goods at 10% became $1.00; adding $10 more makes it $2.00.
+  const followed = resolveAmendedTaxUsd({
+    sale: { tax_usd: 1 }, taxableBaseBeforeUsd: 10, taxableBaseAfterUsd: 20, settings: on,
+  })
+  assert.deepStrictEqual(followed, { taxUsd: 2, recomputed: true, reason: 'recomputed' })
+
+  // A sale that was rung up WITHOUT tax never grows one, however the switch is
+  // set now -- the customer already holds a receipt with no tax line on it.
+  assert.deepStrictEqual(
+    resolveAmendedTaxUsd({ sale: { tax_usd: 0 }, taxableBaseBeforeUsd: 10, taxableBaseAfterUsd: 20, settings: on }),
+    { taxUsd: 0, recomputed: false, reason: 'no_tax_on_sale' },
+    'the tax row stays absent, which is the owner\'s "if off, doesn\'t show"')
+
+  // Off means "stop charging it", NOT "erase what was charged". Zeroing a
+  // historical amount would leave that receipt's own arithmetic wrong.
+  assert.deepStrictEqual(
+    resolveAmendedTaxUsd({ sale: { tax_usd: 1 }, taxableBaseBeforeUsd: 10, taxableBaseAfterUsd: 20, settings: { enabled: false, rate: 0.1 } }),
+    { taxUsd: 1, recomputed: false, reason: 'tax_disabled' })
+
+  // No usable rate: there is nothing to recompute WITH, so the amount stands.
+  assert.deepStrictEqual(
+    resolveAmendedTaxUsd({ sale: { tax_usd: 1 }, taxableBaseBeforeUsd: 10, taxableBaseAfterUsd: 20, settings: { enabled: true, rate: 0 } }),
+    { taxUsd: 1, recomputed: false, reason: 'no_rate' })
+
+  // THE ONE THAT MATTERS MOST: a migrated sale, or one taxed before the rate
+  // changed, carries an amount today's rate would never have produced.
+  // Solving for its own rate is exactly the retro-derivation that was ruled
+  // out, so the amount is kept verbatim and the caller is TOLD.
+  const legacy = resolveAmendedTaxUsd({
+    sale: { tax_usd: 3.42 }, taxableBaseBeforeUsd: 10, taxableBaseAfterUsd: 20, settings: on,
+  })
+  assert.deepStrictEqual(legacy, { taxUsd: 3.42, recomputed: false, reason: 'rate_mismatch' })
+
+  // A cent of tolerance, because the stored amount went through the same
+  // rounding the till used -- but not a cent more.
+  assert.strictEqual(resolveAmendedTaxUsd({ sale: { tax_usd: 1.01 }, taxableBaseBeforeUsd: 10, taxableBaseAfterUsd: 10, settings: on }).recomputed, true)
+  assert.strictEqual(resolveAmendedTaxUsd({ sale: { tax_usd: 1.05 }, taxableBaseBeforeUsd: 10, taxableBaseAfterUsd: 10, settings: on }).recomputed, false)
+
+  // Tax reaches the total through the SAME recompute every other money field
+  // does, so an amendment can never round differently from a checkout.
+  const sale = {
+    exchange_rate: 4100, discount_usd: 0, membership_discount_usd: 0, tax_usd: 1,
+    is_delivery: 0, delivery_fee_usd: 0, delivery_fee_paid_by: 'customer',
+    amount_paid_usd: 11, amount_paid_khr: 0,
+  }
+  const frozen = recomputeSaleMoneyAfterAmendment({ sale, subtotalUsd: 20 })
+  assert.strictEqual(frozen.totalUsd, 21, 'without an override the stored tax rides through untouched')
+  const followedTotals = recomputeSaleMoneyAfterAmendment({ sale, subtotalUsd: 20, taxUsdOverride: 2 })
+  assert.strictEqual(followedTotals.totalUsd, 22, 'and the override lands in the total, not beside it')
+  // Passing null must not be read as "set tax to zero".
+  assert.strictEqual(recomputeSaleMoneyAfterAmendment({ sale, subtotalUsd: 20, taxUsdOverride: null }).totalUsd, 21)
+
+  // The write-back is a plain UPDATE of the two tax columns and nothing else:
+  // it must never touch subtotal or total, which the money statement owns.
+  const stmt = saleTaxUpdateStatement(7, 2.005, 4100)
+  assert.ok(/UPDATE sales SET tax_usd/.test(stmt.sql))
+  assert.ok(!/total_usd|subtotal_usd/.test(stmt.sql), 'the tax statement owns tax only')
+  assert.strictEqual(stmt.params.tax_usd, 2.01, 'rounded the way every other USD amount in this codebase is')
+  assert.strictEqual(stmt.params.tax_khr, Math.round(2.01 * 4100))
+  assert.strictEqual(saleTaxUpdateStatement(7, -3, 4100).params.tax_usd, 0, 'a negative tax is not a thing')
+
+  // Source lock: the till and the Worker must read the switch the same way, or
+  // an amendment will silently disagree with the checkout that created the
+  // sale. Neither side may go back to reading the raw rate on its own.
+  const pos = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'pos', 'POS.tsx'), 'utf8')
+  assert.ok(pos.includes('effectiveTaxRate(settings.tax_enabled, settings.tax_rate)'),
+    'POS must apply the rate through the shared helper so the switch actually stops tax being charged')
+  assert.ok(!/parseFloat\(asText\(settings\.tax_rate/.test(pos),
+    'and must not keep its own copy of the old rate-only rule beside it')
+  const routesTax = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
+  assert.ok(routesTax.includes('readAmendmentMoneySettings'), 'the routes must read the tax settings, not assume them')
+  assert.ok(routesTax.includes('planAmendedTax'), 'and route every amendment kind through the one tax decision')
+}
+console.log('PASS 16 -- tax follows the settings switch, and every refusal to recompute is named')
 
 console.log('\nAll sale-amendment ledger checks passed.')
