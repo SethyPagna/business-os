@@ -122,6 +122,24 @@ check('every ambiguous barcode carries an explicit reviewed ruling', () => {
   assert.strictEqual(ruled.length, expected.length, `expected ${expected.length} rulings, found ${ruled.length}`)
 })
 
+// Regression guard for the mis-attribution hazard found in pre-write review.
+// barcodeKey() strips non-digits, so "Libre10ml" becomes "10" -- and 44 live
+// products carry the literal barcode "10" (the 10ml perfume placeholder),
+// three of them active. Feeding a SKU-style code into the barcode index would
+// book a line against an unrelated product and look correct forever.
+check('a non-numeric source code never reaches the barcode index', () => {
+  assert.ok(/isNumericCode\s*=\s*\(code\)\s*=>\s*\/\^\[0-9\]\+\$\//.test(source),
+    'isNumericCode gate is missing or no longer anchors the whole string')
+  assert.ok(/const key = isNumericCode\(code\) \? barcodeKey\(code\) : ''/.test(source),
+    'resolveProduct no longer gates the barcode lookup on a fully numeric code')
+  const gate = /^\[0-9\]\+$/
+  for (const code of ['Libre10ml', 'CompletelyClean45g', 'ABCpure', '45g']) {
+    assert.ok(!new RegExp('^[0-9]+$').test(code), `${code} should not be treated as a barcode`)
+  }
+  assert.ok(new RegExp('^[0-9]+$').test('773602685608'), 'a real barcode must still take the barcode path')
+  assert.ok(gate.source.length > 0)
+})
+
 check('the planner never applies anything itself', () => {
   assert.ok(!/--apply/.test(source), 'planner advertises an --apply flag')
   assert.ok(!/d1\(\s*['"`](INSERT|UPDATE|DELETE)/i.test(source), 'planner sends a write through d1()')
