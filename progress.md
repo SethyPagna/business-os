@@ -11627,3 +11627,25 @@ POS.tsx along the way — no behavior change needed there).
   focused adversarial shift/sale/undo tests. A 375px preview had no horizontal
   document overflow; authenticated page rendering still requires a local backend
   and session and was therefore covered by the repository's responsive contracts.
+
+# Part 602 — completion-audit shift gaps closed (2026-09-05)
+
+- Mounted one bilingual, non-sensitive current-shift summary on Sales,
+  Expenses, and Income/Reports using the same operational POS branch and shared
+  branch/user/policy state as the POS gate. Historical report filters cannot
+  redefine it. Loading, absent, exempt, and unavailable states are explicit;
+  retry is touch-safe; branch/scope remain visible on compact screens.
+- Corrected shop-wide Telegram accounting: sales, payment methods, delivery,
+  invoice counts, and expenses now cover every employee in the branch/window;
+  per-account shifts retain the cashier/creator filter.
+- Added append-only migration `0119_shift_restore_guard.sql`. Shift amendments
+  remain update/delete-immutable during ordinary use, while the already
+  permission-gated backup restore may replace them only while its surviving
+  `system_flags.maintenance` record says `mode=restore`.
+- Verification: full 197-file frontend utility chain passed, frontend typecheck
+  and production build passed, both language packs resolve 4,849 keys, Worker
+  typecheck and focused shift/report/backup tests passed, and all 118 migrations
+  apply to a fresh database with LF/trigger checks clean.
+- The only unresolved goal item remains the historical production settlement:
+  no remote D1 command or deployment was run. A fresh read-only production
+  preflight and an owner ruling on the two partial payments are still required.

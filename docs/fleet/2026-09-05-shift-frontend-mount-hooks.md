@@ -1,21 +1,29 @@
-# Shift frontend mount hooks
+# Shift frontend mount contract
 
 The reusable non-sensitive transaction-page component is:
 
 ```tsx
-import ShiftSummary from '../shifts/ShiftSummary.tsx'
+import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
 
-<ShiftSummary shift={shift} compact />
+<CurrentShiftSummary />
 ```
 
-It renders only shift code/status, cashier, branch, opened time, closed time, and duration. It deliberately does not render opening cash, closing cash, notes, revenue, cost, or profit.
+It renders only shift code/status, opener/cashier, scope, branch, opened time,
+closed time, and duration. It deliberately does not render opening cash,
+closing cash, notes, revenue, cost, or profit. Loading, no-shift, exempt, and
+offline/error states remain visible rather than disappearing silently.
 
-Coordinator-owned mounts were left untouched because the active report/accounting lane owns the overlapping page trees:
+Completed mounts:
 
-- POS: update both existing mounts in `frontend/src/components/pos/POS.tsx` to pass the same active till branch: `<ShiftGate branchId={primaryBranchFilterId} branchName={...} />` and `<EndShiftButton branchId={primaryBranchFilterId} />`. Resolve `branchName` from the already-loaded `branches` collection. Both components already accept these props; this final mount edit was intentionally left out because `POS.tsx` is outside this worker's ownership.
+- POS passes the active till branch to both `ShiftGate` and `EndShiftButton`.
+- Sales, Expenses, and Income/Reports mount `CurrentShiftSummary` above their
+  transaction controls.
+- All transaction summaries read the operational `pos_branch` selection. A
+  historical report branch/date filter never redefines the current shift.
+- POS open/close writes publish through the same branch/user/policy cache, so
+  mounted transaction pages update immediately.
 
-- Sales: mount beside the selected sale/date summary in `frontend/src/components/sales/Sales.tsx`. Resolve the applicable shift from `listShifts({ branchId, from, to })`, matching `business_date`, `branch_id`, and the sale cashier when policy is `per_account`; for `shop_wide`, match business date and branch only.
-- Expenses: mount in the expense history/detail surface after the date/branch filters. Use the same date/branch rule and cashier match only for `per_account` mode.
-- Income: mount in the income history/detail surface after the date/branch filters, using the same resolver contract.
-
-Do not infer a shift solely from timestamp overlap. The backend records `business_date`, `branch_id`, `scope_mode`, and `user_id`; those fields are the stable join dimensions. If a transaction endpoint later returns `shift_session_id`, prefer that direct key and retain the scoped fallback only for legacy rows.
+This component describes the live/today shift; it does not claim historical
+transaction ownership. If a later feature needs per-record attribution, add a
+persisted `shift_session_id` and prefer that direct key. Do not infer ownership
+solely from timestamp overlap.
