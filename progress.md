@@ -11673,3 +11673,20 @@ POS.tsx along the way — no behavior change needed there).
   production statuses/debt/stock were changed. Need payment-versus-status ruling
   and authorized fresh manifest; never apply the archived invoice-only repair.
   Full overhaul remains open. See `docs/fleet/2026-09-05-shift-cash-review.md`.
+
+# Part 605 — authorized shift/report deployment (2026-09-05)
+
+- User explicitly requested deployment. Released clean commit `c89755aaaaff`
+  to Worker version `8e5aa14c-23c5-422f-ae5d-fb2b458fe374` at 100% traffic.
+  Live frontend and Worker both confirm that revision; health is OK and
+  unauthenticated shift/report requests remain protected (401).
+- Applied only pending migrations 0118 and 0119 after independent review,
+  recovery bookmark capture and preflight. Both existing shifts retained all
+  original data and open state; policy defaults to per-account/admin-exempt.
+- Fresh release build/dry-run passed. Telegram configuration is present; no
+  live shift close/test message was sent. A malformed existing secret name
+  containing credential-like text needs owner-authorized rotation/cleanup.
+- Mobile inline groups/back-title header are still being implemented in an
+  isolated lane. No historical sale/debt/stock edits or live cash entry made.
+  Authenticated production flow certification and settlement semantics remain
+  open. See `docs/fleet/2026-09-05-deployment.md` for provenance and recovery.
