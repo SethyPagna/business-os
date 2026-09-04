@@ -186,6 +186,67 @@ export async function addSaleItems(
   }
 }
 
+export interface SaleAmendmentRequest {
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
+  sale_item_id?: number
+  quantity?: number
+  delivery_fee_usd?: number
+  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
+  notes?: string
+}
+
+/**
+ * S4-30: amend a recorded sale (POST /api/sales/:id/amendments).
+ *
+ * Same discipline as addSaleItems above and for the same reasons: it carries
+ * the expected-updated-at stamp so two people correcting the same receipt get
+ * a write conflict rather than a silent last-write-wins, and it is
+ * deliberately NOT queued offline -- it moves stock in BOTH directions against
+ * a row whose current state only the server knows, and a replay from an outbox
+ * minutes later could hand back units another sale has since taken.
+ */
+export async function amendSale(id: number | string, request: SaleAmendmentRequest): Promise<unknown> {
+  const body = await withExpectedUpdatedAt('sales', id, {
+    ...getDevicePayload(),
+    ...request,
+  })
+  try {
+    const result = await route(
+      'sales:amend',
+      () => apiFetch('POST', `/api/sales/${encodeId(id)}/amendments`, body),
+      null,
+      true,
+    ) as ResultRecord
+    const db = await getLocalDb()
+    await db.table('sales').update(id, {
+      subtotal_usd: result?.subtotalUsd,
+      total_usd: result?.totalUsd,
+      total_khr: result?.totalKhr,
+      updated_at: getResultTimestamp(result),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    attachAttempted(error, { ...request })
+  }
+}
+
+/**
+ * The sale's amendment history (GET /api/sales/:id/amendments) -- the
+ * STAFF-facing read. The receipt never calls this: it renders net state, which
+ * is the whole point of the ledger split.
+ *
+ * No local fallback: an empty history fabricated offline would read as "this
+ * sale was never amended", which is a wrong answer rather than a missing one.
+ */
+export function getSaleAmendments(id: number | string): Promise<unknown> {
+  return route(
+    `sales:amendments:${id}`,
+    () => apiFetch('GET', `/api/sales/${encodeId(id)}/amendments`),
+    null,
+    { raceLocalFallback: false },
+  )
+}
+
 export function getSalesExport(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   return route(

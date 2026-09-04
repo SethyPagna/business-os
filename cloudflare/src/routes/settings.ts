@@ -155,6 +155,9 @@ const SALES_POLICY_KEYS = new Set([
   // (business rule, Aug 31 2026). Buckets with the main rate under sales_policy.
   'change_exchange_rate',
   'tax_rate',
+  // S4-30: the owner's on/off for tax. Buckets with the rate it governs, so a
+  // 'sales_policy' settings user can turn tax off without needing 'all'.
+  'tax_enabled',
   'display_currency',
   'pos_show_item_discount',
   'pos_payment_methods',

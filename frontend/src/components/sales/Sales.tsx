@@ -9,6 +9,7 @@ import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
+import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
@@ -181,10 +182,26 @@ interface SaleItemAddition {
   applied_price_usd?: number
 }
 
+// S4-30: what the detail view asks the server to change, and the ledger rows
+// it reads back. The request shape is the one salesTransport.amendSale sends;
+// the row shape is migration 0115's, shared with utils/saleAmendments.ts so
+// the renderer and the caller cannot drift.
+interface SaleAmendmentRequest {
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
+  sale_item_id?: number
+  quantity?: number
+  delivery_fee_usd?: number
+  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
+  notes?: string
+}
+
 interface SalesApi {
   updateSaleStatus: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<unknown>
   attachSaleCustomer: (saleId: number | string, payload: SaleMembershipPayload) => Promise<unknown>
   addSaleItems: (saleId: number | string, items: SaleItemAddition[], notes?: string) => Promise<unknown>
+  // S4-30: amend a recorded sale, and read its history.
+  amendSale: (saleId: number | string, request: SaleAmendmentRequest) => Promise<unknown>
+  getSaleAmendments: (saleId: number | string) => Promise<unknown>
 }
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -276,6 +293,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // enforces the identical `sales -> add_items` action at Full tier; this
   // client check only decides whether the surface is offered at all.
   const canAddSaleItems = can('sales', 'add_items')
+  // S4-30: amending is deliberately a SEPARATE grant from add_items. Adding a
+  // forgotten item and taking one back off a paid sale are different levels of
+  // trust, and a shop may well want to give one without the other. The Worker
+  // enforces the identical `sales -> amend` action at Full tier; this client
+  // check only decides whether the controls are offered at all.
+  const canAmendSales = can('sales', 'amend')
   const canImportSales = can('sales', 'import')
   const canExportSales = can('sales', 'export')
   const canViewFees = can('fees', 'view')
@@ -826,6 +849,73 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         'error',
       )
       return false
+    }
+  }
+
+  // S4-30: amend a recorded sale. Like handleAddSaleItems above, the server
+  // records its OWN audit trail -- an append-only ledger entry inside the same
+  // atomic batch as the change -- so there is deliberately no pushAction here:
+  // a client-side history entry would be a second, weaker record of the same
+  // act, and its undo closure would die on reload.
+  const handleAmendSale = async (saleId: number | string, request: SaleAmendmentRequest): Promise<boolean> => {
+    if (!canAmendSales) {
+      notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
+      return false
+    }
+    const numericId = Number(saleId)
+    if (!Number.isFinite(numericId)) return false
+    try {
+      const result = await withLoaderTimeout(
+        () => getSalesApi().amendSale(saleId, request),
+        'Amend sale',
+        SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
+      ) as { stockMoved?: boolean; unitsMoved?: number; stockSkipped?: boolean } | null
+      // The outcome names what actually happened to STOCK, because that is the
+      // part a shopkeeper cannot see from the receipt -- and a stock-skipped
+      // sale says so explicitly rather than looking like a silent no-op.
+      const units = Math.abs(Number(result?.unitsMoved) || 0)
+      notify(
+        result?.stockSkipped
+          ? translateOr('sale_amended_no_stock_skipped', 'Sale updated. This sale was completed without moving stock, so stock was left alone.')
+          : units > 0
+            ? (translateOr('sale_amended_stock', 'Sale updated, and {n} unit(s) moved in stock.') || '').replace('{n}', String(units))
+            : translateOr('sale_amended', 'Sale updated.'),
+      )
+      await loadSales(true)
+      void loadSalesStats()
+      actionHistory.refreshServerItems()
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      return true
+    } catch (error) {
+      if (isWriteConflict(error)) {
+        await loadSales()
+        return false
+      }
+      notify(
+        `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${getErrorMessage(error, String(error || 'Unknown error'))}`,
+        'error',
+      )
+      return false
+    }
+  }
+
+  /**
+   * The sale's amendment history, for the detail view's audit trail.
+   *
+   * Returns NULL when the history could not be fetched, and an empty array
+   * only when the server really said there is none. The modal renders those
+   * two differently on purpose: "could not load the history" and "this sale
+   * was never amended" are opposite answers, and quietly showing the second
+   * for the first would be the exact silent gap this feature exists to close.
+   */
+  const loadSaleAmendments = async (saleId: number | string): Promise<SaleAmendmentRow[] | null> => {
+    try {
+      const result = await getSalesApi().getSaleAmendments(saleId) as { entries?: SaleAmendmentRow[] } | null
+      return Array.isArray(result?.entries) ? result.entries : []
+    } catch {
+      return null
     }
   }
 
@@ -1679,6 +1769,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             // `sales:add_items` the prop is absent and the whole Add-items
             // section never renders.
             onAddItems={canAddSaleItems ? handleAddSaleItems : undefined}
+            // Hide-by-omission, the same gate every other write callback on
+            // this modal uses. The HISTORY read is not gated here -- anyone who
+            // can open the sale can see how it got that way (the Worker
+            // gates it on read access), so it is passed unconditionally.
+            onAmend={canAmendSales ? handleAmendSale : undefined}
+            onLoadAmendments={loadSaleAmendments}
             onPrint={(sale) => setSelectedSale(sale as SaleRecord)}
             // Gated exactly like the write callbacks above: without
             // `returns:add` the prop is omitted and the action never renders.

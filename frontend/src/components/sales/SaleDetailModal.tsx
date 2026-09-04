@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
@@ -6,6 +6,16 @@ import { searchProducts } from '../../api/methods.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
+// S4-30: the STAFF-facing half of an amended sale. The receipt uses none of
+// this -- it renders the net state the backend keeps in sale_items and the
+// sales row, which is the whole point of the ledger split.
+import {
+  pairReplacements,
+  saleLooksAmendable,
+  toAmendmentDisplayRows,
+  type AmendmentDisplayRow,
+  type SaleAmendmentRow,
+} from '../../utils/saleAmendments.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
@@ -77,6 +87,8 @@ interface SaleDetail {
   subtotal_khr?: number | string | null
   discount_khr?: number | string | null
   tax_khr?: number | string | null
+  /** S4-2's sticky flag: this sale is permanently outside the stock ledger. */
+  stock_skipped?: number | string | null
   change_khr?: number | string | null
   exchange_rate?: number | string | null
   payment_currency?: string | null
@@ -101,6 +113,18 @@ interface AddProductCandidate {
   barcode?: string | null
   selling_price_usd?: number | string | null
   stock_quantity?: number | string | null
+}
+
+// S4-30: what this modal asks the server to change. Mirrors
+// api/salesTransport.ts's SaleAmendmentRequest -- one shape, so the button and
+// the request cannot drift.
+interface SaleAmendmentRequest {
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
+  sale_item_id?: number
+  quantity?: number
+  delivery_fee_usd?: number
+  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
+  notes?: string
 }
 
 type StagedAddLine = {
@@ -158,6 +182,18 @@ interface SaleDetailModalProps {
   // hide-by-omission gate as the write callbacks above, and the Worker
   // enforces the identical action server-side.
   onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number }>) => Promise<boolean | unknown> | boolean | unknown
+  // S4-30: amend this already-recorded sale -- change a line's quantity,
+  // remove a line, replace one product with another, or correct the delivery
+  // fee. Omitted entirely when the signed-in user lacks `sales:amend`, the
+  // same hide-by-omission gate as every write callback above; the Worker
+  // enforces the identical action server-side.
+  onAmend?: (saleId: string | number, request: SaleAmendmentRequest) => Promise<boolean | unknown> | boolean | unknown
+  // The sale's audit trail. NOT gated on the write permission: anyone who can
+  // open the sale can see how it got that way -- hiding the trail from the
+  // people who reconcile the books would defeat the feature. Resolves to null
+  // when the history could not be fetched, which the view shows differently
+  // from "this sale was never amended".
+  onLoadAmendments?: (saleId: string | number) => Promise<SaleAmendmentRow[] | null>
   t: TranslateFn
   fmtUSD: MoneyFormatter
   fmtKHR: MoneyFormatter
@@ -199,6 +235,8 @@ export default function SaleDetailModal({
   onPrint,
   onReturn,
   onAddItems,
+  onAmend,
+  onLoadAmendments,
   t,
   fmtUSD,
   fmtKHR,
@@ -238,6 +276,48 @@ export default function SaleDetailModal({
   const [addSaving, setAddSaving] = useState(false)
   const [addConfirmOpen, setAddConfirmOpen] = useState(false)
   const addSearchSeqRef = useRef(0)
+
+  // S4-30. `amendments === null` means "not loaded / could not load"; an empty
+  // array means "the server says this sale was never amended". They render
+  // differently on purpose -- showing the second for the first would be the
+  // exact silent gap this feature exists to close.
+  const [amendments, setAmendments] = useState<SaleAmendmentRow[] | null>(null)
+  const [amendmentsLoading, setAmendmentsLoading] = useState(false)
+  const [amendmentsFailed, setAmendmentsFailed] = useState(false)
+  // Which line's inline amend controls are open, and what is typed in them.
+  const [amendLineId, setAmendLineId] = useState<number | null>(null)
+  const [amendQtyText, setAmendQtyText] = useState('')
+  const [amendSaving, setAmendSaving] = useState(false)
+  const [amendConfirm, setAmendConfirm] = useState<{ request: SaleAmendmentRequest; title: string; summary: string } | null>(null)
+  // The delivery fee editor: the CORRECTED value, not a delta. A cashier
+  // reading "$1.50" and typing what it should be cannot get the arithmetic
+  // wrong; the ledger derives the "+$0.50" the owner asked to see.
+  const [feeEditing, setFeeEditing] = useState(false)
+  const [feeText, setFeeText] = useState('')
+  // Replace: the line being replaced, while the existing product search picks
+  // its replacement. Reuses the add-items search rather than growing a second
+  // picker with its own bugs.
+  const [replaceLineId, setReplaceLineId] = useState<number | null>(null)
+  // Bumped after every successful amendment so the trail below reloads. The
+  // history is the record of what just happened; a stale one would be the
+  // least useful thing on the screen.
+  const [amendReloadToken, setAmendReloadToken] = useState(0)
+
+  const saleId = sale?.id
+  useEffect(() => {
+    if (!onLoadAmendments || saleId === undefined || saleId === null) return
+    let cancelled = false
+    setAmendmentsLoading(true)
+    setAmendmentsFailed(false)
+    void (async () => {
+      const rows = await onLoadAmendments(saleId)
+      if (cancelled) return
+      setAmendments(rows)
+      setAmendmentsFailed(rows === null)
+      setAmendmentsLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [onLoadAmendments, saleId, amendReloadToken])
 
   useEffect(() => {
     const text = addQuery.trim()
@@ -294,6 +374,125 @@ export default function SaleDetailModal({
   }
 
   const items = useMemo(() => parseItems(sale?.items), [sale?.items])
+
+  // ---- S4-30: amending ----
+  //
+  // Every amendment moves stock or money on a sale the customer has already
+  // been given a receipt for, so each one is reviewed in a ConfirmDialog
+  // before it is sent -- the same review-before-commit treatment every other
+  // stock write in this app has. `submitAmendment` is the ONE place a request
+  // is actually sent, so there is one error path and one reload.
+  const amendmentRows: AmendmentDisplayRow[] = useMemo(
+    () => toAmendmentDisplayRows(amendments, (value) => fmtUSD(value), t('delivery') || 'Delivery'),
+    [amendments, fmtUSD, t],
+  )
+  const amendmentGroups = useMemo(() => pairReplacements(amendmentRows), [amendmentRows])
+  // The controls are offered only where the server would accept them. This is
+  // a mirror of the server's guard, never the enforcement: the Worker also
+  // checks the edit window and reads the real return records, neither of which
+  // this side can prove.
+  const canAmendThisSale = !!onAmend && saleLooksAmendable(sale as { sale_status?: string | null; return_count?: number | null })
+  // Whether this amendment will touch stock, predicted the way the Worker
+  // decides it (lib/saleAmendments.ts saleAmendmentMovesStock): S4-2's sticky
+  // `stock_skipped` flag wins over the status, because a sale the system never
+  // took units for must not have units handed back to it either.
+  const amendStockMoves = !Number(sale?.stock_skipped || 0)
+    && String(sale?.sale_status || 'completed') !== 'awaiting_payment'
+
+  const submitAmendment = async (request: SaleAmendmentRequest): Promise<void> => {
+    if (!onAmend || !sale) return
+    setAmendSaving(true)
+    try {
+      const ok = await onAmend(sale.id, request)
+      if (ok !== false) {
+        setAmendLineId(null)
+        setReplaceLineId(null)
+        setFeeEditing(false)
+        setAmendQtyText('')
+        setAmendConfirm(null)
+        setAmendReloadToken((token) => token + 1)
+      }
+    } finally {
+      setAmendSaving(false)
+    }
+  }
+
+  /** Open the amend controls on one line, prefilled with its current quantity. */
+  const startAmendLine = (lineId: number, currentQuantity: number): void => {
+    setAmendLineId(lineId)
+    setReplaceLineId(null)
+    setAmendQtyText(String(currentQuantity))
+  }
+
+  /**
+   * "1 and now 2", or "2 back to 1". One control for both directions, because
+   * a cashier types the number the line SHOULD say -- deriving which way that
+   * is, is the computer's job, not theirs.
+   */
+  const stageQuantityAmendment = (lineId: number, currentQuantity: number, name: string): void => {
+    const next = Number(amendQtyText)
+    if (!Number.isFinite(next) || next < 0) return
+    if (next === currentQuantity) return
+    if (next === 0) {
+      stageRemoval(lineId, currentQuantity, name)
+      return
+    }
+    const rising = next > currentQuantity
+    setAmendConfirm({
+      request: {
+        kind: rising ? 'line_quantity_increased' : 'line_quantity_decreased',
+        sale_item_id: lineId,
+        quantity: Math.abs(next - currentQuantity),
+      },
+      title: rising
+        ? translateOr('amend_increase_title', 'Add to this line?', 'បន្ថែមទៅជួរនេះ?')
+        : translateOr('amend_decrease_title', 'Reduce this line?', 'បន្ថយជួរនេះ?'),
+      summary: `${name}: ${currentQuantity} → ${next}`,
+    })
+  }
+
+  const stageRemoval = (lineId: number, currentQuantity: number, name: string): void => {
+    setAmendConfirm({
+      request: { kind: 'line_removed', sale_item_id: lineId },
+      title: translateOr('amend_remove_title', 'Take this off the sale?', 'ដកចេញពីការលក់នេះ?'),
+      summary: `${name} × ${currentQuantity}`,
+    })
+  }
+
+  /**
+   * Replace one product with another. Sent as ONE request so the server can
+   * pair the removal and the addition under a single group id and the history
+   * reads as the single act the cashier performed.
+   */
+  const stageReplacement = (candidate: AddProductCandidate): void => {
+    const lineId = replaceLineId
+    const productId = Number(candidate?.id)
+    if (!lineId || !Number.isFinite(productId) || productId <= 0) return
+    const line = items.find((item) => Number(item.id) === lineId)
+    const quantity = toNumber(line?.quantity ?? line?.qty) || 1
+    setAddQuery('')
+    setAddCandidates([])
+    setAmendConfirm({
+      request: {
+        kind: 'line_replaced',
+        sale_item_id: lineId,
+        replacement: { product_id: productId, quantity },
+      },
+      title: translateOr('amend_replace_title', 'Replace this product?', 'ជំនួសផលិតផលនេះ?'),
+      summary: `${line?.product_name || line?.name || ''} → ${candidate?.name || `#${productId}`} × ${quantity}`,
+    })
+  }
+
+  const stageDeliveryFeeAmendment = (currentFeeUsd: number): void => {
+    const next = Number(feeText)
+    if (!Number.isFinite(next) || next < 0) return
+    if (next === currentFeeUsd) return
+    setAmendConfirm({
+      request: { kind: 'delivery_fee_changed', delivery_fee_usd: next },
+      title: translateOr('amend_fee_title', 'Correct the delivery fee?', 'កែថ្លៃដឹកជញ្ជូន?'),
+      summary: `${fmtUSD(currentFeeUsd)} → ${fmtUSD(next)}`,
+    })
+  }
 
   if (!sale) return null
 
@@ -629,12 +828,13 @@ export default function SaleDetailModal({
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('qty_short') || 'Qty'}</th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('unit_price') || 'Unit price'}</th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('line_total') || 'Line total'}</th>
+                    {canAmendThisSale ? <th className="px-1.5 py-1.5 text-right sm:px-2"><span className="sr-only">{translateOr('amend_line', 'Edit line', 'កែជួរ')}</span></th> : null}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-2 py-3 text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</td>
+                      <td colSpan={canAmendThisSale ? 5 : 4} className="px-2 py-3 text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</td>
                     </tr>
                   ) : items.map((item, index) => {
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
@@ -642,8 +842,14 @@ export default function SaleDetailModal({
                     const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
                     const lineUsd = unitUsd * qty
                     const lineKhr = unitKhr * qty
+                    // The sale_items row id, which every amendment addresses.
+                    // A legacy row without one gets no controls rather than a
+                    // button that would 404 -- the sale is still fully
+                    // readable, which is the important part.
+                    const lineId = Number(item.id) || 0
                     return (
-                      <tr key={`${item.product_id || item.id || index}-${index}`}>
+                      <Fragment key={`${item.product_id || item.id || index}-${index}`}>
+                      <tr>
                         <td className="px-1.5 py-1.5 align-top sm:px-2">
                           <div className="break-words font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>
                           {toNumber(item.returned_quantity) > 0 ? (
@@ -660,7 +866,116 @@ export default function SaleDetailModal({
                           {fmtUSD(lineUsd)}
                           {lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}
                         </td>
+                        {/* S4-30: the amend affordance. Inline rather than in a
+                            menu, because "the customer changed their mind" is a
+                            thing that happens at the counter with someone
+                            waiting -- and the whole control set is on screen
+                            from first paint, never a stub that expands once a
+                            prerequisite field is answered. */}
+                        {/* The amend cell carries the same
+                            tabular-nums/whitespace-nowrap tokens as its numeric
+                            siblings even though it holds a button:
+                            recordDetailRowRhythm locks the shape of every
+                            right-aligned cell in this table, and a control cell
+                            that opted out would weaken the lock for the money
+                            columns beside it. */}
+                        {canAmendThisSale ? (
+                          <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top tabular-nums sm:px-2">
+                            {lineId > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => (amendLineId === lineId ? setAmendLineId(null) : startAmendLine(lineId, qty))}
+                                className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                              >
+                                {amendLineId === lineId
+                                  ? (t('cancel') || 'Cancel')
+                                  : translateOr('amend_line', 'Edit line', 'កែជួរ')}
+                              </button>
+                            ) : null}
+                          </td>
+                        ) : null}
                       </tr>
+                      {canAmendThisSale && amendLineId === lineId && lineId > 0 ? (
+                        <tr className="bg-gray-50 dark:bg-gray-900/40">
+                          <td colSpan={5} className="px-1.5 py-2 sm:px-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor={`amend-qty-${lineId}`}>
+                                {translateOr('amend_new_quantity', 'New quantity', 'ចំនួនថ្មី')}
+                              </label>
+                              <input
+                                id={`amend-qty-${lineId}`}
+                                type="number"
+                                min="0"
+                                step="any"
+                                inputMode="decimal"
+                                value={amendQtyText}
+                                onChange={(event) => setAmendQtyText(event.target.value)}
+                                className="w-20 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                              />
+                              <button
+                                type="button"
+                                disabled={amendSaving}
+                                onClick={() => stageQuantityAmendment(lineId, qty, String(item.product_name || item.name || ''))}
+                                className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                              >
+                                {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={amendSaving}
+                                onClick={() => stageRemoval(lineId, qty, String(item.product_name || item.name || ''))}
+                                className="inline-flex items-center gap-1 rounded border border-red-200 px-2.5 py-1 text-[11px] font-semibold text-red-600 disabled:opacity-50 dark:border-red-800 dark:text-red-400"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                {translateOr('amend_remove', 'Remove', 'ដកចេញ')}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={amendSaving}
+                                onClick={() => { setReplaceLineId(replaceLineId === lineId ? null : lineId); setAddQuery(''); setAddCandidates([]) }}
+                                className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-semibold text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
+                              >
+                                {translateOr('amend_replace', 'Replace', 'ជំនួស')}
+                              </button>
+                            </div>
+                            {/* Replace reuses the SAME product search the
+                                add-items surface uses, rather than growing a
+                                second picker with its own bugs. */}
+                            {replaceLineId === lineId ? (
+                              <div className="mt-2">
+                                <input
+                                  type="search"
+                                  value={addQuery}
+                                  onChange={(event) => setAddQuery(event.target.value)}
+                                  placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
+                                  className="w-full rounded border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                                />
+                                {addSearching ? (
+                                  <div className="mt-1 text-[11px] text-gray-400">{t('loading') || 'Loading'}</div>
+                                ) : addCandidates.length ? (
+                                  <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-700">
+                                    {addCandidates.map((candidate) => (
+                                      <li key={String(candidate.id)}>
+                                        <button
+                                          type="button"
+                                          onClick={() => stageReplacement(candidate)}
+                                          className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                                        >
+                                          <span className="break-words">{candidate.name}</span>
+                                          <span className="shrink-0 tabular-nums text-[11px] text-gray-500">{fmtUSD(toNumber(candidate.selling_price_usd))}</span>
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : addQuery.trim().length >= 2 ? (
+                                  <div className="mt-1 text-[11px] text-gray-400">{translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}</div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ) : null}
+                      </Fragment>
                     )
                   })}
                 </tbody>
@@ -705,6 +1020,56 @@ export default function SaleDetailModal({
                       amount={fmtUSD(deliveryFeeUsd)}
                       sub={deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : null}
                     />
+                  ) : null}
+                  {/* The owner's own example: "before 1.5 dollar delivery,
+                      then we add another 0.5 dollar". The row above always
+                      shows the NET fee -- what the receipt prints -- and the
+                      history card below shows both halves. Typing the new
+                      TOTAL rather than a delta is deliberate: it is the number
+                      on the paper the customer is looking at. */}
+                  {canAmendThisSale && (isDelivery || deliveryFeeUsd > 0) ? (
+                    <div className="mt-1 flex flex-wrap items-center justify-end gap-2">
+                      {feeEditing ? (
+                        <>
+                          <label className="sr-only" htmlFor="amend-delivery-fee">
+                            {translateOr('amend_fee_new_total', 'New delivery fee', 'ថ្លៃដឹកជញ្ជូនថ្មី')}
+                          </label>
+                          <input
+                            id="amend-delivery-fee"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={feeText}
+                            onChange={(event) => setFeeText(event.target.value)}
+                            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            disabled={amendSaving}
+                            onClick={() => stageDeliveryFeeAmendment(deliveryFeeUsd)}
+                            className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                          >
+                            {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFeeEditing(false)}
+                            className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300"
+                          >
+                            {t('cancel') || 'Cancel'}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeeEditing(true) }}
+                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          {translateOr('amend_fee_edit', 'Correct delivery fee', 'កែថ្លៃដឹកជញ្ជូន')}
+                        </button>
+                      )}
+                    </div>
                   ) : null}
                   {refundUsd > 0 ? (
                     <MoneyRow
@@ -915,6 +1280,94 @@ export default function SaleDetailModal({
                 </>
               )}
             </section>
+          ) : null}
+
+          {/* THE AUDIT TRAIL (S4-30). This is the half of the feature the
+              receipt deliberately does not have: the receipt prints the net
+              result as one finalized sale, and this prints how it got there --
+              the original value, every add-on-top, by how much, who did it and
+              when. A removed line lives ONLY here, because it is gone from the
+              item list above and from the receipt by design.
+
+              It renders whenever the sale has any history, regardless of
+              whether the viewer may amend: reading what happened is a
+              different capability from doing it, and hiding the trail from
+              whoever is reconciling the till would defeat the point. */}
+          {amendmentsLoading || amendmentsFailed || amendmentGroups.length > 0 ? (
+            <SectionCard title={translateOr('amendment_history', 'Changes after the sale', 'ការកែប្រែក្រោយការលក់')}>
+              {amendmentsLoading ? (
+                <div className="text-xs text-gray-400">{t('loading') || 'Loading'}</div>
+              ) : amendmentsFailed ? (
+                /* "Could not load" and "never amended" are different answers,
+                   and printing the second when the first is true would be a
+                   lie about the record. */
+                <div className="text-xs text-amber-600 dark:text-amber-400">
+                  {translateOr('amendment_history_failed', 'The change history could not be loaded. It has not been lost — reopen this sale to try again.', 'មិនអាចផ្ទុកប្រវត្តិការកែប្រែបានទេ។ វាមិនបាត់ទេ — សូមបើកការលក់នេះឡើងវិញដើម្បីព្យាយាមម្តងទៀត។')}
+                </div>
+              ) : (
+                <ol className="space-y-2">
+                  {amendmentGroups.map((entry) => {
+                    const key = entry.type === 'replacement' ? `r-${entry.removed.id}-${entry.added.id}` : `s-${entry.row.id}`
+                    const head = entry.type === 'replacement' ? entry.removed : entry.row
+                    return (
+                      <li key={key} className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs dark:border-gray-700">
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {entry.type === 'replacement'
+                              ? `${entry.removed.subject} → ${entry.added.subject}`
+                              : entry.row.subject}
+                          </div>
+                          {/* who, and when -- the two questions a shop asks
+                              of a changed receipt before any other. */}
+                          <div className="tabular-nums text-[11px] text-gray-500 dark:text-gray-400">
+                            {[head.actor, head.at].filter(Boolean).join(' · ')}
+                          </div>
+                        </div>
+                        {entry.type === 'replacement' ? (
+                          <div className="mt-1 text-gray-600 dark:text-gray-300">
+                            {translateOr('amendment_replaced', 'Replaced', 'បានជំនួស')}
+                            {` — ${entry.removed.subject} ${entry.removed.deltaText}, ${entry.added.subject} ${entry.added.deltaText}`}
+                          </div>
+                        ) : (
+                          <div className="mt-1 flex flex-wrap items-baseline gap-x-2 text-gray-600 dark:text-gray-300">
+                            {/* "1 -> 2 (+1)": the before is kept on the screen,
+                                which is the whole of the owner's "in details it
+                                shows both". */}
+                            <span className="tabular-nums">{entry.row.beforeText}</span>
+                            <span aria-hidden="true">→</span>
+                            <span className="tabular-nums font-semibold text-gray-900 dark:text-white">{entry.row.afterText}</span>
+                            <span className={`tabular-nums font-semibold ${entry.row.isRemoval ? 'text-red-600 dark:text-red-400' : entry.row.isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                              ({entry.row.deltaText})
+                            </span>
+                          </div>
+                        )}
+                        {head.via !== 'amend' ? (
+                          <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                            {head.via === 'undo'
+                              ? translateOr('amendment_via_undo', 'Recorded by an undo', 'កត់ត្រាដោយការត្រឡប់ក្រោយ')
+                              : translateOr('amendment_via_redo', 'Recorded by a redo', 'កត់ត្រាដោយការធ្វើឡើងវិញ')}
+                          </div>
+                        ) : null}
+                        {/* A change that moved no stock says WHY. Without this
+                            it reads as a bug to whoever counts the shelf. */}
+                        {head.stockNote === 'stock_skipped' ? (
+                          <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                            {translateOr('amendment_stock_skipped', 'Stock was not touched: this sale is marked as not affecting stock.', 'ស្តុកមិនត្រូវបានប៉ះពាល់ទេ៖ ការលក់នេះត្រូវបានសម្គាល់ថាមិនប៉ះពាល់ស្តុក។')}
+                          </div>
+                        ) : head.stockNote === 'not_deducted' ? (
+                          <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                            {translateOr('amendment_stock_not_deducted', 'Stock was not touched: this sale had not taken stock yet.', 'ស្តុកមិនត្រូវបានប៉ះពាល់ទេ៖ ការលក់នេះមិនទាន់យកស្តុក។')}
+                          </div>
+                        ) : null}
+                        {head.note ? (
+                          <div className="mt-1 break-words text-[11px] text-gray-500 dark:text-gray-400">{head.note}</div>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ol>
+              )}
+            </SectionCard>
           ) : null}
 
           {currentStatus === 'cancelled' ? (
@@ -1150,6 +1603,32 @@ export default function SaleDetailModal({
               working={addSaving}
               onConfirm={submitAddItems}
               onClose={() => { if (!addSaving) setAddConfirmOpen(false) }}
+            />
+          ) : null}
+
+          {/* Every amendment gets the same single review the addition does --
+              they change a receipt the customer already holds, and half of
+              them move stock. One dialog for all five kinds, so no amendment
+              can ever be the one that slipped through on a single click. */}
+          {amendConfirm ? (
+            <ConfirmDialog
+              t={t}
+              title={amendConfirm.title}
+              message={sale.receipt_number ? `#${sale.receipt_number}` : undefined}
+              items={[
+                { label: translateOr('amend_change', 'Change', 'ការកែប្រែ'), value: amendConfirm.summary },
+                {
+                  label: t('stock') || 'Stock',
+                  value: amendStockMoves
+                    ? translateOr('amend_confirm_moves_stock', 'Stock moves now', 'ស្តុកនឹងផ្លាស់ប្តូរភ្លាមៗ')
+                    : translateOr('amend_confirm_no_stock', 'Stock is not touched', 'ស្តុកមិនត្រូវបានប៉ះពាល់'),
+                },
+              ]}
+              note={translateOr('amend_confirm_note', 'The receipt keeps its number and prints the new total. This change stays in the sale history.', 'វិក្កយបត្ររក្សាលេខដដែល ហើយបោះពុម្ពសរុបថ្មី។ ការកែប្រែនេះនៅក្នុងប្រវត្តិការលក់។')}
+              confirmLabel={translateOr('amend_confirm', 'Apply change', 'អនុវត្តការកែប្រែ')}
+              working={amendSaving}
+              onConfirm={() => submitAmendment(amendConfirm.request)}
+              onClose={() => { if (!amendSaving) setAmendConfirm(null) }}
             />
           ) : null}
         </div>

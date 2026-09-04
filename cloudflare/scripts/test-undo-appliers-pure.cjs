@@ -108,6 +108,14 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     plannedLineFromRecord: (record) => record,
     saleMoneyUpdateStatement: () => ({ sql: 'SELECT 1', params: {} }),
   }
+  // S4-30: the same applier now also appends an amendment-ledger entry, so an
+  // undone addition leaves a visible trail instead of a hole. Stubbed for the
+  // same reason as above -- the real statement builder and the append-only
+  // triggers behind it are driven against a live schema by
+  // test-sale-amendments-pure.cjs.
+  if (id === './saleAmendments') return {
+    amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }),
+  }
   return require(id)
 })
 const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable } = undoAppliers

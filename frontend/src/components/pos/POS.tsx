@@ -57,6 +57,7 @@ import {
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { businessDateTimeId } from '../../utils/timestampId.ts'
+import { effectiveTaxRate } from '../../utils/taxSettings.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -143,6 +144,7 @@ type AppSettings = Record<string, unknown> & {
   pos_payment_methods?: string
   product_brand_options?: string
   tax_rate?: string | number
+  tax_enabled?: string | number
 }
 
 type AppContextValue = {
@@ -1042,7 +1044,11 @@ export default function POS() {
   // Y2: per-order idempotency key for checkout -- kept across failed/timed-out
   // attempts (so a retry dedupes server-side), cleared on success.
   const checkoutRequestIdsRef = useRef(new Map<string, string>())
-  const taxRate   = parseFloat(asText(settings.tax_rate || '0')) / 100
+  // Tax only applies when the owner's switch is on (S4-30). With the switch
+  // never set this is identical to the old `tax_rate/100`, so nothing changes
+  // for an existing shop; once it is turned off the rate stops applying without
+  // the rate itself having to be wiped and re-typed later.
+  const taxRate   = effectiveTaxRate(settings.tax_enabled, settings.tax_rate)
   // Settings > POS Settings > "Show Discount in Cart" (pos_show_item_discount).
   // Unset/anything but the literal string 'false' means shown -- same
   // default-on convention as the notifications toggles in Settings.tsx.

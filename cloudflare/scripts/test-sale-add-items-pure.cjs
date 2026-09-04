@@ -500,6 +500,13 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
       './branchWrites': { branchUpdateStatements: () => [] },
       './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
       './saleLineAddition': subject,
+      // S4-30 subsumed this applier into the amendment ledger: undoing an
+      // addition now APPENDS a 'line_removed' entry rather than leaving the
+      // trail with a hole in it. This file proves the addition planners, so
+      // the ledger writer is stubbed here and proved for real -- against the
+      // migration's own append-only triggers -- in
+      // test-sale-amendments-pure.cjs.
+      './saleAmendments': { amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }) },
     })
     const resolved = undoModule.resolveUndoApplier({ applier: 'sale.add_items', snapshot_id: 1 })
     assert.ok(resolved, "resolveUndoApplier must find 'sale.add_items' -- an unregistered applier makes Undo a no-op")

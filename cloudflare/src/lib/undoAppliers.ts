@@ -13,6 +13,11 @@ import {
   saleMoneyUpdateStatement,
   type SaleAddItemsReversal,
 } from './saleLineAddition'
+// S4-30: an undo/redo of an addition appends a compensating entry to the sale's
+// amendment ledger, so there is ONE audit trail and the Undo button writes into
+// it rather than around it. Never a rewrite -- migration 0115's triggers refuse
+// that outright.
+import { amendmentEntryStatement } from './saleAmendments'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -620,7 +625,36 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           userId: ctx.user?.id ?? null,
           userName: ctx.user?.name ?? null,
         })
-        await db.batch([...removal.statements, saleMoneyUpdateStatement(saleId, reversal.moneyBefore)])
+        // S4-30: the Undo button writes INTO the amendment ledger rather than
+        // around it. Without this, a sale's detail view would show "added 2 x
+        // Serum" and then silently stop mentioning it once someone undid the
+        // addition -- one audit trail with a hole in it, which is worse than
+        // none. The original entry is NEVER rewritten (migration 0115's
+        // triggers make that impossible); this is a compensating APPEND, and
+        // "we added it, then we took it back off" is a true statement about
+        // the afternoon.
+        const undoGroupId = crypto.randomUUID()
+        await db.batch([
+          ...removal.statements,
+          saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
+          ...(reversal.lines || []).map((line) => amendmentEntryStatement({
+            saleId,
+            kind: 'line_removed',
+            groupId: undoGroupId,
+            saleItemId: line.saleItemId,
+            productId: line.productId,
+            productName: line.productName,
+            quantityBefore: line.quantity,
+            quantityAfter: 0,
+            totalBeforeUsd: reversal.moneyAfter.total_usd,
+            totalAfterUsd: reversal.moneyBefore.total_usd,
+            unitsMoved: line.heldUnits,
+            via: 'undo',
+            note: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
+            userId: ctx.user?.id ?? null,
+            userName: ctx.user?.name ?? null,
+          })),
+        ])
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('These items are already on the sale; there is nothing to redo.')
@@ -638,7 +672,31 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           userId: ctx.user?.id ?? null,
           userName: ctx.user?.name ?? null,
         })
-        const results = await db.batch([...plan.statements, saleMoneyUpdateStatement(saleId, reversal.moneyAfter)]) as Array<{ meta?: { last_row_id?: number } }>
+        // The mirror of the undo branch above: a redo appends its own
+        // `line_added` entries marked via 'redo', so the trail reads "added,
+        // removed, added back" rather than quietly returning to a state it
+        // never explains.
+        const redoGroupId = crypto.randomUUID()
+        const results = await db.batch([
+          ...plan.statements,
+          saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
+          ...plan.lines.map((line) => amendmentEntryStatement({
+            saleId,
+            kind: 'line_added',
+            groupId: redoGroupId,
+            productId: line.productId,
+            productName: line.productName,
+            quantityBefore: 0,
+            quantityAfter: line.quantity,
+            totalBeforeUsd: reversal.moneyBefore.total_usd,
+            totalAfterUsd: reversal.moneyAfter.total_usd,
+            unitsMoved: -line.heldUnits || 0,
+            via: 'redo',
+            note: `Redo: items re-added to sale ${reversal.receiptNumber || `#${saleId}`}`,
+            userId: ctx.user?.id ?? null,
+            userName: ctx.user?.name ?? null,
+          })),
+        ]) as Array<{ meta?: { last_row_id?: number } }>
         const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
           const statementIndex = plan.saleItemStatementIndexByLine[lineIndex]
           return Number(results[statementIndex]?.meta?.last_row_id || 0) || null
