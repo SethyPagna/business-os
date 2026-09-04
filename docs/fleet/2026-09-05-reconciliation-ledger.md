@@ -17,16 +17,17 @@ only after its focused tests, typecheck, and the final combined verification pas
 | SHIFT-FE | Shift settings, gate cache, profile and transaction summaries | complete | POS, Sales, Expenses and Income share the operational POS branch; visible loading/empty/error states and bilingual non-sensitive summaries are covered by focused tests |
 | SALE-UX | POS-style detail picker, batch/options, delivery text, status chooser | complete | POS-parity, stock-safety, full frontend chain and build pass |
 | PRODUCT-MERGE | Selectively harvest duplicate merge stock/cost decision flow | complete | Stock disposition, audit/undo and frontend choice tests pass; newer cost-average rule retained |
-| DATA | Legacy sale/receivable reconciliation and idempotent stock-safe repair | blocked on production preflight and payment ruling | Unsafe recovered SQL quarantined with matching SHA; 18-row manifest must be re-derived and two partial payments require owner policy |
+| DATA | Legacy sale/receivable reconciliation and idempotent stock-safe repair | fresh read-only preflight complete; exact settlement boundary unresolved | All 82 awaiting sales link to Sep-2 reconciliation; seven accidental Done sales and nine extra deductions remain; see historical-payment-preflight |
 | SECURITY | Adversarial review of shifts, sale batches and undo boundaries | complete | Foreign batches rejected; shift permissions/branch/lifecycle/race enforced; stale sale/product undo rejected; folded allocations remapped |
 | VERIFY | Full frontend/backend suites, build, migration checks, scope/math review | partial; release certification reopened | Earlier suite passes remain historical evidence, not proof of full requirement coverage; scope-review documents corrections and remaining navigation/authenticated checks |
 | COMMIT | Commit integrated changes and update progress | complete | Changes committed by concern on `codex/business-os-reconcile` |
 
 The DATA row is intentionally separate from application release
 correctness: it concerns a historical production settlement. MOBILE and VERIFY
-are also open after the independent reread. No quarantined SQL
-is part of the migration chain, and no production database or deployment action
-has been performed.
+are also open after the independent reread. No quarantined SQL is part of the
+migration chain. Stage-1 application release and schema migrations 0118/0119
+were authorized and deployed; no historical business-data repair was performed.
+See `2026-09-05-deployment.md` and `2026-09-05-historical-payment-preflight.md`.
 
 ## Reread correction
 
