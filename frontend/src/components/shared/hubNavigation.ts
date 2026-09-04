@@ -50,6 +50,18 @@ export function getHubPageFromLocation(pathname: string, hash: string): string {
   return pathname === '/' ? (hash.match(/^#hub:(branches|sales|contacts|promotions|settings|review):/)?.[1] || '') : ''
 }
 
+/** The root landing page has no route identity until its visible host publishes
+ * the body it actually chose. Hidden retained hosts must never claim that URL. */
+export function sealRootHubSection(page: string, section: string, activePage: string): boolean {
+  if (typeof window === 'undefined' || page !== activePage || !section
+    || window.location.pathname !== '/' || window.location.hash) return false
+  const anchor = hubAnchor(page, section)
+  if (getHubPageFromLocation('/', `#${anchor}`) !== page) return false
+  window.history.replaceState(window.history.state, '', `/${window.location.search}#${anchor}`)
+  window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { page, path: '/', anchor } }))
+  return true
+}
+
 export function resolveHubSection(page: string, pathname: string, hash: string, allowed: readonly string[], fallback: string): string {
   const prefix = `#hub:${page}:`
   const requested = hash.startsWith(prefix) ? hash.slice(prefix.length) : ''

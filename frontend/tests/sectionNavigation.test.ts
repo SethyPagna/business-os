@@ -110,7 +110,7 @@ await vm.runInContext(`
   const module = { exports: {} }
   const require = (name) => name === 'react' ? hooks : routing
   new Function('require', 'module', 'exports', compile(hubSource))(require, module, module.exports)
-  const { useHubSection, getHubPageFromLocation, navigationHash, needsNavigationGuard } = module.exports
+  const { useHubSection, getHubPageFromLocation, sealRootHubSection, navigationHash, needsNavigationGuard } = module.exports
   const { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } = routing
   const settingsRef = { current: { default_landing_page: 'sales' } }
   const window = new EventTarget()
@@ -287,6 +287,17 @@ await vm.runInContext(`
   assert.equal(stack.length, lengthBeforeGuardedBack)
   deferTraversals = false
   const beforeRoot = window.location.href
+  window.history.replaceState(window.history.state, '', '/?fixture=1')
+  const rootHistoryLength = stack.length
+  assert.equal(sealRootHubSection('promotions', 'discounts', 'sales'), false, 'hidden retained host cannot claim the root')
+  assert.equal(window.location.hash, '')
+  assert.equal(sealRootHubSection('promotions', 'rules', 'promotions'), true, 'visible root host publishes its actual default, not stale remembered header choice')
+  assert.equal(window.location.hash, '#hub:promotions:rules')
+  assert.equal(window.location.search, '?fixture=1')
+  assert.equal(stack.length, rootHistoryLength, 'sealing the root adds no navigation layer')
+  assert.equal(sealRootHubSection('promotions', 'discounts', 'promotions'), false, 'explicit section anchors retain precedence')
+  window.history.replaceState(window.history.state, '', '/#settings-field')
+  assert.equal(sealRootHubSection('settings', 'settings', 'settings'), false, 'non-hub root anchors retain their meaning')
   window.history.replaceState(window.history.state, '', '/#hub:sales:reports')
   const rootRunner = scheduler()
   assert.equal(rootRunner.run(() => useHubSection('sales', 'sales', ['sales', 'reports'], app.navigateTo))[0], 'reports', 'configured root hub honors section before fallback')
