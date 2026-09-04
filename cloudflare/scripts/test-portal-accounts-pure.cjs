@@ -71,11 +71,15 @@ const dbModule = { getDb: () => db }
 const phone = loadReal('lib/phone.ts')
 const passwordPolicy = loadReal('lib/passwordPolicy.ts')
 const contactOptions = loadReal('lib/contactOptions.ts')
+// The ONE membership-number minter (LC-##### , gap-filling). portalAccounts
+// no longer generates its own id, so this must be the REAL module.
+const membershipNumber = loadReal('lib/membershipNumber.ts')
 const contactDuplicates = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions })
 const { canonicalizePhone } = phone
 const { getPortalLockoutState, recordPortalFailure, clearPortalLockout } = loadReal('lib/portalAuthLockout.ts', { './db': dbModule })
 const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccounts.ts', {
   './db': dbModule,
+  './membershipNumber': membershipNumber,
   './phone': phone,
   './passwordPolicy': passwordPolicy,
   './contactDuplicates': contactDuplicates,
@@ -121,8 +125,11 @@ async function run() {
   await check('signup (new customer, no membership id) creates account + folded contact + auto id', async () => {
     const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret123' })
     assert.strictEqual(res.ok, true)
-    assert.ok(/^LCMN-[A-F0-9]{12}$/.test(res.membershipId), 'auto membership id uses 48 bits of Web-Crypto entropy')
+    // One house format across the whole app: lib/membershipNumber.ts's
+    // gap-filling LC-##### sequence, not this file's old random LCMN- id.
+    assert.ok(/^LC-\d{5,}$/.test(res.membershipId), 'auto membership id uses the LC- house format')
     assert.ok(!portalAccountSource.includes('Math.random('), 'account identifiers must never use Math.random')
+    assert.ok(!portalAccountSource.includes('getRandomValues'), 'portalAccounts no longer mints its own id -- lib/membershipNumber.ts is the one authority')
     const account = rawDb.prepare('SELECT phone, contact_id, membership_id FROM portal_accounts WHERE id = ?').get([res.accountId])
     assert.strictEqual(account.phone, '099888777', 'stored phone is canonical')
     assert.ok(account.contact_id, 'a contact was folded and linked')

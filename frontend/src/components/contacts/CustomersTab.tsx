@@ -40,7 +40,6 @@ import {
   serializeContactOptions as serializeStoredContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { generateCustomerMembershipNumber } from './customerMembershipNumber'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -637,7 +636,9 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       notify(tr(t, 'name_required', 'Name required'), 'error')
       return
     }
-    if (!String(form.membership_number || '').trim()) {
+    // Creating: a blank number is correct -- the server mints the next one in
+    // the LC- house sequence. Editing: an existing customer must keep one.
+    if (selected && !String(form.membership_number || '').trim()) {
       finishSingleAction(saveInFlightRef)
       notify(tr(t, 'membership_number_required', 'Membership number is required'), 'error')
       return

@@ -60,6 +60,18 @@ contactOptionsWrapper(contactOptionsModuleObj.exports, require, contactOptionsMo
 // salesStatus.ts is pure (no D1/Env dependency, per its own file comment)
 // and classifySales (tested below) genuinely calls normalizeSaleStatus and
 // reads RETURN_STATUSES/VALID_SALE_STATUSES at runtime -- same reasoning as
+// lib/membershipNumber.ts is the ONE membership-number minter (LC-#####,
+// gap-filling) -- classifyContacts calls createMembershipNumberAllocator for
+// every blank customer row, so it must be the real transpiled module.
+const membershipNumberSourcePath = path.join(__dirname, '..', 'src', 'lib', 'membershipNumber.ts')
+const { outputText: membershipNumberOutputText } = ts.transpileModule(fs.readFileSync(membershipNumberSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
+  fileName: membershipNumberSourcePath,
+})
+const membershipNumberModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', membershipNumberOutputText)(
+  membershipNumberModuleObj.exports, require, membershipNumberModuleObj, membershipNumberSourcePath, path.dirname(membershipNumberSourcePath),
+)
 // contactOptions.ts above, real transpiled module.
 const salesStatusSourcePath = path.join(__dirname, '..', 'src', 'lib', 'salesStatus.ts')
 const salesStatusSource = fs.readFileSync(salesStatusSourcePath, 'utf8')
@@ -201,6 +213,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request === './contactOptions') {
     return contactOptionsModuleObj.exports // real module -- classifyContacts actually calls into it
+  }
+  if (request === './membershipNumber') {
+    return membershipNumberModuleObj.exports // real module -- the one LC- membership minter classifyContacts uses
   }
   if (request === './salesStatus') {
     return salesStatusModuleObj.exports // real module -- classifySales actually calls into it
@@ -1126,7 +1141,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifyContacts(db, 'customers', [row({ name: 'Dara' }, 1)], null)
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].action, 'create')
-    assert.ok(String(results[0].data.membership_number || '').startsWith('LCMN-'), 'new customer with no membership_number in the CSV gets one auto-generated')
+    assert.ok(/^LC-\d{5}$/.test(String(results[0].data.membership_number || '')), 'new customer with no membership_number in the CSV gets one auto-generated, in the LC-##### house format from lib/membershipNumber.ts')
   }
 
   // 2) Matched existing customer whose stored membership_number is

@@ -8,7 +8,7 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { generateCustomerMembershipNumber } from './customerMembershipNumber'
+import { CUSTOMER_MEMBERSHIP_PLACEHOLDER } from './customerMembershipNumber'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
@@ -117,7 +117,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       notes: String(customer.notes || ''),
       gender: String(customer.gender || ''),
     }
-    : { name: '', membership_number: generateCustomerMembershipNumber(), phone: '', email: '', notes: '', gender: '' }
+    : { name: '', membership_number: '', phone: '', email: '', notes: '', gender: '' }
   const [form, setForm] = useState<CustomerFormState>(initial)
   const [options, setOptions] = useState(() => {
     const parsed = parseContactOptions(initial.address)
@@ -150,7 +150,10 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       setLocalError(tr(t, 'name_required', 'Name is required'))
       return
     }
-    if (!membershipNumber) {
+    // A new customer has no number yet -- the server mints the next one in
+    // the LC- sequence when this field arrives blank. Only an EXISTING
+    // customer, being edited, must still carry one.
+    if (customer && !membershipNumber) {
       setLocalError(tr(t, 'membership_number_required', 'Membership number is required'))
       return
     }
@@ -165,7 +168,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
 
   const buildCustomerReviewItems = (): ConfirmReviewItem[] => {
     const items: ConfirmReviewItem[] = [
-      { label: tr(t, 'membership_number', 'Membership number'), value: String(form.membership_number || '').trim().toUpperCase() },
+      { label: tr(t, 'membership_number', 'Membership number'), value: String(form.membership_number || '').trim().toUpperCase() || tr(t, 'membership_number_auto', 'Assigned on save') },
     ]
     const phone = String(form.phone || '').trim()
     if (phone) items.push({ label: tr(t, 'phone_number', 'Phone Number'), value: phone })
@@ -217,26 +220,26 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
 
         <div>
           <label htmlFor="customer-form-membership" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {tr(t, 'membership_number', 'Membership number')} *
+            {tr(t, 'membership_number', 'Membership number')}{customer ? ' *' : ''}
           </label>
-          <div className="flex gap-2">
-            <input
-              id="customer-form-membership"
-              name="customer_membership_number"
-              autoComplete="off"
-              className="input min-w-0 flex-1"
-              value={form.membership_number || ''}
-              onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
-              placeholder="LCMN-00000000"
-            />
-            <button
-              type="button"
-              className="btn-secondary shrink-0 px-3 text-xs"
-              onClick={() => setField('membership_number', generateCustomerMembershipNumber(form.name))}
-            >
-              {tr(t, 'regenerate', 'Regenerate')}
-            </button>
-          </div>
+          {/* Minted by the server, not the browser: the LC- sequence gap-fills,
+              which only the database can know. A new customer sees the field
+              read-only with the promise; an existing one can still be corrected
+              by hand (the server re-checks the number is unused). */}
+          <input
+            id="customer-form-membership"
+            name="customer_membership_number"
+            autoComplete="off"
+            className="input w-full"
+            value={form.membership_number || ''}
+            onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
+            placeholder={customer ? CUSTOMER_MEMBERSHIP_PLACEHOLDER : tr(t, 'membership_number_auto', 'Assigned on save')}
+            readOnly={!customer}
+            disabled={!customer}
+          />
+          {customer ? null : (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr(t, 'membership_number_auto_hint', 'The next available LC- number is assigned when you save.')}</p>
+          )}
         </div>
 
         <DuplicateFlagBanner matches={duplicateMatches} entityLabel="customer" />

@@ -540,6 +540,8 @@
   "supplier_attribute_failed": "មិនអាចកំណត់អ្នកផ្គត់ផ្គង់បានទេ។",
   "clear_all": "ដកទាំងអស់",
   "membership_discount_khr": "បញ្ចុះតម្លៃសមាជិក (រៀល)",
+  "membership_number_auto": "ផ្តល់ពេលរក្សាទុក",
+  "membership_number_auto_hint": "លេខ LC- បន្ទាប់ដែលទំនេរ នឹងត្រូវផ្តល់ជូននៅពេលអ្នករក្សាទុក។",
   "monthly": "ប្រចាំខែ",
   "more_actions": "សកម្មភាពច្រើនទៀត",
   "move_left": "ផ្លាស់ទីទៅឆ្វេង",

@@ -993,9 +993,17 @@ assert.match(
 
 assert.match(contactsShared, /LoadingWatchdog/, 'shared contact table should use retryable loading watchdog UI')
 assert.match(customers, /CustomerFormModal/, 'customer list should lazy-load the customer form modal')
-assert.match(customerFormModal, /generateCustomerMembershipNumber/, 'customer form should consume shared membership number generation')
-assert.match(customerMembershipNumber, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LCMN'/, 'customer membership helper should keep the LCMN prefix')
-assert.match(customerFormModal, /Regenerate/, 'customer form should let staff regenerate membership numbers')
+// Membership numbers are minted by the SERVER (cloudflare/src/lib/
+// membershipNumber.ts): the house format is LC-#####, and the sequence
+// gap-fills, so the next number is only knowable from the database. The form
+// used to pre-fill a browser-invented random LCMN- number, which -- because
+// the create route only mints when the submitted field is blank -- always won
+// over the real sequence. It must never compose one again.
+assert.doesNotMatch(customerFormModal, /generateCustomerMembershipNumber/, 'the customer form must not compose a membership number in the browser')
+assert.doesNotMatch(customerMembershipNumber, /export function generateCustomerMembershipNumber/, 'the membership helper must not mint numbers -- display and validation only')
+assert.match(customerMembershipNumber, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/, 'customer membership helper should carry the LC- house prefix')
+assert.match(customerFormModal, /CUSTOMER_MEMBERSHIP_PLACEHOLDER/, 'customer form should show the house format as a placeholder')
+assert.match(customerFormModal, /membership_number_auto_hint/, 'the add-customer form should say the number is assigned on save')
 assert.match(loaders, /const DEFAULT_LOADER_TIMEOUT_MS = 20_000/, 'loader timeout should give slow pages enough time before failing first render')
 assert.match(appContext, /RUNTIME_RECOVERY_SESSION_KEY/, 'runtime mismatch recovery should guard against reload loops')
 assert.match(appContext, /window\.location\.replace\(url\.toString\(\)\)/, 'runtime mismatch should heal through a hard reload once')
