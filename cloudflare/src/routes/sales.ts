@@ -3197,6 +3197,24 @@ app.get('/export', async (c) => {
   const afterCreatedAt = String(query.afterCreatedAt || '').trim()
   const afterId = Number(query.afterId)
   if (afterCreatedAt && Number.isSafeInteger(afterId) && afterId > 0) {
+    // sales.created_at is NOT one consistent shape: live inserts are
+    // 'YYYY-MM-DD HH:MM:SS' (sanitizeClientCreatedAt normalizes offline
+    // replays to match the server's CURRENT_TIMESTAMP shape -- see
+    // lib/clientTimestamp.ts) but legacy-import rows are ISO
+    // 'YYYY-MM-DDTHH:MM:SS.sssZ' (lib/*legacy-reports.mjs's
+    // bangkokToUtc/legacyToUtc write .toISOString()), and both eras coexist
+    // on the same calendar days. A raw string compares 'T' (0x54) after ' '
+    // (0x20) at position 10, so a same-day cross-shape raw comparison
+    // misorders -- the datetime() wrap below is required for correctness,
+    // not just inherited caution. What IS safe raw is the first 10 chars
+    // ('YYYY-MM-DD'): identical in both shapes, so a floor on just the date
+    // portion can never exclude a row the exact clause would keep, and it
+    // gives the planner a sargable seek into idx_sales_created_pg instead of
+    // scanning from the start of the table on every later page.
+    if (afterCreatedAt.length >= 10) {
+      detailWhere.push('s.created_at >= @afterCreatedAtFloor')
+      detailParams.afterCreatedAtFloor = afterCreatedAt.slice(0, 10)
+    }
     detailWhere.push(`(datetime(s.created_at) > datetime(@afterCreatedAt) OR (datetime(s.created_at) = datetime(@afterCreatedAt) AND s.id > @afterId))`)
     detailParams.afterCreatedAt = afterCreatedAt
     detailParams.afterId = afterId
@@ -3215,7 +3233,10 @@ app.get('/export', async (c) => {
   }
 
   // Read one extra sale so `has_more` is authoritative without an OFFSET or
-  // another COUNT on every details-only page.
+  // another COUNT on every details-only page. ORDER BY keeps the datetime()
+  // wrap deliberately -- see the mixed-shape note above the keyset cursor --
+  // a raw ORDER BY on created_at would misorder same-day rows that mix the
+  // ISO and space-separated shapes.
   const pageRows = await db.prepare(`
     SELECT s.id, s.receipt_number, s.created_at, s.branch_name, s.cashier_name,
            s.customer_name, s.customer_phone, s.customer_address,
