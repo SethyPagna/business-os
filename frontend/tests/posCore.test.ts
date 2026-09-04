@@ -15,6 +15,8 @@ import { buildVariantOptionLabels,
   getVariantRootProduct,
   isSaleRecorded,
   resolveCartPriceValues,
+  batchReceivedInstant,
+  sortBatchesForPicker,
 } from '../src/components/pos/posCore.ts'
 
 let failed = 0
@@ -510,6 +512,107 @@ await runTest('ProductDetailSheet preselects the card badge branch, not alphabet
     /activeBranchId=\{primaryBranchFilterId \?\? pickBestBranchId\(detailProduct\)\}/,
     'the sheet must be handed the branch the card resolved (filter first, else pickBestBranchId)',
   )
+})
+
+// ---------------------------------------------------------------------------
+// POS lot picker: one list, in the order a cashier needs it
+// ---------------------------------------------------------------------------
+const ids = (rows: Array<{ id: number }>) => rows.map((row) => row.id)
+
+await runTest('lot order: every available lot comes before every empty one', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: '2026-01-05 08:00:00', quantity: 0 },
+    { id: 2, received_at: '2026-06-01 08:00:00', quantity: 4 },
+    { id: 3, received_at: '2026-02-01 08:00:00', quantity: 0 },
+    { id: 4, received_at: '2026-03-01 08:00:00', quantity: 9 },
+  ])
+  // Available (2026-03-01, then 2026-06-01), then empty (2026-01-05, then
+  // 2026-02-01) -- never interleaved, each half oldest-received first.
+  assert.deepEqual(ids(sorted), [4, 2, 1, 3])
+})
+
+await runTest('lot order: within a group it is earliest received date to latest', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: '2026-08-24 10:00:00', quantity: 2 },
+    { id: 2, received_at: '2026-08-24 06:00:00', quantity: 2 },
+    { id: 3, received_at: '2025-12-31 23:00:00', quantity: 2 },
+  ])
+  assert.deepEqual(ids(sorted), [3, 2, 1])
+})
+
+await runTest('lot order: a date-only received_at is a real date, not an undated lot', () => {
+  assert.equal(batchReceivedInstant({ received_at: '2026-08-24' }), Date.UTC(2026, 7, 24))
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: '2026-09-01 00:00:00', quantity: 1 },
+    { id: 2, received_at: '2026-08-24', quantity: 1 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 1])
+})
+
+await runTest('lot order: an MMDDYYYY lot code stands in for a missing received_at', () => {
+  assert.equal(batchReceivedInstant({ lot_code: '08242026', received_at: null }), Date.UTC(2026, 7, 24))
+  const sorted = sortBatchesForPicker([
+    { id: 1, lot_code: '09012026', received_at: null, quantity: 3 },
+    { id: 2, lot_code: '08242026', received_at: null, quantity: 3 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 1])
+})
+
+await runTest('lot order: an undated or malformed lot sinks to the end of its OWN group', () => {
+  // Production holds ~9,900 synthetic `RECON-<productId>` lot codes; they are
+  // not dates, so a lot carrying one and nothing else must not sort as if it
+  // had been received at epoch 0 -- and must not be pushed behind empty lots
+  // either, since it still has stock to sell.
+  assert.equal(batchReceivedInstant({ lot_code: 'RECON-7321', received_at: null }), null)
+  assert.equal(batchReceivedInstant({ lot_code: '13992026', received_at: 'not-a-date' }), null)
+  const sorted = sortBatchesForPicker([
+    { id: 1, lot_code: 'RECON-7321', received_at: null, quantity: 5 },
+    { id: 2, received_at: '2026-05-01 08:00:00', quantity: 0 },
+    { id: 3, received_at: '2026-06-01 08:00:00', quantity: 5 },
+    { id: 4, lot_code: 'RECON-7322', received_at: '', quantity: 0 },
+  ])
+  assert.deepEqual(ids(sorted), [3, 1, 2, 4])
+})
+
+await runTest('lot order: a RECON lot code with a real received_at still sorts by that date', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, lot_code: 'RECON-7321', received_at: '2026-07-01 08:00:00', quantity: 2 },
+    { id: 2, lot_code: 'RECON-7322', received_at: '2026-02-01 08:00:00', quantity: 2 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 1])
+})
+
+await runTest('lot order: undated ties fall back to batch_number, then the incoming FIFO order', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: null, batch_number: null, quantity: 1 },
+    { id: 2, received_at: null, batch_number: 2, quantity: 1 },
+    { id: 3, received_at: null, batch_number: 1, quantity: 1 },
+  ])
+  assert.deepEqual(ids(sorted), [3, 2, 1])
+})
+
+await runTest('lot order: the input array is never mutated', () => {
+  const input = [
+    { id: 1, received_at: '2026-06-01 08:00:00', quantity: 0 },
+    { id: 2, received_at: '2026-01-01 08:00:00', quantity: 7 },
+  ]
+  sortBatchesForPicker(input)
+  assert.deepEqual(ids(input), [1, 2])
+})
+
+// ---------------------------------------------------------------------------
+// Wiring: the POS sheet shows ONE list, not the "#7321 / #7322" row-id pills
+// duplicating the lot list underneath.
+// ---------------------------------------------------------------------------
+await runTest('ProductDetailSheet drops the duplicate row-id option step and orders the lot list', () => {
+  const sheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+  assert.match(sheet, /const mergeRowsIntoLotList = /, 'the merge condition must exist')
+  assert.match(sheet, /const optionStepShown = !mergeRowsIntoLotList/, 'the option step must be hidden when the lot list absorbs it')
+  assert.match(sheet, /\{optionStepShown \? \(/, 'the option pills must actually be gated on it')
+  assert.match(sheet, /sortBatchesForPicker\(batches\)/, 'the lot list must be rendered in picker order')
+  assert.doesNotMatch(sheet, /pagedBatches = batches\.slice/, 'the lot pills must page over the ORDERED list')
+  assert.match(sheet, /lotSourceProductIds/, 'merged mode must fetch every indistinguishable row\'s lots')
+  assert.doesNotMatch(sheet, /'3\. Batch'/, 'the lot step number must be counted, not hardcoded')
 })
 
 if (failed > 0) {

@@ -11,7 +11,7 @@ import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildProductBranchSummaryLabel } from '../products/helpers/productDisplayHelpers.ts'
-import { buildVariantOptionLabels, computeExpiryStatus } from './posCore.ts'
+import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
 import ProductImage from './ProductImage'
 
 type ProductGroupMeta = {
@@ -95,6 +95,12 @@ type PriceMode = 'selling' | 'special' | 'promotion' | string
 const VARIANT_CHOICES_PAGE_SIZE = 5
 const BRANCH_CHOICES_PAGE_SIZE = 6
 const BATCH_CHOICES_PAGE_SIZE = 6
+
+// One lot as the picker holds it: the transport row plus the id of the
+// product ROW it came from. Only set when several indistinguishable rows'
+// lots are merged into a single list (see `mergeRowsIntoLotList` below);
+// picking such a lot also resolves which row the sale is booked against.
+type PickerBatch = ProductBatch & { __productId?: number }
 
 // Human-readable label for one lot/batch pill -- lot code when the batch has
 // one, otherwise the shared "Batch n: mm/dd/yyyy" default (batchLabel.ts),
@@ -272,7 +278,7 @@ export default function ProductDetailSheet({
   // Lot/batch picker state -- see the batch-picker section further down.
   // Reset alongside the other step state whenever a different product's
   // sheet opens, same as branch/barcode above.
-  const [batches, setBatches] = useState<ProductBatch[]>([])
+  const [batches, setBatches] = useState<PickerBatch[]>([])
   const [batchesLoading, setBatchesLoading] = useState(false)
   // Non-empty when the lot lookup FAILED, as opposed to succeeding with no
   // lots. The two must not render the same way -- see the fetch below.
@@ -368,6 +374,42 @@ export default function ProductDetailSheet({
   // each pill's text. See posCore.ts's buildVariantOptionLabels.
   const variantOptionLabels = buildVariantOptionLabels(candidatePool, (value) => fmtUSD(value))
 
+  // THE DUPLICATE LIST. buildVariantOptionLabels reports stepTitle 'Option'
+  // in exactly one situation: neither the barcode nor the selling price
+  // differs across these rows, so it has nothing cashier-facing left to put
+  // on a pill and falls back to the row's internal id ("#7321", "#7322").
+  // That is a list of database ids offered to a cashier as a choice, and it
+  // is asking the SAME question the lot list underneath asks -- "which
+  // intake of this product?" -- while its own doc-comment already hands that
+  // question to the lot picker ("which lot's COGS a sale draws from is
+  // settled by the batch picker"). So the id pills are the redundant half:
+  // the lot list states the choice as a received date and a quantity the
+  // cashier can act on, and it is the only one of the two that feeds the
+  // sale (buildBatchSelection -> BatchSelection -> the cart line's cap).
+  //
+  // Removing the pills outright would strand rows 2..n's lots, because
+  // GET /api/batches is scoped to ONE product row. So the two lists collapse
+  // into one instead: every indistinguishable row's lots are fetched and
+  // merged into a single received-date list, and picking a lot also resolves
+  // the row that owns it (see the pill onClick). Requires every candidate to
+  // be batch-tracked -- a row without lot tracking cannot be represented in
+  // a lot list, so a mixed group keeps the old two-step flow rather than
+  // silently losing a sellable row.
+  const optionStepIsIndistinguishable = groupProduct
+    && candidatePool.length > 1
+    && variantOptionLabels.stepTitle === 'Option'
+  const everyCandidateBatchTracked = candidatePool.length > 0
+    && candidatePool.every((variant) => trackedBatchProductIds?.has(Number(variant.id)) ?? false)
+  const mergeRowsIntoLotList = optionStepIsIndistinguishable && everyCandidateBatchTracked
+
+  // Step numbers are counted, not hardcoded. The option step disappears in
+  // merged mode, and a lot step still labelled "3." under a lone "1. Branch"
+  // reads as a step the cashier somehow skipped.
+  const branchStepShown = branchOptions.length > 0
+  const optionStepShown = !mergeRowsIntoLotList
+  const optionStepNumber = branchStepShown ? 2 : 1
+  const lotStepNumber = (branchStepShown ? 1 : 0) + (optionStepShown ? 1 : 0) + 1
+
   const barcodePageCount = Math.max(1, Math.ceil(candidatePool.length / VARIANT_CHOICES_PAGE_SIZE))
   const clampedBarcodePage = Math.min(barcodePage, barcodePageCount - 1)
   const pagedCandidates = candidatePool.slice(
@@ -417,16 +459,35 @@ export default function ProductDetailSheet({
   // using it here keeps the lot list and the branch shown on screen in
   // agreement instead of deriving the branch twice by different rules.
   const resolvedBranchId = effectiveBranchId
-  const isBatchTracked = resolvedProduct != null && (trackedBatchProductIds?.has(Number(resolvedProduct.id)) ?? false)
+  const isBatchTracked = mergeRowsIntoLotList
+    || (resolvedProduct != null && (trackedBatchProductIds?.has(Number(resolvedProduct.id)) ?? false))
+  // Which product row(s) the lot list is drawn from. Normally just the
+  // resolved row; in merged mode (above) every indistinguishable row, so the
+  // one remaining list still reaches every lot the removed id pills used to
+  // reach. The joined key is what the fetch and the "forget the previous
+  // pick" reset below depend on, NOT resolvedProduct.id -- in merged mode
+  // choosing a lot CHANGES the resolved row, and keying on that would wipe
+  // the very selection that changed it.
+  const lotSourceProductIds = (mergeRowsIntoLotList ? candidatePool : (resolvedProduct ? [resolvedProduct] : []))
+    .map((variant) => Number(variant.id))
+    .filter((id) => Number.isFinite(id) && id > 0)
+  const lotSourceKey = lotSourceProductIds.join(',')
   useEffect(() => {
-    if (!isBatchTracked || resolvedProduct == null) { setBatches([]); return }
+    if (!isBatchTracked || lotSourceProductIds.length === 0) { setBatches([]); return }
     if (resolvedBranchId == null) { setBatches([]); setBatchesLoading(false); return }
     let cancelled = false
     setBatchesLoading(true)
     setBatchesError('')
-    getProductBatches(resolvedProduct.id, resolvedBranchId).then((res) => {
+    // Promise.all, not allSettled, on purpose: a partially-loaded lot list is
+    // indistinguishable on screen from a complete one, and a cashier picking
+    // "the oldest lot" out of a list that quietly lost half its rows sells
+    // the wrong stock. One failed row fails the whole list, which the error
+    // branch below renders as an error and which keeps the sale blocked.
+    Promise.all(lotSourceProductIds.map((productId) => getProductBatches(productId, resolvedBranchId)
+      .then((res) => (Array.isArray(res?.batches) ? res.batches : [])
+        .map((batch) => ({ ...batch, __productId: productId } as PickerBatch))))).then((lists) => {
       if (cancelled) return
-      setBatches(Array.isArray(res?.batches) ? res.batches : [])
+      setBatches(lists.flat())
       setBatchesError('')
     }).catch((error: unknown) => {
       // A failed lot fetch is NOT "this product has no lots here". The old
@@ -441,7 +502,8 @@ export default function ProductDetailSheet({
       setBatchesError(error instanceof Error && error.message ? error.message : 'Could not load lots')
     }).finally(() => { if (!cancelled) setBatchesLoading(false) })
     return () => { cancelled = true }
-  }, [isBatchTracked, resolvedProduct?.id, resolvedBranchId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBatchTracked, lotSourceKey, resolvedBranchId])
   // A Branch/Barcode change can resolve to a different (or differently-
   // tracked) row, so a lot picked under the previous row must not silently
   // carry over -- same "don't leak a stale pick into the next selection"
@@ -456,18 +518,40 @@ export default function ProductDetailSheet({
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedProduct?.id, resolvedBranchId])
+  // Keyed on the lot list's OWN identity (which rows it is drawn from, at
+  // which branch), not on the resolved row: in merged mode picking a lot is
+  // what moves the resolved row, and resetting on that would clear the pick
+  // the moment it was made. Outside merged mode `lotSourceKey` IS the
+  // resolved row's id, so this behaves exactly as before.
   useEffect(() => {
     setSelectedBatchId(null)
     setSelectedDamagedLotId(null)
     setBatchPage(0)
     setBatchChoicesOpen(false)
-  }, [resolvedProduct?.id, resolvedBranchId])
+  }, [lotSourceKey, resolvedBranchId])
 
-  const batchPageCount = Math.max(1, Math.ceil(batches.length / BATCH_CHOICES_PAGE_SIZE))
+  // The cashier's order: available lots first, each group earliest received
+  // date to latest. See posCore.ts's sortBatchesForPicker -- the server's
+  // list is expiry-first FIFO, which interleaves empty lots among sellable
+  // ones. Ordered here at render (rather than when the fetch lands) so the
+  // list can never be shown in the raw transport order.
+  const orderedBatches = sortBatchesForPicker(batches)
+  const batchPageCount = Math.max(1, Math.ceil(orderedBatches.length / BATCH_CHOICES_PAGE_SIZE))
   const clampedBatchPage = Math.min(batchPage, batchPageCount - 1)
-  const pagedBatches = batches.slice(clampedBatchPage * BATCH_CHOICES_PAGE_SIZE, clampedBatchPage * BATCH_CHOICES_PAGE_SIZE + BATCH_CHOICES_PAGE_SIZE)
-  const selectedBatch = batches.find((batch) => batch.id === selectedBatchId) || null
-  const batchStockTotal = batches.reduce((sum, batch) => sum + Number(batch.quantity || 0), 0)
+  const pagedBatches = orderedBatches.slice(clampedBatchPage * BATCH_CHOICES_PAGE_SIZE, clampedBatchPage * BATCH_CHOICES_PAGE_SIZE + BATCH_CHOICES_PAGE_SIZE)
+  const selectedBatch = orderedBatches.find((batch) => batch.id === selectedBatchId) || null
+  const batchStockTotal = orderedBatches.reduce((sum, batch) => sum + Number(batch.quantity || 0), 0)
+  // Picking a lot in merged mode also picks the product row that owns it --
+  // that is how the removed id pills' one real job survives without the
+  // pills. Prices/VIP/wholesale below all re-render from the resolved row,
+  // so what the cashier sees is always the row the sale is booked against.
+  const chooseBatch = (batch: PickerBatch) => {
+    // Kept on one line: "picking a lot clears the damaged-lot pick and closes
+    // the list" is a contract both tests/returnOptions.test.ts and
+    // tests/productsResponsiveSurface.test.ts assert on the source text.
+    setSelectedBatchId(batch.id); setSelectedDamagedLotId(null); setBatchChoicesOpen(false)
+    if (mergeRowsIntoLotList && batch.__productId != null) setSelectedVariantId(String(batch.__productId))
+  }
   // Requires an in-stock lot to be picked before the price buttons below
   // become clickable -- a batch-tracked sale can't proceed without knowing
   // which lot it's coming from. Now applies the same way whether the
@@ -623,12 +707,17 @@ export default function ProductDetailSheet({
                   barcode and differ only in cost -- which used to render as two
                   identical pills with nothing to choose between them, and picking
                   the wrong one books the sale against the wrong cost. See
-                  posCore.ts's buildVariantOptionLabels. */}
+                  posCore.ts's buildVariantOptionLabels.
+
+                  Hidden entirely in merged mode, where it degenerates into a
+                  list of internal row ids ("#7321", "#7322") duplicating the
+                  lot list below -- see mergeRowsIntoLotList. */}
+              {optionStepShown ? (
               <div className="mb-3">
                 <div className="mb-1.5 flex items-baseline justify-between gap-2">
                   <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">
-                    {branchOptions.length
-                      ? `2. ${posCopy(variantOptionLabels.stepTitle, variantOptionLabels.stepTitle)}`
+                    {branchStepShown
+                      ? `${optionStepNumber}. ${posCopy(variantOptionLabels.stepTitle, variantOptionLabels.stepTitle)}`
                       : posCopy(variantOptionLabels.stepTitle, variantOptionLabels.stepTitle)}
                   </span>
                   <span className="text-[10px] text-gray-400 dark:text-gray-500">
@@ -659,6 +748,7 @@ export default function ProductDetailSheet({
                 </div>
                 <PillPager page={clampedBarcodePage} pageCount={barcodePageCount} onPageChange={setBarcodePage} posCopy={posCopy} />
               </div>
+              ) : null}
 
               {effectiveVariant ? (
                 <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
@@ -682,12 +772,12 @@ export default function ProductDetailSheet({
                       above for why this couldn't just reuse the flat-only gate. */}
                   {batchSelectionRequired ? (
                     <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/40">
-                      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{posCopy('3. Batch', '3. បាច់')}</div>
+                      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{`${lotStepNumber}. ${posCopy('Batch', 'បាច់')}`}</div>
                       {batchesLoading ? (
                         <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'កំពុងផ្ទុកបាច់…')}</div>
                       ) : batchesError ? (
                         <div className="text-xs font-medium text-red-500">{batchesError}</div>
-                      ) : batches.length === 0 ? (
+                      ) : orderedBatches.length === 0 ? (
                         <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
                       ) : (
                         <>
@@ -697,7 +787,11 @@ export default function ProductDetailSheet({
                             onClick={() => setBatchChoicesOpen((open) => !open)}
                             aria-expanded={batchChoicesOpen}
                           >
-                            <span className="min-w-0 truncate">{selectedBatch ? formatBatchLabel(selectedBatch, posCopy) : posCopy('Choose batch', 'ជ្រើសរើសបាច់')}</span>
+                            <span className="min-w-0 truncate">
+                              {selectedBatch
+                                ? `${formatBatchLabel(selectedBatch, posCopy)} · ${Number(selectedBatch.quantity || 0)}`
+                                : posCopy('Choose batch', 'ជ្រើសរើសបាច់')}
+                            </span>
                             <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
                           </button>
                           {batchChoicesOpen ? <><div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -708,7 +802,7 @@ export default function ProductDetailSheet({
                                   key={batch.id}
                                   type="button"
                                   className={pillClass(batch.id === selectedBatchId, batchOut)}
-                                  onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}
+                                  onClick={() => chooseBatch(batch)}
                                 >
                                   <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
                                   {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
@@ -790,7 +884,7 @@ export default function ProductDetailSheet({
                   <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'កំពុងផ្ទុកបាច់…')}</div>
                 ) : batchesError ? (
                   <div className="text-xs font-medium text-red-500">{batchesError}</div>
-                ) : batches.length === 0 ? (
+                ) : orderedBatches.length === 0 ? (
                   <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
                 ) : (
                   <>
@@ -800,7 +894,11 @@ export default function ProductDetailSheet({
                       onClick={() => setBatchChoicesOpen((open) => !open)}
                       aria-expanded={batchChoicesOpen}
                     >
-                      <span className="min-w-0 truncate">{selectedBatch ? formatBatchLabel(selectedBatch, posCopy) : posCopy('Choose batch', 'ជ្រើសរើសបាច់')}</span>
+                      <span className="min-w-0 truncate">
+                        {selectedBatch
+                          ? `${formatBatchLabel(selectedBatch, posCopy)} · ${Number(selectedBatch.quantity || 0)}`
+                          : posCopy('Choose batch', 'ជ្រើសរើសបាច់')}
+                      </span>
                       <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
                     </button>
                     {batchChoicesOpen ? <><div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -811,7 +909,7 @@ export default function ProductDetailSheet({
                             key={batch.id}
                             type="button"
                             className={pillClass(batch.id === selectedBatchId, batchOut)}
-                            onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}
+                            onClick={() => chooseBatch(batch)}
                           >
                             <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
                             {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
