@@ -9,6 +9,16 @@
 // the wheel event's default action stops the value from scrubbing, without
 // stopping the panel itself from scrolling. preventDefault would also stop
 // the panel scroll, trading the money bug for a usability one.
+//
+// Known side effect: blur is not inert, it fires the field's own onBlur.
+// FeeForm.tsx's amount_usd/amount_khr inputs use onBlur to mark the form
+// "touched" for validation display -- so scrolling past a focused fee-amount
+// field now marks it touched too, and a validation message can appear on a
+// field nobody edited. Confirmed FeeForm.tsx is the only place in the app
+// that pairs onBlur with a `type="number"` input (POS's payment field has no
+// onBlur). Restoring focus after blur would re-arm the money bug for exactly
+// as long as it takes, so this is accepted as a recorded trade-off rather
+// than designed around.
 
 export interface WheelGuardTarget {
   tagName?: string
