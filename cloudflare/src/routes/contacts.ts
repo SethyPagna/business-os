@@ -1678,8 +1678,8 @@ app.get('/suppliers/reports/ap-invoices', async (c) => {
   else if (status === 'paid') conditions.push('si.outstanding_balance_usd <= 0')
   const from = String(query.from || '').slice(0, 10)
   const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push("date(si.invoice_date, '+7 hours') >= @from"); params.from = from }
-  if (to) { conditions.push("date(si.invoice_date, '+7 hours') <= @to"); params.to = to }
+  if (from) { conditions.push(localDateAtOrAfter('si.invoice_date', '@from')); params.from = from }
+  if (to) { conditions.push(localDateAtOrBefore('si.invoice_date', '@to')); params.to = to }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   type ApRow = {
@@ -1779,8 +1779,8 @@ app.get('/customers/reports/ar-invoices', async (c) => {
   else if (status === 'settled') conditions.push('cr.outstanding_balance_usd = 0')
   const from = String(query.from || '').slice(0, 10)
   const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push("date(cr.invoice_date, '+7 hours') >= @from"); params.from = from }
-  if (to) { conditions.push("date(cr.invoice_date, '+7 hours') <= @to"); params.to = to }
+  if (from) { conditions.push(localDateAtOrAfter('cr.invoice_date', '@from')); params.from = from }
+  if (to) { conditions.push(localDateAtOrBefore('cr.invoice_date', '@to')); params.to = to }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   type ArRow = {
