@@ -249,7 +249,7 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, e
   const title = item?.name || (typeof t === 'function' ? (t('details') || 'Details') : 'Details')
 
   return (
-    <Modal title={title} onClose={onClose}>
+    <Modal title={title} onClose={onClose} unsavedChanges="read-only">
       <div className="space-y-2.5">
         {/* Compact detail rows (user, Part 567: "the details when click to
             view needs to be made more compact") -- narrower label column and

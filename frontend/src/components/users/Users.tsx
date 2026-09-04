@@ -9,6 +9,7 @@ import FilterMenu from '../shared/FilterMenu'
 import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import Modal from '../shared/Modal'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -410,6 +411,12 @@ export default function Users() {
   // can't resurface the dialog the next time the modal is opened.
   useEffect(() => { if (modal !== 'editUser') setUserConfirmOpen(false) }, [modal])
   const [passwordSaving, setPasswordSaving] = useState(false)
+  // S4-21: three separate forms live on this page, so each declares its own
+  // dirtiness and each re-baselines on the record it is editing (one modal
+  // instance is reused for every user/role).
+  const { dirty: userFormDirty } = useFormDirty(userForm, String(selectedUser?.id ?? 'new'))
+  const { dirty: roleFormDirty } = useFormDirty(roleForm, String(selectedRole?.id ?? 'new'))
+  const { dirty: passwordFormDirty } = useFormDirty(passwordForm, String(selectedUser?.id ?? 'new'))
   const [deletingRoleId, setDeletingRoleId] = useState<EntityId | null>(null)
   const saveUserInFlightRef = useRef(false)
   const passwordInFlightRef = useRef(false)
@@ -1344,7 +1351,7 @@ export default function Users() {
       ) : null}
 
       {modal === 'editUser' ? (
-        <Modal title={selectedUser ? `${tr('edit_user', 'Edit User')}: ${selectedUser.name}` : tr('add_user', 'Add user')} onClose={() => setModal(null)} wide>
+        <Modal title={selectedUser ? `${tr('edit_user', 'Edit User')}: ${selectedUser.name}` : tr('add_user', 'Add user')} onClose={() => setModal(null)} wide unsavedChanges={{ dirty: userFormDirty }}>
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
@@ -1433,7 +1440,7 @@ export default function Users() {
       ) : null}
 
       {modal === 'resetPw' && selectedUser ? (
-        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)}>
+        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)} unsavedChanges={{ dirty: passwordFormDirty }}>
           <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleResetPassword() }}>
             <input
               type="text"
@@ -1518,7 +1525,7 @@ export default function Users() {
       ) : null}
 
       {modal === 'editRole' ? (
-        <Modal title={selectedRole ? `${tr('edit_role', 'Edit role')}: ${selectedRole.name}` : tr('create_role', 'Create role')} onClose={() => setModal(null)} wide>
+        <Modal title={selectedRole ? `${tr('edit_role', 'Edit role')}: ${selectedRole.name}` : tr('create_role', 'Create role')} onClose={() => setModal(null)} wide unsavedChanges={{ dirty: roleFormDirty }}>
           <div className="space-y-4">
             <div>
               <label htmlFor="role-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('role_name', 'Role name')}</label>

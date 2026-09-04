@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
@@ -413,6 +414,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
   // -- a renamed/re-barcoded product simply drops out of its cluster.
   const [editTarget, setEditTarget] = useState<ClusterProduct | null>(null)
   const [editForm, setEditForm] = useState<{ name: string; barcode: string; cost: string; price: string }>({ name: '', barcode: '', cost: '', price: '' })
+  // S4-21: re-baselined per product, because one modal instance is
+  // reused for every row -- otherwise loading row B's values into a form
+  // baselined on row A reads as dirty without anyone typing.
+  const { dirty: editFormDirty } = useFormDirty(editTarget ? editForm : null, editTarget?.id ?? null)
   const [editSaving, setEditSaving] = useState(false)
   const openEdit = (product: ClusterProduct) => {
     setEditTarget(product)
@@ -661,7 +666,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
       )}
 
       {editTarget ? (
-        <Modal title={`${t('resolve') || 'Resolve'} — ${editTarget.name || `#${editTarget.id}`}`} onClose={() => setEditTarget(null)} draggable>
+        <Modal title={`${t('resolve') || 'Resolve'} — ${editTarget.name || `#${editTarget.id}`}`} onClose={() => setEditTarget(null)} draggable unsavedChanges={{ dirty: editFormDirty }}>
           <div className="space-y-2.5">
             {([
               ['name', t('name') || 'Name', 'text'],

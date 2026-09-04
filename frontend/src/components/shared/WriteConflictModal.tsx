@@ -234,7 +234,7 @@ export default function WriteConflictModal({ conflict, onClose, onReload }: Writ
   const fieldRows = getConflictFieldRows(conflict)
 
   return (
-    <Modal title={`${entityLabel} changed on another device`} onClose={onClose} size="lg">
+    <Modal title={`${entityLabel} changed on another device`} onClose={onClose} size="lg" unsavedChanges="read-only">
       <div className="space-y-5 text-sm text-gray-700 dark:text-gray-300">
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-900/20">
           <p className="font-semibold text-amber-800 dark:text-amber-300">

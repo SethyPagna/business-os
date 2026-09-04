@@ -247,7 +247,7 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
   }
 
   return (
-    <Modal title={tr('sales_import_title', 'Import Sales', 'នាំចូលការលក់')} onClose={onClose} draggable>
+    <Modal title={tr('sales_import_title', 'Import Sales', 'នាំចូលការលក់')} onClose={onClose} draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {reviewJob ? (
         <ServerImportReviewScreen
           jobId={reviewJob.id}

@@ -90,7 +90,8 @@ export default function ConfirmDialog({
           {working ? (workingLabel || T('saving', 'Saving...')) : (confirmLabel || T('confirm', 'Confirm'))}
         </button>
       )}
-    >
+    
+      unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         {danger ? (
           <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-950/30">

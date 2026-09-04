@@ -785,6 +785,11 @@ export default function ProductForm({
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreateMode, form.name, form.barcode])
+  // S4-21: ONE key, used both to register this form's dirtiness and to tell
+  // the modal chrome which registry entry its ✕ must consult. Two literals
+  // would drift and the ✕ would silently stop guarding.
+  const dirtyWorkKey = `product-form-${product?.id ?? 'new'}`
+
   const askCreateVerdict = () => new Promise<'back' | 'group' | 'new'>((resolve) => {
     createVerdictResolveRef.current = resolve
     setCreateVerdictOpen(true)
@@ -811,7 +816,7 @@ export default function ProductForm({
     }
     const productLabel = String(product?.name || form.name || '').trim()
     return registerDirtyWork({
-      key: `product-form-${product?.id ?? 'new'}`,
+      key: dirtyWorkKey,
       pageId: 'products',
       label: `${t('product_form') || 'Product form'}${productLabel ? ` — ${productLabel}` : ''}`,
       isDirty: () => formDirtyRef.current,
@@ -1142,7 +1147,8 @@ export default function ProductForm({
           ) : null}
         </>
       )}
-    >
+    
+      unsavedChanges={{ workKey: dirtyWorkKey }}>
       <div className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => (
@@ -1804,7 +1810,8 @@ export default function ProductForm({
               : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
           onClose={() => resolveCreateVerdict('back')}
           size="sm"
-        >
+        
+          unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className={`flex items-start gap-3 rounded-lg border p-3 ${createVerdict.kind === 'exact_twin'
               ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30'
@@ -1866,7 +1873,7 @@ export default function ProductForm({
         </Modal>
       ) : null}
       {nameUnlockConfirmOpen ? (
-        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm">
+        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm" unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
               <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />

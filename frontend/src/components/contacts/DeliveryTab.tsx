@@ -17,6 +17,7 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
@@ -255,6 +256,8 @@ interface DeliveryFormProps {
 function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
   const init: DeliveryPayload = contact ? { ...contact } : { name: '', phone: '', area: '', address: '', notes: '', gender: '' }
   const [form, setForm] = useState<DeliveryPayload>(init)
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(contact?.id ?? 'new'))
   const [options, setOptions] = useState(() => {
     const parsed = parseDeliveryOptions(init.address)
     if (parsed.length) return parsed
@@ -330,7 +333,8 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
     <Modal
       title={contact ? `Edit Delivery Contact` : `Add Delivery Contact`}
       onClose={onClose}
-    >
+    
+      unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-3">
         <div>
           <label htmlFor="delivery-form-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

@@ -240,7 +240,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
 
     {/* S4-14: the id the list row shows is repeated in the title, so the row
         an operator clicked and the receipt they read back are the same thing. */}
-    {selected ? <Modal title={`${tr('stock_in_session', 'Stock-in session')}${stockSessionId(selected.createdAt) ? ` · ${stockSessionId(selected.createdAt)}` : ''}`} onClose={() => setSelected(null)} size="lg">
+    {selected ? <Modal title={`${tr('stock_in_session', 'Stock-in session')}${stockSessionId(selected.createdAt) ? ` · ${stockSessionId(selected.createdAt)}` : ''}`} onClose={() => setSelected(null)} size="lg" unsavedChanges={{ dirty: editing }}>
       <div className="space-y-3">
         {editing ? <div className="grid grid-cols-2 gap-2 rounded-lg bg-gray-50 p-2.5 dark:bg-gray-800/60">
           <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('received_date', 'Received date')} value={String(editDate || '').slice(0, 10)} onChange={(iso) => setEditDate(iso)} /></label>

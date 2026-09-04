@@ -18,6 +18,7 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
@@ -208,6 +209,8 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
     ? { ...supplier }
     : { name: '', phone: '', email: '', company: '', contact_person: '', address: '', notes: '', gender: '' }
   const [form, setForm] = useState<SupplierPayload>(init)
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(supplier?.id ?? 'new'))
   const [options, setOptions] = useState<ContactOption[]>(() => {
     const parsed = parseStoredContactOptions(init.address, { legacyField: 'address' })
     if (parsed.length) return parsed
@@ -277,7 +280,7 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
   }
 
   return (
-    <Modal title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')} onClose={onClose}>
+    <Modal title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')} onClose={onClose} unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-3">
         <div>
           <label htmlFor="supplier-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>

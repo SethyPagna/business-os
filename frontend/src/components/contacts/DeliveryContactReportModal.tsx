@@ -98,7 +98,7 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
   )
 
   return (
-    <Modal title={`${tr(t, 'delivery_report', 'Deliveries')} -- ${contactName}`} onClose={onClose}>
+    <Modal title={`${tr(t, 'delivery_report', 'Deliveries')} -- ${contactName}`} onClose={onClose} unsavedChanges="read-only">
       <div className="space-y-3">
         <DateTimeRangePicker
           value={range}

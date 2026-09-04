@@ -103,7 +103,7 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
   }
 
   return (
-    <Modal title="Return reasons" onClose={onClose} size="sm">
+    <Modal title="Return reasons" onClose={onClose} size="sm" unsavedChanges={{ dirty: Boolean(draft.trim()) }}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
           {(['customer', 'supplier'] as ReturnReasonScope[]).map((value) => (

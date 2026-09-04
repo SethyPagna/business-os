@@ -1,5 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useModalClose } from '../shared/modalCloseContext.ts'
+
+// S4-21: the registry key for this form's unsaved work. Exported so the
+// modal hosting the form asks about the SAME entry the form registers --
+// two hand-written literals would drift and the ✕ would stop guarding.
+export function branchFormWorkKey(branchId?: string | number | null): string {
+  return `branch-form-${branchId ?? 'new'}`
+}
 
 type BranchFlag = 0 | 1
 
@@ -48,6 +58,25 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
   const [saving, setSaving] = useState(false)
   const [nameTouched, setNameTouched] = useState(false)
 
+  // S4-21: one declaration, five consumers -- the ✕ on the modal above,
+  // the navigation-away guard, beforeunload, the sidebar dot and the
+  // app-update gate. `saved` latches so a completed save is not still
+  // reported as work at risk while the host unmounts the form.
+  const { dirty } = useFormDirty(form, String(branch?.id ?? 'new'))
+  const savedRef = useRef(false)
+  const dirtyRef = useRef(false)
+  dirtyRef.current = dirty && !savedRef.current
+  const requestClose = useModalClose(onClose)
+  useEffect(() => registerDirtyWork({
+    key: branchFormWorkKey(branch?.id),
+    pageId: 'branches',
+    label: `${t('branch') || 'Branch'}${branch?.name ? ` — ${branch.name}` : ''}`,
+    isDirty: () => dirtyRef.current,
+    // No save hook: saving runs required-name validation, which would
+    // surface an error on a page the operator is trying to leave.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [branch?.id])
+
   const set = <Key extends keyof BranchFormState>(key: Key, value: BranchFormState[Key]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
@@ -60,6 +89,11 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
     try {
       setSaving(true)
       await onSave(form)
+      // Saved for real: nothing is at risk any more, so the close below
+      // must not raise the discard prompt (the classic save-then-prompt
+      // bug). Latched before onClose, never after.
+      savedRef.current = true
+      dirtyRef.current = false
       onClose()
     } finally {
       setSaving(false)
@@ -194,7 +228,9 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
         <button className="btn-primary flex-1" type="submit" disabled={saving || nameInvalid}>
           {saving ? t('saving') : (t('save_branch') || 'Save Branch')}
         </button>
-        <button className="btn-secondary" type="button" onClick={onClose}>
+        {/* Cancel is a dismissal too, so it goes through the modal's guard
+            rather than straight to onClose -- S4-21. */}
+        <button className="btn-secondary" type="button" onClick={requestClose}>
           {t('cancel')}
         </button>
       </div>

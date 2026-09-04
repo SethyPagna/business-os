@@ -279,7 +279,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
   }
 
   return (
-    <Modal title={tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')} onClose={onClose} draggable>
+    <Modal title={tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')} onClose={onClose} draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {reviewJob ? (
         <ServerImportReviewScreen
           jobId={reviewJob.id}

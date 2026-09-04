@@ -179,7 +179,7 @@ export default function ImportReportModal({ jobId, onClose, title }: ImportRepor
   const csvFile = (report?.files || []).find((f) => f.kind === 'csv')
 
   return (
-    <Modal title={title || csvFile?.original_name || t('import_report_default_title')} onClose={onClose} size="lg">
+    <Modal title={title || csvFile?.original_name || t('import_report_default_title')} onClose={onClose} size="lg" unsavedChanges="read-only">
       {loading ? (
         <div className="flex items-center justify-center py-12 text-gray-500 dark:text-gray-400">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />

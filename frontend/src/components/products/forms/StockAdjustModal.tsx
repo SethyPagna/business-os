@@ -630,7 +630,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // Step 1: product picker.
   if (!selectedProduct) {
     return (
-      <Modal title={tr('adjust_pick_product', 'Choose a product to adjust')} onClose={onClose} size="sm">
+      <Modal title={tr('adjust_pick_product', 'Choose a product to adjust')} onClose={onClose} size="sm" unsavedChanges="read-only">
         <div className="space-y-3">
           <div className="flex gap-2">
             <div className="min-w-0 flex-1">

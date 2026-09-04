@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Modal from '../shared/Modal'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import {
   CONTACT_OPTION_LIMIT,
@@ -119,6 +120,8 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
     }
     : { name: '', membership_number: '', phone: '', email: '', notes: '', gender: '' }
   const [form, setForm] = useState<CustomerFormState>(initial)
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(customer?.id ?? 'new'))
   const [options, setOptions] = useState(() => {
     const parsed = parseContactOptions(initial.address)
     return parsed.length ? parsed : [createContactOption()]
@@ -197,7 +200,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
   }
 
   return (
-    <Modal title={customer ? `${tr(t, 'edit_customer', 'Edit Customer')}` : tr(t, 'add_customer', 'Add Customer')} onClose={onClose}>
+    <Modal title={customer ? `${tr(t, 'edit_customer', 'Edit Customer')}` : tr(t, 'add_customer', 'Add Customer')} onClose={onClose} unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-3">
         <div>
           <label htmlFor="customer-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'name', 'Name')} *</label>

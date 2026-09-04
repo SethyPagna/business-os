@@ -30,7 +30,6 @@ import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import Modal from '../shared/Modal.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
-import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import { receiveBatchStock } from '../../api/batchesTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -130,7 +129,6 @@ export default function CreateProductsSessionModal({
   // in-memory state.
   const [itemFormSeq, setItemFormSeq] = useState(0)
   const [saving, setSaving] = useState(false)
-  const [confirmDiscard, setConfirmDiscard] = useState(false)
   const sessionIdRef = useRef(draft?.sessionId || Date.now())
   // One lot date for the whole delivery, captured when the session starts.
   // Not a fourth field -- the owner asked for three -- but shown read-only in
@@ -271,12 +269,16 @@ export default function CreateProductsSessionModal({
     onClose()
   }
 
-  // Close on a dirty form asks before throwing typing away. Created items
-  // are already written, so they are never what is at risk here -- only the
-  // header the operator typed but has not used yet.
+  // S4-21: this modal used to carry its OWN copy of the discard prompt (a
+  // local confirmDiscard flag plus a ConfirmDialog). That copy is gone --
+  // the modal now declares `unsavedChanges` and the shared guard in
+  // Modal.tsx raises the one app-wide prompt, which is the whole point of
+  // the item ("every modal and float in the app, not a one-off").
+  // Created items are already written, so they are never what is at risk
+  // here -- only the header the operator typed but has not used yet.
+  const closeIsGuarded = headerDirty && rows.length === 0
   const requestClose = () => {
     if (saving) return
-    if (headerDirty && rows.length === 0) { setConfirmDiscard(true); return }
     finish()
   }
 
@@ -311,7 +313,7 @@ export default function CreateProductsSessionModal({
         : `${tr('create_products_session_title', 'Create products session')} · ${summary.items}`}
       onClose={requestClose}
       size="lg"
-    >
+      unsavedChanges={{ dirty: closeIsGuarded }}>
       <div className="space-y-4">
         {/* ---- step 1: the shared header, entered once ---- */}
         <div className={`rounded-xl border p-3 ${step === 'header'
@@ -458,18 +460,6 @@ export default function CreateProductsSessionModal({
         ) : null}
       </div>
 
-      {confirmDiscard ? (
-        <ConfirmDialog
-          title={tr('create_products_discard_title', 'Discard these shared details?')}
-          message={tr('create_products_discard_desc', 'The brand, supplier and branch you typed have not been used yet.')}
-          confirmLabel={tr('discard', 'Discard')}
-          cancelLabel={tr('back', 'Back')}
-          danger
-          onConfirm={() => { setConfirmDiscard(false); finish() }}
-          onClose={() => setConfirmDiscard(false)}
-          t={(key: string) => t(key)}
-        />
-      ) : null}
     </Modal>
   )
 }

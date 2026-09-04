@@ -270,7 +270,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
   const isEditing = editingId !== null
 
   return (
-    <Modal title="Announcement Strip" onClose={onClose} size="lg">
+    <Modal title="Announcement Strip" onClose={onClose} size="lg" unsavedChanges={{ dirty: editingId !== null }}>
       <div className="flex flex-col gap-4 overflow-y-auto p-5">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Small, quick banner cards that scroll horizontally at the very top of the public catalog page —

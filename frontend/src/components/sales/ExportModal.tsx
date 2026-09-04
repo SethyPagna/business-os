@@ -223,7 +223,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   }
 
   return (
-    <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={onClose} wide>
+    <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={onClose} wide unsavedChanges="read-only">
       <div className="space-y-5">
         <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
           <div className="rounded-2xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">

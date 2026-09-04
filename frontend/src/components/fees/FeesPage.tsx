@@ -38,7 +38,7 @@ import {
   type FeeRecord,
   type FeeType,
 } from '../../api/feesTransport.ts'
-import FeeForm, { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
+import FeeForm, { FEE_TYPE_OPTIONS, feeFormWorkKey } from './FeeForm.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
@@ -737,7 +737,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       )}
 
       {modal === 'form' ? (
-        <Modal title={selected ? tr('edit_fee', 'Edit Expense') : tr('add_fee', 'Add Expense')} onClose={closeModal} size="sm">
+        <Modal title={selected ? tr('edit_fee', 'Edit Expense') : tr('add_fee', 'Add Expense')} onClose={closeModal} size="sm" unsavedChanges={{ workKey: feeFormWorkKey(selected?.id) }}>
           <FeeForm
             fee={selected}
             labelSuggestions={[...new Set(fees.map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}

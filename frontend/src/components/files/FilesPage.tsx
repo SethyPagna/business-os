@@ -412,7 +412,7 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
   }
 
   return (
-    <Modal title={sanitizeFallback(logicalAssetDisplayName(asset)) || 'Details'} onClose={onClose} size="xl">
+    <Modal title={sanitizeFallback(logicalAssetDisplayName(asset)) || 'Details'} onClose={onClose} size="xl" unsavedChanges="read-only">
       <div className="space-y-4">
         <div className="flex max-h-[55vh] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
           <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="max-h-[55vh] w-full object-contain" />
@@ -1776,7 +1776,7 @@ export default function FilesPage() {
       ) : null}
 
       {deleteConfirmAsset ? (
-        <Modal title={tr('delete_file', 'Delete file')} onClose={closeDeleteConfirm} size="sm">
+        <Modal title={tr('delete_file', 'Delete file')} onClose={closeDeleteConfirm} size="sm" unsavedChanges="read-only">
           <div className="flex flex-col gap-4">
             <p className="truncate text-sm font-medium text-slate-900 dark:text-white" title={deleteConfirmAsset.original_name || ''}>
               {deleteConfirmAsset.original_name || '-'}
@@ -1839,7 +1839,7 @@ export default function FilesPage() {
       ) : null}
 
       {bulkDeleteConfirmOpen ? (
-        <Modal title={tr('delete_files', 'Delete files')} onClose={closeBulkDeleteConfirm} size="sm">
+        <Modal title={tr('delete_files', 'Delete files')} onClose={closeBulkDeleteConfirm} size="sm" unsavedChanges="read-only">
           <div className="flex flex-col gap-4">
             <p className="text-sm text-slate-700 dark:text-slate-200">
               {selectedAssets.length - bulkDeletableAssets.length > 0

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
+import { useFormDirty } from '../../../utils/formDirty.ts'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
@@ -155,6 +156,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(parent?.id ?? 'new'))
   const saveInFlightRef = useRef(false)
   const { notify } = useApp()
 
@@ -269,7 +272,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           {saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
         </button>
       )}
-    >
+    
+      unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-4">
         <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
           {tr('variant_helper_text', 'Variants of the same product group can have different prices, barcodes, and suppliers.', 'វ៉ារីយ៉ង់ក្នុងក្រុមផលិតផលដូចគ្នា អាចមានតម្លៃ បារកូដ និងអ្នកផ្គត់ផ្គង់ខុសគ្នា។')}

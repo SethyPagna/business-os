@@ -80,7 +80,7 @@ export default function ProductImportConflictsModal({ jobId, notify, onClose, on
   }
 
   return (
-    <Modal title="Resolve product import conflicts" onClose={onClose} size="xl">
+    <Modal title="Resolve product import conflicts" onClose={onClose} size="xl" unsavedChanges="read-only">
       <div className="space-y-4">
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           <div className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><p>Choose what happens for every barcode, SKU, or negative-stock warning. <strong>Use safe result</strong> keeps the server preview (a colliding identifier stays a separate product; negative stock becomes 0). <strong>Skip row</strong> makes no change for that row.</p></div>
