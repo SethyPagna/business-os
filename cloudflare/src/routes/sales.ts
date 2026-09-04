@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -29,6 +29,28 @@ import {
   saleStatusDeductsStock,
   type SaleMoneyRow,
 } from '../lib/saleLineAddition'
+// S4-30: amending a recorded sale, as an append-only ledger. Same discipline
+// as S4-24b above -- every rule about who may amend, for how long, what moves
+// stock, and what happens to the money lives in the pure module, and this file
+// is the I/O around it. See scripts/test-sale-amendments-pure.cjs.
+import {
+  AMENDMENT_WINDOW_SETTING_KEY,
+  amendmentEntryStatement,
+  guardDeliveryFeeAmendment,
+  guardSaleAmendment,
+  planDeliveryFeeChange,
+  planLineQuantityDecrease,
+  planLineQuantityIncrease,
+  recomputeSaleMoneyAfterAmendment,
+  resolveAmendmentWindowMinutes,
+  saleAmendmentMovesStock,
+  saleSkipsStock,
+  summarizeAmendments,
+  type AmendableSaleRow,
+  type LedgerRow,
+  type LineAllocation,
+} from '../lib/saleAmendments'
+import { isAdminControlUser } from '../lib/permissions'
 import { recordSaleAddItemsUndoSnapshot } from '../lib/undoAppliers'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
@@ -1703,13 +1725,59 @@ app.post('/:id/items', async (c) => {
     change_khr: money.changeKhr,
   }
 
-  // ---- One atomic batch: the new lines, their stock, and the sale's money.
-  // Deliberately ONE unit -- a committed line whose sale header still shows
-  // the old total is precisely the inconsistency this endpoint must not be
-  // able to produce. ----
+  // ---- The amendment ledger entries for this addition (S4-30).
+  //
+  // S4-24b's endpoint is SUBSUMED by the ledger rather than sitting beside it:
+  // there is ONE way to add a line to a recorded sale, and it leaves ONE audit
+  // trail. A second addition path with its own trail would make the feature
+  // worse than not having it.
+  //
+  // The entries go in the SAME atomic batch as the lines they describe. That
+  // costs one thing -- sale_item_id is not knowable until the batch returns
+  // its last_row_ids, so these entries carry NULL there and identify the line
+  // by product instead. That is the right trade: an added line whose audit
+  // entry silently failed afterwards is a worse outcome than an entry without
+  // a foreign key, and the line id is secondary anyway (a removed line's id
+  // dangles by design -- the ledger snapshots the product name for exactly
+  // this reason).
+  //
+  // One request is one act, so every line shares a group_id.
+  const additionGroupId = crypto.randomUUID()
+  let runningTotalUsd = moneyBefore.total_usd
+  const ledgerStatements = plan.lines.map((line, lineIndex) => {
+    const isLast = lineIndex === plan.lines.length - 1
+    const totalBeforeUsd = runningTotalUsd
+    const totalAfterUsd = isLast ? moneyAfter.total_usd : round2(runningTotalUsd + line.lineTotalUsd)
+    runningTotalUsd = totalAfterUsd
+    return amendmentEntryStatement({
+      saleId,
+      kind: 'line_added',
+      groupId: additionGroupId,
+      productId: line.productId,
+      productName: line.productName,
+      quantityBefore: 0,
+      quantityAfter: line.quantity,
+      totalBeforeUsd,
+      totalAfterUsd,
+      unitsMoved: -line.heldUnits || 0,
+      stockSkipped: saleSkipsStock(sale as AmendableSaleRow),
+      note: String(body.notes || '').trim().slice(0, 500) || null,
+      userId: user?.id ?? null,
+      userName: user?.name ?? null,
+    })
+  })
+
+  // ---- One atomic batch: the new lines, their stock, the sale's money, and
+  // the ledger entries that record all three. Deliberately ONE unit -- a
+  // committed line whose sale header still shows the old total is precisely
+  // the inconsistency this endpoint must not be able to produce. ----
   let batchResults: Array<{ meta?: { last_row_id?: number } }> = []
   try {
-    batchResults = await db.batch([...plan.statements, saleMoneyUpdateStatement(saleId, moneyAfter)]) as typeof batchResults
+    batchResults = await db.batch([
+      ...plan.statements,
+      saleMoneyUpdateStatement(saleId, moneyAfter),
+      ...ledgerStatements,
+    ]) as typeof batchResults
   } catch (error) {
     const message = (error as Error).message || ''
     if (/CHECK constraint|constraint failed/i.test(message)) {
@@ -1806,6 +1874,474 @@ app.post('/:id/items', async (c) => {
     updated_at: updated?.updated_at || null,
   })
 })
+
+// ---------------------------------------------------------------------------
+// GET /api/sales/:id/amendments -- the sale's audit trail (S4-30).
+//
+// This is the STAFF-facing read, and it is the whole point of the feature: the
+// original value plus every amendment on top of it, each with what changed, by
+// how much, who did it and when. The customer-facing receipt reads none of
+// this -- it renders the net state off `sale_items` + the `sales` row, exactly
+// as it always did.
+//
+// Read-gated, not write-gated: a view-tier bookkeeper who can see the sale can
+// see how it got that way. Hiding the trail from the people who reconcile the
+// books would defeat it.
+// ---------------------------------------------------------------------------
+app.get('/:id/amendments', async (c) => {
+  const db = getDb(c.env)
+  if (!canReadSales(c.get('user'))) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const saleId = Number(c.req.param('id'))
+  if (!Number.isFinite(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
+
+  // Oldest first -- the detail view reads top-to-bottom as a story, and this
+  // is the (sale_id, id) index migration 0115 creates.
+  const entries = await db.prepare(`
+    SELECT id, kind, group_id, sale_item_id, product_id, product_name,
+      quantity_before, quantity_after, quantity_delta,
+      amount_before_usd, amount_after_usd, amount_delta_usd,
+      total_before_usd, total_after_usd,
+      units_moved, stock_skipped, via, reverses_amendment_id, undo_action_id,
+      note, user_id, user_name, created_at
+    FROM sale_amendments WHERE sale_id = ? ORDER BY id ASC
+  `).all<LedgerRow>([saleId])
+
+  return c.json({ saleId, entries, summary: summarizeAmendments(entries) })
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/sales/:id/amendments -- change a recorded sale (S4-30).
+//
+// The shop owner's ask: "sometimes we input wrong delivery cost, or customers
+// change their mind and want to add or replace products... we do an add on
+// top, so we know we added."
+//
+// Kinds handled here: increase a line, decrease a line, remove a line, replace
+// one product with another, and correct the delivery fee. ADDING a brand-new
+// line is POST /:id/items above -- that endpoint already exists, already has
+// its own tested stock kernel and its own undo applier, and it now writes a
+// `line_added` entry into this same ledger. Reimplementing it here would be
+// the second path this feature must not have.
+//
+// PERMISSION: the granular `sales -> amend` action at FULL tier. Amending a
+// recorded sale moves stock and changes what the customer owes, so it is not
+// covered by the coarse 'sales' grant, and it is a different act from adding
+// goods (`add_items`) or changing a status (`status`) -- a shop may well want
+// a senior cashier who can add a forgotten item but cannot take one off.
+//
+// NOT BUILT here, on purpose, and each one is named with its reason in
+// lib/saleAmendments.ts's DECISION 2: a line's unit price, the manual and
+// membership discounts, tax, and the tender.
+// ---------------------------------------------------------------------------
+const AMENDMENT_REQUEST_KINDS = new Set(['line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_replaced', 'delivery_fee_changed'])
+
+app.post('/:id/amendments', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'amend') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+
+  const body = await c.req.json<{
+    kind?: string
+    sale_item_id?: number
+    quantity?: number
+    delivery_fee_usd?: number
+    replacement?: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number }
+    notes?: string
+    [key: string]: unknown
+  }>().catch(() => ({} as Record<string, unknown>))
+
+  const kind = String(body.kind || '')
+  if (!AMENDMENT_REQUEST_KINDS.has(kind)) {
+    return c.json({ error: `Unknown amendment "${kind}".` }, 400)
+  }
+
+  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<AmendableSaleRow & {
+    id: number
+    sale_status: string | null
+    updated_at: string | null
+    branch_id: number | null
+    receipt_number: string | null
+    created_at: string | null
+    total_usd: number | null
+    amount_paid_usd: number | null
+    amount_paid_khr: number | null
+  }>([c.req.param('id')])
+  if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  try {
+    assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
+  } catch (error) {
+    if (error instanceof WriteConflictError) {
+      const { body: conflictBody, status } = writeConflictResponse(error)
+      return c.json(conflictBody, status)
+    }
+    throw error
+  }
+
+  const saleId = Number(sale.id)
+  const saleStatus = String(sale.sale_status || 'completed')
+  const exchangeRate = Number(sale.exchange_rate) || 4100
+
+  // A sale can carry real return records while its status row says something
+  // else (imported/legacy rows), so the guard is given the EVIDENCE, not the
+  // label -- the identical read S4-24b's addition guard uses, applied to every
+  // amendment kind rather than only to additions.
+  const returnedRow = await db.prepare(`
+    SELECT 1 AS found FROM return_items ri
+    JOIN returns r ON r.id = ri.return_id
+    WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled'
+    LIMIT 1
+  `).get<{ found: number }>([saleId])
+
+  const windowRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get<{ value: string }>([AMENDMENT_WINDOW_SETTING_KEY])
+  const guard = guardSaleAmendment({
+    saleStatus,
+    hasRecordedReturns: !!returnedRow,
+    saleCreatedAt: sale.created_at,
+    windowMinutes: resolveAmendmentWindowMinutes(windowRow?.value),
+    isAdmin: isAdminControlUser(user),
+  })
+  if (!guard.ok) return c.json({ error: guard.error, code: guard.code }, 400)
+
+  const movesStock = saleAmendmentMovesStock(sale)
+  const stockSkipped = saleSkipsStock(sale)
+  const note = String(body.notes || '').trim().slice(0, 500) || null
+  const changeRateRow = await db.prepare(`SELECT value FROM settings WHERE key = 'change_exchange_rate'`).get<{ value: string }>()
+  const subtotalRow = await db
+    .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
+    .get<{ subtotal: number }>([saleId])
+  const subtotalBeforeUsd = Number(subtotalRow?.subtotal) || 0
+  const totalBeforeUsd = round2(Number(sale.total_usd) || 0)
+
+  // ---- The delivery fee: its own short path, because it touches no line and
+  // moves no stock. "$1.50, then we add another $0.50" -> the sale row holds
+  // $2.00 (what the receipt prints) and the ledger holds both. ----
+  if (kind === 'delivery_fee_changed') {
+    const feeGuard = guardDeliveryFeeAmendment(sale)
+    if (!feeGuard.ok) return c.json({ error: feeGuard.error }, 400)
+    const rawFee = Number(body.delivery_fee_usd)
+    if (!Number.isFinite(rawFee) || rawFee < 0) {
+      return c.json({ error: 'A delivery fee must be zero or more.' }, 400)
+    }
+    const feePlan = planDeliveryFeeChange({ saleId, sale, newFeeUsd: rawFee, exchangeRate })
+    if (feePlan.feeDeltaUsd === 0) {
+      return c.json({ error: 'That is already the delivery fee on this sale.' }, 400)
+    }
+    const money = recomputeSaleMoneyAfterAmendment({
+      sale,
+      subtotalUsd: subtotalBeforeUsd,
+      deliveryFeeUsdOverride: feePlan.feeAfterUsd,
+      changeExchangeRate: changeRateRow?.value,
+    })
+    try {
+      await db.batch([
+        ...feePlan.statements,
+        saleMoneyUpdateStatement(saleId, {
+          subtotal_usd: money.subtotalUsd,
+          subtotal_khr: money.subtotalKhr,
+          total_usd: money.totalUsd,
+          total_khr: money.totalKhr,
+          change_usd: money.changeUsd,
+          change_khr: money.changeKhr,
+        }),
+        amendmentEntryStatement({
+          saleId,
+          kind: 'delivery_fee_changed',
+          amountBeforeUsd: feePlan.feeBeforeUsd,
+          amountAfterUsd: feePlan.feeAfterUsd,
+          totalBeforeUsd,
+          totalAfterUsd: money.totalUsd,
+          note,
+          userId: user?.id ?? null,
+          userName: user?.name ?? null,
+        }),
+      ])
+    } catch (error) {
+      return c.json({ error: `Failed to amend the delivery fee: ${(error as Error).message || ''}` }, 500)
+    }
+    await auditAmendment(c, user, saleId, sale, {
+      kind, fee_before: feePlan.feeBeforeUsd, fee_after: feePlan.feeAfterUsd,
+      total_before: totalBeforeUsd, total_after: money.totalUsd, outside_window: guard.outsideWindow, notes: note,
+    })
+    return amendmentResponse(c, db, { saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped })
+  }
+
+  // ---- Every other kind acts on ONE existing line. ----
+  const lineId = Number(body.sale_item_id)
+  if (!Number.isFinite(lineId) || lineId <= 0) return c.json({ error: 'Which line is being amended?' }, 400)
+  const line = await db.prepare(`
+    SELECT id, product_id, product_name, quantity, applied_price_usd, cost_price_usd, cost_price_khr, branch_id
+    FROM sale_items WHERE id = ? AND sale_id = ?
+  `).get<{ id: number; product_id: number | null; product_name: string | null; quantity: number; applied_price_usd: number; cost_price_usd: number; cost_price_khr: number; branch_id: number | null }>([lineId, saleId])
+  if (!line) return c.json({ error: 'That line is not on this sale.' }, 404)
+
+  // Draw order (id ASC) -- the decrease walk relies on it to hand units back
+  // to the lots they came from, last-drawn first.
+  const allocations = await db.prepare(`
+    SELECT id, batch_id, branch_id, quantity, released_quantity
+    FROM sale_item_batch_allocations WHERE sale_item_id = ? ORDER BY id ASC
+  `).all<LineAllocation>([lineId])
+
+  const statements: StatementList = []
+  const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
+  const groupId = crypto.randomUUID()
+  let subtotalDeltaUsd = 0
+  let unitsMoved = 0
+
+  // --- increase / the "add to existing" case, and the add half of a replace ---
+  const needsLots = kind === 'line_quantity_increased'
+  if (needsLots) {
+    const requested = Math.max(0, Number(body.quantity) || 0)
+    if (!(requested > 0)) return c.json({ error: 'How many more units?' }, 400)
+    const lots = line.branch_id
+      ? (await readFifoLotAvailabilityForCart(db, [{ productId: Number(line.product_id), branchId: line.branch_id }])).get(`${line.product_id}:${line.branch_id}`) || []
+      : []
+    // Pre-flight, plain reads, exactly like POST /'s and POST /:id/items's:
+    // D1's batch() is atomic but cannot branch mid-batch, so a shortage is
+    // reported before the write is built. The CHECK(quantity >= 0) constraints
+    // remain the real race guard.
+    if (movesStock && line.branch_id) {
+      const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
+        .get<{ quantity: number }>([line.branch_id, line.product_id])
+      if (requested > (Number(have?.quantity) || 0)) {
+        return c.json({ error: `Insufficient stock for ${line.product_name || 'this product'}: requested ${requested}, available ${Number(have?.quantity) || 0}` }, 409)
+      }
+    }
+    const plan = planLineQuantityIncrease({
+      saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
+      userId: user?.id ?? null, userName: user?.name ?? null,
+    })
+    statements.push(...plan.statements)
+    subtotalDeltaUsd += plan.subtotalDeltaUsd
+    unitsMoved += plan.unitsMoved
+    ledgerEntries.push({
+      saleId, kind: 'line_quantity_increased', groupId,
+      saleItemId: line.id, productId: line.product_id, productName: line.product_name,
+      quantityBefore: plan.quantityBefore, quantityAfter: plan.quantityAfter,
+      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: plan.unitsMoved, stockSkipped,
+      note, userId: user?.id ?? null, userName: user?.name ?? null,
+    })
+  }
+
+  // --- decrease / remove, and the remove half of a replace ---
+  if (kind === 'line_quantity_decreased' || kind === 'line_removed' || kind === 'line_replaced') {
+    const requested = kind === 'line_quantity_decreased'
+      ? Math.max(0, Number(body.quantity) || 0)
+      : Number(line.quantity) || 0
+    if (!(requested > 0)) return c.json({ error: 'How many units are coming off?' }, 400)
+    if (requested > (Number(line.quantity) || 0)) {
+      return c.json({ error: `This line only has ${line.quantity}.` }, 400)
+    }
+    const plan = planLineQuantityDecrease({
+      saleId, sale, line, removedQuantity: requested, allocations, exchangeRate,
+      reason: kind === 'line_replaced'
+        ? `Line replaced on sale #${saleId}`
+        : `Line ${kind === 'line_removed' ? 'removed from' : 'reduced on'} sale #${saleId}`,
+      userId: user?.id ?? null, userName: user?.name ?? null,
+    })
+    statements.push(...plan.statements)
+    subtotalDeltaUsd += plan.subtotalDeltaUsd
+    unitsMoved += plan.unitsMoved
+    ledgerEntries.push({
+      saleId,
+      kind: plan.quantityAfter <= 0 ? 'line_removed' : 'line_quantity_decreased',
+      groupId,
+      saleItemId: line.id, productId: line.product_id, productName: line.product_name,
+      quantityBefore: plan.quantityBefore, quantityAfter: plan.quantityAfter,
+      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: plan.unitsMoved, stockSkipped,
+      note, userId: user?.id ?? null, userName: user?.name ?? null,
+    })
+  }
+
+  // --- the add half of a replace: the removed line's product swapped for
+  // another. Deliberately NOT a sixth amendment kind: a replace is a removal
+  // plus an addition, which is exactly what it does to stock, and both halves
+  // share one group_id so the detail view can render them as the single act
+  // the cashier performed. ---
+  if (kind === 'line_replaced') {
+    const replacement: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number } =
+      (body.replacement && typeof body.replacement === 'object') ? body.replacement : {}
+    const productId = Number(replacement.product_id)
+    const quantity = Math.max(0, Number(replacement.quantity) || 0)
+    if (!Number.isFinite(productId) || productId <= 0) return c.json({ error: 'Which product is replacing it?' }, 400)
+    if (!(quantity > 0)) return c.json({ error: 'How many of the replacement?' }, 400)
+
+    const product = await db.prepare('SELECT id, name, selling_price_usd, cost_price_usd, cost_price_khr FROM products WHERE id = ?')
+      .get<{ id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>([productId])
+    if (!product) return c.json({ error: `Product #${productId} no longer exists.` }, 400)
+
+    const branchId = Number(replacement.branch_id || line.branch_id || sale.branch_id) || null
+    const rawPrice = Number(replacement.applied_price_usd)
+    const unitPriceUsd = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : Number(product.selling_price_usd) || 0
+
+    const lotsByKey = branchId
+      ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId }])
+      : new Map()
+    // The replacement line is planned by S4-24b's own addition kernel --
+    // called, not re-implemented -- so a replaced-in product draws its lots by
+    // the same FIFO rule and emits the same unclamped statements a checkout
+    // would. The sale's status is what decides how much moves; a stock-skipped
+    // sale is forced to zero afterwards by the same single check.
+    const plannedLines = allocateNewSaleLines([{
+      productId, productName: product.name || `product #${productId}`, quantity, branchId,
+      unitPriceUsd, costPriceUsd: Number(product.cost_price_usd) || 0, costPriceKhr: Number(product.cost_price_khr) || 0,
+      batchId: null, batchLabel: null, batchExpiryDate: null,
+    }], lotsByKey, movesStock ? saleStatus : 'awaiting_payment')
+
+    if (movesStock && branchId) {
+      const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
+        .get<{ quantity: number }>([branchId, productId])
+      if (quantity > (Number(have?.quantity) || 0)) {
+        return c.json({ error: `Insufficient stock for ${product.name}: requested ${quantity}, available ${Number(have?.quantity) || 0}` }, 409)
+      }
+    }
+
+    const additionPlan = planSaleLineAddition({
+      saleId, saleStatus: movesStock ? saleStatus : 'awaiting_payment', lines: plannedLines,
+      exchangeRate, userId: user?.id ?? null, userName: user?.name ?? null,
+    })
+    statements.push(...additionPlan.statements)
+    subtotalDeltaUsd += additionPlan.addedSubtotalUsd
+    unitsMoved += -additionPlan.deductedUnits || 0
+    ledgerEntries.push({
+      saleId, kind: 'line_added', groupId,
+      productId, productName: product.name,
+      quantityBefore: 0, quantityAfter: quantity,
+      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: -additionPlan.deductedUnits || 0, stockSkipped,
+      note, userId: user?.id ?? null, userName: user?.name ?? null,
+    })
+  }
+
+  // ---- Money. Subtotal is the sale's OWN lines re-summed and moved by this
+  // amendment's delta, never the stored column carried forward, so a row whose
+  // subtotal had drifted is corrected. Everything else -- tax, both discounts,
+  // the tender -- is FROZEN by S4-24b's recompute, which is CALLED here rather
+  // than re-implemented, so an amendment cannot round differently from a
+  // checkout. ----
+  const money = recomputeSaleMoneyAfterAmendment({
+    sale,
+    subtotalUsd: round2(subtotalBeforeUsd + subtotalDeltaUsd),
+    changeExchangeRate: changeRateRow?.value,
+  })
+
+  // Every ledger entry in this act ends at the sale's real new total; the
+  // intermediate ones would be arithmetic nobody performed.
+  for (const entry of ledgerEntries) entry.totalAfterUsd = money.totalUsd
+
+  // ---- One atomic batch: the line change, its stock, the sale's money, and
+  // the ledger entries recording all three. A committed line change whose
+  // audit entry failed separately would be exactly the silent gap this feature
+  // exists to close. ----
+  try {
+    await db.batch([
+      ...statements,
+      saleMoneyUpdateStatement(saleId, {
+        subtotal_usd: money.subtotalUsd,
+        subtotal_khr: money.subtotalKhr,
+        total_usd: money.totalUsd,
+        total_khr: money.totalKhr,
+        change_usd: money.changeUsd,
+        change_khr: money.changeKhr,
+      }),
+      ...ledgerEntries.map(amendmentEntryStatement),
+    ])
+  } catch (error) {
+    const message = (error as Error).message || ''
+    if (/CHECK constraint|constraint failed/i.test(message)) {
+      return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being amended. Refresh and try again.', code: 'stock_conflict' }, 409)
+    }
+    return c.json({ error: `Failed to amend this sale: ${message}` }, 500)
+  }
+
+  await auditAmendment(c, user, saleId, sale, {
+    kind,
+    sale_item_id: lineId,
+    product_id: line.product_id,
+    entries: ledgerEntries.map((entry) => entry.kind),
+    units_moved: unitsMoved,
+    stock_skipped: stockSkipped,
+    subtotal_before: round2(subtotalBeforeUsd),
+    subtotal_after: money.subtotalUsd,
+    total_before: totalBeforeUsd,
+    total_after: money.totalUsd,
+    outside_window: guard.outsideWindow,
+    notes: note,
+  })
+
+  return amendmentResponse(c, db, { saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped })
+})
+
+type StatementList = Array<{ sql: string; params: Record<string, unknown> }>
+
+type AmendmentContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
+/**
+ * One audit row per amendment, on top of the ledger entry.
+ *
+ * Not a duplicate of the ledger: `sale_amendments` is the SALE's history, read
+ * on that sale's own screen; `audit` is the SYSTEM's history, read by whoever
+ * is asking what a given user did last Tuesday. Both are wanted, and the same
+ * pairing already exists for POST /:id/items.
+ */
+async function auditAmendment(
+  c: AmendmentContext,
+  user: SessionUser | undefined,
+  saleId: number,
+  sale: { receipt_number?: unknown; sale_status?: unknown },
+  details: Record<string, unknown>,
+): Promise<void> {
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', saleId, {
+    action: 'amend',
+    receipt_number: sale.receipt_number ?? null,
+    sale_status: sale.sale_status ?? null,
+    ...details,
+  })
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'sales'),
+  ]))
+}
+
+/** The shape every amendment answers with, so the client never has to guess. */
+async function amendmentResponse(
+  c: AmendmentContext,
+  db: ReturnType<typeof getDb>,
+  input: {
+    saleId: number
+    sale: { amount_paid_usd?: unknown; amount_paid_khr?: unknown; receipt_number?: unknown }
+    money: { totalUsd: number; totalKhr: number; subtotalUsd: number }
+    exchangeRate: number
+    stockMoved: boolean
+    unitsMoved: number
+    stockSkipped: boolean
+  },
+) {
+  const updated = await db.prepare('SELECT updated_at FROM sales WHERE id = ?').get<{ updated_at: string }>([input.saleId])
+  return c.json({
+    id: input.saleId,
+    // DECISION 6: an amended sale keeps its ORIGINAL receipt number, and a
+    // reprint is a reprint. See lib/saleAmendments.ts for the reasoning and
+    // for the open question this leaves with the shop owner.
+    receiptNumber: input.sale.receipt_number ?? null,
+    subtotalUsd: input.money.subtotalUsd,
+    totalUsd: input.money.totalUsd,
+    totalKhr: input.money.totalKhr,
+    outstandingUsd: round2(Math.max(0, input.money.totalUsd - (Number(input.sale.amount_paid_usd) || 0) - (Number(input.sale.amount_paid_khr) || 0) / input.exchangeRate)),
+    stockMoved: input.stockMoved,
+    unitsMoved: input.unitsMoved,
+    stockSkipped: input.stockSkipped,
+    // Surfaced rather than silently frozen: the client says so on the screen,
+    // because a shop that charges tax and sees the total move without the tax
+    // moving deserves to be told why rather than to discover it at closing.
+    taxFrozen: true,
+    discountFrozen: true,
+    updated_at: updated?.updated_at || null,
+  })
+}
 
 type SaleRow = {
   id: number
