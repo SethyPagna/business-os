@@ -66,7 +66,7 @@ export default function HubSectionNav({
   desktopNavigation,
   children,
 }: HubSectionNavProps) {
-  const { settings, page } = useAppCore()
+  const { settings, page } = useAppCore() as { settings?: Record<string, unknown>; page: string }
   const isCompact = useIsCompactViewport()
   const mode = useMobileSectionNavMode(settings?.ui_mobile_section_nav)
   const layered = isCompact && mode === 'pages'
