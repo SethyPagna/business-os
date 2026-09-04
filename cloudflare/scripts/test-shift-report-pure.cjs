@@ -57,12 +57,11 @@ function loadReal(relPath, requireOverrides = {}) {
 // the receipt lane adds that import (a shop-absorbed delivery fee must not be
 // billed into the alert Total); a stub returning a plausible shape would let
 // that regress invisibly, and a missing key makes loadReal throw on merge.
+// Put another way: telegram.ts asks saleTotals who was billed for a delivery
+// fee, so the message and the stored total_usd cannot disagree about it.
+// Both lanes added this binding independently; keep exactly ONE.
 const saleTotals = loadReal('lib/saleTotals.ts')
 const lang = loadReal('lib/telegramLang.ts')
-// lib/telegram.ts asks lib/saleTotals.ts who was billed for a delivery fee,
-// so the message and the stored total_usd cannot disagree about it. Loaded
-// REAL -- stubbing that rule here would test the stub, not the rule.
-const saleTotals = loadReal('lib/saleTotals.ts')
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const analytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },

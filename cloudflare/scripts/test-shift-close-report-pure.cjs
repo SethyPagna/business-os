@@ -235,6 +235,10 @@ async function main() {
     './db': { getDb: () => settingsOnly },
     './businessDateWindow': businessDateWindow,
     './telegramLang': loadReal('lib/telegramLang.ts'),
+    // telegram.ts imports lib/saleTotals.ts (the receipt lane: a shop-absorbed
+    // delivery fee must not be billed into the alert Total). Loaded REAL -- a
+    // stub of that rule would test the stub. Without the key loadReal throws.
+    './saleTotals': loadReal('lib/saleTotals.ts'),
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', {
       './db': { getDb: () => settingsOnly }, './businessDateWindow': businessDateWindow,
     }),
