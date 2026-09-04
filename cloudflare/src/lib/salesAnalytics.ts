@@ -123,6 +123,43 @@ export function shiftWindowBound(value: unknown): string | null {
   return parsed.toISOString().slice(0, 19).replace('T', ' ')
 }
 
+/**
+ * The shift window as SQL, so there is exactly ONE definition of it.
+ *
+ * whereActiveSales() below calls this, and so does any query that needs the
+ * same window without the kernel's other machinery (the shift report's
+ * invoice counts, which must SEE cancelled sales and therefore cannot go
+ * through the hide-cancelled guard). Writing `created_at >= ... AND < ...` a
+ * second time by hand is exactly how the two would drift -- the boundary
+ * being half-open is a decision, not an accident, and it has to be made in
+ * one place.
+ */
+export function shiftWindowWhere(
+  alias: string,
+  f: Pick<SalesFilters, 'createdFrom' | 'createdTo' | 'cashierId'>,
+): { clauses: string[]; params: Record<string, unknown> } {
+  const clauses: string[] = []
+  const params: Record<string, unknown> = {}
+  const createdFrom = shiftWindowBound(f.createdFrom)
+  if (createdFrom) {
+    clauses.push(`${alias}.created_at >= @createdFrom`)
+    params.createdFrom = createdFrom
+  }
+  // EXCLUSIVE upper bound: with `<=`, a sale rung at the exact second the
+  // drawer was counted would be reported on the closing shift AND on the
+  // next one.
+  const createdTo = shiftWindowBound(f.createdTo)
+  if (createdTo) {
+    clauses.push(`${alias}.created_at < @createdTo`)
+    params.createdTo = createdTo
+  }
+  if (f.cashierId != null && String(f.cashierId).trim() !== '') {
+    clauses.push(`${alias}.cashier_id = @cashierId`)
+    params.cashierId = Number(f.cashierId)
+  }
+  return { clauses, params }
+}
+
 export interface SalesTotals {
   tx_count: number
   gross_sales_usd: number
@@ -297,25 +334,11 @@ function whereActiveSales(alias: string, f: SalesFilters) {
     clauses.push(`${alias}.id <= @maxSaleId`)
     params.maxSaleId = Number(f.maxSaleId)
   }
-  // Shift window (S4-7). Half-open so two back-to-back shifts on one till
-  // cannot both claim the sale that landed on the boundary second -- with
-  // `<=` on the upper bound, a sale rung at the exact moment the drawer was
-  // counted would appear on the closing report AND on the next shift's.
-  // Absent on every pre-existing caller, so those queries are unchanged.
-  const createdFrom = shiftWindowBound(f.createdFrom)
-  if (createdFrom) {
-    clauses.push(`${alias}.created_at >= @createdFrom`)
-    params.createdFrom = createdFrom
-  }
-  const createdTo = shiftWindowBound(f.createdTo)
-  if (createdTo) {
-    clauses.push(`${alias}.created_at < @createdTo`)
-    params.createdTo = createdTo
-  }
-  if (f.cashierId != null && String(f.cashierId).trim() !== '') {
-    clauses.push(`${alias}.cashier_id = @cashierId`)
-    params.cashierId = Number(f.cashierId)
-  }
+  // Shift window (S4-7). Absent on every pre-existing caller, so those
+  // queries are unchanged.
+  const shift = shiftWindowWhere(alias, f)
+  clauses.push(...shift.clauses)
+  Object.assign(params, shift.params)
   const validTime = (v: unknown): v is string => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
   if (validTime(f.startTime) && validTime(f.endTime)) {
     // The time-of-day window is interpreted in the FIXED business timezone
@@ -375,6 +398,33 @@ async function salesCost(env: Env, f: SalesFilters): Promise<number> {
     WHERE ${whereSql} AND ${recognizedExpr('s.')}
   `).get<{ cost_usd: number }>(params)
   return num(row?.cost_usd)
+}
+
+/**
+ * Discount given away on the LINES, as opposed to on the invoice (S4-7).
+ *
+ * SalesTotals already carries the two invoice-level discounts --
+ * store_discount_usd (the cashier's whole-sale discount) and
+ * membership_discount_usd -- because both are columns on the sales row. The
+ * item-level one has no header column at all: `sales.subtotal_usd` is the sum
+ * of the LINE totals, which are already net of each line's own discount, so
+ * the money never appears anywhere on the header. Recovering it means summing
+ * the two per-line columns, and that is what this does.
+ *
+ * Same recognized-only basis as cost, and joined the same way, so
+ * `revenue + item discount + invoice discount` reconciles against the
+ * pre-discount value of what left the shelf.
+ */
+export async function getItemDiscountUsd(env: Env, f: SalesFilters): Promise<number> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('s', f)
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0)), 0) AS item_discount_usd
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    WHERE ${whereSql} AND ${recognizedExpr('s.')}
+  `).get<{ item_discount_usd: number }>(params)
+  return round2(num(row?.item_discount_usd))
 }
 
 export function deriveTotals(level: Record<string, number>, costUsd: number): SalesTotals {
