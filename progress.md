@@ -3242,6 +3242,113 @@ line raises the total but not the tax. With amendments this stops being an edge 
 normal path — every corrected delivery fee and every added product widens the gap. The fix is a
 stored rate on the sale or in settings: a schema **and** pricing-policy decision, so it is asked, not
 guessed.
+### Thirteen lanes on the reconcile — `2d701bb1`, and it is now pushed to origin
+
+`rc/s4-2026-09-04` took four more lanes: `s4/sales-status-nostock` (S4-2), `s4/pos-batch-list`
+(S4-18), `s4/telegram-bilingual` (S4-8/S4-9) and `s4/merge-rules` (S4-29). **The branch is on origin**
+— a peer correctly pointed out it had only ever existed in my worktree.
+
+Probed cumulatively before touching the worktree. The reassuring part: `cloudflare/src/routes/sales.ts`,
+`frontend/src/components/sales/Sales.tsx` and **both language packs auto-merged**, even though S4-2 and
+S4-24b were both inside the sales route. Only `frontend/package.json` conflicted, twice, and only
+because both lanes appended a test to the chain. Unioned both times, counted both times:
+**177 → 181 → 182 entries**, with each side's exclusive entry named and present. Packs now **4,705
+keys, en/km identical, zero replacement characters**.
+
+#### The duplicate-migration precedent, found while checking for one
+
+Checking the merged tree for duplicate migration numbers — the failure git cannot flag, because two
+files with different names never conflict — turned up **`0018_fees.sql` and `0018_products_fts.sql`**.
+
+Both are **applied in production**, as `d1_migrations` ids **18 and 19**, and both are at the deployed
+tip. So this is not a hazard to fix; it is **proof the hazard is real**. D1 has already run two
+same-numbered migrations in this database, in filename sort order, and survived only because those two
+happened to be independent. **Neither may ever be renamed** — renaming an applied filename makes D1
+treat it as new and re-run its DDL.
+
+Above 0107 the merged tree is clean: 0108, 0109, 0110, 0112, 0114 — no duplicates. The 0109 collision
+was caught in time.
+
+- [x] **S4-18 · POS: one batch list, not two. Done** on `s4/pos-batch-list` (`9c282599`), merged.
+  - **It proved which list was redundant from the code rather than from the phrasing.**
+    `buildVariantOptionLabels` emits the `#7321` style label in exactly one branch —
+    `barcodeVaries === false && priceVaries === false` — so the option pills only ever showed bare ids
+    when **nothing cashier-facing distinguished the rows**, which is precisely the case the owner hit.
+    That function's own doc-comment already assigns the choice to the other list.
+  - **The trap that made "just hide the pills" wrong:** `GET /api/batches` is scoped to one product
+    row, and the picker fetched only the resolved row. Hiding the pills would have stranded rows 2..n's
+    lots and could show "No lots available at this branch" **while another row held stock**. So the two
+    lists **collapse into one**: every candidate row's lots are fetched and merged, each tagged with
+    its owning row, and picking a lot resolves that row. Merged mode requires *every* candidate to be
+    batch-tracked, so a mixed group keeps the old flow rather than silently losing a sellable row.
+  - Ordering: available before out-of-stock (never interleaved), then earliest received first, then
+    `batch_number`, then incoming index so the server's expiry-first FIFO survives as a stable
+    tie-break. **Undated lots sink within their own availability group, not to the bottom** — a
+    `RECON-` lot that still holds stock stays ahead of every empty one. Server ordering untouched: it
+    is shared with inventory and allocation.
+  - `Promise.all`, not `allSettled` — deliberately, because a partially-loaded lot list looks identical
+    to a complete one on screen.
+
+- [x] **S4-29 · Merge rules extended to the owner's rulings. Done** on `s4/merge-rules` (`1ce506cf`),
+  merged. Migration **0112**, unrun.
+  - **Rulings 1, 3 and 4 were already implemented** at `c730e5be` and are now confirmed *and tested* —
+    none had tests of its own. Ruling 2 was partly built and **contained a real defect**:
+    `normalizeLeadingZeroBarcodeForCleanup` stripped **exactly one** leading zero, applied to both
+    sides, so `08339327539` and `008339327539` — one Charlotte Tilbury barcode entered twice — moved in
+    lockstep and **never met**. The survivor picker had the same bug in a different shape: it ranked on
+    a was-it-normalized *boolean*, which ties two rows that both carry zeros, so the dirtier row won the
+    id tie-break and **put the extra zero back into the catalog as the keeper**.
+  - **Normalization is comparison-only — nothing rewrites a stored barcode, and that is load-bearing.**
+    **27 zero-stripped barcodes in production are already carried, stripped, by a product under a
+    different name.** Rewriting in place would hand those 27 a duplicate of a live code and make a scan
+    ambiguous. Instead the already-clean row is chosen as the survivor, so the catalog ends up clean
+    with no `UPDATE` to a barcode ever issued. Collisions are impossible by construction.
+  - Fold scope: numeric only, strip all leading zeros, **only if ≥4 digits survive**. `01234`/`1234`
+    merge; `1234`/`12345` cannot; `0` never collapses to blank (which would collide with every
+    unbarcoded row). GTIN-14 uses indicator 1–8 for a carton and 0 for the unit, so folding zeros can
+    never conflate a carton with a single item.
+  - **The two categories, measured (SELECT-only, 8,202 active non-group products):** same-name/both-
+    unbarcoded is **1 name / 2 rows** — `SK-II Facial Treatment Essence 230mL`, ids 9809/9810, costs
+    130.541696 and 130.777307 averaging to **130.6596**. Leading-zero-only barcode pairs are **1,695
+    groups / 3,411 rows**. It **could not reproduce** the earlier survey's "13 rows / 12 names" and
+    says so rather than repeating it.
+  - `Ysl New Item` (id 10185) measured before deletion: 0 sale_items, 0 return_items, 0 movements, 0
+    transfers, 0 images, 2 branch_stock rows totalling 0, 1 batch totalling 0. Every statement repeats
+    the guard, so 0112 is a no-op unless that id is still exactly that empty placeholder.
+
+- [x] **S4-8 / S4-9 · Telegram bilingual, plus inbound commands. Done** on `s4/telegram-bilingual`
+  (`81914be8`), merged. No migration, no frontend change, no chain edit.
+  - **Line shape is one value, two labels** — `Cashier / អ្នកគិតប្រាក់: Za` — not the whole message
+    twice. Sending it twice doubles a phone-width alert for nothing, because the values (money, receipt
+    numbers, product names) are not translatable. Only labels are, so only labels are doubled.
+  - Routes get it **for free**: `sendTelegramEvent` localises the *composed* line by splitting at the
+    first `': '`, so the two call sites that still build lines inline are covered **without editing
+    files other lanes own**.
+  - **A real forcing-function it surfaced:** `Change:` meant two different things — money handed back
+    (ប្រាក់អាប់) and a stock delta (ការផ្លាស់ប្ដូរស្តុក). A line-level localiser cannot tell them
+    apart, so the stock builder now emits `Stock change:`.
+  - **`frontend/tests/khmerRetailVocabulary.test.ts` does not exist at `e3678a39`** — it is on
+    `origin/fx/khmer-naming`, unmerged. So the lane built the check it could: it derives an en→km map
+    **from `km.json` itself** and asserts every Worker term that exists in the packs uses the pack's
+    Khmer. **It caught four divergences the lane had itself introduced.** One documented sense
+    exemption: the pack's "From" is a date-range start (ចាប់ពី), a transfer's From is a source branch
+    (ពី).
+  - **Authorisation without a new setting:** `telegram_chat_id` now parses as a comma/space-separated
+    allow-list — a chat id is digits with an optional leading `-`, so this is unambiguous and
+    backward-compatible with a single id. An unapproved chat gets **only its own chat id** back, and
+    the test asserts the refusal contains none of `$ ៛ Sale Receipt Total Revenue Cashier Product`.
+    It deliberately did **not** add a per-user list: a Telegram user id has no link to a Business OS
+    account, so it would be a second hand-kept list with no stronger guarantee.
+  - **Date convention conflict, flagged not guessed.** The owner wrote `dd-mm-yyyy`; the project pins
+    `mm/dd/yyyy` + 24-hour everywhere. The lane followed the convention and **refuses** `dd-mm-yyyy`
+    rather than guessing, because `05-09-2026` is indistinguishable from `mm-dd-yyyy` and a wrong guess
+    **misfiles a day's revenue**. Accepts `mm/dd/yyyy`, ISO, `today`, `yesterday`, blank. **Needs an
+    owner ruling if `dd-mm-yyyy` was meant literally.**
+  - Caveat it boarded rather than fixed: `/report` reuses the existing aggregation, which **does not
+    exclude cancelled receipts**. That is the pre-existing definition; changing it belongs to whichever
+    lane owns the revenue definition.
+  - **S4-6 is now a one-line change** when S4-11b lands: `by: { en: 'By', km: 'ដោយ' }` is already in
+    the table, so `routes/sales.ts` adds `` by ? `By: ${by}` : '' `` and it ships bilingual.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
