@@ -1120,7 +1120,7 @@ export default function ProductForm({
 
   return (
     <Modal
-      title={product ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product.name}` : tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}
+      title={product ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product.name}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
       onClose={onClose}
       wide
       headerExtra={(
@@ -1143,7 +1143,7 @@ export default function ProductForm({
               onClick={() => {
                 if (saving) return
                 const typedName = String(form.name || '').trim()
-                onMinimize(`${tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}${typedName ? ` — ${typedName}` : ''}`)
+                onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
               }}
               aria-label={tr('minimize', 'Minimize', 'បង្រួម')}
               title={tr('minimize_hint', 'Minimize — continue later from the chip', 'បង្រួម — បន្តពេលក្រោយពីស្លាក')}
@@ -1816,10 +1816,10 @@ export default function ProductForm({
       {saveConfirmOpen ? (
         <ConfirmDialog
           t={t}
-          title={isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes')}
-          message={String(form.name || '').trim() || (isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes'))}
+          title={isCreateMode ? tr('add_product', 'Create Products') : tr('save_changes', 'Save Changes')}
+          message={String(form.name || '').trim() || (isCreateMode ? tr('add_product', 'Create Products') : tr('save_changes', 'Save Changes'))}
           items={saveReviewItems()}
-          confirmLabel={isCreateMode ? tr('add_product', 'Add Product') : tr('save', 'Save')}
+          confirmLabel={isCreateMode ? tr('add_product', 'Create Products') : tr('save', 'Save')}
           working={saving}
           workingLabel={tr('saving', 'Saving...')}
           onConfirm={() => resolveSaveConfirm(true)}
