@@ -2590,6 +2590,58 @@ Consequences for everyone:
 - The rc→main merge still needs a coordinated moment. Until it happens, `main`
   is **not** a superset of production and must not be treated as one.
 
+### Sep-4 round 5 — four items (user, Sep 4 2026; recorded by business-os-v1-c3)
+
+Sent mid-turn during the lane reconciliation, with a photograph of a real
+printed receipt attached. Recorded before any of it was worked, per the owner's
+standing instruction: *"if i add throughout the conversation as you fix giving
+new tasks as you work, you don't forget...always note in progress.md."*
+
+**[ ] S4R5-1 · The receipt's item table is FOUR columns, and the price column
+shows the discount, not the discounted price.** The owner's photo is the
+reference. Reading it column by column: `ទំនិញ` (Item) · `ចំនួន` (Qty) ·
+`តម្លៃ` (Price) · `សរុប` (Total). One line reads
+
+```
+1. Mac Matte Lipstick        1 ដើម     28.00 (-7.00)     21.00
+   648
+```
+
+so the **price** column carries the undiscounted selling price with the
+discount beside it in parentheses, and the **total** column carries the net.
+Under the table: `សរុបចំនួនទំនិញ / Total Qty: 1` and
+`សរុបបញ្ចុះលើទំនិញ / Item Discount: 7.00`. Both an **item discount** and a
+**total discount** line are wanted. This is the same rule the owner already
+gave once — *"the products show selling price and minus the discounts in total
+show selling price (-discount), not discounted price(-discount)"* — now with a
+picture, so treat the photo as the spec and check the live template against it
+line by line rather than assuming the earlier fix covered it.
+
+**[ ] S4R5-2 · One shift per system per day, not one per user.** Start/End Shift
+is done by **one account** for the whole system. It must be settable: either
+per-user (non-admin users each register), or **once in total per day** for the
+business. **Admin never does this.** Today `0116_shift_sessions.sql` enforces
+`UNIQUE(user_id, COALESCE(branch_id,-1), business_date)` — per user, with no
+mode switch and no admin exemption — so the shipped shape is one of the two
+modes hard-wired. Needs: a setting, the second uniqueness shape, and the admin
+exemption in `ShiftGate`. Note the deployed index is already applied to
+production, so the second mode is a NEW migration, not a rename of 0116.
+
+**[ ] S4R5-3 · Reports must actually carry store discount, product discount,
+total discount and the actual delivery fee.** Stated as a verification ask —
+*"make sure it is actually done"* — so the deliverable is expected-vs-actual per
+figure, not a code reading. `getItemDiscountUsd` (S4-7, merged from
+`s4/shift-credit-line-ee`) supplies the item-level term; the two invoice-level
+discounts are columns on the sales row. Prove each one reaches a rendered
+report, and say which do not.
+
+**[ ] S4R5-4 · Re-derive gross profit and revenue against the corrected receipt,
+and restyle the Telegram reports.** Follows S4R5-1: if the receipt's discount
+presentation changes, every figure computed from those terms has to be
+re-checked end to end — revenue, COGS, gross profit, delivery paid by shop vs by
+customer vs actual — not just the printed line. Telegram report styling is part
+of the same item.
+
 ### Sep-4 round 4 — ten items (user, Sep 4 2026; recorded by business-os-v1-c3)
 
 Recorded before any of it is built, per the owner's standing instruction: *"Make
