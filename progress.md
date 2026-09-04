@@ -4122,6 +4122,14 @@ BACKUP_TABLES (`3a0a7cb2`). Still open:
   Commit `e273e127` on branch `fx/wheel-guard-number-inputs`, pushed to
   origin; not yet merged to `main` or included in a deploy — pending the
   fleet's normal reconciliation/staged-deploy cycle.
+  **Known side effect (4a, follow-up `68d1601d`):** blur fires the field's
+  own `onBlur`. `FeeForm.tsx`'s `amount_usd`/`amount_khr` inputs use
+  `onBlur` to mark the form touched for validation display — the only
+  `type="number"`+`onBlur` pairing in the app (POS's payment field has
+  none) — so scrolling past a focused fee-amount field now marks it
+  touched too and can surface a validation message nobody typed into.
+  Accepted trade-off, not designed around: restoring focus after blur
+  would re-arm the money bug for that window.
 - **HIGH (layering):** InfoHint portals at z-[1000] but shared Modal is
   z-[1050] — every InfoHint inside any Modal renders its tooltip BEHIND the
   modal (ImportModeWizard, ExportFieldsModal, StockChangeSection, Branches,
