@@ -627,10 +627,21 @@ app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
   if (!confirmedBody && confirmedQuery !== 'true' && confirmedQuery !== '1') {
     return c.json({ error: 'Confirmation is required to clear old audit logs.' }, 400)
   }
-  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  // Raw column against a full 'YYYY-MM-DD HH:MM:SS' cutoff (matches audit_logs'
+  // own CURRENT_TIMESTAMP shape), batched by id -- same fix as the scheduled
+  // retention in lib/audit.ts:140-147: the old `date(created_at) < @cutoff`
+  // wrapped the column, defeating any index and forcing a full-table scan, and
+  // deleted in ONE unbounded statement that could exceed D1's per-statement
+  // budget on a large backlog.
+  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const db = getDb(c.env)
-  const result = await db.prepare("DELETE FROM audit_logs WHERE date(created_at) < @cutoff").run({ cutoff })
-  const deleted = (result as any)?.meta?.changes ?? (result as any)?.changes ?? 0
+  let deleted = 0
+  for (;;) {
+    const result = await db.prepare('DELETE FROM audit_logs WHERE id IN (SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000)').run({ cutoff })
+    const n = (result as any)?.meta?.changes ?? (result as any)?.changes ?? 0
+    deleted += n
+    if (n < 5000) break
+  }
   await audit(c.env, user?.id ?? null, user?.name ?? user?.username ?? null, 'audit_log_retention_delete', 'audit_log', null, { olderThanDays, cutoffDate: cutoff, deleted })
   return c.json({ ok: true, deleted })
 })
@@ -671,8 +682,8 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   // no date filter set).
   const from = String(query.from || '').slice(0, 10)
   const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push("d.deleted_at IS NOT NULL AND date(d.deleted_at, '+7 hours') >= @from"); params.from = from }
-  if (to) { conditions.push("d.deleted_at IS NOT NULL AND date(d.deleted_at, '+7 hours') <= @to"); params.to = to }
+  if (from) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrAfter('d.deleted_at', '@from')}`); params.from = from }
+  if (to) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrBefore('d.deleted_at', '@to')}`); params.to = to }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   try {

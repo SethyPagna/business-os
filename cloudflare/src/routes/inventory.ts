@@ -532,14 +532,20 @@ app.get('/summary', async (c) => {
         COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0) AS revenue_khr,
         COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0) AS cogs_usd,
         COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0) AS cogs_khr,
-        COALESCE((
-          SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
-          FROM branch_stock bs2
-          JOIN branches b2 ON b2.id = bs2.branch_id
-          WHERE bs2.product_id = p.id
-        ), '[]') AS branch_stock_json
+        COALESCE(bsj.branch_stock_json, '[]') AS branch_stock_json
       FROM products p
       LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId
+      -- Pre-aggregated once, not a per-row correlated subquery (this used to
+      -- run once per product -- 10,271 times on the unfiltered path -- to
+      -- build one product's branch_stock array; same shape as the si/ret
+      -- joins right below, which already aggregate before joining).
+      LEFT JOIN (
+        SELECT bs2.product_id,
+               json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
+        FROM branch_stock bs2
+        JOIN branches b2 ON b2.id = bs2.branch_id
+        GROUP BY bs2.product_id
+      ) bsj ON bsj.product_id = p.id
       LEFT JOIN (
         SELECT si.product_id, si.branch_id,
                SUM(si.quantity) AS qty_sold,
@@ -610,13 +616,17 @@ app.get('/summary', async (c) => {
       COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0) AS revenue_khr,
       COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0) AS cogs_usd,
       COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0) AS cogs_khr,
-      COALESCE((
-        SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
-        FROM branch_stock bs2
-        JOIN branches b2 ON b2.id = bs2.branch_id
-        WHERE bs2.product_id = p.id
-      ), '[]') AS branch_stock_json
+      COALESCE(bsj.branch_stock_json, '[]') AS branch_stock_json
     FROM products p
+    -- Pre-aggregated once, not a per-row correlated subquery -- see the
+    -- branchId-scoped path above for why.
+    LEFT JOIN (
+      SELECT bs2.product_id,
+             json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
+      FROM branch_stock bs2
+      JOIN branches b2 ON b2.id = bs2.branch_id
+      GROUP BY bs2.product_id
+    ) bsj ON bsj.product_id = p.id
     LEFT JOIN (
       SELECT si.product_id,
              SUM(si.quantity) AS qty_sold,
