@@ -1,4 +1,5 @@
 import { getDb } from './db'
+import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   bi, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue,
@@ -716,7 +717,14 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     return `• ${cleanLine(item.name, 100)} ${quantity} × ${usd(item.unitPriceUsd)}${lineDiscount ? ` (−${usd(lineDiscount)})` : ''} = ${usd(item.lineTotalUsd)}`
   })
   const deliveryFee = Number(sale.deliveryFeeUsd) || 0
-  const customerDelivery = sale.isDelivery && sale.deliveryPaidBy !== 'shop' ? deliveryFee : 0
+  // Who paid it comes from the ONE rule that produced total_usd
+  // (lib/saleTotals.ts). This used to test the payer against the string
+  // 'shop'; the stored column, the POS constant and salesAnalytics all say
+  // 'store', so every shop-absorbed delivery was billed into the Total line
+  // below while Net Total excluded it, and the "(shop paid)" tag never
+  // printed on the one message that was supposed to say it.
+  const customerDelivery = customerBilledDeliveryFeeUsd(Boolean(sale.isDelivery), deliveryFee, sale.deliveryPaidBy)
+  const shopAbsorbedDelivery = Boolean(sale.isDelivery) && deliveryFee > 0 && customerDelivery === 0
   const paid = (Number(sale.paidUsd) || 0) + (Number(sale.paidKhr) || 0)
   const change = (Number(sale.changeUsd) || 0) + (Number(sale.changeKhr) || 0)
   return [
@@ -729,7 +737,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     sale.branch ? `Branch: ${sale.branch}` : '',
     ...items,
     sale.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${sale.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
-    sale.isDelivery ? `Delivery service: ${usd(deliveryFee)}${sale.deliveryPaidBy === 'shop' ? ' (shop paid)' : ''}` : '',
+    sale.isDelivery ? `Delivery service: ${usd(deliveryFee)}${shopAbsorbedDelivery ? ' (shop paid)' : ''}` : '',
     `Total: ${usd(round2((Number(sale.subtotalUsd) || 0) + customerDelivery))}`,
     sale.discountUsd ? `Discount: −${usd(sale.discountUsd)}` : '',
     sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',

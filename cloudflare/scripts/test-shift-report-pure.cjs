@@ -53,6 +53,10 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const lang = loadReal('lib/telegramLang.ts')
+// lib/telegram.ts asks lib/saleTotals.ts who was billed for a delivery fee,
+// so the message and the stored total_usd cannot disagree about it. Loaded
+// REAL -- stubbing that rule here would test the stub, not the rule.
+const saleTotals = loadReal('lib/saleTotals.ts')
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const analytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
@@ -62,6 +66,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
+  './saleTotals': saleTotals,
   './salesAnalytics': analytics,
 })
 
@@ -310,6 +315,7 @@ const wired = loadReal('lib/telegram.ts', {
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
+  './saleTotals': saleTotals,
   './salesAnalytics': loadReal('lib/salesAnalytics.ts', {
     './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow,
   }),
@@ -347,6 +353,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './db': { getDb: () => emptyDb },
     './businessDateWindow': businessDateWindow,
     './telegramLang': lang,
+    './saleTotals': saleTotals,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow }),
   })
   return wiredEmpty.telegramCommandReply({}, '/shift 03/09/2026', NOW)

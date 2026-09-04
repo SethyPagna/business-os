@@ -16,6 +16,7 @@ import {
   type AmendmentDisplayRow,
   type SaleAmendmentRow,
 } from '../../utils/saleAmendments.ts'
+import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
@@ -96,6 +97,13 @@ interface SaleDetail {
   is_delivery?: number | null
   delivery_fee_usd?: number | string | null
   delivery_fee_khr?: number | string | null
+  /**
+   * Who the fee fell on. `store` means the shop absorbed it and the customer
+   * was NOT charged, so it is absent from total_usd -- see
+   * utils/receiptTotals.ts. Already returned by GET /api/sales (SELECT s.*);
+   * this screen simply never read it.
+   */
+  delivery_fee_paid_by?: string | null
   delivery_actual_cost_usd?: number | string | null
   delivery_actual_cost_khr?: number | string | null
   delivery_contact_name?: string | null
@@ -508,29 +516,41 @@ export default function SaleDetailModal({
     : returnBlockReason === 'fully_returned'
       ? translateOr('return_blocked_fully_returned', 'Every item on this sale has already been returned.', 'ទំនិញទាំងអស់ក្នុងការលក់នេះ ត្រូវបានប្រគល់មកវិញរួចហើយ។')
       : ''
-  const totalUsd = toNumber(sale.total_usd || sale.total)
+  // ONE derivation of this sale's money column, shared with the printed
+  // receipt (utils/receiptTotals.ts): the delivery fee split by who actually
+  // paid it, the refund and net total, and a 'still owed' that counts riel.
+  // Reading the raw row separately in each surface is how the two drifted
+  // apart -- receiptTotals.test.ts asserts the column reconciles to total_usd
+  // on fixtures rather than a reader trusting that it does.
+  const totals = receiptTotalsFigures(sale)
+  const totalUsd = totals.totalUsd
   const totalKhr = toNumber(sale.total_khr)
-  const refundUsd = toNumber(sale.refund_usd)
-  const refundKhr = toNumber(sale.refund_khr)
-  const membershipDiscountUsd = toNumber(sale.membership_discount_usd)
+  const refundUsd = totals.refundUsd
+  const refundKhr = totals.refundKhr
+  const membershipDiscountUsd = totals.membershipDiscountUsd
   const membershipDiscountKhr = toNumber(sale.membership_discount_khr)
-  const baseDiscountUsd = toNumber(sale.discount_usd)
-  const taxUsd = toNumber(sale.tax_usd)
-  const subtotalUsd = toNumber(sale.subtotal_usd)
+  const baseDiscountUsd = totals.discountUsd
+  const taxUsd = totals.taxUsd
+  const subtotalUsd = totals.subtotalUsd
   // subtotal_khr was already returned by GET /api/sales and already stored by
   // the POS, but the old Totals block printed a KHR line for the discounts and
   // the total while leaving the subtotal USD-only -- so the riel column had a
   // hole in it right at the top. It is shown now for the same reason the rest
   // are: the KHR column has to read straight down.
   const subtotalKhr = toNumber(sale.subtotal_khr)
-  const amountPaidUsd = toNumber(sale.amount_paid_usd)
-  const amountPaidKhr = toNumber(sale.amount_paid_khr)
-  const changeUsd = toNumber(sale.change_usd)
-  const changeKhr = toNumber(sale.change_khr)
+  const amountPaidUsd = totals.paidUsd
+  const amountPaidKhr = totals.paidKhr
+  const changeUsd = totals.changeUsd
+  const changeKhr = totals.changeKhr
   const discountKhr = toNumber(sale.discount_khr)
   const taxKhr = toNumber(sale.tax_khr)
-  const deliveryFeeUsd = toNumber(sale.delivery_fee_usd)
-  const deliveryFeeKhr = toNumber(sale.delivery_fee_khr)
+  // The fee AS STORED -- what the Edit control corrects -- plus the split by
+  // who actually paid it. `total_usd` only ever carries a CUSTOMER-paid fee,
+  // so printing the stored figure whoever paid it left this column over by
+  // exactly the fee on every delivery the shop absorbed.
+  const deliveryFeeUsd = totals.delivery.faceUsd
+  const deliveryFeeKhr = totals.delivery.faceKhr
+  const deliveryPaidByStore = totals.delivery.printsAsFree
   const isDelivery = !!toNumber(sale.is_delivery) || !!String(sale.delivery_contact_name || '').trim()
   // Driver info is DRIVER info. User, Sep 4 2026: "delivery only needs phone
   // and driver name...this is driver info, for customer name, phone and
@@ -558,9 +578,14 @@ export default function SaleDetailModal({
     ? deliveryAddress
     : ''
   const paymentDetails = parsePaymentDetails(sale.payment_details)
-  // Outstanding balance: an on-credit / partially-paid sale (amount_paid below
+  // Outstanding balance: an on-credit / partially-paid sale (tender below
   // total). Shown so the admin detail no longer hides "still owed".
-  const outstandingUsd = Math.max(0, Math.round((totalUsd - amountPaidUsd) * 100) / 100)
+  //
+  // Derived in receiptTotals.ts, which counts amount_paid_KHR as well. This
+  // used to be `totalUsd - amountPaidUsd`, so a sale settled entirely in riel
+  // -- the ordinary shape at this counter -- read as fully unpaid and showed
+  // the whole total as still owed.
+  const outstandingUsd = totals.outstandingUsd
 
   // Y10: an awaiting-payment sale with nothing recorded gets its payment
   // entered HERE, at completion time -- the whole point of the status.
@@ -585,7 +610,7 @@ export default function SaleDetailModal({
   // Same shape as outstandingUsd above -- one definition of "still owed"
   // on this screen, so the projection cannot disagree with the figure it is
   // projecting from.
-  const projectedOutstandingUsd = Math.max(0, Math.round((projectedTotalUsd - amountPaidUsd) * 100) / 100)
+  const projectedOutstandingUsd = Math.max(0, Math.round((projectedTotalUsd - totals.paidTotalUsd) * 100) / 100)
   const addStockMoves = currentStatus !== 'awaiting_payment'
 
   const submitAddItems = async (): Promise<void> => {
@@ -1037,8 +1062,20 @@ export default function SaleDetailModal({
                   {isDelivery || deliveryFeeUsd > 0 || deliveryFeeKhr > 0 ? (
                     <MoneyRow
                       label={translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}
-                      amount={fmtUSD(deliveryFeeUsd)}
-                      sub={deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : null}
+                      {...(deliveryPaidByStore ? { tone: 'credit' as const } : {})}
+                      /* A fee the shop absorbed reads "Free" with the figure
+                         struck through -- the same wording the receipt prints.
+                         Free is what total_usd already assumed; the struck
+                         figure still says what the delivery was worth. */
+                      amount={deliveryPaidByStore ? (
+                        <>
+                          {translateOr('delivery_free', 'Free', 'ឥតគិតថ្លៃ')}{' '}
+                          <span className="font-normal text-gray-400 line-through">{fmtUSD(deliveryFeeUsd)}</span>
+                        </>
+                      ) : fmtUSD(deliveryFeeUsd)}
+                      sub={deliveryFeeKhr > 0
+                        ? (deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr))
+                        : null}
                       action={canAmendThisSale ? (
                         <button
                           type="button"
@@ -1115,7 +1152,27 @@ export default function SaleDetailModal({
                     amount={fmtUSD(totalUsd)}
                     sub={totalKhr > 0 ? fmtKHR(totalKhr) : null}
                   />
-                  {amountPaidUsd > 0 ? (
+                  {/* What the customer is left with once returns are booked.
+                      total_usd is what the sale RANG UP and does not net a
+                      refund, so the minus row above it describes a subtraction
+                      the Total line never makes; this row states the result so
+                      the reader is not left to do it. It carries no bold
+                      weight: the sale total keeps the heavier type (one grand
+                      total per column, pinned by recordDetailRowRhythm.test.ts),
+                      which is also why the refund row keeps its pinned position
+                      above the Total here while the printed receipt puts it
+                      below. */}
+                  {refundUsd > 0 ? (
+                    <MoneyRow
+                      label={translateOr('net_total_after_returns', 'Net total', 'សរុបសុទ្ធ')}
+                      amount={fmtUSD(totals.netTotalUsd)}
+                      sub={totals.netTotalKhr > 0 ? fmtKHR(totals.netTotalKhr) : null}
+                    />
+                  ) : null}
+                  {/* Riel-only tender is a payment. Gating this row on the USD
+                      figure alone hid the whole payment on a sale settled in
+                      riel and left the reader with an unexplained balance. */}
+                  {amountPaidUsd > 0 || amountPaidKhr > 0 ? (
                     <MoneyRow
                       label={t('amount_paid') || 'Amount paid'}
                       tone="muted"
