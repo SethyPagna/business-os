@@ -118,6 +118,58 @@ else is quarantined rather than guessed. Nothing was created — no product, no 
 - **Cashier** — the exports carry no cashier column; `Za` (user id 3) matches the
   fifteen invoices already imported for the same days.
 
+
+## How to exclude these rows from a stock backfill — read this before writing one
+
+These 22 sales are `sale_status = 'completed'` and stock was **never taken** for them. Nothing in
+the row says so. Any job that derives stock from completed sales — a backfill, a reconciliation, a
+"repair the missing deductions" pass — will deduct 56 line quantities that were never meant to
+move. Raised by `business-os-v1-ba`; it is the one genuine latent trap in this import.
+
+```sql
+-- interim handles. Both select exactly these 22 rows, verified against production:
+--   notes LIKE 'Legacy import 004%'                -> 22
+--   id BETWEEN 16842 AND 16863                     -> 22
+--   notes-matches falling outside that id range    -> 0
+```
+
+Treat those as **interim, not durable**. `notes` is free text with no constraint preventing a
+later import, a support edit or a UI note from matching `'Legacy import 004%'`; exact-today is not
+the same property as stable.
+
+**The durable handle is missing, and that is a defect in this import.**
+`sales.legacy_receipt_number` is the typed column the system already uses for exactly this, in the
+format `<invoice>@<YYYY-MM-DD>`. The date suffix exists because legacy invoice numbers repeat
+across years — `004400@2025-07-24` and `004400@2026-09-01` are different sales. It is populated on
+**15,004** rows, including all **35** from the earlier `0044xx@2026-09-0x` reconciliation, and is
+**NULL on all 22 of these**. No value in the 004435–004456 range is currently tagged, and the index
+`idx_sales_legacy_receipt_number` is **not unique**, so a corrective write cannot fail halfway on a
+constraint. The write has **not** been made — it is a production write and needs the user's go.
+
+If it is authorised, three conditions on it (all from `business-os-v1-ba`, all worth honouring):
+re-confirm zero overlap with the values already present immediately before writing; derive each
+value from **its own invoice and that invoice's own date**, never from position in the 16842–16863
+id order, because this set spans **both Sep 2 and Sep 3** and a positional fill would silently
+misdate any row whose insert order does not match its invoice date; and state the 22 explicit
+`invoice -> value` pairs in this file so the write is checkable line by line.
+
+**The gap is confined to `sales`.** `supplier_invoices` and `customer_receivables` both carry
+`legacy_id`, `source_file`, `source_row` and `imported_at`, and this import populated them
+(legacy_id 1305–1309 and the two dated `source_file` values). Those rows are already durably
+identifiable; only the sales rows are not.
+
+**A check that will NOT isolate these 22.** "Every completed sale has matching
+`inventory_movements`" would flag a population, not this batch: production has **14,943** completed
+sales and **23,079** movement rows, of which only **144** are sale-related at all (movement types:
+add, adjustment, delete, reconciliation_add, reconciliation_remove, transfer_in, transfer_out,
+return, return_reversal, sale). Ordinary POS deductions are **not** written as movements in this
+system — `stock_quantity` is updated directly — so **14,905** completed sales already have no
+movement row and these 22 join that population rather than standing out from it.
+
+That is also why `SUM(products.stock_quantity)` holding at **23,085** is the load-bearing proof of
+"no deduction" here; the flat `COUNT(inventory_movements)` at 23,079 only rules out offsetting
+writes.
+
 ## Sources
 
 Archived under explicit dated names in `Migration from old system/` (untracked):
