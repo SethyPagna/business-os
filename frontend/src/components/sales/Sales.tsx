@@ -71,7 +71,13 @@ const SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS = 20000
 // lib/saleTransitions.ts's heldQuantity() uses (STOCK_DEDUCTED_STATUSES
 // plus the two return statuses). A transition moves stock only when it
 // crosses this line, which is what the confirmation dialog states up front.
-const STOCK_HOLDING_STATUSES = new Set(['completed', 'awaiting_delivery', 'partial_return', 'returned'])
+//
+// S4-3: `awaiting_payment` is in the set, because the server now holds stock
+// for it. This list is a MIRROR of the server's rule, so it has to move in
+// the same commit -- a stale copy here does not just mislabel a dialog, it
+// promises the shop a deduction that already happened (or denies one that
+// is about to). cancelled is the only live status left outside.
+const STOCK_HOLDING_STATUSES = new Set(['completed', 'awaiting_payment', 'awaiting_delivery', 'partial_return', 'returned'])
 const transitionMovesStock = (fromStatus: string, toStatus: string): boolean => (
   STOCK_HOLDING_STATUSES.has(String(fromStatus || 'completed')) !== STOCK_HOLDING_STATUSES.has(String(toStatus || 'completed'))
 )
