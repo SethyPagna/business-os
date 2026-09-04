@@ -49,8 +49,9 @@ interface ImageOnlyProduct {
   updated_at?: string
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
-  special_price_usd?: number | string | null
-  special_price_khr?: number | string | null
+  // No special_price_* here: the 2026-09-04 ruling deleted the "VIP" tier and
+  // migration 0111 moved its values into wholesale_price_*, which is now the
+  // one and only discounted tier this view can show.
   wholesale_price_usd?: number | string | null
   wholesale_price_khr?: number | string | null
   barcode?: string | null
@@ -149,7 +150,9 @@ export default function ProductsImageOnlyView() {
   // `product` anyway. Kept as plain booleans (not memoized) since
   // hasPermission() itself is already a cheap map lookup.
   const showPrice = hasPermission('products_image_only_show_price')
-  const showVip = hasPermission('products_image_only_show_vip')
+  // showVip is gone with the tier: the 2026-09-04 ruling deleted the "VIP"
+  // price outright (it was always the wholesale price under a wrong name), so
+  // `products_image_only_show_vip` no longer exists as a permission either.
   // Wholesale shows in the DETAIL panel only (not the card list), matching the
   // "wholesale only in click-to-view detail" preference and keeping the card
   // compact.
@@ -493,13 +496,10 @@ export default function ProductsImageOnlyView() {
                       {Number(product.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(product.selling_price_khr)}` : ''}
                     </p>
                   ) : null}
-                  {showVip && (Number(product.special_price_usd || 0) > 0 || Number(product.special_price_khr || 0) > 0) ? (
-                    <p className="truncate text-xs text-emerald-600 dark:text-emerald-400">
-                      <span className="text-gray-400 dark:text-gray-500">{t('special_price') || 'VIP price'}: </span>
-                      {fmtUSD(product.special_price_usd)}
-                      {Number(product.special_price_khr || 0) > 0 ? ` · ${fmtKHR(product.special_price_khr)}` : ''}
-                    </p>
-                  ) : null}
+                  {/* The VIP price row is deleted (2026-09-04 ruling). The card
+                      list deliberately gains no wholesale row in its place --
+                      wholesale stays detail-panel-only so the card stays
+                      compact, which is the pre-existing showWholesale rule. */}
                   {showBarcode && product.barcode ? (
                     <p className="break-all font-mono text-[11px] text-gray-600 dark:text-gray-300" title={String(product.barcode)}>
                       {product.barcode}
@@ -622,16 +622,10 @@ export default function ProductsImageOnlyView() {
                   </dd>
                 </div>
               ) : null}
-              {showVip && (Number(detailsProduct.special_price_usd || 0) > 0 || Number(detailsProduct.special_price_khr || 0) > 0) ? (
-                <div className="flex justify-between gap-3 py-2">
-                  <dt className="text-gray-500 dark:text-gray-400">{t('special_price') || 'VIP price'}</dt>
-                  <dd className="text-right text-emerald-700 dark:text-emerald-300">
-                    {fmtUSD(detailsProduct.special_price_usd)}
-                    {Number(detailsProduct.special_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.special_price_khr)}` : ''}
-                  </dd>
-                </div>
-              ) : null}
-              {showWholesale && (Number(detailsProduct.wholesale_price_usd || 0) > 0 || Number(detailsProduct.wholesale_price_khr || 0) > 0) ? (
+              {/* The VIP row that stood here is deleted (2026-09-04 ruling):
+                  wholesale, immediately below, is now the only discounted tier
+                  and already carries the values the VIP row used to show. */}
+              {showWholesale &&(Number(detailsProduct.wholesale_price_usd || 0) > 0 || Number(detailsProduct.wholesale_price_khr || 0) > 0) ? (
                 <div className="flex justify-between gap-3 py-2">
                   <dt className="text-gray-500 dark:text-gray-400">{t('wholesale_price') || 'Wholesale'}</dt>
                   <dd className="text-right text-indigo-700 dark:text-indigo-300">

@@ -47,6 +47,8 @@ import {
   applyManualDiscount,
   computeExpiryStatus,
   repricePromotionCartLines,
+  resolveWholesaleAutoRule,
+  applyWholesaleAutoPricing,
   isSaleRecorded,
   findCheckoutBlocker,
   resolveChangeExchangeRate,
@@ -237,8 +239,8 @@ type ProductRecord = Record<string, unknown> & {
   selling_price_khr?: string | number
   selling_price_usd?: string | number
   sku?: string
-  special_price_khr?: string | number
-  special_price_usd?: string | number
+  // No special_price_* pair: the 2026-09-04 ruling retired the "VIP" tier and
+  // the products route stopped selecting the columns, so they never arrive.
   wholesale_price_khr?: string | number
   wholesale_price_usd?: string | number
   stock_quantity?: string | number
@@ -1045,6 +1047,15 @@ export default function POS() {
   // Unset/anything but the literal string 'false' means shown -- same
   // default-on convention as the notifications toggles in Settings.tsx.
   const showItemDiscountInCart = asText(settings.pos_show_item_discount ?? 'true') !== 'false'
+  // Settings > POS Settings > "Automatic Wholesale Price". Default OFF (the
+  // rule resolver enforces that), so a shop that never opens the setting
+  // prices exactly as it did before this shipped. Memoised on the two raw
+  // setting values so the reprice effect below has a stable dependency.
+  const wholesaleAutoRule = useMemo(
+    () => resolveWholesaleAutoRule(settings as Record<string, unknown>),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.pos_wholesale_auto_enabled, settings.pos_wholesale_auto_min_qty],
+  )
   const redeemPointsStep = Math.max(1, parseInt(asText(settings.customer_portal_redeem_points || '100'), 10) || 100)
   // Cents precision, NOT whole dollars (Part-77, money audit): the old
   // Math.round here turned a configured $0.50-per-step into $1 (double the
@@ -2226,18 +2237,21 @@ export default function POS() {
 
   const openProductCard = useCallback((product: ProductRecord, { groupProduct = false, inStock = false }: { groupProduct?: boolean; inStock?: boolean } = {}) => {
     if (!product) return
-    const hasSpecial = asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0
+    // Wholesale is the only alternate tier a product can carry now (the VIP
+    // tier was retired by the 2026-09-04 ruling), so it alone decides whether
+    // a one-tap add has to divert to the detail sheet's price picker.
+    const hasWholesale = asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0
     const hasPromotion = promotionBadgeForProduct(product, promotionRules).active
     // Batch-tracked products always need the detail sheet's lot picker --
     // a one-tap add can't know which lot to sell from -- same gate as
-    // groupProduct/hasSpecial/hasPromotion below.
+    // groupProduct/hasWholesale/hasPromotion below.
     //
     // When the tracking lookup itself failed we don't know which products
     // are tracked, so EVERY product takes the detail-sheet path. One extra
     // tap on an untracked product is a far better error than silently
     // one-tapping a tracked one past its lot picker.
     const isBatchTracked = trackedBatchLoadFailed || trackedBatchProductIds.has(Number(product.id))
-    if (groupProduct || hasSpecial || hasPromotion || isBatchTracked) {
+    if (groupProduct || hasWholesale || hasPromotion || isBatchTracked) {
       setDetailProduct(product)
       return
     }
@@ -2376,6 +2390,21 @@ export default function POS() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.cart, promotionRules, exchangeRate])
 
+  // "Wholesale only > N" (the automation migration 0093 deferred). Same shape
+  // and same reasoning as the promotion pass above: the decision depends on a
+  // line's QUANTITY, so it has to be re-evaluated on every cart change rather
+  // than only at add-to-cart time -- otherwise typing a bigger quantity into
+  // an existing line would never reach the threshold. applyWholesaleAutoPricing
+  // is pure and reports changed=false once the cart agrees with the rule, so
+  // this settles in one pass and cannot loop. It only moves lines it is
+  // allowed to move (plain 'selling', no manual price edit) and only reverses
+  // its own work, so it never fights the promotion pass or the cashier.
+  useEffect(() => {
+    const { cart, changed } = applyWholesaleAutoPricing(active.cart, wholesaleAutoRule, exchangeRate)
+    if (changed) patchActive({ cart: cart as CartLineRecord[] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.cart, wholesaleAutoRule, exchangeRate])
+
   const updatePrice = (cartLineId: string | number, field: 'usd' | 'khr', rawValue: string) => {
     const num = normalizePriceValue(rawValue, 0)
     patchActive({
@@ -2449,21 +2478,29 @@ export default function POS() {
     })
   }
 
-  // A tier chip in the cart (VIP or wholesale) is a MARKER toggle (user): it
-  // flips only whether this line is recorded/printed as that tier, never the
-  // price. Default on (the line was added at that tier); deselecting drops it
-  // to plain 'selling' while keeping applied/base price exactly, so the number
+  // The wholesale tier chip in the cart is a MARKER toggle (user): it flips
+  // only whether this line is recorded/printed as that tier, never the price.
+  // Default on (the line was added at that tier); deselecting drops it to
+  // plain 'selling' while keeping applied/base price exactly, so the number
   // stays put and the receipt simply stops printing the tag (the receipt
-  // derives the tag from the persisted price_mode). Re-selecting restores the
-  // mark; picking the other tier just moves the single price_mode value. Cart
-  // line identity is the stored cart_line_id, so flipping price_mode never
-  // re-keys or merges the line.
-  const toggleTierTag = (cartLineId: string | number, tier: 'special' | 'wholesale') => {
+  // derives the tag from the persisted price_mode). Cart line identity is the
+  // stored cart_line_id, so flipping price_mode never re-keys or merges the
+  // line. (The VIP chip that used to share this handler is gone -- the
+  // 2026-09-04 ruling left exactly one tier, so there is no "other tier" to
+  // move the value to any more.)
+  //
+  // wholesale_auto_optout is what stops this fighting the "wholesale only > N"
+  // automation. Without it, deselecting the chip on a line the automation had
+  // upgraded would drop the line to 'selling', the effect would immediately
+  // see quantity-still-over-threshold and upgrade it straight back, and the
+  // cashier's tap would look broken. The stamp says "a human has ruled on
+  // this line" and the automation leaves it alone from then on.
+  const toggleTierTag = (cartLineId: string | number) => {
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
-        const nextMode = String(item.price_mode || 'selling') === tier ? 'selling' : tier
-        return { ...item, price_mode: nextMode }
+        const nextMode = String(item.price_mode || 'selling') === 'wholesale' ? 'selling' : 'wholesale'
+        return { ...item, price_mode: nextMode, wholesale_auto: false, wholesale_auto_optout: true }
       }),
     })
   }

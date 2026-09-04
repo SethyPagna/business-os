@@ -11,13 +11,17 @@ import {
 export const PRODUCT_MONEY_FIELDS = [
   'selling_price_usd',
   'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  // The VIP-price header alias -- listed as a money field so a raw
-  // 'vip_price_usd' string is coerced to a number before it is copied into
-  // special_price_* during normalization (see normalizeProductImportRow).
+  'wholesale_price_usd',
+  'wholesale_price_khr',
+  // The legacy discounted-tier header aliases -- listed as money fields so a
+  // raw 'vip_price_usd' / 'special_price_usd' string is coerced to a number
+  // before it is copied into wholesale_price_* during normalization (see
+  // normalizeProductImportRow). Kept because migration 0111 renamed the tier,
+  // not the sheets operators already have on disk.
   'vip_price_usd',
   'vip_price_khr',
+  'special_price_usd',
+  'special_price_khr',
   'discount_amount_usd',
   'discount_amount_khr',
   'purchase_price_usd',
@@ -261,14 +265,24 @@ export function normalizeProductImportRow(row: ImportRow = {}, index = 0): Impor
 
   normalized.name = normalizeText(normalized.name)
   normalized.unit = normalizeText(normalized.unit || 'pcs')
-  // VIP price (stored in special_price_*; label is "VIP" now). Reads the
-  // new vip_price_* header OR the legacy special_price_* one, and defaults
-  // to 0 when neither is given -- NOT the selling price. Defaulting to
-  // selling set VIP = selling on every blank row, which the edit form then
-  // wrote back, destroying real VIP prices. Every consumer treats 0 as
-  // "no VIP price, use selling".
-  normalized.special_price_usd = normalized.special_price_usd ?? normalized.vip_price_usd ?? 0
-  normalized.special_price_khr = normalized.special_price_khr ?? normalized.vip_price_khr ?? 0
+  // Wholesale price -- the app's only discounted tier since migration 0111.
+  // The column this app used to call "VIP" (special_price_*) was never a VIP
+  // price; the owner ruled it always held the wholesale number, so 0111 moved
+  // the values into wholesale_price_* and left special_price_* dead. Reads
+  // the canonical wholesale_price_* header first, then the legacy vip_price_*
+  // and special_price_* ones -- by that same ruling an old sheet headed "VIP
+  // price" IS a wholesale sheet, so landing it here keeps the operator's real
+  // numbers instead of dropping the column on the floor. Explicit
+  // wholesale_price_* wins when a file carries both, because it is the one
+  // header that unambiguously names the tier it means. (Same precedence order
+  // as importEngine.ts's row normalizer -- the two used to disagree.)
+  //
+  // Defaults to 0 when none is given -- NOT the selling price. Defaulting to
+  // selling set the tier = selling on every blank row, which the edit form
+  // then wrote back, destroying real wholesale prices. Every consumer treats
+  // 0 as "no wholesale price, use selling".
+  normalized.wholesale_price_usd = normalized.wholesale_price_usd ?? normalized.vip_price_usd ?? normalized.special_price_usd ?? 0
+  normalized.wholesale_price_khr = normalized.wholesale_price_khr ?? normalized.vip_price_khr ?? normalized.special_price_khr ?? 0
   normalized.cost_price_usd = normalized.cost_price_usd ?? normalized.purchase_price_usd ?? 0
   normalized.cost_price_khr = normalized.cost_price_khr ?? normalized.purchase_price_khr ?? 0
   normalized.low_stock_threshold = normalized.low_stock_threshold ?? 10
@@ -306,14 +320,24 @@ function normalizeProductForSignature(product: ImportRow = {}): ImportRow {
   })
   normalized.name = normalizeText(normalized.name)
   normalized.unit = normalizeText(normalized.unit || 'pcs')
-  // VIP price (stored in special_price_*; label is "VIP" now). Reads the
-  // new vip_price_* header OR the legacy special_price_* one, and defaults
-  // to 0 when neither is given -- NOT the selling price. Defaulting to
-  // selling set VIP = selling on every blank row, which the edit form then
-  // wrote back, destroying real VIP prices. Every consumer treats 0 as
-  // "no VIP price, use selling".
-  normalized.special_price_usd = normalized.special_price_usd ?? normalized.vip_price_usd ?? 0
-  normalized.special_price_khr = normalized.special_price_khr ?? normalized.vip_price_khr ?? 0
+  // Wholesale price -- the app's only discounted tier since migration 0111.
+  // The column this app used to call "VIP" (special_price_*) was never a VIP
+  // price; the owner ruled it always held the wholesale number, so 0111 moved
+  // the values into wholesale_price_* and left special_price_* dead. Reads
+  // the canonical wholesale_price_* header first, then the legacy vip_price_*
+  // and special_price_* ones -- by that same ruling an old sheet headed "VIP
+  // price" IS a wholesale sheet, so landing it here keeps the operator's real
+  // numbers instead of dropping the column on the floor. Explicit
+  // wholesale_price_* wins when a file carries both, because it is the one
+  // header that unambiguously names the tier it means. (Same precedence order
+  // as importEngine.ts's row normalizer -- the two used to disagree.)
+  //
+  // Defaults to 0 when none is given -- NOT the selling price. Defaulting to
+  // selling set the tier = selling on every blank row, which the edit form
+  // then wrote back, destroying real wholesale prices. Every consumer treats
+  // 0 as "no wholesale price, use selling".
+  normalized.wholesale_price_usd = normalized.wholesale_price_usd ?? normalized.vip_price_usd ?? normalized.special_price_usd ?? 0
+  normalized.wholesale_price_khr = normalized.wholesale_price_khr ?? normalized.vip_price_khr ?? normalized.special_price_khr ?? 0
   normalized.cost_price_usd = normalized.cost_price_usd ?? normalized.purchase_price_usd ?? 0
   normalized.cost_price_khr = normalized.cost_price_khr ?? normalized.purchase_price_khr ?? 0
   normalized.low_stock_threshold = normalized.low_stock_threshold ?? 10
@@ -432,8 +456,8 @@ function buildProductImportReviewGroups(rows: ImportRow[] = []): Array<Record<st
       low_stock_threshold: row?.low_stock_threshold ?? '',
       selling_price_usd: row?.selling_price_usd ?? '',
       selling_price_khr: row?.selling_price_khr ?? '',
-      special_price_usd: row?.special_price_usd ?? row?.vip_price_usd ?? '',
-      special_price_khr: row?.special_price_khr ?? row?.vip_price_khr ?? '',
+      wholesale_price_usd: row?.wholesale_price_usd ?? row?.vip_price_usd ?? row?.special_price_usd ?? '',
+      wholesale_price_khr: row?.wholesale_price_khr ?? row?.vip_price_khr ?? row?.special_price_khr ?? '',
       purchase_price_usd: row?.purchase_price_usd ?? row?.cost_price_usd ?? '',
       purchase_price_khr: row?.purchase_price_khr ?? row?.cost_price_khr ?? '',
       discount_enabled: row?.discount_enabled ?? '',
@@ -488,8 +512,8 @@ function buildProductImportReviewGroups(rows: ImportRow[] = []): Array<Record<st
             low_stock_threshold: row.low_stock_threshold ?? '',
             selling_price_usd: row.selling_price_usd ?? '',
             selling_price_khr: row.selling_price_khr ?? '',
-            special_price_usd: row.special_price_usd ?? row.vip_price_usd ?? '',
-            special_price_khr: row.special_price_khr ?? row.vip_price_khr ?? '',
+            wholesale_price_usd: row.wholesale_price_usd ?? row.vip_price_usd ?? row.special_price_usd ?? '',
+            wholesale_price_khr: row.wholesale_price_khr ?? row.vip_price_khr ?? row.special_price_khr ?? '',
             purchase_price_usd: row.purchase_price_usd ?? row.cost_price_usd ?? '',
             purchase_price_khr: row.purchase_price_khr ?? row.cost_price_khr ?? '',
             discount_enabled: row.discount_enabled ?? '',

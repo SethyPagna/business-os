@@ -204,8 +204,12 @@ interface ProductRecord {
   cost_price_khr?: number | string | null
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
-  special_price_usd?: number | string | null
-  special_price_khr?: number | string | null
+  // The 2026-09-04 ruling: the tier this app called "VIP" (special_price_*) was
+  // always the WHOLESALE price. Migration 0111 copied those values into
+  // wholesale_price_* and zeroed special_price_*, so the old pair is dead and
+  // this record only knows about the surviving one.
+  wholesale_price_usd?: number | string | null
+  wholesale_price_khr?: number | string | null
   low_stock_threshold?: number | string | null
   out_of_stock_threshold?: number | string | null
   is_active?: boolean | number | null
@@ -267,8 +271,10 @@ type BulkEditForm = Record<string, string | number | boolean | undefined> & {
   qty?: string | number
   selling_price_khr?: string | number
   selling_price_usd?: string | number
-  special_price_khr?: string | number
-  special_price_usd?: string | number
+  // Renamed from special_price_khr/usd with the tier itself (2026-09-04
+  // ruling); the adjust_wholesale toggle below was adjust_special.
+  wholesale_price_khr?: string | number
+  wholesale_price_usd?: string | number
   supplier?: string
   unit?: string
   // Relative price adjustment (see runBulkProductPriceAdjustment).
@@ -276,7 +282,7 @@ type BulkEditForm = Record<string, string | number | boolean | undefined> & {
   adjust_amount?: string | number
   adjust_currency?: string
   adjust_selling?: boolean
-  adjust_special?: boolean
+  adjust_wholesale?: boolean
   adjust_cost?: boolean
   adjust_skip_zero?: boolean
 }
@@ -2843,7 +2849,9 @@ function ProductsFullEditor() {
     const currency = bulkEditForm.adjust_currency === 'khr' ? 'khr' : 'usd'
     const fields: string[] = []
     if (bulkEditForm.adjust_selling !== false) fields.push(`selling_price_${currency}`)
-    if (bulkEditForm.adjust_special) fields.push(`special_price_${currency}`)
+    // Was `special_price_${currency}`: re-pointed at wholesale by the
+    // 2026-09-04 ruling, which deleted the "VIP" tier those columns backed.
+    if (bulkEditForm.adjust_wholesale) fields.push(`wholesale_price_${currency}`)
     if (bulkEditForm.adjust_cost) fields.push(`cost_price_${currency}`)
     if (!fields.length) {
       notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')
@@ -2885,8 +2893,10 @@ function ProductsFullEditor() {
     if (bulkEditForm.adjust_selling !== false) {
       fields.push(bulkEditForm.adjust_currency === 'khr' ? 'selling_price_khr' : 'selling_price_usd')
     }
-    if (bulkEditForm.adjust_special) {
-      fields.push(bulkEditForm.adjust_currency === 'khr' ? 'special_price_khr' : 'special_price_usd')
+    // Re-pointed from special_price_* to wholesale_price_* (2026-09-04 ruling)
+    // -- same as the catalog-wide adjuster above.
+    if (bulkEditForm.adjust_wholesale) {
+      fields.push(bulkEditForm.adjust_currency === 'khr' ? 'wholesale_price_khr' : 'wholesale_price_usd')
     }
     if (bulkEditForm.adjust_cost) {
       fields.push(bulkEditForm.adjust_currency === 'khr' ? 'purchase_price_khr' : 'purchase_price_usd')
@@ -3071,8 +3081,13 @@ function ProductsFullEditor() {
     const productName = String(p.name || '')
     const sellingUsd = Number(p.selling_price_usd || 0)
     const sellingKhr = Number(p.selling_price_khr || 0)
-    const specialUsd = Number(p.special_price_usd || 0)
-    const specialKhr = Number(p.special_price_khr || 0)
+    // Was specialUsd/specialKhr off special_price_*, rendered as "VIP". The
+    // 2026-09-04 ruling deleted that tier: it was the wholesale price all
+    // along, and migration 0111 moved the very same numbers into
+    // wholesale_price_*, so this row keeps showing the same figures under the
+    // name they should always have had.
+    const wholesaleUsd = Number(p.wholesale_price_usd || 0)
+    const wholesaleKhr = Number(p.wholesale_price_khr || 0)
     const {
       branchSummaryLabel,
       compactMeta,
@@ -3257,10 +3272,12 @@ function ProductsFullEditor() {
         <td className="px-3 py-2 text-right col-highlight-green">
           <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
           {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
-          {specialUsd > 0 || specialKhr > 0 ? (
+          {wholesaleUsd > 0 || wholesaleKhr > 0 ? (
+            // Label was a hardcoded "VIP"; it is translated now because the
+            // surviving tier has a real key in both packs (wholesale_price).
             <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
-              VIP {fmtUSD(specialUsd || sellingUsd)}
-              {specialKhr > 0 ? ` / ${fmtKHR(specialKhr)}` : ''}
+              {tr('wholesale_price', 'Wholesale', 'បោះដុំ')} {fmtUSD(wholesaleUsd || sellingUsd)}
+              {wholesaleKhr > 0 ? ` / ${fmtKHR(wholesaleKhr)}` : ''}
             </div>
           ) : null}
           {promotion.active ? (
@@ -3303,7 +3320,9 @@ function ProductsFullEditor() {
     const brandName = String(p.brand || '')
     const barcode = String(p.barcode || '')
     const sellingUsd = Number(p.selling_price_usd || 0)
-    const specialUsd = Number(p.special_price_usd || 0)
+    // Same re-point as the desktop row: the "VIP" tier is deleted (2026-09-04
+    // ruling) and wholesale_price_usd now carries the number it used to.
+    const wholesaleUsd = Number(p.wholesale_price_usd || 0)
     const unitName = typeof p.unit === 'string' ? p.unit : undefined
     const {
       promotion,
@@ -3491,10 +3510,13 @@ function ProductsFullEditor() {
                 too-narrow cards -- the default render is one line. */}
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
               <span className="whitespace-nowrap font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
-              {specialUsd > 0 ? (
-                // The VIP price (the special_price_* field -- labelled "VIP
-                // Price" elsewhere, e.g. ProductDetailModal; the old hardcoded
-                // "Special" here was a mislabel). On the small-screen default
+              {wholesaleUsd > 0 ? (
+                // The wholesale price (wholesale_price_usd). This used to read
+                // special_price_usd and be labelled "VIP"; the 2026-09-04
+                // ruling established that tier was never a VIP price and
+                // deleted it, so the card shows the same figure -- migration
+                // 0111 moved the values across -- as wholesale. On the
+                // small-screen default
                 // card it shows as JUST the number, colour-coded (primary/blue)
                 // with no text label -- the colour distinguishes it from selling
                 // (green) and cost (red) on this compact one-line price row
@@ -3504,7 +3526,7 @@ function ProductsFullEditor() {
                 <>
                   <span className="text-gray-300 dark:text-gray-600">|</span>
                   <span className="whitespace-nowrap font-medium text-primary-700 dark:text-primary-400">
-                    {fmtUSD(specialUsd)}
+                    {fmtUSD(wholesaleUsd)}
                   </span>
                 </>
               ) : null}
@@ -4051,10 +4073,18 @@ function ProductsFullEditor() {
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
             <div><label className="text-xs text-gray-500 block mb-1">Selling Price (KHR)</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">VIP Price (USD)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.special_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,special_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">VIP Price (KHR)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.special_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,special_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+            {/* Was the "VIP Price" pair writing special_price_usd/khr. The
+                2026-09-04 ruling deleted that tier, so these now edit the
+                wholesale price -- the same numbers, since migration 0111 moved
+                them across. Labels come from the wholesale_price_*_full keys
+                that already exist in both packs (the neighbouring rows here are
+                still hardcoded English; not touching those is deliberate, they
+                are not this change). buildProductBulkPricingUpdates already
+                accepts wholesale_price_* so the write path needs nothing new. */}
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_usd_full', 'Wholesale (USD)', 'តម្លៃបោះដុំ (USD)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'តម្លៃបោះដុំ (KHR)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
             <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (USD)</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
             <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (KHR)</label>
@@ -4118,7 +4148,13 @@ function ProductsFullEditor() {
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
               {([
                 ['adjust_selling', tr('selling_price', 'Selling price'), true],
-                ['adjust_special', tr('special_price', 'Special price'), false],
+                // Was 'adjust_special' labelled "Special price". Renamed with
+                // the tier by the 2026-09-04 ruling; both adjustment paths
+                // accept wholesale_price_* (BulkPriceField in
+                // productWriteHelpers.ts for the selected-rows path,
+                // BULK_PRICE_FIELDS in cloudflare/src/routes/products.ts for
+                // the catalog-wide one), so the toggle keeps working.
+                ['adjust_wholesale', tr('wholesale_price', 'Wholesale', 'បោះដុំ'), false],
                 ['adjust_cost', tr('cost_price', 'Cost price'), false],
               ] as const).map(([key, label, defaultOn]) => (
                 <label key={key} className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">

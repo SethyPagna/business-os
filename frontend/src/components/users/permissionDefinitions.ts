@@ -258,7 +258,11 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         exclusiveWithTier: 'products',
         alsoClearsKeys: [
           'products_image_only_show_price',
-          'products_image_only_show_vip',
+          // products_image_only_show_vip is not listed any more: the key no
+          // longer exists (2026-09-04 ruling deleted the tier). Nothing is
+          // stranded -- 0 users and 0 roles held it when production was
+          // checked -- and a role that somehow still carries the stale key just
+          // carries an inert boolean nothing reads.
           'products_image_only_show_wholesale',
           'products_image_only_show_barcode',
           'products_image_only_show_category',
@@ -280,7 +284,10 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // mapping enforced server-side, and ProductsImageOnlyView.tsx for
       // where the UI reads these same keys via useApp().hasPermission().
       { key: 'products_image_only_show_price', tKey: 'perm_products_image_only_show_price', label: 'Image-only role: show selling price', sensitivity: 'normal' },
-      { key: 'products_image_only_show_vip', tKey: 'perm_products_image_only_show_vip', label: 'Image-only role: show VIP price', sensitivity: 'normal' },
+      // The 'products_image_only_show_vip' row is deleted (2026-09-04 ruling):
+      // the tier it revealed was the wholesale price under a wrong name, and
+      // migration 0111 emptied special_price_*, so the grant could only ever
+      // have exposed two permanently empty columns. Wholesale is the survivor.
       { key: 'products_image_only_show_wholesale', tKey: 'perm_products_image_only_show_wholesale', label: 'Image-only role: show wholesale price', sensitivity: 'normal' },
       { key: 'products_image_only_show_barcode', tKey: 'perm_products_image_only_show_barcode', label: 'Image-only role: show barcode', sensitivity: 'normal' },
       { key: 'products_image_only_show_category', tKey: 'perm_products_image_only_show_category', label: 'Image-only role: show category', sensitivity: 'normal' },

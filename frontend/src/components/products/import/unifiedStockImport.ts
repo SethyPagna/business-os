@@ -12,7 +12,11 @@ export const UNIFIED_STOCK_HEADERS = [
   'date',
   'action',
   'selling_price',
-  'vip_price',
+  // Renamed from 'vip_price' by migration 0111: the tier this app called
+  // "VIP" always held the WHOLESALE number, so the sheet column now says so.
+  // Old sheets still import -- HEADER_ALIASES below still accepts the legacy
+  // vip/special spellings and maps them here.
+  'wholesale_price',
   'cost_price',
   'batch',
   // Optional: which supplier this row's stock was bought from. Stored on
@@ -33,7 +37,7 @@ export interface UnifiedStockParsedRow {
   date: string
   action: string
   sellingPrice: number | null
-  vipPrice: number | null
+  wholesalePrice: number | null
   costPrice: number | null
   batch: string
   supplier: string
@@ -59,7 +63,10 @@ const HEADER_ALIASES: Record<UnifiedStockHeader, readonly string[]> = {
   date: ['date', 'transactiondate', 'stockdate', 'receiveddate', 'saledate'],
   action: ['action', 'stockaction', 'movement', 'movementtype', 'salegroup'],
   selling_price: ['sellingprice', 'sellingpriceusd', 'price', 'priceusd'],
-  vip_price: ['vipprice', 'vippriceusd', 'specialprice', 'specialpriceusd'],
+  // Legacy vip*/special* spellings stay accepted: per the owner's ruling that
+  // column always carried wholesale numbers, so an old sheet headed "VIP
+  // price" is a wholesale sheet and must not be silently dropped.
+  wholesale_price: ['wholesaleprice', 'wholesalepriceusd', 'vipprice', 'vippriceusd', 'specialprice', 'specialpriceusd'],
   cost_price: ['costprice', 'costpriceusd', 'cost', 'unitcost'],
   batch: ['batch', 'batchlabel', 'batchcode', 'lot', 'lotcode'],
   supplier: ['supplier', 'suppliername', 'vendor', 'vendorname'],
@@ -116,7 +123,7 @@ export function parseUnifiedStockRows(sourceRows: readonly UnifiedStockSourceRow
     const warehouse = parseOptionalNumber(read('warehouse'))
     const date = normalizeUnifiedStockDate(read('date'))
     const sellingPrice = parseOptionalNumber(read('selling_price'))
-    const vipPrice = parseOptionalNumber(read('vip_price'))
+    const wholesalePrice = parseOptionalNumber(read('wholesale_price'))
     const costPrice = parseOptionalNumber(read('cost_price'))
 
     if (!name && !barcode) issues.push({ rowNumber, code: 'missing_identity', message: 'Name or barcode is required.' })
@@ -125,7 +132,7 @@ export function parseUnifiedStockRows(sourceRows: readonly UnifiedStockSourceRow
       issues.push({ rowNumber, code: 'invalid_quantity', message: 'Shop and warehouse must be non-negative numbers.' })
     }
     if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be mm/dd/yyyy or yyyy-mm-dd.' })
-    if ([sellingPrice, vipPrice, costPrice].some((value) => value === 'invalid' || (typeof value === 'number' && value < 0))) {
+    if ([sellingPrice, wholesalePrice, costPrice].some((value) => value === 'invalid' || (typeof value === 'number' && value < 0))) {
       issues.push({ rowNumber, code: 'invalid_price', message: 'Prices must be non-negative numbers.' })
     }
 
@@ -138,7 +145,7 @@ export function parseUnifiedStockRows(sourceRows: readonly UnifiedStockSourceRow
       date: date || '',
       action: clean(read('action')),
       sellingPrice: typeof sellingPrice === 'number' && sellingPrice >= 0 ? sellingPrice : null,
-      vipPrice: typeof vipPrice === 'number' && vipPrice >= 0 ? vipPrice : null,
+      wholesalePrice: typeof wholesalePrice === 'number' && wholesalePrice >= 0 ? wholesalePrice : null,
       costPrice: typeof costPrice === 'number' && costPrice >= 0 ? costPrice : null,
       batch: clean(read('batch')),
       supplier: clean(read('supplier')),
@@ -151,7 +158,7 @@ export function buildUnifiedStockTemplateCsv(): string {
   return `\uFEFF${UNIFIED_STOCK_HEADERS.join(',')}\r\n`
 }
 
-// Selling/VIP differences are deliberately absent: only multiple batches
+// Selling/wholesale differences are deliberately absent: only multiple batches
 // at multiple costs require the explicit Confirm Action gate.
 export function findUnifiedStockCostBatchConflicts(rows: readonly UnifiedStockParsedRow[]): Map<number, string> {
   const groups = new Map<string, UnifiedStockParsedRow[]>()

@@ -1165,6 +1165,43 @@ export default function Settings() {
               onChange={(event) => setValue('pos_show_item_discount', event.target.checked ? 'true' : 'false')}
             />
           </label>
+          {/* The "wholesale only > N" automation deferred by migration 0093.
+              Note the ?? 'false' default -- every other toggle on this page
+              defaults ON when unset, but an automation that changes what a
+              customer is charged has to be opted into deliberately, so an
+              existing shop that upgrades into this build keeps ringing up
+              exactly what it rang up yesterday until someone ticks this. */}
+          <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('pos_wholesale_auto')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{t('pos_wholesale_auto_desc')}</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={String(form.pos_wholesale_auto_enabled ?? 'false') === 'true'}
+              onChange={(event) => setValue('pos_wholesale_auto_enabled', event.target.checked ? 'true' : 'false')}
+            />
+          </label>
+          {/* Threshold is only meaningful while the automation is on, so it
+              is revealed rather than shown permanently greyed. */}
+          {String(form.pos_wholesale_auto_enabled ?? 'false') === 'true' ? (
+            <div>
+              <label htmlFor="settings-pos-wholesale-auto-min-qty" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {t('pos_wholesale_auto_min_qty')}
+              </label>
+              <input
+                id="settings-pos-wholesale-auto-min-qty"
+                name="pos_wholesale_auto_min_qty"
+                className="input max-w-xs"
+                type="number"
+                min="1"
+                step="1"
+                value={form.pos_wholesale_auto_min_qty || '10'}
+                onChange={(event) => setValue('pos_wholesale_auto_min_qty', event.target.value)}
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('pos_wholesale_auto_min_qty_desc')}</p>
+            </div>
+          ) : null}
         </SettingsSection>
         ) : null}
 

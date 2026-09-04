@@ -59,8 +59,9 @@ type ProductDetailProduct = {
   cost_price_khr?: unknown
   selling_price_usd?: unknown
   selling_price_khr?: unknown
-  special_price_usd?: unknown
-  special_price_khr?: unknown
+  // special_price_* is deliberately absent: the 2026-09-04 ruling deleted the
+  // "VIP" tier (it was the wholesale price all along) and migration 0111 moved
+  // its values into wholesale_price_*, leaving the old columns dead.
   wholesale_price_usd?: unknown
   wholesale_price_khr?: unknown
   discount_badge_color?: string
@@ -132,8 +133,6 @@ export default function ProductDetailModal({
   const purchaseUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
   const purchaseKhr = Number(p.purchase_price_khr || p.cost_price_khr || 0)
   const sellingUsd = Number(p.selling_price_usd || 0)
-  const specialUsd = Number(p.special_price_usd || 0)
-  const specialKhr = Number(p.special_price_khr || 0)
   const wholesaleUsd = Number(p.wholesale_price_usd || 0)
   const wholesaleKhr = Number(p.wholesale_price_khr || 0)
   const sellingKhr = Number(p.selling_price_khr || 0)
@@ -402,12 +401,10 @@ export default function ProductDetailModal({
                     <span className="badge-green">{T('in_stock', 'In stock')}</span>
                   )}
                 </Row>
-                {(specialUsd > 0 || specialKhr > 0) ? (
-                  <Row label={T('special_price', 'VIP Price')}>
-                    <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
-                    {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
-                  </Row>
-                ) : null}
+                {/* The "VIP Price" Row that sat here is deleted by the
+                    2026-09-04 ruling -- that tier was the wholesale price
+                    misnamed, and the Wholesale row directly below now shows
+                    the very numbers it used to (migration 0111 moved them). */}
                 {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
                   <Row label={T('wholesale_price', 'Wholesale')}>
                     <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>

@@ -147,23 +147,32 @@ await runTest('cart line identity includes product, mode, and branch so modes do
   assert.equal(getCartLineId({ id: 4, price_mode: 'selling', branch_id: 2 }), '4:selling:2')
 })
 
-await runTest('special price mode prefers special prices and falls back to selling prices', () => {
-  const special = resolveCartPriceValues(
+// This test used to assert that 'special' mode priced off special_price_*.
+// The 2026-09-04 ruling deleted that tier -- it was the wholesale price under
+// the wrong name -- so the invariant is now the opposite one, and it matters
+// for a specific reason: this is a PWA whose till tabs stay open for days, so
+// after the deploy a stale tab can still add a line asking for price_mode
+// 'special'. The tier must fall through to the SELLING price. The dangerous
+// alternative would be pricing off special_price_*, which migration 0111
+// zeroed -- that would ring the sale up at $0.
+await runTest('the retired VIP/special mode falls through to the selling price, never to zero', () => {
+  const stale = resolveCartPriceValues(
     { selling_price_usd: 12, selling_price_khr: 49200, special_price_usd: 10, special_price_khr: 41000 },
     'special',
     4100,
   )
-  assert.equal(special.price_mode, 'special')
-  assert.equal(special.applied_price_usd, 10)
-  assert.equal(special.applied_price_khr, 41000)
+  assert.equal(stale.price_mode, 'selling', 'the VIP tier no longer exists and must not be honored')
+  assert.equal(stale.applied_price_usd, 12, 'a stale VIP line charges full price, not the retired tier')
+  assert.equal(stale.applied_price_khr, 49200)
 
-  const selling = resolveCartPriceValues(
+  // The realistic post-migration shape: special_price_* zeroed by 0111.
+  const zeroed = resolveCartPriceValues(
     { selling_price_usd: 12, selling_price_khr: 49200, special_price_usd: 0, special_price_khr: 0 },
     'special',
     4100,
   )
-  assert.equal(selling.price_mode, 'selling')
-  assert.equal(selling.applied_price_usd, 12)
+  assert.equal(zeroed.price_mode, 'selling')
+  assert.equal(zeroed.applied_price_usd, 12, 'a zeroed dead column must never become a $0 sale')
 })
 
 await runTest('wholesale price mode prefers wholesale prices and falls back to selling prices', () => {
@@ -330,18 +339,28 @@ await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled
   assert.match(receipt, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ productDiscUnitUsd/)
 })
 
-await runTest('POS product cards keep VIP pricing inside the price options', () => {
+// Formerly "POS product cards keep VIP pricing inside the price options".
+// After the 2026-09-04 ruling there is exactly ONE alternate tier, so this
+// guards two things: the tier still never leaks onto the outside grid (the
+// original point of the test), and the tier that IS offered is wholesale.
+await runTest('the POS offers wholesale as the only alternate tier, and never on the card face', () => {
   const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
   const cardStart = pos.indexOf('Product cards show only the normal selling price')
   const cardEnd = pos.indexOf('Colored qty+unit', cardStart)
   assert.ok(cardStart >= 0 && cardEnd > cardStart, 'the product-card price block should remain identifiable')
   const cardPriceBlock = pos.slice(cardStart, cardEnd)
-  assert.doesNotMatch(cardPriceBlock, /special_price|t\('special_price'\)/, 'VIP labels and values must not appear outside on the POS product card')
+  assert.doesNotMatch(cardPriceBlock, /special_price|wholesale_price/, 'tier labels and values must not appear on the outside POS product card')
 
   const sheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
-  assert.doesNotMatch(sheet, /<DetailField label=\{posCopy\('VIP'/, 'VIP pricing must not appear in the general read-only product details')
-  assert.match(sheet, /closeAfterAdd\(effectiveVariant, 'special'\)/, 'variant VIP pricing must remain available as a selectable option')
-  assert.match(sheet, /closeAfterAdd\(product, 'special'\)/, 'standalone-product VIP pricing must remain available as a selectable option')
+  assert.match(sheet, /closeAfterAdd\(effectiveVariant, 'wholesale'\)/, 'variant wholesale pricing must be a selectable option')
+  assert.match(sheet, /closeAfterAdd\(product, 'wholesale'\)/, 'standalone-product wholesale pricing must be a selectable option')
+  // The retired tier must be gone from the sheet entirely -- a leftover
+  // button would add a line priced off a column 0111 zeroed.
+  assert.doesNotMatch(sheet, /closeAfterAdd\([A-Za-z]+, 'special'\)/, 'the VIP tier must no longer be selectable anywhere')
+  // Comments are stripped first: the sheet documents WHY the columns went, and
+  // a tombstone naming them is the opposite of a leftover read.
+  const sheetCode = sheet.replace(/^\s*\/\/.*$/gm, '')
+  assert.doesNotMatch(sheetCode, /special_price_usd|special_price_khr/, 'the sheet must not read the retired VIP columns')
 })
 
 if (failed > 0) {

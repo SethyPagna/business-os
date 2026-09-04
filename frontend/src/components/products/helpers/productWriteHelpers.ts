@@ -26,8 +26,8 @@ interface ProductRecord {
   description?: unknown
   selling_price_usd?: unknown
   selling_price_khr?: unknown
-  special_price_usd?: unknown
-  special_price_khr?: unknown
+  wholesale_price_usd?: unknown
+  wholesale_price_khr?: unknown
   purchase_price_usd?: unknown
   purchase_price_khr?: unknown
   cost_price_usd?: unknown
@@ -145,8 +145,17 @@ export function buildProductWritePayload(snapshot: ProductRecord = {}, user: Use
     description: stringOrEmpty(snapshot.description),
     selling_price_usd: normalizePriceValue(snapshot.selling_price_usd || 0),
     selling_price_khr: normalizePriceValue(snapshot.selling_price_khr || 0),
-    special_price_usd: normalizePriceValue(snapshot.special_price_usd ?? snapshot.selling_price_usd ?? 0),
-    special_price_khr: normalizePriceValue(snapshot.special_price_khr ?? snapshot.selling_price_khr ?? 0),
+    // The tier column, and NO `?? selling_price` fallback. The old VIP pair
+    // that stood here defaulted to the selling price whenever a snapshot
+    // omitted it, so any writer that built a payload from a partial record
+    // silently stamped the selling price into the tier column -- a
+    // client-composed value overwriting what the server held. That is
+    // exactly the defect that would have re-polluted this column right after
+    // migration 0111 moved 9,552 real prices into it. A snapshot that does
+    // not carry a wholesale price writes 0, which reads as "no wholesale
+    // price set" everywhere and offers no tier at the POS.
+    wholesale_price_usd: normalizePriceValue(snapshot.wholesale_price_usd ?? 0),
+    wholesale_price_khr: normalizePriceValue(snapshot.wholesale_price_khr ?? 0),
     purchase_price_usd: normalizePriceValue(snapshot.purchase_price_usd || snapshot.cost_price_usd || 0),
     purchase_price_khr: normalizePriceValue(snapshot.purchase_price_khr || snapshot.cost_price_khr || 0),
     cost_price_usd: normalizePriceValue(snapshot.cost_price_usd || snapshot.purchase_price_usd || 0),
@@ -326,8 +335,8 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
   for (const field of [
     'selling_price_usd',
     'selling_price_khr',
-    'special_price_usd',
-    'special_price_khr',
+    'wholesale_price_usd',
+    'wholesale_price_khr',
     'purchase_price_usd',
     'purchase_price_khr',
   ]) {
@@ -365,8 +374,8 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
 export type BulkPriceField =
   | 'selling_price_usd'
   | 'selling_price_khr'
-  | 'special_price_usd'
-  | 'special_price_khr'
+  | 'wholesale_price_usd'
+  | 'wholesale_price_khr'
   | 'purchase_price_usd'
   | 'purchase_price_khr'
 

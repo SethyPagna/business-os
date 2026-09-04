@@ -303,8 +303,12 @@ function buildInventoryProductRows(productsToExport: AnyRecord[], getStockQty: S
     Brand: product.brand || '',
     Selling_Price_USD: priceCsv(product.selling_price_usd || 0),
     Selling_Price_KHR: priceCsv(product.selling_price_khr || 0),
-    VIP_Price_USD: priceCsv(product.special_price_usd || 0),
-    VIP_Price_KHR: priceCsv(product.special_price_khr || 0),
+    // Was VIP_Price_* reading special_price_*. Per the 2026-09-04 ruling the
+    // "VIP" tier was always the wholesale price; migration 0111 moved the
+    // values into wholesale_price_* and zeroed special_price_*, so reading the
+    // old columns here would now export a column of zeroes under a wrong name.
+    Wholesale_Price_USD: priceCsv(product.wholesale_price_usd || 0),
+    Wholesale_Price_KHR: priceCsv(product.wholesale_price_khr || 0),
     Discount_Enabled: product.discount_enabled ? 'yes' : 'no',
     Discount_Type: product.discount_type || '',
     Discount_Percent: priceCsv(product.discount_percent || 0),

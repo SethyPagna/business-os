@@ -8,8 +8,10 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 export type ProductRecord = ProductGroupRecord & {
   id?: unknown
   parent_id?: unknown
-  special_price_usd?: unknown
-  special_price_khr?: unknown
+  // special_price_usd/khr are NOT declared: the 2026-09-04 ruling retired the
+  // "VIP" tier and routes/products.ts no longer selects the columns, so the
+  // field can never arrive. Declaring it would invite a read that silently
+  // resolves to undefined on every product.
   wholesale_price_usd?: unknown
   wholesale_price_khr?: unknown
   selling_price_usd?: unknown
@@ -19,6 +21,19 @@ export type ProductRecord = ProductGroupRecord & {
   branch_id?: unknown
   cart_line_id?: unknown
   price_mode?: unknown
+  /**
+   * Set by applyWholesaleAutoPricing on a line IT moved to the wholesale
+   * tier, so the same pass can move it back when the quantity drops below
+   * the threshold. Absent on a wholesale line the cashier picked by hand --
+   * that distinction is the whole reason this flag exists.
+   */
+  wholesale_auto?: unknown
+  /**
+   * Set when the cashier tapped the cart's wholesale chip on this line. It
+   * permanently excludes the line from applyWholesaleAutoPricing so a manual
+   * decision is never overwritten by the threshold rule.
+   */
+  wholesale_auto_optout?: unknown
 }
 
 type PriceConverters = {
@@ -37,7 +52,9 @@ type CartPriceValues = {
   // apply a discount, then change branch again) doesn't compound.
   base_price_usd: number
   base_price_khr: number
-  price_mode: 'selling' | 'special' | 'wholesale' | 'promotion'
+  // 'special' (the old VIP tier) is deliberately absent: after the
+  // 2026-09-04 ruling this function can no longer produce it.
+  price_mode: 'selling' | 'wholesale' | 'promotion'
   product_discount_type?: string
   product_discount_label?: string
   product_discount_usd?: number
@@ -343,21 +360,14 @@ export function resolveCartPriceValues(
       product_discount_khr: evaluation.active ? Math.max(0, normalizePriceValue(sellingKhr - evaluation.unit_price_khr, 0)) : 0,
     }
   }
-  const useSpecial = priceMode === 'special' && (normalizeNumber(product?.special_price_usd) > 0 || normalizeNumber(product?.special_price_khr) > 0)
-  if (useSpecial) {
-    const appliedUsd = normalizePriceValue(product?.special_price_usd ?? product?.selling_price_usd ?? 0, 0)
-    const appliedKhr = normalizePriceValue(product?.special_price_khr ?? product?.selling_price_khr ?? usdToKhr(appliedUsd, exchangeRate), 0)
-    return {
-      applied_price_usd: appliedUsd,
-      applied_price_khr: appliedKhr,
-      base_price_usd: appliedUsd,
-      base_price_khr: appliedKhr,
-      price_mode: 'special',
-    }
-  }
-  // Wholesale mirrors the VIP/special branch exactly -- a third fixed tier the
-  // cashier picks at POS, priced from the product's own wholesale_price (never
-  // borrowing selling unless the KHR side is blank, same fallback as special).
+  // The VIP/'special' branch that used to sit here is GONE (2026-09-04
+  // ruling): that tier was never a VIP price, it was the wholesale price
+  // misnamed, and migration 0111 moved the numbers into wholesale_price_*
+  // and zeroed special_price_*. There is now exactly ONE discounted tier.
+  // A cart line that somehow still arrives carrying price_mode 'special'
+  // (a till tab cached from before the deploy) falls through to selling
+  // rather than pricing off a column that is now zero everywhere -- which
+  // is the honest outcome: it charges full price instead of charging $0.
   const useWholesale = priceMode === 'wholesale' && (normalizeNumber(product?.wholesale_price_usd) > 0 || normalizeNumber(product?.wholesale_price_khr) > 0)
   if (useWholesale) {
     const appliedUsd = normalizePriceValue(product?.wholesale_price_usd ?? product?.selling_price_usd ?? 0, 0)
@@ -440,6 +450,145 @@ export function repricePromotionCartLines(
       product_discount_khr: Math.max(0, normalizePriceValue(sellingKhr - unitKhr, 0)),
     } as ProductRecord
   })
+  return { cart: changed ? next : [...cart], changed }
+}
+
+// ---------------------------------------------------------------------------
+// Wholesale auto-apply ("wholesale only > N")
+// ---------------------------------------------------------------------------
+//
+// The sub-feature migration 0093 deferred ("The 'wholesale only > N' note and
+// its default-off auto-apply toggle are a separate, still-being-specified
+// sub-feature"). Now specified, by the owner's 2026-09-04 ruling: the shop
+// sells wholesale above a quantity, so once a line's quantity crosses the
+// threshold the line should price itself at the wholesale tier without the
+// cashier having to remember to pick it.
+//
+// DEFAULT OFF. Both settings live in the ordinary `settings` key/value table
+// under the sales-policy bucket, the same place `pos_show_item_discount` and
+// `tax_rate` live, and are read with the same string conventions the rest of
+// the app uses. Note the default here is 'false', NOT the 'true' default the
+// notification toggles use -- an automation that silently changes what a
+// customer is charged must be opted INTO, never inherited by a shop that
+// upgraded without being asked.
+
+export type WholesaleAutoRule = {
+  enabled: boolean
+  /** Wholesale applies STRICTLY ABOVE this quantity -- the "> N" in "wholesale only > N". */
+  minQuantity: number
+}
+
+export const WHOLESALE_AUTO_ENABLED_KEY = 'pos_wholesale_auto_enabled'
+export const WHOLESALE_AUTO_MIN_QTY_KEY = 'pos_wholesale_auto_min_qty'
+export const WHOLESALE_AUTO_DEFAULT_MIN_QTY = 10
+
+/**
+ * Reads the two settings keys into a rule. Pure and total: any missing,
+ * blank or malformed value yields the safe default (off, threshold 10), so a
+ * shop that has never opened the setting behaves exactly as it did before
+ * this feature existed.
+ */
+export function resolveWholesaleAutoRule(settings: Record<string, unknown> | null | undefined = {}): WholesaleAutoRule {
+  const source = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
+  // Strict === 'true': unlike the default-ON toggles elsewhere in the app,
+  // anything unset/blank/garbled must read as OFF.
+  const enabled = String(source[WHOLESALE_AUTO_ENABLED_KEY] ?? 'false').trim().toLowerCase() === 'true'
+  const rawQty = String(source[WHOLESALE_AUTO_MIN_QTY_KEY] ?? '').trim()
+  const parsed = Number.parseInt(rawQty, 10)
+  // Floor of 1: a threshold of 0 would mean "every line is wholesale", which
+  // is not a threshold at all and would quietly reprice the whole shop.
+  const minQuantity = Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : WHOLESALE_AUTO_DEFAULT_MIN_QTY
+  return { enabled, minQuantity }
+}
+
+/** True when this product actually has a wholesale price to fall back on. */
+function hasWholesalePrice(item: ProductRecord | null | undefined): boolean {
+  return normalizeNumber(item?.wholesale_price_usd) > 0 || normalizeNumber(item?.wholesale_price_khr) > 0
+}
+
+/**
+ * Applies (and un-applies) the wholesale tier across a cart according to the
+ * rule. Pure, and shaped exactly like repricePromotionCartLines: it returns
+ * the same array instance when nothing changed so callers can patch state
+ * without a render loop.
+ *
+ * Two invariants make this safe to run on EVERY cart mutation:
+ *
+ *  1. It only ever auto-upgrades a line that is in plain 'selling' mode with
+ *     no manual price edit. A cashier who deliberately picked a tier, typed a
+ *     price, or is running a promotion line is never overridden -- the
+ *     automation assists the default path, it does not seize the cart.
+ *  2. Every line it upgrades is stamped `wholesale_auto: true`. Only lines
+ *     carrying that stamp are ever downgraded again, so lowering the quantity
+ *     reverses the automation's own work and NOTHING ELSE. A wholesale line
+ *     the cashier chose by hand has no stamp and survives untouched, which is
+ *     the difference between an automation and a bug.
+ */
+export function applyWholesaleAutoPricing(
+  cart: readonly ProductRecord[] = [],
+  rule: WholesaleAutoRule = { enabled: false, minQuantity: WHOLESALE_AUTO_DEFAULT_MIN_QTY },
+  exchangeRate = 0,
+  converters: PriceConverters = {},
+): { cart: ProductRecord[]; changed: boolean } {
+  const list = Array.isArray(cart) ? cart : []
+  let changed = false
+
+  const next = list.map((item) => {
+    const record = item as Record<string, unknown>
+    const mode = String(item?.price_mode || 'selling')
+    const quantity = Math.max(1, Number(record.quantity) || 1)
+    const autoApplied = record.wholesale_auto === true
+    const overThreshold = quantity > rule.minQuantity
+    // The cashier has taken manual control of this line's tier (they tapped
+    // the cart's wholesale chip). Never touch it again in either direction --
+    // without this the automation and the chip fight each other: the tap
+    // drops the line to 'selling', the next pass sees it is still over the
+    // threshold and puts it straight back, and the button looks broken.
+    if (record.wholesale_auto_optout === true) return item
+
+    // --- downgrade: our own stamp, and the reason for it is gone -----------
+    // Covers the toggle being switched off, the threshold being raised, the
+    // quantity falling back, and the product losing its wholesale price.
+    if (autoApplied && (!rule.enabled || !overThreshold || !hasWholesalePrice(item))) {
+      const values = resolveCartPriceValues(item, 'selling', exchangeRate, converters)
+      changed = true
+      return {
+        ...item,
+        applied_price_usd: values.applied_price_usd,
+        applied_price_khr: values.applied_price_khr,
+        base_price_usd: values.base_price_usd,
+        base_price_khr: values.base_price_khr,
+        price_mode: 'selling',
+        wholesale_auto: false,
+      } as ProductRecord
+    }
+
+    if (!rule.enabled || autoApplied) return item
+
+    // --- upgrade -----------------------------------------------------------
+    // 'selling' only. A manual price edit (a manual discount of any kind)
+    // disqualifies the line: the cashier has already said what this costs.
+    const hasManualEdit = record.manual_discount_type != null && String(record.manual_discount_type || '') !== ''
+    if (mode !== 'selling' || hasManualEdit || !overThreshold || !hasWholesalePrice(item)) return item
+
+    const values = resolveCartPriceValues(item, 'wholesale', exchangeRate, converters)
+    // resolveCartPriceValues refuses 'wholesale' when there is no wholesale
+    // price and hands back a selling-priced result; hasWholesalePrice already
+    // guarantees otherwise, but check rather than stamp a line we did not
+    // actually move.
+    if (values.price_mode !== 'wholesale') return item
+    changed = true
+    return {
+      ...item,
+      applied_price_usd: values.applied_price_usd,
+      applied_price_khr: values.applied_price_khr,
+      base_price_usd: values.base_price_usd,
+      base_price_khr: values.base_price_khr,
+      price_mode: 'wholesale',
+      wholesale_auto: true,
+    } as ProductRecord
+  })
+
   return { cart: changed ? next : [...cart], changed }
 }
 

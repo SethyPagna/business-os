@@ -76,8 +76,9 @@ type ProductRecord = Record<string, unknown> & {
   selling_price_khr?: string | number
   selling_price_usd?: string | number
   sku?: string
-  special_price_khr?: string | number
-  special_price_usd?: string | number
+  // special_price_khr/usd are gone: the 2026-09-04 ruling deleted the "VIP"
+  // tier they backed, and migration 0111 moved the values into the wholesale
+  // pair below -- now the sheet's only discounted tier.
   wholesale_price_khr?: string | number
   wholesale_price_usd?: string | number
   stock_quantity?: string | number
@@ -87,7 +88,10 @@ type ProductRecord = Record<string, unknown> & {
 
 type Translate = (key: string) => string | undefined
 type CurrencyFormatter = (value: number) => string
-type PriceMode = 'selling' | 'special' | 'promotion' | string
+// 'special' dropped from the named members by the 2026-09-04 ruling -- this
+// sheet can no longer add a line at the deleted "VIP" tier. ('wholesale' has
+// always ridden in on the `| string` arm, which is why it isn't listed either.)
+type PriceMode = 'selling' | 'promotion' | string
 
 // Grouped products (same name, different branch/price/barcode/etc.) can have
 // many entries -- paginate each pill row instead of dumping them all in one
@@ -262,11 +266,10 @@ export default function ProductDetailSheet({
   // sheet opens so a stale branch/barcode pick doesn't leak into the next.
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null)
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
-  // VIP price stays hidden until asked for (user, Aug 28): the button first
-  // says only "VIP"; the first tap REVEALS the amount, the second tap
-  // adds at that price. Keyed per product/variant so revealing one row's
-  // VIP does not expose another's.
-  const [vipRevealed, setVipRevealed] = useState<Record<string, boolean>>({})
+  // The `vipRevealed` tap-to-reveal state is deleted along with the tier
+  // (2026-09-04 ruling). Note the reveal gesture did NOT carry over to the
+  // wholesale buttons: those have always shown their amount outright, so
+  // nothing here needs to remember what has been revealed.
   const [branchPage, setBranchPage] = useState(0)
   const [barcodePage, setBarcodePage] = useState(0)
   // Lot/batch picker state -- see the batch-picker section further down.
@@ -548,9 +551,10 @@ export default function ProductDetailSheet({
             <div key={label} className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{label}</span><span className="text-sm text-gray-800 dark:text-gray-200">{String(val)}</span></div>
           ) : null)}
           <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Selling', 'តម្លៃលក់')}</span><div><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</div></div>
-          {/* VIP pricing is intentionally absent from the read-only detail
-              rows. It is revealed only by pressing the VIP price option
-              below, then applied on the second press. */}
+          {/* The VIP tier that used to be withheld from these read-only rows is
+              deleted (2026-09-04 ruling). Wholesale, which replaces it as the
+              one discounted tier, is shown plainly here -- it was never a
+              tap-to-reveal price. */}
           {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
             <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Wholesale', 'បោះដុំ')}</span><div><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</div></div>
           ) : null}
@@ -742,21 +746,9 @@ export default function ProductDetailSheet({
                     <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
                       {batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'ជ្រើសរើសបាច់ជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
                     </button>
-                    {asNumber(effectiveVariant.special_price_usd) > 0 || asNumber(effectiveVariant.special_price_khr) > 0 ? (
-                      <button
-                        className="btn-secondary flex-1 text-xs"
-                        disabled={!effectiveVariantInStock || !batchReadyToSell}
-                        onClick={() => {
-                          const key = `v${effectiveVariant.id}`
-                          if (!vipRevealed[key]) { setVipRevealed((current) => ({ ...current, [key]: true })); return }
-                          closeAfterAdd(effectiveVariant, 'special')
-                        }}
-                      >
-                        {vipRevealed[`v${effectiveVariant.id}`]
-                          ? `${posCopy('VIP', 'VIP')} ${fmtUSD(asNumber(effectiveVariant.special_price_usd || effectiveVariant.selling_price_usd || 0))}`
-                          : posCopy('VIP', 'VIP')}
-                      </button>
-                    ) : null}
+                    {/* The variant's VIP add-to-cart button is deleted by the
+                        2026-09-04 ruling; the Wholesale button beside it now
+                        carries the same numbers (migration 0111 moved them). */}
                     {asNumber(effectiveVariant.wholesale_price_usd) > 0 || asNumber(effectiveVariant.wholesale_price_khr) > 0 ? (
                       <button
                         className="btn-secondary flex-1 text-xs border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
@@ -852,21 +844,8 @@ export default function ProductDetailSheet({
                     : `${(promoBadge.show_title && promoBadge.title) || product.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(promotion.applied_price_usd)}`}
                 </button>
               ) : null}
-              {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (
-                <button
-                  className="btn-secondary flex-1"
-                  disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
-                  onClick={() => {
-                    const key = `p${product.id}`
-                    if (!vipRevealed[key]) { setVipRevealed((current) => ({ ...current, [key]: true })); return }
-                    closeAfterAdd(product, 'special')
-                  }}
-                >
-                  {vipRevealed[`p${product.id}`]
-                    ? `${posCopy('VIP', 'VIP')} ${fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}`
-                    : posCopy('VIP', 'VIP')}
-                </button>
-              ) : null}
+              {/* The product's VIP add-to-cart button is deleted by the
+                  2026-09-04 ruling -- same as the variant twin above. */}
               {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
                 <button
                   className="btn-secondary flex-1 border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"

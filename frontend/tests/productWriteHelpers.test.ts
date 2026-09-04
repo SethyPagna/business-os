@@ -36,7 +36,14 @@ const basePayload = buildProductWritePayload({
 assert.equal(basePayload.name, 'Product A')
 assert.equal(basePayload.unit, 'pcs', 'blank unit falls back to pieces')
 assert.equal(basePayload.selling_price_usd, 10)
-assert.equal(basePayload.special_price_usd, 10, 'special price falls back to selling price')
+// This assertion used to read "special price falls back to selling price",
+// pinning the defect rather than the behaviour: a snapshot with no tier price
+// silently shipped the SELLING price into the tier column, so any writer
+// building a payload from a partial record overwrote the server's value with
+// a client-composed one. The 2026-09-04 ruling moved the tier to wholesale
+// and there is no fallback any more -- absent means 0, which reads as "no
+// wholesale price set" and offers no tier at the POS.
+assert.equal(basePayload.wholesale_price_usd, 0, 'a missing wholesale price must NOT inherit the selling price')
 assert.equal(basePayload.purchase_price_usd, 4, 'purchase price falls back to cost price')
 assert.equal(basePayload.cost_price_usd, 4)
 assert.deepEqual(basePayload.image_gallery, ['/uploads/a.png', '/uploads/b.png'])
@@ -439,14 +446,14 @@ assert.deepEqual(
   buildProductBulkPricingUpdates({
     selling_price_usd: '10.111',
     selling_price_khr: '',
-    special_price_usd: undefined,
-    special_price_khr: '4000.001',
+    wholesale_price_usd: undefined,
+    wholesale_price_khr: '4000.001',
     purchase_price_usd: '3',
     purchase_price_khr: null,
   }),
   {
     selling_price_usd: 10.12,
-    special_price_khr: 4000.01,
+    wholesale_price_khr: 4000.01,
     purchase_price_usd: 3,
     purchase_price_khr: 0,
   },
