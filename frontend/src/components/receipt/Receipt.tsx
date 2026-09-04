@@ -238,6 +238,12 @@ const LABELS = {
     refunded: 'Refunded:',
     thankYou: 'Thank you for your patronage!',
     qty: 'Qty',
+    item: 'Item',
+    unitPrice: 'Price',
+    lineTotal: 'Total',
+    totalQty: 'Total Qty:',
+    itemDiscount: 'Item Discount:',
+    totalDiscount: 'Total Discount:',
     visitWebsite: 'Visit our website',
     followUs: 'Follow us',
   },
@@ -267,6 +273,12 @@ const LABELS = {
     refunded: 'បានសងវិញ:',
     thankYou: 'សូមអរគុណសម្រាប់ការទិញទំនិញ!',
     qty: 'ចំនួន',
+    item: 'ទំនិញ',
+    unitPrice: 'តម្លៃ',
+    lineTotal: 'សរុប',
+    totalQty: 'សរុបចំនួនទំនិញ:',
+    itemDiscount: 'សរុបបញ្ចុះលើទំនិញ:',
+    totalDiscount: 'សរុបបញ្ចុះតម្លៃ:',
     visitWebsite: 'ទស្សនាគេហទំព័ររបស់យើង',
     followUs: 'តាមដានពួកយើង',
   },
@@ -390,10 +402,28 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // That is what lets every historical receipt reprint to the same money, and
   // it is why nothing here touches sale.total_usd or the tax base.
   const showItemDiscount = tpl.show_item_discount !== false
+  // Every per-line cut on the sale. It is printed on its OWN row (Item
+  // Discount, per the owner’s Sep-4 photo) rather than folded into Subtotal
+  // and Discount, so it is named rather than merely included -- and, unlike
+  // before the Sep-4 line fix, it can no longer vanish from the totals.
   const lineSavingsUsd = receiptLineSavingsUsd(items, showItemDiscount, exchangeRate)
-  const displayedSubtotalUsd = subtotalUsd + lineSavingsUsd
-  const displayedDiscountUsd = discountUsd + lineSavingsUsd
-  const displayedDiscountKhr = discountKhr + lineSavingsUsd * exchangeRate
+  // The lines now print their NET totals, so their sum IS sales.subtotal_usd
+  // and Subtotal needs no adjustment. Discount goes back to meaning the
+  // order-level cut alone.
+  const displayedSubtotalUsd = subtotalUsd
+  const displayedDiscountUsd = discountUsd
+  const displayedDiscountKhr = discountKhr
+  // Every cut on the sale in one figure: per line, order-level, and the
+  // membership tier. This is the owner’s "total discount".
+  const totalDiscountUsd = lineSavingsUsd + discountUsd + membershipDiscountUsd
+  const totalQty = items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0)
+  // The item table’s column track, defined ONCE so the header and the rows
+  // cannot drift apart. Four columns by default -- item, qty, price, total --
+  // and three when a shop turns the price column off.
+  const showUnitPriceCol = tpl.show_item_unit_price !== false
+  const itemGridCols = showUnitPriceCol
+    ? 'grid-cols-[minmax(0,1fr)_2.2rem_minmax(3.9rem,auto)_minmax(3.4rem,auto)]'
+    : 'grid-cols-[minmax(0,1fr)_2.2rem_minmax(4.6rem,auto)]'
   const totalUsd = toNumber(sale.total_usd ?? sale.total)
   const totalKhr = toNumber(sale.total_khr) || totalUsd * exchangeRate
   const paidUsd = toNumber(sale.amount_paid_usd ?? sale.amount_paid)
@@ -462,24 +492,33 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     ) : null,
     items: (
       <div key="items" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        <div data-receipt-line="true" className="mb-1 grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] gap-x-2 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
-          <span data-receipt-cell="name">Name</span>
+        {/* FOUR columns (owner, Sep 4 2026, from a photo of a printed
+            receipt): item, qty, unit price, line total. The two money
+            columns are narrower than the old single one was, because there
+            are now two of them on the same 58mm paper -- the item column
+            still takes every pixel the other three leave. */}
+        <div data-receipt-line="true" className={`mb-1 grid ${itemGridCols} gap-x-1.5 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500`}>
+          <span data-receipt-cell="name">{labelFor(lang, 'item')}</span>
           <span data-receipt-cell="qty" className="whitespace-normal text-center leading-tight">{labelFor(lang, 'qty')}</span>
-          <span data-receipt-cell="price" className="text-right">Price</span>
+          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right">{labelFor(lang, 'unitPrice')}</span> : null}
+          <span data-receipt-cell="line-total" className="text-right">{labelFor(lang, 'lineTotal')}</span>
         </div>
         {items.map((item, index) => {
           // Every figure on this line comes from the shared calculation, so the
           // printed price and the Discount row can never disagree.
           const figures = receiptLineFigures(item, showItemDiscount, exchangeRate)
           const qty = figures.qty
+          // Price column = the SELLING unit price with the unit cut beside it.
+          // Total column = what the line actually came to. 28.00 (-7.00) then
+          // 21.00, which is the owner’s photo read left to right.
           const unitUsd = figures.sellingUnitUsd
-          const lineUsd = unitUsd * qty
-          const lineKhr = figures.sellingUnitKhr * qty
+          const lineUsd = figures.chargedUnitUsd * qty
+          const lineKhr = figures.chargedUnitKhr * qty
           // Per-line discount = the line's LIST price minus what was actually
           // charged. Both come from receiptLineFigures above; see
           // utils/receiptLineMath for the derivation and its fallbacks.
           const hasItemDiscount = figures.hasDiscount
-          const itemSavingsUsd = figures.savingsUsd
+          const unitSavingsUsd = figures.unitSavingsUsd
           // Price-tier tag printed beside the item name (user). Derived from
           // the persisted price_mode, so a wholesale line the cashier left
           // marked prints the tag and one they deselected (recorded as
@@ -499,7 +538,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             : ''
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="py-1.5">
-              <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] items-start gap-x-2">
+              <div data-receipt-line="true" className={`grid ${itemGridCols} items-start gap-x-1.5`}>
                 <div data-receipt-cell="name" className="min-w-0 overflow-visible whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
@@ -511,20 +550,21 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                   </div>
                 </div>
                 <div data-receipt-cell="qty" className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
-                <div data-receipt-cell="price" className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
-                  {/* Savings describe the charged price, so they belong in
-                      the Price column—not as a second price block beneath the
-                      product name. This keeps a discounted row readable as
-                      "$2.50 (-$0.50)" at a glance. */}
-                  <div>
-                    {fmtUSD(lineUsd)}
-                    {hasItemDiscount ? <span className="ml-1 text-[10px] font-normal text-red-600">(-{fmtUSD(itemSavingsUsd)})</span> : null}
-                  </div>
-                  {tpl.show_item_unit_price && qty > 1 ? (
-                    <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">
-                      {qty} × {fmtUSD(unitUsd)}
+                {/* Savings describe the price, so they sit in the Price
+                    column -- not as a second block under the product name.
+                    A discounted row reads "$28.00 (-$7.00)" at a glance.
+                    The old "qty × unit" subline is gone: the unit price is
+                    its own column now, so the subline only repeated it. */}
+                {showUnitPriceCol ? (
+                  <div data-receipt-cell="price" className="min-w-0 whitespace-nowrap text-right leading-snug">
+                    <div>
+                      {fmtUSD(unitUsd)}
+                      {hasItemDiscount ? <span className="ml-1 text-[10px] font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</span> : null}
                     </div>
-                  ) : null}
+                  </div>
+                ) : null}
+                <div data-receipt-cell="line-total" className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
+                  <div>{fmtUSD(lineUsd)}</div>
                   {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
               </div>
@@ -534,7 +574,22 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         })}
       </div>
     ),
+    total_qty: tpl.show_item_qty && totalQty > 0 ? (
+      <Row key="total_qty" label={labelFor(lang, 'totalQty')} value={totalQty.toLocaleString()} />
+    ) : null,
+    // The per-line cut, by name. Hidden when there is none, so an
+    // undiscounted sale does not print a row of zeroes.
+    item_discount: showItemDiscount && lineSavingsUsd > 0 ? (
+      <Row key="item_discount" label={labelFor(lang, 'itemDiscount')} value={`-${fmtUSD(lineSavingsUsd)}`} tone="text-red-600" />
+    ) : null,
     subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(displayedSubtotalUsd)} /> : null,
+    // Every cut on the sale in one figure. Only printed when it says
+    // something the rows above did not already say on their own -- i.e.
+    // when more than one kind of discount is present.
+    total_discount: tpl.show_discount !== false && totalDiscountUsd > 0
+      && [lineSavingsUsd, discountUsd, membershipDiscountUsd].filter((v) => v > 0).length > 1 ? (
+      <Row key="total_discount" label={labelFor(lang, 'totalDiscount')} value={`-${fmtUSD(totalDiscountUsd)}`} tone="text-red-600" bold />
+    ) : null,
     discount: tpl.show_discount && displayedDiscountUsd > 0 ? (
       <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(displayedDiscountUsd)}`} subValue={tpl.show_discount_khr !== false && displayedDiscountKhr > 0 ? `-${fmtKHR(displayedDiscountKhr)}` : ''} tone="text-red-600" />
     ) : null,
@@ -603,10 +658,18 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
 
   const fieldOrder: string[] = []
   for (const key of fieldOrderBase) {
+    if (key === 'items') {
+      fieldOrder.push('items')
+      // Straight under the table, where the photo puts them.
+      fieldOrder.push('total_qty')
+      fieldOrder.push('item_discount')
+      continue
+    }
     if (key === 'discount') {
       fieldOrder.push('discount')
       fieldOrder.push('membership_discount')
       fieldOrder.push('membership_points')
+      fieldOrder.push('total_discount')
       continue
     }
     fieldOrder.push(key)
@@ -621,6 +684,11 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   }
   if (!fieldOrder.includes('membership_discount')) fieldOrder.push('membership_discount')
   if (!fieldOrder.includes('membership_points')) fieldOrder.push('membership_points')
+  // A hand-edited field_order that dropped `items` or `discount` still gets
+  // the new rows rather than silently losing them.
+  for (const key of ['total_qty', 'item_discount', 'total_discount']) {
+    if (!fieldOrder.includes(key)) fieldOrder.push(key)
+  }
   if (!fieldOrder.includes('refund')) fieldOrder.splice(Math.max(fieldOrder.indexOf('total'), 0), 0, 'refund')
 
   const renderedSections = fieldOrder

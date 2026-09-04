@@ -7,8 +7,11 @@
  * discounts in total show selling price (-discount), not discounted
  * price(-discount)".
  *
- * So a line prints its SELLING price with the saving beside it, and every cut
- * -- per line and order-wide -- is carried in the Discount row.
+ * So a line prints its SELLING price with the saving beside it. Since the
+ * owner’s Sep-4 photo the line ALSO prints its net total in a fourth column,
+ * and the per-line cut is reported in its own named row (Item Discount)
+ * rather than folded into Subtotal and Discount -- see the note on the
+ * four-column change in Receipt.tsx. The money is identical either way.
  *
  * What it was before: a line printed applied_price_usd (what was actually
  * charged) with the saving beside it, while Subtotal came from
@@ -47,9 +50,14 @@ const num = (value: unknown): number => {
 export interface ReceiptLineFigures {
   qty: number
   chargedUnitUsd: number
+  /** What the customer was actually charged in riel, per unit. */
+  chargedUnitKhr: number
   sellingUnitUsd: number
   sellingUnitKhr: number
   hasDiscount: boolean
+  /** The cut on ONE unit -- what the Price column prints in parentheses. */
+  unitSavingsUsd: number
+  /** The cut on the whole line: unitSavingsUsd * qty. */
   savingsUsd: number
 }
 
@@ -96,12 +104,19 @@ export function receiptLineFigures(
     else sellingUnitKhr = sellingUnitUsd * exchangeRate
   }
 
+  // The Total column prints riel from the CHARGED side. Fall back to the
+  // exchange rate exactly as the selling side does, or a line with no stored
+  // riel would lose its riel subline entirely.
+  const chargedUnitKhrOut = chargedUnitKhr > 0 ? chargedUnitKhr : chargedUnitUsd * exchangeRate
+
   return {
     qty,
     chargedUnitUsd,
+    chargedUnitKhr: chargedUnitKhrOut,
     sellingUnitUsd,
     sellingUnitKhr,
     hasDiscount,
+    unitSavingsUsd: hasDiscount ? originalUnitUsd - chargedUnitUsd : 0,
     savingsUsd: hasDiscount ? (originalUnitUsd - chargedUnitUsd) * qty : 0,
   }
 }

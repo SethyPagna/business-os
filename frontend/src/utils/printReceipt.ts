@@ -221,16 +221,23 @@ export function normalizeReceiptContentWidth<T>(root: T): T {
       line.style.overflow = 'visible'
       const hasQty = Boolean(line.querySelector('[data-receipt-cell="qty"]'))
       const hasPrice = Boolean(line.querySelector('[data-receipt-cell="price"]'))
-      if (hasQty && hasPrice) {
-        // Replace pixel tracks captured from the on-screen preview with tracks
-        // that are recalculated against the actual printable content box.
+      const hasLineTotal = Boolean(line.querySelector('[data-receipt-cell="line-total"]'))
+      // Replace pixel tracks captured from the on-screen preview with tracks
+      // recalculated against the actual printable content box. Count the cells
+      // rather than assuming: the item table is four columns (item, qty, price,
+      // total) unless a shop has turned the price column off, and a track count
+      // that disagrees with the cell count silently wraps a cell onto its own
+      // row on paper while looking perfect on screen.
+      if (hasQty && hasPrice && hasLineTotal) {
+        line.style.gridTemplateColumns = 'minmax(0,1fr) 2.2rem minmax(3.6rem,auto) minmax(3.2rem,auto)'
+      } else if (hasQty && (hasPrice || hasLineTotal)) {
         line.style.gridTemplateColumns = 'minmax(0,1fr) 2.5rem minmax(4.25rem,auto)'
       } else if (line.children.length === 2) {
         line.style.gridTemplateColumns = 'minmax(0,1fr) minmax(4.25rem,auto)'
       }
     })
 
-    node.querySelectorAll<HTMLElement>('[data-receipt-cell="name"], [data-receipt-cell="price"]')
+    node.querySelectorAll<HTMLElement>('[data-receipt-cell="name"], [data-receipt-cell="price"], [data-receipt-cell="line-total"]')
       .forEach((cell) => {
         cell.style.minWidth = '0'
         cell.style.maxWidth = '100%'
@@ -700,8 +707,14 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
 
       if (entry.kind === 'item' && textLine.includes('\t')) {
         const parts = textLine.split('\t')
-        const qtyX = widthPx - paddingX - 96
+        // Four fields = item / qty / price / total (the Sep-4 layout); three =
+        // the same table with the price column switched off. The right edge is
+        // fixed either way, and the extra money column is carved out of the
+        // name's width rather than pushed past the paper.
+        const hasTotalColumn = parts.length >= 4
         const priceX = widthPx - paddingX
+        const qtyX = widthPx - paddingX - (hasTotalColumn ? 150 : 96)
+        const unitX = widthPx - paddingX - (hasTotalColumn ? 54 : 0)
         const nameMaxWidth = Math.max(92, qtyX - paddingX - 18)
         const nameLines = wrapCanvasText(context, parts[0] || '', nameMaxWidth)
         context.textAlign = 'left'
@@ -709,7 +722,12 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
         context.textAlign = 'center'
         context.fillText(parts[1] || '', qtyX, y)
         context.textAlign = 'right'
-        context.fillText(parts.slice(2).join(' ') || '', priceX, y)
+        if (hasTotalColumn) {
+          context.fillText(parts[2] || '', unitX, y)
+          context.fillText(parts.slice(3).join(' ') || '', priceX, y)
+        } else {
+          context.fillText(parts.slice(2).join(' ') || '', priceX, y)
+        }
         context.textAlign = 'left'
         nameLines.slice(1).forEach((continuation) => {
           y += lineHeight
@@ -1359,9 +1377,10 @@ function extractReceiptLines(content: ReceiptContent): string[] {
   }
   const joinColumns = (values: string[]): string => {
     const compactValues = values.map((value) => String(value || '').trim())
+    // Up to FOUR tab-separated fields, because the item table has four columns.
+    // Truncating at three here is what would silently drop the line total.
     if (compactValues.length >= 3) {
-      const [name, qty, price] = compactValues
-      return [name, qty, price].join('\t')
+      return compactValues.slice(0, 4).join('\t')
     }
     if (compactValues.length === 2) {
       const [label, value] = compactValues
@@ -1374,26 +1393,27 @@ function extractReceiptLines(content: ReceiptContent): string[] {
     .flatMap((node) => {
       const element = node as HTMLElement
       const cells = Array.from(element.querySelectorAll(':scope > [data-receipt-cell]')) as HTMLElement[]
-      if (cells.length === 3) {
-        const [nameCell, qtyCell, priceCell] = cells
-        const nameLines = elementLines(nameCell)
-        const qtyLines = elementLines(qtyCell)
-        const priceLines = elementLines(priceCell)
+      // Three or four: the item table is four columns unless the price column
+      // is switched off. Sublines (the riel figure) hang off the LAST cell,
+      // which is the line total when there is one.
+      if (cells.length === 3 || cells.length === 4) {
+        const columns = cells.map((cell) => elementLines(cell))
+        const lastColumn = columns[columns.length - 1] || []
         return [
-          joinColumns([nameLines[0] || '', qtyLines[0] || '', priceLines[0] || '']),
-          ...nameLines.slice(1).map((line) => `  ${line}`),
-          ...priceLines.slice(1).map((line) => `\t\t${line}`),
+          joinColumns(columns.map((lines) => lines[0] || '')),
+          ...(columns[0] || []).slice(1).map((line) => `  ${line}`),
+          ...lastColumn.slice(1).map((line) => `\t\t${line}`),
         ].filter(Boolean)
       }
       const childLines = Array.from(element.children)
         .map((child) => elementLines(child as HTMLElement))
         .filter((lines) => lines.length > 0)
-      if (childLines.length === 3) {
-        const [nameLines, qtyLines, priceLines] = childLines
+      if (childLines.length === 3 || childLines.length === 4) {
+        const lastColumn = childLines[childLines.length - 1] || []
         return [
-          joinColumns([nameLines[0] || '', qtyLines[0] || '', priceLines[0] || '']),
-          ...nameLines.slice(1).map((line) => `  ${line}`),
-          ...priceLines.slice(1).map((line) => `\t\t${line}`),
+          joinColumns(childLines.map((lines) => lines[0] || '')),
+          ...(childLines[0] || []).slice(1).map((line) => `  ${line}`),
+          ...lastColumn.slice(1).map((line) => `\t\t${line}`),
         ]
       }
       if (childLines.length === 2) {
