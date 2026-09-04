@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../api/batchesTransport.ts'
@@ -167,10 +169,20 @@ export default function ReceiveBatchModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate])
 
+  // S4-21: this modal already declares its own in-progress state to the
+  // nav guard above (`receive-batch-<id>`), so the dismissal guard asks the
+  // SAME registry entry rather than recomputing dirtiness a second way --
+  // and its Discard runs the same `clearWorkDraft` the nav guard's
+  // "Discard & Leave" runs. A null product yields an unregistered key,
+  // which the guard treats as clean (fails open, never blocks a close).
+  const closeGuard = useCloseGuard({ workKey: product ? `receive-batch-${product.id}` : '' }, onClose)
+
   if (!product) return null
 
+  // Both the ✕ and the backdrop land here, so routing this one function
+  // through the guard covers both dismissal paths.
   const closeIfIdle = () => {
-    if (!saving) onClose()
+    if (!saving) closeGuard.requestClose()
   }
 
   // D5a: same visibility-mirror rule as the received date -- an existing
@@ -430,7 +442,7 @@ export default function ReceiveBatchModal({
           </label>
         </div>
         <div className="hidden items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
-          <button type="button" className="btn-secondary text-sm" onClick={onClose} disabled={saving}>
+          <button type="button" className="btn-secondary text-sm" onClick={closeIfIdle} disabled={saving}>
             {t('cancel') || 'Cancel'}
           </button>
           <button type="button" className="btn-primary text-sm" onClick={submit} disabled={saving}>
@@ -438,6 +450,7 @@ export default function ReceiveBatchModal({
           </button>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>
   )
 

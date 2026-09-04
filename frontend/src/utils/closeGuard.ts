@@ -61,13 +61,30 @@ export type UnsavedChangesDeclaration =
  *
  * Every dismissal route must be classified into MANUAL or AUTOMATIC, and
  * the term to use is "dismissal", never "close" -- "close" drifts. Today:
- * ✕ is AUTOMATIC (routed through applyCloseGuardEvent); Esc and backdrop
- * click do not close a Modal in this app at all, and if either is ever
- * added it must call the same requestClose, not onClose; MINIMIZE is
- * neither -- it PRESERVES the work (utils/minimizedWork.ts parks it as a
- * chip), so prompting to discard what the operator just asked to keep
- * would be backwards, and the minimize control deliberately calls its own
- * onMinimize and never the guarded close.
+ *   ✕            AUTOMATIC -- routed through applyCloseGuardEvent.
+ *   CANCEL       AUTOMATIC -- a Cancel button is a ✕ with a word on it;
+ *                same route (shared/Modal children reach it through
+ *                ModalCloseContext, hand-rolled ones call requestClose).
+ *   BACKDROP     AUTOMATIC, and the easiest one to hit by accident.
+ *                shared/Modal.tsx does not close on backdrop; several
+ *                hand-rolled overlays DO (ReceiveBatchModal,
+ *                FastStockInModal, ... `onClick={closeIfIdle}` on the
+ *                `fixed inset-0` div). Where a modal funnels ✕ and
+ *                backdrop into one function, guarding that function
+ *                covers both.
+ *   ESC          not wired in this app today (no keydown handler closes a
+ *                modal); if it is ever added it must call requestClose,
+ *                never onClose.
+ *   MINIMIZE     NEITHER -- it PRESERVES the work (utils/minimizedWork.ts
+ *                parks it as a chip), so prompting to discard what the
+ *                operator just asked to keep would be backwards. The
+ *                minimize control calls its own onMinimize and never the
+ *                guarded close.
+ *   AFTER SAVE   NEITHER -- the host calls onClose() directly, not
+ *                requestClose(). It is not a dismissal; the work is saved.
+ *                What keeps this honest is that the save path latches its
+ *                dirty state false BEFORE closing, so even a dismissal at
+ *                that moment would find nothing to lose.
  *
  * `'save-discard-or-back'` stays implemented so reversing the ruling is
  * one edit to this constant rather than a feature to build.

@@ -15,6 +15,8 @@ import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ContactPicker from '../contacts/ContactPicker.tsx'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { normalizeBarcodeKey, searchTermBarcodeKey, sortBySearchRelevance } from '../../utils/searchMatch.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500
@@ -415,8 +417,20 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   // Cancel button below already guards on `submitting` for this reason,
   // same pattern ReceiveBatchModal.tsx/ManageBatchesModal.tsx/
   // InventoryBatchModal.tsx use, but backdrop/X bypassed it entirely.
+  // S4-21: the losable work is the picked supplier/branch plus every
+  // quantity typed against a product row. Branch alone is pre-filled noise,
+  // so it does not count on its own.
+  const supplierReturnDirty = Boolean(supplierId)
+    || reason.trim().length > 0
+    || notes.trim().length > 0
+    || compensationUsd.trim().length > 0
+    || compensationKhr.trim().length > 0
+    || Object.values(quantities).some((value) => Number(value) > 0)
+  const closeGuard = useCloseGuard({ dirty: supplierReturnDirty }, () => { onClose?.() })
+
+  // The backdrop, the ✕ and Cancel all land here.
   const closeIfIdle = () => {
-    if (!submitting) onClose?.()
+    if (!submitting) closeGuard.requestClose()
   }
 
   return createPortal(
@@ -624,6 +638,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           </button>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

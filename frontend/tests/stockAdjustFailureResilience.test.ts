@@ -37,7 +37,9 @@ const inventoryRoute = readFileSync(new URL('../../cloudflare/src/routes/invento
 function commitAdjustBody(): string {
   const start = adjustModal.indexOf('const commitAdjust = useCallback')
   assert.ok(start > 0, 'StockAdjustModal must still have a commitAdjust callback')
-  const end = adjustModal.indexOf('const requestClose', start)
+  // S4-21 renamed the close path: the private discard dialog is gone and
+  // `discardFailedAndClose` is now what the shared guard calls on Discard.
+  const end = adjustModal.indexOf('const discardFailedAndClose', start)
   assert.ok(end > start, 'commitAdjust must be followed by the close guard')
   return adjustModal.slice(start, end)
 }
@@ -102,13 +104,23 @@ runTest('the submit button becomes Retry while a failure is unresolved', () => {
   assert.match(stockModals, /adjustSubmitLabel \|\| t\('save'\)/)
 })
 
-runTest('closing with unsaved failures asks through the shared ConfirmDialog', () => {
-  assert.match(adjustModal, /const requestClose = useCallback\(\(\) => \{[\s\S]*hasUnsavedFailures\(rows\)[\s\S]*setConfirmDiscard\(true\)/)
-  assert.match(adjustModal, /onCloseAdjust=\{requestClose\}/)
-  assert.match(adjustModal, /confirmDiscard \? \(\s*<ConfirmDialog/)
-  assert.match(adjustModal, /discard_failed_adjustment/)
-  assert.match(adjustModal, /keep_editing/)
-  // Confirmations go through the shared dialog -- never a native popup.
+runTest('closing with unsaved failures asks through the ONE shared close guard', () => {
+  // S4-21 retired this surface's private "Discard the unsaved adjustment?"
+  // ConfirmDialog in favour of the app-wide guard. The behaviour the
+  // original test protected is unchanged and still pinned here; what
+  // changed is that one implementation of the question now serves every
+  // modal instead of each surface growing its own.
+  assert.doesNotMatch(adjustModal, /setConfirmDiscard/, 'the private discard dialog must not come back')
+  // The shared adjust chrome does the asking...
+  assert.match(stockModals, /const adjustGuard = useCloseGuard\(/)
+  assert.match(stockModals, /onClick=\{requestCloseAdjust\}/)
+  assert.match(stockModals, /<UnsavedChangesPrompt guard=\{adjustGuard\} items=\{adjustDiscardItems\} \/>/)
+  // ...Discard still runs THIS page's cleanup, not a generic close...
+  assert.match(adjustModal, /onCloseAdjust=\{discardFailedAndClose\}/)
+  assert.match(adjustModal, /hasUnsavedFailures\(rows\)[\s\S]{0,200}?dropFailedStockAttempt\(/)
+  // ...and the failed attempt's values still appear in the prompt.
+  assert.match(adjustModal, /adjustDiscardItems=\{buildAdjustReviewItems\(\)\}/)
+  // Confirmations go through a rendered dialog -- never a native popup.
   assert.doesNotMatch(adjustModal, /window\.confirm\(\s*tr\('discard/)
 })
 
@@ -144,7 +156,13 @@ runTest('the bulk surface follows the same rule, row by row', () => {
   assert.doesNotMatch(bulkModal, /if \(done\) onDone\(/)
   assert.match(bulkModal, /if \(counts\.failed > 0\) \{[\s\S]{0,600}?return\s/, 'failures keep the bulk dialog open')
   assert.match(bulkModal, /onClick=\{requestClose\}/)
-  assert.match(bulkModal, /confirmAbandon \? \(\s*<ConfirmDialog/)
+  // Same S4-21 merge as the single-product surface above: the private
+  // abandon dialog is gone, the shared guard asks, and the failed/done
+  // counts it used to show are handed to that guard's prompt.
+  assert.doesNotMatch(bulkModal, /setConfirmAbandon/, 'the private abandon dialog must not come back')
+  assert.match(bulkModal, /const closeGuard = useCloseGuard\(\{ dirty: bulkDirty \}, reportAndClose\)/)
+  assert.match(bulkModal, /<UnsavedChangesPrompt guard=\{closeGuard\} items=\{bulkPromptItems\} \/>/)
+  assert.match(bulkModal, /hasUnsavedFailures\(rows\) \|\|/, 'unsaved failures still count as dirty')
 })
 
 runTest('fast stock-in already kept its lines -- that behaviour stays', () => {

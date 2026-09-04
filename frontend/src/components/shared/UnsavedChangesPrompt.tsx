@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -18,7 +19,13 @@ import type { CloseGuard } from '../../utils/useCloseGuard.ts'
 
 const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 
-export default function UnsavedChangesPrompt({ guard }: { guard: CloseGuard }) {
+// `items` is how a modal that knows something CONCRETE about what is at
+// risk ("3 failed, 12 done") says so, without growing a private copy of
+// this dialog. It renders in the same label/value idiom ConfirmDialog uses,
+// so the two read alike.
+export type UnsavedChangesPromptItem = { label: ReactNode; value: ReactNode }
+
+export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGuard; items?: UnsavedChangesPromptItem[] }) {
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -31,6 +38,13 @@ export default function UnsavedChangesPrompt({ guard }: { guard: CloseGuard }) {
       className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1080] flex items-center justify-center overflow-y-auto bg-black/60 p-4"
       role="dialog"
       aria-modal="true"
+      // A React portal bubbles its events up the REACT tree, not the DOM
+      // tree. Several hosts (ReceiveBatchModal, TransferModal, ...) put
+      // `onClick={close}` on their backdrop, so without this every click
+      // inside the prompt -- "Back" included -- would ALSO re-trigger the
+      // host's dismissal and the prompt could never be answered. Stopped
+      // once, here, so no host has to remember.
+      onClick={(event) => event.stopPropagation()}
     >
       <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl dark:bg-gray-800">
         <div className="flex items-start gap-3">
@@ -53,6 +67,16 @@ export default function UnsavedChangesPrompt({ guard }: { guard: CloseGuard }) {
             ) : null}
           </div>
         </div>
+        {items && items.length ? (
+          <dl className="mt-3 space-y-1 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-900/40">
+            {items.map((item, index) => (
+              <div key={index} className="flex items-start justify-between gap-3">
+                <dt className="min-w-0 leading-relaxed text-gray-500 dark:text-gray-400">{item.label}</dt>
+                <dd className="shrink-0 font-medium leading-relaxed text-gray-900 dark:text-white">{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
         {/* Actions at the end of the content, never beside a close control
             (S4-20's rule, applied to this dialog too). */}
         <div className="mt-4 flex flex-col gap-2">

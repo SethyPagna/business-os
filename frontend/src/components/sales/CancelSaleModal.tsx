@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -57,6 +59,20 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
   const noteRequired = reason === 'other'
   const canConfirm = !!reason && (!noteRequired || note.trim().length > 0) && !saving
 
+  // S4-21: the reason and the lost-fee figures are typed once and are the
+  // only record of WHY a sale was cancelled -- worth an ask before the
+  // backdrop throws them away.
+  const cancelDirty = Boolean(reason)
+    || note.trim().length > 0
+    || feeUsd.trim().length > 0
+    || feeKhr.trim().length > 0
+    || feeNote.trim().length > 0
+  const closeGuard = useCloseGuard({ dirty: cancelDirty }, onClose)
+  // The backdrop, the ✕ and the footer Cancel all land here.
+  const closeIfIdle = () => {
+    if (!saving) closeGuard.requestClose()
+  }
+
   const confirm = () => {
     if (!canConfirm || !reason) return
     const payload: SaleCancelPayload = { cancel_reason: reason }
@@ -72,7 +88,7 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
   }
 
   return createPortal(
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={saving ? undefined : onClose}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
@@ -81,7 +97,7 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button type="button" className="min-h-9 max-w-28 truncate rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 sm:hidden" onClick={confirm} disabled={!canConfirm}>{saving ? tr('saving', 'Saving...') : tr('confirm', 'Confirm')}</button>
-            <button type="button" onClick={onClose} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
+            <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -146,7 +162,7 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
           </div>
         </div>
         <div className="hidden items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
-          <button type="button" className="btn-secondary text-sm" onClick={onClose} disabled={saving}>
+          <button type="button" className="btn-secondary text-sm" onClick={closeIfIdle} disabled={saving}>
             {tr('keep_sale', 'Keep sale')}
           </button>
           <button
@@ -159,6 +175,7 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
           </button>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

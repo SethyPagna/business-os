@@ -20,6 +20,8 @@ import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 // Long enough that a fast typist does not fire a request per keystroke, short
@@ -758,8 +760,23 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // already use for this exact reason (an outside click or the X button
   // used to close the modal mid-request even though the Confirm button
   // itself was correctly disabled during `submitting`).
+  // S4-21: what an accidental dismissal would really cost here is the
+  // looked-up receipt plus every line, lot, reason and replacement chosen
+  // against it -- minutes of work at a counter. A receipt number typed and
+  // nothing else is NOT worth a prompt (retyping it is the same keystrokes),
+  // so the guard starts once a sale is actually loaded and something has
+  // been chosen on it.
+  const returnDirty = Boolean(foundSale) && (
+    activeItems.length > 0
+    || replacements.length > 0
+    || notes.trim().length > 0
+    || customReason.trim().length > 0
+  )
+  const closeGuard = useCloseGuard({ dirty: returnDirty }, onClose)
+
+  // Both the backdrop and the ✕ land here.
   const closeIfIdle = () => {
-    if (!submitting) onClose()
+    if (!submitting) closeGuard.requestClose()
   }
 
   const reviewReturn = () => {
@@ -1343,6 +1360,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
           )}
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

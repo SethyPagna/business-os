@@ -23,6 +23,8 @@ import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
+import UnsavedChangesPrompt from '../../shared/UnsavedChangesPrompt.tsx'
+import { useCloseGuard } from '../../../utils/useCloseGuard.ts'
 import { dateToBatchCode } from '../../../utils/batchCode.ts'
 import {
   applyRowOutcome,
@@ -166,7 +168,6 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   // Per-product outcomes of the last submit -- what succeeded (never retried),
   // what failed and why. Empty until the first commit.
   const [rows, setRows] = useState<StockAdjustRow<{ productId: number; productName: string }>[]>([])
-  const [confirmAbandon, setConfirmAbandon] = useState(false)
   // D5a: one supplier for the whole bulk receive event -- every lot this
   // add creates gets it; a lot that already has a supplier keeps its own
   // (COALESCE fill server-side, first attribution sticks). supplierId only
@@ -365,15 +366,14 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     }
   }
 
-  // Leaving with failures still unsaved asks first (shared ConfirmDialog,
-  // never window.confirm): abandon them, or keep editing. Whatever DID commit
-  // is still reported so the page refreshes and undo history stays truthful.
+  // Leaving with failures still unsaved asks first: abandon them, or keep
+  // editing. Whatever DID commit is still reported so the page refreshes
+  // and undo history stays truthful.
   const reportAndClose = () => {
     const counts = countRows(rows)
     const amount = parseQuantity(qty, action)
     const updatedIds = rows.filter((row) => row.status === 'done').map((row) => row.request.productId)
     const failedIds = rows.filter((row) => row.status === 'failed').map((row) => row.request.productId)
-    setConfirmAbandon(false)
     if (counts.done && amount !== null) {
       onDone({ quantity: amount, branchId, done: counts.done, failed: counts.failed, updatedIds, failedIds })
       return
@@ -381,11 +381,33 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     onClose()
   }
 
+  // S4-21: this modal used to own a PRIVATE "Discard the unsaved
+  // adjustment?" ConfirmDialog -- one of the copies the shared guard exists
+  // to retire. It now declares what is at risk and lets the one guard raise
+  // the one prompt; the failed/done counts it used to show are handed to
+  // that prompt as `items`, so nothing was traded away for the merge.
+  //
+  // Two different things are losable here, and the old dialog only knew
+  // about the first: rows that FAILED and were never retried, and a header
+  // filled in but never submitted at all (the far more common accident --
+  // quantity, reason and supplier typed, then the Cancel button).
+  const bulkCounts = countRows(rows)
+  const bulkHeaderTyped = qty.trim().length > 0
+    || reason.trim().length > 0
+    || supplierName.trim().length > 0
+    || supplierId !== null
+  const bulkDirty = hasUnsavedFailures(rows) || (rows.length === 0 && bulkHeaderTyped)
+  const closeGuard = useCloseGuard({ dirty: bulkDirty }, reportAndClose)
+  const bulkPromptItems = bulkCounts.failed || bulkCounts.done
+    ? [
+      { label: t('failed') || 'Failed', value: String(bulkCounts.failed) },
+      { label: t('done') || 'Done', value: String(bulkCounts.done) },
+    ]
+    : undefined
+
   const requestClose = () => {
     if (saving) return
-    if (hasUnsavedFailures(rows)) { setConfirmAbandon(true); return }
-    if (countRows(rows).done) { reportAndClose(); return }
-    onClose()
+    closeGuard.requestClose()
   }
 
   const modal = (
@@ -595,22 +617,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
           onClose={() => { if (!saving) setConfirmOpen(false) }}
         />
       ) : null}
-      {confirmAbandon ? (
-        <ConfirmDialog
-          t={(key: string) => t(key)}
-          danger
-          title={t('discard_failed_adjustment') || 'Discard the unsaved adjustment?'}
-          message={t('discard_failed_adjustment_desc') || 'This entry was never saved. Discard it, or keep editing to fix and retry.'}
-          items={[
-            { label: t('failed') || 'Failed', value: String(countRows(rows).failed) },
-            { label: t('done') || 'Done', value: String(countRows(rows).done) },
-          ]}
-          confirmLabel={t('discard') || 'Discard'}
-          cancelLabel={t('keep_editing') || 'Keep editing'}
-          onConfirm={reportAndClose}
-          onClose={() => setConfirmAbandon(false)}
-        />
-      ) : null}
+      <UnsavedChangesPrompt guard={closeGuard} items={bulkPromptItems} />
     </div>
   )
 

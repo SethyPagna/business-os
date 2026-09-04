@@ -8,6 +8,9 @@ import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts
 import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
 
@@ -220,8 +223,22 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   // InventoryBatchModal.tsx already use for this exact reason (only the
   // Save button here was disabled during `submitting`; the other three
   // close paths could still unmount the modal mid-request).
+  // S4-21: an EDIT form, so "dirty" means "differs from the return as it
+  // was opened". The comparison uses `finalReason` rather than the raw
+  // reason/customReason pair on purpose: the normalising effect above
+  // rewrites an unknown stored reason into Other + custom text on the first
+  // pass, which changes those two fields without changing the value that
+  // would be saved. Comparing the raw pair would report every such return
+  // dirty the instant it opened.
+  const editDirty = useFormDirty(
+    { finalReason, returnType, notes, items: items.map((item) => ({ id: item.id, returnQty: item.returnQty, stock_action: item.stock_action })) },
+    ret.id ?? null,
+  )
+  const closeGuard = useCloseGuard({ dirty: editDirty.dirty }, onClose)
+
+  // The backdrop, the ✕ and Cancel all land here.
   const closeIfIdle = () => {
-    if (!submitting) onClose()
+    if (!submitting) closeGuard.requestClose()
   }
 
   return createPortal(
@@ -378,6 +395,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           </div>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
@@ -249,6 +251,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // the whole-branch transfer go through this one shape, so there is exactly
   // one place that actually writes (runPendingTransfer).
   const [pendingTransfer, setPendingTransfer] = useState<PendingTransfer | null>(null)
+
+  // S4-21. This modal builds its own chrome instead of using shared/Modal,
+  // so it opts into the SAME guard directly -- one mechanism with two entry
+  // points, never a second implementation. What a dismissal would lose is
+  // the branches picked and the quantities typed against them; the search
+  // box and paging are navigation, not work.
+  const transferDirty = Boolean(fromBranch) || Boolean(toBranch)
+    || Boolean(quantity.trim()) || Boolean(note.trim())
+    || Object.values(selectedQuantities).some((value) => String(value || '').trim().length > 0)
+  const closeGuard = useCloseGuard({ dirty: transferDirty }, onClose)
+
   // Only set while a multi-request whole-branch move is running, so the
   // operator can see it is partway through rather than hung.
   const [chunkProgress, setChunkProgress] = useState<{ done: number; total: number } | null>(null)
@@ -959,7 +972,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={closeGuard.requestClose}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
               aria-label={t('close') || 'Close'}
             >
@@ -1418,6 +1431,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           t={t}
         />
       ) : null}
+      {/* S4-21: the shared discard prompt, not a local copy. */}
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )
