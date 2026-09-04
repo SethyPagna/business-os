@@ -19464,3 +19464,47 @@ having run. `2c497564` is worse — without it, `wrangler d1 migrations apply --
 at the `\r` and D1 answers "incomplete input", *after* the earlier migrations have applied, and the local
 `--file` path cannot reproduce it. Anyone authoring a migration off `main` today is exposed. Recorded on the board
 as a merge, not as a fix — the code exists.
+
+### Part 601, addendum 2 — the retraction was wrong in the same way as the claim
+
+Within an hour of publishing the addendum above, four sessions re-derived it and two of its sentences did not
+survive. Both failures are the same one, and it is the one the addendum was *about*.
+
+**The `sed`-window explanation was invented.** I had written that my `:83` citation came from a window that ended
+at line 90 and cut the comparison off. `7c` measured what the addendum had not:
+`git show <ref>:ops/scripts/frontend/build-public-runtime-scripts.ts | grep -c normalizeEol` returns **0** on
+`HEAD` and `origin/main`, **3** at `c7ef7264`. Line 83 of the shared checkout is literally
+`if (current !== expected) {`. **My citation was exactly right for the tree I was standing in**, which is `main`.
+There was no truncated window; I had reported a property of `main` as a property of `c7ef7264`, then explained
+that error with a mechanism I had not measured. **The diagnosis reproduced the defect it was diagnosing.**
+
+Which also dissolves the disagreement rather than resolving it: `7c`'s *"it MUST throw on a pristine tree"* is true
+of `main`; my *"it passes on pristine, non-vacuously"* is true of `c7ef7264`. Two correct measurements, two unnamed
+subjects. Neither of us was wrong about anything except which tree we were describing.
+
+**And the retraction re-created the trap in mirror image (`db`).** Read flat, "the staleness check does no
+normalisation — retracted" tells a lane working on `main` that the check normalises. It does not; `normalizeEol`
+does not occur in that file on `main` at all. A correction with no ref attached is the same defect facing the other
+way. Both retractions on the board now carry their scope.
+
+**One thing got better rather than just less wrong.** Chasing my own `.gitattributes` error produced a measurement
+that moves the migration finding onto a different party. `core.autocrlf=true` normalises **on commit**, so a
+migration authored in any checkout on this machine is stored LF with or without the pin — and the evidence is on
+disk: `0105_fee_delivery_contacts.sql` is 8 lines, **8 CRs on disk, 0 CRs in the blob, `git status` clean**. Every
+migration blob on all four live refs is LF (0/105, 0/116, 0/116, 0/116). **So the authoring half was never the
+hole.** The hole is the *checkout* half, which `autocrlf` expands back to CRLF, and `wrangler` reads the working
+file rather than the blob. The exposed party is **whoever deploys from a ref without `.gitattributes`** — which is
+`main` — not whoever writes the SQL. `0115` failed that way on Sep 4 from exactly that shape.
+
+Tempered by the sweep `db` ran and this session re-derived: **nine migrations contain `CREATE TRIGGER` and none of
+them is CRLF on disk**, and the single CRLF file has no trigger. Nothing is armed today. The risk is the next
+trigger-bearing migration deployed from an unpinned tree — worth fixing before it is worth alarm.
+
+**Both fixes are live in production and neither is on `main`** (`1755bd6b`, `2c497564`). `8b` supplied the check
+that answers for the tree a session is actually in, which is better than any rule about which branch to avoid:
+`git merge-base --is-ancestor 1755bd6b HEAD`, and `git ls-tree HEAD -- .gitattributes`. `7c` declined to
+self-assign the two merges and put them to the owner; `21`, `8b`, `ba` and `db` each verified and declined for want
+of a lane. Left unclaimed on the board with an explicit note not to reserve them.
+
+*Nothing in this addendum was found by agreement. Every correction came from a session that re-ran the measurement
+instead of accepting the sentence — including both corrections to the addendum that was itself a correction.*
