@@ -178,6 +178,31 @@ async function main() {
   ok(againBody.shift.closing_counted_usd === 412.5,
     'and the first count survived, so the no-op really was one')
 
+  // ---- 4b. TWO closes at once still send ONE report ------------------------
+  //
+  // The interesting case, and the one section 4 does NOT cover: a second tap
+  // that arrives while the first is still in flight never reaches the
+  // `if (shift.closed_at)` early return, because when it read the row the
+  // shift was still open. Both requests run the UPDATE and only one matches
+  // `AND closed_at IS NULL` -- so `changed > 0` is the ONLY thing standing
+  // between the owner and two identical reports. Moving the send one line out
+  // of that branch is invisible to every other check in this file.
+  //
+  // A fresh day-scoped row is needed because the shift above is closed and
+  // the UNIQUE(user_id, branch_id, business_date) index refuses a second one.
+  sqlite.prepare('DELETE FROM shift_sessions').run()
+  sent.length = 0
+  const reopened = await post('/open', { opening_float_usd: 20, opening_float_khr: 0 })
+  ok(reopened.status === 201, 'a fresh shift is open for the race')
+  const [raceA, raceB] = await Promise.all([
+    post('/close', { closing_counted_usd: 100, closing_counted_khr: 0 }),
+    post('/close', { closing_counted_usd: 100, closing_counted_khr: 0 }),
+  ])
+  const [bodyA, bodyB] = [await raceA.json(), await raceB.json()]
+  const winners = [bodyA, bodyB].filter((body) => body.already_closed === false)
+  ok(winners.length === 1, `exactly one of the two simultaneous closes wrote (got ${winners.length})`)
+  ok(sent.length === 1, `RACE SENDS ONCE: two simultaneous closes produced ${sent.length} report(s), expected exactly 1`)
+
   // ---- 5. A close with no shift at all sends nothing -----------------------
   // A migrated but EMPTY table, so the 404 comes from "no row for today" and
   // not from a missing table -- the sender here throws if it is ever reached.
