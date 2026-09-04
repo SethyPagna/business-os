@@ -3512,6 +3512,63 @@ already built and tested, so that ruling costs nothing.
     id and an `ADJ` lot code **kept their shape**, so nobody later "finishes the job" and corrupts them.
   - Boundaries: `routes/sales.ts`, `SaleDetailModal.tsx` and `undoAppliers.ts` belong to S4-30 and
     S4-32 while those run; date sites inside them are to be listed, not edited.
+
+### `dd/mm/yyyy` — the separator was never the question, and one parser was right to stop
+
+S4-33 came back with two decisions rather than a diff, which is the correct shape for a change
+that touches every date in the product.
+
+**Slashes, not dashes — and the reason is evidence, not taste.** The lane argued dashes would
+collide with ISO. True, but the decisive fact is that **the app already prints slashes**:
+`formatters.ts:59` carries the Aug-25 ruling verbatim ("all date format uses mm/dd/yyyy"),
+`formatters.ts:146` builds `${month}/${day}/${year}`, `batchLabel.ts` says "n: mm/dd/yyyy" in seven
+comments, and three pack values print slashed examples. The owner asked to change the **order**;
+slashes change the order and nothing else, so **dashes would have been a second, unrequested
+change**. Ruled and closed.
+
+**The CSV parser — a genuine data hazard the lane refused to guess at, and it was right to.**
+`normalizeToIsoDate` reads the `batch(mm/dd/yyyy)` column month-first, in two hand-synced mirrors,
+and it writes real stored data (`received_date`, `lot_code`). Flipping it means **every historical
+CSV the shop already holds re-imports with day and month swapped for any day ≤ 12** — silently.
+
+Resolved without needing an owner ruling, because **the header already names its own format**:
+
+| Header in the file | Reading |
+|---|---|
+| `batch(mm/dd/yyyy)` — today's | month-first, **unchanged**; every existing file keeps its meaning |
+| `batch(dd/mm/yyyy)` — the new template | day-first |
+| bare `batch` / `date` / `received_date` | month-first — ambiguous headers keep what they mean **today** |
+| ISO `yyyy-mm-dd` | accepted under every header; the template's example row becomes ISO |
+
+The test that pins it is the point: the same cell `03/09/2026` must yield **two different ISO dates**
+under the two headers, and the month-first one under a bare header. Without that, a later session
+"finishes the job" and swaps ten thousand received dates.
+
+**The line that must not move**, and the lane has it: `dateToBatchCode`'s `MMDDYYYY` output in both
+copies. It is the stored `lot_code`/`batch_key` — **flipping it orphans every existing lot**. Same
+for receipt numbers (0107), `S-YYYYMMDD-HHMM` session ids, and every ISO in D1, transport and query
+params. A test now pins all three shapes.
+
+- **Told to the owner, not solved:** the Sep-3 keypad rule ("write 9032026 and it auto-fills")
+  now produces the same string for a **different day** — 9 March instead of 3 September. Unavoidable
+  under day-first; muscle memory will misfile dates for a while, so the `dd/mm/yyyy` placeholder and
+  the `date_entry_invalid` message in both packs are the only guard.
+- **Known and deliberately left:** the `ADJ09/02/2026` lot codes migration 0108 wrote are stored
+  strings rendered verbatim, so they still read month-first. Changing them needs a migration.
+- **A collision the lane cleared too early:** it reported no date sites in `sales.ts`, but S4-30 is
+  *adding* an amendment ledger with per-amendment timestamps to the sale detail. Told to list that
+  surface for re-check after S4-30 merges — otherwise the one screen the owner asked for lands
+  month-first while the rest of the app is day-first.
+
+- [x] **VIP retired from every display, export and permission surface. Done**, in `s4/wholesale-tier`
+  (`59906158`, already merged at `cc2b7bff`).
+  - Its two reported reds (`posCore`, `productImportPlanner`) were **re-run on the reconcile and are
+    both GREEN** — an artifact of its intermediate worktree, not a defect. Checked rather than
+    relayed; a peer's red is a reference to re-verify.
+  - **One real gap it could not close**, now handed to S4-32: `routes/inventory.ts`'s `/adjust`
+    pricing contract still names `special_price_*`, so **the stock-adjust modals cannot write the
+    wholesale tier at all**. Warned that `/adjust` is a write path old till tabs still POST to, so it
+    accepts both keys and prefers the wholesale one rather than taking a straight rename.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
