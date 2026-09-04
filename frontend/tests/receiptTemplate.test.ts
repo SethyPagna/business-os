@@ -181,7 +181,18 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   assert.match(receiptSource, /const RECEIPT_KHMER_LABELS/)
   assert.match(receiptSource, /បង្កាន់ដៃ/)
   assert.doesNotMatch(receiptSource, /áž/)
-  assert.match(receiptSource, /grid-cols-\[minmax\(0,1fr\)_2\.8rem_minmax\(4\.6rem,auto\)\]/)
+  // FOUR columns since Sep 4 2026 (item / qty / price / total), three when a
+  // shop switches the price column off, and ONE const so the header row and
+  // the item rows can never disagree about the track count.
+  assert.match(receiptSource, /const itemGridCols = showUnitPriceCol/)
+  assert.match(receiptSource, /grid-cols-\[minmax\(0,1fr\)_2\.2rem_minmax\(3\.9rem,auto\)_minmax\(3\.4rem,auto\)\]/)
+  assert.match(receiptSource, /grid-cols-\[minmax\(0,1fr\)_2\.2rem_minmax\(4\.6rem,auto\)\]/)
+  assert.equal(
+    (receiptSource.match(/\$\{itemGridCols\}/g) || []).length,
+    2,
+    'the header row and the item rows must both read the shared track const'
+  )
+  assert.match(receiptSource, /data-receipt-cell="line-total"/)
   assert.doesNotMatch(receiptSource, /getStatusLabel/)
   assert.doesNotMatch(receiptSource, /<Row label=\{labelFor\(lang, 'status'\)/)
   assert.doesNotMatch(receiptSource, /@\s*\{fmtUSD\(unitUsd\)\}/)
@@ -215,16 +226,30 @@ await runTest('receipt discounts stay beside the charged price and printable gri
   const previewSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
   const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
 
-  assert.match(receiptSource, /\{fmtUSD\(lineUsd\)\}[\s\S]*\(-\{fmtUSD\(itemSavingsUsd\)\}\)/,
-    'line savings should be rendered next to the charged total in the Price cell')
-  assert.match(receiptSource, /\{qty\} × \{fmtUSD\(unitUsd\)\}/,
-    'optional unit math should stay in the Price cell rather than duplicate quantity under the name')
+  // The saving still belongs to the price, but the price is now a UNIT price
+  // in its own column, so the parenthesised figure is the cut on one unit --
+  // the owner's photo reads `28.00 (-7.00)` there, then `21.00` in Total.
+  assert.match(receiptSource, /\{fmtUSD\(unitUsd\)\}[\s\S]*\(-\{fmtUSD\(unitSavingsUsd\)\}\)/,
+    'the per-unit saving should be rendered next to the unit price in the Price cell')
+  assert.match(receiptSource, /const lineUsd = figures\.chargedUnitUsd \* qty/,
+    'the Total column carries the net line, which is what the printed Subtotal sums')
+  assert.doesNotMatch(receiptSource, /\{qty\} × \{fmtUSD\(unitUsd\)\}/,
+    'the qty × unit subline duplicated the Price column once that column existed')
   assert.doesNotMatch(receiptSource, /line-through text-gray-400/,
     'the receipt should not add a separate crossed-out price block beneath the product name')
   assert.match(previewSource, /businessDateTimeId\(previewNow\)/)
   assert.match(previewSource, /created_at: previewNow\.toISOString\(\)/)
   assert.doesNotMatch(previewSource, /receipt_number: '20260831-143000'/)
   assert.match(printSource, /line\.style\.gridTemplateColumns = 'minmax\(0,1fr\) 2\.5rem minmax\(4\.25rem,auto\)'/)
+  // On paper the tracks are recomputed from the printable box, so the count
+  // has to follow the cells. Three tracks under a four-cell row would wrap the
+  // line total onto a row of its own -- invisible on screen, wrong on paper.
+  assert.match(printSource, /const hasLineTotal = Boolean\(line\.querySelector\(.\[data-receipt-cell="line-total"\].\)\)/)
+  assert.match(printSource, /gridTemplateColumns = 'minmax\(0,1fr\) 2\.2rem minmax\(3\.6rem,auto\) minmax\(3\.2rem,auto\)'/)
+  // ...and the canvas fallback (iOS / tainted-foreignObject) draws four fields
+  // rather than folding price and total into one right-aligned slot.
+  assert.match(printSource, /const hasTotalColumn = parts\.length >= 4/)
+  assert.match(printSource, /return compactValues\.slice\(0, 4\)\.join\('\\t'\)/)
   assert.match(printSource, /node\.style\.overflowX = 'visible'/)
 })
 

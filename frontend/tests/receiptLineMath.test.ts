@@ -1,12 +1,16 @@
 /**
- * The receipt prints the SELLING price and carries every discount in the
- * Discount row -- "selling price (-discount)", not "discounted price
- * (-discount)" (owner, Sep 4 2026).
+ * The receipt’s item table is FOUR columns -- item, qty, price, total --
+ * and the price column shows the SELLING price with the cut beside it, not
+ * the discounted price (owner, Sep 4 2026, from a photo of a printed
+ * receipt: `28.00 (-7.00)` in the price column, `21.00` in the total).
  *
  * The two sales below are REAL production rows, not invented fixtures. Before
- * this change 16433 printed "$49.00 (-$4.00)" on its first line, a $109.00
+ * any of this 16433 printed "$49.00 (-$4.00)" on its first line, a $109.00
  * Subtotal and a $5.00 Discount -- so the $4.00 it had just shown the customer
- * on that line was nowhere in the totals.
+ * on that line was nowhere in the totals. It is now on the receipt under its
+ * own name, Item Discount, which is what the photo labels it
+ * (`សរុបបញ្ចុះលើទំនិញ`). Both presentations leave the customer paying
+ * exactly the same money; the named row is the one the owner asked for.
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -30,34 +34,54 @@ const sale16433 = {
 {
   const [bobbi, lancome] = sale16433.items.map((i) => receiptLineFigures(i, true, RATE))
 
-  // The discounted line prints its SELLING price, with the saving beside it.
-  assert.equal(bobbi.sellingUnitUsd, 53, 'the line must print the selling price, not the charged one')
-  assert.equal(bobbi.sellingUnitUsd * bobbi.qty, 53)
+  // PRICE column: the selling price, with the per-UNIT cut beside it.
+  assert.equal(bobbi.sellingUnitUsd, 53, 'the price column must show the selling price, not the charged one')
+  assert.equal(bobbi.unitSavingsUsd, 4, 'the parenthesised cut is per unit -- the photo’s (-7.00) on a 1-unit line')
   assert.equal(bobbi.savingsUsd, 4)
   assert.equal(bobbi.hasDiscount, true)
+  // TOTAL column: what the line actually came to.
+  assert.equal(bobbi.chargedUnitUsd * bobbi.qty, 49, 'the total column is net, like the photo’s 21.00')
 
   // A line sold at list is untouched and shows no discount.
   assert.equal(lancome.sellingUnitUsd, 20)
-  assert.equal(lancome.sellingUnitUsd * lancome.qty, 60)
+  assert.equal(lancome.chargedUnitUsd * lancome.qty, 60)
+  assert.equal(lancome.unitSavingsUsd, 0)
   assert.equal(lancome.savingsUsd, 0)
   assert.equal(lancome.hasDiscount, false)
 
-  const savings = receiptLineSavingsUsd(sale16433.items, true, RATE)
-  assert.equal(savings, 4)
+  // A multi-unit line multiplies the unit cut, so the two figures differ and
+  // the price column must print the unit one. (Lancome's is zero, so this is
+  // asserted on a discounted 3-pack rather than on it.)
+  const threePack = receiptLineFigures({ quantity: 3, applied_price_usd: 20, base_price_usd: 24 }, true, RATE)
+  assert.equal(threePack.unitSavingsUsd, 4, 'price column prints the cut on ONE unit')
+  assert.equal(threePack.savingsUsd, 12, 'the Item Discount row sums the cut on the whole line')
 
-  const shownSubtotal = sale16433.subtotal + savings
-  const shownDiscount = sale16433.discount + savings
-  assert.equal(shownSubtotal, 113, 'Subtotal must be the sum of SELLING prices')
-  assert.equal(shownDiscount, 9, 'Discount must carry the per-line cut as well as the order-level one')
+  const itemDiscount = receiptLineSavingsUsd(sale16433.items, true, RATE)
+  assert.equal(itemDiscount, 4)
 
-  // The lines must add up to the subtotal that is printed above them.
+  // The lines are net now, so they sum to the STORED subtotal and the
+  // Subtotal row needs no adjustment.
   const lineSum = sale16433.items
     .map((i) => receiptLineFigures(i, true, RATE))
-    .reduce((sum, f) => sum + f.sellingUnitUsd * f.qty, 0)
-  assert.equal(lineSum, shownSubtotal, 'the printed lines must sum to the printed Subtotal')
+    .reduce((sum, f) => sum + f.chargedUnitUsd * f.qty, 0)
+  assert.equal(lineSum, sale16433.subtotal, 'the printed lines must sum to the printed Subtotal')
+  assert.equal(lineSum, 109)
 
-  // THE INVARIANT: the customer still pays exactly what they paid before.
-  assert.equal(round2(shownSubtotal - shownDiscount), sale16433.total)
+  // The three discount rows the owner's photo and ask call for.
+  const totalDiscount = itemDiscount + sale16433.discount + 0 // + membership, zero here
+  assert.equal(itemDiscount, 4, 'Item Discount = the per-line cut')
+  assert.equal(sale16433.discount, 5, 'Discount = the order-level (store) cut alone')
+  assert.equal(totalDiscount, 9, 'Total Discount = every cut on the sale')
+
+  // THE INVARIANT: the customer still pays exactly what they paid before,
+  // and pays it out of the rows actually printed above the TOTAL.
+  assert.equal(round2(sale16433.subtotal - sale16433.discount), sale16433.total)
+
+  // Nothing is lost relative to the presentation this replaced: the old
+  // inflated Subtotal is still recoverable from the printed rows, which is
+  // what "the $4.00 must not vanish" actually demanded.
+  assert.equal(sale16433.subtotal + itemDiscount, 113)
+  assert.equal(round2((sale16433.subtotal + itemDiscount) - totalDiscount), sale16433.total)
 }
 
 // --- production sale 16815 (receipt 20260902-140834) -----------------------
@@ -69,11 +93,15 @@ const sale16433 = {
     { quantity: 1, applied_price_usd: 22, base_price_usd: 24 },
     { quantity: 1, applied_price_usd: 52, base_price_usd: 52 },
   ]
-  const savings = receiptLineSavingsUsd(items, true, RATE)
-  assert.equal(savings, 6, '2 + 2 + 2, and the line sold at list contributes nothing')
-  assert.equal(154 + savings, 160)
-  assert.equal(4 + savings, 10)
-  assert.equal(round2(160 - 10), 150, 'total unchanged')
+  const itemDiscount = receiptLineSavingsUsd(items, true, RATE)
+  assert.equal(itemDiscount, 6, '2 + 2 + 2, and the line sold at list contributes nothing')
+  // Net lines sum to the stored subtotal.
+  const lineSum = items
+    .map((i) => receiptLineFigures(i, true, RATE))
+    .reduce((sum, f) => sum + f.chargedUnitUsd * f.qty, 0)
+  assert.equal(lineSum, 154)
+  assert.equal(itemDiscount + 4, 10, 'Total Discount = item + store')
+  assert.equal(round2(154 - 4), 150, 'total unchanged')
 }
 
 // --- the fallbacks that keep old receipts reprinting identically -----------
@@ -133,6 +161,13 @@ const sale16433 = {
   // Undiscounted lines keep their stored riel untouched.
   const plain = receiptLineFigures({ quantity: 1, applied_price_usd: 20, applied_price_khr: 82000, base_price_usd: 20 }, true, RATE)
   assert.equal(plain.sellingUnitKhr, 82000)
+
+  // The Total column's riel subline is the CHARGED riel, not the selling one,
+  // or a discounted line would print a dollar total and a riel total that
+  // disagree with each other.
+  assert.equal(real.chargedUnitKhr, 200900, 'the riel subline follows the net total')
+  assert.equal(plain.chargedUnitKhr, 82000)
+  assert.equal(none.chargedUnitKhr, 49 * RATE, 'no stored riel: fall back to the rate on the CHARGED dollars')
 }
 
 // --- the component must consume the shared math, not re-derive it ----------
@@ -140,14 +175,49 @@ const sale16433 = {
   const src = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
   assert.match(src, /import \{ receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
   assert.match(src, /const lineSavingsUsd = receiptLineSavingsUsd\(items, showItemDiscount, exchangeRate\)/)
-  assert.match(src, /const displayedSubtotalUsd = subtotalUsd \+ lineSavingsUsd/)
-  assert.match(src, /const displayedDiscountUsd = discountUsd \+ lineSavingsUsd/)
+  // Subtotal and Discount are the STORED figures now: the lines are net, so
+  // the per-line cut is reported on its own row instead of being folded in.
+  assert.match(src, /const displayedSubtotalUsd = subtotalUsd$/m)
+  assert.match(src, /const displayedDiscountUsd = discountUsd$/m)
+  assert.match(src, /const totalDiscountUsd = lineSavingsUsd \+ discountUsd \+ membershipDiscountUsd/)
   // The rows must print the DISPLAYED figures.
   assert.match(src, /label=\{labelFor\(lang, 'subtotal'\)\} value=\{fmtUSD\(displayedSubtotalUsd\)\}/)
   assert.match(src, /value=\{`-\$\{fmtUSD\(displayedDiscountUsd\)\}`\}/)
-  // And the line must print the selling price. If this regresses to
-  // applied_price_usd the receipt goes back to "discounted price (-discount)".
+
+  // FOUR columns, and each one printing the figure the photo puts in it.
+  assert.match(src, /data-receipt-cell="line-total"/, 'the fourth column must exist')
+  assert.match(src, /labelFor\(lang, 'item'\)/)
+  assert.match(src, /labelFor\(lang, 'unitPrice'\)/)
+  assert.match(src, /labelFor\(lang, 'lineTotal'\)/)
+  // Price column = selling unit price + the per-UNIT cut. If this regresses
+  // to applied_price_usd the receipt goes back to "discounted price
+  // (-discount)", which is the thing the owner has now asked for twice.
   assert.match(src, /const unitUsd = figures\.sellingUnitUsd/)
+  assert.match(src, /const unitSavingsUsd = figures\.unitSavingsUsd/)
+  assert.match(src, /\(-\{fmtUSD\(unitSavingsUsd\)\}\)/)
+  // Total column = the NET line, matching the photo’s 21.00.
+  assert.match(src, /const lineUsd = figures\.chargedUnitUsd \* qty/)
+  assert.match(src, /const lineKhr = figures\.chargedUnitKhr \* qty/)
+  // The two named discount rows, and the qty total under the table.
+  assert.match(src, /labelFor\(lang, 'itemDiscount'\)/)
+  assert.match(src, /labelFor\(lang, 'totalDiscount'\)/)
+  assert.match(src, /labelFor\(lang, 'totalQty'\)/)
+  // ...registered in the field order, or they never render.
+  assert.match(src, /fieldOrder\.push\('item_discount'\)/)
+  assert.match(src, /fieldOrder\.push\('total_discount'\)/)
+  assert.match(src, /fieldOrder\.push\('total_qty'\)/)
+  // Both label packs carry every new key, or a Khmer receipt prints blanks.
+  for (const key of ['item', 'unitPrice', 'lineTotal', 'totalQty', 'itemDiscount', 'totalDiscount']) {
+    assert.equal(
+      (src.match(new RegExp(`^\\s+${key}: '`, 'gm')) || []).length,
+      2,
+      `${key} must be defined in BOTH LABELS.en and LABELS.km`,
+    )
+  }
+  // The Khmer wording is read off the owner’s photo; pin the two that name
+  // the new rows so a future edit cannot quietly paraphrase them.
+  assert.match(src, /totalQty: 'សរុបចំនួនទំនិញ:'/)
+  assert.match(src, /itemDiscount: 'សរុបបញ្ចុះលើទំនិញ:'/)
   assert.doesNotMatch(
     src,
     /const unitUsd = toNumber\(item\.applied_price_usd/,
@@ -245,4 +315,4 @@ const sale16433 = {
   assert.equal(receiptDeliveryFigures({ delivery_fee_usd: 0, delivery_fee_paid_by: 'store' }, RATE).printsAsFree, false)
 }
 
-console.log('receiptLineMath: selling price on the line, every discount in the Discount row, an absorbed delivery fee prints Free, total unchanged')
+console.log('receiptLineMath: four columns, selling price with the unit cut, net line total, Item + Total Discount rows, an absorbed delivery fee prints Free, total unchanged')
