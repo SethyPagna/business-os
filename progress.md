@@ -4089,6 +4089,28 @@ chain · receipt/date locale duplicates (main date fixed Part 519) · MEDIUM lis
 (review-tier bypasses, offline-sale timestamps, import-review parity, failed-job
 "Queued 0%", Suppliers/Delivery sort/pagination).
 
+**[~] Claimed by business-os-v1-63, Sep 4 2026 — sargable-date regression, forward
+from the Aug 31 fix.** ee's read-only sweep at `2c497564` found the `date()`/
+`datetime()`-wraps-an-indexed-column class reintroduced at 6 sites in 2 days:
+`sales.ts:2115,2145` (`/sales/export` cursor + ORDER BY vs `idx_sales_created_pg`,
+unbounded when date bounds are omitted, from `4341acf1` Sep 1) ·
+`contacts.ts:1668,1669,1769,1770` (`date(...,'+7 hours')` vs
+`idx_supplier_invoices_date`/`idx_customer_receivables_date`, from `b480d8a8`/
+`fc1e4e4c` Aug 31) · `compat.ts:664,665` (same shape, legacy deleted sales).
+Also in scope: `compat.ts:622` unbounded `DELETE ... WHERE date(created_at) <
+@cutoff` (sibling `lib/audit.ts:143-147` already batches 5,000 rows per
+`64f32198` — parity fix) · `inventory.ts:578-720` `/inventory/summary` unpaged
+over 10,271 products with a correlated per-row subquery · `contacts.ts:472-605`
+`/customers` unpaged, ~251 statements. Explicitly NOT touching (deliberate,
+correct): `salesAnalytics.ts:737`, `auth.ts:232`, `promotionRulesSql.ts:40-41`,
+`compat.ts:281,282,288`. File boundary held with ee: `ee`'s sargable
+agent (`bos-rc-workers/ee-sargable`, `fx/sargable-date-lock-ee`) owns
+`cloudflare/scripts/test-sargable-date-filters-pure.cjs` only, read-only
+against routes; every route file above is mine, neither touches the other's.
+Building on `rc/s4-2026-09-04` @ `2c497564` in its own worktree, not the
+shared tree (`sales.ts`/`compat.ts` are dirty here already for unrelated
+work). Not merged/deployed — reconciler's call.
+
 ### Open defects — Part-549 verification sweep (7a, Aug 31)
 
 Full detail + file:line evidence in session-log Part 549. Fixed in-sweep:
