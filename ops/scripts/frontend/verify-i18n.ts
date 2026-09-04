@@ -96,6 +96,36 @@ if (coreBlock) {
   }
 }
 
+// 4. Interpolation slots must match between the packs.
+//
+// Every call site substitutes with a literal .replace('{n}', String(count)),
+// so a slot that exists in one pack and not the other does NOT throw -- the
+// replace is simply a no-op and the number vanishes from that language only.
+// Two live keys shipped that way since the initial import: en's
+// match_import_images and sync_online_devices had lost their {n} while km
+// kept it, so Khmer showed the count and English did not. Key-set parity
+// (check 2) cannot see this -- both packs have the key; only the value differs.
+const SLOT = /\{[a-zA-Z_][a-zA-Z0-9_]*\}/g
+const slotsOf = (v: string) => new Set(v.match(SLOT) ?? [])
+for (const key of enTop) {
+  const e = en[key]
+  const k = km[key]
+  if (typeof e !== 'string' || typeof k !== 'string') continue
+  const inEn = slotsOf(e)
+  const inKm = slotsOf(k)
+  const enOnly = [...inEn].filter((x) => !inKm.has(x))
+  const kmOnly = [...inKm].filter((x) => !inEn.has(x))
+  if (enOnly.length || kmOnly.length) {
+    const detail = [
+      enOnly.length ? `en-only ${enOnly.join(' ')}` : '',
+      kmOnly.length ? `km-only ${kmOnly.join(' ')}` : '',
+    ].filter(Boolean).join(', ')
+    failures.push(
+      `interpolation slots differ for '${key}' (${detail}) — the pack missing the ` +
+        `slot silently drops the value instead of failing; give both packs the same slots`,
+    )
+  }
+}
 if (failures.length) {
   console.error(`verify:i18n FAILED — ${failures.length} problem(s):`)
   for (const f of failures) console.error('  ' + f)
