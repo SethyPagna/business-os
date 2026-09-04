@@ -1,6 +1,6 @@
 // Regression test for the ONE membership-number authority:
 // cloudflare/src/lib/membershipNumber.ts, plus migration
-// 0108_customers_membership_lc_backfill.sql, run against an in-memory SQLite
+// 0110_customers_membership_lc_backfill.sql, run against an in-memory SQLite
 // with every real migration applied. The REAL source is transpiled and run --
 // nothing here reimplements the logic.
 //
@@ -10,7 +10,7 @@
 //   3. concurrent minting -- two writers computing the same next number, the
 //      UNIQUE index from 0015 arbitrating, and the loser getting the NEXT one
 //   4. one minter: no source file mints its own membership number any more
-//   5. migration 0108 backfilling existing rows into the same sequence
+//   5. migration 0110 backfilling existing rows into the same sequence
 //
 // Run (from cloudflare/): node scripts/test-membership-number-pure.cjs
 
@@ -244,7 +244,7 @@ check(() => assert.match(frontendHelper, /CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/, 't
 
 const { DatabaseSync } = require('node:sqlite')
 const backfillSql = fs.readFileSync(
-  path.join(__dirname, '..', 'migrations', '0108_customers_membership_lc_backfill.sql'), 'utf8',
+  path.join(__dirname, '..', 'migrations', '0110_customers_membership_lc_backfill.sql'), 'utf8',
 )
 
 function runBackfill(seed) {
@@ -283,7 +283,7 @@ check(() => assert.equal(bulk[4999], 'LC-05000'))
 check(() => assert.equal(new Set(bulk).size, 5000, 'no number is issued twice'))
 
 main().then(() => {
-  console.log(`PASS ${checks} membership-number checks (LC- format, gap-fill, concurrency, one minter, 0108 backfill)`)
+  console.log(`PASS ${checks} membership-number checks (LC- format, gap-fill, concurrency, one minter, 0110 backfill)`)
 }).catch((error) => {
   console.error(error)
   process.exit(1)
