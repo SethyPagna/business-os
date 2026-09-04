@@ -2376,9 +2376,23 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
 - [ ] **S4-10 · Start Shift / End Shift.** First POS use of a day requires Start Shift; the
   day ends with End Shift. Both capture cash on hand for change in **USD and KHR**. The
   shift report (S4-7) covers whichever user is signed in.
-- [?] **S4-11 · "Can check in users for invoices details."** Reading: invoice detail should
-  show which user handled it, and a shift should be attributable per user. Needs one line
-  of confirmation from the user before building.
+- [ ] **S4-11 · "Can check in users for invoices details." Unblocked, and it splits in two.**
+  The user named it alongside "build it", so it is no longer waiting on a ruling. Reading it
+  against the source at `e3678a39` shows the two halves are very different sizes:
+  - **S4-11a — who made the sale. Display only; the data is already there.** `sales.cashier_id`
+    and `sales.cashier_name` are written by `POST /` and come back on the row. Showing them on
+    the invoice detail is a frontend change. Held by `business-os-v1-c3` behind S4-24b, because
+    it lands in `SaleDetailModal.tsx` which the S4-24b subagent currently holds.
+  - **S4-11b — who made each status update. Nothing records it.** At `e3678a39`,
+    `cloudflare/src/routes/sales.ts` contains **no `action_history` write at all**. The only user
+    attribution a status change leaves is `inventory_movements.user_id/user_name`, and the plan
+    only emits movements when the transition actually crosses the stock-deducting boundary — so a
+    change between two statuses that both deduct, or both do not, records nobody. This has to be
+    persisted before it can be shown.
+  - **S4-11b is the same missing column as the Telegram ask** ("telegram messages for receipt
+    status update should also show the cashier who make the update"). You cannot print the
+    updater until someone stores them. Offered to `business-os-v1-02 [055499]`, who is already
+    inside `PATCH /:id/status` for S4-2..S4-5 — rather than send a second lane into that handler.
 
 **Products, stock sessions and costs**
 
@@ -2601,9 +2615,10 @@ but the item needs reassigning. Whoever takes it: the reports directory is
 `frontend/src/components/sales/reports`, **not** `frontend/src/components/reports` — a first grep
 for the obvious path finds nothing and will make you think the lane is empty.
 
-**Blocked on the user, not on work:** S4-1 (the revert is a production write), S4-11 (needs a
-one-line ruling on what "check in users for invoices details" means), S4-17b (production write),
-S4-26b (`dd-mm-yyyy` versus the pinned `mm/dd/yyyy` convention).
+**Blocked on the user, not on work:** S4-1 (the revert is a production write), S4-17b (production
+write), S4-26b (`dd-mm-yyyy` versus the pinned `mm/dd/yyyy` convention). **S4-11 came off this
+list** — the user named it in the same breath as "build it", which is the ruling it was waiting
+for; it is now split into S4-11a and S4-11b above.
 
 ### Fleet sweep, Sep 4 ~02:20 (business-os-v1-c3)
 
