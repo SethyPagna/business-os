@@ -301,8 +301,10 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   const nav = read('src/components/shared/HubSectionNav.tsx')
   assert.ok(nav.includes('hub-section-pills flex max-w-full flex-wrap'), 'the chip row is viewport bounded and wraps')
   assert.ok(!nav.includes('hub-section-pills flex max-w-full overflow-x-auto'), 'the chip row does not require horizontal scrolling')
-  assert.ok(nav.includes('grid grid-cols-2'), 'the phone surface is a two-per-row tile grid')
-  assert.ok(nav.includes('hub-section-label block break-words'), 'tile labels stay complete and may use additional lines')
+  const sidebar = read('src/components/navigation/Sidebar.tsx')
+  assert.ok(sidebar.includes('grid min-w-0 grid-cols-2'), 'inline mobile group children use two bounded columns')
+  assert.ok(sidebar.includes('min-h-11 min-w-0 break-words'), 'mobile leaf labels wrap in touch-safe buttons')
+  assert.ok(nav.includes('if (layered || visible.length <= 1) return <>{children}</>'), 'default mobile mode enters the selected body directly, without another tile page')
 })
 
 test('Part 553/554: report sections render display-currency money + a CSV export', () => {

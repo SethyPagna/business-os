@@ -1,6 +1,6 @@
 // Local-only fixture: real provider, Sidebar, section hook and switcher;
 // synthetic user, API and bodies. Never a production auth/business-flow test.
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useState, useRef} from 'react';
 import {createRoot} from 'react-dom/client';
 import {AppProvider, useApp} from '/src/AppContext.tsx';
 import Sidebar from '/src/components/navigation/Sidebar.tsx';
@@ -25,7 +25,8 @@ function Host({pageId}){
  const destinations=getHubDestinations(pageId,app);
  const [active,choose]=useHubSection(pageId,destinations[0]?.id||'',destinations.map(d=>d.id),app.navigateTo);
  const [text,setText]=useState('');
- useEffect(()=>registerDirtyWork({key:`fixture-${pageId}`,pageId,label:'Unsaved fixture text',isDirty:()=>text!=='',discard:()=>setText(''),save:()=>{setText('');return true}}),[text,pageId]);
+ const draft=useRef(text); draft.current=text;
+ useEffect(()=>registerDirtyWork({key:`fixture-${pageId}`,pageId,label:'Unsaved fixture text',isDirty:()=>draft.current!=='',discard:()=>{draft.current='';setText('')},save:()=>{draft.current='';setText('');return true}}),[pageId]);
  const sections=destinations.map(d=>({id:d.id,label:app.t(d.key)}));
  return h('section',{hidden:app.page!==pageId,'data-fixture-host':pageId},h(HubSectionNav,{pageId,sections,active,onChange:choose,storageKey:`fixture:hub:${pageId}`},
  h('h1',{'data-fixture-section':`${pageId}:${active}`,style:{fontSize:20,overflowWrap:'anywhere'}},`${pageId}: ${active}`),
