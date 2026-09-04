@@ -19271,3 +19271,67 @@ returned the changed source.
   amendment updates, and the DB confirms the new value); the print pipeline was not driven in the browser
   because it goes through an image/PDF render and a native dialog.
 - Not deployed. This lane is not in the Sep-4 checkpoint; it is on origin awaiting a coordinator's Stage 2.
+
+### Addendum (same day, after the deploy) — the last line above is now false
+
+**Deployed.** Wrangler version `798d9e19-76d0-4909-8db3-6a7a4ad43ad7`, commit `c7ef7264` (contains this lane's
+`64aa0a51`), migration `0117` applied 11:37:39, highest applied now 0117 (`d1_migrations` row id 116 — a row
+counter, not the filename number). Driven by session `ee` from an isolated worktree; this session held no deploy
+role and stayed off the remote throughout. Probes all expected-vs-actual exact: `/health` ok on both hosts,
+storefront 200, admin 200, `/api/products` 401, `/ws` 426.
+
+**What the migration actually did, and why the number in the approval differs from the number in this entry.**
+The owner approved with 31 affected customers in front of them. Six sales rang up during deploy preparation, so
+the migration ran against 15,059 sales / 48 accruing / **34 customers**. Both figures are kept on the board: 31
+is the honest record of what was agreed, 34 is what was touched. The drift was surfaced to the owner explicitly
+rather than allowed to replace 31 quietly in a report — the same decision, but not the same figure.
+
+**Two items only the owner can close, both still open at the time of writing.** The switch defaults to ON and
+`0117` writes no settings row, so production is running the loyalty programme against zeroed balances and
+accrual has already resumed — the AFTER output reported `new_accruing_since_before = 1`, a sale that accrued
+during the deploy window itself. And the balance read — the only check that observes what was approved — was
+never completed: `ee` had no admin session and correctly declined to authenticate as the owner rather than mark
+it passed. Three customers were verified safe to check (**19718, 19719, 19735**, none having transacted since
+the migration). Correct order is toggle-off first, then read, because flipping stops new accrual and makes the
+read instant-independent by construction.
+
+**The lesson this deploy actually taught, which is not about loyalty points.** Four separate checks in the
+deploy verifier could not have failed for the reason they existed:
+
+1. `accruing_rows == 45` — a frozen constant; went red on live traffic.
+2. `logged_ids_bytes == 269` — the same reading in a different unit, invisible to a sweep for the first.
+3. `captured_rows_present == BASE.accruing_rows` — **captured at runtime and still wrong**, because BASE was
+   read at 11:26:57 and the migration ran at 11:37. Capturing at the wrong instant is the same bug disguised as
+   its own fix.
+4. The manual balance read, proposed by this session — a live balance compared to a constant while the till was
+   open. Would have gone red on a good migration and invited a rollback that restored 34 customers' points.
+
+The rule that survives all four: **a comparison is only traffic-immune when both sides are read at the same
+instant**, which in practice means comparing an operation's own record against itself (`captured_rows_present ==
+logged_reset_count`). Its companion, for a "still zero" assertion: **enumerate every writer of the field** —
+`loyalty_accrual` has three, all INSERTs (`sales.ts:689`, `salesImportCommit.ts:91`, `returns.ts:1207`) and no
+UPDATE anywhere in `cloudflare/src`, so a row's flag is immutable after creation and the assertion is genuinely
+instant-independent rather than merely appearing so.
+
+**Also found in passing, recorded and not taken: the in-app Discounts figure is wrong on production today.**
+`getItemDiscountUsd` (`salesAnalytics.ts:670` at `c7ef7264`) is called from exactly one place, `telegram.ts:567`.
+It is not a field on `SalesTotals`, so `/api/reports` never carries it, and `sales.ts:2944` defines
+`total_discount_usd` as `discount_usd + membership_discount_usd` — invoice-level only. The Telegram report
+therefore includes line-level discounts and the app does not; they have disagreed since before this lane
+existed, and the app is the wrong one. The fix commit's own production measurement: August 2026, store $5.50,
+membership $0.00, product **$2,338.85** unreported — 425×. It hides structurally, because a line total is
+already net of its own discount and so the header carries no trace.
+
+The fix is written at `1d67e895` on `rc/deploy-2026-09-04` and is **not** in production; that branch is 1 ahead
+/ 25 behind `c7ef7264`, so it must be merged forward, never deployed from. The merge is not textual: both sides
+added a **fourth parameter to `deriveTotals` with different meanings** — production
+`(level, costUsd, returnedCostUsd = 0, pending: PendingCostInput = {})` at `:691`, the fix
+`(level, costUsd, returnedCostUsd = 0, itemDiscountUsd = 0)` at `:628` — and all four production call sites
+(`:781`, `:833`, `:1364`, `:1498`) pass an object literal, so the slot is fully occupied. An options object is
+the only resolution that survives; a fifth positional is four edits and a landmine.
+
+The loud half is caught by the typechecker (number vs object, both directions). **The quiet half is the hazard:**
+a 3-arg call site compiles under either signature and both fourth parameters default, so the merge goes green
+while one of the two features silently reads zero — and which one depends on which side won. The guard is a
+fixture where the fourth argument is non-zero and the assertion moves, **for both features**; locking only the
+one being merged reproduces the same green. Unclaimed lane; it needs the owner's report surfaces in front of it.
