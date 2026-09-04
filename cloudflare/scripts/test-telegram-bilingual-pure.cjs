@@ -180,10 +180,13 @@ console.log(`PASS coverage: all ${new Set(scanned.map(([, name]) => name)).size}
 
 // --- 4. composed event payloads: both languages on every labelled line ------
 
+// lib/telegram.ts reads the sales kernel for the shift report (S4-7).
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow })
 const telegram = loadReal('lib/telegram.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
+  './salesAnalytics': salesAnalytics,
 })
 
 const bilingualOk = (line) => {
@@ -351,6 +354,9 @@ const wired = loadReal('lib/telegram.ts', {
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
+  // The real kernel over the same stub db, so `/shift` goes down its actual
+  // query path here rather than a hand-written imitation of it.
+  './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow }),
 })
 const env = { TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-secret' }
 const lastSent = () => sent[sent.length - 1].body.text

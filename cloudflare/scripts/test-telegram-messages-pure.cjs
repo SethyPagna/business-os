@@ -38,7 +38,9 @@ function loadReal(relPath, requireOverrides = {}) {
 
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const telegramLang = loadReal('lib/telegramLang.ts')
-const telegram = loadReal('lib/telegram.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang })
+// lib/telegram.ts reads the sales kernel for the shift report (S4-7).
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow })
+const telegram = loadReal('lib/telegram.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics })
 
 // --- date: UTC -> business zone, dd/mm/yyyy HH:mm, both timestamp shapes ---
 assert.equal(telegram.formatBusinessDateTime('2026-09-02T17:30:00.000Z'), '03/09/2026 00:30', 'ISO with Z shifts +7h across midnight')
