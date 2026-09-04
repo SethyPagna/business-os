@@ -2430,7 +2430,93 @@ One line per open item; the full text lives in the master-plan phases below (sam
 IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 **[ ]** = not started.
 
-### Sep-4 round 3 — nine items (user, Sep 4 2026; taken by business-os-v1-c4)
+### Sep-4 round 4 — ten items (user, Sep 4 2026; recorded by business-os-v1-c3)
+
+Recorded before any of it is built, per the owner's standing instruction: *"Make
+sure you keep track of changes in progress.md do checkpoints and commits, push,
+and deploy."*
+
+**Four of these land on lanes that already exist and are unmerged.** Nobody
+should take one of those without claiming it against the branch owner first —
+`fx/sale-detail-rows`, `lane-a/fast-stock-in`, `lane-b/transfer`,
+`fx/reports-redesign`, `s4/reports`. Collisions are flagged per item below.
+
+**[ ] S4R4-1 · Sales detail shows per-branch stock; POS options show Shop only.**
+New selling rule. In the sale-detail sheet a product shows its stock **by
+branch** — "Shop: n, Warehouse: n" — as *information*. The selectable **options**
+list only Shop rows (with selling price, received date, barcode). Everything else
+about identity is unchanged: the same-name grouping and child-row model still
+stand ([[product-child-row-model]]). This is a change to what POS offers for
+sale, not to what a product is. *Collides with `fx/sale-detail-rows`.*
+
+**[ ] S4R4-2 · Sale detail renders raw JSON at the delivery contact.** Observed
+by the owner, verbatim:
+
+```
+Delivery ta
+Address [{"label":"Default","name":"ta","phone":"","email":"","address":"","area":""}]
+```
+
+A contact's address column holds a JSON array of labelled addresses and the sheet
+prints it. Parse it, pick the right entry, render label/phone/area as fields, and
+fall back to the plain string for rows that are not JSON — both shapes are live.
+*Collides with `fx/sale-detail-rows`.*
+
+**[ ] S4R4-3 · Sale detail must be compact and clean.** Same sheet: merge rows,
+two columns where it reads better, no wall of single-value lines.
+*Collides with `fx/sale-detail-rows`.*
+
+**[ ] S4R4-4 · Stock change (add/minus) shows branch on small screens and in the
+detail view**, and the same compaction — merge rows, two columns.
+
+**[ ] S4R4-5 · Shift cash register — HIGHEST PRIORITY, owner asked for it "as
+quick as possible for deploy".** First POS use of each day prompts the employee
+to register the shift's cash/change float, and **keeps prompting until it is
+registered**; once registered that day, never again. End of shift is **manual**,
+and can only be ended **once**. Ties into S4-30/S4R3-8 (who did what, when) and
+the `S-YYYYMMDD-24hour` session-id convention already on the board.
+
+**[ ] S4R4-6 · Stats and reports count every non-cancelled status.** Total sales
+$ **including unpaid**; transaction count; and stats for paid, unpaid, profit and
+COGS. Well designed and compact. This is the same defect as S4R3-5 and the second
+half of S4R3-2's root cause — fix the scope once in the kernel and let every
+surface read it. *Collides with `fx/reports-redesign`, `s4/reports`.*
+
+**[ ] S4R4-7 · Product names are truncated in the search results** for transfers
+and for every stock-change action (fast in, add stock, remove, set). The owner
+cannot identify a product from what is shown and does not remember barcodes. The
+name must be legible in the result row, not clipped.
+*Collides with `lane-a/fast-stock-in`, `lane-b/transfer`.*
+
+**[ ] S4R4-8 · Back and Save at the END of the page, on the same row.** Repeated
+instruction — already on the board once. Scroll to the bottom, both buttons, one
+row.
+
+**[ ] S4R4-9 · Fast-in's saved-products list must scroll with the float**, as one
+page, not as its own inner scroll region. *Collides with `lane-a/fast-stock-in`.*
+
+**[ ] S4R4-10 · Merge product rows whose barcodes differ only by a leading zero.**
+A survey across all products and their child rows: where two rows in a name group
+differ **only** by a leading `0` on the barcode, they are the same product and
+merge. Costs average per the standing rule — add and divide **only across rows
+whose costs genuinely differ**, never folding in a 0-cost row
+([[product-child-row-model]]). Survey and propose FIRST: the merge itself is a
+production data write and needs the owner's sanction, exactly like the 22-row
+subtotal repair below.
+
+**[ ] S4R4-11 · The sale-detail sheet must be able to sell like POS.** Add more
+products to an existing sale, search with **barcode scanning**, and get the same
+select/choose/options behaviour POS has. Today none of that is available from
+the sale detail. Depends on S4R4-1 (which options are offered).
+*Collides with `fx/sale-detail-rows`, and with `s4/sale-add-items`.*
+
+**Still blocked, carried from round 3:** the 22-row `subtotal_usd` repair
+($3,462) is staged and unrun. It needs the owner's explicit go in chat; the
+approval that came back through the question UI arrived with a system notice
+saying no human input had been received, and that is not a basis for 22
+irreversible writes to production financials.
+
+### Sep-4 round 3 — nine items (user, Sep 4 2026; taken by business-os-v1-c3)
 
 Sent mid-turn while the delivery/profit scoping was being written. Recorded here
 first, per the owner's standing instruction: *"if i add throughout the
@@ -2442,7 +2528,7 @@ figures exist in the kernel (`refund_usd`, `gross_sales_usd`) and are not
 rendered. Find out whether the panel drops them or the transport does.
 
 **[~] S4R3-2 · Dashboard revenue is wildly low. ROOT-CAUSED — two independent
-causes, one fixed, one awaiting the owner.** (business-os-v1-c4, Sep 4 2026.)
+causes, one fixed, one awaiting the owner.** (business-os-v1-c3, Sep 4 2026.)
 Measured against production, not reasoned about.
 
 *Cause 1 — the legacy import never wrote `subtotal_usd`.* Canonical revenue is
