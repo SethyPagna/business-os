@@ -5288,7 +5288,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             ...resolveMergedPricing([earlier.data, d]),
             ...resolveMergedWholesalePricing([earlier.data, d]),
             ...resolveMergedCost([earlier.data, d]),
-          }          Object.assign(earlier.data, merged)
+          }
+          Object.assign(earlier.data, merged)
           Object.assign(d, merged)
           continue
         }
