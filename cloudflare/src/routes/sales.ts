@@ -13,7 +13,7 @@ function canReadSales(user: SessionUser): boolean {
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
+import { CUSTOMER_REFUND_JOIN, awaitingExpr, getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
 // a line, how much stock moves, which lots, what happens to the totals) are
@@ -2905,37 +2905,34 @@ app.get('/stats', async (c) => {
   // exact query shape (the drift risk buildSalesSearchWhere exists to
   // prevent in the first place).
   //
-  // COALESCE(NULLIF(s.sale_status, ''), 'completed') is the SQL spelling of
-  // the JS `sale_status || 'completed'` it replaces: BOTH an empty string
-  // and NULL mean completed, so a blank status keeps counting as revenue
-  // rather than silently dropping out of the total. A plain COALESCE alone
-  // would leave '' unmatched and quietly lose those sales.
-  //
   // Revenue basis = NET SALES (subtotal net of both discounts), minus customer
-  // refunds -- the canonical definition (user directive Sep 1 2026), computed
-  // byte-for-byte identically to salesAnalytics.ts's deriveTotals so this header
-  // and the Reports kernel/Dashboard can never disagree. Tax and delivery fees
-  // are pass-through, NOT revenue, so total_usd (which folds tax in) is no
-  // longer the base here. Awaiting-payment (unpaid credit) uses the same net
+  // refunds -- the canonical definition (user directive Sep 1 2026). Tax and
+  // delivery fees are pass-through, NOT revenue, so total_usd (which folds tax
+  // in) is not the base here. Awaiting-payment (unpaid credit) uses the same net
   // basis but is reported separately as pending, never folded into revenue.
+  //
+  // This header used to spell that definition out a SECOND time and carry a
+  // comment claiming it matched salesAnalytics.ts byte for byte. It stopped
+  // matching the moment the kernel began apportioning the refund onto the net
+  // basis (Sep 4 2026), and nothing would have said so -- the Sales page and the
+  // Dashboard would simply have shown two different revenues for the same
+  // filter. So it now interpolates the kernel's OWN exported fragments,
+  // including the refund subquery, and agreement is structural rather than
+  // asserted. The blank-status rule (both '' and NULL mean completed) lives in
+  // recognizedExpr with the rest of it.
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
     const totals = await db.prepare(`
     SELECT
       COUNT(*) AS total_count,
-      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') NOT IN ('cancelled', 'awaiting_payment') THEN 1 ELSE 0 END), 0) AS revenue_count,
-      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') NOT IN ('cancelled', 'awaiting_payment')
-        THEN (COALESCE(s.subtotal_usd, 0) - COALESCE(s.discount_usd, 0) - COALESCE(s.membership_discount_usd, 0)) - COALESCE(r.refund_usd, 0) ELSE 0 END), 0) AS revenue_usd,
-      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') = 'awaiting_payment'
-        THEN (COALESCE(s.subtotal_usd, 0) - COALESCE(s.discount_usd, 0) - COALESCE(s.membership_discount_usd, 0)) ELSE 0 END), 0) AS pending_revenue_usd
+      COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN 1 ELSE 0 END), 0) AS revenue_count,
+      COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')}
+        THEN ${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')} ELSE 0 END), 0) AS revenue_usd,
+      COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')}
+        THEN ${netSaleExpr('s.')} ELSE 0 END), 0) AS pending_revenue_usd
     FROM sales s
     LEFT JOIN customers c ON c.id = s.customer_id
-    LEFT JOIN (
-      SELECT sale_id, SUM(total_refund_usd) AS refund_usd
-      FROM returns
-      WHERE COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-      GROUP BY sale_id
-    ) r ON r.sale_id = s.id
+    ${CUSTOMER_REFUND_JOIN}s.id
     WHERE ${where.join(' AND ')}
   `).get<{ total_count: number; revenue_count: number; revenue_usd: number; pending_revenue_usd: number }>(params)
 

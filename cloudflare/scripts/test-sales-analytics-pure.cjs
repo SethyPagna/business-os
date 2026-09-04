@@ -55,7 +55,17 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
   assert.equal(totals.discount_usd, 7, 'discount_usd = store + membership')
   assert.equal(totals.revenue_usd, 93, 'revenue_usd = gross_sales - discount (excludes tax/delivery)')
   assert.equal(totals.collected_total_usd, 103, 'collected_total = revenue + tax + customer-paid delivery')
-  assert.equal(totals.profit_usd, 70, 'profit = revenue - cost - store-paid delivery (93 - 20 - 3)')
+  // profit = revenue - cost + what delivery is worth (93 - 20 + 6).
+  //
+  // Was 70 = 93 - 20 - 3, which did two wrong things at once: it subtracted the
+  // $3 fee the shop WAIVED -- money it never had, and already absent from the
+  // $93 -- and it ignored the $6 the customer actually PAID for delivery. This
+  // level supplies no courier cost, so delivery contributes its full $6 here;
+  // where a courier payment is recorded it comes straight back off.
+  assert.equal(totals.profit_usd, 79, 'profit = revenue - cost + delivery net (93 - 20 + 6)')
+  assert.equal(totals.delivery_net_usd, 6, 'delivery contributes collected-minus-paid-out, once')
+  assert.equal(totals.store_delivery_usd, 3, 'the waived fee is still REPORTED -- it just is not a cost')
+  assert.notEqual(totals.profit_usd, 70, 'the waived fee must not be subtracted a second time')
   assert.equal(totals.avg_order_usd, Math.round((93 / 3) * 100) / 100, 'avg_order = revenue / tx_count')
 }
 
@@ -83,7 +93,12 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
   assert.equal(totals.profit_usd, 26, 'profit = revenue - cost (50 - 24), not deflated/inflated by item count')
 }
 
-// ---- P6: delivery actual cost is display-only and never moves profit ----
+// ---- P6: delivery contributes to profit, once: charged minus paid out ----
+// 0068 recorded the courier cost but deliberately left it out of profit, saying
+// folding it in "is its own explicit decision later". Sep 4 2026 is that
+// decision (owner: "make sure the calculation for delivery fees are all scoped
+// in"). Note the figures were already right here -- delivery_margin_usd was
+// computing 12 - 9 = 3 and simply not reaching profit.
 {
   const level = {
     tx_count: 4, gross_sales_usd: 100, store_discount_usd: 0, membership_discount_usd: 0,
@@ -95,7 +110,11 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
   assert.equal(totals.delivery_margin_usd, 3, 'margin = customer-charged delivery (12) - actual cost (9)')
   assert.equal(totals.delivery_actual_cost_count, 3, 'how many sales actually recorded a cost')
   assert.equal(totals.delivery_sale_count, 4, 'vs how many deliveries there were -- the gap is visible')
-  assert.equal(totals.profit_usd, 77, 'profit stays revenue - cost - store-paid delivery (100-20-3): actual cost is display-only until an explicit decision folds it in')
+  assert.equal(totals.delivery_net_usd, 3, 'the contribution is the charged fee (12) less the courier cost (9)')
+  assert.equal(totals.profit_usd, 83, 'profit = revenue - cost + delivery net (100 - 20 + 3)')
+  assert.equal(totals.profit_usd - totals.delivery_net_usd, 80, 'without delivery it would be 100 - 20')
+  assert.notEqual(totals.profit_usd, 77, 'the WAIVED 3 must not be subtracted -- it was never collected')
+  assert.notEqual(totals.profit_usd, 92, 'and the charged 12 must not arrive without its 9 of cost')
 }
 {
   // No actual costs recorded at all (every historical sale): zeros, not NaN.

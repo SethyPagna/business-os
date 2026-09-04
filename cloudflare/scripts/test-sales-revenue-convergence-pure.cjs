@@ -96,6 +96,14 @@ db.exec(`
     created_at TEXT,
     branch_id INTEGER
   );
+  CREATE TABLE return_items (
+    id INTEGER PRIMARY KEY,
+    return_id INTEGER,
+    quantity REAL,
+    cost_price_usd REAL,
+    return_to_stock INTEGER,
+    stock_action TEXT
+  );
   CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT);
   -- getDeliveryContactTotals also folds courier expense rows (fees linked to a
   -- delivery contact via 0105) into the day report; the columns it reads.
@@ -144,7 +152,7 @@ sale({ id: 4, created_at: AT(13), sale_status: 'awaiting_payment', subtotal_usd:
 // S5 cancelled -> excluded entirely
 sale({ id: 5, created_at: AT(14), sale_status: 'cancelled', subtotal_usd: 999, discount_usd: 0, membership_discount_usd: 0, tax_usd: 50, total_usd: 1049 })
 // S6 completed, two customer refunds summing to 20
-sale({ id: 6, created_at: AT(15), sale_status: 'completed', subtotal_usd: 70, discount_usd: 0, membership_discount_usd: 10, tax_usd: 0, total_usd: 60 })
+sale({ id: 6, created_at: AT(15), sale_status: 'completed', subtotal_usd: 80, discount_usd: 0, membership_discount_usd: 20, tax_usd: 0, total_usd: 60 })
 
 const insItem = db.prepare('INSERT INTO sale_items (id, sale_id, quantity, cost_price_usd, total_usd, branch_id, product_id, product_name) VALUES (?,?,?,?,?,?,?,?)')
 insItem.run(1, 1, 1, 30, 90, 1, 101, 'A')   // S1 cost 30
@@ -162,19 +170,44 @@ insRet.run(4, 2, 100, 'completed', 'supplier', AT(16), 1) // supplier scope -> M
 insRet.run(5, 1, 999, 'cancelled', 'customer', AT(16), 1) // cancelled return -> ignored
 insRet.run(6, 4, 30, 'completed', 'customer', AT(16), 1)  // refund on awaiting sale -> doesn't touch revenue
 
+// What came back on the shelf. Return 1 is S1's $20 refund; 1 unit at cost 12
+// went back sellable, so 12 of S1's 30 of COGS is no longer cost of goods SOLD.
+// The other three lines are the shapes that must NOT reverse: damaged stock is
+// held with no sale value, 'none' means the customer kept the goods, and the
+// supplier-scope return never touched customer revenue in the first place.
+const insRetItem = db.prepare('INSERT INTO return_items (id, return_id, quantity, cost_price_usd, return_to_stock, stock_action) VALUES (?,?,?,?,?,?)')
+insRetItem.run(1, 1, 1, 12, 1, 'restock')
+insRetItem.run(2, 2, 1, 9, 1, 'damaged')   // return 2 is on S6 -- damaged, no reversal
+insRetItem.run(3, 3, 1, 7, 1, 'none')      // return 3 is on S6 -- kept, no reversal
+insRetItem.run(4, 4, 1, 40, 1, 'restock')  // return 4 is SUPPLIER scope -- out of scope
+
 // ---- 3. Hand-computed expectations (the canonical net-sales definition) ------
 const EXPECT = {
   recognizedNet: 85 + 50 + 35 + 60, // S1 85, S2 50, S3 35, S6 60  = 230
-  refunds: 20 + 20,                  // S1 20, S6 (15+5)=20         = 40  (supplier & cancelled ignored)
-  revenue: 230 - 40,                 //                             = 190
+  // Refunds come off revenue on the SAME net basis revenue is measured on.
+  // S1 refunded 20 of a sale charged 100 that netted 85 -> 20 * 0.85 = 17.
+  // S6 refunded 20 of a sale charged 80 that netted 60  -> 20 * 0.75 = 15.
+  // Taking the charged 40 instead would subtract those sales' discounts a
+  // SECOND time -- they were already gone when the sale was recognized.
+  refunds: 17 + 15,                  //                             = 32
+  refundsChargedBasis: 20 + 20,      // the old, doubled figure     = 40
+  revenue: 230 - 32,                 //                             = 198
   pending: 180,                      // S4 net (200-20)             = 180
-  cost: 30 + 10 + 8 + 12,            // recognized items only       = 60  (awaiting/cancelled excluded)
-  storeDelivery: 3,                  // S3 store-absorbed
+  grossCost: 30 + 10 + 8 + 12,       // recognized items only       = 60
+  returnedCost: 12,                  // S1's restocked unit -- back on the shelf
+  storeDelivery: 3,                  // S3 store-absorbed: reported, NOT a cost
   recognizedTax: 8 + 4,              // S1 + S2                     = 12
   recognizedDelivery: 6,             // S1 customer-paid (S3 is store, so 0)
+  deliveryCost: 4,                   // S1's courier cost recorded on the sale
 }
-EXPECT.profit = EXPECT.revenue - EXPECT.cost - EXPECT.storeDelivery // 190-60-3 = 127
-EXPECT.collected = EXPECT.revenue + EXPECT.recognizedTax + EXPECT.recognizedDelivery // 190+12+6 = 208
+// Goods on the shelf are not goods sold.
+EXPECT.cost = EXPECT.grossCost - EXPECT.returnedCost                     // 60-12 = 48
+// Delivery contributes once: what the customer paid minus what the courier
+// took. The fee the shop WAIVED is not subtracted -- it was never collected,
+// so it is already absent from revenue.
+EXPECT.deliveryNet = EXPECT.recognizedDelivery - EXPECT.deliveryCost     // 6-4  = 2
+EXPECT.profit = EXPECT.revenue - EXPECT.cost + EXPECT.deliveryNet        // 198-48+2 = 152
+EXPECT.collected = EXPECT.revenue + EXPECT.recognizedTax + EXPECT.recognizedDelivery // 198+12+6 = 216
 
 let passed = 0
 const check = (label, cond) => { assert.ok(cond, label); passed++; console.log(`PASS ${label}`) }
@@ -187,12 +220,22 @@ const filters = { startDate: '2026-08-01', endDate: '2026-08-31', branchId: null
 const kernel = await lib.getSalesTotals({ __db: db }, filters)
 
 check(`kernel revenue_usd == net sales minus refunds (${EXPECT.revenue})`, kernel.revenue_usd === EXPECT.revenue)
-check(`kernel refund_usd == recognized customer refunds only (${EXPECT.refunds})`, kernel.refund_usd === EXPECT.refunds)
+check('kernel refund_usd counts recognized CUSTOMER refunds only (supplier and cancelled returns ignored)',
+  kernel.refund_usd === EXPECT.refunds)
 check(`kernel pending_revenue_usd == awaiting-payment net, held OUT of revenue (${EXPECT.pending})`, kernel.pending_revenue_usd === EXPECT.pending)
-check(`kernel cost_usd counts recognized items only (${EXPECT.cost})`, kernel.cost_usd === EXPECT.cost)
-check(`kernel profit_usd = revenue - cost - store-absorbed delivery (${EXPECT.profit})`, kernel.profit_usd === EXPECT.profit)
+check(`kernel cost_usd counts recognized items only, net of restocked returns (${EXPECT.cost})`, kernel.cost_usd === EXPECT.cost)
+check(`kernel returned_cost_usd reports the reversal rather than hiding it (${EXPECT.returnedCost})`, kernel.returned_cost_usd === EXPECT.returnedCost)
+check('only a RESTOCK reverses COGS -- damaged and kept goods were really consumed (would be 12+9+7=28)',
+  kernel.returned_cost_usd === 12)
+check('a supplier-scope return never reverses customer COGS (would be 52 if it did)', kernel.returned_cost_usd !== 52)
+check(`kernel delivery_net_usd = customer-paid fees - courier cost (${EXPECT.deliveryNet})`, kernel.delivery_net_usd === EXPECT.deliveryNet)
+check(`kernel profit_usd = revenue - cost + delivery net (${EXPECT.profit})`, kernel.profit_usd === EXPECT.profit)
+check('the WAIVED delivery fee is reported but never charged to profit (the old double minus was -3)',
+  kernel.store_delivery_usd === EXPECT.storeDelivery && kernel.profit_usd !== EXPECT.profit - EXPECT.storeDelivery)
+check(`kernel refund_usd is apportioned onto the net basis (${EXPECT.refunds}), not the charged one (${EXPECT.refundsChargedBasis})`,
+  kernel.refund_usd === EXPECT.refunds && kernel.refund_usd !== EXPECT.refundsChargedBasis)
 check(`kernel collected_total_usd = revenue + tax + customer delivery (${EXPECT.collected})`, kernel.collected_total_usd === EXPECT.collected)
-check('kernel gross_sales_usd still reports the raw pre-discount subtotal line (unchanged display field)', kernel.gross_sales_usd === 100 + 50 + 40 + 200 + 70) // all non-cancelled subtotals = 460
+check('kernel gross_sales_usd still reports the raw pre-discount subtotal line (unchanged display field)', kernel.gross_sales_usd === 100 + 50 + 40 + 200 + 80) // all non-cancelled subtotals = 470
 check('awaiting-payment revenue is NOT folded into revenue (would be 190+180=370 if it were)', kernel.revenue_usd !== EXPECT.revenue + EXPECT.pending)
 
 // ---- 5. Per-period trend must SUM to the headline (shared deriveTotals) ------
@@ -203,30 +246,53 @@ check(`per-day trend revenue sums to the headline (${EXPECT.revenue})`, seriesRe
 check(`per-day trend profit sums to the headline (${EXPECT.profit})`, seriesProfit === EXPECT.profit)
 
 // ---- 6. Per-sale day drill must SUM to that day's total --------------------
-// S6 is local Aug 15; its one recognized sale nets 60 - 20 refund = 40.
+// S6 is local Aug 15; its one recognized sale nets 60, less the 20 refund put on that same basis (20 * 60/80 = 15), so 45.
 const day15 = await lib.getSalesDayReport({ __db: db }, '2026-08-15', {})
 const day15Rows = Math.round(day15.sales.reduce((s, r) => s + r.revenue_usd, 0) * 100) / 100
-check('per-sale day-drill rows sum to the day total (S6: 60 net - 20 refund = 40)', day15Rows === 40 && day15.totals.revenue_usd === 40)
+check('per-sale day-drill rows sum to the day total (S6: 60 net - 15 apportioned refund = 45)', day15Rows === 45 && day15.totals.revenue_usd === 45)
 
-// ---- 7. The REAL /stats SQL, extracted verbatim from routes/sales.ts --------
+// ---- 7. The REAL /stats SQL, EVALUATED from routes/sales.ts ----------------
+// This used to pull the SELECT out as literal text. It cannot any more, and
+// that is the improvement: the header no longer restates the revenue
+// definition, it interpolates the kernel's exported fragments. So the template
+// is extracted with its \${...} holes intact and evaluated against the
+// transpiled kernel -- the same objects the Worker passes in. A header that
+// stopped using the kernel's definition would no longer compile here.
 const salesTs = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-const m = salesTs.match(/SELECT\s+COUNT\(\*\) AS total_count,[\s\S]*?\)\s*r ON r\.sale_id = s\.id/)
+const m = salesTs.match(/const totals = await db\.prepare\(`([\s\S]*?)`\)\.get</)
 assert.ok(m, 'could not locate the /stats revenue SELECT in routes/sales.ts -- did the query shape change?')
+const headerTemplate = m[1]
+
+check('the header takes its revenue definition FROM the kernel rather than restating it',
+  /\${netSaleExpr\('s\.'\)}/.test(headerTemplate)
+  && /\${recognizedExpr\('s\.'\)}/.test(headerTemplate)
+  && /\${netRefundExpr\('s\.', 'rf\.'\)}/.test(headerTemplate)
+  && /\${awaitingExpr\('s\.'\)}/.test(headerTemplate)
+  && /\${CUSTOMER_REFUND_JOIN}s\.id/.test(headerTemplate))
+check('the header no longer spells the net-sales subtraction out a second time',
+  !/COALESCE\(s\.subtotal_usd, 0\) - COALESCE\(s\.discount_usd, 0\)/.test(headerTemplate))
+check('the header no longer carries its own copy of the customer-refund subquery',
+  !/SELECT sale_id, SUM\(total_refund_usd\) AS refund_usd/.test(headerTemplate))
+check('the header no longer sums total_usd (which folds tax in)',
+  !/THEN COALESCE\(s\.total_usd, 0\)/.test(headerTemplate))
+
 // Same local-day (UTC+7) scope the kernel applies, on the `s` alias.
 const dateClauseS = `date(s.created_at, '+7 hours') >= @startDate AND s.created_at >= date(@startDate, '-1 day') AND date(s.created_at, '+7 hours') <= @endDate AND s.created_at < date(@endDate, '+1 day')`
-const statsRow = db.prepare(`${m[0]} WHERE ${dateClauseS}`).get({ startDate: '2026-08-01', endDate: '2026-08-31' })
+// eslint-disable-next-line no-new-func -- the input is this repo's own source.
+const headerSql = new Function(
+  'recognizedExpr', 'netSaleExpr', 'netRefundExpr', 'awaitingExpr', 'CUSTOMER_REFUND_JOIN', 'where',
+  'return \`' + headerTemplate + '\`',
+)(lib.recognizedExpr, lib.netSaleExpr, lib.netRefundExpr, lib.awaitingExpr, lib.CUSTOMER_REFUND_JOIN, [dateClauseS])
+const statsRow = db.prepare(headerSql).get({ startDate: '2026-08-01', endDate: '2026-08-31' })
 const statsRevenue = Math.round((statsRow.revenue_usd || 0) * 100) / 100
 const statsPending = Math.round((statsRow.pending_revenue_usd || 0) * 100) / 100
-
-check('the shipped /stats revenue SELECT was found and is on the net-sales basis (subtotal - discounts)',
-  /COALESCE\(s\.subtotal_usd, 0\) - COALESCE\(s\.discount_usd, 0\) - COALESCE\(s\.membership_discount_usd, 0\)/.test(m[0]))
-check('the shipped /stats revenue SELECT no longer sums total_usd (which folds tax in)',
-  !/THEN COALESCE\(s\.total_usd, 0\) - COALESCE\(r\.refund_usd, 0\)/.test(m[0]))
 
 // ---- 8. THE CONVERGENCE: header revenue == kernel revenue, to the cent ------
 check(`CONVERGENCE: /stats revenue (${statsRevenue}) == kernel revenue (${kernel.revenue_usd})`, statsRevenue === kernel.revenue_usd)
 check(`CONVERGENCE: /stats pending (${statsPending}) == kernel pending (${kernel.pending_revenue_usd})`, statsPending === kernel.pending_revenue_usd)
-check('both surfaces equal the hand-computed net-sales revenue (190)', statsRevenue === EXPECT.revenue && kernel.revenue_usd === EXPECT.revenue)
+check(`both surfaces equal the hand-computed net-sales revenue (${EXPECT.revenue})`, statsRevenue === EXPECT.revenue && kernel.revenue_usd === EXPECT.revenue)
+check(`CONVERGENCE: the header's refund is apportioned too -- the charged basis would have given ${230 - EXPECT.refundsChargedBasis}`,
+  statsRevenue !== 230 - EXPECT.refundsChargedBasis)
 
 console.log(`\nALL ${passed} CHECKS PASSED`)
 })().catch((e) => { console.error(e); process.exit(1) })
