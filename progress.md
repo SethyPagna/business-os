@@ -2504,12 +2504,49 @@ two columns where it reads better, no wall of single-value lines.
 **[ ] S4R4-4 · Stock change (add/minus) shows branch on small screens and in the
 detail view**, and the same compaction — merge rows, two columns.
 
-**[ ] S4R4-5 · Shift cash register — HIGHEST PRIORITY, owner asked for it "as
-quick as possible for deploy".** First POS use of each day prompts the employee
-to register the shift's cash/change float, and **keeps prompting until it is
-registered**; once registered that day, never again. End of shift is **manual**,
-and can only be ended **once**. Ties into S4-30/S4R3-8 (who did what, when) and
-the `S-YYYYMMDD-24hour` session-id convention already on the board.
+**[x] S4R4-5 · Shift cash register — DONE, both halves, on `s4/shift-register`
+(worktree `bos-dlv`). Not yet merged to the rc; not yet deployed.** First POS use
+of each day prompts the employee to register the shift's cash/change float, and
+**keeps prompting until it is registered**; once registered that day, never
+again. End of shift is **manual**, and can only be ended **once**.
+
+Three of the four promises are enforced by the SCHEMA, not by route code, because
+a check-then-write in a route is something two POS tabs pass simultaneously on the
+same morning:
+
+| Promise | Where it is enforced |
+|---|---|
+| "only need registered once" | `UNIQUE(user_id, COALESCE(branch_id, -1), business_date)` |
+| "end only once" | the close is `UPDATE ... WHERE id = ? AND closed_at IS NULL` |
+| "prompt until registered" | the ABSENCE of today's row is the prompt condition |
+| end of shift is manual | no trigger or default ever sets `closed_at` |
+
+**The `COALESCE(branch_id, -1)` is the whole reason the guard test exists.** In
+SQLite every NULL is DISTINCT from every other NULL for uniqueness purposes, so a
+plain `UNIQUE(user_id, branch_id, business_date)` constrains nothing at all when
+`branch_id` is NULL — which is exactly a single-branch till, the most common shop
+in this system. The index would have looked correct and "register once a day"
+would have been silently false for almost everyone.
+`test-shift-sessions-pure.cjs` caught it by registering the same NULL-branch till
+twice and requiring the second to be refused.
+
+Files — backend `9d1a8f82`: `cloudflare/migrations/0116_shift_sessions.sql`,
+`src/routes/shifts.ts`, `src/index.ts` (2 mount lines),
+`scripts/test-shift-sessions-pure.cjs` (22 checks).
+Frontend: `src/api/shiftTransport.ts`, `src/components/pos/ShiftGate.tsx`,
+`src/components/pos/POS.tsx`, `tests/shiftGate.test.ts` (19 checks),
+`package.json` (one invocation at the TAIL of `test:utils` — union it on merge),
+`src/lang/{en,km}.json` (+16 `shift_*` keys each, appended — union both packs).
+
+Two frontend decisions worth not re-litigating: the prompt is **non-dismissible**
+(a closable prompt is one the till never registers), and the transport passes
+`null` as route()'s local fallback — **no offline mirror**, because a queued
+offline registration would let two devices each open the same morning and
+reconcile into exactly the duplicate the UNIQUE index exists to prevent.
+
+Uses the `S-YYYYMMDD-HHMM` session-id convention already on the board, built from
+the same +7 business offset as every report. Ties into S4-30/S4R3-8 (who did what,
+when). — `business-os-v1-c3`
 
 **[ ] S4R4-6 · Stats and reports count every non-cancelled status.** Total sales
 $ **including unpaid**; transaction count; and stats for paid, unpaid, profit and
