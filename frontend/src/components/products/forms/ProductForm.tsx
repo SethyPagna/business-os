@@ -38,23 +38,23 @@ type ProductFormTab = 'basic' | 'pricing' | 'stock' | 'expiry'
 type ScannerField = 'barcode'
 type Translate = (key: string) => string
 
-interface CategoryOption {
+export interface CategoryOption {
   id: EntityId
   name: string
 }
 
-interface UnitOption {
+export interface UnitOption {
   id: EntityId
   name: string
 }
 
-interface BranchOption {
+export interface BranchOption {
   id: EntityId
   name: string
   is_default?: boolean | number | null
 }
 
-interface ProductUser {
+export interface ProductUser {
   id?: EntityId
   name?: string
   username?: string
@@ -63,7 +63,7 @@ interface ProductUser {
   role_permissions?: unknown
 }
 
-interface GroupCandidate {
+export interface GroupCandidate {
   id?: EntityId | null
   name?: string | null
 }
@@ -186,6 +186,13 @@ interface ProductFormProps {
   // minimize control that parks the in-progress add-product flow as a
   // top-bar chip via the shared minimizedWork registry. Omitted for edit.
   onMinimize?: (label: string) => void
+  // S4-12: values a CREATE starts pre-filled with, layered over this form's
+  // own blank defaults (so the defaults below stay the single source of
+  // truth for every field the caller does not seed). Used by the
+  // create-products session header, which captures brand/supplier/branch
+  // once and hands them to every item entered afterwards. Ignored in edit
+  // mode -- an existing product's own row always wins.
+  createDefaults?: Partial<ProductFormState>
   t: Translate
   usdSymbol: string
   khrSymbol: string
@@ -414,6 +421,7 @@ export default function ProductForm({
   onDelete,
   onClose,
   onMinimize,
+  createDefaults,
   t,
   usdSymbol,
   khrSymbol,
@@ -465,8 +473,12 @@ export default function ProductForm({
       image_path: '',
       image_gallery: [],
       branch_id: defaultBranchId,
+      // S4-12: seeded LAST so a create-products session's brand/supplier/
+      // branch override the blanks above, while every other field keeps the
+      // one set of defaults defined here.
+      ...(createDefaults || {}),
     }
-  }, [product, units, defaultBranchId])
+  }, [product, units, defaultBranchId, createDefaults])
 
   const [form, setForm] = useState<ProductFormState>(initialForm)
   // Always retain/display a pre-existing admin gallery. The ordinary-user
