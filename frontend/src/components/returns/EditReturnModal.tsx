@@ -224,12 +224,13 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   // Save button here was disabled during `submitting`; the other three
   // close paths could still unmount the modal mid-request).
   // S4-21: an EDIT form, so "dirty" means "differs from the return as it
-  // was opened". The comparison uses `finalReason` rather than the raw
-  // reason/customReason pair on purpose: the normalising effect above
-  // rewrites an unknown stored reason into Other + custom text on the first
-  // pass, which changes those two fields without changing the value that
-  // would be saved. Comparing the raw pair would report every such return
-  // dirty the instant it opened.
+  // was opened". The comparison uses `finalReason` -- the value that would
+  // actually be saved -- rather than the raw reason/customReason pair,
+  // because a stored reason outside RETURN_REASONS is PRESENTED as Other
+  // plus custom text (see the state init and the back-fill effect above).
+  // The same saved value therefore has two on-screen shapes, and comparing
+  // the raw pair would call a return dirty for re-reaching the reason it
+  // already had.
   const editDirty = useFormDirty(
     { finalReason, returnType, notes, items: items.map((item) => ({ id: item.id, returnQty: item.returnQty, stock_action: item.stock_action })) },
     ret.id ?? null,
