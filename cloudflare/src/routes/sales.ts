@@ -56,7 +56,6 @@ import {
   type LineAllocation,
   type TaxSettings,
 } from '../lib/saleAmendments'
-import { isAdminControlUser } from '../lib/permissions'
 import { recordSaleAddItemsUndoSnapshot } from '../lib/undoAppliers'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
