@@ -336,9 +336,15 @@ await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled
   assert.doesNotMatch(updatePriceBody, /manual_discount_type: discountUsd > 0 \? 'fixed' : null/)
 
   const receipt = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
-  // The receipt's per-line "original" price is base + product-level cut, so
-  // the full discount shows (previously it used the charged price_usd).
-  assert.match(receipt, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ productDiscUnitUsd/)
+  // The receipt's per-line list price is base + product-level cut, so the full
+  // discount shows (it once printed the charged price_usd). That derivation now
+  // lives in utils/receiptLineMath, where a test can EXECUTE it instead of only
+  // pattern-matching it, so this asserts the rule in its new home AND that the
+  // component still consumes it -- together, what this lock was always after.
+  assert.match(receipt, /import \{ receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
+  assert.match(receipt, /const figures = receiptLineFigures\(item, showItemDiscount, exchangeRate\)/)
+  const lineMath = fs.readFileSync(new URL('../src/utils/receiptLineMath.ts', import.meta.url), 'utf8')
+  assert.match(lineMath, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ num\(item\.product_discount_usd\)/)
 })
 
 // Formerly "POS product cards keep VIP pricing inside the price options".

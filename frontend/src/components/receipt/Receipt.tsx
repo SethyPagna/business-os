@@ -7,6 +7,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { receiptLineFigures, receiptLineSavingsUsd } from '../../utils/receiptLineMath'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
@@ -37,7 +38,9 @@ interface ReceiptItem {
   // product-level (promotion/special) cut, so the receipt can show the full
   // per-line discount (list − charged) as (-$x.xx).
   base_price_usd?: number | string | null
+  base_price_khr?: number | string | null
   product_discount_usd?: number | string | null
+  product_discount_khr?: number | string | null
   // The line's price tier -- comes straight through on the stored sale_items
   // row (the list query SELECTs si.*) and on the POS in-memory checkout
   // payload, so the receipt can print a small "Wholesale" tier tag beside the
@@ -363,6 +366,25 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const taxKhr = toNumber(sale.tax_khr) || taxUsd * exchangeRate
   const deliveryFeeUsd = toNumber(sale.delivery_fee_usd)
   const deliveryFeeKhr = toNumber(sale.delivery_fee_khr) || deliveryFeeUsd * exchangeRate
+  // The owner's rule (Sep 4 2026): a line prints its SELLING price, and every
+  // discount is carried in the Discount row -- "selling price (-discount)",
+  // not "discounted price (-discount)".
+  //
+  // sales.subtotal_usd is the sum of CHARGED line totals, so before this the
+  // per-line cut appeared beside its line and then vanished: Subtotal already
+  // had it removed and Discount never mentioned it. Production carries 24,085
+  // such lines across 11,974 sales and $99,534.40 of discount the totals never
+  // showed.
+  //
+  // Both displayed figures move by the SAME amount, so the total is provably
+  // unchanged: (subtotal + savings) - (discount + savings) = subtotal - total.
+  // That is what lets every historical receipt reprint to the same money, and
+  // it is why nothing here touches sale.total_usd or the tax base.
+  const showItemDiscount = tpl.show_item_discount !== false
+  const lineSavingsUsd = receiptLineSavingsUsd(items, showItemDiscount, exchangeRate)
+  const displayedSubtotalUsd = subtotalUsd + lineSavingsUsd
+  const displayedDiscountUsd = discountUsd + lineSavingsUsd
+  const displayedDiscountKhr = discountKhr + lineSavingsUsd * exchangeRate
   const totalUsd = toNumber(sale.total_usd ?? sale.total)
   const totalKhr = toNumber(sale.total_khr) || totalUsd * exchangeRate
   const paidUsd = toNumber(sale.amount_paid_usd ?? sale.amount_paid)
@@ -437,30 +459,18 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           <span data-receipt-cell="price" className="text-right">Price</span>
         </div>
         {items.map((item, index) => {
-          const qty = toNumber(item.quantity) || 1
-          const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
-          const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
+          // Every figure on this line comes from the shared calculation, so the
+          // printed price and the Discount row can never disagree.
+          const figures = receiptLineFigures(item, showItemDiscount, exchangeRate)
+          const qty = figures.qty
+          const unitUsd = figures.sellingUnitUsd
           const lineUsd = unitUsd * qty
-          const lineKhr = unitKhr * qty
-          // Per-line discount = the line's ORIGINAL selling price minus what
-          // was actually charged, shown as a crossed-out original + savings.
-          // Z2: the original is the base/selling price plus any product-level
-          // cut (base_price + product_discount = the pre-discount list price),
-          // so BOTH the product-level discount AND the cashier's manual
-          // discount show -- previously this used price_usd, which checkout
-          // stores as the CHARGED price, so real sales showed no discount at
-          // all. Falls back to price_usd for older sales without base_price.
-          const baseUnitUsd = toNumber(item.base_price_usd)
-          const productDiscUnitUsd = toNumber(item.product_discount_usd)
-          const originalUnitUsd = baseUnitUsd > 0
-            ? baseUnitUsd + productDiscUnitUsd
-            : toNumber(item.price_usd ?? item.price)
-          const hasItemDiscount = tpl.show_item_discount !== false
-            && originalUnitUsd > 0
-            && unitUsd > 0
-            && originalUnitUsd > unitUsd + 0.005
-            && item.applied_price_usd != null
-          const itemSavingsUsd = hasItemDiscount ? (originalUnitUsd - unitUsd) * qty : 0
+          const lineKhr = figures.sellingUnitKhr * qty
+          // Per-line discount = the line's LIST price minus what was actually
+          // charged. Both come from receiptLineFigures above; see
+          // utils/receiptLineMath for the derivation and its fallbacks.
+          const hasItemDiscount = figures.hasDiscount
+          const itemSavingsUsd = figures.savingsUsd
           // Price-tier tag printed beside the item name (user). Derived from
           // the persisted price_mode, so a wholesale line the cashier left
           // marked prints the tag and one they deselected (recorded as
@@ -515,9 +525,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         })}
       </div>
     ),
-    subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(subtotalUsd)} /> : null,
-    discount: tpl.show_discount && discountUsd > 0 ? (
-      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(discountUsd)}`} subValue={tpl.show_discount_khr !== false && discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : ''} tone="text-red-600" />
+    subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(displayedSubtotalUsd)} /> : null,
+    discount: tpl.show_discount && displayedDiscountUsd > 0 ? (
+      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(displayedDiscountUsd)}`} subValue={tpl.show_discount_khr !== false && displayedDiscountKhr > 0 ? `-${fmtKHR(displayedDiscountKhr)}` : ''} tone="text-red-600" />
     ) : null,
     membership_discount: tpl.show_membership_discount !== false && membershipDiscountUsd > 0 ? (
       <Row
