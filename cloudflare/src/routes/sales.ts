@@ -13,6 +13,11 @@ function canReadSales(user: SessionUser): boolean {
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+// The POS payment-method field is free text (a datalist, not a select), so a
+// sale can introduce a method Settings has never heard of. See
+// lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
+// every sale writer rather than done in the POS component.
+import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '../lib/paymentMethodRegistry'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -82,6 +87,49 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 
 const SALES_READ_CACHE_TTL_SECONDS = 20
+
+/**
+ * Fold the methods a sale actually used back into `pos_payment_methods`.
+ *
+ * The ONE I/O wrapper around lib/paymentMethodRegistry -- every sale writer in
+ * this file calls this, so a method typed at the till, a method chosen when a
+ * credit sale is finally settled, and a method that arrives on an imported row
+ * all reach the configured list by the same route.
+ *
+ * Three properties this deliberately has:
+ *
+ * - It NEVER fails the caller. A sale that is already committed must not be
+ *   reported as failed because a settings row would not write, so every error
+ *   is swallowed and logged. Callers hand this to `waitUntil`, off the
+ *   response path.
+ * - It reads and re-writes the whole array rather than appending, because the
+ *   setting IS a JSON array; `mergePaymentMethods` keeps the existing order
+ *   and the operator's own capitalisation, so a concurrent Settings edit can
+ *   only ever lose the append, never reorder or rename what the operator set.
+ * - It writes NOTHING when nothing is new. This runs on every checkout; the
+ *   common case (a known method) must not produce a settings write, or
+ *   `settings.updated_at` would change on every sale and defeat the
+ *   /settings/meta polling that the whole app's refresh cadence is built on.
+ */
+async function registerUsedPaymentMethods(env: Env, sale: { payment_method?: unknown; payment_details?: unknown }): Promise<string[]> {
+  const used = saleMethodsUsed(sale)
+  if (!used.length) return []
+  try {
+    const db = getDb(env)
+    const row = await db.prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>()
+    const configured = parseConfiguredMethods(row?.value)
+    const merged = mergePaymentMethods(configured, used)
+    if (!merged.changed) return []
+    await db.prepare(
+      `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    ).run({ value: JSON.stringify(merged.methods) })
+    return merged.added
+  } catch (error) {
+    console.error('[payment-methods] could not register methods used on a sale', error)
+    return []
+  }
+}
 
 async function getSalesReadCacheVersion(env: Env): Promise<string> {
   // The list/search payload also exposes current customer membership data and
@@ -447,9 +495,24 @@ app.post('/', async (c) => {
   let membershipDiscountUsd = round2(Math.max(0, Number(body.membership_discount_usd) || 0))
   let membershipDiscountKhr = round2(Math.max(0, Number(body.membership_discount_khr) || 0))
 
+  // The owner's membership-points master switch (user, Sep 4 2026), read as a
+  // SETTING and never from the request -- a stale till that still shows the
+  // points panel must not be able to accrue or spend against a programme the
+  // shop has switched off. Absent = on, matching buildPortalConfig's default.
+  const loyaltyEnabledRow = await db.prepare(
+    `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
+  ).get<{ value: string }>()
+  const loyaltyPointsEnabled = !['0', 'false', 'no', 'off'].includes(String(loyaltyEnabledRow?.value ?? '').trim().toLowerCase())
+
   if (membershipPointsRedeemed > 0) {
     if (!customer) {
       return c.json({ error: 'A membership customer is required to redeem points' }, 400)
+    }
+    // Refused, not silently ignored. Dropping the redemption would charge the
+    // customer the FULL total while the cashier's screen still showed the
+    // discount -- a money difference at the counter is worse than an error.
+    if (!loyaltyPointsEnabled) {
+      return c.json({ error: 'Membership points are turned off in Settings, so points cannot be redeemed.' }, 400)
     }
     const settingsRows = await db.prepare(
       `SELECT key, value FROM settings WHERE key IN ('customer_portal_points_basis', 'customer_portal_points_per_usd')`,
@@ -473,7 +536,11 @@ app.post('/', async (c) => {
        FROM returns WHERE customer_id = ?`,
     ).get<{ refund_usd: number; refund_khr: number }>([customer.id])
     const rewardedAgg = await db.prepare(
-      `SELECT COALESCE(SUM(reward_points), 0) AS rewarded FROM customer_share_submissions WHERE customer_id = ? AND status = 'approved'`,
+      // `reward_points_voided_at IS NULL` (migration 0116) -- the same clause
+      // contacts.ts's bulk read applies. This re-validation and the balance
+      // POS displays MUST see the same ledger; the Part-77 note below is the
+      // record of what happens when one of them omits a term.
+      `SELECT COALESCE(SUM(reward_points), 0) AS rewarded FROM customer_share_submissions WHERE customer_id = ? AND status = 'approved' AND reward_points_voided_at IS NULL`,
     ).get<{ rewarded: number }>([customer.id])
     // Manual awards (Part-77, MEDIUM): summarizePoints -- the balance POS
     // DISPLAYS -- adds loyalty_point_adjustments, but this re-validation
@@ -482,7 +549,7 @@ app.post('/', async (c) => {
     // checkout. Same term, same sign (adjustments are positive awards by
     // CHECK constraint).
     const adjustedAgg = await db.prepare(
-      `SELECT COALESCE(SUM(points), 0) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = ?`,
+      `SELECT COALESCE(SUM(points), 0) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = ? AND voided_at IS NULL`,
     ).get<{ adjusted: number }>([customer.id])
 
     const earned = pointsBasis === 'khr' ? (salesAgg?.earned_khr || 0) * pointsPerKhr : (salesAgg?.earned_usd || 0) * pointsPerUsd
@@ -660,7 +727,15 @@ app.post('/', async (c) => {
       // Only an EXPLICIT false opts a sale out of earning points -- absent or
       // any other value keeps the long-standing auto-accrual behavior, so an
       // older cached POS build cannot silently stop customers earning points.
-      loyalty_accrual: body.loyalty_accrual === false ? 0 : 1,
+      //
+      // The shop-level switch (user, Sep 4 2026) overrides that default in the
+      // other direction: with membership points off, the sale is STAMPED
+      // non-accruing at write time rather than merely hidden at read time. It
+      // has to be stored per-sale, exactly the way `loyalty_accrual` already
+      // works, or switching the programme back on later would retroactively
+      // pay points for every sale made while it was off -- the same "history
+      // must never accrue" rule that governs imports.
+      loyalty_accrual: !loyaltyPointsEnabled || body.loyalty_accrual === false ? 0 : 1,
       subtotal_usd: round2(subtotalUsd),
       subtotal_khr: Math.round(subtotalUsd * exchangeRate),
       discount_usd: discountUsd,
@@ -942,6 +1017,14 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
   ]))
+  // A method typed at the till joins the configured list (user, Sep 4 2026).
+  // Off the response path: the sale is already recorded and must not be held
+  // up, or failed, by a settings write. `settings` is bumped only when the
+  // merge actually added something, so a normal checkout costs no invalidation.
+  c.executionCtx.waitUntil(
+    registerUsedPaymentMethods(c.env, { payment_method: paymentMethod, payment_details: effectivePaymentDetails })
+      .then((added) => (added.length ? bumpVersion(c.env, 'settings') : undefined)),
+  )
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'sales',
     // Receipt-summary shape (lib/telegram.ts formatSaleTelegramLines): status,
@@ -1269,6 +1352,12 @@ app.patch('/:id/status', async (c) => {
     || body.payment_details !== undefined
     || body.amount_paid_usd !== undefined
     || body.amount_paid_khr !== undefined
+  // Lifted out of the block below so the settled methods can be registered
+  // after the write succeeds. A credit sale is settled HERE, not at the till,
+  // so this is the second of the two places a new method can enter the system
+  // -- and the one most likely to see a method the shop only takes for
+  // settlements (a bank transfer against an invoice).
+  let settledPaymentSummary: { payment_method: string; payment_details: string } | null = null
   if (paymentFieldsSent) {
     const isDeferredPaymentSettle = oldStatus === 'awaiting_payment'
       && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
@@ -1319,6 +1408,7 @@ app.patch('/:id/status', async (c) => {
       `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
     ).get<{ value: string }>()
     updateParams.change_khr = Math.round(overpayExactUsd * resolveChangeExchangeRate(changeRateRow?.value, rate))
+    settledPaymentSummary = { payment_method: methodSummary, payment_details: JSON.stringify(effectiveDetails) }
   }
   if (saleStatus === 'cancelled') {
     updates.push(
@@ -1460,6 +1550,14 @@ app.patch('/:id/status', async (c) => {
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
   ]))
+  // The settle path's half of the payment-method registry (see POST / above).
+  if (settledPaymentSummary) {
+    const settled = settledPaymentSummary
+    c.executionCtx.waitUntil(
+      registerUsedPaymentMethods(c.env, settled)
+        .then((added) => (added.length ? bumpVersion(c.env, 'settings') : undefined)),
+    )
+  }
 
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
   const payload = updated || { id: Number(id), sale_status: saleStatus }
