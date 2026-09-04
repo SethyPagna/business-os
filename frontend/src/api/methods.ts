@@ -1407,6 +1407,17 @@ export const addSaleItems = async (id, items, notes) => {
   return addSaleItemsRequest(id, items, notes)
 }
 
+// ─── Amend a recorded sale, and read its history (S4-30) ──────────────────────
+export const amendSale = async (id, request) => {
+  const { amendSale: amendSaleRequest } = await loadSalesTransport()
+  return amendSaleRequest(id, request)
+}
+
+export const getSaleAmendments = async (id) => {
+  const { getSaleAmendments: getSaleAmendmentsRequest } = await loadSalesTransport()
+  return getSaleAmendmentsRequest(id)
+}
+
 // ─── Sales export ─────────────────────────────────────────────────────────────
 export const attachSaleCustomer = async (id, payload) => {
   const { attachSaleCustomer: attachSaleCustomerRequest } = await loadSalesTransport()
