@@ -216,6 +216,14 @@ before these numbers existed, so they live here:
 | `LENGTH(sales_reset_ids)` the log will capture | 269 bytes |
 | `loyalty_point_adjustments` / `customer_share_submissions` | 0 / 0 |
 
+**⚠️ THESE NUMBERS ARE A POINT-IN-TIME READING AND HAVE ALREADY DRIFTED.** The shop rang up 6 more sales
+during the deploy preparation: 15,053 → **15,059** total and 45 → **48** accruing, so the affected customer
+count is **31 or more** and 31 is no longer the true figure. It is left above as the number the owner actually
+approved with, which is the honest record of the decision — but any post-deploy report must use the count
+captured at migration time, not this one. The lesson generalises: **a baseline for a live system must be
+captured, never frozen.** Session `ee`'s verifier hardcoded these pre-counts and went red on the live traffic;
+the dangerous version is the one that would have passed, zeroing 48 sales while asserting 45.
+
 The other 15,008 sales are already explicitly `loyalty_accrual = 0` — the old-system import wrote them that
 way deliberately (`routes/portal.ts:1011` names migration 0061 and the historical-import / POS-opt-out cases;
 `:1014` is the gate). So the migration is far narrower than "zero all the membership points" sounds, **but it
