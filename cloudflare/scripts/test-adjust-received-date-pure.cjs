@@ -314,7 +314,27 @@ async function main() {
     assert.ok(!/INSERT\s+INTO\s+products\b/i.test(transferSrc), 'a transfer never creates a product row (so it cannot mint a new barcode either)')
   })
 
-  await check('fast stock-in changed cost creates a same-name variant and keeps receipt/session metadata', async () => {
+  // REWRITTEN 2026-09-04 (was: "fast stock-in changed cost creates a same-name
+  // variant..."). That assertion encoded the PRE-Sep-4 identity rule, under
+  // which cost was a DETAIL and a changed cost forked a child row. The owner's
+  // Sep-4 ruling reversed it -- "only diffeerent barcode creates new child
+  // row... rest merge" -- and lib/productDetailRule.ts's productDetailSignature
+  // has been barcode-only ever since. This assertion was never updated with it.
+  //
+  // Leaving it green would have meant locking in a live defect: in production
+  // on Sep 3 this exact path forked "Olay Serum Body Lotion 547ml" onto a
+  // second row sharing barcode 075609215322, stranding 28 received units where
+  // the POS could not see them. Note too that the very next check below --
+  // "same barcode + same batch shares the option" -- already asserted the
+  // OPPOSITE outcome for the same barcode with a changed cost. The two only
+  // disagreed because identity accidentally depended on whether a lot already
+  // existed for that date; both now resolve to the same row.
+  //
+  // The receipt/session metadata coverage is kept intact, just pointed at the
+  // row the stock actually lands on, and the sibling path this used to cover
+  // is preserved in the check after it by changing the BARCODE instead, which
+  // is what forks a row now.
+  await check('fast stock-in at a changed cost stays on the SAME row and keeps receipt/session metadata', async () => {
     seed()
     rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
     const { status, json } = await req('POST', '/adjust', {
@@ -325,11 +345,39 @@ async function main() {
       pricing: { selling_price_usd: 4, cost_usd: 2.5, cost_khr: 0, barcode: 'B123' },
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
-    assert.strictEqual(json.createdSibling, true)
+    assert.strictEqual(json.createdSibling, false, 'a cost change is not an identity change')
+    assert.strictEqual(json.productId, 1)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM products').get().n, 1, 'no twin row on the same barcode')
+    const row = rawDb.prepare('SELECT name, cost_price_usd, stock_quantity FROM products WHERE id = ?').get([json.productId])
+    assert.strictEqual(row.name, 'Widget')
+    assert.strictEqual(row.cost_price_usd, 1, 'the receipt cost belongs to the lot, not the catalog row')
+    assert.strictEqual(row.stock_quantity, 7)
+    const batch = rawDb.prepare('SELECT expiry_date, unit_cost_usd, supplier_name FROM product_batches WHERE variant_product_id = ?').get([json.productId])
+    assert.strictEqual(batch.expiry_date, '2027-08-20')
+    assert.strictEqual(batch.unit_cost_usd, 2.5, 'the receipt cost is recorded on the lot')
+    assert.strictEqual(batch.supplier_name, 'Variant Supplier')
+    const movement = rawDb.prepare('SELECT reference_id, product_id FROM inventory_movements ORDER BY id DESC LIMIT 1').get()
+    assert.strictEqual(movement.reference_id, 98765)
+    assert.strictEqual(movement.product_id, json.productId)
+  })
+
+  await check('fast stock-in at a changed BARCODE does create a same-name variant and carries the metadata onto it', async () => {
+    seed()
+    rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
+    const { status, json } = await req('POST', '/adjust', {
+      productId: 1, type: 'add', quantity: 7, reason: 'Stock-in session', branchId: 1,
+      unlockPricing: true, receivedDate: '2026-08-20', expiryDate: '2027-08-20',
+      unitCostUsd: 2.5, paymentStatus: 'paid', sessionId: 98765,
+      supplierName: 'Variant Supplier',
+      pricing: { selling_price_usd: 4, cost_usd: 2.5, cost_khr: 0, barcode: 'B999' },
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.createdSibling, true, 'a different barcode IS a different article')
     assert.notStrictEqual(json.productId, 1)
-    const sibling = rawDb.prepare('SELECT name, cost_price_usd, stock_quantity FROM products WHERE id = ?').get([json.productId])
-    assert.strictEqual(sibling.name, 'Widget')
-    assert.strictEqual(sibling.cost_price_usd, 2.5)
+    const sibling = rawDb.prepare('SELECT name, barcode, cost_price_usd, stock_quantity FROM products WHERE id = ?').get([json.productId])
+    assert.strictEqual(sibling.name, 'Widget', 'the variant stays in the same name group')
+    assert.strictEqual(sibling.barcode, 'B999')
+    assert.strictEqual(sibling.cost_price_usd, 2.5, 'a NEW row is created carrying the entered cost')
     assert.strictEqual(sibling.stock_quantity, 7)
     const batch = rawDb.prepare('SELECT expiry_date, unit_cost_usd, supplier_name FROM product_batches WHERE variant_product_id = ?').get([json.productId])
     assert.strictEqual(batch.expiry_date, '2027-08-20')
