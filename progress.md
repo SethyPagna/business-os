@@ -2656,6 +2656,36 @@ index, never `npm install` in a worktree whose `node_modules` is a junction, rem
 SELECT-only, both packs every time, a red test is a suspect not a verdict. None of them deploys and
 none of them writes to production.
 
+### Seven subagent lanes dispatched, Sep 4 (business-os-v1-c3 coordinating)
+
+The user asked for the remaining backlog to be spread across seven subagents that cannot collide.
+The `bos-*` definitions load at session start and this session predates them, so these run on the
+built-in types with model overrides. **File sets are disjoint by construction**; each lane has its
+own worktree off `e3678a39` and its own branch, and none of them may touch `progress.md` or the
+session log — they report back and this session boards them, so the shared index sees one writer.
+
+| Item | Branch / worktree | Effort | Boundary that keeps it disjoint |
+|---|---|---|---|
+| **S4-24b** add lines to an existing sale | `s4/sale-add-items`, `bos-rc-workers/s4-ai` | opus, high | Off `s4/receipt-shape`, not `e3678a39` — it builds on the receipt-shaped modal. Shares `routes/sales.ts` with `02 [055499]`, so it is forbidden the `PATCH /:id/status` handler; new endpoint only. |
+| **S4-12** create-products header step | `s4/create-products-header`, `s4-cp` | opus, medium | Overlaps S4-13, which is `ba`'s: told explicitly **not** to rename Add Product / Add stock. Builds the flow; `ba` changes the words. |
+| **S4-23** `LC-` membership numbers | `s4/membership-lc`, `s4-mb` | opus, medium | `routes/contacts.ts` + `importEngine.ts`, which nobody else holds. |
+| **S4-26** reports hub + compact excel tab | `s4/reports`, `s4-rp` | opus, medium | `components/sales/reports`, orphaned when its owner ended. Told to start from `s4/09` (`7735dc95`) / `rc/sec-10-reports` (`e2497aa0`) rather than rebuild what the user already said they liked. |
+| **S4-19** find and rename RECON | `s4/adj-prefix`, `s4-adj` | sonnet, high | Discovery first — see below. |
+| **S4-1** does Undo actually reverse the 09:48 batch | none (read-only) | opus, high | Reads `e3678a39` via `git show`; writes nothing. |
+| **S4-17b** cost-forked twin survey | `s4/cost-merge-survey`, `s4-cm` | sonnet, high | SELECT-only survey; may commit a migration file but not run it. |
+
+**S4-19 is a search task before it is a rename task.** Grepping the repo for `RECON` returns only
+the mode constant `RECONCILE` (`stockActionResolver.ts`, `importEngine.ts`, `datedStockCountApply.ts`
+and one pure test). **There is no literal `RECON` label and no `ADJ` prefix in the source.** So the
+string the user is looking at is assembled at runtime, or it lives in production data written by an
+old import. The lane is told to prove which, and that "I could not find it, send me a screenshot"
+is an acceptable result — renaming a plausible-looking string that turns out to be the wrong one is
+the worse outcome.
+
+**Neither read-only lane is authorised to fix what it finds.** S4-1 and S4-17b both end at a
+production write the user has not approved, so both produce a verdict, the real row counts, and the
+exact unrun command. No agent message counts as that approval.
+
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
