@@ -233,17 +233,30 @@ fix, and abandoning the branch abandons the fix.
 rewritten underneath it by the S4 lanes. **It needs its own lane with the owner's report surfaces in front of
 it**, not a merge squeezed in after a deploy.
 
-### 🔵 THREE LIVE DATA GAPS — shipped code whose data half never landed (`21`, measured on production)
+### 🔵 FOUR LIVE DATA GAPS — shipped code whose data half never landed (`21`, measured on production)
 
 - **S4-2 skip-stock is fully live and has NEVER been used.** `SELECT COUNT(*) FROM sales WHERE stock_skipped = 1`
   → **0**. The whole path is in `c7ef7264` (`routes/sales.ts` `skip_stock` + the `isAdminControlUser` gate at
   `:1150`, `planSaleStockTransition`, `saleAmendments`, `saleLineAddition`, `SaleStatusConfirmModal`, `Sales.tsx`
   single **and** bulk, both lang packs) and migration `0114` applied 05:03:43. **The feature the owner asked for on
   Sep 3 shipped; the 82 legacy `awaiting_payment` rows it was built for are still sitting there unmigrated.**
-- **`customer_receivables` has NO app-side settle path.** On `c7ef7264` the only writers are `contacts.ts`, and only
-  for rename/merge repointing — **nothing marks a receivable Paid**. Live AR: 13,204 Paid / **98 Unpaid
-  ($11,470.10)** / 2 Outstanding ($102). So even after the app completes those sales, **the AR ledger stays unpaid
-  unless something writes it.** Unclaimed.
+- **`customer_receivables` has NO app-side settle path.** On `c7ef7264` the only writers are `contacts.ts`, and
+  only for rename/merge repointing — **nothing marks a receivable Paid**. Live AR: 13,204 Paid + **100 non-Paid**
+  (98 Unpaid, 2 Outstanding). So even after the app completes those sales, **the AR ledger stays unpaid unless
+  something writes it.** Unclaimed.
+- **18 receivables worth $1,818 are unpaid against sales that are ALREADY `completed` (`21`).** Of the 100 non-Paid
+  rows, `21`'s legacy flip covers 82 (**80 Unpaid + 2 Outstanding — the 2 Outstanding are INSIDE the 82, not
+  outside**, correcting the earlier reading here). The **remaining 18 join to sales whose `sale_status` is already
+  `'completed'`** — so the flip neither creates nor leaves this undone; it is a **pre-existing split between the two
+  ledgers**. After the flip settles $9,798.60, **AR still shows $1,818 outstanding against finished sales.** Same
+  shape as the other three: one half landed, the other never did.
+  **If you re-derive this, the join is `legacy_receipt_number = invoice_no || '@' || date(invoice_date)`.** Joining
+  on `invoice_no` alone returns NULL for **every** row — including ones that certainly have sales — because
+  `invoice_no` is not a key in that table and **80% of rows share one**. `21` nearly published "18 receivables with
+  no sale behind them" off the bare join; **a control set of rows known to have sales is what caught it.**
+  *(A separate figure to handle with care if anyone records it: `8b`'s $98,742.52 overpayment across the Paid set
+  is real but concentrated in **367 rows**, not spread across all 13,204 — 12,837 are exact. A "legacy encoding
+  convention" reading of it is therefore unlikely.)*
 - **⚠️ Any hand-written status flip that does not mention `stock_skipped` has a hole — whenever it was written.**
   **The test is textual, not temporal (`21`).** If a flip sets `sale_status='completed'` and the string
   `stock_skipped` does not appear in it, it has the hole. Time discriminates badly in both directions: a flip
@@ -299,7 +312,7 @@ including `fx/add-stock-barcode-identity` (`4741a921`), `rc/s4-2026-09-04`, `shi
 5. **Escalated, never fixed** (all unclaimed): membership discount missing from the Telegram sale message
    (`telegram.ts`); Khmer mojibake in `printReceipt.ts` → `buildTextOnlyPdf`; `recordDetailRowRhythm.test.ts`
    locks a rhythm that blocks refund-position parity between the receipt and the sale detail.
-6. **The shared checkout has 65 dirty files** and a clean index. Several are junk at the repo root
+6. **The shared checkout has 53 tracked-dirty files** (+12 untracked; `git status --porcelain` counts 65 because it includes untracked — `git diff --name-only` is the tracked count, and the two get confused) and a clean index. Several are junk at the repo root
    (`CHECKPOINT*.txt/patch/md`, `run-log.txt`, `tmp/`, `outputs/`, and three files with **mangled names**
    containing a literal newline or `\357\200\242`). Someone should identify owners and clean up — **ask before
    deleting anything; a peer's in-flight lines are never yours to remove.**
@@ -826,9 +839,14 @@ a bug report.**
 **no `.gitattributes` anywhere**, and all three blobs stored **LF**. A fresh detached worktree at `c7ef7264` is
 **completely clean — 0 dirty files** — with the trio checked out as **CRLF**. Running `build:public-runtime`, which
 every real deploy runs, rewrites all three back to **LF**, leaving **exactly those three files dirty with 0 content
-rows under `--ignore-cr-at-eol`**. Independently corroborated in the shared checkout, whose same three files have
-been dirty since 15:56 with 0 content rows. **So the trio is a demonstrated sufficient cause for a `-dirty` stamp on
-any build of this commit.** It still cannot show nothing *else* was dirty in the removed worktree.
+**RETRACTED — the corroboration was measured in the WRONG TREE (`7c` caught it).** I wrote that the shared
+checkout's same three files were "dirty since 15:56", corroborating the mechanism. Re-measured: in the **shared
+checkout** the trio is **CLEAN** (`git status --porcelain -- frontend/public/` → 0 lines), **LF on disk**
+(CR=0; 637/118/219 are LINE counts, not CR counts), and its mtime is **Sep 3 15:56** — an *mtime*, which I read as
+a *dirty-since*. The trio is dirty in **`bos-rc-workers/ee-integrate`**, a different tree, and that is where my
+read ran. **The reproduction above stands entirely on its own and needs no corroboration** — fresh worktree clean,
+builder run, exactly those three files, 0 content rows. Two separate errors in one sentence: the wrong tree, and an
+mtime read as a status.
 
 **FIX FOR EVERY FUTURE DEPLOY (`7c`) — UNCLAIMED, one line in the deploy-record template:** capture
 `git status --porcelain` **and** `git rev-parse HEAD` into the deploy record **at build time**. Today a `-dirty`
