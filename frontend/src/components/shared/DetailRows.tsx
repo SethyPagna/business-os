@@ -99,9 +99,17 @@ interface MoneyRowProps {
   marker?: string
   /** Extra note rendered under the label (e.g. a credit due date). */
   note?: ReactNode
+  /** A control for THIS money row, rendered in a trailing cell so it lands
+   *  in the same column as the per-line Edit buttons in the table above.
+   *  Before this existed the sale detail's delivery-fee editor was a bare
+   *  <div> parked inside <tfoot> -- a non-row child of a table section, which
+   *  is why the user saw that control "placed all over the place": the
+   *  browser hoists it out of the table box entirely. A control that belongs
+   *  to a row has to travel in a cell of that row. */
+  action?: ReactNode
 }
 
-export function MoneyRow({ label, amount, sub, tone = 'default', strong = false, labelSpan = 3, note, marker }: MoneyRowProps) {
+export function MoneyRow({ label, amount, sub, tone = 'default', strong = false, labelSpan = 3, note, marker, action }: MoneyRowProps) {
   const toneClass = MONEY_TONE_CLASS[tone]
   const border = strong ? 'border-t border-gray-200 dark:border-gray-700' : ''
   return (
@@ -114,6 +122,7 @@ export function MoneyRow({ label, amount, sub, tone = 'default', strong = false,
         {amount}
         {sub ? <div className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{sub}</div> : null}
       </td>
+      {action ? <td className="whitespace-nowrap px-1.5 py-1 text-right align-top tabular-nums sm:px-2">{action}</td> : null}
     </tr>
   )
 }

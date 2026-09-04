@@ -532,26 +532,31 @@ export default function SaleDetailModal({
   const deliveryFeeUsd = toNumber(sale.delivery_fee_usd)
   const deliveryFeeKhr = toNumber(sale.delivery_fee_khr)
   const isDelivery = !!toNumber(sale.is_delivery) || !!String(sale.delivery_contact_name || '').trim()
-  // S4-25: what the standalone Delivery card used to hold, rendered under the
-  // delivery-fee row's label instead. `note` sits inside a <span>, so every
-  // line here is a span too -- a <div> in there is invalid nesting and React
-  // will not warn about it in a production build.
-  const deliveryContactLines: Array<[label: string, value: string]> = isDelivery
-    ? ([
-        [translateOr('driver', 'Delivery', 'ដឹកជញ្ជូន'), String(sale.delivery_contact_name || '').trim()],
-        [t('phone') || 'Phone', String(sale.delivery_contact_phone || '').trim()],
-        [t('address') || 'Address', String(sale.delivery_contact_address || '').trim()],
-      ] as Array<[string, string]>).filter(([, value]) => value !== '')
-    : []
-  const deliveryContactNote = deliveryContactLines.length > 0 ? (
-    <span className="mt-0.5 block text-left font-normal">
-      {deliveryContactLines.map(([label, value]) => (
-        <span key={label} className="block break-words">
-          <span className="text-gray-400">{label}</span> {value}
-        </span>
-      ))}
-    </span>
-  ) : null
+  // Driver info is DRIVER info. User, Sep 4 2026: "delivery only needs phone
+  // and driver name...this is driver info, for customer name, phone and
+  // address keep it same in customer section... make them compact".
+  //
+  // This SUPERSEDES S4-25, which hung all three delivery fields off the
+  // delivery-fee row's label. That was one place too clever: three wrapped
+  // lines of contact detail grew out of the left of a money row and shoved the
+  // amount column down with them, and it put the driver's name in the totals
+  // block, which is where money lives, not people. The two fields that are
+  // genuinely about the driver now sit in the Sale card as ordinary compact
+  // rows, on the same label/value rhythm as everything else there.
+  const deliveryDriverName = String(sale.delivery_contact_name || '').trim()
+  const deliveryDriverPhone = String(sale.delivery_contact_phone || '').trim()
+  // The drop address is the one delivery field that can legitimately differ
+  // from what the Customer card already shows -- "keep it same in customer
+  // section" is where an address belongs, so it is shown THERE, and only when
+  // it is not simply a restatement of the customer's own address. Dropping it
+  // outright would have deleted the only place a deliver-somewhere-else
+  // address is visible on this screen.
+  const deliveryAddress = String(sale.delivery_contact_address || '').trim()
+  const sameAddressText = (left: string, right: string): boolean =>
+    left.replace(/\s+/g, ' ').trim().toLowerCase() === right.replace(/\s+/g, ' ').trim().toLowerCase()
+  const deliveryAddressToShow = deliveryAddress && !sameAddressText(deliveryAddress, String(sale.customer_address || ''))
+    ? deliveryAddress
+    : ''
   const paymentDetails = parsePaymentDetails(sale.payment_details)
   // Outstanding balance: an on-credit / partially-paid sale (amount_paid below
   // total). Shown so the admin detail no longer hides "still owed".
@@ -751,6 +756,21 @@ export default function SaleDetailModal({
                 {sale.source_return_id ? (
                   <DetailRow label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
                 ) : null}
+                {/* Driver, compact, in the section that describes the sale --
+                    not in the money block and not in a card of its own. Each
+                    row hides itself when empty (DetailRow's own rule), so a
+                    walk-in sale is unchanged and a free delivery still names
+                    its driver, which the fee row could not do when the fee was
+                    zero and the row did not render. */}
+                <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} />
+                <DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} />
+                {/* The note the cashier typed at checkout. It used to be a
+                    SectionCard of its own ABOVE the items -- user, Sep 4 2026:
+                    "the notes did not show in the notes area for sales, it
+                    went to above". A note is a field OF the sale, so it reads
+                    as one, on the same rhythm as the rows around it.
+                    whitespace-pre-wrap keeps a multi-line note multi-line. */}
+                <DetailRow label={t('notes') || 'Notes'} value={sale.notes} valueClassName="whitespace-pre-wrap" />
                 {/* S4-24: Timezone, Device and Payment currency are gone from
                     this card. They are device telemetry -- no receipt prints
                     them, and the user asked for the detail to read like one.
@@ -767,6 +787,7 @@ export default function SaleDetailModal({
                 <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
                 <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} />
                 <DetailRow label={t('address') || 'Address'} value={sale.customer_address} />
+                <DetailRow label={translateOr('delivery_address', 'Delivery address', 'អាសយដ្ឋានដឹកជញ្ជូន')} value={deliveryAddressToShow} />
                 <DetailRow label={t('membership') || 'Membership'} value={sale.customer_membership_number} mono />
               </DetailRowGroup>
               {/* An ACTION, not a field -- kept in the Customer card but held
@@ -805,11 +826,6 @@ export default function SaleDetailModal({
                 the reader hold two addresses apart before reaching a single
                 number they both explain. */}
 
-            {sale.notes ? (
-              <SectionCard title={t('notes') || 'Notes'}>
-                <p className="break-words text-sm text-gray-700 dark:text-gray-200">{sale.notes}</p>
-              </SectionCard>
-            ) : null}
           </div>
 
           {/* Items AND the money summary in ONE table: the tfoot amounts sit in
@@ -828,7 +844,12 @@ export default function SaleDetailModal({
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('qty_short') || 'Qty'}</th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('unit_price') || 'Unit price'}</th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('line_total') || 'Line total'}</th>
-                    {canAmendThisSale ? <th className="px-1.5 py-1.5 text-right sm:px-2"><span className="sr-only">{translateOr('amend_line', 'Edit line', 'កែជួរ')}</span></th> : null}
+                    {/* A visible header, because this is now a real column:
+                        every editable row on this table -- product lines and
+                        the delivery fee alike -- puts its control here. An
+                        sr-only header described a column the eye could not
+                        find. */}
+                    {canAmendThisSale ? <th className="px-1.5 py-1.5 text-right sm:px-2">{translateOr('amend_line', 'Edit', 'កែ')}</th> : null}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -889,7 +910,7 @@ export default function SaleDetailModal({
                               >
                                 {amendLineId === lineId
                                   ? (t('cancel') || 'Cancel')
-                                  : translateOr('amend_line', 'Edit line', 'កែជួរ')}
+                                  : translateOr('amend_line', 'Edit', 'កែ')}
                               </button>
                             ) : null}
                           </td>
@@ -1016,9 +1037,17 @@ export default function SaleDetailModal({
                   {isDelivery || deliveryFeeUsd > 0 || deliveryFeeKhr > 0 ? (
                     <MoneyRow
                       label={translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}
-                      note={deliveryContactNote}
                       amount={fmtUSD(deliveryFeeUsd)}
                       sub={deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : null}
+                      action={canAmendThisSale ? (
+                        <button
+                          type="button"
+                          onClick={() => { if (!feeEditing) setFeeText(String(deliveryFeeUsd)); setFeeEditing(!feeEditing) }}
+                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          {feeEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
+                        </button>
+                      ) : null}
                     />
                   ) : null}
                   {/* The owner's own example: "before 1.5 dollar delivery,
@@ -1027,11 +1056,20 @@ export default function SaleDetailModal({
                       history card below shows both halves. Typing the new
                       TOTAL rather than a delta is deliberate: it is the number
                       on the paper the customer is looking at. */}
-                  {canAmendThisSale && (isDelivery || deliveryFeeUsd > 0) ? (
-                    <div className="mt-1 flex flex-wrap items-center justify-end gap-2">
-                      {feeEditing ? (
-                        <>
-                          <label className="sr-only" htmlFor="amend-delivery-fee">
+                  {/* The editor is a ROW of the table, spanning it, exactly
+                      like the per-line quantity editor above. It used to be a
+                      bare <div> parked between two <tr>s inside <tfoot>; a
+                      table section may only contain rows, so the browser
+                      hoisted that div out of the table box and dropped it
+                      wherever it landed -- the "placed all over the place" the
+                      user was looking at. Opening it is now the Edit button in
+                      the Edit column, so products and delivery are amended the
+                      same way from the same place. */}
+                  {canAmendThisSale && feeEditing && (isDelivery || deliveryFeeUsd > 0) ? (
+                    <tr className="bg-gray-50 dark:bg-gray-900/40">
+                      <td colSpan={5} className="px-1.5 py-2 sm:px-2">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-fee">
                             {translateOr('amend_fee_new_total', 'New delivery fee', 'ថ្លៃដឹកជញ្ជូនថ្មី')}
                           </label>
                           <input
@@ -1059,17 +1097,9 @@ export default function SaleDetailModal({
                           >
                             {t('cancel') || 'Cancel'}
                           </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeeEditing(true) }}
-                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                          {translateOr('amend_fee_edit', 'Correct delivery fee', 'កែថ្លៃដឹកជញ្ជូន')}
-                        </button>
-                      )}
-                    </div>
+                        </div>
+                      </td>
+                    </tr>
                   ) : null}
                   {refundUsd > 0 ? (
                     <MoneyRow
