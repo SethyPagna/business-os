@@ -2441,12 +2441,52 @@ note in progress.md."* Every later message in this run goes in this section too.
 figures exist in the kernel (`refund_usd`, `gross_sales_usd`) and are not
 rendered. Find out whether the panel drops them or the transport does.
 
-**[ ] S4R3-2 · Dashboard revenue is wildly low.** A 7-day range showed barely
-$1K while the Sales page shows more than that in a single day. Two figures over
-the same window that disagree by an order of magnitude is a scope defect, not a
-rounding one — suspects, in order: the status filter (see S4R3-5), the local-day
-window, and the awaiting-payment exclusion. Measure both surfaces over the SAME
-range against production before changing anything.
+**[~] S4R3-2 · Dashboard revenue is wildly low. ROOT-CAUSED — two independent
+causes, one fixed, one awaiting the owner.** (business-os-v1-c4, Sep 4 2026.)
+Measured against production, not reasoned about.
+
+*Cause 1 — the legacy import never wrote `subtotal_usd`.* Canonical revenue is
+`subtotal_usd - discount_usd - membership_discount_usd` and never reads
+`total_usd`; the Sep 2-3 import's INSERT listed `total_usd` but not
+`subtotal_usd`, so 22 sales stored a 0 subtotal. They are ids 16842–16863,
+`notes LIKE 'Legacy import%'`, and they are the **entire** affected population —
+every other one of 15,044 sales has a correct subtotal. Hidden trade: **$3,462**.
+The Sales list looked right the whole time because it renders `total_usd`.
+
+The arithmetic closes exactly over the last 7 local days, which is what makes
+the repair value certain rather than a judgement call:
+
+```
+SUM(sale_items.total_usd)  7,935
+        the 22 sales      -3,462
+                          ------
+SUM(sales.subtotal_usd)    4,473   <- matches to the cent
+```
+
+That equality also proves the house convention — for a correctly written sale,
+`subtotal_usd` IS the sum of its line totals — and on all 22 rows
+`total_usd == SUM(sale_items.total_usd)` with tax, both discounts and delivery
+all 0. So the repair is `subtotal_usd = total_usd` for those 22 ids, nothing else.
+
+- **Writer: FIXED** — `625830d5` on `fx/legacy-import-subtotal` (pushed). Lists
+  every money column explicitly, plus a guard that reads its expected column set
+  out of `netSaleExpr` rather than naming `subtotal_usd`, so it tracks the
+  revenue definition instead of a snapshot. Proven red on the original omission
+  and green on restore.
+- **Data: NOT DONE — needs the owner's sanction.** 22 UPDATEs against production
+  D1. Their earlier "yes, i confirm, the 22 sales" sanctioned the *import*, not a
+  repair, so it is not carried over. The statement is staged, not run.
+
+*Cause 2 — awaiting-payment exclusion, which is S4R3-5.* Over the same 7 days,
+branch 2: recognized net **$4,469** vs all-status net **$7,672**. Awaiting is
+70–100% of some individual days (Sep 1: $2,184 of $2,734; Aug 28: 100%). The two
+causes compound, which is why the gap read as an order of magnitude.
+
+Related drift found while measuring, not yet fixed: `cloudflare/src/routes/compat.ts`
+~390/400/434/444 still hold un-apportioned `- COALESCE(rf.refund_usd, 0)` copies,
+and `attributedLineRevenue` at ~345. The Dashboard's summary tiles (~255) use
+`SUM(total_usd)` over non-cancelled — a *third* revenue definition, which is why
+the tiles and the Analytics panel disagree with each other on the same screen.
 
 **[ ] S4R3-3 · "A network or security layer in front of the server blocked this
 request…"** Reported on the Dashboard and on *each receipt report*. That string
