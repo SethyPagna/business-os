@@ -111,6 +111,32 @@ check('historical sales are imported with loyalty accrual off', () => {
     || /,\s*0,\s*\$\{sale\.deliveryService/.test(insert), 'loyalty_accrual is not the literal 0')
 })
 
+// The first run of this import wrote total_usd and amount_paid_usd but never
+// subtotal_usd, so 22 sales stored a 0 subtotal. Canonical revenue is built on
+// subtotal_usd (salesAnalytics.ts, netSaleExpr) and never reads total_usd, so
+// $3,462 of real, paid trade was invisible to every revenue, profit, dashboard
+// and report figure -- while the Sales list, which renders total_usd, showed it
+// correctly. Nothing errored; the money simply was not there.
+//
+// The expected column set is READ OUT OF the revenue definition rather than
+// spelled out here, so the guard tracks the kernel instead of a snapshot of it.
+check('the sales INSERT lists every column the revenue definition reads', () => {
+  const analytics = fs.readFileSync(
+    path.join(__dirname, '..', '..', '..', 'cloudflare', 'src', 'lib', 'salesAnalytics.ts'), 'utf8')
+  const def = analytics.match(/export function netSaleExpr\(p: string\): string \{([\s\S]*?)\n\}/)
+  assert.ok(def, 'netSaleExpr is gone or has been reshaped -- re-derive this guard against the new revenue definition')
+  const needed = [...new Set([...def[1].matchAll(/\$\{p\}([a-z_]+)/g)].map((m) => m[1]))]
+  assert.ok(needed.includes('subtotal_usd'), 'revenue no longer reads subtotal_usd; this guard needs rewriting')
+
+  const insert = source.slice(source.indexOf('INSERT INTO sales'))
+  const columns = insert.slice(insert.indexOf('(') + 1, insert.indexOf(')'))
+  for (const column of needed) {
+    assert.ok(new RegExp('\\b' + column + '\\b').test(columns),
+      `the sales INSERT omits ${column}, which the revenue definition reads -- ` +
+      'an omitted money column defaults to 0 and the sale is silently worth less than it is')
+  }
+})
+
 check('every ambiguous barcode carries an explicit reviewed ruling', () => {
   const block = source.slice(source.indexOf('AMBIGUOUS_BARCODE_RULINGS = Object.freeze({'))
   const body = block.slice(0, block.indexOf('})'))

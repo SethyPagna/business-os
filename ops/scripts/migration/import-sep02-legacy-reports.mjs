@@ -486,11 +486,20 @@ if (wantSql && !blockers.length) {
       applied_price_usd: line.unitPrice,
       total_usd: line.total,
     })))
+    // subtotal_usd is NOT optional. Canonical revenue is
+    // subtotal_usd - discount_usd - membership_discount_usd (salesAnalytics.ts,
+    // netSaleExpr) -- total_usd is never read for revenue. The first run of this
+    // script omitted subtotal_usd, so 22 imported sales defaulted it to 0 and
+    // $3,462 of real trade was invisible to every revenue, profit and dashboard
+    // figure while the Sales list showed it correctly from total_usd. Every money
+    // column is now listed explicitly, including the two that are legitimately 0
+    // here, so the next report shape cannot reintroduce the same silence.
     out.push(`INSERT INTO sales (receipt_number, cashier_name, cashier_id, customer_id, customer_name, customer_phone,
-  payment_method, sale_status, total_usd, amount_paid_usd, loyalty_accrual, is_delivery, items, notes, created_at, updated_at)
+  payment_method, sale_status, subtotal_usd, discount_usd, membership_discount_usd, tax_usd, total_usd, amount_paid_usd,
+  loyalty_accrual, is_delivery, items, notes, created_at, updated_at)
 VALUES (${sqlText(sale.receipt)}, ${sqlText(CASHIER)}, ${sqlNum(cashier.user.id)}, ${sale.customer.customer ? sqlNum(sale.customer.customer.id) : 'NULL'},
   ${sqlText(sale.customerName)}, ${sqlText(sale.customerPhone)}, ${sqlText(sale.paymentMethod)}, ${sqlText(TARGET_STATUS)},
-  ${sqlNum(sale.grandTotal)}, ${sqlNum(sale.grandTotal)}, 0, ${sale.deliveryService && sale.deliveryService !== 'Walk-In' ? '1' : '0'},
+  ${sqlNum(sale.grandTotal)}, 0, 0, 0, ${sqlNum(sale.grandTotal)}, ${sqlNum(sale.grandTotal)}, 0, ${sale.deliveryService && sale.deliveryService !== 'Walk-In' ? '1' : '0'},
   ${sqlText(itemsJson)}, ${sqlText(`Legacy import ${sale.invoiceNo} (Sep 2-3 batch); stock intentionally unaffected`)},
   ${sqlText(sale.createdAtUtc)}, ${sqlText(sale.createdAtUtc)});`)
     for (const line of sale.lines) {
