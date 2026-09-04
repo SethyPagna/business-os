@@ -43,6 +43,13 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
 
 export const hubAnchor = (page: string, section: string): string => `hub:${page}:${section}`
 
+/** Root URLs can host the configured landing hub; a section anchor identifies it. */
+export function getHubPageFromLocation(pathname: string, hash: string): string {
+  const page = getAdminPageFromPath(pathname)
+  if (page) return page
+  return pathname === '/' ? (hash.match(/^#hub:(branches|sales|contacts|promotions|settings|review):/)?.[1] || '') : ''
+}
+
 export function resolveHubSection(page: string, pathname: string, hash: string, allowed: readonly string[], fallback: string): string {
   const prefix = `#hub:${page}:`
   const requested = hash.startsWith(prefix) ? hash.slice(prefix.length) : ''
@@ -80,7 +87,7 @@ export function mobileGroupAction(expanded: string | null, page: string, section
 export function useHubSection<S extends string>(page: string, initial: S | (() => S), allowed: readonly string[], navigateTo: (page: string, anchor?: string) => void): [S, (section: S) => void] {
   const [section, setSection] = useState<S>(() => {
     const fallback = typeof initial === 'function' ? initial() : initial
-    if (typeof window === 'undefined' || getAdminPageFromPath(window.location.pathname) !== page) return fallback
+    if (typeof window === 'undefined' || getHubPageFromLocation(window.location.pathname, window.location.hash) !== page) return fallback
     return resolveHubSection(page, window.location.pathname, window.location.hash, allowed, fallback) as S
   })
   const current = useRef({ allowed, section })
@@ -89,7 +96,7 @@ export function useHubSection<S extends string>(page: string, initial: S | (() =
     const publish = (id: string) => {
       // Seal the initial/restored body into this entry without adding a layer.
       // Existing non-hub anchors (Settings fields, notifications) keep their meaning.
-      if (getAdminPageFromPath(window.location.pathname) !== page || !id) return
+      if (getHubPageFromLocation(window.location.pathname, window.location.hash) !== page || !id) return
       if (window.location.hash && !window.location.hash.startsWith('#hub:')) return
       const anchor = hubAnchor(page, id)
       if (window.location.hash === `#${anchor}`) return

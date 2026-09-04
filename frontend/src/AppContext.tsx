@@ -1,4 +1,4 @@
-import { navigationHash, needsNavigationGuard } from './components/shared/hubNavigation.ts'
+import { getHubPageFromLocation, navigationHash, needsNavigationGuard } from './components/shared/hubNavigation.ts'
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
@@ -572,6 +572,9 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
 
 function getInitialAdminPage(publicMode: boolean): string {
   if (publicMode || typeof window === 'undefined') return 'dashboard'
+  if (window.location.pathname === '/' && window.location.hash.startsWith('#hub:')) {
+    return getHubPageFromLocation(window.location.pathname, window.location.hash) || 'dashboard'
+  }
   return getAdminPageFromPath(window.location.pathname) || 'dashboard'
 }
 
@@ -2135,6 +2138,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     href: window.location.href,
     state: window.history.state,
   })
+  const pendingTraversalRef = useRef<null | { targetHref: string; delta: number; restored: boolean; approved: boolean; resumed: boolean }>(null)
+  const resumeHistoryNavigation = useCallback(() => {
+    const pending = pendingTraversalRef.current
+    if (!pending || !pending.restored || !pending.approved || pending.resumed) return
+    pending.resumed = true
+    window.history.go(pending.delta)
+  }, [])
   useEffect(() => {
     const remember = () => {
       const state = window.history.state || {}
@@ -2152,7 +2162,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (typeof window !== 'undefined') {
       const nextPath = getAdminPathForPage(pageId)
       const currentUrl = new URL(window.location.href)
-      const nextHash = navigationHash(getAdminPageFromPath(currentUrl.pathname) || 'dashboard', pageId, currentUrl.hash, anchor)
+      const nextHash = navigationHash(getHubPageFromLocation(currentUrl.pathname, currentUrl.hash) || resolveAdminLandingPage(settingsRef.current.default_landing_page), pageId, currentUrl.hash, anchor)
       if (nextPath && (currentUrl.pathname !== nextPath || nextHash !== currentUrl.hash)) {
         const index = Number(committedLocationRef.current?.state?.bosNavigationIndex || 0)
         window.history.pushState({ bosNavigationIndex: index + 1 }, '', `${nextPath}${currentUrl.search}${nextHash}`)
@@ -2181,6 +2191,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   pageRef.current = page
   const navigateTo = useCallback((pageId: string, anchor?: string) => {
     if (!canAccessPage(pageId)) return
+    pendingTraversalRef.current = null
     const currentHash = typeof window === 'undefined' ? '' : window.location.hash
     if (needsNavigationGuard(pageRef.current, pageId, currentHash, navigationHash(pageRef.current, pageId, currentHash, anchor))) {
       const dirty = getDirtyWork()
@@ -2194,30 +2205,39 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   const resolveNavGuard = useCallback(async (action: 'save' | 'discard' | 'stay') => {
     const guard = navGuard
+    const traversal = pendingTraversalRef.current
     setNavGuard(null)
-    if (!guard || action === 'stay') return
+    if (!guard || action === 'stay') { pendingTraversalRef.current = null; return }
     if (action === 'save') {
       for (const entry of guard.entries) {
         if (!entry.isDirty()) continue
         if (!entry.save) continue
         try {
           const saved = await entry.save()
-          if (!saved) return // save refused (validation etc.) -- stay put
+          if (!saved) { pendingTraversalRef.current = null; return }
         } catch {
+          pendingTraversalRef.current = null
           return
         }
       }
       // Anything dirty WITHOUT a save hook must not be silently lost by a
       // "save" choice -- staying is the safe reading (the modal only offers
       // Save & Leave when every dirty entry can save; this is the backstop).
-      if (getDirtyWork().length > 0) return
+      if (getDirtyWork().length > 0) { pendingTraversalRef.current = null; return }
     } else {
       for (const entry of guard.entries) {
         try { entry.discard?.() } catch { /* leaving anyway */ }
       }
     }
-    navigateNow(guard.pageId, guard.anchor)
-  }, [navGuard, navigateNow])
+    if (traversal) {
+      if (pendingTraversalRef.current !== traversal) return
+      traversal.approved = true
+      // history.go is asynchronous: approval may arrive before rollback finishes.
+      resumeHistoryNavigation()
+    } else {
+      navigateNow(guard.pageId, guard.anchor)
+    }
+  }, [navGuard, navigateNow, resumeHistoryNavigation])
 
   // Browser close/reload guard -- the native confirm is all a page gets.
   useEffect(() => {
@@ -2242,25 +2262,36 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (typeof window === 'undefined') return
     const onPopState = () => {
       const targetUrl = new URL(window.location.href)
-      const target = getAdminPageFromPath(targetUrl.pathname) || 'dashboard'
+      const target = getHubPageFromLocation(targetUrl.pathname, targetUrl.hash) || resolveAdminLandingPage(settingsRef.current.default_landing_page)
       const previous = committedLocationRef.current
       // Fold/modal history uses the same URL. It must never change the host section.
-      if (previous?.href === targetUrl.href) return
+      const pending = pendingTraversalRef.current
+      if (previous?.href === targetUrl.href) {
+        if (pending && !pending.resumed) {
+          pending.restored = true
+          resumeHistoryNavigation()
+        }
+        return
+      }
+      const approvedTraversal = pending?.resumed && pending.targetHref === targetUrl.href
+      if (approvedTraversal) pendingTraversalRef.current = null
       const previousHash = previous ? new URL(previous.href).hash : ''
-      const dirty = needsNavigationGuard(pageRef.current, target, previousHash, targetUrl.hash) ? getDirtyWork() : []
+      const dirty = !approvedTraversal && needsNavigationGuard(pageRef.current, target, previousHash, targetUrl.hash) ? getDirtyWork() : []
       if (!canAccessPage(target) || dirty.length > 0) {
         if (previous) {
           const from = previous.state?.bosNavigationIndex
           const to = window.history.state?.bosNavigationIndex
-          if (Number.isInteger(from) && Number.isInteger(to) && from !== to) {
+          const indexed = Number.isInteger(from) && Number.isInteger(to) && from !== to
+          if (dirty.length > 0 && canAccessPage(target)) {
+            pendingTraversalRef.current = { targetHref: targetUrl.href, delta: indexed ? to - from : -1, restored: !indexed, approved: false, resumed: false }
+            setNavGuard({ pageId: target, anchor: targetUrl.hash.slice(1), entries: dirty })
+          }
+          if (indexed) {
             // Return to the committed entry without destroying Forward on Stay.
             window.history.go(from - to)
           } else {
             window.history.pushState(previous.state, '', previous.href)
           }
-        }
-        if (dirty.length > 0 && canAccessPage(target)) {
-          setNavGuard({ pageId: target, anchor: targetUrl.hash.slice(1), entries: dirty })
         }
         return
       }
@@ -2272,7 +2303,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [canAccessPage])
+  }, [canAccessPage, resumeHistoryNavigation])
 
   // Currency helpers.
   const exchangeRate    = parseFloat(String(settings.exchange_rate || '4100'))
