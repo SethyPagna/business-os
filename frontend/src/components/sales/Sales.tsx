@@ -288,7 +288,7 @@ function buildSaleExportRows(rows: SaleRecord[] = []): Array<Record<string, unkn
 }
 
 export default function Sales({ embedded = false }: { embedded?: boolean }) {
-  const { t, settings, fmtUSD, fmtKHR, notify, user, can } = useApp()
+  const { t, settings, fmtUSD, fmtKHR, notify, user, can, getPermissionTier } = useApp()
   // Part 557 slice 2: 'sales' is a view-tier section. A View-only grant reads
   // the list/stats/reports/export but every write (cancel, change status, edit
   // customer, import) is hidden here and refused by the backend. Full only.
@@ -308,6 +308,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const canAmendSales = can('sales', 'amend')
   const canImportSales = can('sales', 'import')
   const canExportSales = can('sales', 'export')
+  const canViewSales = can('sales', 'view')
   const canViewFees = can('fees', 'view')
   // Returning straight from the receipt is still a RETURNS write, so it is
   // gated on the returns section's own create action -- the same
@@ -597,9 +598,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   }, [loadSalesStats])
 
   // The foldable stats strip (shared StatsStrip): range-scoped figures with
-  // per-card breakdowns. It reads the SAME `stripRange` the list reads
-  // (declared near the top), so the strip and the list always describe the
-  // one date window — no second, independent range.
+  // per-card breakdowns. Only the period is shared with the list: search,
+  // status and cashier filters do not scope these endpoints.
   type SalesStripPayload = {
     totals?: Record<string, number>
     by_payment?: Array<{ payment_method?: string; tx_count?: number; collected_usd?: number; total_usd?: number }>
@@ -610,22 +610,39 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     totals?: { count?: number; amount_usd?: number; amount_khr?: number }
     by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
   }
-  const [stripData, setStripData] = useState<SalesStripPayload | null>(null)
-  const [feeStripData, setFeeStripData] = useState<FeesStripPayload | null>(null)
-  const [stripLoading, setStripLoading] = useState(false)
+  const stripScopeKey = JSON.stringify([
+    stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime,
+    isActive, user?.id, user?.username, user?.role_code, user?.permissions,
+    getPermissionTier('sales'), getPermissionTier('fees'), canViewSales, canViewFees,
+  ])
+  // A new identity also distinguishes A -> B -> A; matching old date strings
+  // alone must not resurrect results from an earlier user/activity lifetime.
+  const stripScope = useMemo(() => ({ key: stripScopeKey }), [stripScopeKey])
+  const stripScopeRef = useRef<typeof stripScope | null>(stripScope)
+  stripScopeRef.current = stripScope
+  const [stripSnapshot, setStripSnapshot] = useState<{
+    scope: typeof stripScope
+    status: 'loading' | 'ready' | 'error'
+    data: SalesStripPayload | null
+    fees: FeesStripPayload | null
+  } | null>(null)
   const stripRequestRef = useRef(0)
+  const stripAvailable = isActive && !!user && canViewSales
+  const stripHasRange = !!stripRange.startDate && !!stripRange.endDate
+  const stripStatus = !stripAvailable ? 'unavailable'
+    : !stripHasRange ? 'no-range'
+      : stripSnapshot?.scope === stripScope ? stripSnapshot.status : 'loading'
+  // Mask on render, before effects/cleanup run, including open card details.
+  const stripData = stripStatus === 'ready' ? stripSnapshot?.data : null
+  const feeStripData = stripStatus === 'ready' ? stripSnapshot?.fees : null
+  const stripLoading = stripStatus === 'loading'
   const loadStatsStrip = useCallback(async (): Promise<void> => {
-    if (!isActive) return
-    if (!stripRange.startDate || !stripRange.endDate) {
-      setStripData(null)
-      setFeeStripData(null)
-      setStripLoading(false)
-      return
-    }
+    if (!stripAvailable || !stripHasRange || stripScopeRef.current !== stripScope) return
     const requestId = beginTrackedRequest(stripRequestRef)
-    setStripLoading(true)
+    const isCurrent = () => stripScopeRef.current === stripScope && isTrackedRequestCurrent(stripRequestRef, requestId)
+    setStripSnapshot({ scope: stripScope, status: 'loading', data: null, fees: null })
     try {
-      const [result, fees] = await Promise.all([
+      const [result, fees] = await withLoaderTimeout(() => Promise.all([
         getSalesStatsStrip({
           startDate: stripRange.startDate,
           endDate: stripRange.endDate,
@@ -635,19 +652,27 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         canViewFees
           ? getFeesReport({ startDate: stripRange.startDate, endDate: stripRange.endDate })
           : Promise.resolve(null),
-      ])
-      if (!aliveRef.current || !isTrackedRequestCurrent(stripRequestRef, requestId)) return
-      setStripData((result || {}) as SalesStripPayload)
-      setFeeStripData((fees || null) as FeesStripPayload | null)
+      ]), 'Sales period statistics')
+      if (!isCurrent()) return
+      // A null transport fallback/missing aggregate is unavailable, not a
+      // successful zero-sales period. Both reports return totals on empty days.
+      const data = result as SalesStripPayload | null
+      const feeData = fees as FeesStripPayload | null
+      if (!data?.totals || (canViewFees && !feeData?.totals)) throw new Error('Missing period totals')
+      setStripSnapshot({ scope: stripScope, status: 'ready', data, fees: feeData })
     } catch {
-      if (!aliveRef.current || !isTrackedRequestCurrent(stripRequestRef, requestId)) return
-      setStripData(null)
-      setFeeStripData(null)
-    } finally {
-      if (aliveRef.current && isTrackedRequestCurrent(stripRequestRef, requestId)) setStripLoading(false)
+      if (!isCurrent()) return
+      setStripSnapshot({ scope: stripScope, status: 'error', data: null, fees: null })
     }
-  }, [canViewFees, isActive, stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
-  useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
+  }, [canViewFees, stripAvailable, stripHasRange, stripScope, stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
+  useEffect(() => {
+    stripScopeRef.current = stripScope
+    void loadStatsStrip()
+    return () => {
+      invalidateTrackedRequest(stripRequestRef)
+      if (stripScopeRef.current === stripScope) stripScopeRef.current = null
+    }
+  }, [loadStatsStrip, stripScope])
 
   useEffect(() => {
     if (!isActive) {
@@ -1159,6 +1184,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < filteredIds.length
   }, [filteredIds.length, selectedIds.size])
 
+  const stripHasTime = !!stripRange.startTime || !!stripRange.endTime
   const stripCards = useMemo<StatCardDef[]>(() => {
     const totals = (stripData?.totals || {}) as Record<string, number>
     const byStatus = stripData?.by_status || []
@@ -1224,7 +1250,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         value: fmtUSD(profitUsd),
         tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
         sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
-        hint: translateOr('stats_profit_hint', 'Gross profit = net revenue − COGS − store-paid delivery.'),
+        hint: translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (including Not Paid).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងមិនទាន់បង់)។'),
         details: [
           { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
           { label: t('cogs') || 'COGS', value: fmtUSD(cogsUsd), tone: 'warn' as const },
@@ -1259,10 +1285,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (canViewFees) {
       cards.push({
         key: 'expenses',
-        label: t('fees') || 'Expenses',
+        label: stripHasTime
+          ? translateOr('sales_strip_expenses_whole_days', 'Expenses · whole days', 'ចំណាយ · ពេញមួយថ្ងៃ')
+          : t('fees') || 'Expenses',
         value: expenseValue,
         tone: expensesUsd > 0 || expensesKhr > 0 ? ('warn' as const) : undefined,
-        hint: translateOr('stats_expenses_hint', 'Expenses booked by date in this range. They are kept separate from gross profit so the accounting basis stays explicit.'),
+        hint: stripHasTime
+          ? translateOr('sales_strip_expenses_time_hint', 'Expenses cover the full selected dates; the time filter does not apply. Expenses stay separate from gross profit.', 'ចំណាយគិតពេញថ្ងៃតាមកាលបរិច្ឆេទដែលបានជ្រើស ហើយមិនអនុវត្តតម្រងម៉ោងទេ។ ចំណាយនៅដាច់ដោយឡែកពីប្រាក់ចំណេញដុល។')
+          : translateOr('stats_expenses_hint', 'Expenses booked by date in this range. They are kept separate from gross profit so the accounting basis stays explicit.'),
         details: (feeStripData?.by_type || []).map((row) => ({
           label: String(row.fee_type || 'Other'),
           value: [
@@ -1273,8 +1303,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         })),
       })
     }
-    return cards
-  }, [canViewFees, feeStripData, fmtKHR, fmtUSD, stripData, t, translateOr])
+    return stripStatus === 'ready' ? cards : cards.map(({ key, label, hint }) => ({ key, label, hint, value: '—' }))
+  }, [canViewFees, feeStripData, fmtKHR, fmtUSD, stripData, stripHasTime, stripStatus, t, translateOr])
 
   // A sale "counts" toward the headline figures only when it contributes to
   // the money shown: cancelled and awaiting-payment sales are excluded from
@@ -1574,10 +1604,26 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           be in one manage button") then the mini stat cards. The old
           standalone action row and the centered pagination row are gone;
           the pager now rides the sticky search row below. */}
+      <div className="mt-3 mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+        <p className="min-w-0 break-words">
+          {translateOr('sales_strip_period_scope', 'Period totals · list search, status and cashier filters do not apply.', 'សរុបតាមរយៈពេល · មិនអនុវត្តការស្វែងរក តម្រងស្ថានភាព និងអ្នកគិតលុយក្នុងបញ្ជីទេ។')}
+        </p>
+        <span role="status" aria-live="polite">
+          {stripStatus === 'no-range' ? translateOr('sales_strip_choose_range', 'Select both dates to see totals.', 'ជ្រើសកាលបរិច្ឆេទទាំងពីរ ដើម្បីមើលចំនួនសរុប។')
+            : stripStatus === 'loading' ? translateOr('sales_strip_loading', 'Loading period totals…', 'កំពុងផ្ទុកចំនួនសរុបតាមរយៈពេល…')
+              : stripStatus === 'error' ? translateOr('sales_strip_failed', 'Period totals unavailable.', 'មិនអាចផ្ទុកចំនួនសរុបតាមរយៈពេលបានទេ។')
+                : stripStatus === 'unavailable' ? translateOr('sales_strip_unavailable', 'Period totals are not available in this view.', 'មិនអាចមើលចំនួនសរុបតាមរយៈពេលនៅទីនេះបានទេ។') : null}
+        </span>
+        {stripStatus === 'error' ? (
+          <button type="button" className="btn-secondary min-h-[44px] px-3 text-xs" onClick={() => { void loadStatsStrip() }}>
+            {translateOr('sales_strip_retry', 'Retry totals', 'ព្យាយាមផ្ទុកចំនួនសរុបម្ដងទៀត')}
+          </button>
+        ) : null}
+      </div>
       <StatsStrip
         // Keep a clear visual breath after the Sales hub's section tabs;
         // without this, the first stats row reads as part of the title row.
-        className="mt-3 mb-4"
+        className="mb-4"
         cards={stripCards}
         loading={stripLoading}
         t={t}
