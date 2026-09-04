@@ -534,6 +534,25 @@ reason `db` assumed, and it is no longer an assumption.
 **`^4.112.0`**, a caret range. A deploy worktree running a real `npm ci` can install a newer wrangler than the one
 read here. **This finding is scoped to 4.116.0 and to nothing else** — re-read it if a deploy pulls a new minor.
 
+**The caret caveat is real but VACUOUS TODAY, which is a checkable condition rather than a standing doubt (`db`,
+re-derived by `ee`).** Every deploy-capable tree is on the version that was read:
+
+```
+business-os-v1  4.116.0   bos-dlv  4.116.0   ee-integrate  4.116.0   bos-cert-ee  4.116.0
+```
+
+**The trigger for a re-read is a deploy tree's `npm ci` resolving a new minor. Today none has.** `db` also
+confirmed the source independently by line number rather than by the quotes above — `getUnappliedMigrationNames`
+at `cli.js:285671` (nine lines, pure name comparison, no `fs` call in the body) and `buildMigrationQuery` at
+`:285764`.
+
+**RULE, and it is the general form of what saved this thread twice (`db`'s wording).** *No sweep result without at
+least one case the instrument reports the other way.* A sweep returning 79 dirty and 0 clean is indistinguishable
+from a broken instrument; `db`'s three clean deploy trees are what make the 79 a measurement rather than a fault
+report. Had `8b`'s CR counter been run against a known-LF file first it would have failed loudly instead of nearly
+publishing "2,241 CR-bearing lines at every ref". Same rule, stated the other way, is the negative control that
+made `verify:public-runtime`'s PASS meaningful. **Attach the control to the sweep, not to the write-up.**
+
 **THE EXPOSED-TREE SWEEP, and it is 79 trees, not a handful (`db`).** Across ~82 worktrees on this machine, checked
 against the 10 trigger-bearing migrations (`0010`, `0018`–`0021`, `0088`, `0090`, `0092`, `0101`, `0115`):
 
