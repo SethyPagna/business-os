@@ -1463,6 +1463,15 @@ app.patch('/:id/status', async (c) => {
 
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
   const payload = updated || { id: Number(id), sale_status: saleStatus }
+  // S4-6: name who made the change. The actor is the request's authenticated
+  // user (requireAuth, above) -- known synchronously here regardless of
+  // whether it is ALSO persisted for later in-app display (that is S4-11b's
+  // job, a separate action_history column). Same name/username fallback as
+  // the sale-recorded message's Cashier line (line ~954) and the same
+  // omit-the-line-if-unknown idiom `by` already uses in
+  // formatStockChangeTelegramLines/formatTransferTelegramLines/
+  // formatReturnTelegramLines, rather than printing "By: undefined".
+  const actorName = user?.name || user?.username || null
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'status',
     lines: [
@@ -1474,6 +1483,7 @@ app.patch('/:id/status', async (c) => {
       // that moved no stock must not look like a normal one.
       skipStock ? `Stock: not changed (${totalSkippedUnits} unit${totalSkippedUnits === 1 ? '' : 's'} deliberately skipped)` : '',
       cancelFeeUsd || cancelFeeKhr ? `Lost fee: ${telegramMoney(cancelFeeUsd, cancelFeeKhr)}` : '',
+      actorName ? `By: ${actorName}` : '',
     ],
   }).catch((error) => console.error('[telegram] sale status notification failed', error)))
   // S4-2: echo the skip back so the client can badge the sale immediately

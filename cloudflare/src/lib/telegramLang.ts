@@ -102,9 +102,11 @@ const LABELS = {
   onHand: { en: 'On hand', km: 'នៅក្នុងស្តុក', localizeValue: true },
   // S4-6's slot. A route that knows who made a change adds ONE line --
   // `by ? \`By: ${by}\` : ''` -- and it ships bilingual with no change here.
-  // routes/sales.ts's status change cannot fill it yet (it writes no
-  // action_history, so a status move between two completed-ish statuses
-  // records nobody); the label is ready for the lane adding that storage.
+  // routes/sales.ts's status change now fills it (S4-6) from the request's
+  // authenticated user, c.get('user') -- known synchronously at send time
+  // even though it is NOT yet persisted to an action_history column for
+  // later in-app display of "who changed this status"; that persistence is
+  // a separate item (S4-11b) and does not gate this line.
   by: { en: 'By', km: 'ដោយ' },
   from: { en: 'From', km: 'ពី' },
   to: { en: 'To', km: 'ទៅ' },
