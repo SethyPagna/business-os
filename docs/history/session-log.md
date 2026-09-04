@@ -19017,3 +19017,85 @@ This entry is written as reference to re-verify, not as ground truth: the versio
 migration figures from direct `SELECT`s on `d1_migrations` and the affected tables, and the commit is on
 `rc/s4-2026-09-04`. `/health`'s `version` field is a hard-coded string and is **not** the deploy id — only wrangler
 prints that.
+
+## Part 600 — the S4 round-3 batch shipped, and three frozen readings that would have gone red on a good run
+
+**Ask.** The owner, Sep 4 2026: merge and reconcile taking only what is useful, never reverting to older
+deploys; make the receipt break down properly and be fully correct; give the summary the shift CLOSING time,
+not only the opening one; extend the theoretical unpaid figures to delivery, profit and discounts; and add the
+missing arithmetic from total revenue → gross profit → total profit, including cost of goods sold and actual
+delivery costs. Then, separately: the actual courier cost must NOT print on the receipt but MUST be computed
+internally "so we know the actual costs vs what was received or what we paid", surfaced as a detailed
+breakdown in the summary. Then commit, push, deploy.
+
+**What changed.** Three lanes merged into `rc/ee-integrate-2026-09-04` and deployed as `c7ef7264`, wrangler
+version `798d9e19-76d0-4909-8db3-6a7a4ad43ad7`. The report waterfall now states revenue − COGS + delivery
+collected − delivery paid → gross profit, every term measured rather than derived; the line that used to read
+"Store-paid delivery" was a residual (`revenue − cost − profit`) that always footed while naming the wrong
+quantity, and is now the measured `store_delivery_usd`. Delivery reconciliation is a MEMO block — charged /
+actually paid / waived / net — with no operator, so it is reported without entering any total. The receipt has
+a footing check asserted to zero on every fixture, and the same helper feeds the receipt and the sale detail.
+Shift summaries carry `closed_at` and a duration, switching label to "Ending at"/"Open for" while still open.
+
+**What was found.**
+
+- **A residual always closes.** A figure derived by subtraction makes the page foot no matter what it names.
+  Footing assertions therefore prove nothing here; value assertions carry the weight.
+
+- **Line-survival is not composition.** After merging, a check confirmed every added line from every lane had
+  survived the auto-merge — 0 missing across the two files that two lanes both touched. It passed, and the
+  build was still broken: the receipt and shift lanes had each independently added a `saleTotals` binding to
+  `test-shift-report-pure.cjs` (duplicate declaration), and the shift lane's NEW
+  `test-shift-close-report-pure.cjs` never got the key at all. Each lane was green alone; the defect existed
+  only in the union. **After any multi-lane merge, run every test file individually** — and note that
+  `test:utils` chains with `&&` and stops at the first red, so a union defect can hide behind an earlier green.
+
+- **`fastStockIn.test.ts` exited 0 over a real failure.** Its `if (failed > 0) process.exitCode = 1` sat at line
+  152 with three `runTest()` calls after it, so any failure in those three printed FAIL and still exited 0 —
+  and the whole chained gate reported green. Guard moved to the end of the file, where it must stay. That
+  exposed two stale assertions demanding the pre-`3eec9f22` two-control layout, which also contradicted
+  `modalPrimaryPlacement.test.ts` across 237 components. Replaced with the rule, verified by four mutations.
+
+- **Three frozen readings, the third of which was already "fixed".** The 0117 verifier asserted against
+  hardcoded pre-counts (45 rows, 269 concat bytes) measured when the owner approved. The shop kept selling;
+  by deploy time it was 48 rows, and those assertions would have gone red on a perfectly good migration. The
+  third instance survived the first fix and was the instructive one:
+  `captured_rows_present == BASE.accruing_rows` looked safe because BASE was captured at runtime rather than
+  hardcoded — but BASE was read ten minutes before the migration ran, so any sale in that window breaks it.
+  **Capturing at the wrong instant is the same bug.** The rule: an equality is traffic-immune only when BOTH
+  sides are read at the same instant. Fixed to `captured_rows_present == logged_reset_count`, log-vs-log,
+  which also subsumes the `count == id_count` cross-check and adds row-existence. For a "still zero" assertion
+  the companion rule is to enumerate every writer: `loyalty_accrual` has three INSERT sites and no UPDATE
+  anywhere in `cloudflare/src`, so the flag is immutable after row creation and the assertion cannot be
+  perturbed by traffic (enumeration by peer 88).
+
+- **`d1 migrations list` lies from the wrong tree.** Run in the main checkout it reported "No migrations to
+  apply" — that checkout's `migrations/` stops at 0106, so it compared a stale folder against a database with
+  0117 pending. Querying `d1_migrations` directly, and re-running from the deploy tree, both showed exactly one
+  pending. Migration ids are row counters, not filename numbers: file 0117 is row id 116.
+
+**Verified.** cloudflare `tsc` clean · **196/196** pure scripts · frontend `tsc` clean · `verify:i18n` **4813**
+keys at parity · **194/194** frontend tests run individually · the real `test:utils` chain green at the shipped
+sha · `vite build` clean. Post-deploy: `/health` `status: ok` on both hosts · `/api/products` unauthenticated
+**401** · storefront **200** · admin **200** · `/ws` **426** · nothing pending. 0117 verified id-scoped:
+`captured_still_accruing` **0**, `captured_rows_present == logged_reset_count` **48 == 48**, `log_rows` **1**,
+`total_sales` **15059 → 15060** as control. Reset touched **48 sales / 34 customers**. Language packs were
+checked against the expected union after merging — 5478 keys each, nothing re-admitted, both packs at parity.
+
+**Not done.**
+
+- **The membership-points switch is still ON with balances at zero.** 0117 writes no settings row and
+  `loyalty_points_enabled` defaults to on, so every sale since 11:37 UTC accrues again and partially undoes the
+  reset; `new_accruing_since_before` was already 1 at verification. One owner action: Settings → Membership
+  points → OFF → Save. Deliberately not written from a session — production D1 is SELECT-only here, and the
+  owner flipping it is the switch being verified.
+- **The authenticated read-site check was NOT performed.** Every SQL check above re-asks the migration's own
+  `WHERE` clause, so a missing void filter at a read site would survive all of them. It needs an authenticated
+  in-app read; the Browser pane had no admin session and none was created. Safe subjects (zero sales newer than
+  `max(sales_reset_ids)`, so their balances cannot have moved): **19718, 19719, 19735**, expect **0**. Do it
+  after the toggle, and treat a non-zero as a diagnosis (post-migration sale vs missing filter), not a verdict.
+- **The owner approved "31 customers"; 34 were touched.** Both figures kept on the board rather than one
+  quietly replacing the other.
+- Escalated, not fixed: membership discount missing from the Telegram sale message (`telegram.ts`); Khmer
+  mojibake in `printReceipt.ts` `buildTextOnlyPdf`; `recordDetailRowRhythm.test.ts` locks a rhythm that blocks
+  refund-position parity between the receipt and the sale detail.

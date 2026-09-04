@@ -125,7 +125,65 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**🟢 DEPLOYED TO PRODUCTION Sep 4 2026 05:04 UTC — wrangler version id
+
+**🟢 DEPLOYED TO PRODUCTION Sep 4 2026 11:37–11:39 UTC — wrangler version id
+`798d9e19-76d0-4909-8db3-6a7a4ad43ad7`. DEPLOYED FROM THE BRANCH `rc/ee-integrate-2026-09-04` @ `c7ef7264`,
+**NOT FROM `main`**. Reference to re-verify.** The previous live version was
+`a164d260-49ae-4bec-b372-eb73bce58850`. `main` still does not contain the deployed code; deploying `main`
+rolls back this batch and the S4 batch below it.
+
+Built in an isolated detached worktree with a real `npm ci` in both packages, from committed `HEAD`, never a
+dirty tree. Certified before shipping: cloudflare `tsc` clean · **196/196** pure scripts · frontend `tsc` clean ·
+`verify:i18n` **4813** keys at parity in both packs · **194/194** frontend tests run INDIVIDUALLY · the real
+`test:utils` chain green end to end at the exact shipped sha · a real `vite build`.
+
+- **What shipped (the owner's Sep-4 round-3 asks).** Three lanes merged: the report waterfall (revenue → gross
+  profit → total profit, with COGS and actual delivery cost as explicit terms, replacing a residual plug that
+  always footed while naming the wrong quantity) · the receipt breakdown (every line reconciles; a footing check
+  asserted zero across every fixture, and the same helper feeds both the receipt and the sale detail) · shift
+  summaries carrying the CLOSING time and duration, not only the opening time. The actual courier cost is
+  computed internally and reported in the summary as a memo block (charged / actually paid / waived / net),
+  carrying no operator, and is absent from all four customer-facing receipt surfaces.
+
+- **ONE migration applied: `0117_membership_points_reset.sql`, at 11:37:39 UTC. Highest applied id is now 116.**
+  It was 115 (`0116_shift_sessions.sql`) before. Verified id-scoped, not table-wide: `captured_still_accruing`
+  **0** · `captured_rows_present == logged_reset_count` **48 == 48** · `logged_reset_count == logged_id_count`
+  **48 == 48** (two independent aggregates, so a truncated `group_concat` is caught) · `log_rows` **1** (ran once)
+  · `total_sales` **15059 → 15060**, the control. The reset touched **48 sales / 34 customers**.
+
+- **⚠️ THE OWNER APPROVED "31 customers". The real figure is 34.** They approved at a moment when 45 sales /
+  31 customers were accruing; the shop kept selling and it was **48 / 34** when the migration ran. Both numbers
+  are kept deliberately: 31 is what was agreed to, 34 is what was touched. The decision is unchanged.
+
+- **⚠️ OPEN, OWNER ACTION, THE CLOCK IS RUNNING.** `0117` zeroes balances but writes NO settings row, and
+  `loyalty_points_enabled` defaults to ON at all four Worker read sites. **The programme is still on with
+  balances at zero, so every sale from 11:37 UTC onward accrues again and partially undoes the reset.**
+  `new_accruing_since_before` was already **1** at verification time — a sale accrued during the deploy window.
+  Fix is the owner's and is one action: Settings → Membership points → OFF → Save. Not writable from here
+  (production D1 is SELECT-only for these sessions), and the owner flipping it IS the switch being verified.
+
+- **⏸ OPEN, NOT DONE: the one check SQL cannot make.** Every DB query above re-asks the migration's own `WHERE`
+  clause, so a read-site void filter can still be missing. It needs an AUTHENTICATED read of a customer's points
+  in the app. Not performed — the Browser pane has no admin session and no session was created. Safe subjects,
+  chosen because they have ZERO sales newer than `max(sales_reset_ids)` so their balance cannot have moved:
+  **19718, 19719, 19735**. Expect points **0**. Do it AFTER flipping the toggle, otherwise a fresh sale makes a
+  good migration read red. A non-zero has TWO causes — a post-migration sale (expected while the switch is on)
+  or a missing void filter — so diagnose before concluding.
+
+- **⏪ ROLLBACK POINTS.** The Worker rolls back to `a164d260-49ae-4bec-b372-eb73bce58850`. The data does NOT roll
+  back with it. Pre-migration D1 bookmark, taken 11:36:20 UTC, ~80s before the migration:
+  `00001284-00000006-000050dc-0b6029c1fc8415749dafe6e6a03422be`. Restoring it would give 34 customers their
+  points back while the owner believes them cleared. Destructive; the owner's call.
+
+- **Post-deploy probes, expected vs actual.** `/health` → `status: ok` on **both** hosts · `/api/products`
+  unauthenticated → **401** · storefront → **200** with Leang Beauty branding · admin → **200**, login page
+  renders on the new build · `/ws` unauthenticated GET → **426** · `d1 migrations list --remote` → nothing
+  pending. All exact. NOTE: run `migrations list` from a tree that HAS the migrations — the main checkout stops
+  at 0106 and reports "No migrations to apply" against a 0117-pending database.
+
+---
+
+**⏸ SUPERSEDED (previous deploy) — Sep 4 2026 05:04 UTC — wrangler version id
 `a164d260-49ae-4bec-b372-eb73bce58850`. THIS WAS DEPLOYED FROM THE BRANCH `rc/s4-2026-09-04` @ `2c497564`, **NOT
 FROM `main`**. Reference to re-verify.** Said in capitals because the Sep-3 incident that produced the
 `deploy-provenance` skill was caused by exactly this fact going unrecorded: a later session read `main`, saw a
