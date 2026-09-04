@@ -48,6 +48,17 @@ function loadUndoAppliers(d1) {
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
+    // S4-24b: the 'sale.add_items' applier's planners. This file exercises
+    // the supplier-backfill applier only, so these stubs exist to let the
+    // module load; the real planners are driven against a live schema by
+    // test-sale-add-items-pure.cjs.
+    './saleLineAddition': {
+      buildAllocationStatements: () => [],
+      planSaleLineAddition: () => ({ lines: [], statements: [], saleItemStatementIndexByLine: [], deductions: [], deductedUnits: 0, addedSubtotalUsd: 0 }),
+      planSaleLineRemoval: () => ({ statements: [], restoredUnits: 0 }),
+      plannedLineFromRecord: (record) => record,
+      saleMoneyUpdateStatement: () => ({ sql: 'SELECT 1', params: {} }),
+    },
   }
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {

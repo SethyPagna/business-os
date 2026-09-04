@@ -5,6 +5,14 @@ import { audit } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { branchUpdateStatements } from './branchWrites'
 import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
+import {
+  buildAllocationStatements,
+  planSaleLineAddition,
+  planSaleLineRemoval,
+  plannedLineFromRecord,
+  saleMoneyUpdateStatement,
+  type SaleAddItemsReversal,
+} from './saleLineAddition'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -502,7 +510,170 @@ async function applySupplierBackfillRedo(env: Env, r: SupplierBackfillReversal):
   return name
 }
 
+// ---------------------------------------------------------------------------
+// sale.add_items -- reload-durable undo/redo for "add products to an existing
+// sale" (routes/sales.ts POST /:id/items, S4-24b).
+//
+// This is the applier the sale-STATUS action never got. Sales.tsx records a
+// status change with `undo_payload: {}` (actionHistory.ts's default), and
+// resolveUndoApplier({}) returns null, so that row's Undo transitions the
+// history entry and moves nothing -- the button lies. An action that MOVED
+// STOCK must not repeat that, so this one carries a real payload and a real
+// applier, and the pure test proves the applier reverses both the line and
+// its stock.
+//
+// Payload shape: { applier: 'sale.add_items', snapshot_id }. The reversal is
+// unbounded in line count (up to 50 lines, each with its own lot takes) and
+// action_history's payload is a 20 KB column, so it lives in undo_snapshots
+// exactly like the merge appliers above.
+//
+// UNDO returns the units to the SAME lots the addition drew from, in reverse
+// draw order, as new 'return' movements (never by editing the original
+// movements), deletes the added sale_items and their allocation rows, and
+// restores the sale's money columns from the snapshot's moneyBefore.
+// REDO re-inserts the same lines through the SAME production planner
+// (planSaleLineAddition -- no second copy of the deduction SQL), drawing the
+// exact lots recorded rather than re-running FIFO, then restores moneyAfter.
+// The new sale_item ids are written back into the snapshot so the next undo
+// deletes the rows that actually exist.
+// ---------------------------------------------------------------------------
+
+export async function recordSaleAddItemsUndoSnapshot(
+  env: Env,
+  user: SessionUser | null,
+  reversal: SaleAddItemsReversal,
+): Promise<{ snapshotId: number; actionHistoryId: number } | null> {
+  if (!reversal || !(Number(reversal.saleId) > 0) || !Array.isArray(reversal.lines) || !reversal.lines.length) return null
+  const db = getDb(env)
+  const snap = await db.prepare(`
+    INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
+    VALUES ('sale.add_items', 'applied', @payload, @byId, @byName)
+  `).run({ payload: JSON.stringify(reversal), byId: user?.id ?? null, byName: user?.name ?? null })
+  const snapshotId = Number(snap.lastInsertRowid ?? 0)
+  const payload = JSON.stringify({ applier: 'sale.add_items', snapshot_id: snapshotId })
+  const saleLabel = reversal.receiptNumber || `#${reversal.saleId}`
+  const lineCount = reversal.lines.length
+  const hist = await db.prepare(`
+    INSERT INTO action_history (
+      scope, entity, entity_id, label, undo_label, redo_label, reversible, status,
+      undo_payload, redo_payload, created_by_id, created_by_name
+    ) VALUES ('sales', 'sale', @entityId, @label, @undoLabel, @redoLabel, 1, 'undoable',
+              @payload, @payload, @byId, @byName)
+  `).run({
+    entityId: String(reversal.saleId),
+    label: `Added ${lineCount} item${lineCount === 1 ? '' : 's'} to sale ${saleLabel}`,
+    undoLabel: `Undo items added to sale ${saleLabel}`,
+    redoLabel: `Redo items added to sale ${saleLabel}`,
+    payload,
+    byId: user?.id ?? null,
+    byName: user?.name ?? null,
+  })
+  return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
+}
+
 const APPLIERS: Record<string, UndoApplierDef> = {
+  // Payload shape: { applier: 'sale.add_items', snapshot_id }. Undo and redo
+  // payloads are identical; the applier is direction-aware and the reversal
+  // (the added lines, their exact lot takes, and both money snapshots) lives
+  // in undo_snapshots[snapshot_id]. See recordSaleAddItemsUndoSnapshot above
+  // for why this action needed a REAL payload instead of the `{}` the sale
+  // status action records.
+  //
+  // Gated by the SAME granular action as the live route (sales ->
+  // add_items), full tier, at record and operate time.
+  'sale.add_items': {
+    permission: 'sales',
+    action: 'add_items',
+    run: async (payload, ctx) => {
+      const db = getDb(ctx.env)
+      const snapshotId = Number(payload.snapshot_id || 0)
+      if (!Number.isInteger(snapshotId) || snapshotId <= 0) {
+        throw new Error('These added items cannot be replayed: their saved snapshot reference is missing.')
+      }
+      const snap = await db
+        .prepare('SELECT id, status, payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
+        .get<{ id: number; status: string; payload_json: string }>([snapshotId, 'sale.add_items'])
+      if (!snap) throw new Error('The saved details for these added items are no longer available, so they cannot be reversed.')
+      let reversal: SaleAddItemsReversal
+      try {
+        reversal = JSON.parse(snap.payload_json) as SaleAddItemsReversal
+      } catch (_) {
+        throw new Error('The saved details for these added items are unreadable, so they cannot be reversed.')
+      }
+      const saleId = Number(reversal.saleId || 0)
+      const sale = await db.prepare('SELECT id, sale_status FROM sales WHERE id = ?').get<{ id: number; sale_status: string | null }>([saleId])
+      if (!sale) throw new Error('The sale these items were added to no longer exists, so this cannot be reversed.')
+      // The stock arithmetic recorded in the snapshot is only true for the
+      // status the sale was in when the line was added -- a sale that has
+      // since been cancelled has already had these units restored by the
+      // cancellation, and undoing here would add them a second time.
+      if (String(sale.sale_status || 'completed') !== String(reversal.saleStatus)) {
+        throw new Error("This sale's status changed after the items were added, so this can no longer be undone safely. Adjust the sale directly instead.")
+      }
+
+      if (ctx.direction === 'undo') {
+        if (String(snap.status) !== 'applied') throw new Error('These added items have already been removed.')
+        const removal = planSaleLineRemoval({
+          saleId,
+          lines: reversal.lines || [],
+          reason: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
+          userId: ctx.user?.id ?? null,
+          userName: ctx.user?.name ?? null,
+        })
+        await db.batch([...removal.statements, saleMoneyUpdateStatement(saleId, reversal.moneyBefore)])
+        await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
+      } else {
+        if (String(snap.status) !== 'reversed') throw new Error('These items are already on the sale; there is nothing to redo.')
+        // Re-add through the SAME production planner, drawing the exact lots
+        // the original addition drew from (plannedLineFromRecord) rather than
+        // re-running FIFO -- undo put those units back into those lots, so
+        // they are the right ones, and the strict decrement aborts the redo
+        // if a concurrent sale has since taken them.
+        const lines = (reversal.lines || []).map(plannedLineFromRecord)
+        const plan = planSaleLineAddition({
+          saleId,
+          saleStatus: reversal.saleStatus,
+          lines,
+          exchangeRate: Number(reversal.exchangeRate) || 4100,
+          userId: ctx.user?.id ?? null,
+          userName: ctx.user?.name ?? null,
+        })
+        const results = await db.batch([...plan.statements, saleMoneyUpdateStatement(saleId, reversal.moneyAfter)]) as Array<{ meta?: { last_row_id?: number } }>
+        const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
+          const statementIndex = plan.saleItemStatementIndexByLine[lineIndex]
+          return Number(results[statementIndex]?.meta?.last_row_id || 0) || null
+        })
+        const allocationStatements = buildAllocationStatements(plan.lines, saleItemIdByLine)
+        if (allocationStatements.length) {
+          try { await db.batch(allocationStatements) } catch (allocationError) {
+            console.error('[undo] sale.add_items redo: allocation rows failed (stock already moved correctly)', allocationError)
+          }
+        }
+        // The re-inserted rows have NEW ids -- persist them so a later undo
+        // deletes the rows that actually exist, not the ones this redo
+        // replaced.
+        const nextReversal: SaleAddItemsReversal = {
+          ...reversal,
+          lines: (reversal.lines || []).map((line, lineIndex) => ({
+            ...line,
+            saleItemId: Number(saleItemIdByLine[lineIndex] || 0) || line.saleItemId,
+          })),
+        }
+        await db.prepare("UPDATE undo_snapshots SET payload_json = @payload, status = 'applied', updated_at = CURRENT_TIMESTAMP WHERE id = @id")
+          .run({ payload: JSON.stringify(nextReversal), id: snapshotId })
+      }
+
+      await audit(
+        ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+        ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
+        'sale', saleId,
+        { via: 'undo_applier', applier: 'sale.add_items', lines: (reversal.lines || []).length },
+      )
+      await broadcast(ctx.env, 'sales', { action: 'update', id: saleId })
+      await broadcast(ctx.env, 'products', { action: 'update' })
+      await broadcast(ctx.env, 'inventory', { action: 'update' })
+    },
+  },
   // Payload shape: { applier: 'branch.update', id, fields: { name, location,
   // phone, manager, notes, is_default, is_active } }. The undo_payload carries
   // the PRE-edit field values and the redo_payload the POST-edit values, so the

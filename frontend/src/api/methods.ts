@@ -1401,6 +1401,12 @@ export const updateSaleStatus = async (id, sale_status, notes, extra) => {
   return updateSaleStatusRequest(id, sale_status, notes, extra)
 }
 
+// ─── Add items to a recorded sale (S4-24b) ────────────────────────────────────
+export const addSaleItems = async (id, items, notes) => {
+  const { addSaleItems: addSaleItemsRequest } = await loadSalesTransport()
+  return addSaleItemsRequest(id, items, notes)
+}
+
 // ─── Sales export ─────────────────────────────────────────────────────────────
 export const attachSaleCustomer = async (id, payload) => {
   const { attachSaleCustomer: attachSaleCustomerRequest } = await loadSalesTransport()

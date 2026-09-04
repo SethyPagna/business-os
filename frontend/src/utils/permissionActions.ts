@@ -222,6 +222,12 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', review: 'block' },
     { key: 'status', tKey: 'perm_act_sales_status', label: 'Change or cancel sale status', review: 'block' },
     { key: 'customer', tKey: 'perm_act_sales_customer', label: 'Change linked customer', review: 'block' },
+    // S4-24b: POST /:id/items -> 403 unless FULL (sales.ts). Adding goods to
+    // a recorded sale moves stock and raises what the customer owes, so it
+    // gets its own switch rather than riding the coarse 'sales' grant or
+    // being folded into `status`, and it can never be queued for review --
+    // the stock movement is immediate.
+    { key: 'add_items', tKey: 'perm_act_sales_add_items', label: 'Add items to a recorded sale', review: 'block' },
   ],
 
   promotions: [

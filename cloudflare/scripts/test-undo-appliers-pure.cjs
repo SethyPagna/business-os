@@ -97,6 +97,17 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   // getPermissionTier); the source-lock checks below read the real source, so
   // these stubs only need to let the module load.
   if (id === './permissions') return { getActionTier: () => 'full', getPermissionTier: () => 'full' }
+  // S4-24b: the 'sale.add_items' applier's planners. This file exercises the
+  // branch/merge appliers only, so these stubs exist to let the module load;
+  // the real planners are driven against a live schema by
+  // test-sale-add-items-pure.cjs, which is where that applier is proved.
+  if (id === './saleLineAddition') return {
+    buildAllocationStatements: () => [],
+    planSaleLineAddition: () => ({ lines: [], statements: [], saleItemStatementIndexByLine: [], deductions: [], deductedUnits: 0, addedSubtotalUsd: 0 }),
+    planSaleLineRemoval: () => ({ statements: [], restoredUnits: 0 }),
+    plannedLineFromRecord: (record) => record,
+    saleMoneyUpdateStatement: () => ({ sql: 'SELECT 1', params: {} }),
+  }
   return require(id)
 })
 const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable } = undoAppliers

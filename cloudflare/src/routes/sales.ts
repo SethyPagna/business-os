@@ -15,6 +15,21 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
+// S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
+// a line, how much stock moves, which lots, what happens to the totals) are
+// all in this one pure module so a test can drive them directly -- see
+// POST /:id/items below and scripts/test-sale-add-items-pure.cjs.
+import {
+  allocateNewSaleLines,
+  buildAllocationStatements,
+  guardSaleLineAddition,
+  planSaleLineAddition,
+  recomputeSaleMoneyAfterLineChange,
+  saleMoneyUpdateStatement,
+  saleStatusDeductsStock,
+  type SaleMoneyRow,
+} from '../lib/saleLineAddition'
+import { recordSaleAddItemsUndoSnapshot } from '../lib/undoAppliers'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -1448,6 +1463,347 @@ app.patch('/:id/customer', async (c) => {
     customer: customer
       ? { id: customer.id, name: customer.name || null, membership_number: customer.membership_number || null, phone: customer.phone || null, address: customer.address || null }
       : null,
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/sales/:id/items -- add product lines to a sale that already
+// exists (S4-24b).
+//
+// Until now the Sales page could change a sale's status, its customer and
+// its membership, but never its CONTENTS: a customer who asked for one more
+// item right after paying had to be rung up as a second, unrelated sale.
+//
+// Every rule this endpoint applies -- which statuses accept a line, how many
+// units leave the shelf, which lots they come from, and what happens to the
+// totals -- lives in lib/saleLineAddition.ts, which a pure test drives
+// against a real in-memory schema (scripts/test-sale-add-items-pure.cjs).
+// This handler is the I/O around it: gate, read, plan, one atomic batch,
+// bookkeeping, undo record.
+//
+// It deliberately does NOT touch the PATCH /:id/status handler above or its
+// transition planner -- a line added here is a NEW held quantity, computed
+// by the same heldQuantity() invariant that route moves stock by, not a
+// status change.
+//
+// PERMISSION (decision 5): the granular `sales -> add_items` action at FULL
+// tier, server-side. Adding goods to a recorded sale moves stock and raises
+// what the customer owes, so it is not covered by the coarse 'sales' grant
+// (a view-tier bookkeeper must not reach it) and it is not the same act as
+// changing a status, so it is not folded into `sales.status` either. The
+// undo applier declares the identical permission+action, so a replay cannot
+// be the one path that writes this section more loosely than the route.
+//
+// NOT BUILT here, on purpose: damaged-lot sourcing (POST /'s damaged_lot_id
+// path), per-line manual/product discounts, and membership point redemption
+// against the added line. Each is its own money rule and none of them has a
+// place to be entered on this surface yet.
+app.post('/:id/items', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'add_items') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+
+  const id = c.req.param('id')
+  const body = await c.req.json<{
+    items?: Array<{
+      product_id?: number
+      id?: number
+      quantity?: number
+      applied_price_usd?: number
+      branch_id?: number
+      batch_id?: number | null
+      batch_label?: string | null
+      batch_expiry_date?: string | null
+    }>
+    notes?: string
+    [key: string]: unknown
+  }>().catch(() => ({} as Record<string, unknown>))
+
+  const rawItems = Array.isArray(body.items) ? body.items : []
+  if (!rawItems.length) return c.json({ error: 'Sale items required' }, 400)
+  // Bounded so one request cannot build a D1 batch of unbounded size; the
+  // POS cart itself is the place for a large order.
+  if (rawItems.length > 50) return c.json({ error: 'Add at most 50 lines at a time.' }, 400)
+
+  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown> & {
+    id: number
+    sale_status: string | null
+    updated_at: string | null
+    branch_id: number | null
+    receipt_number: string | null
+  }>([id])
+  if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  try {
+    assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
+  } catch (error) {
+    if (error instanceof WriteConflictError) {
+      const { body: conflictBody, status } = writeConflictResponse(error)
+      return c.json(conflictBody, status)
+    }
+    throw error
+  }
+
+  const saleId = Number(sale.id)
+  const saleStatus = String(sale.sale_status || 'completed')
+
+  // A sale can carry real return records while its status row says something
+  // else (imported/legacy rows), so the guard is given the evidence, not
+  // just the label -- see guardSaleLineAddition's own comment.
+  const returnedRow = await db.prepare(`
+    SELECT 1 AS found FROM return_items ri
+    JOIN returns r ON r.id = ri.return_id
+    WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled'
+    LIMIT 1
+  `).get<{ found: number }>([saleId])
+  const guard = guardSaleLineAddition(saleStatus, !!returnedRow)
+  if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // ---- Normalize (no DB access yet), same shape as POST /'s step 1 ----
+  const requested: Array<{
+    productId: number
+    quantity: number
+    branchId: number | null
+    appliedPriceUsd: number | null
+    batchId: number | null
+    batchLabel: string | null
+    batchExpiryDate: string | null
+  }> = []
+  for (let index = 0; index < rawItems.length; index += 1) {
+    const item = rawItems[index] || {}
+    const productId = Number(item.product_id || item.id)
+    if (!Number.isFinite(productId) || productId <= 0) {
+      return c.json({ error: `Added item #${index + 1} is missing a product` }, 400)
+    }
+    const quantity = Number(item.quantity)
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return c.json({ error: `Added item #${index + 1} has an invalid quantity` }, 400)
+    }
+    const rawPrice = Number(item.applied_price_usd)
+    requested.push({
+      productId,
+      quantity,
+      // A line inherits the sale's branch unless it names its own, exactly
+      // as a checkout line does -- the stock has to come off the shelf the
+      // sale was rung up at.
+      branchId: Number(item.branch_id || sale.branch_id) || null,
+      appliedPriceUsd: Number.isFinite(rawPrice) && rawPrice >= 0 && item.applied_price_usd !== undefined && item.applied_price_usd !== null
+        ? rawPrice
+        : null,
+      batchId: Number(item.batch_id) || null,
+      batchLabel: item.batch_label ? String(item.batch_label) : null,
+      batchExpiryDate: item.batch_expiry_date ? String(item.batch_expiry_date) : null,
+    })
+  }
+
+  // ---- Current prices/costs, chunked for D1's parameter ceiling ----
+  const productIds = [...new Set(requested.map((item) => item.productId))]
+  const products = await selectInChunks(productIds, 0, (chunk) => db
+    .prepare(`SELECT id, name, selling_price_usd, cost_price_usd, cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
+  const productMap = new Map(products.map((product) => [product.id, product]))
+  for (const item of requested) {
+    if (!productMap.has(item.productId)) {
+      return c.json({ error: `Product #${item.productId} no longer exists.` }, 400)
+    }
+  }
+
+  const deductsStock = saleStatusDeductsStock(saleStatus)
+
+  // ---- Plan the lines: FIFO lots first (the checkout's own rule, called) --
+  const lotsByKey = await readFifoLotAvailabilityForCart(
+    db,
+    requested
+      .filter((item) => item.branchId)
+      .map((item) => ({ productId: item.productId, branchId: item.branchId as number })),
+  )
+  const planned = allocateNewSaleLines(
+    requested.map((item) => {
+      const product = productMap.get(item.productId)
+      return {
+        productId: item.productId,
+        productName: product?.name || `product #${item.productId}`,
+        quantity: item.quantity,
+        branchId: item.branchId,
+        unitPriceUsd: item.appliedPriceUsd ?? Number(product?.selling_price_usd || 0),
+        costPriceUsd: Number(product?.cost_price_usd || 0),
+        costPriceKhr: Number(product?.cost_price_khr || 0),
+        batchId: item.batchId,
+        batchLabel: item.batchLabel,
+        batchExpiryDate: item.batchExpiryDate,
+      }
+    }),
+    lotsByKey,
+    saleStatus,
+  )
+
+  const exchangeRate = Number(sale.exchange_rate) || 4100
+  const plan = planSaleLineAddition({
+    saleId,
+    saleStatus,
+    lines: planned,
+    exchangeRate,
+    userId: user?.id ?? null,
+    userName: user?.name ?? null,
+  })
+
+  // ---- Pre-flight availability, plain reads, exactly like POST /'s step 2:
+  // D1's batch() is atomic but cannot branch mid-batch, so a shortage has to
+  // be reported before the write is built. The CHECK(quantity >= 0)
+  // constraints below remain the real race guard. ----
+  if (plan.deductions.length) {
+    const branchIds = [...new Set(plan.deductions.map((entry) => entry.branch_id))]
+    for (const branchId of branchIds) {
+      const idsForBranch = [...new Set(plan.deductions.filter((entry) => entry.branch_id === branchId).map((entry) => entry.product_id))]
+      const rows = await selectInChunks(idsForBranch, 1, (chunk) => db
+        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+        .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
+      const available = new Map(rows.map((row) => [row.product_id, row.quantity]))
+      for (const entry of plan.deductions.filter((item) => item.branch_id === branchId)) {
+        const have = available.get(entry.product_id) || 0
+        if (entry.quantity > have) {
+          const name = productMap.get(entry.product_id)?.name || `product #${entry.product_id}`
+          return c.json({ error: `Insufficient stock for ${name}: requested ${entry.quantity}, available ${have}` }, 409)
+        }
+      }
+    }
+  }
+
+  // ---- Totals (decision 3). Subtotal is re-summed from the sale's OWN
+  // lines rather than added onto the stored column, so a row whose stored
+  // subtotal had drifted is corrected instead of carrying the drift; every
+  // other money field is frozen. See lib/saleLineAddition.ts. ----
+  const existingSubtotalRow = await db
+    .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
+    .get<{ subtotal: number }>([saleId])
+  const changeRateRow = await db.prepare(
+    `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
+  ).get<{ value: string }>()
+  const money = recomputeSaleMoneyAfterLineChange({
+    sale: sale as SaleMoneyRow,
+    subtotalUsd: (Number(existingSubtotalRow?.subtotal) || 0) + plan.addedSubtotalUsd,
+    changeExchangeRate: changeRateRow?.value,
+  })
+  const moneyBefore = {
+    subtotal_usd: Number(sale.subtotal_usd) || 0,
+    subtotal_khr: Number(sale.subtotal_khr) || 0,
+    total_usd: Number(sale.total_usd) || 0,
+    total_khr: Number(sale.total_khr) || 0,
+    change_usd: Number(sale.change_usd) || 0,
+    change_khr: Number(sale.change_khr) || 0,
+  }
+  const moneyAfter = {
+    subtotal_usd: money.subtotalUsd,
+    subtotal_khr: money.subtotalKhr,
+    total_usd: money.totalUsd,
+    total_khr: money.totalKhr,
+    change_usd: money.changeUsd,
+    change_khr: money.changeKhr,
+  }
+
+  // ---- One atomic batch: the new lines, their stock, and the sale's money.
+  // Deliberately ONE unit -- a committed line whose sale header still shows
+  // the old total is precisely the inconsistency this endpoint must not be
+  // able to produce. ----
+  let batchResults: Array<{ meta?: { last_row_id?: number } }> = []
+  try {
+    batchResults = await db.batch([...plan.statements, saleMoneyUpdateStatement(saleId, moneyAfter)]) as typeof batchResults
+  } catch (error) {
+    const message = (error as Error).message || ''
+    if (/CHECK constraint|constraint failed/i.test(message)) {
+      return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
+    }
+    return c.json({ error: `Failed to add sale items: ${message}` }, 500)
+  }
+
+  const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
+    const statementIndex = plan.saleItemStatementIndexByLine[lineIndex]
+    return Number(batchResults[statementIndex]?.meta?.last_row_id || 0) || null
+  })
+
+  // Lot attribution, same second non-atomic pass as POST /: stock is already
+  // correctly moved above (that only needed batch_id/branch_id, known up
+  // front); this is bookkeeping for reporting and returns, so a failure is
+  // logged rather than rolling back a correct stock movement.
+  const allocationStatements = buildAllocationStatements(plan.lines, saleItemIdByLine)
+  if (allocationStatements.length) {
+    try {
+      await db.batch(allocationStatements)
+    } catch (allocationError) {
+      console.error('[sales] failed to record sale_item_batch_allocations for added lines (stock already moved correctly)', allocationError)
+    }
+  }
+
+  // ---- Undo (decision 4). A REAL payload and a real applier: the
+  // sale-status action records `{}`, and resolveUndoApplier({}) returns
+  // null, so its Undo button transitions the history row and changes
+  // nothing. This one stores the added lines with the exact lots they drew
+  // from and both money snapshots, and lib/undoAppliers.ts's
+  // 'sale.add_items' replays it server-side -- reload-durable, and it moves
+  // the stock back into the same lots. ----
+  let undoActionId: number | null = null
+  try {
+    const recorded = await recordSaleAddItemsUndoSnapshot(c.env, user ?? null, {
+      saleId,
+      receiptNumber: sale.receipt_number || null,
+      saleStatus,
+      exchangeRate,
+      moneyBefore,
+      moneyAfter,
+      lines: plan.lines.map((line, lineIndex) => ({
+        saleItemId: Number(saleItemIdByLine[lineIndex] || 0),
+        productId: line.productId,
+        productName: line.productName,
+        quantity: line.quantity,
+        branchId: line.branchId,
+        heldUnits: line.heldUnits,
+        unitPriceUsd: line.unitPriceUsd,
+        lineTotalUsd: line.lineTotalUsd,
+        costPriceUsd: line.costPriceUsd,
+        costPriceKhr: line.costPriceKhr,
+        takes: line.takes,
+      })).filter((line) => line.saleItemId > 0),
+    })
+    undoActionId = recorded?.actionHistoryId ?? null
+  } catch (undoError) {
+    // A missing history row must never fail an otherwise-correct sale write.
+    console.error('[sales] failed to record the add-items undo snapshot', undoError)
+  }
+
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', saleId, {
+    action: 'add_items',
+    receipt_number: sale.receipt_number || null,
+    sale_status: saleStatus,
+    lines: plan.lines.length,
+    units_deducted: plan.deductedUnits,
+    subtotal_before: moneyBefore.subtotal_usd,
+    subtotal_after: moneyAfter.subtotal_usd,
+    total_before: moneyBefore.total_usd,
+    total_after: moneyAfter.total_usd,
+    notes: String(body.notes || '').trim().slice(0, 500) || null,
+  })
+
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'sales'),
+  ]))
+
+  const updated = await db.prepare('SELECT updated_at FROM sales WHERE id = ?').get<{ updated_at: string }>([saleId])
+  return c.json({
+    id: saleId,
+    receiptNumber: sale.receipt_number || null,
+    saleStatus,
+    addedLines: plan.lines.length,
+    unitsDeducted: plan.deductedUnits,
+    stockMoved: deductsStock,
+    subtotalUsd: moneyAfter.subtotal_usd,
+    totalUsd: moneyAfter.total_usd,
+    totalKhr: moneyAfter.total_khr,
+    outstandingUsd: round2(Math.max(0, moneyAfter.total_usd - (Number(sale.amount_paid_usd) || 0) - (Number(sale.amount_paid_khr) || 0) / exchangeRate)),
+    undoActionId,
+    updated_at: updated?.updated_at || null,
   })
 })
 
