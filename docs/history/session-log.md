@@ -18337,3 +18337,216 @@ Board: `cd3749b7` (the seven-lane table with each boundary), `e4d2c929` (the S4-
 pushed. No code was written in this session's own tree; the lanes report back and are boarded here,
 so the shared index sees one writer.
 
+
+## Part 593 (Sep 4 2026, session business-os-v1-c3, COORDINATOR) — three read-only investigations that each overturned the item that commissioned them, and the revert procedure written out in full and left unrun
+
+Three subagent lanes reported: S4-1 (does Undo reverse the 21:48 batch), S4-19 (find and rename
+RECON), S4-17b (survey the cost-forked twins). Not one of them ended where its board item expected.
+Each is recorded here as **reference to re-verify**, not as ground truth.
+
+### S4-1 — the Undo button is not merely broken, it is misleading
+
+**Verdict: the in-app Undo cannot reverse the 21:48 bulk status change.** Two independent proofs.
+
+1. **Code.** `frontend/src/utils/actionHistory.ts:297` posts `undo_payload: entry.undo_payload || {}`
+   and the bulk caller (`frontend/src/components/sales/Sales.tsx:1218`) passes no payload at all —
+   only live JS closures. `cloudflare/src/lib/undoAppliers.ts:682` resolves the applier off
+   `payload.applier`, so `{}` resolves to `null`. And **no sale-status applier is registered
+   anywhere**: the registry holds `branch.update`, `product.merge`, `product.merge.bulk`,
+   `supplier.backfill` and nothing else, on `e3678a39` and on the current dirty tree alike.
+2. **The stored row.** `action_history` id **160**, `2026-09-03 14:49:05` UTC, Admin, label
+   `Update 9 sales to បានបញ្ចប់`, `reversible=1`, `status='undoable'`, `undo_payload='{}'`.
+
+The dangerous part is the gap between those two facts: the row still renders an Undo affordance.
+With `require_applied` the Worker 409s (`cloudflare/src/routes/actionHistory.ts:271`); **without it,
+the Worker flips `undoable` → `redoable` and changes no data** — recording a reversal that never
+happened and leaving a plausible "Redo" for whoever looks next. That is worse than an inert button,
+and it is why the board now says in as many words: do not press Undo on row 160.
+
+Worth noting for anyone tracing this later: `cloudflare/src/routes/sales.ts` writes **no
+`action_history` rows at all** (grep at `e3678a39`: zero hits). It writes `audit_logs` and
+`inventory_movements`. Row 160 came from the browser, which is exactly why its payload is closures.
+
+**The label lies about the count.** It says 9 sales; **7 changed.** Nine PATCHes returned 200, but
+`sales.ts`'s `oldStatus === saleStatus` early return answers 200 without writing when a sale is
+already in the target status. **Which two were no-ops is unknowable** — a no-op leaves no audit row,
+no movement, and does not touch `updated_at`. The lane checked for hidden rows
+(`sales.updated_at` across 14:40–15:10 UTC) and found exactly the seven, so nothing is concealed;
+there is simply no evidence to identify the other two. Do not guess ids.
+
+The seven, all migrated `20260901-*` receipts, `awaiting_payment → completed`, branch 2:
+16786 (3 units), 16789, 16791, 16795, 16796, 16798, 16801 (1 each) = **9 units**, movements
+46189–46197, each `movement_type='sale'`, `quantity=-1`.
+
+The user's "9:48" is **21:48 local (+07) = 14:48 UTC**, not the morning; the 02:30–03:15 UTC window
+holds one unrelated `delete` movement only.
+
+**Reverting is arithmetically clean, and the lane proved the three things that could have made it
+dirty are absent.** Zero returns exist against any of the seven (`returns ⋈ return_items` → 0 rows),
+so `returnedByItem = 0` and every line restores in full — no double-count is possible. All nine
+`sale_items` carry `batch_id` and `damaged_lot_id` NULL with no `sale_item_batch_allocations`, so
+neither the lot ledger nor `damaged_stock_lots` is touched. And there is a real asymmetry worth
+recording — **the deduct path clamps with `MAX(0, …)` while the restore path adds unconditionally**,
+which would inflate any product whose total had already been clamped to zero — but for all nine
+products `SUM(branch_stock) == products.stock_quantity` exactly, so nothing ever clamped.
+
+**Sale 16834 is not part of this batch**: `awaiting_payment → cancelled` at 15:03 UTC, fourteen
+minutes later, `restoredUnits=0, deductedUnits=0`. Leave it alone.
+
+#### The procedure, written and unrun
+
+Not raw SQL. Raw SQL would have to hand-replicate four tables; the app's own endpoint runs the
+verified kernel atomically per sale.
+
+**Step 0 — baseline, keep the output:**
+
+```sql
+SELECT s.id, s.receipt_number, s.sale_status, si.product_id, si.quantity,
+       bs.quantity AS branch2_qty, p.stock_quantity AS product_total
+FROM sales s
+JOIN sale_items si ON si.sale_id = s.id
+JOIN products p ON p.id = si.product_id
+LEFT JOIN branch_stock bs ON bs.product_id = si.product_id AND bs.branch_id = 2
+WHERE s.id IN (16786,16789,16791,16795,16796,16798,16801)
+ORDER BY s.id, si.id;
+```
+
+Expect **9 rows**, every `sale_status='completed'`.
+
+**Step 1 — the revert**, as Admin, against `PATCH /api/sales/:id/status` for those seven ids with
+`{ "sale_status": "awaiting_payment" }`. Omitting `updated_at` skips the optimistic-concurrency
+check (`conflictControl.ts:43`), so there is no 409 race; no CSRF header is required
+(`frontend/src/api/http.ts:674`). Through the UI instead, **leave the Notes box empty** — an empty
+box still sends `notes:''` and overwrites `sales.notes`, harmless here only because all seven are
+already empty.
+
+**Step 2 — proof:** re-run Step 0 (9 rows, all `awaiting_payment`, each quantity exactly +1 on
+baseline), then confirm **9 movements / +9 units** of `movement_type='return'` with reason
+`completed to awaiting_payment` against those reference ids.
+
+**If it half-applies, nothing is lost.** Each PATCH is one atomic `db.batch` per sale, so a sale is
+either fully reverted or untouched, and **the call is idempotent** — a sale already reverted hits
+the same early return and writes nothing, so a re-run cannot double-restore.
+
+#### Why it has not been run
+
+The user's answer changed the destination: *"i want you to make them status completed without
+changing stock quantity. and make this an option for admins. as i mentioned, we did a recon adjust
+for all products quantities which is the latest for completed sales."* The seven are **already
+`completed`** — so the status is not what is wrong; the nine units are. The end state is reached by
+revert (+9 through the ledger) followed immediately by re-complete with stock skipped (0), which
+needs **S4-2**, which did not exist.
+
+**And the ordering is a hazard, not a preference.** The same backlog asks for `awaiting_payment` to
+hold stock (S4-3). If that ships while these seven sit in `awaiting_payment`, they are deducted
+again — the identical double-count, a second time. So the two steps must be back-to-back, and S4-3
+needs an explicit answer for rows that are *already* awaiting_payment (a one-time backfill, or a
+cutoff), not merely correct behaviour for new ones. `business-os-v1-02 [055499]` was told this.
+
+**S4-2 was reclaimed.** `s4/sales-status` exists neither locally nor on `origin`, and **none of the
+six Sep-4 peer lanes has pushed a branch**, so nobody was building the mechanism the user had just
+named. It went to a subagent on `s4/sales-status-nostock`; `055499` was told directly and keeps
+S4-3/4/5. The requirement most likely to be dropped, and therefore written into the prompt: **a sale
+whose stock was deliberately skipped must be recorded as such**, or it becomes indistinguishable
+from a deduction lost to a bug.
+
+### S4-19 — RECON is 9,921 rows of data, and there is no such label in the code
+
+The lane was commissioned to rename a string. **There is no string.** A sweep of `cloudflare/src`,
+`frontend/src`, both lang packs and the built bundles found **zero** live code emitting or parsing a
+`RECON-` prefix — only the unrelated `RECONCILE` stock-import mode and `RECONNECT_*` networking
+constants. What the user is looking at is **9,921 rows in production `product_batches`**, every one
+`synthetic = 1`, all stamped `created_at = 2026-09-02T15:30:00Z`, carrying
+`lot_code = 'RECON-<productId>'` and `batch_number = 'RECON-<YYYYMMDD>-<productId>'`, written by a
+one-off Sep-2 "Authoritative Item Export" reconciliation script that is a raw SQL dump and **not
+part of the deployed Worker**.
+
+It reaches the screen because `frontend/src/utils/batchLabel.ts`'s `batchDisplayLabel()` renders any
+`lot_code` that is not a pure 8-digit `MMDDYYYY` string verbatim, treating it as a genuine custom lot
+code — so it appears raw in the POS lot picker, `ManageBatchesModal`, `ProductDetailModal`,
+`ReceiveBatchModal`, `StockChangeSection`, `ProductDetailReport`, `ProductRowParts` and
+`TransferModal`.
+
+`cloudflare/migrations/0108_recon_lot_code_to_adj_date.sql` is written, committed on `s4/adj-prefix`
+and **unrun**: `lot_code = 'ADJ' || strftime('%m/%d/%Y', created_at)`, dry-run-verified against
+remote D1 to produce exactly `ADJ09/02/2026`, scoped to `lot_code LIKE 'RECON-%' AND synthetic = 1`
+so it cannot reach a real user lot code.
+
+**This is the value of commissioning the search rather than the rename.** A lane told simply to
+"rename RECON to ADJ" would have found `RECONCILE`, renamed a mode constant, broken the stock-import
+resolver, and left every one of the 9,921 rows still reading RECON on screen.
+
+#### The bug found underneath it (S4-19b)
+
+Those same rows put the `RECON-...` **string** into `batch_number`, a column `nextBatchNumber`
+treats as a per-product counter via `COALESCE(MAX(batch_number),0)+1`. **SQLite orders TEXT above
+INTEGER**, so `MAX()` already returns the RECON text for these products and `+1` coerces it to
+**1** — meaning the next stock-in for any of those 9,921 products silently receives
+`batch_number = 1`, a number very likely already taken. Boarded separately and deliberately not
+fixed here: it is a data-integrity defect, not a cosmetic rename, and it intersects the still-open
+Part 581 lot-identity A/B decision the user has not ruled on.
+
+### S4-17b — the rule the survey was sizing up is already implemented, on an undeployed branch
+
+The lane was to survey same-name/same-barcode rows forked only by cost, ahead of building the new
+merge rule. It found the rule **already built**: `s4/identity-cost` (tip `c730e5be`) makes
+`productDetailSignature` barcode-only and adds `resolveMergedCost()` in
+`cloudflare/src/lib/productDetailRule.ts`, mirrored in `frontend/src/utils/productDetailRule.ts` —
+averaging the **distinct** costs per currency, rounding **up** to 4dp, and treating a cost of **0 as
+"not recorded"** and excluding it from the mean. `POST /api/products/merge-duplicates` already folds
+a duplicate using it, with undo support.
+
+**The survey**, against remote D1, SELECT-only, grouping by `(lower(trim(name)), lower(trim(barcode)))`
+— verified to match the app's own normalization exactly, no product name containing internal double
+spaces: from 8,202 active non-group products, **352 groups / 705 rows** disagree on cost. 351 are
+simple pairs; one has three (`Maybelline Fit Me Powder 110`, ids 4148/9037/9038, all zero stock).
+
+| Category | Groups | Needs |
+|---|---|---|
+| Safe arithmetic (clean costs, stock on ≤1 member) | 21 (43 rows) | average + deactivate |
+| Multi-branch stock, clean costs | 73 | branch-aware fold |
+| Zero / not-recorded cost on ≥1 member | 257 | already resolved by `resolveMergedCost` |
+| Both risks | 1 | both |
+
+All 74 stock-holding groups span **exactly two** branches, never three or more, and the app's
+per-branch `ON CONFLICT(product_id,branch_id) DO UPDATE quantity = quantity + excluded.quantity`
+fold never mixes two branches into one row — it consolidates the catalog entry, it does not move
+physical stock. Cross-references among the 705: 263 appear in `sale_items` (12 of those lines belong
+to `awaiting_payment` sales), **0** in `return_items`, 2 in `stock_transfers`, and **all 705** have
+at least one `product_batches` row (2,045 in total) — so batch folding is unavoidable for every
+group, which is precisely why raw SQL is the wrong tool.
+
+The recommendation is therefore **not** the fallback SQL: ship `s4/identity-cost` and run the
+existing, tested, reversible `merge-duplicates` route per group. A hand-written migration would have
+to reimplement branch-aware stock folding, batch re-pointing by `batch_key`, `sale_items` and
+`inventory_movements` reparenting, image carry-over, the audit row and the undo snapshot — which is
+the "one rule, three implementations, all three disagreed" failure this codebase's own comments warn
+about.
+
+**Four questions only the shop owner can answer** are on the board: whether 0 may ever mean a
+genuinely free item (it drives 73% of the groups); whether two same-name rows with **no** barcode
+merge (`SK-II Facial Treatment Essence 230mL`, 9809/9810); what `Ysl New Item` (10185, no barcode,
+0/0 cost) is; and confirmation that cross-branch consolidation is wanted.
+
+### A migration collision caught before it could matter
+
+The S4-17b lane wrote its fallback as `0099_barcode_only_cost_merge_fallback.sql`. **`0099` is
+already taken** by `0099_legacy_cashier_identity_backfill.sql`, which is applied in production. D1
+tracks applied migrations by **filename**, so a second `0099_*.sql` is read as unapplied and would
+run **out of order, after 0107**. Renumbered to `0109` (`a6f8c71d`), with the reasoning written into
+the file header so the next reader does not undo it.
+
+Verified from production while doing so: **`d1_migrations` tops out at 107**
+(`0107_receipt_numbers_business_format.sql`). Note that **0107 is not in this checkout's
+`migrations/` directory**, which stops at 0106 — another instance of the Part 583 lesson that `main`
+does not describe what is live. 0108 is claimed by S4-19, 0109 by S4-17b, both unrun.
+
+### Both survey branches were unpushed and are now on GitHub
+
+`s4/adj-prefix` (`8e8ca524`) and `s4/cost-merge-survey` (`a6f8c71d`) each held a committed migration
+that existed only inside a worktree on this machine. After Part 583 that is not a theoretical risk:
+work living only in a worktree is one `git worktree remove` from gone. Both pushed.
+
+Board: `49c59659` (S4-1 verdict), `7d640e96` (S4-19 findings, S4-19b, S4-2 reclaimed). No production
+write has been made, and none is authorised.
+
