@@ -253,6 +253,59 @@ the 22 rows need a `notes LIKE` match and an id range. Same system, same need, s
 table and lost in the other. Backfilling `legacy_receipt_number` is not housekeeping; it
 restores to `sales` a capability `inventory_movements` already has.
 
+
+## A third near-miss: `customer_receivables.invoice_no` is not a key
+
+Found Sep 4 2026 while scoping the status flip, prompted by `business-os-v1-ba` noticing a
+duplicate invoice number in passing. **`customer_receivables` has no `sale_id` and no date
+qualifier on `invoice_no`.** Its real identity is `UNIQUE(source_file, legacy_id)`; the
+invoice number is just a copied label, and it recycles hard:
+
+| Measure | Value |
+|---|---|
+| AR rows | 13,304 |
+| Distinct `invoice_no` | 6,807 |
+| Invoice numbers appearing more than once | 4,179 (max 3 copies) |
+| AR rows sharing a number with another row | **10,676 — 80%** |
+
+`sales` solved this with `legacy_receipt_number` = `<invoice>@<YYYY-MM-DD>`. AR never did.
+
+**The flip script correlated on the bare number and was one guard away from being wrong.**
+Its AR statement matched `s.legacy_receipt_number LIKE cr.invoice_no || '@%'` — no date on
+the AR side. Measured against the 82 target sales, that predicate reaches **152 AR rows**:
+the intended 82, plus **70 wrong-year rows totalling $9,809.75** belonging to other
+customers. Every one of those 70 is already `status = 'Paid'`, and the statement's
+`WHERE status <> 'Paid'` filtered all 70 out — so the net effect on today's data was
+exactly the correct 82 rows, $9,754.10 outstanding.
+
+**That is the barcode near-miss again, in a different table.** Benign because of what the
+data happened to contain, not because the key was right. Fixed before first execution:
+the predicate is now an exact match on `cr.invoice_no || '@' || substr(cr.invoice_date,1,10)`,
+verified to select the same 82 rows. Nothing was applied under the loose form.
+
+**Nothing in the Worker joins AR to sales on `invoice_no`** — grepped; the tables are not
+linked in application code at all, so this is confined to migration and reconciliation
+scripts. Any future script that reaches for `invoice_no` alone to tie AR to a sale is
+wrong by default and needs the date, or the row's own `(source_file, legacy_id)`.
+
+## The `partial_return` row, and a column that is empty everywhere
+
+Sale **16671** (`004313@2026-08-25`, ចេ លក់ថ្នាំពេទ្យ, $349) is the only `partial_return`
+in the database — `sales` holds 14,945 completed, 96 awaiting_payment, 3 cancelled, 1
+partial_return. It was excluded from the flip because it is **already fully paid**
+(`amount_paid_usd` = `total_usd` = $349), so there is nothing to settle, and flipping it to
+`completed` would overwrite a return state rather than clear a debt. Its receivable (id 76)
+is already `Paid` with zero outstanding, it has no supplier line, and the flip takes no
+stock either way — the exclusion leaves no dangling reference. **A decision, not an
+unfinished edge.**
+
+Its `sale_items.returned_quantity` sums to 0, which looked like an anomaly and is not:
+that column is **0 on all 36,230 sale_items rows**. It exists only for the sales-import
+path (migration `0059_sale_item_import_return_quantity.sql`), and `routes/sales.ts:1698`
+shadows it with a value derived from `return_items`, so the stored column is never read by
+the API. The real return is recorded where it belongs: sale 16671 has one of the database's
+two `returns` rows. The status is backed by a genuine return record, not set by hand.
+
 ## Sources
 
 Archived under explicit dated names in `Migration from old system/` (untracked):
