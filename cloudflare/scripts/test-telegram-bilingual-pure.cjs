@@ -162,7 +162,16 @@ const LINE_LABEL = /[`'"]([A-Z][A-Za-z ]{1,24}): \$\{/g
 const scanned = []
 for (const rel of ['src/lib/telegram.ts', 'src/routes/sales.ts', 'src/routes/fees.ts']) {
   const source = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8')
-  for (const match of source.matchAll(LINE_LABEL)) scanned.push([rel, match[1]])
+  // Scan line by line so an HTTP error body can be excluded. The 500 returned
+  // by POST /:id/items builds its message with exactly the same shape as a
+  // Telegram line -- a capitalised phrase, a colon, an interpolation -- but it
+  // is an API response that never reaches Telegram, and adding it to
+  // telegramLang.ts would put an HTTP error into the bot vocabulary. Telegram
+  // lines are always pushed onto a lines array; they are never returned as JSON.
+  for (const line of source.split(/\r?\n/)) {
+    if (line.includes('c.json(')) continue
+    for (const match of line.matchAll(LINE_LABEL)) scanned.push([rel, match[1]])
+  }
 }
 const unknownLabels = [...new Set(scanned.filter(([, name]) => !known.has(name)).map(([rel, name]) => `${name} (${rel})`))].sort()
 assert.deepEqual(unknownLabels, [], 'these Telegram line labels have no entry in telegramLang.ts, so they would ship English-only:\n  ' + unknownLabels.join('\n  '))
