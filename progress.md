@@ -2590,6 +2590,40 @@ Consequences for everyone:
 - The rc→main merge still needs a coordinated moment. Until it happens, `main`
   is **not** a superset of production and must not be treated as one.
 
+### Sep-4 round 6 — two items (user, Sep 4 2026; recorded by business-os-v1-c3)
+
+Sent mid-turn, minutes after round 5. Recorded before the work, same standing
+instruction.
+
+**[ ] S4R6-1 · Expenses belong beside the stats on Sales, per day and per
+shift.** Two halves, and the first is a correctness claim, not a layout one:
+*"make sure it is expenses and data shown correctly"* — so the figures get an
+expected-vs-actual check before anything is moved. Then the placement: expenses
+shown **in Sales**, **next to the stats**, broken down **by day**, and for the
+**shift** window (the shift kernel from S4-7 already exists —
+`salesAnalytics.ts` can be asked for a shift, not just a day, so the window
+clause is there to reuse). Ties to S4R5-3: a discount or fee that is wrong in a
+report is wrong here too.
+
+**[ ] S4R6-2 · Sales lists show ALL rows for today by default; "per page"
+becomes a custom Show-all.** Sales, Returns and Expenses each list **everything
+for the current day** on open. The page-size control gains a custom / **Show
+all** option and that is the default. A date range the operator sets overrides
+the current-day default — the "unless" in *"show all for current day... unless
+change in date range"* is the whole rule: once a range is chosen it wins, and
+the list is not silently re-clamped back to today.
+
+Two things to watch when building it, neither of which the ask has to say:
+
+- **Show-all is unbounded by definition**, and this database has ~15,000 sales.
+  Today's rows are a safe set; a widened date range with Show-all still on is
+  not. Whatever ships has to stay inside D1's CPU limit for the widest range a
+  person can actually pick, so the keyset cursor in `routes/sales.ts` stays the
+  transport even when the UI says "all".
+- The current-day default must use the **business day** (+7), the same offset
+  every report uses, or the till and the report disagree about what "today" is
+  for the first and last hours of it.
+
 ### Sep-4 round 5 — four items (user, Sep 4 2026; recorded by business-os-v1-c3)
 
 Sent mid-turn during the lane reconciliation, with a photograph of a real
