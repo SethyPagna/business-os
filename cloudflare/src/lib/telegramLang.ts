@@ -180,6 +180,31 @@ const LABELS = {
   // explicitly is not one.
   unpaidCredit: { en: 'Unpaid credit', km: 'ឥណទានមិនទាន់បង់' },
   paymentMethod: { en: 'Payment method', km: 'វិធីទូទាត់' },
+
+  // --- shift report, the fuller breakdown (owner, Sep 4 2026: "proper
+  // detailed summary breakdowns of each aspects") ---------------------------
+  //
+  // Measured against what the Reports hub already carries for the same admin
+  // audience, the shift message was missing the tax, the returns money, the
+  // average sale, the two halves of the invoice discount, and everything about
+  // what a delivery COST as opposed to what it charged. Every Khmer below is
+  // copied from km.json (test-telegram-bilingual-pure.cjs re-checks it):
+  // store/membership discount from the reports' own column headers, 'Avg order
+  // value' from `avg_order_value`, 'Profit' from `profit`, 'Delivery fee' from
+  // `delivery_fee`, 'Delivery margin' from the delivery-margin column. Tax and
+  // Refund needed no new entry -- they already exist above, for the receipt
+  // and the returns message, and reusing them is the point of one table.
+  storeDiscount: { en: 'Store discount', km: 'បញ្ចុះតម្លៃហាង' },
+  membershipDiscount: { en: 'Membership discount', km: 'បញ្ចុះតម្លៃសមាជិក' },
+  avgOrderValue: { en: 'Avg order value', km: 'ទឹកប្រាក់មធ្យម/វិក្កយបត្រ' },
+  // 'Cost of goods' has no pack entry; the compound is built on the pack's
+  // canonical ថ្លៃដើម for cost (the retail glossary's rival, តម្លៃដើម, is
+  // what the rival-spelling check refuses).
+  costOfGoods: { en: 'Cost of goods', km: 'ថ្លៃដើមទំនិញ' },
+  profit: { en: 'Profit', km: 'ចំណេញ' },
+  deliveryFee: { en: 'Delivery fee', km: 'ថ្លៃដឹក' },
+  deliveryCost: { en: 'Delivery cost', km: 'ថ្លៃដើមដឹកជញ្ជូន' },
+  deliveryMargin: { en: 'Delivery margin', km: 'ចំណេញដឹកជញ្ជូន' },
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS

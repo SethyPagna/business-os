@@ -52,6 +52,12 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
+// saleTotals is a pure module with no imports of its own, so it is loaded for
+// real rather than stubbed. telegram.ts does not import it on this branch, but
+// the receipt lane adds that import (a shop-absorbed delivery fee must not be
+// billed into the alert Total); a stub returning a plausible shape would let
+// that regress invisibly, and a missing key makes loadReal throw on merge.
+const saleTotals = loadReal('lib/saleTotals.ts')
 const lang = loadReal('lib/telegramLang.ts')
 // lib/telegram.ts asks lib/saleTotals.ts who was billed for a delivery fee,
 // so the message and the stored total_usd cannot disagree about it. Loaded
@@ -96,7 +102,19 @@ const FIGURES = {
   revenueUsd: 210,
   itemDiscountUsd: 5,
   invoiceDiscountUsd: 3,
+  // The two halves of the invoice discount, which must add up to it.
+  storeDiscountUsd: 2,
+  membershipDiscountUsd: 1,
   grossSaleUsd: 218,
+  taxUsd: 7,
+  refundUsd: 12,
+  avgOrderUsd: 17.5,
+  costUsd: 120,
+  profitUsd: 93,
+  deliveryFeeUsd: 6,
+  deliveryCostUsd: 3.5,
+  deliveryMarginUsd: 2.5,
+  deliveryCostRecorded: 2,
   creditUsd: 18,
   otherExpenseUsd: 4,
   otherExpenseKhr: 0,
@@ -106,7 +124,7 @@ const FIGURES = {
     { method: 'ABA', count: 3, collectedUsd: 30 },
   ],
   deliveryServices: [
-    { name: 'Vireak Buntham', deliveries: 2, chargedUsd: 6 },
+    { name: 'Vireak Buntham', deliveries: 2, chargedUsd: 6, costUsd: 3.5, marginUsd: 2.5, costRecorded: 2 },
   ],
 }
 
@@ -172,6 +190,81 @@ assert.ok(/100,?000\s?៛/.test(valueOf('Registered cash')), `registered cash lo
 assert.equal(valueOf('From'), '04/09/2026 08:15')
 assert.equal(valueOf('To'), '04/09/2026 17:02')
 console.log('PASS figures: money, both currencies, and dd/mm/yyyy 24-hour local times')
+
+// --- 3b. the fuller breakdown ------------------------------------------------
+// The owner, Sep 4 2026: "proper detailed summary breakdowns of each aspects".
+// Measured against what the Reports hub carries for the same admin audience,
+// this message was missing the tax, the returns money, the average sale, the
+// SPLIT of the invoice discount, and everything about what a delivery cost as
+// opposed to what it charged. Each of those is asserted on its value AND on
+// its position, because a figure printed in the wrong place is read as the
+// wrong figure.
+
+// Indented component lines (5 spaces) are found separately: they belong to the
+// line above them, which is the whole reason they are indented.
+const componentLine = (english) => {
+  const found = lines.find((line) => line.trimStart().startsWith(`${english}${SEP}`) && line.startsWith('     '))
+  assert.ok(found, `no indented "${english}" component line:\n${report}`)
+  return found
+}
+const indexOfLine = (english) => lines.findIndex((line) => line.trimStart().startsWith(`${english}${SEP}`))
+
+assert.equal(valueOf('Tax'), '$7.00')
+assert.equal(valueOf('Refund'), '$12.00')
+assert.equal(valueOf('Avg order value'), '$17.50')
+assert.equal(valueOf('Cost of goods'), '$120.00')
+assert.equal(valueOf('Profit'), '$93.00')
+assert.equal(valueOf('Delivery fee'), '$6.00')
+
+// The discount split sits UNDER the sum it explains, indented, and the two
+// halves actually add up to it -- a split that does not reconcile is worse
+// than no split.
+assert.ok(componentLine('Store discount').endsWith(': $2.00'))
+assert.ok(componentLine('Membership discount').endsWith(': $1.00'))
+assert.equal(FIGURES.storeDiscountUsd + FIGURES.membershipDiscountUsd, FIGURES.invoiceDiscountUsd)
+assert.ok(indexOfLine('Store discount') === indexOfLine('Invoice discount') + 1
+  && indexOfLine('Membership discount') === indexOfLine('Invoice discount') + 2,
+  `the discount split must sit directly under the invoice discount:\n${report}`)
+
+// Delivery cost and margin sit under the fee, and the margin is the
+// subtraction it claims to be.
+assert.ok(componentLine('Delivery cost').endsWith(': $3.50'))
+assert.ok(componentLine('Delivery margin').endsWith(': $2.50'))
+assert.equal(Math.round((FIGURES.deliveryFeeUsd - FIGURES.deliveryCostUsd) * 100) / 100, FIGURES.deliveryMarginUsd)
+assert.ok(indexOfLine('Delivery cost') === indexOfLine('Delivery fee') + 1,
+  'the courier cost must sit directly under the fee it is deducted from')
+
+// Every indented component line is bilingual too -- the loop in section 2
+// deliberately skips them, so without this they could ship English-only.
+for (const line of lines.filter((entry) => entry.startsWith('     ') && entry.includes(': '))) {
+  const labelPart = line.trimStart().slice(0, line.trimStart().indexOf(': '))
+  assert.ok(KHMER.test(labelPart) && labelPart.includes(SEP), `component label "${labelPart}" is not a bilingual pair`)
+}
+
+// A courier's own row carries the same three parts as arithmetic.
+const courierLine = lines.find((line) => line.startsWith('• Vireak Buntham'))
+assert.ok(courierLine.endsWith('2 · $6.00 − $3.50 = $2.50'), `the courier row lost its cost and margin: ${courierLine}`)
+
+// THE HONESTY RULE. delivery_actual_cost_usd is NULL when nothing was
+// recorded, never 0 -- so a shift whose deliveries recorded no courier cost
+// must print NEITHER a $0.00 cost NOR the margin that would follow from it,
+// which would read as "delivery was free" and inflate the apparent margin to
+// the whole fee. Measured Sep 4 2026: 12 of 15,044 sales carry a cost, so
+// this is the COMMON case, not the edge one.
+const noCost = telegram.formatShiftReport('Shop', CLOSED, {
+  ...FIGURES,
+  deliveryCostUsd: 0,
+  deliveryMarginUsd: 6,
+  deliveryCostRecorded: 0,
+  deliveryServices: [{ name: 'Vireak Buntham', deliveries: 2, chargedUsd: 6, costUsd: 0, marginUsd: 6, costRecorded: 0 }],
+}, NOW)
+assert.ok(!noCost.includes('Delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
+assert.ok(!noCost.includes('Delivery margin'), 'and must not print the margin that a missing cost would invent')
+assert.ok(noCost.split('\n').some((line) => line.startsWith(`Delivery fee${SEP}`) && line.endsWith(': $6.00')),
+  'the charged fee is still reported')
+assert.ok(noCost.split('\n').find((line) => line.startsWith('• Vireak Buntham')).endsWith('2 · $6.00'),
+  'and the courier row falls back to the charged figure alone')
+console.log('PASS breakdown: tax, refund, avg order, cost, profit, the discount split and the three delivery parts -- each in its place, and no invented margin')
 
 // --- 4. the final amount is what the lines under it say it is ---------------
 
@@ -265,6 +358,9 @@ console.log('PASS breakdowns: payment methods then delivery services; empty ones
 const empty = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 50, closing_counted_khr: 100000 }, {
   invoices: 0, cancelled: 0, edited: 0,
   revenueUsd: 0, itemDiscountUsd: 0, invoiceDiscountUsd: 0, grossSaleUsd: 0,
+  storeDiscountUsd: 0, membershipDiscountUsd: 0,
+  taxUsd: 0, refundUsd: 0, avgOrderUsd: 0, costUsd: 0, profitUsd: 0,
+  deliveryFeeUsd: 0, deliveryCostUsd: 0, deliveryMarginUsd: 0, deliveryCostRecorded: 0,
   creditUsd: 0, otherExpenseUsd: 0, otherExpenseKhr: 0, collectedUsd: 0,
   paymentMethods: [], deliveryServices: [],
 }, NOW)
@@ -361,6 +457,107 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(reply.includes('No shift was registered'), `a day with no shift must say so:\n${reply}`)
   assert.ok(KHMER.test(reply), 'the empty-day answer is English-only')
   console.log('PASS empty day: a day with no registered shift is answered bilingually, not with a blank report')
+
+  // --- 10. every figure comes from the kernel column it claims to ------------
+  //
+  // Sections 1-3b drive formatShiftReport directly, so they pin the LAYOUT and
+  // the arithmetic but not the wiring: shiftFigures could read tax_usd into the
+  // store-discount line and every one of them would still pass. The stub in
+  // section 9 answers all its money queries with the same shape, so it cannot
+  // tell two kernel columns apart either.
+  //
+  // This one gives every column a DISTINCT value and reads the rendered
+  // message back. A crossed source shows up as the wrong number on the line,
+  // which is exactly how this defect would reach the owner's phone.
+  const kernelRow = {
+    tx_count: 12,
+    gross_sales_usd: 218,
+    store_discount_usd: 2,
+    membership_discount_usd: 1,
+    tax_usd: 7,
+    delivery_usd: 6,
+    store_delivery_usd: 0,
+    delivery_actual_cost_usd: 3.5,
+    delivery_actual_cost_count: 2,
+    delivery_sale_count: 2,
+    recognized_net_usd: 222,
+    pending_revenue_usd: 18,
+    recognized_tax_usd: 7,
+    recognized_delivery_usd: 6,
+    recognized_store_delivery_usd: 0,
+    recognized_delivery_cost_usd: 3.5,
+    refund_usd: 12,
+    refund_paid_out_usd: 12,
+  }
+  const mappingDb = {
+    prepare(sql) {
+      const answerGet = () => {
+        if (/FROM settings/.test(sql)) return { value: 'Sok Meng Shop' }
+        if (/FROM shift_sessions/.test(sql)) return CLOSED
+        if (/AS gross_sales_usd/.test(sql)) return kernelRow
+        if (/AS cost_usd/.test(sql)) return { cost_usd: 120 }
+        if (/AS returned_cost_usd/.test(sql)) return { returned_cost_usd: 0 }
+        if (/AS item_discount_usd/.test(sql)) return { item_discount_usd: 5 }
+        if (/AS cancelled/.test(sql)) return { invoices: 12, cancelled: 1, edited: 2 }
+        // shiftExpenses -- the only other .get, and the only one FROM fees.
+        if (/FROM fees/.test(sql)) return { usd: 4, khr: 0 }
+        throw new Error(`unexpected .get in the mapping stub:\n${sql}`)
+      }
+      return {
+        async get(params) { void params; return answerGet() },
+        async all(params) {
+          void params
+          if (/FROM shift_sessions/.test(sql)) return [CLOSED]
+          if (/AS payment_method/.test(sql)) return [{ payment_method: 'Cash', tx_count: 12, total_usd: 210, collected_usd: 210 }]
+          if (/AS delivery_contact_name[\s\S]*FROM sales/.test(sql)) {
+            return [{
+              delivery_contact_id: 4, delivery_contact_name: 'Vireak Buntham', deliveries: 2,
+              charged_fee_usd: 6, absorbed_fee_usd: 0, actual_cost_usd: 3.5, actual_cost_count: 2,
+              last_delivery_at: '2026-09-04 05:00:00',
+            }]
+          }
+          // The courier-expense leg (fees joined to delivery_contacts).
+          return []
+        },
+      }
+    },
+  }
+  const wiredMapping = loadReal('lib/telegram.ts', {
+    './db': { getDb: () => mappingDb },
+    './businessDateWindow': businessDateWindow,
+    './telegramLang': lang,
+    './saleTotals': saleTotals,
+    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => mappingDb }, './businessDateWindow': businessDateWindow }),
+  })
+  return wiredMapping.telegramCommandReply({}, '/shift 04/09/2026', NOW)
+}).then((reply) => {
+  const mapped = reply.split('\n')
+  const mappedValue = (english) => {
+    const found = mapped.find((line) => line.trimStart().startsWith(`${english}${SEP}`))
+    assert.ok(found, `the report has no "${english}" line:\n${reply}`)
+    return found.slice(found.indexOf(': ') + 2)
+  }
+  // Each of these is a DIFFERENT number, so a line reading from the wrong
+  // kernel column cannot coincidentally match.
+  assert.equal(mappedValue('Revenue'), '$210.00', 'revenue is recognized net sales minus refunds')
+  assert.equal(mappedValue('Tax'), '$7.00', 'the tax line must read tax_usd')
+  assert.equal(mappedValue('Refund'), '$12.00', 'the refund line must read refund_usd, not the unpaid credit')
+  assert.equal(mappedValue('Unpaid credit'), '$18.00', 'and unpaid credit must still read pending_revenue_usd')
+  assert.equal(mappedValue('Avg order value'), '$17.50', 'avg order is revenue / tx_count, from the kernel')
+  assert.equal(mappedValue('Store discount'), '$2.00', 'the store half of the invoice discount')
+  assert.equal(mappedValue('Membership discount'), '$1.00', 'the membership half')
+  assert.equal(mappedValue('Invoice discount'), '$3.00', 'and their sum is the invoice discount')
+  assert.equal(mappedValue('Cost of goods'), '$120.00', 'cost is the kernel cost, net of restocked returns')
+  // revenue 210 - cost 120 + delivery net (6 - 3.5) = 92.50, the kernel's own
+  // profit definition. Asserted as a VALUE so a second profit rule invented
+  // here would show up as a different number.
+  assert.equal(mappedValue('Profit'), '$92.50', 'profit is the kernel definition, not one computed in the message')
+  assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
+  assert.equal(mappedValue('Delivery cost'), '$3.50', 'the courier money actually paid out')
+  assert.equal(mappedValue('Delivery margin'), '$2.50', 'and the difference between them')
+  const courier = mapped.find((line) => line.startsWith('• Vireak Buntham'))
+  assert.ok(courier.endsWith('2 · $6.00 − $3.50 = $2.50'), `the courier row lost a part: ${courier}`)
+  console.log('PASS sources: every added figure reads the kernel column it claims, proved with distinct values end to end')
   console.log('OK test-shift-report-pure')
 }).catch((error) => {
   console.error(error)

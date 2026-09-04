@@ -328,13 +328,41 @@ export type ShiftReportFigures = {
   revenueUsd: number
   itemDiscountUsd: number
   invoiceDiscountUsd: number
+  // The two halves of the invoice discount. `invoiceDiscountUsd` is their sum
+  // (the kernel's `discount_usd`), printed above them: the owner asked for the
+  // breakdown of each aspect, and "we gave away $3" answers a different
+  // question from "we gave away $2 as a shop decision and $1 as a membership
+  // benefit".
+  storeDiscountUsd: number
+  membershipDiscountUsd: number
   grossSaleUsd: number
+  taxUsd: number
+  // Customer refunds, on the kernel's net basis. NOT the same figure as
+  // creditUsd: credit is a sale that has not been paid for, a refund is money
+  // that was taken and given back. The shift report carried neither returns
+  // figure before this.
+  refundUsd: number
+  avgOrderUsd: number
+  // Cost of goods sold and profit, straight off getSalesTotals -- the SAME
+  // helper the Reports hub reads, never a second definition computed here.
+  costUsd: number
+  profitUsd: number
+  // Delivery, in the three parts the Reports hub carries: what customers were
+  // charged, what the couriers were actually paid, and the difference.
+  deliveryFeeUsd: number
+  deliveryCostUsd: number
+  deliveryMarginUsd: number
+  // How many of the window's deliveries recorded a courier cost at all. A
+  // missing cost is NULL, never zero (see deliveryActualCostExpr), so a report
+  // that printed "cost $0.00 / margin $6.00" off an empty column would claim
+  // free delivery. Nothing prints unless this is above zero.
+  deliveryCostRecorded: number
   creditUsd: number
   otherExpenseUsd: number
   otherExpenseKhr: number
   collectedUsd: number
   paymentMethods: { method: string; count: number; collectedUsd: number }[]
-  deliveryServices: { name: string; deliveries: number; chargedUsd: number }[]
+  deliveryServices: { name: string; deliveries: number; chargedUsd: number; costUsd: number; marginUsd: number; costRecorded: number }[]
 }
 
 /**
@@ -372,7 +400,34 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     labeled('revenue', usd(figures.revenueUsd)),
     labeled('itemDiscount', usd(figures.itemDiscountUsd)),
     labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)),
+    // Indented under the line they add up to, the same way Final amount prints
+    // its own components: these are the split of the invoice discount, not two
+    // more discounts on top of it.
+    `     ${labeled('storeDiscount', usd(figures.storeDiscountUsd))}`,
+    `     ${labeled('membershipDiscount', usd(figures.membershipDiscountUsd))}`,
     labeled('grossSale', usd(figures.grossSaleUsd)),
+    labeled('tax', usd(figures.taxUsd)),
+    labeled('refund', usd(figures.refundUsd)),
+    labeled('avgOrderValue', usd(figures.avgOrderUsd)),
+    labeled('costOfGoods', usd(figures.costUsd)),
+    labeled('profit', usd(figures.profitUsd)),
+    labeled('deliveryFee', usd(figures.deliveryFeeUsd)),
+  )
+
+  // What the couriers were actually paid, and what was left. Printed ONLY when
+  // at least one delivery in the window recorded a cost: the column is NULL
+  // when nothing was recorded, so an unconditional pair would print
+  // "cost $0.00 / margin $6.00" and read as free delivery. Measured Sep 4 2026,
+  // 12 of 15,044 sales carry a courier cost, so silence is the common case and
+  // it has to be honest silence.
+  if (figures.deliveryCostRecorded > 0) {
+    lines.push(
+      `     ${labeled('deliveryCost', usd(figures.deliveryCostUsd))}`,
+      `     ${labeled('deliveryMargin', usd(figures.deliveryMarginUsd))}`,
+    )
+  }
+
+  lines.push(
     labeled('otherExpense', money(figures.otherExpenseUsd, figures.otherExpenseKhr)),
     labeled('registeredCash', money(shift.opening_float_usd, shift.opening_float_khr)),
   )
@@ -422,7 +477,14 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   if (figures.deliveryServices.length) {
     lines.push('', `${label('deliveryService')}:`)
     for (const row of figures.deliveryServices) {
-      lines.push(`• ${localizeTelegramValue(cleanLine(row.name, 60))} — ${row.deliveries} · ${usd(row.chargedUsd)}`)
+      // charged − cost = margin, spelled as arithmetic rather than as three
+      // more labels: the bullet carries no label of its own, and the sum is
+      // checkable at a glance. A courier with no recorded cost keeps the old
+      // one-figure line -- see the deliveryCostRecorded note above.
+      const margin = row.costRecorded > 0
+        ? ` − ${usd(row.costUsd)} = ${usd(row.marginUsd)}`
+        : ''
+      lines.push(`• ${localizeTelegramValue(cleanLine(row.name, 60))} — ${row.deliveries} · ${usd(row.chargedUsd)}${margin}`)
     }
   }
   return lines.join('\n')
@@ -517,19 +579,49 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     itemDiscountUsd,
     // The kernel's `discount_usd` is store + membership: both are taken off
     // the whole invoice rather than off a line, which is what makes them the
-    // invoice discount.
+    // invoice discount. The two halves ride along beside the sum -- the
+    // kernel already separates them, so printing the split costs no query.
     invoiceDiscountUsd: totals.discount_usd,
+    storeDiscountUsd: totals.store_discount_usd,
+    membershipDiscountUsd: totals.membership_discount_usd,
     // Pre-discount value of what left the shelf. `gross_sales_usd` is the sum
     // of subtotals, which are already net of the LINE discounts, so the item
     // discount is added back to reach the price the goods were listed at.
     grossSaleUsd: Math.round((totals.gross_sales_usd + itemDiscountUsd) * 100) / 100,
+    taxUsd: totals.tax_usd,
+    // Customer refunds over the window, on the same net basis as revenue (they
+    // are already subtracted from it). Attribution follows the kernel: a refund
+    // belongs to the SALE's window, so a return taken this shift against
+    // yesterday's receipt is yesterday's figure -- otherwise the two surfaces
+    // would disagree about the same money.
+    refundUsd: totals.refund_usd,
+    avgOrderUsd: totals.avg_order_usd,
+    // Cost and profit as the Reports hub defines them. No second definition
+    // lives here: if that one changes, this line changes with it, which is the
+    // only way the shift message and the day report can stay reconcilable.
+    costUsd: totals.cost_usd,
+    profitUsd: totals.profit_usd,
+    deliveryFeeUsd: totals.delivery_usd,
+    deliveryCostUsd: totals.delivery_actual_cost_usd,
+    deliveryMarginUsd: totals.delivery_margin_usd,
+    deliveryCostRecorded: totals.delivery_actual_cost_count,
     // Unpaid credit, on the same net basis. Not revenue, and not in the till.
     creditUsd: totals.pending_revenue_usd,
     otherExpenseUsd: expenses.usd,
     otherExpenseKhr: expenses.khr,
     collectedUsd: totals.collected_total_usd,
     paymentMethods: paymentMethods.map((row) => ({ method: row.payment_method, count: row.tx_count, collectedUsd: row.collected_usd })),
-    deliveryServices: deliveries.map((row) => ({ name: row.delivery_contact_name, deliveries: row.deliveries, chargedUsd: row.charged_fee_usd })),
+    deliveryServices: deliveries.map((row) => ({
+      name: row.delivery_contact_name,
+      deliveries: row.deliveries,
+      chargedUsd: row.charged_fee_usd,
+      // Per courier, the same three parts as the totals above -- already on
+      // the kernel's row (margin_usd = charged − actual cost), so this is a
+      // rename, not a second calculation.
+      costUsd: row.actual_cost_usd,
+      marginUsd: row.margin_usd,
+      costRecorded: row.actual_cost_count,
+    })),
   }
 }
 
@@ -572,12 +664,14 @@ async function shiftReport(env: Env, date: string, nowMs: number): Promise<strin
 }
 
 /**
- * Push ONE shift's report to the alerts chat. This is the hand-off for the
- * lane that owns routes/shifts.ts: its `POST /close` handler can call
- * `c.executionCtx.waitUntil(sendTelegramShiftReport(c.env, shift.id))` after
- * the close succeeds and the report goes out with no other change. Returns
- * false (never throws) when Telegram is not configured or the id is unknown,
- * so it can never turn a successful close into a failed request.
+ * Push ONE shift's report to the alerts chat.
+ *
+ * Called from `POST /api/shifts/close` (routes/shifts.ts), inside the
+ * `changed > 0` branch and through `c.executionCtx.waitUntil(...)`, so it
+ * fires exactly once per close that actually wrote and never delays the till's
+ * response. Returns false (never throws) when Telegram is not configured or
+ * the id is unknown, so it can never turn a successful close into a failed
+ * request.
  */
 export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: number = Date.now()): Promise<boolean> {
   try {

@@ -5534,5 +5534,17 @@
   "shift_counted_khr": "បានរាប់ (រៀល)",
   "shift_ended": "បានបញ្ចប់វេន។",
   "shift_already_ended": "វេននេះត្រូវបានបញ្ចប់រួចហើយ។",
-  "shift_end_failed": "មិនអាចបញ្ចប់វេនបានទេ។"
+  "shift_end_failed": "មិនអាចបញ្ចប់វេនបានទេ។",
+  "shift_code": "វេន",
+  "shift_opened_at": "បើកនៅ",
+  "shift_closed_at": "បិទនៅ",
+  "shift_starts_at": "នឹងចាប់ផ្តើមនៅ",
+  "shift_ends_at": "នឹងបញ្ចប់នៅ",
+  "shift_open_for": "បើកបានរយៈពេល",
+  "shift_duration": "រយៈពេល",
+  "shift_counted_close": "បានរាប់ពេលបញ្ចប់",
+  "shift_summary_title": "សង្ខេបវេន",
+  "shift_summary_hint": "វេននេះបានបញ្ចប់។ នេះជាម៉ោងបើក និងម៉ោងបិទដែលបានកត់ត្រា។",
+  "shift_hours_short": "ម៉ោង",
+  "shift_minutes_short": "នាទី"
 }

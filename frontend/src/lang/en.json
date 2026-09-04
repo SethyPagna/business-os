@@ -5534,5 +5534,17 @@
   "shift_counted_khr": "Counted (KHR)",
   "shift_ended": "Shift ended.",
   "shift_already_ended": "This shift was already ended.",
-  "shift_end_failed": "Could not end the shift."
+  "shift_end_failed": "Could not end the shift.",
+  "shift_code": "Shift",
+  "shift_opened_at": "Opened at",
+  "shift_closed_at": "Closed at",
+  "shift_starts_at": "Starting at",
+  "shift_ends_at": "Ending at",
+  "shift_open_for": "Open for",
+  "shift_duration": "Duration",
+  "shift_counted_close": "Counted at close",
+  "shift_summary_title": "Shift summary",
+  "shift_summary_hint": "This shift is ended. These are the opening and closing times recorded for it.",
+  "shift_hours_short": "hr",
+  "shift_minutes_short": "min"
 }
