@@ -197,6 +197,12 @@ Verified layers 1, 4 and 5 — both packages green, and driven in a real browser
 Worker (8899) and a **private copy** of the D1 state with all 115 migrations applied. Ready for a coordinator to
 fold into the next Stage-2 candidate; this session did not deploy and holds no deploy role.
 
+**CITATIONS IN THIS BLOCK ARE AT `64aa0a51` — verify by the quoted text, not the number.** Session `ee`
+re-checked them at the merged candidate `6a27d738` and two had drifted: the `sales.ts` "Absent = on" comment
+is at **:501** there (not :498) and the `LoyaltyPointsPage.tsx` settings write at **:516** (not :497).
+Substance identical both times — which is the whole argument for quoting the line's text: a number silently
+points at whatever now occupies it, text fails loudly or not at all.
+
 **`0117` MEASURED ON PRODUCTION before it runs (read-only, by session `ee`, Sep 4).** Part 599 was written
 before these numbers existed, so they live here:
 
