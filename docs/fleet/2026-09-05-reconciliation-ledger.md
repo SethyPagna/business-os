@@ -18,8 +18,9 @@ only after its focused tests, typecheck, and the final combined verification pas
 | SALE-UX | POS-style detail picker, batch/options, delivery text, status chooser | implemented; combined verification pending | POS-parity, stock-safety and typecheck pass |
 | PRODUCT-MERGE | Selectively harvest duplicate merge stock/cost decision flow | implemented; combined verification pending | Stock disposition, audit/undo and frontend choice tests pass; newer cost-average rule retained |
 | DATA | Legacy sale/receivable reconciliation and idempotent stock-safe repair | blocked on production preflight and payment ruling | Unsafe recovered SQL quarantined with matching SHA; 18-row manifest must be re-derived and two partial payments require owner policy |
-| VERIFY | Full frontend/backend suites, build, migration checks, scope/math review | queued | Final gate |
-| COMMIT | Commit integrated changes and update progress | queued | Final gate |
+| SECURITY | Adversarial review of shifts, sale batches and undo boundaries | complete | Foreign batches rejected; shift permissions/branch/lifecycle/race enforced; stale sale/product undo rejected; folded allocations remapped |
+| VERIFY | Full frontend/backend suites, build, migration checks, scope/math review | complete | 197-file frontend utility chain, frontend build, all backend pure tests, focused security regressions, typechecks and migration LF checks pass |
+| COMMIT | Commit integrated changes and update progress | complete | Changes committed by concern on `codex/business-os-reconcile` |
 
 ## Accounting contract
 

@@ -19112,3 +19112,8 @@ The archived legacy settlement SQL was recovered byte-for-byte and quarantined
 under `docs/fleet/evidence/`; no production write was attempted. A fresh
 read-only manifest and an owner decision about two partial payments are required
 before any operator-run repair can be generated.
+
+The final security pass also closed forged-batch, low-privilege shift access,
+concurrent shift amendment, stale sale-addition undo, stale product-merge undo,
+and folded-batch return-allocation gaps. Full local frontend/backend certification
+passed. Deployment and production data repair were intentionally not run.

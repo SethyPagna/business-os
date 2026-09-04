@@ -11617,3 +11617,13 @@ POS.tsx along the way — no behavior change needed there).
   It must not be run: 18 completed-sale receivables require a fresh primary-key
   manifest, and two partial payments require an explicit owner ruling. No remote
   database mutation or deployment was performed.
+- Security follow-up rejects forged/foreign sale batches and derives lot metadata
+  server-side; shift routes enforce POS/Sales access and canonical active branches;
+  concurrent or lifecycle-breaking amendments fail safely; stale sale-addition and
+  product-merge undo operations now conflict instead of overwriting newer work;
+  folded batch allocations remain returnable through the active keeper lot.
+- Certification passed: the 197-file frontend utility chain, production frontend
+  build, Worker typecheck, all backend pure suites, migration LF/trigger check, and
+  focused adversarial shift/sale/undo tests. A 375px preview had no horizontal
+  document overflow; authenticated page rendering still requires a local backend
+  and session and was therefore covered by the repository's responsive contracts.
