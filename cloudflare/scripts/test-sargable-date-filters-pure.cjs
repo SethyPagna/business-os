@@ -9,9 +9,23 @@
 // Sep 1 (67b8e3b9). The class then REGRESSED FORWARD: routes shipped Aug 31
 // (b480d8a8, fc1e4e4c) and Sep 1 (4341acf1) reintroduced the identical
 // anti-pattern in brand-new code, because nothing stopped it. This file is
-// that stop. It is a STATIC lock, not a fix -- it is expected to be RED
-// right now, on the real offenders below, until their owning lanes fix the
-// call sites. Fixing them is explicitly out of scope for this file.
+// that stop. It is a STATIC lock, not a fix: fixing a call site is out of
+// scope for this file, and the escape hatch for a legitimate wrap is an
+// ALLOWLIST entry carrying the reasoning.
+//
+// STATUS: GREEN as of Sep 4 2026 -- 0 confirmed offenders. It shipped RED on
+// purpose against sales.ts, contacts.ts and compat.ts; all three are resolved:
+//   - contacts.ts and compat.ts were fixed at the CALL SITES by their owning
+//     lanes. contacts.ts now contains no date()/datetime()/strftime() wrap at
+//     all, and compat.ts's two surviving "date(created_at)" mentions are both
+//     inside comments describing the pattern that was removed.
+//   - sales.ts is an ALLOWLIST entry below, not a code change: its wrap is
+//     required for CORRECTNESS (two timestamp shapes coexist on one day) and
+//     the call site is already floored on the raw column, so the index seek
+//     survives. See that entry for the full reasoning and its caveat.
+//
+// So a RED run is now a REAL finding, not the documented baseline. Do not
+// dismiss one on the strength of this header.
 //
 // WHAT IT DOES (and does not do):
 //   1. Parses every migrations/*.sql for CREATE INDEX ... ON table(col, ...)
@@ -407,6 +421,27 @@ const ALLOWLIST = [
       + 'currently-unreachable note.',
   },
   {
+    file: 'src/routes/sales.ts', table: 'sales', column: 'created_at', alias: 's',
+    reason: "the details-export keyset cursor and its ORDER BY. This is the exact false "
+      + "positive LIMITATIONS predicts: a datetime() wrap deliberately ANDed with a "
+      + "redundant same-column RAW floor. sales.created_at genuinely carries two shapes on "
+      + "the same calendar days -- live inserts are YYYY-MM-DD HH:MM:SS, legacy-import rows "
+      + "are ISO YYYY-MM-DDTHH:MM:SS.sssZ -- and a raw compare misorders them, because T "
+      + "(0x54) sorts after the space (0x20) at position 10. The wrap is therefore required "
+      + "for CORRECTNESS, not inherited caution; removing it reintroduces a real same-day "
+      + "pagination bug. The index is not lost: the call site hand-writes a bare "
+      + "s.created_at >= @afterCreatedAtFloor on the first 10 chars (identical in both "
+      + "shapes, so it can never exclude a row the exact clause would keep), which gives the "
+      + "planner its seek into idx_sales_created_pg. The wrap then only breaks ties inside "
+      + "that seeked range, and the ORDER BY sorts one LIMITed page. Because that floor is "
+      + "hand-written rather than routed through localDateAtOrAfter, the literal datetime( "
+      + "text stays visible and this lock still flags it -- which LIMITATIONS says to resolve "
+      + "with an allowlist entry, not a rule change. CAVEAT: the key is file+table+column+"
+      + "alias with no line number, so this also silences any FUTURE datetime(s.created_at) "
+      + "added anywhere in sales.ts. Re-read the call sites before trusting this entry to "
+      + "still describe them.",
+  },
+  {
     file: 'src/routes/compat.ts', table: 'products', column: 'expiry_date', alias: null,
     reason: 'the low-stock/expiry alert has no index on products.expiry_date -- the recorded '
       + 'deliberate decision (see compat.ts) is that this alert query is bounded by is_active '
@@ -540,7 +575,7 @@ function main() {
   console.log('')
 
   if (allConfirmed.length > 0) {
-    console.log(`FAIL ${allConfirmed.length} confirmed sargable-date-filter regression(s) -- see list above. This is the expected, intentional state of this lock until the owning lanes fix sales.ts/contacts.ts/compat.ts; see this file's header.`)
+    console.log(`FAIL ${allConfirmed.length} confirmed sargable-date-filter regression(s) -- see list above. This lock is GREEN at baseline, so this is a REAL regression, not the documented starting state: either fix the call site, or add an ALLOWLIST entry with the reasoning if the wrap is required for correctness and the query is floored some other way.`)
     process.exitCode = 1
   } else {
     console.log(`PASS no confirmed sargable-date-filter regressions (checked ${files.length} files, ${passed} assertions)`)
