@@ -76,17 +76,32 @@ export type SaleTotals = {
   changeKhr: number
 }
 
+/**
+ * The part of a delivery fee the CUSTOMER was billed -- the ONLY part
+ * `sales.total_usd` ever carries. When the store absorbs it the customer's
+ * bill is unchanged and the fee is a cost, not revenue: the same rule as
+ * POS.tsx's customerFeeUsd and the frontend's receiptDeliveryFigures, so the
+ * cart, the receipt and the stored row all agree on one number.
+ *
+ * Exported because lib/telegram.ts needs the same answer to print a sale
+ * summary whose lines foot to total_usd, and it had reached that answer with
+ * its own literal: it compared the payer against 'shop', while the column
+ * default, POS.tsx's DELIVERY_FEE_PAYER and salesAnalytics.ts all use
+ * 'store'. So a delivery the shop absorbed was added into the alert's Total
+ * while its Net Total (total_usd) excluded it, and the "(shop paid)" tag
+ * could never print. One rule, one place.
+ */
+export function customerBilledDeliveryFeeUsd(isDelivery: boolean, feeUsd: unknown, paidBy: unknown): number {
+  return isDelivery && String(paidBy || 'customer') === 'customer'
+    ? round2(Number(feeUsd) || 0)
+    : 0
+}
+
 export function computeSaleTotals(input: SaleTotalsInput): SaleTotals {
   const exchangeRate = Number(input.exchangeRate) || 4100
 
-  // Only a CUSTOMER-paid delivery fee belongs in the total. When the store
-  // absorbs it the customer's bill is unchanged and the fee is a cost, not
-  // revenue -- same rule as POS.tsx's customerFeeUsd, so the cart, the
-  // receipt and the stored row all agree on one number.
   const deliveryFeeUsd = round2(Number(input.deliveryFeeUsd) || 0)
-  const customerDeliveryFeeUsd = input.isDelivery && String(input.deliveryFeePaidBy || 'customer') === 'customer'
-    ? deliveryFeeUsd
-    : 0
+  const customerDeliveryFeeUsd = customerBilledDeliveryFeeUsd(input.isDelivery, deliveryFeeUsd, input.deliveryFeePaidBy)
 
   const totalUsd = round2(
     (Number(input.subtotalUsd) || 0)

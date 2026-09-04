@@ -39,8 +39,11 @@ function loadReal(relPath, requireOverrides = {}) {
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const telegramLang = loadReal('lib/telegramLang.ts')
 // lib/telegram.ts reads the sales kernel for the shift report (S4-7).
+// The delivery-payer rule the sale summary uses comes from the module that
+// WROTE total_usd, so the alert cannot foot differently from the stored row.
+const saleTotals = loadReal('lib/saleTotals.ts')
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow })
-const telegram = loadReal('lib/telegram.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics })
+const telegram = loadReal('lib/telegram.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals })
 
 // --- date: UTC -> business zone, dd/mm/yyyy HH:mm, both timestamp shapes ---
 assert.equal(telegram.formatBusinessDateTime('2026-09-02T17:30:00.000Z'), '03/09/2026 00:30', 'ISO with Z shifts +7h across midnight')
@@ -93,6 +96,41 @@ assert.ok(credit.includes('Delivery service: $1.00 (shop paid)'))
 assert.ok(credit.includes('Total: $2.00'), credit.join('\n'))
 assert.ok(credit.includes('Paid: unpaid'))
 assert.ok(!credit.some((line) => /^(Customer|Tel|Discount|Change|Delivery driver):/.test(line)))
+
+// The payer as it is ACTUALLY stored. `delivery_fee_paid_by` defaults to
+// 'customer' and POS.tsx's DELIVERY_FEE_PAYER writes 'customer' | 'store';
+// nothing anywhere writes 'shop'. This builder used to compare against
+// 'shop', so every shop-absorbed delivery was billed into Total while Net
+// Total (total_usd) excluded it, and "(shop paid)" never printed on a real
+// sale. The rule now comes from lib/saleTotals.ts, which is what wrote the
+// stored total, so the two cannot disagree again.
+const absorbed = telegram.formatSaleTelegramLines({
+  status: 'completed', receiptNumber: 'R3', items: [{ name: 'A', quantity: 1, unitPriceUsd: 20, lineTotalUsd: 20 }],
+  exchangeRate: 4100, isDelivery: true, deliveryFeeUsd: 2, deliveryPaidBy: 'store',
+  subtotalUsd: 20, discountUsd: 0, totalUsd: 20, totalKhr: 82000, paidUsd: 20,
+}).filter(Boolean)
+assert.ok(absorbed.includes('Delivery service: $2.00 (shop paid)'), absorbed.join('\n'))
+assert.ok(absorbed.includes('Total: $20.00'), absorbed.join('\n'))
+assert.ok(absorbed.includes('Net Total: $20.00 · 82,000៛'), absorbed.join('\n'))
+
+// The message FOOTS: Total - Discount + Tax must equal Net Total, which is
+// the stored total_usd. A shop-absorbed fee added to Total would break this
+// by exactly the fee -- which is the defect above, stated as arithmetic.
+const footing = (sale) => {
+  const lines = telegram.formatSaleTelegramLines(sale).filter(Boolean)
+  const money = (prefix) => { const hit = lines.find((l) => l.startsWith(prefix)); return hit ? Number(hit.replace(prefix, '').split(' ')[0].replace(/[$,\u00a0]/g, '').replace('\u2212', '-')) : 0 }
+  return Math.round((money('Total: ') - money('Discount: \u2212') + money('Tax: ') - money('Net Total: ')) * 100) / 100
+}
+assert.equal(footing({
+  status: 'completed', receiptNumber: 'R4', items: [{ name: 'A', quantity: 2, unitPriceUsd: 21, basePriceUsd: 28, lineTotalUsd: 42 }, { name: 'B', quantity: 1, unitPriceUsd: 10, lineTotalUsd: 10 }],
+  exchangeRate: 4100, isDelivery: true, deliveryFeeUsd: 1.5, deliveryPaidBy: 'customer',
+  subtotalUsd: 52, discountUsd: 5, taxUsd: 1, totalUsd: 49.5, totalKhr: 202950, paidUsd: 50,
+}), 0, 'customer-paid delivery: Total - Discount + Tax must equal Net Total')
+assert.equal(footing({
+  status: 'completed', receiptNumber: 'R5', items: [{ name: 'A', quantity: 1, unitPriceUsd: 20, lineTotalUsd: 20 }],
+  exchangeRate: 4100, isDelivery: true, deliveryFeeUsd: 2, deliveryPaidBy: 'store',
+  subtotalUsd: 20, discountUsd: 0, totalUsd: 20, totalKhr: 82000, paidUsd: 20,
+}), 0, 'shop-absorbed delivery must not be billed into Total')
 
 // long receipts are capped, never truncated silently
 const many = telegram.formatSaleTelegramLines({

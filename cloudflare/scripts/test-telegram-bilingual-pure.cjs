@@ -38,6 +38,10 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const lang = loadReal('lib/telegramLang.ts')
+// lib/telegram.ts asks lib/saleTotals.ts who was billed for a delivery fee,
+// so the message and the stored total_usd cannot disagree about it. Loaded
+// REAL -- stubbing that rule here would test the stub, not the rule.
+const saleTotals = loadReal('lib/saleTotals.ts')
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 
 const KHMER = /[ក-៿]/
@@ -186,6 +190,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
+  './saleTotals': saleTotals,
   './salesAnalytics': salesAnalytics,
 })
 
@@ -354,6 +359,7 @@ const wired = loadReal('lib/telegram.ts', {
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
+  './saleTotals': saleTotals,
   // The real kernel over the same stub db, so `/shift` goes down its actual
   // query path here rather than a hand-written imitation of it.
   './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow }),
