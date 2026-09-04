@@ -17623,3 +17623,1397 @@ tooltips, options compact to one row on small screens including iOS, name horizo
 **Correction owed to the user on returns framing:** the original sale is immutable, so this is a
 return plus a **new linked sale** joined by `returns.replacement_sale_id` / `sales.source_return_id`
 — not a multi-role edit of the sale.
+
+---
+
+## Part 584 (Sep 3 2026, session business-os-v1-0a, COORDINATOR, main tree + isolated worktrees) — the missing deploy ledger written, all 49 worktrees reconciled, six user-reported defects dispatched as isolated lanes
+
+**Ask** — one message, seven things: *"check sessions, check progress.md, check the latest deployed"*; the Products
+section judged against an attached pre-merge reference tree, *"though remember i only want the data report style for
+products section"*; *"the returns seems to say customer pay price difference,, and it says any stock no specific
+lot… fixx these, so returns is returns, and this replacement will just be replace/add buy same time add to sales…
+and the price returns gets returned, price returns back and the added product do like normal sales… this way it is
+not confusing"*; *"go deep into the namings, make them more easily understood in khmer"* with four terms dictated
+verbatim; *"the search functions of transfer, stock change, returns etc… seems not fully scoped properly… feels like
+the likely result was at bottom in reverse"*; *"sales the click to view details… a row view is better instead of
+current broken view"*; *"reports i wanted you to redo and designed better.. and view in settings that can change
+sections into 3 layer page design for smaller screens"*; and *"make sure uncommited, dirty works in downloads, in
+other sessions, etc… are all acccounted for, reconciled, continued and finished."*
+
+**What changed** — no product code was written by this session; it coordinated, verified and recorded.
+- `progress.md` gains two blocks at the top of *Current status*: the **deploy ledger** (three Sep-3 deploys with
+  version id, source commit AND branch, tree state, migrations, `secrets:sync`) and the **reconciliation sweep**
+  (every worktree, every dirty file, classified).
+- Eight isolated lanes dispatched from `a486d82e`, each in its own worktree with `node_modules` junctioned to the
+  main checkout (never `npm install`), private Vite/Worker ports and a `<lane>.localhost` host so no two share a
+  cookie jar: `fx/returns-semantics`, `fx/khmer-naming`, `fx/search-rank`, `fx/sale-detail-rows`,
+  `fx/reports-redesign`, `fx/products-report-style`, plus rescues of the two abandoned lanes `hf/merge` and
+  `hf/customers-perf`.
+
+**What was found**
+- **Production cannot be asked what commit it is running, and that is the root cause of the Sep-3 revert.**
+  `GET /api/runtime/version` returns `{"revision":"","sourceHash":""}` — hard-coded literals at
+  `cloudflare/src/routes/runtime.ts:44-53`, directly under a comment saying the intent was to report the
+  deployment's `compatibility_date`. `/health`'s `version` is the unrelated literal
+  `cloudflare-portal-bootstrap-20260728`. Neither is a deploy id; neither changed across three deploys.
+- **The live Worker version is `eb358e4d-624b-472f-aca0-f896a352b430` (09:40:33Z), from `a486d82e` on
+  `reconcile/2026-09-03`** — not `main`, and not recorded anywhere before now. Nor was the 07:26Z deploy's source
+  (`57c0b61c` on `hotfix/prod-2026-09-03`), the one that applied migration 0107.
+- **Most "dirty work" was noise.** The `frontend/public/{sw.js,runtime-noise-guard.js,theme-bootstrap.js}` trio is
+  dirty in 11 worktrees because the dev server rewrites it at boot; per-session QA scaffolding accounts for most of
+  the rest. `head-cert` and `prod-repro` hold a fees/delivery-contact set that is **behind** production, not ahead —
+  already shipped as `3bf58d6c` + `835a99f8`.
+- **Genuinely at-risk uncommitted work, now owned:** `hf/merge` (18 files — the cost verdict where 0/NULL means
+  *missing* rather than *different*, built on top of `productDetailSignature` without changing it);
+  `hf/customers-perf` (9 files — the caller side of the narrowed customer reads); `hf/search` (`searchMatch.ts`
+  +37/−14 rewriting the exact-barcode probe into a rowid subquery so `idx_products_barcode_pg` is actually
+  consulted, with EXPLAIN QUERY PLAN evidence, never committed); `sec-10` (20 files of reports redesign).
+- **A peer's root cause was stale and was corrected before it cost a lane a wasted rewrite.** Session 64's
+  fast-stock-in spec §4.3 states there is no exact-equality barcode probe in the read path. At `a486d82e` there is:
+  `buildExactBarcodeMatchClause` (`searchMatch.ts:1279`) is wired in `products.ts:933-934` (unshifted to the front
+  of the clause list), `branches.ts:905` and `inventory.ts:236`, and `inventory.ts:14` already imports
+  `buildExactBarcodeRankSql`. The revised hypothesis handed to `fx/search-rank`: a ranked search read and an
+  unranked list read sit side by side and some pickers call the unranked one.
+- **`normalizedBarcode` (`productDetailRule.ts:92-94`) must never be widened.** It feeds the auto-merge identity
+  signature; teaching it leading-zero or GTIN-14 equivalence would silently auto-merge the 1,722 leading-zero
+  families the user reserved to handle by hand. Search-only barcode folding goes in a separate helper, pinned by a
+  test that fails if the identity normalizer ever gains that behaviour.
+
+**Verified** — `wrangler deployments list` (three Sep-3 deploys, ids and timestamps above) · `d1_migrations` read
+directly: top **107**, then 106, then 105 · `admin.leangbeauty.com/health` **200** · `/api/runtime/version` returns
+empty `revision`/`sourceHash` · 49 worktrees swept for branch, tip, dirty count and `merge-base --is-ancestor`
+containment in `a486d82e` · `head-cert` working tree diffed against `a486d82e` (insertions below deletions, zero
+unique insertions in the test) · `progress.md` diff before commit: **88 insertions, 0 deletions**.
+
+**Not done** — no deploy (nothing ships until all eight lanes return certified) · the `runtime.ts` provenance stamp
+is diagnosed, not fixed · `rc/coordinated-2026-09-02` and the `rc/p2-*`
+program (~150 commits) remain a separate body of work, untouched · session 64's Lane D stays frozen: both rehearsals
+red, the tier2 `CHECK constraint failed: value=1` correctly proving an invariant false across 1,400 families, tier1's
+suspected cause the denormalized `products.stock_quantity` not recomputed after branch rows move, tier3 never
+rehearsed, and its counts disagreeing with 6d's on the same data (1723/1682, 409/392, 279/267, 10/0) — one
+classifier is wrong and which is unknown · `AppUpdateBanner` renders on the public-catalog route (`App.tsx`
+~:1844-1848), flagged by session 64, not yet fixed.
+
+## Part 585 (Sep 3 2026, session business-os-v1-c9, COORDINATOR, isolated worktrees) — two fleet-wide tooling defects that made lanes distrust their own test runs; the language packs shipping a literal `{count}` and a wrong instruction; fourteen lanes inventoried and their conflict map measured
+
+**Ask.** Continue the round-2 lane program on top of `a486d82e` (what production runs): finish the
+fleet-blocking `verify:public-runtime` fix routed over from session 64, sweep the `tr()` placeholder
+bug, collect the eight dispatched lanes, and reconcile everything into a state the user can decide to
+deploy from. Nothing pushed, nothing deployed, no migrations, no remote writes.
+
+**What changed.** Branch `fx/fleet-tooling` (base `a486d82e`), three commits, tip `be09ee65`.
+`fx/public-runtime-eol` still points at the first of them and is an ancestor.
+
+- `1755bd6b` — `ops/scripts/frontend/build-public-runtime-scripts.ts` compares CONTENT, not bytes,
+  plus `frontend/tests/publicRuntimeCheck.test.ts` and its chain entry (172 → 173).
+- `3ad506ce` — `en.json`/`km.json` values for `sales_import_started` and `inventory_import_started`,
+  `ExportFieldsModal.tsx` (carried verbatim from `fx/products-report-style`), plus
+  `frontend/tests/trPlaceholderSubstitution.test.ts` and its chain entry (173 → 174).
+- `be09ee65` — `cloudflare/scripts/test-inventory-adjust-set-pure.cjs` anchored to `__dirname`, plus
+  `cloudflare/scripts/test-script-path-anchoring-pure.cjs`.
+
+**What was found.**
+
+*Two tooling defects that punished lanes for following the documented procedure.* Both have the same
+shape, and the shape is the finding: the check was wrong, so its red looked like lane error every
+single time, and the real defect stayed invisible behind it.
+
+1. `verify:public-runtime` compared bytes. Git stores `frontend/public/{sw,runtime-noise-guard,
+   theme-bootstrap}.js` with LF; this checkout is `core.autocrlf=true`, so they land on disk with
+   CRLF while the generator emits LF. A pristine checkout was therefore reported stale, permanently.
+   It is **step 2 of the `test:utils` chain and the chain stops at the first red**, so a lane could
+   run `test:utils`, see it fail, and conclude "the chain is red" without one of its 171 test files
+   ever executing — a certification from that run is empty. Worse, the standing cleanup rule made it
+   recur: `npm run build` fixes it, and the documented `git checkout -- frontend/public/*.js`
+   afterwards **restores the CRLF and re-breaks it** (measured by the Khmer lane, confirmed by the
+   returns lane, which also observed that a later full `npm run build` does not re-break it — only
+   the checkout step does).
+2. `cloudflare/scripts/test-inventory-adjust-set-pure.cjs` read `src/routes/inventory.ts` relative to
+   the cwd, so the suite was 167/168 from `cloudflare/scripts/` — the directory **CLAUDE.md's own
+   documented sweep command cds into** — and 168/168 from `cloudflare/`. Three lanes hit it
+   independently and each spent time proving the red was not theirs.
+
+*The language packs were shipping two different live defects, and a source-text test could not see
+either.* `tr()` and `t()` look a key up; neither interpolates. A full sweep of every `tr()`/`t()`
+call on a placeholder-bearing pack key found **exactly four** sites (169 placeholder keys, 88 call
+sites, 84 already correct). The sweep must recognise **both** substitution idioms — chained
+`.replace('{k}', v)` and the locally-redefined `replaceVars(template, values)`, which exists in five
+separate copies — or it over-reports 4x; and it must scan **backward** as well as forward, because
+`SaleLinkConflictsSection.tsx:113` wraps a ternary of two `tr()` calls in one `replaceVars()` above
+both keys. Credit for both traps to session 64.
+
+Of the four: `FastStockInModal.tsx:367` is fixed on `lane-a/fast-stock-in` (`6b2acc88`);
+`ExportFieldsModal.tsx:109` is fixed identically on `fx/products-report-style` (`459cacc7`) and is
+carried here byte-for-byte so the two branches merge without a choice to make.
+
+The remaining two were worse than a stray brace. `salesImportWorker.test.ts` and
+`inventoryImportWorker.test.ts` each assert their modal's source does **not** contain "Review and
+approve it from the top progress bar" — those two imports review and auto-approve **in-modal**, their
+only "later" affordance is the button labelled `continue_in_background`, and no top-progress-bar
+approval step exists for them. Both assertions passed for the whole life of the bug, because the
+sentence was not in the source: it had been copy-pasted into `en.json` and `km.json` from
+`contacts_import_started`, whose flow genuinely does queue rows for that approval. So production told
+operators, in both languages, to go review and approve an import that had already been applied — with
+a literal `{count}` in the sentence. **A source-text assertion structurally cannot see a string that
+lives in a language pack.** The call sites were right all along; the fix is the pack values, and the
+new test extends both source-level invariants into the packs.
+
+*The exemption pattern.* `FastStockInModal` is listed in `EXPECTED_UNFIXED` as a **self-retiring**
+exemption, not a tolerated baseline: the test requires it to be both still present and still broken,
+so lane-a's merge turns it red and names the entry to delete.
+
+**Verified** (this run, in `bos-rc-workers/fx-provenance`, base `a486d82e`).
+`npx tsc --noEmit` frontend 0 · **172/172** frontend test files green individually (explicit for-loop,
+not the chain) · `testChainCoverage` green, chain 172 → 174, appended, nothing removed ·
+`check:source` 449 files · `verify:i18n` exit 0, 4498 pack keys, 449 source files, every referenced
+key resolves in both packs · `vite build` exit 0 · `verify:public-runtime` exit 0 **on a pristine
+CRLF checkout** · cloudflare `tsc` 0 · backend sweep **168/168 from `cloudflare/` AND 168/168 from
+`cloudflare/scripts/`**, where it was 167/168 before.
+
+Non-vacuity proven one thing at a time, never by assertion-count: reverting only the EOL comparison
+line failed with "a CRLF checkout must not be reported stale"; reverting `ExportFieldsModal` named
+that exact file:line; restoring the base pack values failed the placeholder check; injecting a
+placeholder-free sentence that still said "top progress bar" failed check 5 by name; restoring the
+cwd-relative reads named `test-inventory-adjust-set-pure.cjs` lines 4, 5 and 6; and the exemption was
+proven self-retiring by simulating lane-a's fix, after which `FastStockInModal` was restored
+byte-for-byte and verified by an empty diff.
+
+**Lane inventory — tips read from git, not from any lane's report.** Base `a486d82e` unless noted.
+
+| lane | branch | tip | state |
+| --- | --- | --- | --- |
+| fleet tooling | `fx/fleet-tooling` | `be09ee65` | green, this Part |
+| runtime provenance | `fx/runtime-provenance` | `93632d0b` | green (Part 584) |
+| catalog update banner | `fx/catalog-no-update-banner` | `5778c01f` | green — **supersedes** the "not yet fixed" note at the end of Part 584 |
+| Khmer naming | `fx/khmer-naming` | `64c69d67` | green, 4 commits |
+| sale-detail rows | `fx/sale-detail-rows` | `1ee8696a` | green, 5 commits |
+| products data-report style | `fx/products-report-style` | `5fd0ebd2` | green, 6 commits |
+| reports redesign | `fx/reports-redesign` | `9b444788` | green, 4 commits |
+| returns semantics | `fx/returns-semantics` | `d8931348` | green, 6 commits |
+| search relevance | `fx/search-rank` | `1b83e1b5` | **still running at time of writing** |
+| lane A | `lane-a/fast-stock-in` | `6b2acc88` | green (session 64) |
+| lane B | `lane-b/transfer` | `5f1794c4` | green (session 64) |
+| lane C | `lane-c/app-update-prompt` | `8580c92a` | green (session 64) |
+| merge/duplicates | `hf/merge` | `65459d6e` | green — **DIVERGENT**, merge-base `7afc8a71` |
+| customers perf | `hf/customers-perf` | `68d5ecef` | green — **DIVERGENT**, merge-base `7afc8a71` |
+
+The two divergent lanes are why their `verify:i18n` is red on their own branch: `fced3086` (the
+32-key fix) is not in their ancestry. `hf/merge` simulated the union merge onto `a486d82e` and got
+`OK — 4516 pack keys, 451 source files`, exit 0. Merge signal, not a defect. Lane D (session 64,
+tier-count reconciliation) stays **frozen**: both rehearsals red, nothing applyable.
+
+**Conflict map, measured** with `git diff --name-only <merge-base> <lane>` across all 14 branches.
+12 files are touched by more than one lane. Three are the known union-merge files —
+`frontend/package.json` (8 lanes; the `test:utils` chain is one long line every lane appends to,
+taking either side silently drops a lane's test) and `frontend/src/lang/{km,en}.json` (8 and 7 lanes;
+union by key, then re-`JSON.parse` both packs). The nine real code overlaps, each needing a human
+decision at merge time:
+
+- `frontend/tests/productsResponsiveSurface.test.ts` — khmer-naming, products-report, lane-b (3 lanes)
+- `frontend/src/components/products/Products.tsx` — products-report, search-rank, hf-merge (3 lanes)
+- `frontend/src/components/products/ExportFieldsModal.tsx` — fleet-tooling, products-report
+  (**byte-identical on both**, verified: merges with no conflict and no choice)
+- `frontend/src/components/returns/ReturnDetailModal.tsx` — sale-detail, returns-semantics
+- `cloudflare/src/lib/salesAnalytics.ts` and `cloudflare/src/routes/sales.ts` — reports-redesign,
+  returns-semantics
+- `cloudflare/src/routes/products.ts` — search-rank, hf-merge (one line in
+  `expandSearchResultsToNameSiblings`, flagged by hf/merge)
+- `frontend/src/components/branches/TransferModal.tsx` — search-rank, lane-b (lane-b rewrote +360
+  lines; highest risk in the set)
+- `frontend/src/components/pos/POS.tsx` — search-rank, hf-customers-perf
+
+Session 64 separately proved `fx/public-runtime-eol` and `lane-b/transfer` reconcile in either order
+(`git merge-tree --write-tree` exit 0, no conflict list).
+
+**Not done.** No trial integration yet — it waits for `fx/search-rank`, the most entangled lane (26
+files, overlapping five others). Nothing pushed, nothing deployed, no migration applied anywhere, no
+remote D1 writes; remote access this session was SELECT-only and rare. The nine code overlaps above
+are unresolved by design. Two operational facts worth carrying: a killed background wrangler task can
+leave `workerd.exe` still holding the port, so `netstat` the port before certifying; and
+`frontend/node_modules` being a junction means `node_modules/.vite` is **shared**, so a lane running
+vite with a private config must also set a private `cacheDir` or it swaps the optimize cache out from
+under peers (`504 Outdated Optimize Dep`). Also unresolved: **the preview pane resolves
+`.claude/launch.json` against the primary working directory**, so a screenshot taken from a lane
+worktree silently shows the MAIN checkout instead — session 64 correctly refused to ship small-screen
+evidence on that basis, and no supported way to preview an `rc/*` worktree exists yet.
+
+## Part 586 (Sep 3 2026, session business-os-v1-c9, COORDINATOR) — the fleet is building two programs against one production Worker, and the RC line's migration number is already taken
+
+**Ask.** Continue coordinating. Four new peer sessions appeared after session 64 went away; brief them
+before they touch a file, and answer session 8c/sec-10's ownership report.
+
+**What changed.** Nothing in code. `progress.md` and this Part; four coordinator briefs and four
+escalations sent by `SendMessage`. No lane branch was touched, nothing merged, nothing deployed.
+
+**What was found.**
+
+*There are two programs, not one backlog.* They forked at `57d8f1a2`. Since the split the **RC line**
+(`rc/coordinated-2026-09-02`, `539567e2`) is **149 commits / 244 code files**; the **production line**
+(`reconcile/2026-09-03`, `a486d82e`, the commit the live Worker is built from) is **89 commits / 148
+code files**; **55 files were changed by both**. Neither is an ancestor of the other. Every prior Part
+that talked about "the lanes" meant one of these two and never said which, which is why the collision
+below survived this long.
+
+*The RC line cannot be deployed, and the reason is a number.* Read from remote D1, SELECT-only:
+
+```
+107  0107_receipt_numbers_business_format.sql
+106  0106_return_replacement_sales.sql
+105  0105_fee_delivery_contacts.sql
+104  0104_stock_in_session_read_indexes.sql
+```
+
+`rc/coordinated-2026-09-02` carries `cloudflare/migrations/0106_barcode_aliases.sql` — a **different
+file in an applied slot** — placed there by `90180e9b chore(migrations): renumber barcode_aliases to
+0106`. That is precisely the fourth false reading in the `deploy-provenance` skill: renumber per the
+standing rule *without reading `d1_migrations` first*. The standing rule governs migrations that have
+never run; 0105/0106/0107 have run, so their filenames are frozen and the free number was 0108, not
+0106. The RC line is also missing all three of those migrations outright — it forked before they
+existed — so it is 149 commits of work built against a schema production left behind.
+
+A fleet-wide sweep makes the fix small: **`0106_barcode_aliases.sql` is the only unapplied migration
+anywhere in the repo.** No round-2 lane adds a migration, no `hf/*` branch adds one, and neither
+in-flight RC lane adds one. Renaming it to `0108_barcode_aliases.sql` is one commit, touches nothing
+else, and cannot disturb production because D1 keys on filename and this file has never run.
+
+*Both programs are redesigning the same pages from the same user request.* Not a file-lock problem —
+duplicated implementation. `fx/reports-redesign` `9b444788` modifies `ReportsHub.tsx` and ships
+`HubLayers.tsx` as its layered container; `rc/sec-10-reports` is rebuilding the same hub with
+`kit/Fold.tsx`. **Both create `cloudflare/scripts/test-reports-views-pure.cjs`** — identical new path,
+different content, an add/add conflict git cannot resolve, in the very file whose job is to prove the
+other file is right. The same pattern covers search (`fx/search-rank` vs `rc/p2-2-search` +
+`rc/sec-2-products-search`), products (`fx/products-report-style` vs `rc/p2-4b-products`) and
+PWA/update (`lane-c/app-update-prompt` vs `rc/p2-9-pwa` + `rc/sec-8b-plan-variants-pwa`).
+
+*The measurement had to be redone once, and the first answer was wrong.* Diffing each `rc/*` branch
+from the original `57d8f1a2` split attributes the whole RC line's history to whichever lane sits on
+top of it, and reported 28 shared files. Diffing each branch from **its own fork point off
+`rc/coordinated-2026-09-02`** gives the real per-lane answer: **12**. It also showed that every
+`rc/sec-*` and `rc/p2-*` branch except two is already an ancestor of the RC tip; only
+`rc/p2-4b-products` (8 commits) and `rc/p2-9-pwa` (17) are ahead. `rc/sec-10-reports` and
+`rc/sec-11-ios-pwa` sit **exactly at** the RC tip with no commits of their own, so those lanes' work
+exists only as uncommitted files in their worktrees.
+
+**Verified.** Migration state read from production D1 with a read-only SELECT, not inferred from the
+repo. Branch topology from `git merge-base --is-ancestor` and `git rev-list --count`, per-lane file
+sets from `git diff --name-only <own fork point> <branch>`. The `0106` collision confirmed from three
+independent angles: the applied list in D1, `git ls-tree` of both lines' migration directories, and
+the commit that introduced the rename.
+
+**Not done.** Nothing renamed — `0108_barcode_aliases.sql` is the RC lane's commit to make, and I told
+them so rather than reaching into their branch. No trial integration; `fx/search-rank` is still
+running. Nothing deployed and no Stage-2 go exists. The RC-versus-production reconciliation, and
+which of each duplicated pair survives, are the user's decisions and are now in front of them.
+
+## Part 587 (Sep 3 2026, session business-os-v1-c3, FINAL RECONCILER + DEPLOY) — the design the user liked, reconciled onto what was live, and deployed as `3b25fe33`
+
+**Signature correction.** Parts 585 and 586 are signed `business-os-v1-c9`; `ListAgents` says this session is
+`business-os-v1-c3`. The pushed commits are not rewritten; the record is corrected here.
+
+**Ask.** The user, verbatim: "I want you to reconcile then put the design into the current deployed, i like, the
+current gold design, sections design (though even better if remove the "Section"). Promotions remove the promotions
+title... in smaller screens, the sections into mini page part of the 3 layer design... though sales did it you can do
+a square design with icon larger and name below the icon... two per row... in smaller screens.... of course this is
+changeable through settings.. i also like the reports...... after you add this to list regarding reconcile... then
+continue implementing and actually deploying." Earlier in the same session: POS "Options: N | Total n" with coloured
+numbers, receipts Khmer first then English, the receipt contrast "not bold, not super contrast very dark... my printer
+is not printing with good ink", and stats "should show total latest of whole system".
+
+**What changed.** Branch `ship/2026-09-03` (pushed), cut from `a486d82e` — the commit production was serving
+(ledger #3) — and now **72 commits** ahead of it. 12 lanes are fully contained (`claude/musing-tu-d9f677`, `fx/catalog-no-update-banner`, `fx/fleet-tooling`, `fx/khmer-naming`, `fx/products-report-style`, `fx/public-runtime-eol`, `fx/returns-semantics`, `fx/runtime-provenance`, `fx/sale-detail-rows`, `fx/search-rank`, `lane-a/fast-stock-in`, `lane-b/transfer`). Two RC-line
+lanes were ported as cherry-picks after verifying they add no migration (`rc/sec-6-mobile-layers`: the 3-layer mobile
+navigation and the `ui_mobile_section_nav` setting; `rc/sec-4-receipt-contrast`: the receipt Text-contrast setting).
+Three genuine conflicts were resolved as unions, not side-picks: `ReturnDetailModal.tsx` keeps the shared
+`MoneyRow` rhythm from `fx/sale-detail-rows` and the two-era branch from `fx/returns-semantics` (a `marker` prop on
+`MoneyRow` carries `data-historical-settlement` / `data-replacement-sale`); `BranchesHubPage.tsx` takes the RC
+`HubSectionDef` shape but keeps production's section ids (the RC line still calls the second section `inventory`,
+production renamed it `products` — taking the RC ids would have broken the deep link); the five receipt files stack
+both contrast controls (the older `highContrastBold` and the newer `text_contrast`) instead of choosing one. The
+lang packs and the `test:utils` chain were unioned by script from the git stages (`unionlang.cjs`, `unionpkg.cjs`):
+zero genuine value conflicts, and a key-set diff against `a486d82e` afterwards shows **0 base keys lost** in either
+pack.
+
+On top of the reconcile, the user's asks: `HubSectionNav` layer 2 is a two-per-row grid of square tiles (icon
+12×12 box, name under it, description under that, badge in the corner, no chevron) and the "Sections" caption is
+gone from both layers; `PromotionsPage` drops its `h1` (the name still feeds layer 2's heading on a phone); the POS
+grouped card reads "Options: N | Total: n" with the option count in the accent and the summed stock in the
+red/amber/emerald convention; `labelFor('both')` joins as "ខ្មែរ / English:" and the bilingual thank-you puts the
+Khmer line first (toggle reads KH/EN); `FastStockInModal` opens with the business-day date filled (`todayStr()`);
+`DEFAULT_RECEIPT_TEXT_CONTRAST` is `'maximum'` and `normalizeReceiptTextContrast` now passes both enum strings
+through so `'normal'` remains the opt-out.
+
+**What certification found on the reconciled branch (all fixed forward, each its own commit).** Eight test files
+were red on committed HEAD; none was a behaviour regression. Three pinned *where* markup lives after the RC lane
+moved every hub's chip row into `HubSectionNav` (`nestedUiIntegrity`, `statsStrip`); the pins now follow the
+delegation. `langKeyIntegrity` + `returnsExchangeFlow` + `returnOptions` were one finding: the union re-admitted
+keys `fx/returns-semantics` had retired (`any_stock`, `customer_owes`, `shop_refunds`, `settle_difference`,
+`uneven_exchange_blocked`, `even_exchange_desc`, `perm_act_returns_settle_difference`, `replacement_items_*`) — a
+deletion on one side looks like an addition on the other to a union; dropped again, no consumer references any of
+them. `khmerRetailVocabulary`: six `lot_*`/`return_lot_*` values said ឡូត and one said អ្នកទិញ; now បាច់ / អតិថិជន.
+`testChainCoverage`: `hubSectionNav.test.ts` and `receiptTextContrast.test.ts` existed but no lane's chain had them.
+`trPlaceholderSubstitution`: a stale EXPECTED_UNFIXED allowance lane-a had already fixed. `receiptTextContrast`'s
+`textColor` pin now accepts the union with `highContrastBold`. Also cleared a leftover `CHERRY_PICK_HEAD` whose
+commit (`bae87445`) was already resolved as `249a76f1`.
+
+**Deploy.** Provenance first: `wrangler deployments list` shows #3 at 09:40:33Z, 2 min after `a486d82e` was
+committed; `d1_migrations` top = 107 = the chain top, so this deploy applies nothing. Isolated worktree
+`Downloads/bos-dep` at `e3678a39`, secret files copied in, real `npm ci` in both packages, both typechecks,
+`build:frontend`, `migrate:remote` ("No migrations to apply!"), `wrangler deploy` → **Current Version ID
+`3b25fe33-a806-44f7-9d42-caca6801f102`**, created 2026-09-03T14:27:12Z. `secrets:sync` not run. Worktree removed.
+
+**Verified (expected vs actual).** Before: served bundle `index-BPKbnMPD.js`. After: `/health` 200/200 on
+admin.leangbeauty.com and leangbeauty.com (expected ok → ok); `/api/products` unauthenticated 401 → 401; `/ws` GET
+426 → 426; storefront 200 with "Leang Beauty online store" → 200; admin `/` 200 → 200; served bundle
+`index-PVIjw20o.js` == the file the isolated build emitted; `wrangler deployments list` tail = `3b25fe33…`;
+`d1 migrations list --remote` → nothing to apply; admin login page renders in the Browser pane with only the
+expected unauthenticated bootstrap 401 in the console. Certification on committed HEAD before the deploy: frontend
+`test:utils` 177 files green, `verify:i18n` green (4542 keys, 454 source files), `vite build`; cloudflare `tsc` +
+172/172.
+
+**Not done / owed.** (1) The whole-system stats ask is **not shipped**: Inventory's stat cards follow the page
+filters by a deliberate earlier fix (the Worker's `/stats` comment: cards must match the filtered table below), so
+making them whole-system reverses a recorded decision — the user's ruling is needed, and which surface they mean
+(Inventory cards, Branches → Products, Dashboard). (2) `fx/reports-redesign` is held out (peer 09's objection stands:
+merging it decides the reports question by merge order; it also ships the All-time $0.00 defect) — the two-version
+comparison is still owed to the user. (3) `rc/sec-10-reports` stays parked on the RC line. (4) `ship/2026-09-03` is
+**not merged to `main`**, and neither was `a486d82e`; `main` no longer describes production. (5) The till's own
+localStorage print settings can still hold an old `highContrastBold:false`; if a receipt still prints light on that
+device, tick "Extra-dark bold receipt text" once in Print settings there. (6) Reply from peers 40/63/7e to the deploy
+brief: none arrived before the deploy; musing-tu-d9f677-c4 was told to use Part 588.
+
+## Part 588 (Sep 3–4 2026, session musing-tu-d9f677-c4, lane `claude/musing-tu-d9f677`) — the storefront was the last hand-copy of the search tail, and it ranked discounts above the product the shopper typed
+
+**Ask.** The user: move `cloudflare/src/routes/portal.ts` onto the shared search helpers that
+`fx/search-rank` extracted, because portal.ts "is the last remaining hand-copy of the product search
+tail." Two named defects: `portal.ts:1518` built its own
+`buildFtsMatchExpression([searchTerms], 'AND', ['name','sku','barcode'])` plus its own short-word and
+partial-word fallbacks instead of calling `buildProductSearchQuery`; `portal.ts:1734` hardcoded
+`'family_promoted DESC, match_rank ASC, family_sort_value ASC, family_name ASC'`, which "puts the
+promoted key ABOVE relevance (so a discounted product that merely shares a word outranks the product
+the shopper typed) and it has no discrete exact-barcode / exact-name / name-prefix tier at all. Both
+shapes were the reported 'it shows products not really matched, top to bottom' defect in the admin
+app." Two constraints, verbatim: "Do not widen `normalizedBarcode` in
+`cloudflare/src/lib/productDetailRule.ts` (it decides auto-merges)" and "Run the cloudflare sweep from
+the `cloudflare` directory, not from `cloudflare/scripts/`." The client half was already done —
+`PublicCatalogPage.tsx:885` passes `preserveInputOrder` into `mergePortalCatalogProducts`.
+
+**What changed.** One commit, `e86330f4`, cut from `fx/search-rank` `5db7c373`; 6 files, 564+/122−,
+every path staged explicitly.
+
+`cloudflare/src/routes/portal.ts` — `buildPortalProductFilters` lost ~98 lines of hand-copied tail
+(its own FTS match expression, short-word fallback, partial-word clause and trigram expression) to a
+single `buildProductSearchQuery(term, params, { paramPrefix: 'portal' })`. The `paramPrefix` was
+checked against every bind the route already emits (`branchId`, `branchN`, `brand`, `category`,
+`initial`, `promoRuleN`, `promoNow`, `pageSize`, `offset`) — no collisions. `tokenizeSearchWords` was
+kept but now feeds only the JS fuzzy fallback, because `runFuzzyFallbackMatch` takes a flat word list
+rather than the comma-groups the FTS builder wanted. The filter bundle returns `matchRankSql` and
+`matchTierSql` alongside the existing fields, and `runPortalProductSearch`'s
+`paginateProductFamilies` call passes them through with
+`buildFamilyRelevanceOrderSql('family_sort_value ASC, family_name ASC', { hasTier, hasRank, promotedFirst: true })`
+in place of the literal. Keeping `family_sort_value ASC, family_name ASC` as the tail is deliberate:
+the storefront's own brand sort still decides order *within* a relevance tier. Three stale comment
+blocks that described the deleted hand-copy were rewritten rather than left lying.
+
+The ordering consequence is the whole point. `buildFamilyRelevanceOrderSql` emits `match_tier ASC`
+first, then `family_promoted DESC`, then `match_rank ASC` — so promotion leads within a tier and can
+no longer outrank a better match, and the storefront gains the exact-barcode / exact-name /
+name-prefix tiers it never had. `productDetailRule.ts` was not touched.
+
+`cloudflare/scripts/test-portal-search-relevance-order-pure.cjs` (new, 10 checks) — modelled on
+`test-search-relevance-order-pure.cjs`, but drives the **real route** through
+`app.request('/catalog/products/search?q=…')` rather than a re-implementation, with
+`searchMatch.ts`, `productSearchQuery.ts`, `familyPagination.ts`, `promotionRulesSql.ts` and
+`sqlBinding.ts` all loaded for real and only the infrastructure (db, cache, auth, media, portal
+session) stubbed. The fixture is built so that every wrong answer is attractive: two of the decoys
+are **discounted**, so alphabet, brand-sort and "discounted leads" all point away from the right row.
+A `searchWithOldOrder()` control re-runs the same matched rows through the old literal ORDER BY, so
+each assertion shows the fix and the defect side by side. Pinned exact orders for the four probes the
+ask named — exact barcode `3348901770569`, its leading-zero GTIN-14 twin, the name prefix `matte`,
+and pages 1–3 of a nine-family query — plus a check that browsing with no search term is unchanged,
+a check that portal.ts orders through the shared builder (comment lines stripped first, after the
+regex matched my own explanatory comment), and a check that `normalizedBarcode`'s body still contains
+no `padStart|checkDigit|check_digit|ltrim`.
+
+Four existing portal pure tests (`test-portal-catalog-sort-pure.cjs`,
+`…-membership-crosscustomer-…`, `…-membership-redaction-…`, `…-public-url-…`) each gained an
+override-map entry for the new `../lib/productSearchQuery` import — the real module for the sort
+test, `{}` for the three that never search. No assertion in any of them changed.
+
+**What was found.** The GTIN twin was not a rounding-out case, it was genuinely broken: at HEAD the
+padded probe `03348901770569*` is prefix-matched by FTS5 against the stored token `3348901770569`
+and never matches, and the padded form is not a substring of the bare one either, so *only* the
+folded exact-barcode disjunct in the shared helper reaches the twin at all. Sabotage 3 proves it —
+reverting portal.ts returns just one of the two twins.
+
+Four environment traps cost real time and are worth the next session's attention. (1) A lane
+worktree has **no `node_modules`**, so `npx tsc` resolves to something else entirely ("This is not
+the tsc command you are looking for") and every `test-*.cjs` dies on `require('typescript')`;
+directory junctions to the main checkout fixed it. (2) The **Bash heredoc halves doubled
+backslashes** even with a quoted delimiter, so a JS regex written as two backslashes plus `s` lands
+as one and silently evaluates to `s+` — an exact-match search then reports "NOT FOUND" on text that
+is plainly present. Author such files with the Write tool. (3) `npm run test:utils` stopped at step 2
+on `verify:public-runtime` ("Generated runtime is stale") — the known CRLF byte-compare defect whose
+fix `1755bd6b` is not in this lane's ancestry; `npm run build` regenerating the three
+`frontend/public/*.js` files clears it, and peer `business-os-v1-09` confirmed
+`npm run build:public-runtime` as the narrower workaround. (4) `test-inventory-adjust-set-pure.cjs`
+is red when the sweep is run from `cloudflare/scripts/` and green from `cloudflare/` — a pre-existing
+cwd sensitivity (fix `be09ee65` not in ancestry), and exactly why the ask specified the directory.
+That file was not touched.
+
+**Verified.** Cloudflare, run from `cloudflare/` as the ask specified:
+`node node_modules/typescript/bin/tsc --noEmit` clean; **169/169** pure tests green; re-certified
+after committing, with the cloudflare working tree byte-identical to HEAD. Frontend, though this lane
+changed no frontend file: `npm run test:utils` **EXIT=0** end to end (**171/171** files, typecheck
+and `check:source` clean), `npm run verify:i18n` green (4498 keys, 449 source files), `npm run build`
+green.
+
+Non-vacuity by sabotage, each reverted afterwards with an md5 comparison confirming the file was
+restored byte-for-byte: restoring the old literal ORDER BY → 5 pass / 5 fail; dropping `matchTierSql`
+from the pagination call → 3 pass / 7 fail; reverting portal.ts wholesale to HEAD → 4 pass / 6 fail.
+Green again at 10/10 after the last revert.
+
+Provenance, checked after the fact rather than assumed: `git merge-base --is-ancestor` puts
+`e86330f4` inside both `e3678a39` (the Sep-3 `ship/2026-09-03` deploy, Worker `3b25fe33`) and
+`2c497564` (the Sep-4 `rc/s4-2026-09-04` deploy, Worker `a164d260`), and `portal.ts` at `2c497564` is
+byte-identical to this lane's copy. **So this change is live in production.** It is *not* in `main`.
+
+**Not done.** (1) `progress.md`'s *Current status* was deliberately left alone: `business-os-v1-c3`
+was actively rewriting it for Part 597, and this lane is already recorded there (line 248) as
+contained in the ship branch. (2) This branch is still unmerged to `main` — like the rest of the S4
+batch, per Part 597. (3) The seven Sep-4 migrations (0108–0112, 0114) were re-read against this lane
+as Part 597 asked: the only hits in portal.ts are pre-existing `membership_number` lookups that this
+diff never touched, and the new test seeds its own fixture, so nothing here assumed `special_price`,
+a RECON lot code, or a null membership number. (4) Worth someone's lane, not claimed here:
+`portal.ts:1054` matches a shopper's typed membership number against the stored value with
+`lower(trim(...)) = lower(trim(...))`, and migration `0110` moved every customer onto an `LC-` number
+— a returning shopper typing their old number would no longer match. `business-os-v1-c3` then
+checked it against production: `0110`’s `needy` CTE selects anything that is not `LC-<digits>`, so a
+legacy `LCMN-XXXXXXXX` really was overwritten rather than preserved — but only **12 customers of
+4,978** ever had a number at all (4,966 were blank), so at most 11 people could have had one rewritten,
+and those were machine-generated random strings nobody memorises or was handed on paper. Real,
+bounded, not a hotfix. Left flagged, not fixed. (5) **Corrected — the claim first written here was wrong, and `business-os-v1-c3`
+was right to push back.** This entry originally said `0115` sat in the repo unapplied, "so the chain
+top is ahead of live". It is not. The `d1_migrations` `id` is a **row counter, not the filename**
+number, and because no `0113` has ever existed on any ref
+(`git log --all --diff-filter=A -- cloudflare/migrations/0113*` returns nothing) the counter runs one
+behind the filename from `0114` onward. Re-derived from the deployed tree alone, without trusting the
+correction: id 113 = `0114_sales_stock_skipped.sql`, id 114 = `0115_sale_amendments.sql`. So `0115`
+**is applied** — it failed once on the CRLF/trigger split, was root-caused and re-run successfully
+inside the same deploy — and ids 107→114 are exactly the seven files 0108–0112, 0114, 0115. Nothing
+is pending; `migrations list --remote` reports none. The `0113` gap is a reserved number, never a
+drop. The lesson worth keeping: a d1 migration id and its filename number are not the same thing, and
+they diverge permanently at the first skipped number.
+
+## Part 589 (Sep 4 2026, session business-os-v1-c3, COORDINATOR + lane S4-17) — the user's Sep-4 walkthrough split into 26 items, one production incident root-caused from read-only queries, and the identity rule reversed
+
+The user walked the whole app in one message and left 26 distinct asks in it. They are on the board
+as **S4-1 … S4-26** with stable ids; use those ids in commit messages. Everything below is
+reference to re-verify, not ground truth.
+
+**The production incident (S4-1), root-caused entirely from SELECT-only reads.** `action_history`
+row **160**, "Update 9 sales to បានបញ្ចប់", by Admin at `2026-09-03 14:49:05` UTC (21:49 local),
+moved **seven** sales — 16786, 16789, 16791, 16795, 16796, 16798, 16801, every one a migrated
+`20260901-*` receipt — from `awaiting_payment` to `completed`. That wrote **nine
+`inventory_movements` rows**, ids 46189–46197, all `movement_type='sale'`, `quantity=-1`, branch 2,
+reason "Sale status changed from awaiting_payment to completed", against products 165, 5196, 5067,
+4115, 4259, 238, 3924, 955, 939. These are old-system sales whose stock was already accounted for
+at import, so the nine units are a double-count.
+
+**The app's own Undo for that action does nothing.** Its `undo_payload` is literally `{}` —
+Sales.tsx's `actionHistory.pushAction` supplies none — `resolveUndoApplier({})` returns null, and
+there is no `sale.status` applier in the codebase at all. With `require_applied` the Undo 409s;
+without it, it flips the history row's own status and performs zero writes. So the safe revert is
+to set those seven sales back to **Awaiting payment in the app UI**: `heldQuantity` gives
+`held(completed)=qty` and `held(awaiting_payment)=0`, so the delta is negative and
+`planSaleStockTransition` restores the nine units as `'return'`-type movements. That is a
+production write; remote D1 is SELECT-only by standing rule and no approval exists, so **S4-1 is
+blocked on the user**, not on analysis.
+
+**S4-4 has a trap worth naming before anyone builds it.** `awaiting_payment` does not deduct today:
+`STOCK_DEDUCTED_STATUSES` is `{completed, awaiting_delivery}`, and `heldQuantity` *also*
+early-returns 0 for `awaiting_payment` before it ever consults that set — so both places have to
+change together or the fix is half-applied. And making awaiting-payment deduct while migrated sales
+must never move stock means the "don't touch stock" flag (S4-2) belongs on the **legacy sale**, not
+on one action.
+
+**Two more findings that change what their items are.** `RECON` is production **data**, not code:
+it is a value in `product_batches.lot_code`, and no generator, template, lang key, SQL file or
+migration emits the string — so S4-19 is a D1 data migration plus possibly a display rule, not a
+rename. And the membership prefix is `LCMN-` + 8 characters, generated in **four** independent
+places (`customerMembershipNumber.ts` with `Math.random()` and no uniqueness check, `contacts.ts`,
+`portalAccounts.ts` via `crypto.getRandomValues`, and `importEngine.ts`), against a nullable column
+with only a partial unique index — so S4-23 has to unify four writers before it can promise every
+customer a number.
+
+### S4-17 — cost stopped being identity (branch `s4/identity-cost`, pushed)
+
+The user's ruling, verbatim: *"chaneg the rule, all products if cost is different add different
+costs together and divide by the number different costs...keep 4 decimal digits always round up to
+4 decimal digits... so now only diffeerent barcode creates new child row... rest merge"*.
+
+Three commits, each green on its own scope: `b1463d4b` the rule, `f4474ea1` the import path,
+`c730e5be` merge-duplicates and its undo. Gate at that tip: `npm run test:utils`, `verify:i18n` and
+a real `vite build` green in `frontend`; `npx tsc --noEmit` and every `scripts/test-*.cjs` green in
+`cloudflare`.
+
+`productDetailSignature` is now the normalized barcode and nothing else, in both byte-identical
+copies of the rule. `resolveMergedCost` takes its place for cost: the mean of the **distinct**
+costs per currency field — the user said "divide by the number different costs", so ten rows at $4
+and one at $5 average to $4.50, not $4.09 — rounded **up** to 4dp, because an averaged cost below
+what was actually paid overstates profit. A cost of **0 reads as not recorded** and stays out of the
+mean: both columns are `DEFAULT 0` and every importer writes 0 for a missing cell, so averaging it
+in would halve a real cost and double reported profit.
+
+Four consequences fell out of the change and are fixed in the same branch rather than left to
+surface in production:
+
+1. **A fold that only happens because cost stopped splitting had to be made additive.** Rows that
+   used to fork a child row now land on the row that already exists, and a folded row carrying no
+   `plannedMode` falls through to the legacy update path — which *replaces* a branch's quantity.
+   Two receipts of 5 and 3 would have stored 3. Folds whose rows disagree on cost or on lot code are
+   now marked `merge_stock`, the additive path, and the seed row's original cost is kept beside the
+   running mean so a third receipt is compared against what the file said, not against the average
+   it is about to move.
+2. **The lot-code branch of `productImportRowSignature` is gone.** It existed so two receipts of one
+   batch at two costs could share a product option back when a cost difference otherwise forked a
+   row. With cost out of identity it could no longer merge anything — all it could still do was
+   split one barcode into a row per lot, which is exactly what the ruling forbids. Lot codes live in
+   `product_batches`, which hang off a single product row by `variant_product_id`; a batch was never
+   a child row.
+3. **Several products can now share one name+barcode**, so the import match is resolved by evidence
+   and then by age — the active lot's owner when the batch names exactly one, otherwise the oldest
+   row, which is the survivor merge-duplicates keeps — instead of by iteration order. The old
+   *"merge the exact duplicate batch ownership before importing"* refusal is retired: under the new
+   rule it fires on precisely the products the rule change exists to heal, and refusing would block
+   their restocks.
+4. **A blank cost cell still keeps the product's existing cost, and an explicit 0 still lands as 0.**
+   Those two cases belong to `preserveExistingMoneyOnBlankCells` and the 61-product cost wipe it was
+   written for; averaging applies only to a cost the row actually states.
+
+Also fixed while pinning it: `roundCostUp4(0)` returned `-0`, because `Math.ceil(-1e-9)` is `-0` —
+it would have stored and serialised as "-0". Four tests that pinned the old rule were **inverted
+rather than deleted**, so the reversal stays legible to the next reader, and
+`frontend/tests/mergedCostRule.test.ts` is new (14 checks) and registered in the `test:utils` chain.
+
+**S4-17b is the half this does not do.** None of it folds the cost-forked twins production is
+already carrying — the very `#7321 / #7322` pairs the user complained about. That needs a survey of
+same-name+same-barcode groups and then the merge-duplicates path run per group, and it is a
+production write: user-gated.
+
+### S4-26 — which reports design the user actually saw
+
+Peer `business-os-v1-9f` claimed the localhost design the user liked is theirs (`rc/sec-10-reports`),
+not `fx/reports-redesign`. Checked here rather than taken on their word, and it holds: the user's
+phrase *"the tab excel style"* names a control that exists only in that lane
+(`frontend/src/components/sales/reports/ReportTable.tsx` and `ReportsHub.tsx`), while
+`fx/reports-redesign` `9b444788` has no style toggle at all — its only "excel" hits are import and
+export wording in `Sales.tsx` and `SalesImportModal.tsx`. So `fx/reports-redesign` is **parked**,
+and the All-time `$0.00` defect it carries leaves the critical path with it. Note for whoever picks
+this up: a first grep for `frontend/src/components/reports` finds nothing — the directory is
+`frontend/src/components/sales/reports`.
+
+One item came back needing a ruling: `dd-mm-yyyy` contradicts the `mm/dd/yyyy` / `en-US` convention
+this project pinned and re-swept in Part 388/W2. The user's newer instruction wins for the reports
+surface, which is where they gave it; whether the rest of the app follows is on the board as
+**S4-26b** and should not be decided unilaterally.
+
+## Part 590 (Sep 4 2026, session business-os-v1-c3, lane S4-27, worktree `bos-rc-workers/s4-rd`) — "batch" becomes "received date" everywhere, and the Khmer word turned out to have been dictated a day earlier
+
+Branch `s4/received-date` off the deployed tip `e3678a39`, six commits, pushed. Reference to
+re-verify, not ground truth.
+
+The user's instruction was one line ("make sure the renamed batch to received date is updated
+throughout the system"), and the honest answer was that the earlier rename had only ever reached
+one field label. Two questions had to go back to them before anything could be renamed, and both
+were answered:
+
+- **Does the collection noun move too?** — *Everything moves.* Not just the date field: the
+  "Manage batches" button, the Batches column headers, the Worker's own error bodies.
+- **Is "lot" a second vocabulary or drift?** — *Drift, revert to one word.* Some screens had
+  quietly started saying "lot" where others said "batch"; there was never a decision behind it.
+
+So there is now exactly one term: **"received date"** in English, **`ថ្ងៃចូល`** in Khmer.
+
+### The part that is worth reading before anyone renames anything again
+
+**The Khmer word was not mine to choose, and I chose wrong first.** I picked `ថ្ងៃទទួលស្តុក`,
+built the whole pack on it, and `frontend/tests/khmerRetailVocabulary.test.ts` went red at 1,038
+PASS. The test was right. On 2026-09-03 the shop owner had dictated, in their own words, *"Batch
+name change Date in `ថ្ងៃចូល`"* — which means **that dictation already was this rename, in Khmer**,
+a day before the English one was asked for. 106 occurrences were replaced and the glossary rule
+rewritten so `ថ្ងៃចូល` is canonical and `បាច់` / `ឡូត` / `ឡុត` are all forbidden spellings.
+`ចាំបាច់` ("necessary") contains `បាច់` and needed a lookbehind to survive the rule.
+
+Two lessons the next session gets for free: **that test file is the Khmer glossary** — read it
+before writing Khmer, not after; and **a raw line read out of `km.json` is not the rendered value**,
+because `AppContext` flattens the nested `common`/`pages` groups into one namespace last-write-wins
+(517 top-level keys are shadowed that way). A survey that quoted `received_date = ថ្ងៃទទួលស្តុក`
+from the file was quoting a key the UI never renders.
+
+**A blind regex over a language pack produced twelve broken strings.** Three renamed `{batch}` and
+`{lot}` *interpolation slots* — those are named placeholders the calling code fills, so renaming one
+prints literal braces to the shopkeeper. One renamed the CSV header `batch(mm/dd/yyyy)` inside its
+own documentation, where the whole point of the sentence is that the header keeps its old name so
+existing files still import. The rest were nonsense the substitution manufactured: "Received date
+date", "Receive Received date", "a damaged received date", "received date(es)". All rewritten by
+hand and then asserted — placeholders intact, header intact, no doubling.
+
+### What was deliberately not renamed
+
+The `product_batches` D1 columns and every identifier (a rename there is a migration, not a label
+change); the CSV header `batch(mm/dd/yyyy)`, which is read by a four-way fallback at
+`cloudflare/src/lib/importEngine.ts:1433` and counted as one of seven routing signals at
+`importTemplateRouter.ts:122`; and three keys where the same word means something else entirely —
+`inventory_batch_session` (a multi-line review flow) and `reason_defective_batch` (a return reason
+the shop writes). Also `importEngine.ts:1562` and `stockActionResolver.ts`'s
+`COST_BATCH_CONFLICT_MESSAGE`, because lane `s4/identity-cost` deletes them — renaming them here
+would have manufactured a merge conflict over dead code.
+
+**Stored text is not rewritten.** Inventory-movement reasons are saved into D1, so rows written
+before this still read "Batch receipt (…)" in stock history. Rewriting them is a production data
+write and is out of this lane.
+
+### The commits
+
+| commit | what |
+| --- | --- |
+| `dd475a3f` | three places a Khmer user was shown the English word |
+| `bdf2998d` | stop printing `08242026` where a received date belongs — `ProductsImageOnlyView`, `movementGroups.ts:319`, `FastStockInModal.tsx:433` now all route through `batchDisplayLabel` / `lotCodeAsDate` |
+| `ffec1309` | `batchDisplayLabel`'s English default was reaching Khmer users from `ProductDetailReport` |
+| `374bbe33` | the Products date filter said "Created" and filters on received date |
+| `894ad310` | the packs: 85 EN values, 90 KM, plus the glossary rule |
+| `d144e133` | the Worker's own 31 user-visible strings across five routes and seven libs |
+
+Gate at `d144e133`: `verify:i18n` OK, `test:utils` exit 0 with 1,078 PASS, `vite build` clean,
+Worker `tsc --noEmit` clean, full `cloudflare/scripts/test-*.cjs` sweep clean.
+
+### Left for their owners, messaged rather than edited around
+
+`ProductDetailSheet.tsx` and `POS.tsx` bypass the packs entirely through `posCopy(...)`, so nothing
+in `894ad310` reaches them — `business-os-v1-7c` owns those and was told, with the canonical Khmer
+word. `StockChangeSection.tsx:748` and `StockInSessionsSection.tsx:260,265` belong to
+`business-os-v1-ba`, told the same. Both messages went out twice: once to claim the boundary, once
+after the Khmer term changed under them.
+
+## Part 591 (Sep 4 2026, session business-os-v1-c3, lane S4-24 + S4-25, worktree `bos-rc-workers/s4-rs`) — the record detail reads like a receipt, and the one word in the ask that turned out to be a Worker feature
+
+Branch `s4/receipt-shape` off `e3678a39`, two commits, pushed: `1f655574` delivery, `840161ee` the
+receipt shape. Reference to re-verify, not ground truth.
+
+Taken here rather than left waiting on a reply, because S4-24 and S4-25 are **one surface** — both
+land in `SaleDetailModal.tsx`, `ReturnDetailModal.tsx` and the receipt renderer — and handing them
+to two of the three idle sessions would have put two lanes in the same three files.
+
+### The scope call, made from the receipt rather than from taste
+
+"Show data like receipt" is a rule you can actually apply: `Receipt.tsx`'s own field order
+(`header, order_info, customer, delivery, items, subtotal, discount, tax, total, payment, change,
+footer`) says what a receipt prints. Everything the detail printed that is not on that list went:
+**Timezone**, **Device**, **Payment currency**, **Points redeemed**, **Actual delivery cost**.
+
+The last one is the one to defend, and it is probably the "difference" the user's sentence names: it
+is what the shop **paid the driver**, and it rendered under Change — inviting a reader to subtract
+it from a total it was never part of. None of these are deleted data; all five are still on the
+sale row, in the exports and in the reports. Any single one can be put back on a word from the user;
+they are listed individually on the board for exactly that reason.
+
+A split payment survived, moved rather than cut: it is the payment row's own detail now, which is
+precisely how `Receipt.tsx` prints it (`order_info` passes the same list as the payment row's
+`subValue`). A row titled "Payment breakdown" was the thing being objected to, not the information.
+
+### Why delivery did NOT become a line item
+
+The literal reading of "delivery can merge into items" is a delivery row inside the items list. That
+reading is wrong arithmetic: a fee row above the subtotal makes the item lines stop adding to the
+subtotal printed directly under them. What the ask is actually describing is already true of the
+receipt — the fee sits **next to the total**. So the standalone Delivery card is gone and the driver,
+their phone and the drop address now render under the delivery-fee row **inside the items table**.
+One place, no second address to hold apart from the customer's, and the numbers still add up.
+
+That change also fixed something the card was hiding: the fee row only rendered when the fee was
+above zero, so a **free delivery** showed no row at all — and once the card is gone, that row is the
+only place the driver's name appears.
+
+### The half that is not a layout change
+
+"and add sale products functions" reads like part of a modal item. It is not. `routes/sales.ts`
+exposes `POST /`, `PATCH /:id/status`, `PATCH /:id/customer` and the read/report routes, and
+**nothing that adds a line to an existing sale**. Building it means inserting sale items, moving
+stock for them, deciding what a sale that is already completed or already partly returned does, and
+an undo applier — Worker work with stock correctness at stake. It is on the board as **S4-24b** with
+that written down, rather than being quietly absent from a ticked item.
+
+### Four tests were inverted, not deleted
+
+The Sep-3 pass had pinned "no field was lost turning blocks into rows" — correct for a restyle,
+wrong as a veto on a scope decision the user made a day later. So the cases were turned around and
+now pin that the removed rows **stay** removed, with the reason on each. `formatters.test.ts` came
+out stricter, not weaker: its Aug-30 rule (a captured zone must never read "Bangkok") used the sale
+detail's `fmtTimezoneLabel` call as its proof; the detail prints no timezone at all now, so the case
+asks the stronger question — this surface must never print a raw captured zone.
+`saleReceiptIdAndReturnAction.test.ts` kept every guarantee about the Return action and only moved
+which slice it reads, plus a new assertion that **no record action may sit beside a close button**,
+checked in both modals so the two records cannot drift apart again.
+
+Gate at `840161ee`: `tsc` clean, `check:source` 454 files, `verify:i18n` OK (4,542 keys), every
+`frontend/tests/*.test.ts` green, `vite build` clean in 37s. Layout was **not** verified in a
+browser: a preview started from an `rc/*` worktree silently serves the main checkout, so a
+screenshot from here would have shown the wrong tree.
+
+
+## Part 592 (Sep 4 2026, session business-os-v1-c3, COORDINATOR) — seven subagent lanes cut so their file sets cannot intersect, and the blocked item that turned out to be blocked for only half its length
+
+The user asked for the remaining backlog to be spread across seven subagents, coordinated from here.
+The interesting part was not the dispatch; it was what had to be true first for seven concurrent
+lanes not to collide, and what reading the source did to two board items on the way.
+
+### The `bos-*` roster could not be used, and that is a standing trap
+
+Part 585 landed nine `bos-*` agent definitions in `.claude/agents/`. They load **at session start**,
+so a session that was already running when they landed cannot see them — this one. The seven lanes
+therefore run on the built-in `subagent_type` values with `model` overrides, which costs the
+role-specific constraint text baked into each definition. Every one of those constraints had to be
+restated inline in the prompt instead: never `git add -A` on the shared index, never `npm install`
+in a worktree whose `node_modules` is a junction, remote D1 is SELECT-only, both language packs
+every time, a red test is a suspect not a verdict. A prompt that omits them is a lane that breaks a
+peer within minutes.
+
+### Disjointness was constructed, not hoped for
+
+Six sessions already hold lanes, so "pick something free" was not enough. Each subagent got a
+boundary written into its prompt naming the peer it would otherwise collide with:
+
+- **S4-24b** (add lines to an existing sale) branches off `s4/receipt-shape`, not `e3678a39`, because
+  it builds on the receipt-shaped modal. It shares `routes/sales.ts` with `business-os-v1-02
+  [055499]`, so it is **forbidden the `PATCH /:id/status` handler** — new endpoint and its own
+  helpers only. `055499` was told the same thing from the other side, and asked to say now if they
+  intend to restructure the file wholesale, since that is the one shape that turns a two-region diff
+  into a real conflict.
+- **S4-12** (create-products header step) overlaps **S4-13**, the Add Product -> Create Products
+  rename, which is `business-os-v1-ba`'s. The subagent is told explicitly not to rename anything: it
+  builds the flow, `ba` changes the words. It was also pointed at the fast-stock-in session as the
+  pattern to mirror, because "same as the session for add stock" in the user's sentence *is* the
+  specification — the shape they already use, not a new one.
+- **S4-26** (reports) inherits an orphaned lane and was told to start from `s4/09` (`7735dc95`) or
+  `rc/sec-10-reports` (`e2497aa0`) rather than rebuild. The user said they *liked* what they were
+  shown in localhost; rebuilding it from scratch would have thrown that away.
+- **S4-26 vs S4-22.** The reports ask bundles the Khmer-clipping complaint into it, so shipping
+  reports without touching it would ship a view that still shears the diacritics. The subagent may
+  fix it **inside `components/sales/reports` only**, is forbidden the app-wide fix (a global CSS
+  change touching every surface the fleet is editing), and must instead write up the root cause and
+  where the global fix belongs. `business-os-v1-7c` keeps S4-22 and was told this directly.
+
+### S4-19 is a search task before it is a rename task
+
+"Rename RECON to ADJMM/DD/YYYY" reads like a one-line change. Grepping the repo for `RECON` returns
+**only** the mode constant `RECONCILE` (`stockActionResolver.ts`, `importEngine.ts`,
+`datedStockCountApply.ts`, one pure test). There is **no literal `RECON` label and no `ADJ` prefix
+anywhere in the source.** So the string the user is looking at is assembled at runtime, or it lives
+in production data written by an old import — and those two answers need completely different work
+(a code change versus a migration). The lane is told to prove which, and that *"I could not find it,
+send me a screenshot"* is an acceptable result. Renaming a plausible-looking string that turns out
+to be the wrong one is the worse outcome, and it is the outcome a confident agent produces.
+
+### S4-11 was blocked for half its length
+
+S4-11 ("Can check in users for invoices details") sat on the board as `[?]` needing a ruling. The
+user named it in the same breath as "build it", which is the ruling. Reading the source at
+`e3678a39` then showed the two halves are nothing alike in size:
+
+- **S4-11a — who made the sale.** `sales.cashier_id` / `cashier_name` are written by `POST /` and
+  come back on the row. Pure display work.
+- **S4-11b — who made each status update.** `cloudflare/src/routes/sales.ts` contains **no
+  `action_history` write at all** at the deployed tip. The only user attribution a status change
+  leaves is `inventory_movements.user_id` / `user_name`, and `planSaleStockTransition` emits
+  movements only when the transition crosses the stock-deducting boundary
+  (`STOCK_DEDUCTED_STATUSES` = `{completed, awaiting_delivery}`). A change between two deducting
+  statuses, or between two non-deducting ones, **records nobody**.
+
+That second half is the same missing column as **S4-6**, the Telegram ask that status-update
+messages name the cashier who made the update. You cannot print the updater until somebody stores
+them, so S4-6 is not a formatting change and `business-os-v1-db` was warned before opening the
+message builder — with S4-8 and S4-9 named as the two Telegram items that do *not* depend on it.
+S4-11b was offered to `055499`, who is already inside that handler, rather than sending a second
+lane into it.
+
+### Two read-only lanes that end at a wall on purpose
+
+S4-1 (does Undo actually reverse the 09:48 batch) and S4-17b (the cost-forked twin survey) both
+terminate at a production write the user has not approved. Both are scoped to produce a verdict, the
+real row counts from SELECT-only queries, and the **exact unrun command** — and both prompts say in
+so many words that no message from me or any other agent constitutes that approval. A subagent that
+decides it has permission because the coordinator sounded confident is the failure mode worth
+designing against.
+
+### One self-inflicted near-miss worth recording
+
+Rewriting `progress.md` line-by-line and re-joining with `\n` normalised the whole file's line
+endings: a 24-line edit became a **10,047-insertion / 10,032-deletion diff**. `progress.md` is
+genuinely mixed — the S4-11 region is LF, the block four hundred lines below it is CRLF — so neither
+"convert everything to CRLF" nor "convert everything to LF" is correct. Committing that would have
+handed every peer a full-file conflict on the one file the whole fleet writes to. Fixed by restoring
+from HEAD and re-applying with a helper that detects each replaced run's own terminator and re-emits
+it; the diff came back to 21/6. The general rule: on a shared file, `git diff --stat` before every
+commit is not ceremony, it is the check that catches the edit you did not know you made.
+
+Board: `cd3749b7` (the seven-lane table with each boundary), `e4d2c929` (the S4-11 split). Both
+pushed. No code was written in this session's own tree; the lanes report back and are boarded here,
+so the shared index sees one writer.
+
+
+## Part 593 (Sep 4 2026, session business-os-v1-c3, COORDINATOR) — three read-only investigations that each overturned the item that commissioned them, and the revert procedure written out in full and left unrun
+
+Three subagent lanes reported: S4-1 (does Undo reverse the 21:48 batch), S4-19 (find and rename
+RECON), S4-17b (survey the cost-forked twins). Not one of them ended where its board item expected.
+Each is recorded here as **reference to re-verify**, not as ground truth.
+
+### S4-1 — the Undo button is not merely broken, it is misleading
+
+**Verdict: the in-app Undo cannot reverse the 21:48 bulk status change.** Two independent proofs.
+
+1. **Code.** `frontend/src/utils/actionHistory.ts:297` posts `undo_payload: entry.undo_payload || {}`
+   and the bulk caller (`frontend/src/components/sales/Sales.tsx:1218`) passes no payload at all —
+   only live JS closures. `cloudflare/src/lib/undoAppliers.ts:682` resolves the applier off
+   `payload.applier`, so `{}` resolves to `null`. And **no sale-status applier is registered
+   anywhere**: the registry holds `branch.update`, `product.merge`, `product.merge.bulk`,
+   `supplier.backfill` and nothing else, on `e3678a39` and on the current dirty tree alike.
+2. **The stored row.** `action_history` id **160**, `2026-09-03 14:49:05` UTC, Admin, label
+   `Update 9 sales to បានបញ្ចប់`, `reversible=1`, `status='undoable'`, `undo_payload='{}'`.
+
+The dangerous part is the gap between those two facts: the row still renders an Undo affordance.
+With `require_applied` the Worker 409s (`cloudflare/src/routes/actionHistory.ts:271`); **without it,
+the Worker flips `undoable` → `redoable` and changes no data** — recording a reversal that never
+happened and leaving a plausible "Redo" for whoever looks next. That is worse than an inert button,
+and it is why the board now says in as many words: do not press Undo on row 160.
+
+Worth noting for anyone tracing this later: `cloudflare/src/routes/sales.ts` writes **no
+`action_history` rows at all** (grep at `e3678a39`: zero hits). It writes `audit_logs` and
+`inventory_movements`. Row 160 came from the browser, which is exactly why its payload is closures.
+
+**The label lies about the count.** It says 9 sales; **7 changed.** Nine PATCHes returned 200, but
+`sales.ts`'s `oldStatus === saleStatus` early return answers 200 without writing when a sale is
+already in the target status. **Which two were no-ops is unknowable** — a no-op leaves no audit row,
+no movement, and does not touch `updated_at`. The lane checked for hidden rows
+(`sales.updated_at` across 14:40–15:10 UTC) and found exactly the seven, so nothing is concealed;
+there is simply no evidence to identify the other two. Do not guess ids.
+
+The seven, all migrated `20260901-*` receipts, `awaiting_payment → completed`, branch 2:
+16786 (3 units), 16789, 16791, 16795, 16796, 16798, 16801 (1 each) = **9 units**, movements
+46189–46197, each `movement_type='sale'`, `quantity=-1`.
+
+The user's "9:48" is **21:48 local (+07) = 14:48 UTC**, not the morning; the 02:30–03:15 UTC window
+holds one unrelated `delete` movement only.
+
+**Reverting is arithmetically clean, and the lane proved the three things that could have made it
+dirty are absent.** Zero returns exist against any of the seven (`returns ⋈ return_items` → 0 rows),
+so `returnedByItem = 0` and every line restores in full — no double-count is possible. All nine
+`sale_items` carry `batch_id` and `damaged_lot_id` NULL with no `sale_item_batch_allocations`, so
+neither the lot ledger nor `damaged_stock_lots` is touched. And there is a real asymmetry worth
+recording — **the deduct path clamps with `MAX(0, …)` while the restore path adds unconditionally**,
+which would inflate any product whose total had already been clamped to zero — but for all nine
+products `SUM(branch_stock) == products.stock_quantity` exactly, so nothing ever clamped.
+
+**Sale 16834 is not part of this batch**: `awaiting_payment → cancelled` at 15:03 UTC, fourteen
+minutes later, `restoredUnits=0, deductedUnits=0`. Leave it alone.
+
+#### The procedure, written and unrun
+
+Not raw SQL. Raw SQL would have to hand-replicate four tables; the app's own endpoint runs the
+verified kernel atomically per sale.
+
+**Step 0 — baseline, keep the output:**
+
+```sql
+SELECT s.id, s.receipt_number, s.sale_status, si.product_id, si.quantity,
+       bs.quantity AS branch2_qty, p.stock_quantity AS product_total
+FROM sales s
+JOIN sale_items si ON si.sale_id = s.id
+JOIN products p ON p.id = si.product_id
+LEFT JOIN branch_stock bs ON bs.product_id = si.product_id AND bs.branch_id = 2
+WHERE s.id IN (16786,16789,16791,16795,16796,16798,16801)
+ORDER BY s.id, si.id;
+```
+
+Expect **9 rows**, every `sale_status='completed'`.
+
+**Step 1 — the revert**, as Admin, against `PATCH /api/sales/:id/status` for those seven ids with
+`{ "sale_status": "awaiting_payment" }`. Omitting `updated_at` skips the optimistic-concurrency
+check (`conflictControl.ts:43`), so there is no 409 race; no CSRF header is required
+(`frontend/src/api/http.ts:674`). Through the UI instead, **leave the Notes box empty** — an empty
+box still sends `notes:''` and overwrites `sales.notes`, harmless here only because all seven are
+already empty.
+
+**Step 2 — proof:** re-run Step 0 (9 rows, all `awaiting_payment`, each quantity exactly +1 on
+baseline), then confirm **9 movements / +9 units** of `movement_type='return'` with reason
+`completed to awaiting_payment` against those reference ids.
+
+**If it half-applies, nothing is lost.** Each PATCH is one atomic `db.batch` per sale, so a sale is
+either fully reverted or untouched, and **the call is idempotent** — a sale already reverted hits
+the same early return and writes nothing, so a re-run cannot double-restore.
+
+#### Why it has not been run
+
+The user's answer changed the destination: *"i want you to make them status completed without
+changing stock quantity. and make this an option for admins. as i mentioned, we did a recon adjust
+for all products quantities which is the latest for completed sales."* The seven are **already
+`completed`** — so the status is not what is wrong; the nine units are. The end state is reached by
+revert (+9 through the ledger) followed immediately by re-complete with stock skipped (0), which
+needs **S4-2**, which did not exist.
+
+**And the ordering is a hazard, not a preference.** The same backlog asks for `awaiting_payment` to
+hold stock (S4-3). If that ships while these seven sit in `awaiting_payment`, they are deducted
+again — the identical double-count, a second time. So the two steps must be back-to-back, and S4-3
+needs an explicit answer for rows that are *already* awaiting_payment (a one-time backfill, or a
+cutoff), not merely correct behaviour for new ones. `business-os-v1-02 [055499]` was told this.
+
+**S4-2 was reclaimed.** `s4/sales-status` exists neither locally nor on `origin`, and **none of the
+six Sep-4 peer lanes has pushed a branch**, so nobody was building the mechanism the user had just
+named. It went to a subagent on `s4/sales-status-nostock`; `055499` was told directly and keeps
+S4-3/4/5. The requirement most likely to be dropped, and therefore written into the prompt: **a sale
+whose stock was deliberately skipped must be recorded as such**, or it becomes indistinguishable
+from a deduction lost to a bug.
+
+### S4-19 — RECON is 9,921 rows of data, and there is no such label in the code
+
+The lane was commissioned to rename a string. **There is no string.** A sweep of `cloudflare/src`,
+`frontend/src`, both lang packs and the built bundles found **zero** live code emitting or parsing a
+`RECON-` prefix — only the unrelated `RECONCILE` stock-import mode and `RECONNECT_*` networking
+constants. What the user is looking at is **9,921 rows in production `product_batches`**, every one
+`synthetic = 1`, all stamped `created_at = 2026-09-02T15:30:00Z`, carrying
+`lot_code = 'RECON-<productId>'` and `batch_number = 'RECON-<YYYYMMDD>-<productId>'`, written by a
+one-off Sep-2 "Authoritative Item Export" reconciliation script that is a raw SQL dump and **not
+part of the deployed Worker**.
+
+It reaches the screen because `frontend/src/utils/batchLabel.ts`'s `batchDisplayLabel()` renders any
+`lot_code` that is not a pure 8-digit `MMDDYYYY` string verbatim, treating it as a genuine custom lot
+code — so it appears raw in the POS lot picker, `ManageBatchesModal`, `ProductDetailModal`,
+`ReceiveBatchModal`, `StockChangeSection`, `ProductDetailReport`, `ProductRowParts` and
+`TransferModal`.
+
+`cloudflare/migrations/0108_recon_lot_code_to_adj_date.sql` is written, committed on `s4/adj-prefix`
+and **unrun**: `lot_code = 'ADJ' || strftime('%m/%d/%Y', created_at)`, dry-run-verified against
+remote D1 to produce exactly `ADJ09/02/2026`, scoped to `lot_code LIKE 'RECON-%' AND synthetic = 1`
+so it cannot reach a real user lot code.
+
+**This is the value of commissioning the search rather than the rename.** A lane told simply to
+"rename RECON to ADJ" would have found `RECONCILE`, renamed a mode constant, broken the stock-import
+resolver, and left every one of the 9,921 rows still reading RECON on screen.
+
+#### The bug found underneath it (S4-19b)
+
+Those same rows put the `RECON-...` **string** into `batch_number`, a column `nextBatchNumber`
+treats as a per-product counter via `COALESCE(MAX(batch_number),0)+1`. **SQLite orders TEXT above
+INTEGER**, so `MAX()` already returns the RECON text for these products and `+1` coerces it to
+**1** — meaning the next stock-in for any of those 9,921 products silently receives
+`batch_number = 1`, a number very likely already taken. Boarded separately and deliberately not
+fixed here: it is a data-integrity defect, not a cosmetic rename, and it intersects the still-open
+Part 581 lot-identity A/B decision the user has not ruled on.
+
+### S4-17b — the rule the survey was sizing up is already implemented, on an undeployed branch
+
+The lane was to survey same-name/same-barcode rows forked only by cost, ahead of building the new
+merge rule. It found the rule **already built**: `s4/identity-cost` (tip `c730e5be`) makes
+`productDetailSignature` barcode-only and adds `resolveMergedCost()` in
+`cloudflare/src/lib/productDetailRule.ts`, mirrored in `frontend/src/utils/productDetailRule.ts` —
+averaging the **distinct** costs per currency, rounding **up** to 4dp, and treating a cost of **0 as
+"not recorded"** and excluding it from the mean. `POST /api/products/merge-duplicates` already folds
+a duplicate using it, with undo support.
+
+**The survey**, against remote D1, SELECT-only, grouping by `(lower(trim(name)), lower(trim(barcode)))`
+— verified to match the app's own normalization exactly, no product name containing internal double
+spaces: from 8,202 active non-group products, **352 groups / 705 rows** disagree on cost. 351 are
+simple pairs; one has three (`Maybelline Fit Me Powder 110`, ids 4148/9037/9038, all zero stock).
+
+| Category | Groups | Needs |
+|---|---|---|
+| Safe arithmetic (clean costs, stock on ≤1 member) | 21 (43 rows) | average + deactivate |
+| Multi-branch stock, clean costs | 73 | branch-aware fold |
+| Zero / not-recorded cost on ≥1 member | 257 | already resolved by `resolveMergedCost` |
+| Both risks | 1 | both |
+
+All 74 stock-holding groups span **exactly two** branches, never three or more, and the app's
+per-branch `ON CONFLICT(product_id,branch_id) DO UPDATE quantity = quantity + excluded.quantity`
+fold never mixes two branches into one row — it consolidates the catalog entry, it does not move
+physical stock. Cross-references among the 705: 263 appear in `sale_items` (12 of those lines belong
+to `awaiting_payment` sales), **0** in `return_items`, 2 in `stock_transfers`, and **all 705** have
+at least one `product_batches` row (2,045 in total) — so batch folding is unavoidable for every
+group, which is precisely why raw SQL is the wrong tool.
+
+The recommendation is therefore **not** the fallback SQL: ship `s4/identity-cost` and run the
+existing, tested, reversible `merge-duplicates` route per group. A hand-written migration would have
+to reimplement branch-aware stock folding, batch re-pointing by `batch_key`, `sale_items` and
+`inventory_movements` reparenting, image carry-over, the audit row and the undo snapshot — which is
+the "one rule, three implementations, all three disagreed" failure this codebase's own comments warn
+about.
+
+**Four questions only the shop owner can answer** are on the board: whether 0 may ever mean a
+genuinely free item (it drives 73% of the groups); whether two same-name rows with **no** barcode
+merge (`SK-II Facial Treatment Essence 230mL`, 9809/9810); what `Ysl New Item` (10185, no barcode,
+0/0 cost) is; and confirmation that cross-branch consolidation is wanted.
+
+### A migration collision caught before it could matter
+
+The S4-17b lane wrote its fallback as `0099_barcode_only_cost_merge_fallback.sql`. **`0099` is
+already taken** by `0099_legacy_cashier_identity_backfill.sql`, which is applied in production. D1
+tracks applied migrations by **filename**, so a second `0099_*.sql` is read as unapplied and would
+run **out of order, after 0107**. Renumbered to `0109` (`a6f8c71d`), with the reasoning written into
+the file header so the next reader does not undo it.
+
+Verified from production while doing so: **`d1_migrations` tops out at 107**
+(`0107_receipt_numbers_business_format.sql`). Note that **0107 is not in this checkout's
+`migrations/` directory**, which stops at 0106 — another instance of the Part 583 lesson that `main`
+does not describe what is live. 0108 is claimed by S4-19, 0109 by S4-17b, both unrun.
+
+### Both survey branches were unpushed and are now on GitHub
+
+`s4/adj-prefix` (`8e8ca524`) and `s4/cost-merge-survey` (`a6f8c71d`) each held a committed migration
+that existed only inside a worktree on this machine. After Part 583 that is not a theoretical risk:
+work living only in a worktree is one `git worktree remove` from gone. Both pushed.
+
+Board: `49c59659` (S4-1 verdict), `7d640e96` (S4-19 findings, S4-19b, S4-2 reclaimed). No production
+write has been made, and none is authorised.
+
+
+## Part 594 — nine lanes unioned, a task that was already shipped, and a certification whose header lied
+
+`business-os-v1-c3`, Sep 4. Three things happened worth writing down: a merge that had to be
+resolved by counting rather than by eye, a board item that turned out to have shipped months ago,
+and a background verification run that reported the wrong commit.
+
+### The nine-lane reconcile
+
+`rc/s4-2026-09-04` took its eighth and ninth lanes. `s4/sale-add-items` (`859c8e57`, S4-24b) merged
+clean. `s4/create-products-header` (`19555765`, S4-12) conflicted on **all three** of the files this
+project has previously lost work in — `frontend/package.json` and both language packs — which is
+exactly the set the deploy-provenance skill names as unions rather than choices.
+
+Both merges were probed with `git merge-tree --write-tree`, chained through `git commit-tree` so the
+second probe ran against the result of the first, **before** either touched the worktree. The
+conflict was therefore known in advance rather than discovered halfway through a merge.
+
+The resolution and its proof:
+
+| File | base | ours | theirs | union |
+|---|---|---|---|---|
+| `test:utils` chain | 177 | 179 | 178 | **180** |
+| `en.json` / `km.json` | 4,542 | 4,674 | 4,559 | **4,691** |
+
++132 keys from ours, +17 from theirs, **zero lost from either side**, zero two-sided value clashes.
+Then, against the merged tree: `verify:i18n` 4,691 keys / 483 source files with every referenced key
+resolving in both packs; the chain-coverage guard green at 181 files; and the Khmer pack re-parsed —
+**4,645 values carrying Khmer script, zero replacement characters**.
+
+That last check is not ceremony. The resolver rewrites both packs through `JSON.stringify`, so a bad
+encoding round-trip would corrupt every Khmer string simultaneously **while leaving key parity
+perfect** — `verify:i18n` would pass, the build would pass, and the shop floor would get mojibake.
+The check that would catch it has to look at the values.
+
+### The union resolver now refuses to re-admit a retired key
+
+A naive three-way union resurrects any key a lane deliberately deleted, because "absent on one side"
+is indistinguishable from "never added" unless you diff against base in **both** directions. The
+resolver now computes retirements explicitly, keeps them out, and reports genuine two-sided value
+clashes instead of quietly letting insertion order decide. Both were zero this time; the check is
+what makes that a fact rather than an assumption.
+
+### S4-11a had already shipped
+
+S4-11a — "show who made the sale" — sat on the board as a frontend change, sized, assigned, and
+blocked behind another lane's lock on `SaleDetailModal.tsx` for hours. It needed no code:
+
+```
+git show e3678a39:frontend/src/components/sales/SaleDetailModal.tsx
+  375:  <DetailRow label={t('cashier') || 'Cashier'} value={sale.cashier_name} />
+```
+
+Live since `cb65fec1`, the first row of the "Sale" card, with the `cashier` key resolving in both
+packs so the English fallback never fires, and `SELECT * FROM sales` on the read path so the column
+arrives without a query change.
+
+The reasonable next worry was that the field renders but is blank on legacy invoices — which would
+have justified building something. One query settled it:
+
+```sql
+-- remote D1, SELECT-only
+SELECT COUNT(*) total,
+       SUM(CASE WHEN cashier_name IS NULL OR cashier_name='' THEN 1 ELSE 0 END) no_name
+  FROM sales;   -- total 15007 | no_name 4
+```
+
+**4 of 15,007, or 0.03%.** Migration `0099_legacy_cashier_identity_backfill` did what it claimed.
+
+What was missing when this was boarded was one `git show` against the **deployed tip**. Reading the
+user's ask, and even reading the current worktree, are both different from reading what is live.
+
+S4-11b remains the whole of the real ask, re-confirmed on the nine-lane reconcile: `grep -n
+action_history cloudflare/src/routes/sales.ts` returns **nothing**. Sale creation attributes a
+cashier; every later transition through `PATCH /:id/status` attributes nobody, and
+`inventory_movements.user_id` only catches transitions that cross the stock-deducting boundary — so
+a move between two statuses that both deduct, or both do not, records no one at all.
+
+### The certification whose header lied
+
+A background certification launched against `35d13f7e` (seven lanes) reported, in its later phases,
+**4,691 pack keys and 181 frontend tests**. Those are the *nine*-lane numbers. The run reads the
+shared reconcile worktree live at each step, so the two merges landed underneath it mid-sweep: its
+header named one commit and its frontend phase certified a different tree.
+
+It happened to come out green, and its numbers match the post-merge measurements exactly. That is
+luck, not method. **A certification that reads a worktree someone is still merging into is not
+certifying the commit in its header** — the same shape as the deploy-provenance failure, where a
+green check described a tree other than the one that shipped. Certify a static tree, or re-run.
+
+### Also closed: the 178th test file that was never missing
+
+The deployed tip has 178 test files on disk but only 177 chain entries, and
+`paginationSurfaceContract.test.ts` is the odd one out. It is **not** an orphan:
+`paginationRangeControl.test.ts:15` does `import './paginationSurfaceContract.test.ts'`, Node runs
+an imported module before its parent, and `testChainCoverage.test.ts` deliberately counts that as
+reachable — which is why the guard passes at 181 while the chain lists 180. The file runs in CI and
+is green. **Do not "fix" this by appending it to the chain**; it would then run twice per sweep.
+
+### Open for the shop owner, not for an engineer
+
+`sales.tax_usd` is an absolute amount and **no tax rate is stored anywhere in this schema**. Adding a
+line to an existing sale therefore raises the total but not the tax. For a shop that charges VAT
+that is wrong, but the fix is a stored rate on the sale or in settings — a schema *and* pricing
+policy decision. Surfaced rather than guessed.
+
+
+---
+
+## Part 595 (Sep 4 2026, session business-os-v1-21) — a paid-history import that had to route around the app's own writers, and the barcode normaliser that turns "Libre10ml" into a real product's barcode
+
+**Ask.** Four legacy `.xls` exports (AP by supplier, AR all-paid, item report, invoice detail) added to
+sales and suppliers, **status all paid, stock quantity untouched, no deduction**, with cashier, product,
+supplier and customer names resolved against **the new system** so nothing is duplicated and no product is
+created. Coordinate with the other live sessions throughout.
+
+**What changed.**
+
+- `ops/scripts/migration/import-sep02-legacy-reports.mjs` — fourth in the dated importer series
+  (aug30 → aug31 → sep01 → sep02). A **read-only planner**: it emits SQL and never applies it; there is no
+  `--apply` flag, and a test asserts there never is one.
+- `ops/scripts/migration/test-sep02-import-plan-pure.cjs` — 10 pure guards, every path anchored to
+  `__dirname` (Part 585's cwd bug made a relative read pass from `cloudflare/` and fail from
+  `cloudflare/scripts/`). Two of them are the real ones: **no write to any stock-bearing table**, and
+  **a non-numeric source code never reaches the barcode index**.
+- `ops/scripts/migration/SEP02-03-IMPORT-RECORD.md` — the apply record: Time Travel bookmark, row
+  identification queries, count reconciliation, the held invoices, the defect.
+- Commits `59c0a96d` (planner + test), `0b4470a0` (mis-attribution fix), `b1bfdb85` (apply + record).
+
+**What was found.**
+
+*The gap was 22, not 37.* Production already held 15 of the 37 source invoices — the Sep-2 out-of-fleet
+reconciliation stopped at `004434`, and `customer_receivables` stopped at **exactly the same invoice**. One
+clean cutoff, so only the gap was inserted; the 15 were flipped in place, not re-imported.
+
+*Stock had to be avoided by routing around the app.* `routes/sales.ts` and `lib/importEngine.ts` both move
+stock when a sale's status is in `salesStatus.ts::STOCK_DEDUCTED_STATUSES`, and that set contains
+`completed` — the status the user asked for. Any import through a writer would have deducted. Rows were
+therefore inserted **direct-to-D1**, with `loyalty_accrual = 0` so forced-paid history cannot inflate the
+computed loyalty balances. The consequence is intentional and permanent: for these invoices sold-quantity
+and stock-value disagree (raised by `business-os-v1-ba`).
+
+*The near-miss.* `legacy-preflight.mjs::barcodeKey()` strips non-digits. I claimed in review that a
+SKU-style code therefore normalises to an empty key and falls through harmlessly. That is wrong, and peer
+`business-os-v1-4a` made me run it:
+
+```
+"Libre10ml"          -> "10"
+"CompletelyClean45g" -> "45"
+```
+
+A **short numeric key**, not an empty one. **44 live products carry the literal barcode `10`** — the
+placeholder used for 10ml perfumes — three of them active, including `10111 "YSL Libre 10ml"`, which is the
+exact product such a line means. Only the duplicate-barcode quarantine stopped a mis-book, and it did so by
+accident: with exactly one active match, a YSL Libre line would have been written against an unrelated
+perfume and looked correct forever. Fixed in `0b4470a0` — a source code is a barcode only when it is
+**entirely digits**; otherwise resolution falls through to SKU, then to a single exact active name. Caught
+before any production write.
+
+*The same bug already cost two lines.* It is why `004430` and `004434` are live but short — 004430 missing
+"YSL Libre 10ml" ($54 live vs $79 reported), 004434 missing "Clinical Completely Clean 45g" ×2 ($105 vs
+$131). Both were **held out of the paid flip on purpose**: marking a short invoice settled converts a
+visible exception into a closed record.
+
+*The count that looked wrong and wasn't.* `sales` moved 15,012 → 15,035, which is +23 against +22 written.
+The extra row is live business: sale 16841 (`20260904-102300`, cashier Rath) was rung up between the
+baseline snapshot and the apply. `MAX(sales.id)` is 16863 — this batch's last row — and nothing exists
+above it.
+
+**Verified.**
+
+- `node ops/scripts/migration/test-sep02-import-plan-pure.cjs` → `all checks passed` (10/10), from the repo
+  root and from `cloudflare/scripts/`.
+- Apply against production D1 `business-os`: **711 rows written, 3,009 read, all statements successful**.
+  `sales` +22 (ids 16842–16863, $3,462.00, all `completed`, `amount_paid_usd = total_usd`), `sale_items`
+  +56, 11 `awaiting_payment`→`completed` flips, `supplier_invoices` +5 ($3,002.00), `customer_receivables`
+  +22 (all Paid, outstanding 0).
+- **Stock, expected vs observed:** `SUM(products.stock_quantity)` expected 23,085 → observed **23,085**;
+  `COUNT(inventory_movements)` expected 23,079 → observed **23,079**; `products` 10,272 → 10,272 and
+  `customers` 4,970 → 4,970 (nothing created, as instructed).
+- Integrity query after apply: `my_sales = 22`, `my_items = 56`, `bad_rows = 0`, `my_value = 3462`,
+  `total_vs_lines_mismatch = 0`. `sep23_not_completed = 3` — the two held invoices plus one genuinely
+  cancelled POS sale (16834, "Srey Pich"), all accounted for.
+- D1 rejected `BEGIN TRANSACTION` ("please use `state.storage.transaction()`"); removed, since a `--file`
+  batch is already atomic. `last_insert_rowid()` was replaced pre-emptively with
+  `(SELECT id FROM sales WHERE receipt_number = ...)` so a parent lookup cannot drift.
+- Pre-write Time Travel bookmark captured: `0000126d-00000064-000050dc-e4baaad3f0743e943943449ec02bd96e`.
+
+**Not done.**
+
+- **`004430` and `004434` are not flipped to paid** and need a user ruling: restore the dropped lines
+  (product `10111` on 004430; "Clinical Completely Clean 45g" ×2 on 004434), then flip.
+- **The fix in `0b4470a0` is forward-only. It does not touch what is already in production, and the
+  window is NOT clean.** `import-sep01-legacy-reports.mjs:53-54` defines byte-for-byte the same behaviour,
+  spelled through its own `digits()` — `"Libre10ml"` -> `"10"` — and **Sep 1 has already been applied**.
+  So the open question is not whether it could mis-book but whether it already did, and the answer is
+  sitting in production (pressed by `business-os-v1-4a`). `legacy-preflight.mjs:77` is the shared call
+  site still on the old behaviour. The 44-products-carrying-barcode-`10` finding is a property of the
+  **product table**, not of this batch, so it applies to every batch that used the helper.
+  Two suspected exposures were checked and ruled out rather than assumed: in `import-aug30` (:63) and
+  `import-aug31` (:74), `digits()` feeds **`phoneKey` only** and never a barcode lookup, and
+  `barcodeKey` at `import-aug31:160` is a **function parameter shadowing the name** (a mapping column
+  key), not the helper. The exposure is Sep 1 and Sep 2 — not the whole series.
+  The bound itself is owed and NOT done: re-run each applied batch under the old helper and the new one and
+  diff the resolved `product_id` per line; list every non-numeric legacy code with its old key and whether
+  an active product carries that key; and treat any correction after that as the user's call, not a
+  session's. Peer `business-os-v1-db` separately confirmed shipped app code is clean
+  (`productDetailRule.ts` trims and lowercases only), so the class is confined to migration tooling.
+  `business-os-v1-ba` and `business-os-v1-4a` have each offered to take it read-only.
+- No migration was applied (chain top stays **0107**) and no deploy was involved. This was data only.
+
+## Part 596 (Sep 4 2026, session business-os-v1-c3, COORDINATOR) — the discount the receipt showed and then spent, and three merges where picking a side was the wrong move
+
+**The receipt was doing subtraction twice and showing it once.** The owner's rule was terse — *"products show
+selling price and minus the discounts in total show selling price (-discount), not discounted price(-discount)"* —
+and the defect underneath it was exact. The line printed `applied_price_usd`, which checkout stores as what was
+actually **charged**, and then printed the saving beside it: `$49.00 (-$4.00)`. But `sales.subtotal_usd` is the sum
+of **charged** line totals. So the $4 had already been removed from the Subtotal before it was printed, and the
+Discount row never mentioned it. The cut appeared next to its line and then vanished from the arithmetic directly
+below it. Against production that is **24,085 lines across 11,974 sales and $99,534.40** of discount the totals
+never showed — not an edge case, the ordinary path.
+
+The fix is display-only and provably so: a line prints its **list** price, and both displayed figures shift by the
+same amount, so `(subtotal + savings) - (discount + savings) = subtotal - discount`. Sale 16433 went from
+`$109.00 / $5.00` to `$113.00 / $9.00` and still totals `$104.00`. That identity is what lets every historical
+receipt reprint to the same money, and it is why `total_usd` and the tax base are untouched.
+
+**The arithmetic moved out of the component so a test could run it.** `Receipt.tsx` is JSX, which the test runner
+cannot import, so every guard on it had been a source-scan — regexes matching the code's *spelling*. Extracting
+`utils/receiptLineMath.ts` let `receiptLineMath.test.ts` drive real production sales (16433, 16815) through the
+actual function and assert the printed lines sum to the printed Subtotal. It also pins the fallbacks that keep old
+receipts identical: no `base_price` falls back to charged, a price *increase* must not yield a negative saving, and
+sub-cent noise is not a discount.
+
+**Which immediately produced the red that proves the point.** `posCore.test.ts`'s Z2 lock asserted
+`baseUnitUsd > 0 ? baseUnitUsd + productDiscUnitUsd` **inside `Receipt.tsx`** — and the derivation had moved to the
+util, byte-identical apart from a helper's name. That is the failure mode the fleet rule exists for: a red is a
+suspect, not a verdict, and each one is either pinning a real contract or pinning the old spelling. This one pinned
+the spelling. It was re-pointed at the rule's new home rather than deleted, and given the assertion it had only ever
+implied — that the component still *consumes* the shared math. Then both halves were broken in turn to confirm the
+lock still goes red; a re-pointed lock nobody re-tests is just a deleted one with extra steps.
+
+**Three lane merges, and in two of them "pick a side" was the losing move.**
+
+- `s4/wholesale-merge-path` conflicted in `importEngine.ts`. `HEAD` called a local
+  `resolveMergedWholesalePricing`; the branch **deletes that function on purpose**, because S4-32 had re-pointed the
+  shared `resolveMergedPricing` at `wholesale_price_*` and the local copy had become a second implementation of one
+  rule — the exact drift `productDetailRuleParity.test.ts` exists to prevent. Taking `HEAD` would not have compiled.
+  The conflict looked like a choice and was actually a consolidation.
+- `s4/date-format-ddmmyyyy` conflicted on `test:utils`, the one very long line every lane appends to. Each side had
+  exactly one entry the other lacked (`dateFormatDayFirst` theirs, `receiptLineMath` mine). Either side-pick loses a
+  test **silently and permanently**. Unioned to 190 entries and then *proved* a superset of both parents, along with
+  both language packs, rather than trusting that the merge looked clean.
+
+One scare that was not one: a union check reported a test file on disk that no chain entry names. It turned out
+`testChainCoverage.test.ts` deliberately treats a test imported by a chained test as reachable, and
+`paginationSurfaceContract` is imported by `paginationRangeControl`. The guard was right and the ad-hoc check was
+naive — worth recording, because the instinct on seeing "the coverage guard passed but a file is unchained" is to
+distrust the guard.
+
+**Certified after merging, on the merged tree.** frontend `tsc` clean, **188/188** tests, `check:source` 488 files,
+`verify:i18n` **4742** keys at parity, a real `vite build`; cloudflare `tsc` clean, **183/183** pure scripts. The
+certified tree is byte-identical to committed `HEAD` (`979338e9`) apart from the three self-rewriting
+`frontend/public/*` files — stated explicitly because a certification that silently describes a different tree than
+its header claims is a mistake this project has already made once.
+
+**Nothing was deployed, and the gate is heavier than it looks.** The chain tops out at **0115** while production D1
+is still at **107**, re-verified by direct `SELECT`. A deploy applies **seven** unrun migrations and **five rewrite
+production data** — `0108` relabels RECON lot codes, `0109` folds barcode-only duplicate costs, `0110` backfills
+every customer onto `LC-`, `0111` moves the VIP price into `wholesale_price_*`, `0112` deletes a placeholder
+product. Asking "deploy?" without naming those five would understate the question.
+
+**A ruling, and an operational cost worth saying out loud.** S4-32 declined to accept `special_price_*` as an input
+alias on `/adjust` and handed the call up; affirmed. A stale PWA till tab renders that field from its own cached row
+and 0111 zeroes the column, so an old tab can only ever send `0` — aliasing it would let that `0` overwrite a
+sibling row's inherited wholesale price. The accepted cost is that until every till reloads, a wholesale-price edit
+made from the Adjust dialog on a stale tab is **silently dropped** (the stock adjustment still lands). That is the
+safe half of the trade, but it is not a free one, and the shop should hear it.
+
+**Finally, the thing no test can catch:** typing `9032026` still renders `09/03/2026`, and that string now means
+**9 March** rather than 3 September. The placeholder and error text say "day first" loudly. Staff muscle memory
+will still produce wrong dates that look entirely right, and a word to the counter will do more than either.
+
+## Part 597 (Sep 4 2026, session business-os-v1-c3, COORDINATOR) — the S4 batch is live, and a line ending nearly stopped it
+
+**Production is now running `a164d260-49ae-4bec-b372-eb73bce58850`, DEPLOYED FROM THE BRANCH `rc/s4-2026-09-04`
+@ `2c497564` — NOT FROM `main`.** That sentence is in capitals for one reason: on Sep 3 a session read `main`, found
+a clean and fully certified tree, deployed it, and silently rolled 24 commits of live hotfix work out of production.
+Every check it ran was green. The user found the regression. The `deploy-provenance` skill exists because of it, and
+its closing instruction is to say the branch in capitals when it is not `main`. **`main` still does not contain the
+deployed code.** Until that merge lands, deploying `main` rolls the entire S4 batch back.
+
+The previous live version was `3b25fe33-a806-44f7-9d42-caca6801f102` (Sep 3 14:27 UTC). The build was made in an
+isolated detached worktree at `C:/Users/mrkl6/Downloads/bos-dep` with a real `npm ci` — never in the shared
+checkout, whose `node_modules` a dozen sessions depend on — and from committed `HEAD`, never a dirty tree.
+`secrets:sync` was deliberately not run: no secret changed, and running it would have rewritten live secrets from a
+worktree's copy of the local auth files.
+
+**Seven migrations went to the production D1 and five of them rewrote data**, taking the highest applied id from 107
+to 114. The user was told what those five do individually before the go, because a single "deploy?" understates
+them. Each one was then proved by a `SELECT` taken before and again after, rather than by the migration exiting 0 —
+which is the difference between "it ran" and "it did what it says". `0108` relabelled the RECON lot codes: RECON
+**9,920 → 0**, ADJ **0 → 9,920**. `0110` put every customer on the `LC-` sequence: customers with no number
+**4,966 → 0**, with **4,976** now carrying one. `0111` moved the VIP price into `wholesale_price_*`:
+`special_price` **9,552 → 0**, `wholesale_price` **0 → 9,552**. `0112` deleted the YSL placeholder: products
+**10,272 → 10,271**. `0109` folded the barcode-only duplicate costs. Sales stayed at **15,041** across all of it,
+which is the control that says nothing else moved. `0114` and `0115` are schema only.
+
+**Mid-deploy, `0115` failed against production** with `incomplete input: SQLITE_ERROR [code: 7500]` — after the six
+migrations ahead of it had already applied, which is the worst moment for a migration to fail. The cause is not in
+the SQL. `wrangler d1 migrations apply --remote` splits the file into statements before sending them, and it decides
+a `CREATE TRIGGER` body has closed with the regex `/\sEND[;\s]$/`. This checkout is `autocrlf`, so the accumulated
+chunk ends `END;\r`, the `$` anchor sits past the `\r`, the match fails, wrangler never sees the trigger close, and
+it sends a truncated statement that D1 correctly rejects.
+
+The part worth remembering is why no amount of local testing would have caught it. `wrangler d1 execute --local
+--file` hands the **whole file** to SQLite, which parses multi-statement input natively and never splits it. A
+migration can therefore be green locally, green in review, green in every check this project runs, and still be
+unshippable. So it was closed as a class rather than patched as a file: `.gitattributes` now pins
+`cloudflare/migrations/*.sql` to `eol=lf` so the files are born correct on an `autocrlf` clone; the existing chain
+was normalised; and `cloudflare/scripts/test-migration-line-endings-pure.cjs` re-derives **wrangler's own regex**
+against every `END;` in every migration, so the guard fails for the same reason wrangler would, not for a proxy of
+it. It also rejects the sibling form documented in `0010`'s own header — a lowercase `begin` opening a trigger body,
+which mis-parses identically (workers-sdk #10998). Red before the fix, green after: *114 migrations LF; 10 contain
+triggers, 36 bodies wrangler can close*. The first version of that guard split on `/CREATE\s+TRIGGER/i` and
+immediately tripped over `0010`, which discusses triggers in its prose; iterating `END;` occurrences directly is
+what made it honest.
+
+**Post-deploy, with the expected value written next to the observed one**, because a probe without both is not
+evidence: `/health` → 200 `status: ok` on both hosts · `/api/products` unauthenticated → **401**, not 200, which is
+the one that would have mattered · storefront → 200 with Leang branding · `/ws` → **426**, an upgrade-required
+rather than a 500 · `migrations list --remote` → nothing pending · `migrate:import:remote` → nothing to apply. The
+admin SPA loads to the sign-in screen; its only console error is the unauthenticated `401 / invalid_session`, which
+is what an unauthenticated load is supposed to produce.
+
+**Rollback, while it lasts.** The Worker reverts to the previous version id. The *data* does not come back with it —
+D1 Time Travel is the only route and it restores by timestamp. The migrations ran at **04:54:56–04:55:00 UTC**, so
+`--timestamp=2026-09-04T04:50:00Z` is the pre-migration state, and Time Travel's 30-day window closes **Oct 4
+2026**. A restore is destructive and is the user's call, not a session's.
+
+This entry is written as reference to re-verify, not as ground truth: the version id came from wrangler, the
+migration figures from direct `SELECT`s on `d1_migrations` and the affected tables, and the commit is on
+`rc/s4-2026-09-04`. `/health`'s `version` field is a hard-coded string and is **not** the deploy id — only wrangler
+prints that.

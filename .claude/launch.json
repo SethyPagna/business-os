@@ -38,6 +38,24 @@
       "autoPort": false
     },
     {
+      "name": "frontend-lane",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "C:/Users/mrkl6/Downloads/bos-rc-workers/lane-preview/frontend",
+        "--",
+        "--config",
+        "vite.lane.config.ts",
+        "--port",
+        "5199",
+        "--strictPort"
+      ],
+      "port": 5199,
+      "autoPort": false
+    },
+    {
       "name": "worker-dev",
       "runtimeExecutable": "npx",
       "runtimeArgs": [
