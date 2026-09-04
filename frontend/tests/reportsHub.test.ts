@@ -167,6 +167,22 @@ test('buildIncomeStatement: the profit bridge names every term and never uses th
   // wrong quantity, so its absence from the profit group is the fix.
   assert.ok(!('store_delivery' in gross), 'the residual delivery plug is gone from the profit group')
   assert.equal(gross.delivery_absorbed.group, 'delivery', 'store-paid delivery is a memo now, not a profit term')
+  // ... and pinned by VALUE, not only by key and group. Reintroducing the
+  // residual keeps both of those and changes only the number, so structure
+  // alone does not see the regression come back. On this fixture the measured
+  // figure and the residual are the same magnitude with opposite signs
+  // (5 against 215 - 90 - 130 = -5) -- which is exactly how a negative
+  // "store-paid delivery" used to read as a negative expense.
+  assert.equal(gross.delivery_charged.usd, 10, 'charged = every customer-paid fee in the window')
+  assert.equal(gross.delivery_actual_cost.usd, 3, 'actual cost = every courier payment recorded in the window')
+  assert.equal(gross.delivery_absorbed.usd, 5, 'store-paid delivery is the MEASURED store_delivery_usd')
+  // Stated directly, so it survives someone re-picking the fixture numbers: if
+  // a future fixture made the two coincide this goes red, which is the signal.
+  assert.notEqual(
+    gross.delivery_absorbed.usd,
+    gross.revenue_carried.usd - gross.cogs.usd - gross.gross_profit.usd,
+    'store-paid delivery is never the residual revenue - cost - profit',
+  )
   // delivery_margin_usd (7 here) is the descriptive figure over ALL deliveries;
   // substituting it for the recognized halves would miss by 2 and still look
   // plausible, which is why the fixture skews them apart.
