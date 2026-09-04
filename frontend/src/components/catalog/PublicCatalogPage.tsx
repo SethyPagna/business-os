@@ -504,9 +504,10 @@ function formatDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // mm/dd/yyyy + 24-hour in Phnom Penh business time (fmtTime). This is a
-  // customer-facing surface; a bare toLocaleString() rendered whatever locale
-  // and timezone the visitor's device happened to use (dd/mm, 12-hour).
+  // dd/mm/yyyy + 24-hour in Phnom Penh business time (fmtTime, day-first
+  // since Sep 4 2026). This is a customer-facing surface; a bare
+  // toLocaleString() rendered whatever locale and timezone the visitor's
+  // device happened to use, which silently swaps day and month.
   return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }
 

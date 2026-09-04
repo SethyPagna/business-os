@@ -280,8 +280,10 @@ for (const doc of lang.TELEGRAM_COMMANDS) {
   assert.ok(reference.includes(`▸ ${doc.example}`), `${doc.command} has no example`)
   assert.ok(KHMER.test(doc.km) && !KHMER.test(doc.en), `${doc.command} descriptions are in the wrong scripts`)
 }
-assert.ok(reference.includes('mm/dd/yyyy'), 'the reference states the project date convention')
-assert.ok(!reference.includes('dd-mm-yyyy'), 'dd-mm-yyyy is ambiguous with mm-dd-yyyy and is not offered')
+assert.ok(reference.includes('dd/mm/yyyy'), 'the reference states the project date convention')
+// The refusal inverted on Sep 4 2026 rather than loosening: exactly ONE
+// slash order may be offered, and it is now the day-first one.
+assert.ok(!reference.includes('mm/dd/yyyy'), 'the month-first order is no longer offered')
 // Width in GRAPHEMES, not UTF-16 units: Khmer stacks combining marks, so
 // `.length` over-counts a Khmer line by ~25% and would fail an honest layout.
 const graphemes = new Intl.Segmenter('km', { granularity: 'grapheme' })
@@ -296,15 +298,22 @@ assert.deepEqual(lang.parseReportDate(undefined, '2026-09-04'), { ok: true, date
 assert.deepEqual(lang.parseReportDate('today', '2026-09-04'), { ok: true, date: '2026-09-04' })
 assert.deepEqual(lang.parseReportDate('YESTERDAY', '2026-09-01'), { ok: true, date: '2026-08-31' }, 'yesterday crosses a month end')
 assert.deepEqual(lang.parseReportDate('2026-09-01', '2026-09-04'), { ok: true, date: '2026-09-01' }, 'ISO is accepted')
-assert.deepEqual(lang.parseReportDate('09/01/2026', '2026-09-04'), { ok: true, date: '2026-09-01' }, 'mm/dd/yyyy is the project convention')
-assert.deepEqual(lang.parseReportDate('9/1/2026', '2026-09-04'), { ok: true, date: '2026-09-01' }, 'unpadded mm/dd/yyyy is accepted')
-for (const bad of ['01-09-2026', '2026-13-01', '13/45/2026', '02/30/2026', 'last tuesday', 'DROP TABLE sales', '2026/09/01']) {
+assert.deepEqual(lang.parseReportDate('09/01/2026', '2026-09-04'), { ok: true, date: '2026-01-09' }, 'dd/mm/yyyy is the project convention -- 9 January')
+assert.deepEqual(lang.parseReportDate('9/1/2026', '2026-09-04'), { ok: true, date: '2026-01-09' }, 'unpadded dd/mm/yyyy is accepted')
+// Past the 12th, so only one reading can parse at all:
+assert.deepEqual(lang.parseReportDate('25/12/2026', '2026-09-04'), { ok: true, date: '2026-12-25' }, '25 December can only be day-first')
+// The owner wrote the direction as "dd-mm-yyyy", so the dash spelling is
+// accepted too. It adds no ambiguity that 01/09/2026 does not already
+// carry: a 4-digit year LAST cannot be read as ISO, and only one slash
+// order is accepted at all.
+assert.deepEqual(lang.parseReportDate('01-09-2026', '2026-09-04'), { ok: true, date: '2026-09-01' }, 'the dash spelling the owner used is accepted, day-first')
+for (const bad of ['12/25/2026', '2026-13-01', '13/45/2026', '30/02/2026', 'last tuesday', 'DROP TABLE sales', '2026/09/01']) {
   const parsed = lang.parseReportDate(bad, '2026-09-04')
   assert.equal(parsed.ok, false, `"${bad}" must not be guessed at`)
   assert.ok(KHMER.test(parsed.message), `the refusal for "${bad}" is bilingual`)
-  assert.ok(parsed.message.includes('mm/dd/yyyy') && parsed.message.includes('yyyy-mm-dd'), 'the refusal names the accepted forms')
+  assert.ok(parsed.message.includes('dd/mm/yyyy') && parsed.message.includes('yyyy-mm-dd'), 'the refusal names the accepted forms')
 }
-console.log('PASS arguments: today/yesterday/ISO/mm-dd-yyyy accepted, ambiguous and junk input answered bilingually')
+console.log('PASS arguments: today/yesterday/ISO/dd-mm-yyyy accepted, month-first and junk input answered bilingually')
 
 // --- 7. an unauthorised chat learns nothing about the shop -------------------
 
@@ -361,11 +370,15 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.ok(!lastSent().includes('📊'), 'no report reaches an unapproved chat')
   assert.equal(sent[sent.length - 1].body.chat_id, '-100999', 'the refusal goes back to the asker, not the shop chat')
 
-  await wired.handleTelegramWebhook(env, { message: { text: '/report@business_os_bot 09/01/2026', chat: { id: -100111 } } })
-  assert.ok(lastSent().includes('09/01/2026'), 'a bot mention is stripped and the date is honoured')
+  // 25 past the 12th: the echoed header proves the WHOLE path is day-first,
+  // where 09/01/2026 would have read identically under either order.
+  await wired.handleTelegramWebhook(env, { message: { text: '/report@business_os_bot 25/12/2026', chat: { id: -100111 } } })
+  assert.ok(lastSent().includes('25/12/2026'), 'a bot mention is stripped and the date is honoured, day first')
 
-  await wired.handleTelegramWebhook(env, { message: { text: '/report 01-09-2026', chat: { id: -100111 } } })
-  assert.ok(lastSent().startsWith('⚠️'), 'an ambiguous date is answered, not thrown')
+  // 01-09-2026 used to be the rejected example; day-first made it a real
+  // date, so the refusal is now demonstrated with a month-first spelling.
+  await wired.handleTelegramWebhook(env, { message: { text: '/report 12/25/2026', chat: { id: -100111 } } })
+  assert.ok(lastSent().startsWith('⚠️'), 'a month-first date is answered, not thrown')
   assert.ok(!lastSent().includes('📊'), 'and no data is sent with it')
 
   await wired.handleTelegramWebhook(env, { message: { text: '/nonsense', chat: { id: -100111 } } })
@@ -392,9 +405,10 @@ const lastSent = () => sent[sent.length - 1].body.text
   console.log(`PASS commands: ${sent.length} composed replies, allow-list enforced, nothing sent for non-commands`)
 
   // Business day, business date shape.
-  assert.equal(wired.formatBusinessDay('2026-09-01'), '09/01/2026', 'report headers use the pinned mm/dd/yyyy')
+  assert.equal(wired.formatBusinessDay('2026-09-01'), '01/09/2026', 'report headers use the pinned dd/mm/yyyy')
+  assert.equal(wired.formatBusinessDay('2026-12-25'), '25/12/2026', 'and a day past the 12th proves the order')
   assert.equal(wired.formatBusinessDay(''), '', 'a missing date degrades quietly')
-  console.log('PASS dates: report headers render mm/dd/yyyy, the project-wide convention')
+  console.log('PASS dates: report headers render dd/mm/yyyy, the project-wide convention')
 
   console.log('\ntelegram bilingual + commands tests passed')
 })().catch((error) => { console.error(error); process.exit(1) })
