@@ -17981,6 +17981,116 @@ localStorage print settings can still hold an old `highContrastBold:false`; if a
 device, tick "Extra-dark bold receipt text" once in Print settings there. (6) Reply from peers 40/63/7e to the deploy
 brief: none arrived before the deploy; musing-tu-d9f677-c4 was told to use Part 588.
 
+## Part 588 (Sep 3–4 2026, session musing-tu-d9f677-c4, lane `claude/musing-tu-d9f677`) — the storefront was the last hand-copy of the search tail, and it ranked discounts above the product the shopper typed
+
+**Ask.** The user: move `cloudflare/src/routes/portal.ts` onto the shared search helpers that
+`fx/search-rank` extracted, because portal.ts "is the last remaining hand-copy of the product search
+tail." Two named defects: `portal.ts:1518` built its own
+`buildFtsMatchExpression([searchTerms], 'AND', ['name','sku','barcode'])` plus its own short-word and
+partial-word fallbacks instead of calling `buildProductSearchQuery`; `portal.ts:1734` hardcoded
+`'family_promoted DESC, match_rank ASC, family_sort_value ASC, family_name ASC'`, which "puts the
+promoted key ABOVE relevance (so a discounted product that merely shares a word outranks the product
+the shopper typed) and it has no discrete exact-barcode / exact-name / name-prefix tier at all. Both
+shapes were the reported 'it shows products not really matched, top to bottom' defect in the admin
+app." Two constraints, verbatim: "Do not widen `normalizedBarcode` in
+`cloudflare/src/lib/productDetailRule.ts` (it decides auto-merges)" and "Run the cloudflare sweep from
+the `cloudflare` directory, not from `cloudflare/scripts/`." The client half was already done —
+`PublicCatalogPage.tsx:885` passes `preserveInputOrder` into `mergePortalCatalogProducts`.
+
+**What changed.** One commit, `e86330f4`, cut from `fx/search-rank` `5db7c373`; 6 files, 564+/122−,
+every path staged explicitly.
+
+`cloudflare/src/routes/portal.ts` — `buildPortalProductFilters` lost ~98 lines of hand-copied tail
+(its own FTS match expression, short-word fallback, partial-word clause and trigram expression) to a
+single `buildProductSearchQuery(term, params, { paramPrefix: 'portal' })`. The `paramPrefix` was
+checked against every bind the route already emits (`branchId`, `branchN`, `brand`, `category`,
+`initial`, `promoRuleN`, `promoNow`, `pageSize`, `offset`) — no collisions. `tokenizeSearchWords` was
+kept but now feeds only the JS fuzzy fallback, because `runFuzzyFallbackMatch` takes a flat word list
+rather than the comma-groups the FTS builder wanted. The filter bundle returns `matchRankSql` and
+`matchTierSql` alongside the existing fields, and `runPortalProductSearch`'s
+`paginateProductFamilies` call passes them through with
+`buildFamilyRelevanceOrderSql('family_sort_value ASC, family_name ASC', { hasTier, hasRank, promotedFirst: true })`
+in place of the literal. Keeping `family_sort_value ASC, family_name ASC` as the tail is deliberate:
+the storefront's own brand sort still decides order *within* a relevance tier. Three stale comment
+blocks that described the deleted hand-copy were rewritten rather than left lying.
+
+The ordering consequence is the whole point. `buildFamilyRelevanceOrderSql` emits `match_tier ASC`
+first, then `family_promoted DESC`, then `match_rank ASC` — so promotion leads within a tier and can
+no longer outrank a better match, and the storefront gains the exact-barcode / exact-name /
+name-prefix tiers it never had. `productDetailRule.ts` was not touched.
+
+`cloudflare/scripts/test-portal-search-relevance-order-pure.cjs` (new, 10 checks) — modelled on
+`test-search-relevance-order-pure.cjs`, but drives the **real route** through
+`app.request('/catalog/products/search?q=…')` rather than a re-implementation, with
+`searchMatch.ts`, `productSearchQuery.ts`, `familyPagination.ts`, `promotionRulesSql.ts` and
+`sqlBinding.ts` all loaded for real and only the infrastructure (db, cache, auth, media, portal
+session) stubbed. The fixture is built so that every wrong answer is attractive: two of the decoys
+are **discounted**, so alphabet, brand-sort and "discounted leads" all point away from the right row.
+A `searchWithOldOrder()` control re-runs the same matched rows through the old literal ORDER BY, so
+each assertion shows the fix and the defect side by side. Pinned exact orders for the four probes the
+ask named — exact barcode `3348901770569`, its leading-zero GTIN-14 twin, the name prefix `matte`,
+and pages 1–3 of a nine-family query — plus a check that browsing with no search term is unchanged,
+a check that portal.ts orders through the shared builder (comment lines stripped first, after the
+regex matched my own explanatory comment), and a check that `normalizedBarcode`'s body still contains
+no `padStart|checkDigit|check_digit|ltrim`.
+
+Four existing portal pure tests (`test-portal-catalog-sort-pure.cjs`,
+`…-membership-crosscustomer-…`, `…-membership-redaction-…`, `…-public-url-…`) each gained an
+override-map entry for the new `../lib/productSearchQuery` import — the real module for the sort
+test, `{}` for the three that never search. No assertion in any of them changed.
+
+**What was found.** The GTIN twin was not a rounding-out case, it was genuinely broken: at HEAD the
+padded probe `03348901770569*` is prefix-matched by FTS5 against the stored token `3348901770569`
+and never matches, and the padded form is not a substring of the bare one either, so *only* the
+folded exact-barcode disjunct in the shared helper reaches the twin at all. Sabotage 3 proves it —
+reverting portal.ts returns just one of the two twins.
+
+Four environment traps cost real time and are worth the next session's attention. (1) A lane
+worktree has **no `node_modules`**, so `npx tsc` resolves to something else entirely ("This is not
+the tsc command you are looking for") and every `test-*.cjs` dies on `require('typescript')`;
+directory junctions to the main checkout fixed it. (2) The **Bash heredoc halves doubled
+backslashes** even with a quoted delimiter, so a JS regex written as two backslashes plus `s` lands
+as one and silently evaluates to `s+` — an exact-match search then reports "NOT FOUND" on text that
+is plainly present. Author such files with the Write tool. (3) `npm run test:utils` stopped at step 2
+on `verify:public-runtime` ("Generated runtime is stale") — the known CRLF byte-compare defect whose
+fix `1755bd6b` is not in this lane's ancestry; `npm run build` regenerating the three
+`frontend/public/*.js` files clears it, and peer `business-os-v1-09` confirmed
+`npm run build:public-runtime` as the narrower workaround. (4) `test-inventory-adjust-set-pure.cjs`
+is red when the sweep is run from `cloudflare/scripts/` and green from `cloudflare/` — a pre-existing
+cwd sensitivity (fix `be09ee65` not in ancestry), and exactly why the ask specified the directory.
+That file was not touched.
+
+**Verified.** Cloudflare, run from `cloudflare/` as the ask specified:
+`node node_modules/typescript/bin/tsc --noEmit` clean; **169/169** pure tests green; re-certified
+after committing, with the cloudflare working tree byte-identical to HEAD. Frontend, though this lane
+changed no frontend file: `npm run test:utils` **EXIT=0** end to end (**171/171** files, typecheck
+and `check:source` clean), `npm run verify:i18n` green (4498 keys, 449 source files), `npm run build`
+green.
+
+Non-vacuity by sabotage, each reverted afterwards with an md5 comparison confirming the file was
+restored byte-for-byte: restoring the old literal ORDER BY → 5 pass / 5 fail; dropping `matchTierSql`
+from the pagination call → 3 pass / 7 fail; reverting portal.ts wholesale to HEAD → 4 pass / 6 fail.
+Green again at 10/10 after the last revert.
+
+Provenance, checked after the fact rather than assumed: `git merge-base --is-ancestor` puts
+`e86330f4` inside both `e3678a39` (the Sep-3 `ship/2026-09-03` deploy, Worker `3b25fe33`) and
+`2c497564` (the Sep-4 `rc/s4-2026-09-04` deploy, Worker `a164d260`), and `portal.ts` at `2c497564` is
+byte-identical to this lane's copy. **So this change is live in production.** It is *not* in `main`.
+
+**Not done.** (1) `progress.md`'s *Current status* was deliberately left alone: `business-os-v1-c3`
+was actively rewriting it for Part 597, and this lane is already recorded there (line 248) as
+contained in the ship branch. (2) This branch is still unmerged to `main` — like the rest of the S4
+batch, per Part 597. (3) The seven Sep-4 migrations (0108–0112, 0114) were re-read against this lane
+as Part 597 asked: the only hits in portal.ts are pre-existing `membership_number` lookups that this
+diff never touched, and the new test seeds its own fixture, so nothing here assumed `special_price`,
+a RECON lot code, or a null membership number. (4) Worth someone's lane, not claimed here:
+`portal.ts:1054` matches a shopper's typed membership number against the stored value with
+`lower(trim(...)) = lower(trim(...))`, and migration `0110` moved every customer onto an `LC-` number
+— a returning shopper typing their old number would no longer match. Unverified against production;
+flagged, not fixed. (5) Migration `0113` is absent from the tree (114 files, numbered to 0115) and
+`0115` is in the repo but failed against production mid-deploy, so the chain top is ahead of live —
+both are Part 597's items, noted here only so they are not read as this lane's doing.
+
 ## Part 589 (Sep 4 2026, session business-os-v1-c3, COORDINATOR + lane S4-17) — the user's Sep-4 walkthrough split into 26 items, one production incident root-caused from read-only queries, and the identity rule reversed
 
 The user walked the whole app in one message and left 26 distinct asks in it. They are on the board
