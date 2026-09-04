@@ -14,6 +14,13 @@ export type DenseTableProps = {
    *  clicked -- the caller opens a `Fold` (or whatever it likes) from
    *  this callback; DenseTable itself holds no expand/open state. */
   expandRow?: (rowKey: string) => void
+  /** Columns hug their content instead of being stretched across the full
+   *  width of the frame. `w-full` on a table with few columns pushes each
+   *  header away from its own values until a label and its number sit at
+   *  opposite ends of the screen (user, Part 586: "the fields and value can
+   *  be closer much closer"). With `fit`, the table is only as wide as its
+   *  content and the horizontal scroller still handles the overflow case. */
+  fit?: boolean
   className?: string
 }
 
@@ -27,18 +34,22 @@ export type DenseTableProps = {
 // `--ui-surface-2` -- applied to the caller's own table markup through
 // Tailwind's descendant-selector arbitrary variants rather than DenseTable
 // generating rows itself, since it must not own data/sorting/selection.
-export default function DenseTable({ children, columnChooser, className = '' }: DenseTableProps) {
+export default function DenseTable({ children, columnChooser, fit = false, className = '' }: DenseTableProps) {
   return (
     <div className={className}>
-      {columnChooser ? <div className="mb-1.5 flex justify-end">{columnChooser}</div> : null}
+      {columnChooser ? <div className="mb-1 flex justify-end">{columnChooser}</div> : null}
       <div className="overflow-x-auto rounded-[var(--ui-radius)] border border-[var(--ui-line)]">
         <table
           className={[
-            'w-full min-w-max border-collapse text-[length:var(--ui-size-body)] text-[var(--ui-ink)]',
+            // Cell padding is a token so a surface can tune its own density
+            // without forking DenseTable (reports-surface.css sets 6px; the
+            // 12px fallback preserves the previous look for any other caller).
+            fit ? 'w-auto min-w-max' : 'w-full min-w-max',
+            'border-collapse text-[length:var(--ui-size-body)] text-[var(--ui-ink)]',
             '[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[var(--z-sticky)] [&_thead]:bg-[var(--ui-surface)]',
-            '[&_thead_th]:border-b [&_thead_th]:border-[var(--ui-line)] [&_thead_th]:px-3 [&_thead_th]:text-left [&_thead_th]:text-[length:var(--ui-size-meta)] [&_thead_th]:font-medium [&_thead_th]:text-[var(--ui-ink-2)]',
+            '[&_thead_th]:border-b [&_thead_th]:border-[var(--ui-line)] [&_thead_th]:px-[var(--ui-cell-px,12px)] [&_thead_th]:text-left [&_thead_th]:text-[length:var(--ui-size-meta)] [&_thead_th]:font-medium [&_thead_th]:text-[var(--ui-ink-2)]',
             '[&_tbody_tr]:h-[var(--ui-row-h)] [&_tbody_tr:nth-child(even)]:bg-[var(--ui-surface-2)]',
-            '[&_tbody_td]:px-3 [&_tbody_td]:border-b [&_tbody_td]:border-[var(--ui-line)]',
+            '[&_tbody_td]:px-[var(--ui-cell-px,12px)] [&_tbody_td]:py-[var(--ui-cell-py,0px)] [&_tbody_td]:border-b [&_tbody_td]:border-[var(--ui-line)]',
           ].join(' ')}
         >
           {children}

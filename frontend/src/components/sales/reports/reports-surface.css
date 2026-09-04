@@ -1,0 +1,153 @@
+/* reports-surface.css -- the `--ui-*` layer the kit primitives read, plus the
+   Khmer line-box floor for this surface.
+
+   WHY THIS FILE EXISTS
+   --------------------
+   The kit primitives (shared/kit/*) were ported onto the deployed line in
+   732838a5, but `styles/tokens.css` -- the P2-1 file that DECLARES every
+   `--ui-surface` / `--ui-line` / `--ui-row-h` / `--ui-size-body` the kit
+   reads -- lives on the rc/p2-1-kit line and did NOT come with them. An
+   undeclared custom property makes `var(--ui-row-h)` invalid at
+   computed-value time, so on this line the kit was silently rendering with:
+     - `height: var(--ui-row-h)` -> invalid -> `height: auto` (no row rhythm)
+     - `font-size: var(--ui-size-body)` -> invalid -> inherited 14px
+     - `border-color: var(--ui-line)` -> invalid -> currentColor-ish/none
+   i.e. no hairlines, no zebra, no density control at all. Declaring them is
+   a prerequisite for the density work, not a cosmetic extra.
+
+   Only the kit (shared/kit/*), this reports directory and ReportsHub.tsx read
+   any `--ui-<surface|ink-2|ink-3|line|line-2|row-h|size-*|accent-soft|
+   accent-ink|radius-sm|radius-lg|focus|danger|ground>` token -- verified by
+   grep across src/ -- so declaring them at `:root` restyles the reports
+   surface and nothing else. Values are mapped onto the app's EXISTING
+   gray/neutral palette (main.css `:root` / `.dark` --dm-* set) rather than
+   P2-1's ivory/charcoal palette, so Reports keeps looking like the rest of
+   the deployed app instead of importing a second design language.
+
+   DENSITY (user, Part 586: "the tab excel style can be more compact and
+   closer, the fields and value can be closer much closer"). The numbers here
+   are deliberately tighter than P2-1's: row 32px -> 24px, body 13px -> 12px,
+   meta 12px -> 11px, cell padding 12px -> 6px. Compaction is spent on
+   PADDING, never on the line box -- see the Khmer block below for why. */
+
+:root {
+  /* --- surfaces & ink (light) --- */
+  --ui-ground: #f9fafb;          /* main.css body background */
+  --ui-surface: #ffffff;         /* .card background */
+  --ui-surface-2: #f3f4f6;       /* zebra / hover -- gray-100 */
+  --ui-ink: #111827;             /* main.css body color -- gray-900 */
+  --ui-ink-2: #4b5563;           /* gray-600 -- labels, meta */
+  --ui-ink-3: #9ca3af;           /* gray-400 -- placeholders, notes */
+  --ui-line: rgba(17, 24, 39, .10);
+  --ui-line-2: rgba(17, 24, 39, .20);
+  --ui-danger: #b91c1c;
+  --ui-focus: var(--ui-accent, #9c7a3c);
+  --ui-accent-ink: #ffffff;
+  --ui-accent-soft: color-mix(in srgb, var(--ui-accent, #9c7a3c) 12%, transparent);
+
+  /* --- radii (main.css already owns --ui-radius) --- */
+  --ui-radius-sm: 6px;
+  --ui-radius-lg: 12px;
+
+  /* --- density --- */
+  --ui-size-body: 12px;
+  --ui-size-meta: 11px;
+  --ui-row-h: 24px;
+  /* Cell padding, read by kit DenseTable. The single biggest source of the
+     "fields and value are far apart" complaint: 12px each side put 24px of
+     dead air between a label column and its value column. */
+  --ui-cell-px: 6px;
+  --ui-cell-py: 1px;
+  /* Receipt style: the label/value line box. */
+  --ui-receipt-lh: 16px;
+  --ui-receipt-gap: 0.75rem;
+
+  /* --- page-local stacking (typed mirror: shared/kit/zLayers.ts) --- */
+  --z-sticky: 20;
+  --z-dropdown: 30;
+  --z-fold: 1020;
+  --z-modal: 1050;
+  --z-modal-2: 1060;
+  --z-toast: 1100;
+}
+
+:root.dark,
+.dark {
+  --ui-ground: var(--dm-page, #171717);
+  --ui-surface: var(--dm-card, #262626);
+  --ui-surface-2: var(--dm-card-hover, #303030);
+  --ui-ink: var(--dm-text, #fafafa);
+  --ui-ink-2: var(--dm-text-3, #d4d4d4);
+  --ui-ink-3: var(--dm-text-4, #a3a3a3);
+  --ui-line: var(--dm-border, rgba(82, 82, 82, .6));
+  --ui-line-2: var(--dm-border-strong, #404040);
+  --ui-danger: #f87171;
+  --ui-accent-ink: #1a1a1a;
+}
+
+/* ---------------------------------------------------------------------------
+   KHMER: the line box must not be shorter than the cluster's ink extent.
+
+   ROOT CAUSE of "the little up and down of the khmer words are getting cut
+   off" (user, Part 586). A Khmer orthographic cluster stacks vertically: a
+   superscript vowel/diacritic (  ី  ុ  ់  ៊  ៉ ) sits ABOVE the base glyph and a
+   coeng subscript ( ្ក ) or below-vowel (  ុ   ូ ) hangs BELOW it. Its ink extent
+   is roughly 1.55-1.65em, well past Latin's ~1.2em.
+
+   main.css's Aug-31 compaction pass ("khmer versions are not compact
+   enough... the rows") pulled the km line-heights DOWN from 1.68-1.82 to
+   1.38-1.52 (`body.lang-km .text-xs` 1.45, `.text-sm` 1.48, headings 1.38-1.4).
+   Line-height alone only overlaps lines -- it does not clip. The clipping
+   appears where a SHORT line box meets an `overflow: hidden` ancestor, and
+   Tailwind's `.truncate` is exactly that (`overflow:hidden; text-overflow:
+   ellipsis; white-space:nowrap`). The content box is then one short line box
+   tall, and every pixel of ink above/below it is sheared -- the tops and
+   tails the user is describing. Fixed `h-*` boxes and `line-clamp-*` clip the
+   same way. `overflow-x` cannot be clipped independently of `overflow-y` in
+   CSS, so the ONLY correct fix is to give the line box enough height.
+
+   Hence: this surface pays for its compactness with padding, and restores a
+   1.62 line box for Khmer. Scoped to `[data-reports-hub]` -- the app-wide
+   version of this fix is written up for the board rather than applied here,
+   because `body.lang-km .text-xs/.text-sm/.text-base` is global and every
+   other lane is editing the surfaces it would reflow. */
+
+body.lang-km [data-reports-hub] {
+  /* A taller line box needs a taller row, or the row clips instead. */
+  --ui-row-h: 28px;
+  --ui-receipt-lh: 20px;
+}
+
+body.lang-km [data-reports-hub],
+body.lang-km [data-reports-hub] th,
+body.lang-km [data-reports-hub] td,
+body.lang-km [data-reports-hub] button,
+body.lang-km [data-reports-hub] input,
+body.lang-km [data-reports-hub] select,
+body.lang-km [data-reports-hub] .truncate,
+body.lang-km [data-reports-fold],
+body.lang-km [data-reports-fold] button,
+body.lang-km [data-reports-fold] th,
+body.lang-km [data-reports-fold] td {
+  line-height: 1.62;
+}
+
+/* `.text-xs` / `.text-sm` carry `!important` line-heights in main.css's km
+   block, so matching specificity + !important is required to lift them back
+   over the clip threshold inside this surface only. */
+body.lang-km [data-reports-hub] .text-xs,
+body.lang-km [data-reports-fold] .text-xs {
+  line-height: 1.62 !important;
+}
+
+body.lang-km [data-reports-hub] .text-sm,
+body.lang-km [data-reports-fold] .text-sm {
+  line-height: 1.6 !important;
+}
+
+/* A truncating cell is the clip site: keep it single-line and elliptical, but
+   let the line box breathe so the ascender/descender ink stays inside it. */
+body.lang-km [data-reports-hub] td.truncate,
+body.lang-km [data-reports-hub] .truncate {
+  padding-block: 2px;
+}
