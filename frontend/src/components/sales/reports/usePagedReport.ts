@@ -41,7 +41,16 @@ export function usePagedReport<Row>(
   const [error, setError] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [tick, setTick] = useState(0)
+  // Mask rows and pagination on the first render of a new filter/refresh,
+  // before effects can clear state. Each visit gets a distinct identity.
+  const scopeRef = useRef({ depsKey, enabled, tick })
+  if (scopeRef.current.depsKey !== depsKey || scopeRef.current.enabled !== enabled || scopeRef.current.tick !== tick) {
+    scopeRef.current = { depsKey, enabled, tick }
+  }
+  const scope = scopeRef.current
+  const [resultScope, setResultScope] = useState<typeof scope | null>(null)
   const seq = useRef(0)
+  const busyRef = useRef(false)
   const pageRef = useRef<PageCursor>({ snapshotMaxId: null, cursor: null })
   const fetchRef = useRef(fetchPage)
   fetchRef.current = fetchPage
@@ -49,20 +58,30 @@ export function usePagedReport<Row>(
   mapRef.current = mapRow
 
   const run = useCallback((first: boolean) => {
+    if (!enabled || scopeRef.current !== scope || (!first && busyRef.current)) return
     const mine = ++seq.current
+    const isCurrent = () => seq.current === mine && scopeRef.current === scope
+    busyRef.current = true
     if (first) {
+      setResultScope(scope)
       pageRef.current = { snapshotMaxId: null, cursor: null }
+      setRows([])
+      setHasMore(false)
+      setLoadingMore(false)
       setLoading(true)
     } else {
       setLoadingMore(true)
     }
     setError(null)
-    fetchRef
-      .current(pageRef.current)
+    const fetch = fetchRef.current
+    const map = mapRef.current
+    const page = pageRef.current
+    Promise.resolve()
+      .then(() => isCurrent() ? fetch(page) : undefined)
       .then((raw) => {
-        if (seq.current !== mine) return
+        if (!isCurrent()) return
         const res = (raw && typeof raw === 'object' ? raw : {}) as PageResponse
-        const mapped = Array.isArray(res.rows) ? res.rows.map((r, i) => mapRef.current(r, i)) : []
+        const mapped = Array.isArray(res.rows) ? res.rows.map((r, i) => map(r, i)) : []
         pageRef.current = {
           snapshotMaxId: typeof res.snapshot_max_id === 'number' ? res.snapshot_max_id : pageRef.current.snapshotMaxId,
           cursor: res.next_cursor && typeof res.next_cursor === 'object' ? res.next_cursor : null,
@@ -71,18 +90,22 @@ export function usePagedReport<Row>(
         setRows((prev) => (first ? mapped : [...prev, ...mapped]))
         setLoading(false)
         setLoadingMore(false)
+        busyRef.current = false
       })
       .catch((err: unknown) => {
-        if (seq.current !== mine) return
+        if (!isCurrent()) return
         setError(err instanceof Error ? err.message : String(err))
         setLoading(false)
         setLoadingMore(false)
+        busyRef.current = false
       })
-  }, [])
+  }, [scope, enabled])
 
   useEffect(() => {
     if (!enabled) {
       seq.current += 1
+      busyRef.current = false
+      pageRef.current = { snapshotMaxId: null, cursor: null }
       setRows([])
       setLoading(false)
       setLoadingMore(false)
@@ -91,14 +114,31 @@ export function usePagedReport<Row>(
       return
     }
     run(true)
-  }, [depsKey, enabled, tick, run])
+    return () => {
+      seq.current += 1
+      busyRef.current = false
+    }
+  }, [enabled, run])
 
+  const current = enabled && resultScope === scope
   const loadMore = useCallback(() => {
-    if (!hasMore || loading || loadingMore) return
+    if (!current || !hasMore || loading || loadingMore) return
     run(false)
-  }, [hasMore, loading, loadingMore, run])
+  }, [current, hasMore, loading, loadingMore, run])
 
-  const reload = useCallback(() => setTick((n) => n + 1), [])
+  const reload = useCallback(() => {
+    seq.current += 1
+    busyRef.current = true
+    setTick((n) => n + 1)
+  }, [])
 
-  return { rows, loading, loadingMore, error, hasMore, loadMore, reload }
+  return {
+    rows: current ? rows : [],
+    loading: enabled && (!current || loading),
+    loadingMore: current && loadingMore,
+    error: current ? error : null,
+    hasMore: current && hasMore,
+    loadMore,
+    reload,
+  }
 }

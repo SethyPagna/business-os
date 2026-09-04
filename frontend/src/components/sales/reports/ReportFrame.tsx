@@ -63,34 +63,51 @@ export function useReportData<T>(loader: () => Promise<T>, depsKey: string, enab
   const [loading, setLoading] = useState<boolean>(enabled)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
+  // A new render scope hides prior results before the passive effect runs.
+  // Identity also distinguishes A -> B -> A and disable/re-enable cycles.
+  const scopeRef = useRef({ depsKey, enabled, tick })
+  if (scopeRef.current.depsKey !== depsKey || scopeRef.current.enabled !== enabled || scopeRef.current.tick !== tick) {
+    scopeRef.current = { depsKey, enabled, tick }
+  }
+  const scope = scopeRef.current
+  const [resultScope, setResultScope] = useState<typeof scope | null>(null)
   const seq = useRef(0)
   const loaderRef = useRef(loader)
   loaderRef.current = loader
 
   useEffect(() => {
+    const mine = ++seq.current
+    const isCurrent = () => seq.current === mine && scopeRef.current === scope
     if (!enabled) {
       setData(null)
       setLoading(false)
       setError(null)
       return
     }
-    const mine = ++seq.current
+    setResultScope(scope)
+    setData(null)
     setLoading(true)
     setError(null)
-    loaderRef
-      .current()
+    const load = loaderRef.current
+    Promise.resolve()
+      .then(() => isCurrent() ? load() : undefined)
       .then((result) => {
-        if (seq.current !== mine) return
-        setData(result)
+        if (!isCurrent()) return
+        setData(result as T)
         setLoading(false)
       })
       .catch((err: unknown) => {
-        if (seq.current !== mine) return
+        if (!isCurrent()) return
         setError(err instanceof Error ? err.message : String(err))
         setLoading(false)
       })
-  }, [depsKey, enabled, tick])
+    return () => { seq.current += 1 }
+  }, [scope, enabled])
 
-  const reload = useCallback(() => setTick((n) => n + 1), [])
-  return { data, loading, error, reload }
+  const reload = useCallback(() => {
+    seq.current += 1
+    setTick((n) => n + 1)
+  }, [])
+  const current = enabled && resultScope === scope
+  return { data: current ? data : null, loading: enabled && (!current || loading), error: current ? error : null, reload }
 }
