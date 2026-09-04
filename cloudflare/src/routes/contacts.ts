@@ -631,7 +631,7 @@ function registerContactRoutes(config: ContactConfig) {
       live.sales = Number((await db.prepare('SELECT COUNT(*) AS n FROM sales WHERE delivery_contact_id = @id').get<{ n: number }>({ id }))?.n || 0)
     }
     return c.json({
-      kind: config.table === 'customers' ? 'customer' : config.table === 'suppliers' ? 'supplier' : 'customer',
+      kind: config.table === 'customers' ? 'customer' : config.table === 'suppliers' ? 'supplier' : 'delivery_contact',
       from: current.name,
       to,
       products_primary: 0,
@@ -1022,7 +1022,12 @@ function registerContactRoutes(config: ContactConfig) {
     if (!name) return c.json({ error: 'Name is required' }, 400)
     const nameChanged = String(current.name || '').trim().toLowerCase() !== name.toLowerCase()
     const renameScope = String(body.__rename_cascade || '').trim().toLowerCase()
-    if (nameChanged && (config.table === 'customers' || config.table === 'suppliers')) {
+    // Every contact kind with live name snapshots asks the rename question
+    // (the user's rule: a rename either links everything over or keeps the
+    // past records as they were). Delivery contacts snapshot onto
+    // sales.delivery_contact_name, so they are in.
+    const renameChoiceRequired = config.table === 'customers' || config.table === 'suppliers' || config.table === 'delivery_contacts'
+    if (nameChanged && renameChoiceRequired) {
       if (renameScope !== 'carry' && renameScope !== 'record_only') {
         return c.json({ error: 'Choose whether to update linked live records or rename only this contact.', code: 'rename_choice_required' }, 409)
       }
@@ -1102,7 +1107,7 @@ function registerContactRoutes(config: ContactConfig) {
     // table separately, so a later failure could leave the contact and its
     // products disagreeing. D1 batch is transactional and fails loudly.
     // Immutable audit/event rows are deliberately not rewritten here.
-    const snapshotCarry = !nameChanged || renameScope === 'carry' || (config.table !== 'customers' && config.table !== 'suppliers')
+    const snapshotCarry = !nameChanged || renameScope === 'carry' || !renameChoiceRequired
     const phoneChanged = config.table === 'customers'
       && Object.prototype.hasOwnProperty.call(payload, 'phone')
       && String(current.phone || '') !== String(payload.phone || '')

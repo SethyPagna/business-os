@@ -17,6 +17,7 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
@@ -106,6 +107,7 @@ interface DeliveryPayload {
   userId?: string | number | null
   userName?: string | null
   confirmDuplicate?: boolean
+  __rename_cascade?: 'carry' | 'record_only'
 }
 
 interface DeliveryMutationResult {
@@ -133,6 +135,7 @@ interface DeliveryApi {
   createDeliveryContact: (payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
   updateDeliveryContact: (id: number | string, payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
   deleteDeliveryContact: (id: number | string) => Promise<DeliveryMutationResult | unknown>
+  getDeliveryContactRenameImpact: (id: number | string, to: string) => Promise<import('../../api/renameCascadeTransport.ts').RenameImpact>
 }
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -162,6 +165,7 @@ function getDeliveryApi(): DeliveryApi {
     createDeliveryContact: async (payload) => (await loadContactWriteTransportModule()).createDeliveryContact(payload as Record<string, unknown>),
     updateDeliveryContact: async (id, payload) => (await loadContactWriteTransportModule()).updateDeliveryContact(id, payload as Record<string, unknown>),
     deleteDeliveryContact: async (id) => (await loadContactWriteTransportModule()).deleteDeliveryContact(id),
+    getDeliveryContactRenameImpact: async (id, to) => (await loadContactWriteTransportModule()).getDeliveryContactRenameImpact(id, to),
   }
 }
 
@@ -479,6 +483,20 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
+  // Rename prompt, same flow as CustomersTab/SuppliersTab: the save awaits
+  // the user's carry / only-this-one choice before the PUT goes out.
+  const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
+  const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
+  const askRenameChoice = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => {
+    renameResolveRef.current = resolve
+    setRenameRequest(request)
+  })
+  const handleRenameChoice = (choice: RenameCascadeChoice) => {
+    setRenameRequest(null)
+    const resolve = renameResolveRef.current
+    renameResolveRef.current = null
+    resolve?.(choice)
+  }
   const [contacts, setContacts] = useState<DeliveryContact[]>([])
   const [search,   setSearch]   = useState('')
   const appliedInitialSearchRef = useRef<string | undefined>(undefined)
@@ -666,6 +684,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     gender: contact.gender || '',
     userId: user?.id,
     userName: user?.name,
+    // Undo/redo replays a rename the user already decided on; carry keeps
+    // the linked sales in step (same as CustomersTab's builder).
+    __rename_cascade: 'carry',
   }), [user?.id, user?.name])
 
   const runDeliveryMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<DeliveryMutationResult> => (
@@ -773,7 +794,19 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     }
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const payload = { ...form, userId: user?.id, userName: user?.name }
+      const payload: DeliveryPayload = { ...form, userId: user?.id, userName: user?.name }
+      const oldName = selected ? String(selected.name || '').trim() : ''
+      const newName = String(form.name || '').trim()
+      if (selected && oldName && oldName.toLowerCase() !== newName.toLowerCase()) {
+        const impact = await getDeliveryApi().getDeliveryContactRenameImpact(selected.id, newName)
+        if (impact.target_exists) {
+          notify(`"${newName}" already exists. Use Conflicts to choose which delivery contact to keep.`, 'warning')
+          return
+        }
+        const choice = await askRenameChoice({ kind: 'delivery_contact', from: oldName, to: newName, impact, choices: ['carry', 'only'] })
+        if (choice === 'cancel') return
+        payload.__rename_cascade = choice === 'carry' ? 'carry' : 'record_only'
+      }
       const res = selected
         ? await runDeliveryMutation(() => getDeliveryApi().updateDeliveryContact(selected.id, payload), 'Update delivery contact')
         : await runDeliveryMutation(() => getDeliveryApi().createDeliveryContact(payload), 'Create delivery contact')
@@ -1292,6 +1325,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           />
         </Suspense>
       ) : null}
+      <RenameCascadeModal request={renameRequest} busy={false} t={(key, fallback) => tr(key, fallback || key)} onChoose={handleRenameChoice} />
     </div>
   )
 }

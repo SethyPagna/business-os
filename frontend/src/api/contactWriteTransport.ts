@@ -133,6 +133,11 @@ export function updateDeliveryContact(id: number | string, payload: ContactWrite
   return updateContact('deliveryContacts', '/api/delivery-contacts', 'delivery_contacts', id, payload)
 }
 
+export function getDeliveryContactRenameImpact(id: number | string, to: string): Promise<RenameImpact> {
+  const query = new URLSearchParams({ to })
+  return apiFetch('GET', `/api/delivery-contacts/${encodeURIComponent(String(id))}/rename-impact?${query.toString()}`)
+}
+
 export function deleteDeliveryContact(id: number | string): Promise<unknown> {
   return deleteContact('deliveryContacts', '/api/delivery-contacts', 'delivery_contacts', id)
 }

@@ -91,6 +91,24 @@ const renameCascade = read('components/shared/RenameCascadeModal.tsx')
 assert.match(renameCascade, /createPortal\(/, 'RenameCascadeModal must portal to the viewport layer')
 assert.match(renameCascade, /fixed inset-0 z-\[(?:1060|var\(--z-modal-2\))\]/, 'RenameCascadeModal must layer above the z-[1050] shared Modal it is opened from')
 
+// Sibling-surface parity: every contact tab with live name snapshots asks the
+// rename question the same way (Customers, Suppliers, Delivery) -- fetch the
+// impact, await the carry / only-this-one choice, send __rename_cascade, and
+// mount the prompt at the tab root. A tab missing any step saves silently
+// (Delivery did until Part 582).
+for (const [tab, fetcher] of [
+  ['CustomersTab', 'getCustomerRenameImpact('],
+  ['SuppliersTab', "getRenameImpact('supplier'"],
+  ['DeliveryTab', 'getDeliveryContactRenameImpact('],
+] as const) {
+  const source = read(`components/contacts/${tab}.tsx`)
+  assert.match(source, /import RenameCascadeModal/, `${tab} must import RenameCascadeModal`)
+  assert.ok(source.includes(fetcher), `${tab} must fetch the rename impact via ${fetcher}`)
+  assert.match(source, /askRenameChoice\(\{ kind: '/, `${tab} must await the rename choice`)
+  assert.match(source, /__rename_cascade = /, `${tab} must send the chosen scope as __rename_cascade`)
+  assert.match(source, /<RenameCascadeModal request=\{renameRequest\}/, `${tab} must mount the prompt`)
+}
+
 for (const file of ['components/products/forms/BulkAddStockModal.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)
   assert.match(source, /modal-viewport-safe/, `${file}: nested dialog viewport must respect safe areas`)
