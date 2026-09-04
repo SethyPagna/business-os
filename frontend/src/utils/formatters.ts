@@ -56,15 +56,22 @@ export function fmtTime(raw: TimestampInput): string {
   try {
     const date = new Date(normalized)
     if (Number.isNaN(date.getTime())) return '—'
-    // mm/dd/yyyy, not "Aug 22, 2026". The whole app uses one numeric date
+    // dd/mm/yyyy, not "Aug 22, 2026". The whole app uses one numeric date
     // format by request (Aug 25 2026: "all date format uses mm/dd/yyyy
-    // throughout app"), so a short-month form here would be the odd one out
-    // wherever it sits next to a date rendered by fmtDate/fmtDateTime24.
-    // `en-US` is passed explicitly rather than `undefined`: the locale
-    // default follows the VIEWER's machine, which would render dd/mm/yyyy
-    // for a Khmer or European locale -- silently swapping day and month
-    // rather than failing, which is the worst kind of date bug.
-    return date.toLocaleString('en-US', {
+    // throughout app"; day-first since Sep 4 2026 -- "change the whole app
+    // to dd-mm-yyy, just receipt id stays yyyy-mm-dd"), so a short-month
+    // form here would be the odd one out wherever it sits next to a date
+    // rendered by fmtDate/fmtDateTime24.
+    //
+    // The parts are assembled by hand rather than left to a locale. No
+    // `Intl` locale is BOTH day-first AND 24-hour AND slash-separated
+    // reliably across engines, and picking one that happens to be today
+    // (en-GB) would silently follow that locale's future CLDR changes --
+    // exactly the "swap day and month without failing" bug the old comment
+    // here warned about, just from the other direction. `en-US` is still
+    // the formatter locale because only its FIELD VALUES are read; the
+    // order is ours.
+    const parts = new Intl.DateTimeFormat('en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -72,7 +79,9 @@ export function fmtTime(raw: TimestampInput): string {
       minute: '2-digit',
       hourCycle: 'h23',
       timeZone: BUSINESS_TIME_ZONE,
-    })
+    }).formatToParts(date)
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+    return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}`
   } catch {
     return String(raw || '')
   }
@@ -84,18 +93,18 @@ export function fmtTime(raw: TimestampInput): string {
  * @returns {string}
  */
 /**
- * mm/dd/yyyy for DATE-ONLY values ('2026-08-28' or a datetime whose date
+ * dd/mm/yyyy for DATE-ONLY values ('2026-08-28' or a datetime whose date
  * part is what's shown). Pure string reorder -- deliberately NOT routed
  * through new Date(): a bare date string parses as UTC midnight, so
  * formatting it in the business timezone can shift it a day. Used by the
  * surfaces that used to print raw ISO slices (batch received/expiry dates,
- * credit due dates) -- the whole app shows mm/dd/yyyy by request
- * (Aug 25 2026, reaffirmed Part 388).
+ * credit due dates) -- the whole app shows dd/mm/yyyy by request
+ * (Aug 25 2026 numeric-everywhere, day-first since Sep 4 2026).
  */
 export function fmtDateOnly(raw: unknown): string {
   const match = String(raw ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (!match) return String(raw ?? '') || '—'
-  return `${match[2]}/${match[3]}/${match[1]}`
+  return `${match[3]}/${match[2]}/${match[1]}`
 }
 
 export function fmtDate(raw: TimestampInput): string {
@@ -104,22 +113,24 @@ export function fmtDate(raw: TimestampInput): string {
   try {
     const date = new Date(normalized)
     if (Number.isNaN(date.getTime())) return '—'
-    // See fmtTime above for why this is numeric and why the locale is
-    // pinned to en-US rather than left to the viewer's machine.
-    return date.toLocaleDateString('en-US', {
+    // See fmtTime above for why this is numeric and why the day/month/year
+    // order is assembled here rather than delegated to a locale.
+    const parts = new Intl.DateTimeFormat('en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       timeZone: BUSINESS_TIME_ZONE,
-    })
+    }).formatToParts(date)
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+    return `${get('day')}/${get('month')}/${get('year')}`
   } catch {
     return String(raw || '')
   }
 }
 
 /**
- * Format a UTC timestamp as mm/dd/yyyy HH:mm in 24-hour time (e.g.
- * "08/22/2026 20:00"). Used where a numeric, sortable-looking date +
+ * Format a UTC timestamp as dd/mm/yyyy HH:mm in 24-hour time (e.g.
+ * "22/08/2026 20:00"). Used where a numeric, sortable-looking date +
  * time is wanted (contacts' Added/Created column) rather than fmtTime's
  * "Aug 22, 2026, 20:00" long form. Uses `hourCycle: 'h23'` rather than
  * `hour12: false` -- some JS engines render hour12:false's midnight as
@@ -143,7 +154,46 @@ export function fmtDateTime24(raw: TimestampInput): string {
       timeZone: BUSINESS_TIME_ZONE,
     }).formatToParts(date)
     const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
-    return `${get('month')}/${get('day')}/${get('year')} ${get('hour')}:${get('minute')}`
+    return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')}`
+  } catch {
+    return String(raw || '')
+  }
+}
+
+/**
+ * The SAME instant as fmtDateTime24, in the same business timezone and the
+ * same 24-hour clock, but written ISO-first: "2026-08-28 14:30".
+ *
+ * This is NOT a display formatter and must not be used as one -- it exists
+ * for machine-readable cells that are read back by a parser, where a
+ * day/month order would be ambiguous. The sales export's `sale_date` is the
+ * case that forced it: that column is round-tripped through the importer
+ * (cloudflare/src/lib/importEngine.ts's parseSalesImportDateTime), whose
+ * slash branch reads month-first and must keep doing so, because every
+ * spreadsheet the shop already owns was written under that meaning. Emitting
+ * the day-first display string into that column would have re-imported the
+ * 8th of December as the 12th of August -- silently, for any day <= 12 -- and
+ * thrown for the rest. ISO is unambiguous, is the form the importer's own
+ * error message advertises ("Use YYYY-MM-DD HH:mm"), and is what the Worker
+ * side of the same export already ships.
+ */
+export function fmtBusinessIsoDateTime(raw: TimestampInput): string {
+  const normalized = normalizeTimestampInput(raw)
+  if (!normalized) return ''
+  try {
+    const date = new Date(normalized)
+    if (Number.isNaN(date.getTime())) return ''
+    const parts = new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: BUSINESS_TIME_ZONE,
+    }).formatToParts(date)
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+    return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`
   } catch {
     return String(raw || '')
   }

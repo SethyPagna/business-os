@@ -64,7 +64,7 @@ function formatDateTime(value: string | null | undefined): string {
   if (!value) return '--'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  // Shared mm/dd/yyyy 24-hour formatter -- the old en-US call without
+  // Shared dd/mm/yyyy 24-hour formatter -- the old en-US call without
   // hour12:false rendered 12-hour AM/PM (Part-77 finding).
   return fmtDateTime24(date)
 }

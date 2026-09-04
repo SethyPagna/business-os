@@ -423,7 +423,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const debouncedSearch = useDebouncedValue(search, 180)
   // Sales organize by DAY always (user, Aug 30: "for date in sales …
   // do date by year month and day") — the day label is the full
-  // mm/dd/yyyy, so year+month+day all read off every section header
+  // dd/mm/yyyy, so year+month+day all read off every section header
   // instead of the old bare-year buckets.
   const timeGroupingMode = 'day' as const
   const isAdmin = useMemo(() => {

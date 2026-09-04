@@ -558,7 +558,7 @@ function formatDateTime(value: string | number | Date | null | undefined): strin
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  // mm/dd/yyyy + 24-hour Phnom Penh via the shared formatter -- the viewer-
+  // dd/mm/yyyy + 24-hour Phnom Penh via the shared formatter -- the viewer-
   // locale Intl form rendered dd/mm + 12-hour on non-US devices (Part-77
   // finding, cross-surface date rule).
   return fmtDateTime24(date)

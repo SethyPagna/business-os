@@ -4,7 +4,7 @@ import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
-import { lotCodeAsDate } from '../../utils/batchLabel.ts'
+import { lotCodeToIsoDate } from '../../utils/batchLabel.ts'
 
 export type ProductRecord = ProductGroupRecord & {
   id?: unknown
@@ -736,9 +736,12 @@ function parseReceivedInstant(receivedAt: unknown): number | null {
 export function batchReceivedInstant(batch: PickerBatchLike | null | undefined): number | null {
   const stored = parseReceivedInstant(batch?.received_at)
   if (stored != null) return stored
-  const codeAsDate = lotCodeAsDate(batch?.lot_code)
-  if (!codeAsDate) return null
-  const [mm, dd, yyyy] = codeAsDate.split('/').map((part) => Number(part))
+  // ISO, not the display string: lot ORDERING must not depend on how dates
+  // happen to be rendered today. See lotCodeToIsoDate for what went wrong
+  // when it did.
+  const iso = lotCodeToIsoDate(batch?.lot_code)
+  if (!iso) return null
+  const [yyyy, mm, dd] = iso.split('-').map((part) => Number(part))
   if (!Number.isFinite(mm) || !Number.isFinite(dd) || !Number.isFinite(yyyy)) return null
   return Date.UTC(yyyy, mm - 1, dd)
 }

@@ -332,7 +332,7 @@ export function telegramCommandReference(): string {
   }
   lines.push(
     RULE,
-    `🗓 ${bi('Date', 'កាលបរិច្ឆេទ')}: mm/dd/yyyy · yyyy-mm-dd`,
+    `🗓 ${bi('Date', 'កាលបរិច្ឆេទ')}: dd/mm/yyyy · yyyy-mm-dd`,
     `     today · yesterday · ${bi('blank = today', 'ទទេ = ថ្ងៃនេះ')}`,
     '🔒 Only this shop chat receives data.',
     '     មានតែឆាតហាងនេះទេ ដែលទទួលទិន្នន័យ។',
@@ -345,12 +345,23 @@ export function telegramCommandReference(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The project's date convention is mm/dd/yyyy (24-hour clock) everywhere --
+ * The project's date convention is dd/mm/yyyy (24-hour clock) everywhere --
  * consistency-audit.md, and formatBusinessDateTime in lib/telegram.ts. So the
- * bot accepts mm/dd/yyyy, plus ISO yyyy-mm-dd (what D1 stores, and the only
- * unambiguous typed form), plus `today`/`yesterday`. dd-mm-yyyy is NOT
- * accepted: 05-09-2026 cannot be told apart from mm-dd-yyyy, and silently
- * guessing would misfile a day's revenue.
+ * bot accepts dd/mm/yyyy, plus ISO yyyy-mm-dd (what D1 stores, and the only
+ * form that cannot be misread either way), plus `today`/`yesterday`.
+ *
+ * THIS REFUSAL INVERTED ON Sep 4 2026. It used to accept month-first and
+ * reject day-first as ambiguous; the shop owner chose to move the whole app
+ * day-first instead ("change the whole app to dd-mm-yyy, just receipt id
+ * stays yyyy-mm-dd"), so month-first is now the rejected side. The reasoning
+ * is unchanged and is the whole point: 05/09/2026 cannot be told apart from
+ * its own transpose, so exactly ONE order may be accepted and the other must
+ * fail loudly. Silently guessing would misfile a day's revenue.
+ *
+ * A slash form whose FIRST field is > 12 (e.g. 25/12/2026) could only ever be
+ * day-first, so it is simply valid. One whose first field is <= 12 is taken
+ * day-first per this rule -- which is why the error text below leads with the
+ * order rather than merely listing shapes.
  */
 export type ParsedReportDate = { ok: true; date: string } | { ok: false; message: string }
 
@@ -374,9 +385,12 @@ export function parseReportDate(argument: string | undefined, today: string): Pa
   const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (iso && isRealDate(Number(iso[1]), Number(iso[2]), Number(iso[3]))) return { ok: true, date: raw }
 
-  const slashed = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  // Day first. A dash-separated day-first date is accepted too -- the owner
+  // wrote the direction as "dd-mm-yyyy" -- but only when it cannot be read as
+  // ISO, which the 4-digit-year-last shape guarantees.
+  const slashed = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
   if (slashed) {
-    const [month, day, year] = [Number(slashed[1]), Number(slashed[2]), Number(slashed[3])]
+    const [day, month, year] = [Number(slashed[1]), Number(slashed[2]), Number(slashed[3])]
     if (isRealDate(year, month, day)) {
       return { ok: true, date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` }
     }
@@ -387,8 +401,8 @@ export function parseReportDate(argument: string | undefined, today: string): Pa
     message: [
       `⚠️ ${bi(`I could not read the date "${raw.slice(0, 30)}".`, `មិនអាចអានកាលបរិច្ឆេទ "${raw.slice(0, 30)}" បានទេ។`)}`,
       '',
-      bi('Use one of these:', 'សូមប្រើទម្រង់ណាមួយ៖'),
-      `  ▸ mm/dd/yyyy   — ${bi('e.g.', 'ឧ.')} 09/01/2026`,
+      bi('Use one of these — the DAY comes first:', 'សូមប្រើទម្រង់ណាមួយ៖ ថ្ងៃមកមុន'),
+      `  ▸ dd/mm/yyyy   — ${bi('e.g.', 'ឧ.')} 01/09/2026 = ${bi('1 September', '1 កញ្ញា')}`,
       `  ▸ yyyy-mm-dd   — ${bi('e.g.', 'ឧ.')} 2026-09-01`,
       `  ▸ today ${BILINGUAL_SEPARATOR.trim()} yesterday`,
       `  ▸ ${bi('nothing at all = today', 'មិនដាក់អ្វីសោះ = ថ្ងៃនេះ')}`,

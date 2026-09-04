@@ -40,11 +40,13 @@ const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const telegramLang = loadReal('lib/telegramLang.ts')
 const telegram = loadReal('lib/telegram.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang })
 
-// --- date: UTC -> business zone, mm/dd/yyyy HH:mm, both timestamp shapes ---
-assert.equal(telegram.formatBusinessDateTime('2026-09-02T17:30:00.000Z'), '09/03/2026 00:30', 'ISO with Z shifts +7h across midnight')
-assert.equal(telegram.formatBusinessDateTime('2026-09-02 08:05:09'), '09/02/2026 15:05', 'D1 CURRENT_TIMESTAMP (no zone) is UTC')
+// --- date: UTC -> business zone, dd/mm/yyyy HH:mm, both timestamp shapes ---
+assert.equal(telegram.formatBusinessDateTime('2026-09-02T17:30:00.000Z'), '03/09/2026 00:30', 'ISO with Z shifts +7h across midnight')
+assert.equal(telegram.formatBusinessDateTime('2026-09-02 08:05:09'), '02/09/2026 15:05', 'D1 CURRENT_TIMESTAMP (no zone) is UTC')
 assert.equal(telegram.formatBusinessDateTime(null, Date.UTC(2026, 0, 1, 0, 0)), '01/01/2026 07:00', 'missing timestamp falls back to now')
 assert.equal(telegram.formatBusinessDateTime('garbage', Date.UTC(2026, 0, 1, 0, 0)), '01/01/2026 07:00', 'unparseable timestamp falls back to now')
+// 01/01 reads the same in either order; this one cannot:
+assert.equal(telegram.formatBusinessDateTime('2026-12-25T03:00:00.000Z'), '25/12/2026 10:00', 'day first -- 25 December, not month 25')
 
 // --- sale receipt summary ---
 const lines = telegram.formatSaleTelegramLines({
@@ -61,7 +63,7 @@ const lines = telegram.formatSaleTelegramLines({
 }).filter(Boolean)
 assert.deepEqual(lines, [
   'Status: paid',
-  'Date: 09/03/2026 10:04',
+  'Date: 03/09/2026 10:04',
   'INV: 20260903-100405',
   'Cashier: Za',
   'Customer: Sok Dara',
@@ -114,7 +116,7 @@ assert.deepEqual(telegram.formatTransferTelegramLines({
     { product: 'Coca Cola 330ml', quantity: 24, mergedInto: 'Coca-Cola 330ml', fromOnHand: 0, toOnHand: 48, totalOnHand: null },
   ],
 }).filter(Boolean), [
-  'Date: 09/03/2026 10:04',
+  'Date: 03/09/2026 10:04',
   'From: Warehouse',
   'To: Shop',
   '• Rice 5kg 10 (lot 09032026) — Warehouse 90 · Shop 25 · all branches 115',
@@ -144,7 +146,7 @@ assert.deepEqual(telegram.formatReturnTelegramLines({
   ],
   refundUsd: 10.25, refundKhr: 0, replacements: [{ product: 'Rice 5kg', quantity: 1 }], by: 'Za',
 }).filter(Boolean), [
-  'Date: 09/03/2026 10:04',
+  'Date: 03/09/2026 10:04',
   'RET: RET-20260903-100405',
   'INV: 20260901-153000',
   'Customer: Sok Dara',
@@ -168,7 +170,7 @@ assert.deepEqual(telegram.formatReturnTelegramLines({
   reason: 'Expired on arrival', settlement: 'credit', items: [{ product: 'Milk 1L', quantity: 12, branchOnHand: 88, totalOnHand: 100 }],
   compensationUsd: 9.6, compensationKhr: 0, lossUsd: 2.4, lossKhr: 0, by: 'Rath',
 }).filter(Boolean), [
-  'Date: 09/03/2026 10:04',
+  'Date: 03/09/2026 10:04',
   'SRET: SRET-20260903-100405',
   'Supplier: ABC Trading',
   'Branch: Warehouse',

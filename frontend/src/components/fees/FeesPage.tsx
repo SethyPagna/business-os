@@ -99,7 +99,10 @@ function formatFeeDate(value: string | null | undefined): string {
   if (!value) return '--'
   const date = new Date(`${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  // dd/mm/yyyy, day-first (Sep 4 2026).
+  const dd = String(date.getDate()).padStart(2, '0')
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${date.getFullYear()}`
 }
 
 export function feeTypeToneClass(type: string): string {
@@ -336,7 +339,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         details: days.slice(0, 8).map((day) => {
           const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day.date || ''))
           return {
-            label: m ? `${m[2]}/${m[3]}/${m[1]}` : String(day.date || ''),
+            label: m ? `${m[3]}/${m[2]}/${m[1]}` : String(day.date || ''),
             value: `${Number(day.count) || 0} · ${fmtMoney(Number(day.amount_usd) || 0, Number(day.amount_khr) || 0)}`,
           }
         }),

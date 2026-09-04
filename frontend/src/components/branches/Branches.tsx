@@ -281,14 +281,18 @@ function formatTransferDate(rawValue: string | null | undefined): string {
     : `${rawValue.replace(' ', 'T')}Z`
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return 'N/A'
-  return date.toLocaleString('en-US', {
+  // dd/mm/yyyy HH:mm, day-first (Sep 4 2026) -- see utils/formatters.ts for
+  // why the order is assembled here rather than left to a locale.
+  const parts = new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
-  })
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+  return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}`
 }
 
 /**

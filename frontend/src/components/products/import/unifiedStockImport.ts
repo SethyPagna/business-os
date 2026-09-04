@@ -95,6 +95,18 @@ function parseOptionalNumber(value: unknown): number | null | 'invalid' {
   return Number.isFinite(parsed) ? parsed : 'invalid'
 }
 
+/**
+ * MONTH-FIRST, deliberately, and it must stay that way.
+ *
+ * This reads the sheet's bare `date` column. Per the standing rule, a date
+ * cell's reading order comes from its column header: `batch(dd/mm/yyyy)` is
+ * day-first, `batch(mm/dd/yyyy)` is month-first, and a bare header that names
+ * no format keeps the meaning it has always had -- otherwise every sheet the
+ * shop already owns would silently change meaning the day the app went
+ * day-first. ISO is accepted here too and is the form that can never be
+ * misread. Do NOT "finish the job" by flipping this to match the display
+ * convention; see lib/batchCode.ts readBatchDateCell for the same rule.
+ */
 export function normalizeUnifiedStockDate(value: unknown): string | null {
   const text = clean(value)
   if (!text) return null
@@ -131,7 +143,7 @@ export function parseUnifiedStockRows(sourceRows: readonly UnifiedStockSourceRow
     if (shop === 'invalid' || warehouse === 'invalid' || (typeof shop === 'number' && shop < 0) || (typeof warehouse === 'number' && warehouse < 0)) {
       issues.push({ rowNumber, code: 'invalid_quantity', message: 'Shop and warehouse must be non-negative numbers.' })
     }
-    if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be mm/dd/yyyy or yyyy-mm-dd.' })
+    if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.' })
     if ([sellingPrice, wholesalePrice, costPrice].some((value) => value === 'invalid' || (typeof value === 'number' && value < 0))) {
       issues.push({ rowNumber, code: 'invalid_price', message: 'Prices must be non-negative numbers.' })
     }

@@ -1342,7 +1342,7 @@ export function downloadImportTemplate(type) {
     // headings so existing sheets keep working; it just stops teaching them.
     'wholesale_price_usd','wholesale_price_khr',
     'cost_price_usd','cost_price_khr',
-    'stock_quantity','low_stock_threshold','batch(mm/dd/yyyy)','expiry_date','expiry_alert_days',
+    'stock_quantity','low_stock_threshold','batch(dd/mm/yyyy)','expiry_date','expiry_alert_days',
     'branch','supplier',
     'parent_id','is_group',
     'image_filename_1','image_filename_2','image_filename_3','image_filename_4','image_filename_5',
@@ -1355,13 +1355,20 @@ export function downloadImportTemplate(type) {
     cost_price_usd: '1.20', cost_price_khr: '',
     stock_quantity: '40', low_stock_threshold: '10',
     // Column consolidation (Aug 24 2026): the old separate `batch` label
-    // column and `date` column are now one column, `batch(mm/dd/yyyy)`.
-    // Leave it blank to let the system stamp today's date and
-    // auto-derive the batch code from it, or fill in a specific received
-    // date (e.g. "08/24/2026") -- the system reads that date and
-    // auto-formats it into the stored batch code (e.g. "08242026") for
-    // you; there's no separate free-typed label to fill in anymore.
-    'batch(mm/dd/yyyy)': '', expiry_date: '', expiry_alert_days: '30',
+    // column and `date` column are now one column. Since Sep 4 2026 the
+    // template ships it as `batch(dd/mm/yyyy)` -- day-first, like the rest
+    // of the app. The importer still reads a `batch(mm/dd/yyyy)` column
+    // MONTH-first, so every sheet the shop already has keeps its exact
+    // present meaning; the HEADER picks the order, never the app's current
+    // display convention (see lib/batchCode.ts's readBatchDateCell).
+    //
+    // Leave it blank to let the system stamp today's date and auto-derive
+    // the batch code from it, or fill in a specific received date. The
+    // example row uses ISO (e.g. "2026-08-24"), the one form neither
+    // reading can get wrong; the system auto-formats whatever it reads into
+    // the stored batch code (e.g. "08242026"), which is an identifier and
+    // stays month-first on purpose.
+    'batch(dd/mm/yyyy)': '2026-08-24', expiry_date: '', expiry_alert_days: '30',
     branch: 'Main Branch', supplier: '',
     parent_id: '', is_group: '',
     // Naming convention: spaces in the product name stay as real spaces,

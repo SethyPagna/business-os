@@ -58,21 +58,25 @@ export function returnLineNeedsLotPick(input: {
   return !(Number.isFinite(picked) && picked > 0)
 }
 
-// mm/dd/yyyy per the app-wide date convention; ISO or Date-parseable in.
+// dd/mm/yyyy per the app-wide date convention (day-first since Sep 4 2026:
+// "change the whole app to dd-mm-yyy"); ISO or Date-parseable in. This one
+// assembles the string by hand rather than calling the shared formatter
+// because it must pass an unparseable value through untouched, so it is
+// easy to miss in a sweep for toLocaleDateString -- it was.
 export function formatBatchDate(value: string | null | undefined): string {
   const text = String(value ?? '').trim()
   if (!text) return ''
   const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (isoMatch) return `${isoMatch[2]}/${isoMatch[3]}/${isoMatch[1]}`
+  if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`
   const parsed = new Date(text)
   if (Number.isNaN(parsed.getTime())) return text
   const mm = String(parsed.getMonth() + 1).padStart(2, '0')
   const dd = String(parsed.getDate()).padStart(2, '0')
-  return `${mm}/${dd}/${parsed.getFullYear()}`
+  return `${dd}/${mm}/${parsed.getFullYear()}`
 }
 
 // One line per lot for the replacement batch picker -- lot code, expiry
-// (mm/dd/yyyy), and what's actually available at the branch. Never cost.
+// (dd/mm/yyyy), and what's actually available at the branch. Never cost.
 export function describeBatchOption(batch: {
   lot_code?: string | null
   expiry_date?: string | null

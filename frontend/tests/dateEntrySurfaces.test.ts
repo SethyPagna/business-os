@@ -63,9 +63,12 @@ for (const surface of SURFACES) {
 // The allow-list is EMPTY on purpose. Every date field in the admin app is
 // typed by staff on a numeric keypad, and <input type="date"> is exactly what
 // makes '9032026' impossible: it hands entry to the browser's own segmented
-// widget, which accepts neither a bare digit run nor a paste of mm/dd/yyyy,
-// and it renders in the DEVICE locale (dd/mm on a phone set to en-GB) against
-// the app's settled mm/dd/yyyy convention. There is no surface where the
+// widget, which accepts neither a bare digit run nor a paste of dd/mm/yyyy,
+// and it renders in the DEVICE locale against the app's settled convention.
+// (That convention became day-first on Sep 4 2026; the native control was
+// already wrong when it was month-first, and letting the device pick the
+// order is the same defect either way -- a wrong locale swaps day and month
+// without failing.) There is no surface where the
 // native control buys something the shared field does not. If one ever turns
 // up, add it here WITH the reason -- do not weaken the sweep.
 const NATIVE_DATE_ALLOW_LIST: string[] = []
@@ -102,9 +105,12 @@ runTest('no surface keeps a free-typed date field outside the shared component',
     const source = fs.readFileSync(file, 'utf8')
     source.split('\n').forEach((line, index) => {
       if (/^\s*(\/\/|\*)/.test(line)) return
-      // A plain <input> carrying an mm/dd/yyyy placeholder is a date field
-      // that never learned to normalise -- exactly what FastStockInModal had.
-      if (/<input\b/.test(line) && /mm\/dd\/yyyy/i.test(line)) offenders.push(`${relative}:${index + 1}`)
+      // A plain <input> carrying a slash-date placeholder is a date field that
+      // never learned to normalise -- exactly what FastStockInModal had. BOTH
+      // orders are caught: day-first because that is the convention such a
+      // field would be imitating, and month-first because a leftover
+      // mm/dd/yyyy placeholder is now wrong twice over.
+      if (/<input\b/.test(line) && /(dd\/mm\/yyyy|mm\/dd\/yyyy)/i.test(line)) offenders.push(`${relative}:${index + 1}`)
     })
   }
   assert.deepEqual(offenders, [], `free-typed date fields found:\n  ${offenders.join('\n  ')}`)
@@ -113,7 +119,10 @@ runTest('no surface keeps a free-typed date field outside the shared component',
 runTest('DateEntryInput carries the entry contract the direction asked for', () => {
   const source = read('components/shared/DateEntryInput.tsx')
   assert.ok(source.includes('inputMode="numeric"'), 'the field must open a numeric keypad')
-  assert.ok(source.includes("placeholder = 'mm/dd/yyyy'"), 'the placeholder must be the literal display format')
+  // The placeholder is the only thing standing between a cashier's muscle
+  // memory and a misfiled date, so it must spell the live order out.
+  assert.ok(source.includes("placeholder = 'dd/mm/yyyy'"), 'the placeholder must be the literal display format')
+  assert.ok(!source.includes('mm/dd/yyyy'), 'no month-first spelling may survive anywhere in the field')
   assert.ok(source.includes('applyDateEntryMask'), 'the as-you-type mask must come from the shared helper')
   assert.ok(source.includes('normalizeDateEntry'), 'commit must go through the shared normalizer')
   assert.ok(source.includes('setSelectionRange'), 'the caret must be restored after masking')

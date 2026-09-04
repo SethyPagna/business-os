@@ -1312,12 +1312,19 @@ function formatSyncTimestamp(value: unknown): string {
   }
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleString([], {
+  // dd/mm HH:mm -- day-first like every other date in the app (Sep 4 2026).
+  // The locale is pinned to en-US and only its field VALUES are read, so a
+  // viewer's machine locale can no longer decide the order or the clock; the
+  // bare `[]` here used to hand both to the device.
+  const parts = new Intl.DateTimeFormat('en-US', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  })
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+  return `${get('day')}/${get('month')}, ${get('hour')}:${get('minute')}`
 }
 
 function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, conflictsNeedReview }: OfflineModeBannerProps) {

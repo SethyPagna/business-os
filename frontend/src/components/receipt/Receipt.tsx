@@ -353,7 +353,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const createdAt = sale.created_at
   // Route every supported timestamp shape through the shared formatter:
   // Date objects, epoch numbers, ISO values, and SQLite's timezone-less UTC
-  // all resolve to the same mm/dd/yyyy HH:mm Phnom Penh wall clock.
+  // all resolve to the same dd/mm/yyyy HH:mm Phnom Penh wall clock.
   const dateStr = fmtDateTime24(createdAt || new Date())
   const exchangeRate = toNumber(sale.exchange_rate) || toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100
   const subtotalUsd = toNumber(sale.subtotal_usd ?? sale.subtotal)

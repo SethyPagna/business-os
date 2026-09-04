@@ -48,7 +48,7 @@ function formatConflictTime(value: unknown): string {
   if (!value) return 'Unknown'
   const date = new Date(String(value))
   if (Number.isNaN(date.getTime())) return String(value)
-  // Shared mm/dd/yyyy 24-hour formatter -- bare toLocaleString() followed
+  // Shared dd/mm/yyyy 24-hour formatter -- bare toLocaleString() followed
   // the viewer's locale/timezone (dd/mm + 12-hour on non-US devices).
   return fmtDateTime24(date)
 }

@@ -56,11 +56,15 @@ runTest('a returned line needs a lot pick exactly when nothing else can name one
   assert.equal(returnLineNeedsLotPick({ originalBatchId: 0, pickedBatchId: '', lotOptionCount: 2 }), true)
 })
 
-runTest('K2: batch option lines read mm/dd/yyyy and never carry cost', () => {
-  assert.equal(formatBatchDate('2026-09-15'), '09/15/2026')
+runTest('K2: batch option lines read dd/mm/yyyy and never carry cost', () => {
+  // 15 and 31 are both past the 12th, so these pin the ORDER rather than
+  // reading the same under either convention.
+  assert.equal(formatBatchDate('2026-09-15'), '15/09/2026')
   assert.equal(formatBatchDate(''), '')
   const label = describeBatchOption({ lot_code: '08152026', expiry_date: '2027-01-31', quantity: 6, batch_number: 2 })
-  assert.equal(label, '08152026 · exp 01/31/2027 · 6 in stock')
+  // The lot code stays MMDDYYYY verbatim while the expiry date beside it is
+  // day-first: one line carrying both halves of the display/identifier split.
+  assert.equal(label, '08152026 · exp 31/01/2027 · 6 in stock')
   assert.equal(describeBatchOption({ lot_code: null, expiry_date: null, quantity: 3, batch_number: 4 }), '#4 · 3 in stock')
   assert.doesNotMatch(label, /cost/i)
 })

@@ -984,9 +984,11 @@ function formatDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // mm/dd/yyyy + 24-hour in Phnom Penh business time. A bare toLocaleString()
-  // rendered the VIEWER's locale + timezone (dd/mm, 12-hour) -- the app pins
-  // one numeric format everywhere via fmtTime; this was one of the few strays.
+  // dd/mm/yyyy + 24-hour in Phnom Penh business time (day-first since Sep 4
+  // 2026). A bare toLocaleString() rendered the VIEWER's locale and timezone,
+  // which is the actual defect regardless of which order the app has chosen:
+  // a wrong locale swaps day and month without failing. The app pins one
+  // numeric format everywhere via fmtTime; this was one of the few strays.
   return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }
 

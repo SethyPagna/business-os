@@ -30,7 +30,11 @@ await runTest('formatters accept database timestamp shapes', () => {
 
 await runTest('receipt date formatting accepts every supported timestamp representation', () => {
   const instant = Date.parse('2026-09-02T01:59:00.000Z')
-  const expected = '09/02/2026 08:59'
+  // 2026-09-02 is the 2nd day of the 9th month: day-first renders 02/09.
+  // (User, Sep 4 2026: 'change the whole app to dd-mm-yyy'.) What this test
+  // really pins is that ALL five timestamp representations agree -- that
+  // contract is unchanged; only the order inside the string moved.
+  const expected = '02/09/2026 08:59'
   assert.equal(fmtDateTime24(instant), expected)
   assert.equal(fmtDateTime24(new Date(instant)), expected)
   assert.equal(fmtDateTime24('2026-09-02T01:59:00.000Z'), expected)
