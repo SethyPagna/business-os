@@ -112,7 +112,7 @@ export type ProductDetailInput = {
  * inside that name's group.
  *
  * Deliberately excludes cost (merged by averaging instead -- see
- * resolveMergedCost) and selling/special price -- see the rule above.
+ * resolveMergedCost) and selling/wholesale price -- see the rule above.
  */
 export function productDetailSignature(row: ProductDetailInput): string {
   return normalizedBarcode(row.barcode)
@@ -206,19 +206,29 @@ export function resolveMergedCost(rows: MergeableCost[]): Partial<Record<keyof M
 export type MergeablePricing = {
   selling_price_usd?: unknown
   selling_price_khr?: unknown
-  special_price_usd?: unknown
-  special_price_khr?: unknown
+  wholesale_price_usd?: unknown
+  wholesale_price_khr?: unknown
 }
 
 /**
- * Resolves the selling/special prices for a merge, taking the HIGHEST of
- * each across the rows involved.
+ * Resolves the selling and wholesale prices for a merge, taking the HIGHEST
+ * of each across the rows involved.
  *
  * Highest rather than first-seen because these are customer-facing prices:
  * merging must never quietly drop a product to a lower price than one of
  * the merged rows expected to charge. Each of the four fields is resolved
  * independently, so a row with the best selling price and another with the
- * best special price both contribute.
+ * best wholesale price both contribute.
+ *
+ * The discounted tier is `wholesale_price_usd/khr`, NOT the retired
+ * `special_price_usd/khr` pair this used to name. The 2026-09-04 owner ruling
+ * established that the tier the app called "VIP" was always the wholesale
+ * (បោះដុំ) price, and migration 0111 copied the numbers across and zeroed the
+ * old columns, keeping them only as inert ballast for stale PWA till tabs.
+ * While this list still said `special_price_*` the merge resolved the maximum
+ * of 0 and 0: a folded-away duplicate's wholesale price was deactivated with
+ * its row and vanished from the catalogue, silently. Never point this list
+ * back at the dead pair.
  *
  * Returns only the fields that at least one row actually carried, so a
  * caller can spread the result over an existing row without clobbering
@@ -226,7 +236,7 @@ export type MergeablePricing = {
  */
 export function resolveMergedPricing(rows: MergeablePricing[]): Partial<Record<keyof MergeablePricing, number>> {
   const fields: (keyof MergeablePricing)[] = [
-    'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr',
+    'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr',
   ]
   const merged: Partial<Record<keyof MergeablePricing, number>> = {}
   for (const field of fields) {

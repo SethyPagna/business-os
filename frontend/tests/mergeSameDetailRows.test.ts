@@ -86,19 +86,23 @@ await runTest('mergeSameDetailRows MERGES a cost difference and averages the dis
   assert.equal(rows[0].stock_quantity, 2, 'and their stock adds up, because they are one row now')
 })
 
-await runTest('mergeSameDetailRows MERGES a selling/special price difference and keeps the highest', () => {
-  // Selling and special price are what we plan to charge, adjustable for
+await runTest('mergeSameDetailRows MERGES a selling/wholesale price difference and keeps the highest', () => {
+  // Selling and wholesale price are what we plan to charge, adjustable for
   // sales/POS -- not what the item is. Two rows for one article at two
   // hoped-for prices are one product, and the merged row must never show a
   // price below what one of the merged rows expected to charge.
+  //
+  // The discounted tier is wholesale_price_* since migration 0111; while this
+  // rule still named the retired special_price_* pair the grouped row silently
+  // showed the FIRST child row's wholesale price instead of the highest.
   const rows = mergeSameDetailRows([
-    { id: 1, name: 'Gloss Nude', selling_price_usd: 8, special_price_usd: 7.5, stock_quantity: 1 },
-    { id: 2, name: 'Gloss Nude', selling_price_usd: 9, special_price_usd: 6.0, stock_quantity: 1 },
+    { id: 1, name: 'Gloss Nude', selling_price_usd: 8, wholesale_price_usd: 7.5, stock_quantity: 1 },
+    { id: 2, name: 'Gloss Nude', selling_price_usd: 9, wholesale_price_usd: 6.0, stock_quantity: 1 },
   ])
   assert.equal(rows.length, 1)
   assert.equal(rows[0].__mergedRowCount, 2)
   assert.equal(rows[0].selling_price_usd, 9, 'highest selling price wins')
-  assert.equal(rows[0].special_price_usd, 7.5, 'each price field resolves independently to its own highest')
+  assert.equal(rows[0].wholesale_price_usd, 7.5, 'each price field resolves independently to its own highest')
 })
 
 await runTest('mergeSameDetailRows ignores id/created_at/updated_at/client_request_id/image_gallery when comparing rows', () => {

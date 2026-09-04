@@ -2417,13 +2417,20 @@ export async function foldDuplicateProductInto(
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
   const canonicalBefore = await db
-    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr
+    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr
               FROM products WHERE id = @id`)
-    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: canonicalId })
+    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: canonicalId })
   const dupPricing = await db
-    .prepare(`SELECT selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr
+    .prepare(`SELECT selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr
               FROM products WHERE id = @id`)
-    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: dup.id })
+    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: dup.id })
+  // Selling AND wholesale price: highest of the two rows wins (see
+  // resolveMergedPricing). Both SELECTs above name wholesale_price_*, not the
+  // retired special_price_* pair -- migration 0111 moved the discounted tier
+  // across and zeroed the old columns, so while this path still read them the
+  // merge resolved max(0, 0) and a folded-away duplicate's wholesale price was
+  // deactivated with its row. Nothing threw; the number simply left the
+  // catalogue. The dead pair is written by nothing here on purpose.
   const mergedPricing = resolveMergedPricing([canonicalBefore || {}, dupPricing || {}])
   // Cost is no longer identity (Sep 4 2026), so folding a duplicate must also
   // reconcile the two costs rather than silently keeping the keeper's: the
@@ -2508,8 +2515,8 @@ export async function foldDuplicateProductInto(
     sql: `UPDATE products
           SET selling_price_usd = @sellingUsd,
               selling_price_khr = @sellingKhr,
-              special_price_usd = @specialUsd,
-              special_price_khr = @specialKhr,
+              wholesale_price_usd = @wholesaleUsd,
+              wholesale_price_khr = @wholesaleKhr,
               cost_price_usd = @costUsd,
               cost_price_khr = @costKhr,
               updated_at = CURRENT_TIMESTAMP
@@ -2518,8 +2525,8 @@ export async function foldDuplicateProductInto(
       canonicalId,
       sellingUsd: mergedPricing.selling_price_usd ?? canonicalBefore?.selling_price_usd ?? 0,
       sellingKhr: mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0,
-      specialUsd: mergedPricing.special_price_usd ?? canonicalBefore?.special_price_usd ?? 0,
-      specialKhr: mergedPricing.special_price_khr ?? canonicalBefore?.special_price_khr ?? 0,
+      wholesaleUsd: mergedPricing.wholesale_price_usd ?? canonicalBefore?.wholesale_price_usd ?? 0,
+      wholesaleKhr: mergedPricing.wholesale_price_khr ?? canonicalBefore?.wholesale_price_khr ?? 0,
       costUsd: mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? 0,
       costKhr: mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? 0,
     },
@@ -2657,8 +2664,8 @@ export async function foldDuplicateProductInto(
       keeperPricingBefore: {
         selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
         selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
-        special_price_usd: Number(canonicalBefore?.special_price_usd) || 0,
-        special_price_khr: Number(canonicalBefore?.special_price_khr) || 0,
+        wholesale_price_usd: Number(canonicalBefore?.wholesale_price_usd) || 0,
+        wholesale_price_khr: Number(canonicalBefore?.wholesale_price_khr) || 0,
         cost_price_usd: Number(canonicalBefore?.cost_price_usd) || 0,
         cost_price_khr: Number(canonicalBefore?.cost_price_khr) || 0,
       },

@@ -87,10 +87,17 @@ check('the merge deactivates the duplicate only after everything is carried over
   assert.ok(imagesAt > 0 && imagesAt < deactivateAt, 'images must be moved before the duplicate is deactivated')
 })
 
-check('the merge carries the highest selling and special prices onto the keeper', () => {
+check('the merge carries the highest selling and WHOLESALE prices onto the keeper', () => {
   assert.ok(/resolveMergedPricing\(\[canonicalBefore \|\| \{\}, dupPricing \|\| \{\}\]\)/.test(mergeBlock), 'price resolution must compare both rows')
   assert.ok(/selling_price_usd = @sellingUsd/.test(mergeBlock), 'highest USD selling price must be written to the keeper')
-  assert.ok(/special_price_usd = @specialUsd/.test(mergeBlock), 'highest USD special price must be written to the keeper')
+  // The discounted tier lives in wholesale_price_* since migration 0111.
+  // While this path still named special_price_* the merge resolved max(0, 0)
+  // and the folded-away duplicate's wholesale price left the catalogue with
+  // its row -- silently, with no error and no failing test anywhere.
+  assert.ok(/wholesale_price_usd = @wholesaleUsd/.test(mergeBlock), 'highest USD wholesale price must be written to the keeper')
+  assert.ok(/wholesale_price_khr = @wholesaleKhr/.test(mergeBlock), 'and the KHR half of the same tier')
+  assert.ok(!/special_price_(usd|khr) = @/.test(mergeBlock), 'the retired special_price_* pair must never be written by a merge again')
+  assert.ok(/wholesale_price_usd, wholesale_price_khr/.test(mergeBlock), 'both pricing SELECTs must read the wholesale columns, not the zeroed pair')
   assert.ok(/keeperPricingBefore:/.test(routeSrc), 'the keeper price before-image must be captured so undo is exact')
 })
 

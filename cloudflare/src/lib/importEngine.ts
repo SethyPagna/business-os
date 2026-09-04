@@ -1172,43 +1172,15 @@ export function getProductImportReplaceColumns(policyJson: string | null | undef
   }
 }
 
-/**
- * The wholesale half of the merge rule productDetailRule.ts's
- * resolveMergedPricing implements for the selling prices: when two rows
- * merge into one product and disagree on the wholesale price, the HIGHEST
- * wins.
- *
- * Same reasoning as the selling-price merge -- these are prices we plan to
- * charge, not facts about the item, and a merge must never quietly drop a
- * product below a price one of the merged rows expected to charge. It lives
- * here rather than inside resolveMergedPricing because that helper is shared
- * with the product-detail identity rule (and its frontend twin
- * frontend/src/utils/productDetailRule.ts), which this lane does not own;
- * the two are called together at every merge site below.
- *
- * Returns only the fields at least one row actually carried, so the caller
- * can spread the result over an existing row without clobbering an untouched
- * column with a zero -- exactly resolveMergedPricing's contract.
- */
-const WHOLESALE_MERGE_FIELDS = ['wholesale_price_usd', 'wholesale_price_khr'] as const
-
-export function resolveMergedWholesalePricing(
-  rows: Array<Record<string, unknown> | null | undefined>,
-): Partial<Record<typeof WHOLESALE_MERGE_FIELDS[number], number>> {
-  const merged: Partial<Record<typeof WHOLESALE_MERGE_FIELDS[number], number>> = {}
-  for (const field of WHOLESALE_MERGE_FIELDS) {
-    let best: number | null = null
-    for (const row of rows) {
-      const raw = row?.[field]
-      if (raw === undefined || raw === null || raw === '') continue
-      const value = Number(raw)
-      if (!Number.isFinite(value)) continue
-      if (best === null || value > best) best = value
-    }
-    if (best !== null) merged[field] = best
-  }
-  return merged
-}
+// The wholesale tier used to be merged here, by a local
+// resolveMergedWholesalePricing that duplicated resolveMergedPricing's
+// max-wins loop over wholesale_price_usd/khr. It existed only because
+// productDetailRule.ts still named the retired special_price_* pair and the
+// lane that added it did not own that file. S4-32 re-pointed the shared rule
+// at wholesale_price_*, so the shared helper now merges the tier itself and
+// the local copy would have been a second implementation of one rule -- the
+// exact drift hazard productDetailRuleParity.test.ts exists to prevent. Every
+// call site below now passes through resolveMergedPricing alone.
 
 // ---------------------------------------------------------------------------
 // Per-type classification. Each function takes the already CSV-parsed rows
@@ -1719,15 +1691,12 @@ export async function classifyProducts(
     // each wins -- merging must never quietly drop a product below a price
     // one of the merged rows expected to charge. Applied before the changes
     // diff and before the write, so the reviewer sees the value that will
-    // actually be stored. The wholesale tier merges by the same rule through
-    // resolveMergedWholesalePricing (migration 0111 moved the discounted tier
-    // off the dead special_price_* columns).
+    // actually be stored. The wholesale tier rides the SAME resolver: since
+    // S4-32, resolveMergedPricing's field list is selling_price_* +
+    // wholesale_price_* (migration 0111 moved the discounted tier off the dead
+    // special_price_* columns), so there is one implementation of max-wins.
     if (match) {
       Object.assign(data, resolveMergedPricing([
-        match as unknown as Record<string, unknown>,
-        data,
-      ]))
-      Object.assign(data, resolveMergedWholesalePricing([
         match as unknown as Record<string, unknown>,
         data,
       ]))
@@ -5281,14 +5250,15 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // rows disagree on selling/wholesale price, the HIGHEST wins --
           // applied to BOTH rows' data, because the first row's INSERT and
           // this row's later UPDATE each write their own params and the
-          // update runs last (statement order preserves row order). Cost is
-          // the exception: it MEANS rather than maxes (S4-17), so all three
-          // resolvers are needed and none of them may be dropped.
+          // update runs last (statement order preserves row order). Selling
+          // AND wholesale both max through resolveMergedPricing since S4-32.
+          // Cost is the exception: it MEANS rather than maxes (S4-17), so both
+          // resolvers are needed and neither may be dropped.
           const merged = {
             ...resolveMergedPricing([earlier.data, d]),
-            ...resolveMergedWholesalePricing([earlier.data, d]),
             ...resolveMergedCost([earlier.data, d]),
-          }          Object.assign(earlier.data, merged)
+          }
+          Object.assign(earlier.data, merged)
           Object.assign(d, merged)
           continue
         }
