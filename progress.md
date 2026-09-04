@@ -244,11 +244,13 @@ it**, not a merge squeezed in after a deploy.
   for rename/merge repointing — **nothing marks a receivable Paid**. Live AR: 13,204 Paid / **98 Unpaid
   ($11,470.10)** / 2 Outstanding ($102). So even after the app completes those sales, **the AR ledger stays unpaid
   unless something writes it.** Unclaimed.
-- **⚠️ Any hand-written status flip authored before Sep 4 05:43 UTC has a hole.** `21`'s `flip.sql` for the 82 rows
-  predated `0114` and set `sale_status='completed'` with **no** `stock_skipped` — exactly the state `0114`'s header
-  warns about: held(completed) becomes a lie, and a later cancel computes `delta = 0 - qty` and **ADDS units that
-  were never taken**. `21` has patched theirs (still 6 statements, still idempotent). **If you are holding a similar
-  flip, it has the same hole.**
+- **⚠️ Any hand-written status flip that does not mention `stock_skipped` has a hole — whenever it was written.**
+  **The test is textual, not temporal (`21`).** If a flip sets `sale_status='completed'` and the string
+  `stock_skipped` does not appear in it, it has the hole. Time discriminates badly in both directions: a flip
+  written before `0114` may be fine, and one written today by someone who never heard of `0114` has the hole
+  anyway. The failure: held(completed) becomes a lie, and a later cancel computes `delta = 0 - qty` and **ADDS
+  units that were never taken**. `0114` (applied **05:03:43**) is why the column exists — it is not a cutoff.
+  `21` has patched theirs (still 6 statements, still idempotent). **If you hold one, grep it.**
 
 ### 🟡 THE DOCS ARE FORKED IN TWO PLACES — union, never pick a side
 
@@ -812,7 +814,27 @@ Read this before any deploy. The `deploy-provenance` skill exists because of the
 | 4 | `3b25fe33-a806-44f7-9d42-caca6801f102` | 2026-09-03T14:27:12Z | `e3678a39` | **`ship/2026-09-03`** (NOT main; pushed to origin) | clean, isolated worktree `Downloads/bos-dep`, real `npm ci`, removed after | none (chain top == prod top == 107) | no |
 | 5 | `a164d260-49ae-4bec-b372-eb73bce58850` | 2026-09-04T05:04:16Z | `2c497564` | **`rc/s4-2026-09-04`** (NOT main) | stamped **`-dirty`** — traced to the CRLF-only `frontend/public` trio in `bos-rc-s4`; zero content change | 0108–0115 | no |
 | 6 | `8480241e-8867-442c-8643-93c8e5f8175e` | 2026-09-04T07:57:12Z | `e83ee73f` | **`rc/deploy-2026-09-04`** (NOT main; pushed) | clean, isolated worktree `Downloads/bos-deploy`, real `npm ci`, removed after | **0116** only; **0 renames** | no |
-| 7 | `798d9e19-76d0-4909-8db3-6a7a4ad43ad7` | 2026-09-04T11:37:39Z | `c7ef7264` | **`rc/ee-integrate-2026-09-04`** (NOT main; pushed) | isolated worktree, real `npm ci`, removed after — but production stamps **`c7ef726438f0-dirty`** (reported by `8b`; DNS unreachable from `ee`, so not independently confirmed). Cause almost certainly the CRLF-only `frontend/public` trio, which shows **zero** content rows under `--ignore-cr-at-eol`; **not provable now**, the deploy worktree was removed | **0117** applied 11:37:39Z; `d1_migrations` row id **116** (ids are row counters, not filename numbers) | no |
+| 7 | `798d9e19-76d0-4909-8db3-6a7a4ad43ad7` | 2026-09-04T11:37:39Z | `c7ef7264` | **`rc/ee-integrate-2026-09-04`** (NOT main; pushed) | isolated worktree, real `npm ci`, removed after — but production stamps **`c7ef726438f0-dirty`** (reported by `8b`; DNS unreachable from `ee`, so not independently confirmed). Cause **reproduced** (note below): the CRLF-only `frontend/public` trio. **Sufficient cause, demonstrated — but not provable as the actual cause for THIS build**, since the deploy worktree was removed and nothing rules out something else also having been dirty in it | **0117** applied 11:37:39Z; `d1_migrations` row id **116** (ids are row counters, not filename numbers) | no |
+
+**THE `-dirty` STAMP ON DEPLOY #7 IS THE PROVENANCE FEATURE WORKING, NOT A DEFECT (`7c`).** `fx/runtime-provenance`
+was built so that a dirty tree is stamped `<commit>-dirty`, because the build that incident replaced came from a
+tree no commit described, and a stamp quietly naming the nearest commit would be worse than none. On its first real
+deploy it caught exactly the condition it exists for. **Read a future `-dirty` as the mechanism succeeding, not as
+a bug report.**
+
+**REPRODUCED on this machine (`ee`, after `7c` pointed out it was testable), at `c7ef7264`:** `core.autocrlf=true`,
+**no `.gitattributes` anywhere**, and all three blobs stored **LF**. A fresh detached worktree at `c7ef7264` is
+**completely clean — 0 dirty files** — with the trio checked out as **CRLF**. Running `build:public-runtime`, which
+every real deploy runs, rewrites all three back to **LF**, leaving **exactly those three files dirty with 0 content
+rows under `--ignore-cr-at-eol`**. Independently corroborated in the shared checkout, whose same three files have
+been dirty since 15:56 with 0 content rows. **So the trio is a demonstrated sufficient cause for a `-dirty` stamp on
+any build of this commit.** It still cannot show nothing *else* was dirty in the removed worktree.
+
+**FIX FOR EVERY FUTURE DEPLOY (`7c`) — UNCLAIMED, one line in the deploy-record template:** capture
+`git status --porcelain` **and** `git rev-parse HEAD` into the deploy record **at build time**. Today a `-dirty`
+stamp says *that* the tree was dirty and nothing about *what*, and the answer exists only in the seconds before the
+worktree is removed. With the file list attached this can never become unanswerable again — which is the whole
+failure mode the provenance work exists to close.
 
 **#4 IS WHAT PRODUCTION SERVES RIGHT NOW (Part 587).** Served bundle `index-PVIjw20o.js`, the same file name
 the isolated build emitted; `/health` **200** on both hosts 49 s after the deploy; `/api/products` unauthenticated
