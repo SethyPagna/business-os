@@ -18086,10 +18086,23 @@ diff never touched, and the new test seeds its own fixture, so nothing here assu
 a RECON lot code, or a null membership number. (4) Worth someone's lane, not claimed here:
 `portal.ts:1054` matches a shopper's typed membership number against the stored value with
 `lower(trim(...)) = lower(trim(...))`, and migration `0110` moved every customer onto an `LC-` number
-— a returning shopper typing their old number would no longer match. Unverified against production;
-flagged, not fixed. (5) Migration `0113` is absent from the tree (114 files, numbered to 0115) and
-`0115` is in the repo but failed against production mid-deploy, so the chain top is ahead of live —
-both are Part 597's items, noted here only so they are not read as this lane's doing.
+— a returning shopper typing their old number would no longer match. `business-os-v1-c3` then
+checked it against production: `0110`’s `needy` CTE selects anything that is not `LC-<digits>`, so a
+legacy `LCMN-XXXXXXXX` really was overwritten rather than preserved — but only **12 customers of
+4,978** ever had a number at all (4,966 were blank), so at most 11 people could have had one rewritten,
+and those were machine-generated random strings nobody memorises or was handed on paper. Real,
+bounded, not a hotfix. Left flagged, not fixed. (5) **Corrected — the claim first written here was wrong, and `business-os-v1-c3`
+was right to push back.** This entry originally said `0115` sat in the repo unapplied, "so the chain
+top is ahead of live". It is not. The `d1_migrations` `id` is a **row counter, not the filename**
+number, and because no `0113` has ever existed on any ref
+(`git log --all --diff-filter=A -- cloudflare/migrations/0113*` returns nothing) the counter runs one
+behind the filename from `0114` onward. Re-derived from the deployed tree alone, without trusting the
+correction: id 113 = `0114_sales_stock_skipped.sql`, id 114 = `0115_sale_amendments.sql`. So `0115`
+**is applied** — it failed once on the CRLF/trigger split, was root-caused and re-run successfully
+inside the same deploy — and ids 107→114 are exactly the seven files 0108–0112, 0114, 0115. Nothing
+is pending; `migrations list --remote` reports none. The `0113` gap is a reserved number, never a
+drop. The lesson worth keeping: a d1 migration id and its filename number are not the same thing, and
+they diverge permanently at the first skipped number.
 
 ## Part 589 (Sep 4 2026, session business-os-v1-c3, COORDINATOR + lane S4-17) — the user's Sep-4 walkthrough split into 26 items, one production incident root-caused from read-only queries, and the identity rule reversed
 
