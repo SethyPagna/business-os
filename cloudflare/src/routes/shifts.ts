@@ -2,8 +2,8 @@ import { Hono } from 'hono'
 import { getDb, type D1Compat } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { BUSINESS_TZ_FORWARD, localTodayExpr } from '../lib/businessDateWindow'
-import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
+import { hasAnyPermission, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { sendTelegramShiftReport } from '../lib/telegram'
 import type { Env } from '../index'
 
@@ -44,6 +44,17 @@ function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 function displayName(user: SessionUser): string | null { return user.name || user.username || null }
+function canUseShifts(user: SessionUser): boolean { return hasAnyPermission(user, ['pos', 'sales']) }
+function shiftPermissionError(c: { json: (body: object, status: 403) => Response }, user: SessionUser): Response | null {
+  return canUseShifts(user) ? null : c.json({ error: 'You do not have permission to use shifts.' }, 403)
+}
+async function resolveBranch(db: D1Compat, branchId: number | null): Promise<{ id: number; name: string } | null> {
+  if (branchId == null) return null
+  return (await db.prepare('SELECT id, name FROM branches WHERE id=@id AND is_active=1').get<{ id: number; name: string }>({ id: branchId })) ?? null
+}
+function businessDateFor(iso: string): string {
+  return new Date(new Date(iso).getTime() + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10)
+}
 function shiftCode(nowIso: string): string {
   const local = new Date(new Date(nowIso).getTime() + 7 * 60 * 60 * 1000)
   const p = (n: number) => String(n).padStart(2, '0')
@@ -80,9 +91,14 @@ function currentResponse(shift: ShiftRow | undefined, policy: ShiftPolicy, exemp
 app.get('/policy', async (c) => c.json(await readShiftPolicy(getDb(c.env))))
 
 app.get('/current', async (c) => {
-  const user = c.get('user'); const db = getDb(c.env); const policy = await readShiftPolicy(db)
+  const user = c.get('user'); const denied = shiftPermissionError(c, user); if (denied) return denied
+  const db = getDb(c.env); const requestedBranchId = branchIdFrom(c)
+  const rawBranchId = c.req.query('branch_id') ?? c.req.header('X-Branch-Id')
+  if (rawBranchId != null && String(rawBranchId).trim() !== '' && requestedBranchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
+  if (requestedBranchId != null && !(await resolveBranch(db, requestedBranchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  const policy = await readShiftPolicy(db)
   const exempt = policy.admin_exempt && isAdminControlUser(user)
-  const shift = exempt ? undefined : await readCurrent(db, policy, user.id, branchIdFrom(c))
+  const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
   return c.json(currentResponse(shift, policy, exempt))
 })
 
@@ -116,15 +132,18 @@ app.get('/:id/history', async (c) => {
 
 app.post('/open', async (c) => {
   const user = c.get('user'); const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const denied = shiftPermissionError(c, user); if (denied) return denied
   const branchId = bodyBranchId(body, branchIdFrom(c))
   if (body.branch_id != null && String(body.branch_id).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
-  const db = getDb(c.env); const policy = await readShiftPolicy(db)
+  const db = getDb(c.env); const branch = await resolveBranch(db, branchId)
+  if (branchId != null && !branch) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  const policy = await readShiftPolicy(db)
   if (policy.admin_exempt && isAdminControlUser(user)) return c.json({ error: 'This account is exempt from shifts.', exempt: true }, 403)
   const existing = await readCurrent(db, policy, user.id, branchId)
   if (existing) return c.json({ ...currentResponse(existing, policy, false), already_registered: true }, 200)
   const nowIso = new Date().toISOString()
   const row = { shiftCode: shiftCode(nowIso), scopeMode: policy.scope_mode, userId: user.id,
-    userName: displayName(user), branchId, branchName: optionalText(body.branch_name), openedAt: nowIso,
+    userName: displayName(user), branchId, branchName: branch?.name ?? null, openedAt: nowIso,
     floatUsd: money(body.opening_float_usd), floatKhr: money(body.opening_float_khr),
     note: optionalText(body.opening_note), deviceName: c.req.header('X-Device-Name') || null }
   try {
@@ -146,9 +165,12 @@ app.post('/open', async (c) => {
 
 app.post('/close', async (c) => {
   const user = c.get('user'); const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const denied = shiftPermissionError(c, user); if (denied) return denied
   const branchId = bodyBranchId(body, branchIdFrom(c))
   if (body.branch_id != null && String(body.branch_id).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
-  const db = getDb(c.env); const policy = await readShiftPolicy(db)
+  const db = getDb(c.env)
+  if (branchId != null && !(await resolveBranch(db, branchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  const policy = await readShiftPolicy(db)
   if (policy.admin_exempt && isAdminControlUser(user)) return c.json({ error: 'This account is exempt from shifts.', exempt: true }, 403)
   const shift = await readCurrent(db, policy, user.id, branchId)
   if (!shift) return c.json({ error: 'No shift is registered for today. Register the opening float first.' }, 404)
@@ -186,6 +208,9 @@ app.patch('/:id', async (c) => {
   }
   const openedAt = iso('opened_at', before.opened_at); const closedAt = iso('closed_at', before.closed_at)
   if (!openedAt || closedAt === undefined) return c.json({ error: 'Invalid shift timestamp.' }, 400)
+  if (businessDateFor(openedAt) !== before.business_date) return c.json({ error: 'Opening time must remain within the shift business date.' }, 400)
+  if (before.closed_at && !closedAt) return c.json({ error: 'Closed shifts cannot be reopened.' }, 400)
+  if (!before.closed_at && closedAt) return c.json({ error: 'Open shifts must be closed through the close action.' }, 400)
   if (closedAt && new Date(closedAt).getTime() < new Date(openedAt).getTime()) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const after = { ...before, opened_at: openedAt,
     opening_float_usd: 'opening_float_usd' in body ? money(body.opening_float_usd) : before.opening_float_usd,
@@ -200,7 +225,7 @@ app.patch('/:id', async (c) => {
   const comparableAfter = { ...after }; delete (comparableAfter as Partial<ShiftRow>).revision
   if (JSON.stringify(comparableBefore) === JSON.stringify(comparableAfter)) return c.json({ error: 'No shift fields changed.' }, 400)
   const nowIso = new Date().toISOString(); const actorName = displayName(user)
-  await db.batch([
+  const results = await db.batch([
     { sql: `UPDATE shift_sessions SET opened_at=@openedAt, opening_float_usd=@openingUsd, opening_float_khr=@openingKhr,
         opening_note=@openingNote, closed_at=@closedAt, closing_counted_usd=@closingUsd, closing_counted_khr=@closingKhr,
         closing_note=@closingNote, revision=revision+1, updated_at=@updatedAt WHERE id=@id AND revision=@revision`,
@@ -208,10 +233,13 @@ app.patch('/:id', async (c) => {
         openingKhr: after.opening_float_khr, openingNote: after.opening_note, closedAt: after.closed_at,
         closingUsd: after.closing_counted_usd, closingKhr: after.closing_counted_khr, closingNote: after.closing_note, updatedAt: nowIso } },
     { sql: `INSERT INTO shift_session_amendments (shift_session_id, actor_user_id, actor_name, reason, before_json, after_json, created_at)
-        SELECT @id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions WHERE id=@id AND revision=@newRevision`,
+        SELECT @id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions
+        WHERE changes()=1 AND id=@id AND revision=@newRevision`,
       params: { id, actorId: user.id, actorName, reason, beforeJson: JSON.stringify(before),
         afterJson: JSON.stringify(after), createdAt: nowIso, newRevision: after.revision } },
   ])
+  const changed = Number((results[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0)
+  if (changed !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const saved = await readShiftById(db, id)
   if (!saved || saved.revision !== after.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   await audit(c.env, user.id, actorName, 'shift.amend', 'shift_session', id, { reason, revision: saved.revision })

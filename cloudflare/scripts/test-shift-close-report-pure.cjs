@@ -116,7 +116,7 @@ const shiftsRoute = loadReal('routes/shifts.ts', {
   '../lib/auth': {
     requireAuth: async (c, next) => { c.set('user', { id: 7, name: 'Za', username: 'za' }); await next() },
   },
-  '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false },
+  '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false, hasAnyPermission: () => true },
   '../lib/audit': { audit: async () => {} },
   '../lib/telegram': {
     // The spy stands where the real sender does. It records and returns; it
@@ -217,7 +217,7 @@ async function main() {
     '../lib/businessDateWindow': businessDateWindow,
     '../lib/db': { getDb: () => d1(empty) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 9, name: 'Nobody' }); await next() } },
-    '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false },
+    '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false, hasAnyPermission: () => true },
     '../lib/audit': { audit: async () => {} },
     '../lib/telegram': { sendTelegramShiftReport: async () => { throw new Error('a shift that does not exist must not be reported') } },
   })
