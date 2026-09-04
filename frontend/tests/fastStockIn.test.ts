@@ -148,10 +148,6 @@ runTest('stock-in header edits are collision- and concurrency-safe', () => {
   assert.match(batchTransportSource, /body\.credit_due_date = patch\.creditDueDate/)
 })
 
-if (failed > 0) {
-  process.exitCode = 1
-}
-
 runTest('the lot picker matches the sibling add-stock surfaces', () => {
   // Same affordance ReceiveBatchModal / InventoryStockModals already have:
   // a chip row scoped to the picked product and the shipment branch.
@@ -182,9 +178,17 @@ runTest('queueing a line and committing the session are visibly different action
   assert.match(modalSource, /fast_stockin_add/, "the queue button uses the 'Add & next' key")
   assert.match(modalSource, /update_line/, 'editing a queued line says Update line, not Save')
   assert.doesNotMatch(modalSource, /tr\('save', 'Save'\)/, 'nothing that writes nothing may be labelled Save')
-  // Exactly one commit control per breakpoint: header on phones, footer above.
-  assert.match(modalSource, /sm:hidden[\s\S]*commitSession/, 'phones commit from the header')
-  assert.match(modalSource, /hidden flex-shrink-0[\s\S]*sm:flex/, 'the desktop commit sits in a footer, not in the scroll body')
+  // ONE commit control at every width. 3eec9f22 (S4-20) replaced the old pair
+  // -- a phone-only header button plus a desktop footer button -- with a single
+  // primary action at the end of the panel. The two assertions this replaces
+  // still demanded that split, so they contradicted the rule
+  // modalPrimaryPlacement.test.ts enforces across 237 components: a modal must
+  // not hide its primary action behind a breakpoint. They went unnoticed
+  // because this file's exit guard used to sit ABOVE them.
+  const commitControls = modalSource.match(/<button[^>]*onClick=\{commitSession\}/g) || []
+  assert.equal(commitControls.length, 1, 'exactly ONE commit control, not one per breakpoint')
+  assert.doesNotMatch(commitControls[0], /(^|["'`\s])(sm:|md:|lg:|xl:)?hidden(?=["'`\s]|$)/,
+    'the commit control is never hidden at any width')
   assert.match(modalSource, /lines_queued/, 'the footer states what is queued and what it costs')
   assert.match(modalSource, /add_next_hint/, 'the difference is a tooltip, not prose on the card')
 })
@@ -202,3 +206,12 @@ runTest('committing asks through ConfirmDialog, and placeholders are filled', ()
   // A failure keeps the modal and the draft, and the reason stays readable.
   assert.match(modalSource, /break-words text-\[10px\]/, 'a long server reason wraps rather than being squeezed out')
 })
+
+// The exit guard MUST be the last statement in this file. It previously sat
+// at line 152 with three runTest() calls after it, so a failure in any of
+// those three incremented a counter nothing re-read: the file printed FAIL
+// and still exited 0. test:utils chains with &&, so the whole gate reported
+// green over a real red. Anything appended below this guard is invisible.
+if (failed > 0) {
+  process.exitCode = 1
+}
