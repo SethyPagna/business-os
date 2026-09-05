@@ -10,7 +10,7 @@ only after its focused tests, typecheck, and the final combined verification pas
 |---|---|---|---|
 | BASE | Preserve dirty `main`; integrate from deployed lineage | complete | Separate clean worktree created; dirty batch traced to deployed ancestor `7afc8a71` |
 | BRANCH | Audit uncontained branches and recovery refs | complete | 113 refs / 84 tips audited; product-merge series is the principal selective harvest candidate |
-| MOBILE | Compact two-layer mobile hub and wrapped section controls | reopened | Source audit confirms separate hub grid / section history layer and branded mobile header remain; passing contracts did not prove requested interaction |
+| MOBILE | Compact two-layer mobile hub and wrapped section controls | implemented and deployed; bounded visual checks passed | 9d13ca94 inline groups/direct leaves, back/title header, old-tabs preference; independent review plus real-provider EN/KM320/375 browser samples |
 | REPORT-UI | Mobile report filters, date presets, density and overflow | partial visual verification | Date/time endpoint wrapping corrected; local real-component EN/KM samples fit 320/375px; full authenticated report matrix remains unverified |
 | MONEY | Awaiting-payment, discounts, revenue/profit, labels and convergence | complete | Revenue convergence, waterfall and full Worker suites pass |
 | SHIFT-BE | Shift policy, history/amendments, authorization, Telegram, backup | complete | Shop-wide totals include all branch staff; migration 0119 keeps amendments immutable in-app while restore can replace them; fresh-schema and focused tests pass |
@@ -24,7 +24,8 @@ only after its focused tests, typecheck, and the final combined verification pas
 
 The DATA row is intentionally separate from application release
 correctness: it concerns a historical production settlement. MOBILE and VERIFY
-are also open after the independent reread. No quarantined SQL is part of the
+were reopened after the independent reread; MOBILE is now released while full
+authenticated VERIFY remains partial. No quarantined SQL is part of the
 migration chain. Stage-1 application release and schema migrations 0118/0119
 were authorized and deployed; no historical business-data repair was performed.
 See `2026-09-05-deployment.md` and `2026-09-05-historical-payment-preflight.md`.

@@ -16,6 +16,10 @@ sales source. This supersedes any blanket before/after-date settlement reading.
 - Production run `latest-data-20260902-v1` is complete, recorded at
   `2026-09-02T15:30:00.000Z`. Its source ZIP, workbook and baseline hashes exactly
   match the local `tmp/latest-data-reconcile/zero-error-migration-plan.json`.
+  Independent source review confirms that 15:30Z is a generated constant in the
+  builder, not proof of an actual apply time or physical stock-count timestamp.
+  Raw invoice report ends September 2 **16:42:28 ICT**, receipt 004434. Exact
+  physical Item Export snapshot capture time remains unproven.
 - The source-link ledger has 15,004 sale-header links to
   `report-invoice-detail-2021-2026 shop.xls`. **All 82 current awaiting-payment
   sales are linked to this run**; source times range July 6 through September 2
@@ -53,9 +57,18 @@ has `stock_skipped=0`; updated timestamps remain those of the erroneous batch.
 History 160 is still `undoable`, `reversible=1`, but both payloads are `{}`.
 Do not treat its visual Undo label as a usable persisted reversal.
 
+All seven belong to the September 2 source-linked reconciliation. Consequently
+the latest fully-paid-cohort instruction and the requested accidental-Done
+reversal overlap: confirm their final status/payment treatment instead of
+assuming they must both be settled and returned to Awaiting Payment.
+
 Movement IDs **46189–46197** still record -1 unit each in branch 2, with null
 batch IDs, reason `Sale status changed from awaiting_payment to completed`.
 Product IDs: 165, 5196, 5067, 4115, 4259, 238, 3924, 955, 939. No reversal exists.
+All nine product identities remain active and current product totals equal
+their branch sums. Two later movements on products 939/955 are separate sales
+activity, not incident compensation; preserve those. Lot-level repair targeting
+still requires a schema-grounded current allocation/quantity manifest.
 
 **Important version correction:** the old proposed seven status PATCHes are no
 longer a stock repair. The current `salesStatus.ts` treats awaiting-payment as

@@ -11690,3 +11690,25 @@ POS.tsx along the way — no behavior change needed there).
   isolated lane. No historical sale/debt/stock edits or live cash entry made.
   Authenticated production flow certification and settlement semantics remain
   open. See `docs/fleet/2026-09-05-deployment.md` for provenance and recovery.
+
+# Part 606 — inline navigation deployed; historical incident verified (2026-09-05)
+
+- Released `9d13ca94ed4e`, Worker `cadfb107-3e58-4784-9fa2-2c115540e2cf`
+  at 100% traffic. Live frontend/server revision parity and health confirmed.
+- True inline mobile groups/direct section entry, replacement back/title
+  header, utility controls and immediate legacy-tabs preference are integrated.
+  Independent review findings on dirty history, root titles and header reveal
+  fixed. Final 198-file frontend chain, typecheck, i18n and build passed.
+  Local real-provider EN/KM 320/375px browser samples and dirty Back/Forward
+  passed; this is not a complete authenticated production role/page matrix.
+- Fresh read-only D1 audit confirms all 82 awaiting sales belong to the
+  September 2 source-linked reconciliation. Later Sep 2–3 import is separate.
+  Seven September 1 sales accidentally completed on September 3 remain
+  completed with zero payment; nine extra stock deductions were not reversed.
+  Current Completed→Awaiting status logic cannot restore those nine units.
+- Owner says fully paid only for reconciliation-matching sales; others follow
+  normal process. Seven accidental completions are also in that cohort, so
+  their final paid-versus-awaiting treatment needs confirmation. Two short
+  invoices still require later-source line verification. No historical data
+  repair performed. Exact evidence and safe next steps are in
+  `docs/fleet/2026-09-05-historical-payment-preflight.md`.

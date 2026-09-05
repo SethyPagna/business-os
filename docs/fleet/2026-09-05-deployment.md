@@ -70,3 +70,51 @@ settlement SQL. No rollback or database restore was executed.
 - Full authenticated live shift/report/role matrix and real Telegram delivery
   receipt are not certified by these public checks. Historical payment/status
   semantics still require an owner ruling before any bulk data mutation.
+
+## Stage 2 — inline mobile navigation, released
+
+- Source `9d13ca94ed4eed033a3de61d81ab57aa8d98d1c6`; same clean release
+  worktree and provenance-stamping wrapper, `--keep-vars`.
+- Worker version `cadfb107-3e58-4784-9fa2-2c115540e2cf`, 100% traffic,
+  deployment created `2026-09-04T23:59:45.120Z`.
+- Runtime revision `9d13ca94ed4e`, source hash `142f047c8f086ca8`, built at
+  `2026-09-04T23:59:21.985Z`.
+- Frontend revision `9d13ca94ed4e`, hash `394247e78e6833ca`, built at
+  `2026-09-04T23:58:07.026Z`.
+- Live runtime/assets parity and health rechecked; the four protected endpoints
+  above still return 401 without authentication. No additional migration,
+  secret change, business-data mutation or Telegram send.
+
+The default compact navigation expands groups inline; each leaf opens its body
+directly, without the old extra hub menu/history layer. Back opens the section
+menu; the header replaces branding with section title and retains utility
+controls. Legacy mobile tabs remain an immediate preference. All six hosts
+(including Review & Logs) retain permission gates and desktop surfaces.
+
+Worker commits `6546c401` and `41b2a186` integrated as `c57d2599` and `3512a22d`.
+Independent review caught dirty-Back history duplication, root hash title/body
+disagreement, hidden-header persistence, and a bare-root default-hub mismatch.
+All were fixed and rechecked. Main also fixed the behavioral test's CRLF-only
+source extraction failure instead of treating the worker's LF pass as sufficient.
+Final independent clearance: team-state result
+`8e34c592-9339-4971-88d9-ed2f236b3535`.
+
+Final combined 198-file frontend chain passed (including typecheck, public
+runtime parity and syntax); i18n resolves 4,864 keys in 507 source files;
+clean-release build and exact-revision Worker dry-run passed. Backend code is
+unchanged from stage 1's previously certified 200-suite version.
+
+Playwright drove the committed real provider, Sidebar, section hook and
+switcher using `frontend/output/playwright/mobile-navigation.html` with a
+synthetic user, API and page bodies. Verified group expansion without URL
+navigation, direct Reports leaf/title parity, header Back/menu, immediate old
+tabs preference, English/Khmer controls, 320px/375px document width equality,
+and real asynchronous dirty Back → Stay / Discard → Forward. History length
+stayed 9 before and after Discard; Forward returned to Reports with the draft
+cleared. Initial preview-only dependency-cache conflicts were resolved before
+these checks; no production session or business operation was simulated as live.
+Screenshots remain under the fixture's `.playwright-cli` artifact directory.
+
+Limits remain: this is not a full authenticated production screen/role matrix,
+nor verification of actual Telegram receipt. The historical reconciliation and
+bulk-Done incident are separately documented and were not repaired by deploying.
