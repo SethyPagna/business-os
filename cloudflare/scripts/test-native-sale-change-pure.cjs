@@ -92,15 +92,45 @@ check('the existing physical 100 KHR round-down is the only denomination shortag
   assert.equal(nativeChange.planNativeSaleChange(input).changeKhr, 8800)
   rejects('invalid_actual_change_total', { ...input, rawChangeKhr: 8700 })
   rejects('invalid_actual_change_total', { ...input, rawChangeKhr: 8900 })
+  const boundary = base({ rawChangeUsd: 0, rawChangeKhr: 3900, amountPaidUsd: 0, amountPaidKhr: 3999, totalUsd: 0, exchangeRate: 4000 })
+  assert.equal(nativeChange.planNativeSaleChange(boundary).changeKhr, 3900, '99 KHR of round-down is allowed')
+  rejects('invalid_actual_change_total', { ...boundary, rawChangeKhr: 3899 })
 })
 
 check('USD cents, KHR whole riel, sign and canonical overpayment are enforced', () => {
   rejects('invalid_actual_change_precision', { rawChangeUsd: '5.001' })
+  rejects('invalid_actual_change_precision', { rawChangeUsd: '5.00001' })
   rejects('invalid_actual_change_precision', { rawChangeKhr: '0.5' })
+  rejects('invalid_actual_change_precision', { rawChangeKhr: '0.00001' })
   rejects('invalid_actual_change_amount', { rawChangeUsd: -1 })
+  rejects('invalid_actual_change_amount', { rawChangeUsd: '-0.00001' })
+  rejects('invalid_actual_change_amount', { rawChangeKhr: '-0.00001' })
+  rejects('invalid_actual_change_amount', { rawChangeUsd: '   ' })
   rejects('invalid_actual_change_amount', { rawChangeKhr: 'NaN' })
   rejects('invalid_actual_change_total', { rawChangeUsd: 6 })
   rejects('invalid_actual_change_rate', { exchangeRate: 0 })
+  assert.deepStrictEqual(nativeChange.planNativeSaleChange(base({ rawChangeUsd: ' 5.00 ', rawChangeKhr: ' 0 ' })), {
+    changeUsd: 5, changeKhr: 0, changeIsActual: 1, changeExchangeRate: 4000,
+  })
+})
+
+check('USD-only nearest-cent reconciliation has an exact half-cent boundary', () => {
+  assert.equal(nativeChange.planNativeSaleChange(base({
+    rawChangeUsd: 5, rawChangeKhr: 0, amountPaidUsd: 0, amountPaidKhr: 19980,
+    totalUsd: 0, exchangeRate: 4000, changeExchangeRate: 4000,
+  })).changeUsd, 5, 'exactly half a cent of over-return is allowed')
+  rejects('invalid_actual_change_total', {
+    rawChangeUsd: 5, rawChangeKhr: 0, amountPaidUsd: 0, amountPaidKhr: 19979,
+    totalUsd: 0, exchangeRate: 4000, changeExchangeRate: 4000,
+  })
+  assert.equal(nativeChange.planNativeSaleChange(base({
+    rawChangeUsd: 5, rawChangeKhr: 0, amountPaidUsd: 0, amountPaidKhr: 20020,
+    totalUsd: 0, exchangeRate: 4000, changeExchangeRate: 4000,
+  })).changeUsd, 5, 'exactly half a cent of under-return is allowed')
+  rejects('invalid_actual_change_total', {
+    rawChangeUsd: 5, rawChangeKhr: 0, amountPaidUsd: 0, amountPaidKhr: 20021,
+    totalUsd: 0, exchangeRate: 4000, changeExchangeRate: 4000,
+  })
 })
 
 check('blank or invalid change setting falls back to the canonical main rate', () => {
@@ -125,8 +155,11 @@ check('legacy or malformed stored change is never inferred as actual', () => {
   }), { kind: 'none', usd: 0, khr: 0 })
   for (const row of [
     { changeIsActual: 1, changeUsd: 1.001, changeKhr: 0, changeExchangeRate: 4000 },
+    { changeIsActual: 1, changeUsd: '1.00001', changeKhr: 0, changeExchangeRate: 4000 },
     { changeIsActual: 1, changeUsd: 1, changeKhr: 0.5, changeExchangeRate: 4000 },
+    { changeIsActual: 1, changeUsd: 1, changeKhr: '0.00001', changeExchangeRate: 4000 },
     { changeIsActual: 1, changeUsd: -1, changeKhr: 0, changeExchangeRate: 4000 },
+    { changeIsActual: 1, changeUsd: '-0.00001', changeKhr: 0, changeExchangeRate: 4000 },
     { changeIsActual: 1, changeUsd: 1, changeKhr: 0, changeExchangeRate: null },
   ]) assert.deepStrictEqual(nativeChange.resolveStoredNativeSaleChange(row), { kind: 'unknown' })
 })

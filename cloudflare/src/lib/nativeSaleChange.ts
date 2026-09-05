@@ -2,7 +2,6 @@ import {
   actualKhrValue,
   actualUsdValue,
   financialCalculationUnits,
-  financialCalculationValue,
   type FinancialDecimalInput,
 } from './financialPrecision'
 import { resolveChangeExchangeRate } from './saleTotals'
@@ -73,8 +72,9 @@ export type StoredNativeSaleChange =
   | { kind: 'unknown' }
 
 const CALCULATION_SCALE = 10_000n
-const USD_CENT_IN_CALCULATION_UNITS = 100n
-const KHR_RIEL_IN_CALCULATION_UNITS = 10_000n
+const MAX_DECIMAL_SOURCE_LENGTH = 256
+const MAX_ABS_DECIMAL_EXPONENT = 100_000
+const DECIMAL_PATTERN = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/
 
 /** Must remain aligned with frontend/src/utils/rielRounding.ts RIEL_STEP. */
 export const NATIVE_CHANGE_KHR_STEP = 100 as const
@@ -96,6 +96,35 @@ function calculationUnits(value: unknown, message: string): bigint {
   }
 }
 
+type DecimalShape = { negative: boolean; coefficient: string; decimalScale: number }
+
+function decimalShape(value: unknown, message: string): DecimalShape {
+  const input = decimalInput(value, message)
+  const source = typeof input === 'string' ? input.trim() : input.toString()
+  if (!source || source.length > MAX_DECIMAL_SOURCE_LENGTH) return fail(message, 'invalid_actual_change_amount')
+  const match = DECIMAL_PATTERN.exec(source)
+  if (!match) return fail(message, 'invalid_actual_change_amount')
+  const exponentSource = match[5] || '0'
+  const exponent = Number(exponentSource)
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > MAX_ABS_DECIMAL_EXPONENT) {
+    return fail(message, 'invalid_actual_change_amount')
+  }
+  const fraction = match[3] ?? match[4] ?? ''
+  const coefficient = `${match[2] || ''}${fraction}`.replace(/^0+/, '') || '0'
+  return {
+    negative: match[1] === '-' && coefficient !== '0',
+    coefficient,
+    decimalScale: fraction.length - exponent,
+  }
+}
+
+function hasExactIncrement(shape: DecimalShape, decimals: number): boolean {
+  const discardedDigits = shape.decimalScale - decimals
+  if (discardedDigits <= 0 || shape.coefficient === '0') return true
+  if (discardedDigits > shape.coefficient.length) return false
+  return !/[1-9]/.test(shape.coefficient.slice(-discardedDigits))
+}
+
 function finiteNumber(value: unknown, message: string): number {
   const number = Number(value)
   if (!Number.isFinite(number)) return fail(message, 'invalid_actual_change_amount')
@@ -103,22 +132,24 @@ function finiteNumber(value: unknown, message: string): number {
 }
 
 function actualUsd(value: unknown): number {
-  const units = calculationUnits(value, 'Actual USD change must be a valid non-negative amount.')
-  if (units < 0n) return fail('Actual USD change cannot be negative.', 'invalid_actual_change_amount')
-  if (units % USD_CENT_IN_CALCULATION_UNITS !== 0n) {
+  const shape = decimalShape(value, 'Actual USD change must be a valid non-negative amount.')
+  if (shape.negative) return fail('Actual USD change cannot be negative.', 'invalid_actual_change_amount')
+  if (!hasExactIncrement(shape, 2)) {
     return fail('Actual USD change must use whole cents.', 'invalid_actual_change_precision')
   }
+  calculationUnits(value, 'Actual USD change must be a valid non-negative amount.')
   try { return actualUsdValue(decimalInput(value, 'Actual USD change is invalid.')) } catch {
     return fail('Actual USD change is invalid.', 'invalid_actual_change_amount')
   }
 }
 
 function actualKhr(value: unknown): number {
-  const units = calculationUnits(value, 'Actual KHR change must be a valid non-negative amount.')
-  if (units < 0n) return fail('Actual KHR change cannot be negative.', 'invalid_actual_change_amount')
-  if (units % KHR_RIEL_IN_CALCULATION_UNITS !== 0n) {
+  const shape = decimalShape(value, 'Actual KHR change must be a valid non-negative amount.')
+  if (shape.negative) return fail('Actual KHR change cannot be negative.', 'invalid_actual_change_amount')
+  if (!hasExactIncrement(shape, 0)) {
     return fail('Actual KHR change must use whole riel.', 'invalid_actual_change_precision')
   }
+  calculationUnits(value, 'Actual KHR change must be a valid non-negative amount.')
   try { return actualKhrValue(decimalInput(value, 'Actual KHR change is invalid.')) } catch {
     return fail('Actual KHR change is invalid.', 'invalid_actual_change_amount')
   }
@@ -130,6 +161,44 @@ function canonicalNonNegative(value: unknown, label: string): number {
   return Number(units) / Number(CALCULATION_SCALE)
 }
 
+type Fraction = { numerator: bigint; denominator: bigint }
+
+function fraction(value: number): Fraction {
+  const shape = decimalShape(value, 'Internal reconciliation value is invalid.')
+  const coefficient = BigInt(shape.coefficient) * (shape.negative ? -1n : 1n)
+  if (shape.decimalScale <= 0) {
+    return { numerator: coefficient * (10n ** BigInt(-shape.decimalScale)), denominator: 1n }
+  }
+  return { numerator: coefficient, denominator: 10n ** BigInt(shape.decimalScale) }
+}
+
+function add(left: Fraction, right: Fraction): Fraction {
+  return {
+    numerator: left.numerator * right.denominator + right.numerator * left.denominator,
+    denominator: left.denominator * right.denominator,
+  }
+}
+
+function subtract(left: Fraction, right: Fraction): Fraction {
+  return {
+    numerator: left.numerator * right.denominator - right.numerator * left.denominator,
+    denominator: left.denominator * right.denominator,
+  }
+}
+
+function divide(left: Fraction, right: Fraction): Fraction {
+  return { numerator: left.numerator * right.denominator, denominator: left.denominator * right.numerator }
+}
+
+function multiply(left: Fraction, right: Fraction): Fraction {
+  return { numerator: left.numerator * right.numerator, denominator: left.denominator * right.denominator }
+}
+
+function compare(left: Fraction, right: Fraction): number {
+  const delta = left.numerator * right.denominator - right.numerator * left.denominator
+  return delta < 0n ? -1 : delta > 0n ? 1 : 0
+}
+
 function nativeChangeMatchesOverpay(input: {
   usd: number
   khr: number
@@ -139,20 +208,29 @@ function nativeChangeMatchesOverpay(input: {
   exchangeRate: number
   changeExchangeRate: number
 }): boolean {
-  const paidUsd = financialCalculationValue(input.amountPaidUsd + input.amountPaidKhr / input.exchangeRate)
-  const overpayUsd = Math.max(0, financialCalculationValue(paidUsd - input.totalUsd))
-  const returnedUsd = financialCalculationValue(input.usd + input.khr / input.changeExchangeRate)
-  const differenceUsd = financialCalculationValue(overpayUsd - returnedUsd)
+  const zero = fraction(0)
+  const paid = add(fraction(input.amountPaidUsd), divide(fraction(input.amountPaidKhr), fraction(input.exchangeRate)))
+  const overpayCandidate = subtract(paid, fraction(input.totalUsd))
+  const overpay = compare(overpayCandidate, zero) > 0 ? overpayCandidate : zero
+  const returned = add(fraction(input.usd), divide(fraction(input.khr), fraction(input.changeExchangeRate)))
+  const difference = subtract(overpay, returned)
+  if (difference.numerator === 0n) return true
 
-  // USD is stored in cents and KHR in whole riel. The UI also exposes the
-  // shop's physical round-down-to-100-riel amount. Permit only those explicit
-  // denomination effects: never a second cent or a full 100 riel of shortage.
-  const quantizationToleranceUsd = (input.usd > 0 ? 0.005 : 0)
-    + (input.khr > 0 ? 0.5 / input.changeExchangeRate : 0)
-    + 0.0001
-  const roundDownToleranceUsd = input.khr > 0 ? (NATIVE_CHANGE_KHR_STEP - 1) / input.changeExchangeRate : 0
-  return differenceUsd >= -quantizationToleranceUsd
-    && differenceUsd <= quantizationToleranceUsd + roundDownToleranceUsd
+  if (difference.numerator > 0n) {
+    // When KHR is the returned denomination (including a zero return), the
+    // physical counter rule is a strict round down: 99 riel may remain, a
+    // full 100 may not. USD-only change instead rounds to its nearest cent.
+    if (input.khr > 0 || (input.usd === 0 && input.khr === 0)) {
+      return compare(multiply(difference, fraction(input.changeExchangeRate)), fraction(NATIVE_CHANGE_KHR_STEP)) < 0
+    }
+    return compare(difference, { numerator: 1n, denominator: 200n }) <= 0
+  }
+
+  // A cent can over-return by exactly half a cent when the exact overpayment
+  // lies on the lower side of nearest-cent rounding. KHR is always rounded
+  // down, so it never receives an over-return allowance of its own.
+  const excess = { numerator: -difference.numerator, denominator: difference.denominator }
+  return input.usd > 0 && compare(excess, { numerator: 1n, denominator: 200n }) <= 0
 }
 
 /**
