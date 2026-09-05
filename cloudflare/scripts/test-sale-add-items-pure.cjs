@@ -568,6 +568,15 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
       './saleBulkStatus': {
         replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-sale-add-items-pure.cjs') },
       },
+      './saleBulkUpdate': {
+        BULK_UPDATE_KIND: 'sale.fields.bulk',
+        BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk',
+        replaySaleBulkUpdate: () => { throw new Error('Unexpected bulk sale update replay in test-sale-add-items-pure.cjs') },
+      },
+      './returnBulkAction': {
+        RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
+        replayReturnBulkAction: () => { throw new Error('Unexpected return bulk replay in test-sale-add-items-pure.cjs') },
+      },
       './db': { getDb: () => ({}) },
       './audit': { audit: async () => {} },
       '../durable-objects/broadcastHub': { broadcast: async () => {} },
