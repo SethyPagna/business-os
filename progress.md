@@ -2,6 +2,18 @@
 
 ## Active continuation — production usability, September 5
 
+Owner requests increased parallelism and tighter multi-layer checks. Added Sol-high
+Plato for independent shift integration and Sol-medium Ohm for release provenance;
+Socrates separately reviews Add products, Aquinas stock replay. Completed lane
+agents retired only after committed handoffs. Main remains sole integrator/deployer.
+Independent stock attribution recertification now PASS at1a512cec (integrated
+346754a5): actual supplier AP, negative control, stale replay and metadata proved.
+Report resize identity fixed4334b278, regression gateaaea5027. Clean sweep found
+four backend fixture failures and one stale frontend assertion; main fixes91693b2e/
+fd768a7c pass locally, remaining sale-add loader belongs to FX lane. Final full
+gates remain pending. Product604e9808/ddfa0cf5 not integrated yet: zero-stock
+atomic create, queued editing and received-date override still being completed.
+
 Verification checkpoint: clean release baseline4df2ecfa passed214 backend suites;
 frontend205/206 passed, with the stale entry-time assertion corrected and retested
 in c676d4fe. Integrated stock undo/backup e6c34712/a87af5a9 and report desktop
