@@ -102,11 +102,22 @@ export default function AlphaIndexRail({
   const activeLetter = activeKey !== undefined ? activeKey : internalActive
   const tabStopKey = railFocusKey(navKeys, focusKey ?? activeLetter)
 
+  // Hit-testing measures the LETTER COLUMN, never the pill around it. The
+  // rail is height-capped but its entries are shrink-0, so a long enough
+  // alphabet makes the column taller than the box (and then scrolls inside
+  // it); a linear split of the clamped box height names a letter rows away
+  // from the finger. Two rect reads -- the first and the last entry -- carry
+  // the scroll position, the padding and the border with them, so the mapping
+  // stays true in every state without measuring all 28 buttons per move.
   const keyAtPoint = useCallback((clientY: number): string | null => {
     const node = railRef.current
     if (!node) return null
     const rect = node.getBoundingClientRect()
-    const index = railIndexAtOffset(navKeys.length, clientY - rect.top, rect.height)
+    const firstRect = buttonRefs.current.get(navKeys[0])?.getBoundingClientRect()
+    const lastRect = buttonRefs.current.get(navKeys[navKeys.length - 1])?.getBoundingClientRect()
+    const contentTop = firstRect ? firstRect.top - rect.top : 0
+    const contentHeight = firstRect && lastRect ? lastRect.bottom - firstRect.top : rect.height
+    const index = railIndexAtOffset(navKeys.length, clientY - rect.top, rect.height, contentTop, contentHeight)
     return index === -1 ? null : navKeys[index] ?? null
   }, [navKeys])
 
@@ -255,13 +266,29 @@ export default function AlphaIndexRail({
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
       onKeyDown={handleKeyDown}
-      className={`fixed top-1/2 z-30 flex -translate-y-1/2 touch-none select-none flex-col items-center justify-center rounded-full border border-gray-200 bg-white/90 shadow-md backdrop-blur-sm transition-[gap,padding] duration-150 dark:border-slate-700 dark:bg-slate-900/90 ${edgeClass} ${
-        expanded ? 'gap-[1px] px-1 py-2' : 'gap-0 px-0.5 py-1.5'
+      // `justify-start` + `overflow-y-auto`, not `justify-center`: the entries
+      // are shrink-0, so an alphabet longer than the max-h cap used to paint
+      // straight through the pill's own edge (and centring pushed its head
+      // out of reach of any scroll). `overscroll-contain` keeps a wheel that
+      // runs off the end of the rail from chaining into the page behind it,
+      // and the scrollbar is hidden because a 20px pill has no room for one.
+      className={`fixed top-1/2 z-30 flex -translate-y-1/2 touch-none select-none flex-col items-center justify-start overflow-y-auto overscroll-contain rounded-full border border-gray-200 bg-white/90 shadow-md backdrop-blur-sm transition-[gap,padding] duration-150 [scrollbar-width:none] dark:border-slate-700 dark:bg-slate-900/90 [&::-webkit-scrollbar]:hidden ${edgeClass} ${
+        expanded ? 'gap-[1px] px-1 py-2' : 'gap-[3px] px-1 py-1.5'
       } ${className}`}
     >
       {navKeys.map((key) => {
         const isReset = Boolean(resetOption) && key === resetOption?.key
         const isActive = activeLetter === key
+        // Collapsed the rail is a stack of DASHES -- short horizontal bars,
+        // wider than they are tall. A square (h-1 w-1) on a rounded-full box
+        // is a dot, which is the admin index-rail look the owner rejected for
+        // the storefront; and with no fill of its own it was an empty pill.
+        const entryShape = expanded ? 'h-5 w-6 rounded-full text-xs' : 'h-0.5 w-2.5 rounded-full text-[0px]'
+        const entryTone = isActive
+          ? 'bg-blue-600 text-white'
+          : expanded
+            ? 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-800'
+            : 'bg-gray-300 dark:bg-slate-600'
         return (
           <button
             key={key}
@@ -284,13 +311,9 @@ export default function AlphaIndexRail({
             // active letter itself growing in place (scale) -- not a second
             // floating bubble elsewhere on screen showing the same character
             // twice (the thing this replaced).
-            className={`flex shrink-0 cursor-pointer items-center justify-center rounded-full font-semibold leading-none outline-none transition-all duration-150 focus-visible:ring-2 focus-visible:ring-blue-500 ${
-              expanded ? 'h-5 w-6 text-xs' : 'h-1 w-1 text-[0px]'
-            } ${isActive ? 'scale-125' : ''} ${
-              isActive
-                ? 'bg-blue-600 text-white'
-                : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-800'
-            }`}
+            className={`flex shrink-0 cursor-pointer items-center justify-center font-semibold leading-none outline-none transition-all duration-150 focus-visible:ring-2 focus-visible:ring-blue-500 ${entryShape} ${
+              isActive ? 'scale-125' : ''
+            } ${entryTone}`}
           >
             {expanded ? (isReset ? '•' : key) : ''}
           </button>

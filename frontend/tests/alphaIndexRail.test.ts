@@ -109,6 +109,40 @@ runTest('the hit-test maps a Y offset onto a letter and clamps outside the rail'
   assert.equal(railIndexAtOffset(3, 10, 0), -1, 'a collapsed/unmeasured rail must not divide by zero')
 })
 
+runTest('the hit-test follows the LETTER COLUMN, not the pill, when the column is taller than its box', () => {
+  // The regression this pins: the expanded rail is capped (`max-h-[60vh]` on
+  // the storefront, `max-h-[70vh]` on the admin sidebar variant) but its
+  // entries are shrink-0, so past ~22 keys the column is taller than the
+  // measured box. Splitting the CLAMPED box height into n slices then names a
+  // letter several rows away from the finger.
+  //
+  // 28 entries at 21px + 17px of chrome = a 605px column inside a 400px box
+  // (60vh of an 812px viewport). The 6th entry (index 5) spans column
+  // y 105..126, so its middle is y 118.
+  assert.equal(
+    railIndexAtOffset(28, 118, 400, 0, 605),
+    5,
+    'a 605px column inside a 400px box: y=118 is the 6th entry, whatever the box was clamped to',
+  )
+  // Centred overflow (justify-center + -translate-y-1/2) puts the column's
+  // top ABOVE the box top, so the first entries sit at negative offsets.
+  assert.equal(
+    railIndexAtOffset(28, 10, 400, -102, 605),
+    5,
+    'a column that overhangs the box top is measured from the column, not the box',
+  )
+  // Scrolled column: the offset the component passes is relative to the
+  // rail's border box, and the column top moves with the scroll.
+  assert.equal(railIndexAtOffset(28, 300, 400, -205, 605), 23, 'a scrolled column still maps 1:1 onto its entries')
+  assert.equal(railIndexAtOffset(28, 900, 400, 0, 605), 27, 'dragging past the bottom of a tall column holds the last entry')
+  assert.equal(railIndexAtOffset(28, -50, 400, 0, 605), 0, 'dragging past the top of a tall column holds the first entry')
+  assert.equal(
+    railIndexAtOffset(3, 45, 90, 0, 0),
+    1,
+    'an unmeasured column (no button rects on the first move) falls back to the box height rather than dying',
+  )
+})
+
 // ---------------------------------------------------------------------------
 // Keyboard reachability (the grid it replaced was plain <button>s, so the
 // rail must not be a keyboard dead end)
@@ -142,6 +176,35 @@ runTest('the shared rail offers a screen-edge variant without moving the admin o
   assert.match(rail, /md:left-\[228px\] md:right-auto/, 'the sidebar variant must keep its 220px offset')
   assert.match(rail, /env\(safe-area-inset-right\)/, 'the screen-edge variant must clear a notched right edge')
   assert.match(rail, /z-30/, 'the rail sits above the grid (z-20 sticky search) and below the pinned nav (z-40) and the list FAB (z-50)')
+})
+
+runTest('the rail hit-tests against its measured entries and can never spill outside its own pill', () => {
+  assert.match(
+    rail,
+    /railIndexAtOffset\(\s*navKeys\.length,[\s\S]{0,160}?contentTop,\s*contentHeight,?\s*\)/,
+    'the hit-test must be handed the measured letter column, not just the clamped box height',
+  )
+  assert.match(rail, /buttonRefs\.current\.get\(navKeys\[0\]\)/, 'the column top comes from the first entry\'s own rect')
+  assert.match(
+    rail,
+    /buttonRefs\.current\.get\(navKeys\[navKeys\.length - 1\]\)/,
+    "the column height comes from the last entry's own rect, so scroll and padding are already in it",
+  )
+  assert.match(rail, /overflow-y-auto/, 'a column taller than max-h must scroll inside the pill, not paint outside it')
+  assert.match(rail, /overscroll-contain/, 'and scrolling it must not chain into the page behind it')
+})
+
+runTest('collapsed, the rail reads as DASHES -- not the round dots of the admin styling', () => {
+  const entry = /expanded \? 'h-5 w-6[^']*' : '([^']+)'/.exec(rail)
+  assert.ok(entry, 'the expanded/collapsed entry sizing must stay one readable ternary')
+  const collapsed = entry![1]
+  const height = Number(/(?:^|\s)h-([\d.]+)(?:\s|$)/.exec(collapsed)?.[1])
+  const width = Number(/(?:^|\s)w-([\d.]+)(?:\s|$)/.exec(collapsed)?.[1])
+  assert.ok(Number.isFinite(height) && Number.isFinite(width), `collapsed entries need an explicit h-/w- pair, got "${collapsed}"`)
+  assert.ok(width >= height * 3, `the owner asked for a "dash dash" rail: collapsed entries must be far wider than tall, got "${collapsed}"`)
+  const container = /expanded \? 'gap-\[1px\][^']*' : '([^']+)'/.exec(rail)
+  assert.ok(container, 'the expanded/collapsed container spacing must stay one readable ternary')
+  assert.doesNotMatch(container![1], /(?:^|\s)gap-0(?:\s|$)/, 'zero-gap dashes fuse into one solid bar -- the dashes need air between them')
 })
 
 runTest('the rail renders through a portal, like every other float', () => {

@@ -54,15 +54,38 @@ export function nearestRailKey(items: readonly string[], letter: string | null |
   return items[insertAt - 1] ?? items[insertAt] ?? null
 }
 
-/** Which rendered key a pointer at `offsetY` (relative to the rail's own top)
- * is over, as an index. Returns -1 when there is nothing to hit or the rail
- * has not been measured yet. Clamps, so a drag that runs off either end holds
- * the first/last key instead of losing the gesture. */
-export function railIndexAtOffset(itemCount: number, offsetY: number, height: number): number {
+/** Which rendered key a pointer at `offsetY` (relative to the rail's own
+ * border-box top) is over, as an index. Returns -1 when there is nothing to
+ * hit or the rail has not been measured yet. Clamps, so a drag that runs off
+ * either end holds the first/last key instead of losing the gesture.
+ *
+ * The mapping is onto the LETTER COLUMN, not onto the rail's box. Those are
+ * not the same rectangle: the rail is capped (`max-h-[60vh]` on the
+ * storefront, `max-h-[70vh]` beside the admin sidebar) while its entries are
+ * fixed-height and shrink-0, so a long enough alphabet makes the column
+ * taller than the box -- and once the box scrolls, the column also slides
+ * under it. Dividing the box height into `itemCount` slices in either case
+ * hands back a key several rows from the finger (at 28 entries in a 400px
+ * box, pressing the 6th selects the 4th).
+ *
+ * `contentTop` is the first entry's top and `contentHeight` the distance from
+ * that to the last entry's bottom, both measured from the same origin as
+ * `offsetY`, so scroll position, padding and the pill's border are already
+ * inside them. They default to the box, which is what the geometry collapses
+ * to before the entries have ever been laid out. */
+export function railIndexAtOffset(
+  itemCount: number,
+  offsetY: number,
+  height: number,
+  contentTop = 0,
+  contentHeight = height,
+): number {
   if (!Number.isFinite(itemCount) || itemCount <= 0) return -1
   if (!Number.isFinite(height) || height <= 0) return -1
-  const clampedOffset = Math.min(Math.max(Number(offsetY) || 0, 0), height - 1)
-  const index = Math.floor((clampedOffset / height) * itemCount)
+  const span = Number.isFinite(contentHeight) && contentHeight > 0 ? contentHeight : height
+  const top = Number.isFinite(contentTop) ? contentTop : 0
+  const clampedOffset = Math.min(Math.max((Number(offsetY) || 0) - top, 0), span - 1)
+  const index = Math.floor((clampedOffset / span) * itemCount)
   return Math.min(Math.max(index, 0), itemCount - 1)
 }
 
