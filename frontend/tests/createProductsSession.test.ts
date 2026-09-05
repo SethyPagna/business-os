@@ -314,6 +314,14 @@ runTest('corrected stock-session wire receives real JSON numbers and explicit ba
   assert.match(modalSource, /new TextEncoder\(\)\.encode\(JSON\.stringify\(attemptPayload\)\)\.length/)
 })
 
+runTest('an attributed existing lot locks its supplier and omits a replacement on the wire', () => {
+  assert.match(modalSource, /const lotAttributedName = chosenBatch\?\.supplier_name\?\.trim\(\) \|\| ''/)
+  assert.match(modalSource, /supplierName: lotAttributedName \|\| lineSupplier\.supplierName\.trim\(\), supplierLocked: Boolean\(lotAttributedName\)/)
+  assert.match(modalSource, /lockedName=\{typeof batchChoice === 'number'/)
+  assert.match(modalSource, /supplier_id: line\.supplierLocked \|\| line\.supplierId == null \? null/)
+  assert.match(modalSource, /supplier_name: line\.supplierLocked \? null/)
+})
+
 runTest('existing-line quantity and unit cost reject invalid input instead of coercing it', () => {
   const queueBlock = modalSource.slice(modalSource.indexOf('const queueExistingLine ='), modalSource.indexOf('const writeDraft ='))
   assert.match(queueBlock, /const quantity = Number\(lineQuantity\)/)
