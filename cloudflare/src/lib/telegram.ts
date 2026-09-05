@@ -7,8 +7,8 @@ import {
   parseReportDate, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import {
-  getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesTotals,
-  shiftWindowWhere, type SalesFilters,
+  getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesGroupedTotals, getSalesTotals,
+  recognizedExpr, shiftWindowWhere, type SalesFilters,
 } from './salesAnalytics'
 import type { Env } from '../index'
 
@@ -150,26 +150,60 @@ const dayClause = (column: string): string => localDateRangeClause(column, '@dat
 
 type MoneyBucket = { count: number; usd: number; khr: number } | null | undefined
 type UnitBucket = { count: number; quantity: number } | null | undefined
-type DayStats = { date: string; sales: MoneyBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
-type CashierRow = { cashier: string; count: number; usd: number; khr: number }
+/** Kernel-derived, so it carries what the kernel knows and the old SUM did not:
+ *  how many receipts were VOIDED, and how much was refunded. */
+type SalesBucket = { count: number; usd: number; khr: number; cancelled: number; refundUsd: number }
+type DayStats = { date: string; sales: SalesBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
+type CashierRow = { cashier: string; count: number; usd: number; khr: number; cancelled: number }
 
+/** One business day as kernel filters. The shift report next door already
+ *  reads its money this way (shiftFigures); the day/cashier/sales reports
+ *  did not, and that was the whole defect. */
+const dayFilters = (date: string): SalesFilters => ({ startDate: date, endDate: date, branchId: null })
+
+// CORRECTED Sep 6 2026 (owner ask N6). The sales figure was
+// `SUM(total_usd), SUM(total_khr) FROM sales` over the day with NO status
+// filter at all, so it counted VOIDED receipts as takings, included tax and
+// the delivery fee in what it called sales, and subtracted no refund. It
+// disagreed with the Sales page, the Dashboard, the Reports hub and with the
+// shift report inside this very file. It now reads the same kernel as all of
+// them -- one implementation, not a lookalike.
+//
+// The KHR half is gone rather than reproduced: the kernel has ONE canonical
+// revenue and it is USD (see salesAnalytics.ts's header). The old `khr` was
+// SUM(total_khr) over every row including the voided ones -- a different
+// quantity from this one, not a translation of it. money() prints just the
+// dollars when the riel side is zero.
 async function dayStats(env: Env, date: string): Promise<DayStats> {
   const db = getDb(env)
-  const [sales, fees, stockIn, stockOut] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS usd, COALESCE(SUM(total_khr), 0) AS khr FROM sales WHERE ${dayClause('created_at')}`).get<{ count: number; usd: number; khr: number }>({ date }),
+  const [totals, fees, stockIn, stockOut] = await Promise.all([
+    getSalesTotals(env, dayFilters(date)),
     db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE fee_date = @date').get<{ count: number; usd: number; khr: number }>({ date }),
     db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('add', 'transfer_in', 'move_in') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
     db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('remove', 'transfer_out', 'move_out') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
   ])
-  return { date, sales, fees, stockIn, stockOut }
+  return {
+    date,
+    sales: { count: totals.tx_count, usd: totals.revenue_usd, khr: 0, cancelled: totals.cancelled_tx_count, refundUsd: totals.refund_usd },
+    fees,
+    stockIn,
+    stockOut,
+  }
 }
 
-// "cashier user" in the ask: who rang up how much, on that day.
+// "cashier user" in the ask: who rang up how much, on that day. Same kernel,
+// sliced by cashier -- so a cashier's line and the Sales total above it are
+// the same number cut two ways, and the per-cashier lines sum to the total.
+// (They did not: the old query counted voided receipts and gross totals.)
 async function cashierTotals(env: Env, date: string): Promise<CashierRow[]> {
-  return getDb(env).prepare(`SELECT COALESCE(NULLIF(TRIM(cashier_name), ''), 'Unknown') AS cashier,
-      COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS usd, COALESCE(SUM(total_khr), 0) AS khr
-    FROM sales WHERE ${dayClause('created_at')}
-    GROUP BY 1 ORDER BY usd DESC, count DESC LIMIT 12`).all<CashierRow>({ date })
+  const rows = await getSalesGroupedTotals(env, dayFilters(date), 'cashier', 12)
+  return rows.map((row) => ({
+    cashier: row.label || 'Unknown',
+    count: row.tx_count,
+    usd: row.revenue_usd,
+    khr: 0,
+    cancelled: row.cancelled_tx_count,
+  }))
 }
 
 /**
@@ -190,13 +224,20 @@ const counted = (count: unknown, noun: 'receipt(s)' | 'record(s)' | 'movement(s)
 
 function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: Partial<Record<TelegramEventType, boolean>>): string {
   const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
-  if (categories?.sales !== false) lines.push(labeled('sales', `${counted(stats.sales?.count, 'receipt(s)')} · ${money(stats.sales?.usd, stats.sales?.khr)}`))
+  if (categories?.sales !== false) {
+    lines.push(labeled('sales', `${counted(stats.sales?.count, 'receipt(s)')} · ${money(stats.sales?.usd, stats.sales?.khr)}`))
+    // Both are already inside the figure above (refunds subtracted, voids
+    // contributing nothing). They print so the reader can see WHY the number
+    // is what it is, and only when there is something to see.
+    if (stats.sales?.refundUsd) lines.push(labeled('refund', money(stats.sales.refundUsd, 0)))
+    if (stats.sales?.cancelled) lines.push(labeled('cancelled', counted(stats.sales.cancelled, 'receipt(s)')))
+  }
   if (categories?.fees !== false) lines.push(labeled('fees', `${counted(stats.fees?.count, 'record(s)')} · ${money(stats.fees?.usd, stats.fees?.khr)}`))
   if (categories?.stock_in !== false) lines.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
   if (categories?.stock_out !== false) lines.push(labeled('stockOut', `${counted(stats.stockOut?.count, 'movement(s)')} · ${counted(stats.stockOut?.quantity, 'unit(s)')}`))
   if (cashiers.length) {
     lines.push('', `${label('cashiers')}:`)
-    for (const row of cashiers) lines.push(`• ${cleanLine(row.cashier, 60)} — ${counted(row.count, 'receipt(s)')} · ${money(row.usd, row.khr)}`)
+    for (const row of cashiers) lines.push(`• ${cleanLine(row.cashier, 60)} — ${counted(row.count, 'receipt(s)')} · ${money(row.usd, row.khr)}${row.cancelled ? ` · ${label('cancelled')} ${row.cancelled}` : ''}`)
   }
   return lines.join('\n')
 }
@@ -215,7 +256,11 @@ async function dayReport(env: Env, date: string): Promise<string> {
 
 async function salesReport(env: Env, date: string): Promise<string> {
   const db = getDb(env); const stats = await dayStats(env, date)
-  const sales = await db.prepare(`SELECT id, receipt_number, cashier_name, total_usd, total_khr FROM sales WHERE ${dayClause('created_at')} ORDER BY created_at DESC LIMIT 5`).all<{ id: number; receipt_number: string | null; cashier_name: string | null; total_usd: number; total_khr: number }>({ date })
+  // Voided receipts are excluded here for the same reason they contribute 0
+  // to the total above: listing one under a total it is not part of invites
+  // exactly the reconciliation the owner asked us to end. The count of them
+  // is printed by formatDaySummary instead.
+  const sales = await db.prepare(`SELECT id, receipt_number, cashier_name, total_usd, total_khr FROM sales WHERE ${dayClause('created_at')} AND ${recognizedExpr('')} ORDER BY created_at DESC LIMIT 5`).all<{ id: number; receipt_number: string | null; cashier_name: string | null; total_usd: number; total_khr: number }>({ date })
   const title = reportTitle('🛍️', 'Sales', 'ការលក់', date)
   if (!sales.length) return `${title}\n${bi('No sales recorded on this day.', 'គ្មានការលក់បានកត់ត្រាក្នុងថ្ងៃនេះទេ។')}`
   const ids = sales.map((sale) => sale.id)
