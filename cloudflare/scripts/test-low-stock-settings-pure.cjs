@@ -431,6 +431,47 @@ async function main() {
     )
   })
 
+  await check('no OTHER server file keeps a private copy of the rule', () => {
+    // The named sweep above can only see files somebody remembered to name.
+    // lib/businessMetrics.ts was not one of them: a dead port of the old
+    // backend, no importer anywhere, carrying its own
+    // COALESCE(low_stock_threshold, 10) -- deleted in the same commit as
+    // this check. Scanning both directories is what makes a NEW file (or a
+    // resurrected one) fail here instead of quietly answering to a number
+    // the owner never chose.
+    const ALLOWED = new Set([
+      // The storefront's own documented customer_portal_* rule; the
+      // positive control below proves this sweep can still fail.
+      'routes/portal.ts',
+      // An IMPORT default, not a reader: it fills the product row's OWN
+      // low_stock_threshold column when a spreadsheet leaves it blank, and
+      // 10 is that column's schema default (products.low_stock_threshold
+      // REAL DEFAULT 10). Wiring a write of the per-product number to the
+      // display setting would make an import's result depend on a switch
+      // that is meant to change nothing stored.
+      'lib/importEngine.ts',
+      // The storefront AI assistant. Its deriveStockStatus says it mirrors
+      // "the admin UI", but the surface it actually ships to -- an anonymous
+      // visitor, beside catalog cards whose status comes from
+      // routes/portal.ts's attachPortalStockStatus and the customer_portal_*
+      // triple -- is the storefront. It is left on the storefront side of the
+      // line drawn above rather than quietly moved to the admin's number;
+      // which of the two storefront rules it should follow is the owner's
+      // call, and is raised as one (it already disagrees with the cards
+      // beside it whenever the portal thresholds are set to global).
+      'lib/portalAi.ts',
+    ])
+    const offenders = []
+    for (const dir of ['lib', 'routes']) {
+      for (const file of fs.readdirSync(path.join(CF_SRC, dir)).filter((name) => name.endsWith('.ts'))) {
+        const rel = dir + '/' + file
+        if (ALLOWED.has(rel)) continue
+        if (/low_stock_threshold,\s*10\)/.test(readCf(rel))) offenders.push(rel)
+      }
+    }
+    assert.deepStrictEqual(offenders, [], 'these files still hardcode the old fallback of 10')
+  })
+
   console.log(`\n${passed} checks passed`)
 }
 

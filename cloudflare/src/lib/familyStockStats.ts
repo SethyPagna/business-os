@@ -7,9 +7,10 @@
 // /stats endpoint -- all kept computing total_products/in_stock/low_stock/
 // out_of_stock as a plain `COUNT(*) FROM products`, counting every variant
 // row separately (and even counting group-header placeholder rows, which
-// aren't sellable products at all -- see businessMetrics.ts's
-// sellableProductWhere for the same exclusion, applied there but never to
-// these three live endpoints). Net effect: any catalog with grouped/variant
+// aren't sellable products at all -- the same exclusion the dead
+// lib/businessMetrics.ts applied in its own sellableProductWhere, and never
+// to these three live endpoints; that file is gone, this helper is the one
+// place it lives now). Net effect: any catalog with grouped/variant
 // products shows a bigger "total products" on Dashboard/Inventory stat
 // cards than the pagination footer on the listing right below them, and
 // stakeholders comparing the two pages get two different answers to
