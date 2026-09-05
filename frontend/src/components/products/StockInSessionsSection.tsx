@@ -16,6 +16,7 @@ import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives.tsx'
 
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal.tsx'), 'stock-session-fast-stock-in')
@@ -37,6 +38,11 @@ type Row = {
   batch_payment_status?: string | null; batch_credit_due_date?: string | null
   batch_expiry_date?: string | null; batch_updated_at?: string | null
   batch_receipt_session_count?: number | null
+  // N14: 1 when this line CREATED the product, 0 when it received into one
+  // that already existed, null when the receipt did not come through the
+  // stock-in session endpoint and therefore never recorded the answer.
+  created_product?: number | null
+  session_command_kind?: string | null
 }
 type Session = {
   key: string; rows: Row[]; supplier: SupplierChoice; receivedDate: string; branchId: string
@@ -65,6 +71,18 @@ function sessionCost(rows: Row[]): { costUsd: number | null; linesWithoutCost: n
     missing += 1
   }
   return { costUsd: known ? Math.round(total * 100) / 100 : null, linesWithoutCost: missing }
+}
+
+// N14: the New/Existing pill. Deliberately three-valued -- a receipt taken
+// through a path that leaves no stock_session_members row (fast stock-in's
+// inline create, POST /batches, a legacy import) knows nothing about whether
+// the product was new, and saying "Existing" for it would be a guess. Those
+// rows get no pill and the column header's InfoHint says why.
+function productOriginTag(row: Row, tr: (key: string, fallback: string) => string): { label: string; className: string } | null {
+  if (row.created_product == null) return null
+  return Number(row.created_product) === 1
+    ? { label: tr('stock_session_new_product', 'New'), className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' }
+    : { label: tr('stock_session_existing_product', 'Existing'), className: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-300' }
 }
 
 function paymentState(rows: Row[]): Session['paymentStatus'] {
@@ -283,11 +301,12 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         </div> : null}
         <div className="desktop-dense-only dense-data-shell">
           <div className="scroll-x"><table className="dense-data-table min-w-[720px]">
-            <thead><tr><th data-tone="blue">{tr('product', 'Product')}</th><th>{tr('barcode', 'Barcode')}</th><th>{tr('batch', 'Batch')}</th><th>{tr('reason', 'Reason')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('unit_cost', 'Unit cost')}</th><th className="w-10" aria-label={tr('actions', 'Actions')} /></tr></thead>
+            <thead><tr><th data-tone="blue"><span className="inline-flex items-center gap-1">{tr('product', 'Product')}<InfoHint label={tr('product', 'Product')} text={tr('stock_session_origin_hint', 'New means this session created the product; Existing means it received into a product already in the catalogue. Receipts recorded outside an Add-products session carry no marker.')} /></span></th><th>{tr('barcode', 'Barcode')}</th><th>{tr('batch', 'Batch')}</th><th>{tr('reason', 'Reason')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('unit_cost', 'Unit cost')}</th><th className="w-10" aria-label={tr('actions', 'Actions')} /></tr></thead>
             <tbody>{selected.rows.map((row) => {
               const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) > 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
+              const originTag = productOriginTag(row, tr)
               return <tr key={row.id} className={selectedLine?.id === row.id ? 'bg-blue-50/70 dark:bg-blue-950/20' : ''}>
-                <td><button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-center gap-2 text-left hover:text-blue-700 dark:hover:text-blue-300"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-8 w-8 rounded object-cover" /> : <ProductImagePlaceholder compact className="h-8 w-8 rounded" />}</span><span className="min-w-0"><span className="block dense-cell-truncate font-semibold" title={row.product_name}>{row.product_name}</span><span className="block dense-cell-truncate text-[10px] text-gray-400">{[row.unit, row.tag_label].filter(Boolean).join(' · ')}</span></span></button></td>
+                <td><button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-center gap-2 text-left hover:text-blue-700 dark:hover:text-blue-300"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-8 w-8 rounded object-cover" /> : <ProductImagePlaceholder compact className="h-8 w-8 rounded" />}</span><span className="min-w-0"><span className="flex min-w-0 items-center gap-1"><span className="dense-cell-truncate font-semibold" title={row.product_name}>{row.product_name}</span>{originTag ? <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}</span><span className="block dense-cell-truncate text-[10px] text-gray-400">{[row.unit, row.tag_label].filter(Boolean).join(' · ')}</span></span></button></td>
                 <td><span className="dense-cell-truncate dense-id" title={row.barcode || ''}>{row.barcode || '—'}</span></td>
                 <td><span className="dense-cell-truncate dense-id">{row.batch_id || '—'}</span></td>
                 <td><span className="dense-cell-truncate text-gray-500" title={row.reason || ''}>{row.reason || '—'}</span></td>
@@ -300,8 +319,9 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         </div>
         <div className="mobile-cards-only space-y-1">{selected.rows.map((row) => {
           const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) > 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
+          const originTag = productOriginTag(row, tr)
           return <div key={row.id} className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2.5 py-1.5 ${selectedLine?.id === row.id ? 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20' : 'border-gray-100 dark:border-gray-700'}`}>
-            <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block truncate text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
+            <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}{originTag ? <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block truncate text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
             <span className="shrink-0 text-right"><b className="block text-sm text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</b><span className="block text-[11px] text-gray-400">{unitCost == null || Number(unitCost) <= 0 ? '—' : `$${Number(unitCost).toFixed(2)} / ${row.unit || tr('unit', 'unit')}`}</span></span>
             <button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-4 w-4" /></button>
           </div>

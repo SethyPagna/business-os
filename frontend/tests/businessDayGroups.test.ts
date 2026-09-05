@@ -68,4 +68,22 @@ assert.match(sessions, /title=\{fmtDateTime24\(session\.createdAt\)\}/,
 assert.match(sessions, /\{group\.key\} · \{group\.rows\.length\}/,
   'both the desktop day row and the mobile day divider label the day and its size')
 
-console.log('PASS business-day grouping splits a Phnom Penh day where a device-calendar key would not, and the Stock-in Sessions list uses it')
+// ---- N14: New vs Existing is three-valued, never guessed ------------------
+assert.match(sessions, /function productOriginTag/, 'the New/Existing pill needs one shared rule, not two inline copies')
+assert.match(sessions, /if \(row\.created_product == null\) return null/,
+  'a receipt with no recorded origin must show NO pill rather than a guessed "Existing"')
+assert.match(sessions, /stock_session_new_product/, 'the New tag must come from the pack, not a literal')
+assert.match(sessions, /stock_session_existing_product/, 'the Existing tag must come from the pack, not a literal')
+assert.match(sessions, /stock_session_origin_hint/, 'the column header must explain the missing-marker case behind an InfoHint')
+assert.equal((sessions.match(/productOriginTag\(row, tr\)/g) || []).length, 2,
+  'the tag must land on BOTH the desktop line table and the mobile line card')
+
+const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+for (const key of ['stock_session_new_product', 'stock_session_existing_product', 'stock_session_origin_hint']) {
+  assert.ok(en[key], `en.json is missing ${key}`)
+  assert.ok(km[key], `km.json is missing ${key}`)
+  assert.notEqual(en[key], km[key], `${key} must be really translated, not the English string copied into km`)
+}
+
+console.log('PASS business-day grouping splits a Phnom Penh day where a device-calendar key would not, and the Stock-in Sessions list uses it with a three-valued New/Existing tag')

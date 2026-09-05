@@ -17,6 +17,7 @@ const db = openDb(loadAll())
 
 db.exec(`
   INSERT INTO branches (id,name,is_active) VALUES (1,'Shop',1);
+  INSERT INTO users (id,username,name,password) VALUES (7,'za','Za Sokha','x');
   INSERT INTO suppliers (id,name) VALUES (1,'Bong Long');
   INSERT INTO products (id,name,barcode,unit,brand,category,tag_label,image_path,selling_price_usd,purchase_price_usd,is_active) VALUES
     (1,'Lip Oil A','1001','pcs','Colourpop','Lip','new','/uploads/lip-a.webp',14,9,1),
@@ -28,7 +29,7 @@ db.exec(`
     (1,1,'Lip Oil A',1,'Shop','add',5,9,45,100,7,'Za','2026-09-01 03:00:00',1),
     (2,2,'Lip Oil B',1,'Shop','add',3,8,24,100,7,'Za','2026-09-01 03:00:01',2),
     (3,1,'Lip Oil A',1,'Shop','add',1,10,10,101,7,'Za','2026-09-01 04:00:00',1),
-    (4,2,'Lip Oil B',1,'Shop','add',2,8,16,NULL,NULL,NULL,'2024-08-15 09:00:00',2),
+    (4,2,'Lip Oil B',1,'Shop','add',2,8,16,NULL,99,'Deleted Operator','2024-08-15 09:00:00',2),
     (5,2,'Lip Oil B',1,'Shop','add',1,8,8,102,7,'Za','2026-09-01 05:00:00',2),
     (6,2,'Lip Oil B',1,'Shop','remove',1,NULL,NULL,'revert:5',7,'Za','2026-09-01 05:01:00',2),
     (7,1,'Lip Oil A',1,'Shop','stock_in',4,9,36,103,7,'Za','2026-09-02 03:00:00',1),
@@ -62,6 +63,19 @@ assert.equal(legacyStringSession.line_count, 2)
 assert.equal(legacyStringSession.quantity, 6)
 assert.equal(legacyStringSession.movement_cost_usd, 52)
 
+// The actor column is the account USERNAME resolved from the id, not the
+// display-name snapshot the movement row carries. User 7 is 'za' / 'Za Sokha',
+// and the movement rows above snapshot 'Za' -- so 'Za Sokha', 'Za' and 'za'
+// are three distinguishable answers and only one of them is right.
+assert.equal(groups.find((row) => row.session_key === 'session:100').user_name, 'za',
+  'the session list must show the username, not the display-name snapshot')
+const usernameSearch = kernel.buildStockInSessionListQuery('za')
+assert.ok(db.prepare(usernameSearch.groupedSql).bind(usernameSearch.params).all().length >= 1,
+  'search must reach the same actor string the column shows')
+const orphanActor = groups.find((row) => String(row.session_key).startsWith('legacy:'))
+assert.equal(orphanActor.user_name, 'Deleted Operator',
+  'a movement whose user row is gone falls back to its snapshot rather than blanking the column')
+
 const search = kernel.buildStockInSessionListQuery('1002')
 const searched = db.prepare(search.groupedSql).bind(search.params).all()
 assert.ok(searched.length >= 1, 'barcode search reaches linked current product data')
@@ -76,6 +90,29 @@ assert.equal(lines[0].image_path, '/uploads/lip-a.webp')
 assert.equal(lines[0].selling_price_usd, 14)
 assert.equal(lines[0].purchase_price_usd, 9)
 assert.equal(kernel.parseStockInSessionKey('legacy:2026-09-01 06:02:02:1:2:23').createdAt, '2026-09-01 06:02:02')
+
+// N14 New vs Existing. Movement 1 created its product in the session, movement
+// 2 received into a product that already existed, and movement 3 came from a
+// path that leaves no member row at all. Before the line query read
+// stock_session_members these three were indistinguishable.
+db.exec(`
+  INSERT INTO stock_session_operations (id,actor_id,request_id,mode,request_json) VALUES
+    ('op-100',7,'req-100','stock_in','{}');
+  INSERT INTO stock_session_members (operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,movement_id,quantity,unit_cost_usd) VALUES
+    ('op-100','line-1','create_receive',1,1,1,1,1,5,9),
+    ('op-100','line-2','receive',2,0,1,2,2,3,8);
+`)
+const taggedLines = db.prepare(kernel.stockInSessionLinesSql(locator)).bind(kernel.stockInSessionLineParams(locator)).all()
+assert.equal(taggedLines.find((row) => row.id === 1).created_product, 1, 'a line that created its product reads back as new')
+assert.equal(taggedLines.find((row) => row.id === 1).session_command_kind, 'create_receive')
+assert.equal(taggedLines.find((row) => row.id === 2).created_product, 0, 'a line that received into an existing product reads back as existing')
+assert.equal(taggedLines.find((row) => row.id === 2).session_command_kind, 'receive')
+
+const untaggedLocator = kernel.parseStockInSessionKey('session:101')
+const untaggedLines = db.prepare(kernel.stockInSessionLinesSql(untaggedLocator)).bind(kernel.stockInSessionLineParams(untaggedLocator)).all()
+assert.equal(untaggedLines.length, 1)
+assert.equal(untaggedLines[0].created_product, null,
+  'a receipt with no session member row reports "not recorded", never a guessed Existing')
 
 const legacyLocator = kernel.parseStockInSessionKey('session:103')
 const legacyLines = db.prepare(kernel.stockInSessionLinesSql(legacyLocator)).bind(kernel.stockInSessionLineParams(legacyLocator)).all()
