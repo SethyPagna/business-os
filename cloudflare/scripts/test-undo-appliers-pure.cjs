@@ -90,6 +90,11 @@ function wrapDb(sqlite) {
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   // The dedicated bulk test executes this applier with its actual Hono/SQL.
   if (id === './saleBulkStatus') return { replaySaleBulkStatus: async () => { throw new Error('Use the dedicated bulk fixture') } }
+  if (id === './saleBulkUpdate') return {
+    BULK_UPDATE_KIND: 'sale.fields.bulk',
+    BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk',
+    replaySaleBulkUpdate: async () => { throw new Error('Use the dedicated bulk fixture') },
+  }
   if (id === './db') return { getDb: () => wrapDb(sharedDb) }
   if (id === './audit') return { audit: async () => {} }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
@@ -225,6 +230,8 @@ await check('resolveUndoApplier recognizes a registered applier and falls throug
   assert.strictEqual(resolveUndoApplier({}), null)
   assert.strictEqual(resolveUndoApplier(null), null)
   assert.ok(registeredUndoAppliers().includes('branch.update'))
+  assert.ok(registeredUndoAppliers().includes('sale.fields.bulk'))
+  assert.ok(registeredUndoAppliers().includes('sale.customer.bulk'))
 })
 
 await check('source lock: routes/branches.ts replays the same write via branchUpdateStatements', () => {

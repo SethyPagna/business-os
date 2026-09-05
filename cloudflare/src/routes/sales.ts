@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -64,6 +65,7 @@ import {
 } from '../lib/saleAmendments'
 import { recordSaleAddItemsUndoSnapshot } from '../lib/undoAppliers'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
+import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -1108,6 +1110,16 @@ app.post('/bulk-status', async (c) => {
   }
 })
 
+app.post('/bulk-update', async (c) => {
+  try {
+    const result = await applySaleBulkUpdate(c.env, c.get('user'), await c.req.json())
+    c.executionCtx.waitUntil(notifySaleBulkUpdate(c.env, result.action?.kind))
+    return c.json(result)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+  }
+})
+
 app.patch('/:id/status', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
@@ -1443,6 +1455,28 @@ app.patch('/:id/status', async (c) => {
       statements.push({ sql: 'DELETE FROM fees WHERE id = @feeId', params: { feeId: sale.cancel_fee_id } })
     }
   }
+  // Keep cancellation money and lifecycle state in the same transaction.
+  // The former post-commit insert could leave a cancelled/restocked sale with
+  // no linked fee, which also made a later un-cancel impossible to reverse
+  // exactly. last_insert_rowid() is consumed by the immediately following
+  // sale UPDATE in this one D1 batch.
+  if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
+    statements.push({
+      sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
+            VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
+      params: {
+        label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
+        amount_usd: cancelFeeUsd,
+        amount_khr: cancelFeeKhr,
+        sale_id: Number(id),
+        branch_id: sale.branch_id ?? null,
+        notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
+        created_by: user?.id ?? null,
+        created_by_name: user?.name ?? null,
+      },
+    })
+    updates.push('cancel_fee_id = last_insert_rowid()')
+  }
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
   statements.push(...plan.statements)
 
@@ -1495,32 +1529,6 @@ app.patch('/:id/status', async (c) => {
     throw error
   }
 
-  // The lost-fee expense row is written AFTER the transition commits (a
-  // failed transition must never leave a stray loss on the books), then
-  // linked back via cancel_fee_id so un-cancelling can find and remove it.
-  let feeWarning: string | null = null
-  if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
-    try {
-      const feeResult = await db.prepare(`
-        INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
-        VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)
-      `).run({
-        label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
-        amount_usd: cancelFeeUsd,
-        amount_khr: cancelFeeKhr,
-        sale_id: Number(id),
-        branch_id: sale.branch_id ?? null,
-        notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
-        created_by: user?.id ?? null,
-        created_by_name: user?.name ?? null,
-      })
-      const feeId = Number(feeResult.lastInsertRowid) || null
-      if (feeId) await db.prepare('UPDATE sales SET cancel_fee_id = @feeId WHERE id = @id').run({ feeId, id })
-    } catch {
-      feeWarning = 'The sale was cancelled and stock added back, but recording the lost fee failed -- add it on the Fees page.'
-    }
-  }
-
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', id, {
     oldStatus,
     newStatus: saleStatus,
@@ -1543,6 +1551,9 @@ app.patch('/:id/status', async (c) => {
   c.executionCtx.waitUntil(Promise.all([
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
+    ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
+      ? [broadcast(c.env, 'fees', { action: 'update' })]
+      : []),
   ]))
   // The settle path's half of the payment-method registry (see POST / above).
   if (settledPaymentSummary) {
@@ -1581,7 +1592,7 @@ app.patch('/:id/status', async (c) => {
   // S4-2: echo the skip back so the client can badge the sale immediately
   // (and so a scripted caller can assert the flag actually took effect).
   const statusPayload = skipStock ? { ...payload, stock_skipped: 1 } : payload
-  return c.json(feeWarning ? { ...statusPayload, warning: feeWarning } : statusPayload)
+  return c.json(statusPayload)
 })
 
 // PATCH /api/sales/:id/customer -- attach/detach a customer or membership on
@@ -1599,7 +1610,7 @@ app.patch('/:id/customer', async (c) => {
   const saleId = c.req.param('id')
   const body = await c.req.json<{ customerId?: number; membershipNumber?: string; clearAssignment?: boolean; [key: string]: unknown }>().catch(() => ({} as Record<string, unknown>))
 
-  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown> & { id: number; customer_id: number | null; updated_at: string | null }>([saleId])
+  const sale = await db.prepare('SELECT s.*,COALESCE(v.revision,0) AS write_revision FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id = ?').get<Record<string, unknown> & { id: number; customer_id: number | null; updated_at: string | null; write_revision: number }>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
   try {
@@ -1626,22 +1637,50 @@ app.patch('/:id/customer', async (c) => {
     if (!customer) return c.json({ error: 'Customer or membership number not found' }, 404)
   }
 
-  await db.batch([
-    {
-      sql: `UPDATE sales SET customer_id = @customer_id, customer_name = @customer_name, customer_phone = @customer_phone, customer_address = @customer_address, updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
+  const customerSearchNormalized = normalizeSearchText([
+    sale.receipt_number,
+    sale.cashier_name,
+    customer?.name,
+    customer?.phone,
+    sale.branch_name,
+    sale.payment_method,
+  ].filter(Boolean).join(' '))
+  const customerReferenceGuard = customer
+    ? bulkAssertion("EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(name,'')=COALESCE(@name,'') AND COALESCE(phone,'')=COALESCE(@phone,'') AND COALESCE(address,'')=COALESCE(@address,''))", {
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      address: customer.address,
+    })
+    : null
+
+  try {
+    await db.batch([
+      saleRevisionGuard(Number(saleId), Number(sale.write_revision)),
+      ...(customerReferenceGuard ? [customerReferenceGuard] : []),
+      {
+      sql: `UPDATE sales SET customer_id = @customer_id, customer_name = @customer_name, customer_phone = @customer_phone, customer_address = @customer_address, search_normalized = @search_normalized, updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
       params: {
         customer_id: customer?.id ?? null,
         customer_name: customer?.name ?? null,
         customer_phone: customer?.phone ?? null,
         customer_address: customer?.address ?? null,
+        search_normalized: customerSearchNormalized,
         id: saleId,
       },
-    },
-    {
+      },
+      {
       sql: `UPDATE returns SET customer_id = @customer_id, customer_name = @customer_name, updated_at = CURRENT_TIMESTAMP WHERE sale_id = @sale_id`,
       params: { customer_id: customer?.id ?? null, customer_name: customer?.name ?? null, sale_id: saleId },
-    },
-  ])
+      },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    ])
+  } catch (error) {
+    if (/constraint/i.test(String(error))) {
+      return c.json({ error: 'This sale or one of its linked returns changed. Refresh and try again.', code: 'write_conflict' }, 409)
+    }
+    throw error
+  }
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', saleId, {
     previous_customer_id: sale.customer_id ?? null,

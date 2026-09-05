@@ -7,7 +7,7 @@ const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['db','permissions','saleBulkStatus','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl'])
+const actual = new Set(['db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -19,6 +19,7 @@ function load(rel) {
     if (name.endsWith('/cache')) return {bumpVersion:async()=>{},getVersionWithFallback:async()=>0}
     if (name.endsWith('/broadcastHub')) return {broadcast:async()=>{}}
     if (name.endsWith('/audit')) return {audit:async()=>{}}
+    if (name.endsWith('/telegram')) return {formatSaleTelegramLines:()=>[],sendTelegramEvent:async()=>{},telegramMoney:()=>''}
     if (name.startsWith('.')) {
       const target=path.posix.normalize(path.posix.join(path.posix.dirname(rel),name))+'.ts'
       if(actual.has(path.posix.basename(name))) return load(target)
@@ -53,7 +54,7 @@ function fixture(migrate = true) {
     }
   }}
   const ctx={waitUntil(){},passThroughOnException(){}}
-  const call=async(app,url,body,method='POST')=>{const response=await app.request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},env,ctx);return {status:response.status,body:await response.json()}}
+  const call=async(app,url,body,method='POST')=>{const response=await app.request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},env,ctx);const text=await response.text();let parsed;try{parsed=JSON.parse(text)}catch{parsed={error:text}}return {status:response.status,body:parsed}}
   return {sql,env,call,fail(value){failAt=value},barrier(fn){beforeBatch=fn},metrics:()=>({batches,reads,readRows})}
 }
 function seed(f,count=9) {
@@ -110,6 +111,55 @@ async function run() {
   assert.equal((await replay(f,first.body.actionHistoryId)).status,200)
   assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,50)
   console.log('PASS exact stock inverse and request idempotency')
+
+  f=fixture();seed(f)
+  const conditional=request(f,'cancelled','request-source-filter')
+  conditional.source_status='completed'
+  conditional.items=conditional.items.map(item=>item.id<=7?{...item,expected_status:'completed',expected_updated_at:'stale'}:item)
+  const conditionalResult=await f.call(sales,'/bulk-status',conditional)
+  assert.equal(conditionalResult.status,200,JSON.stringify(conditionalResult))
+  assert.deepEqual([conditionalResult.body.changedCount,conditionalResult.body.unchangedCount],[2,7])
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sales WHERE id<=7 AND sale_status='awaiting_payment'").get().n,7)
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sales WHERE id>7 AND sale_status='cancelled'").get().n,2)
+  assert.equal(conditionalResult.body.items.filter(item=>item.reason==='source_mismatch').length,7)
+  assert.equal((await replay(f,conditionalResult.body.actionHistoryId)).status,200)
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sales WHERE sale_status='completed'").get().n,2)
+  console.log('PASS conditional source status skips mismatches, including stale mismatches, and replays only changed members')
+
+  f=fixture();seed(f,2)
+  const perSale=request(f,'cancelled','request-per-sale-fees')
+  delete perSale.cancel_reason
+  perSale.items=perSale.items.map((item,index)=>({...item,cancel:{reason:index?'other':'buyer_refused',...(index?{note:'address wrong'}:{}),fee_usd:index?2.5:1,fee_khr:index?0:4000,fee_note:`fee ${index+1}`}}))
+  const baselineFeeCount=f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n
+  const withFees=await f.call(sales,'/bulk-status',perSale)
+  assert.equal(withFees.status,200,JSON.stringify(withFees))
+  const feeRows=f.sql.prepare('SELECT f.* FROM fees f JOIN sales s ON s.cancel_fee_id=f.id WHERE s.id IN (1,2) ORDER BY f.sale_id').all()
+  assert.equal(feeRows.length,2)
+  assert.ok(feeRows.every(row=>row.id<0))
+  assert.deepEqual(f.sql.prepare('SELECT cancel_fee_id FROM sales ORDER BY id').all().map(row=>row.cancel_fee_id),feeRows.map(row=>row.id))
+  assert.equal((await replay(f,withFees.body.actionHistoryId)).status,200)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n,baselineFeeCount)
+  assert.equal((await replay(f,withFees.body.actionHistoryId,'redo',1)).status,200)
+  assert.deepEqual(f.sql.prepare('SELECT f.* FROM fees f JOIN sales s ON s.cancel_fee_id=f.id WHERE s.id IN (1,2) ORDER BY f.sale_id').all(),feeRows)
+  f.sql.prepare("UPDATE fees SET notes='edited later' WHERE id=?").run(feeRows[0].id)
+  const editedFeeState=snapshot(f)
+  assert.equal((await replay(f,withFees.body.actionHistoryId,'undo',2)).status,409)
+  assert.equal(snapshot(f),editedFeeState)
+  console.log('PASS per-sale cancellation answers and fees are atomic, exactly replayable, and guarded against later fee edits')
+
+  f=fixture();seed(f,1)
+  const beforeSingleFee=snapshot(f)
+  f.fail('INSERT INTO fees')
+  const failedSingleFee=await f.call(sales,'/1/status',{sale_status:'cancelled',expected_updated_at:'same-second',cancel_reason:'mistake',cancel_fee_usd:3},'PATCH')
+  assert.equal(failedSingleFee.status,500)
+  assert.equal(snapshot(f),beforeSingleFee)
+  f=fixture();seed(f,1)
+  const singleFee=await f.call(sales,'/1/status',{sale_status:'cancelled',expected_updated_at:'same-second',cancel_reason:'mistake',cancel_fee_usd:3},'PATCH')
+  assert.equal(singleFee.status,200,JSON.stringify(singleFee))
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees WHERE sale_id=1').get().n,1)
+  assert.equal(f.sql.prepare('SELECT cancel_fee_id FROM sales WHERE id=1').get().cancel_fee_id,f.sql.prepare('SELECT id FROM fees WHERE sale_id=1').get().id)
+  console.log('PASS single cancellation fee and status/stock commit atomically')
+
   for(const marker of ['UPDATE sales','INSERT INTO undo_snapshots','INSERT INTO action_history','INSERT INTO audit_logs']) {
     f=fixture();seed(f);const before=snapshot(f);f.fail(marker)
     assert.equal((await f.call(sales,'/bulk-status',request(f,'cancelled'))).status,500)
