@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import './posNativeChangeIntent.test.ts'
 import fs from 'node:fs'
 import { buildVariantOptionLabels,
   applyManualDiscount,
