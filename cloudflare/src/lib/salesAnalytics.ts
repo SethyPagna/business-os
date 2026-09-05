@@ -24,12 +24,15 @@
 // directive Sep 1 2026 -- see the "Canonical revenue" block further down):
 //   gross_sales_usd   = SUM(subtotal_usd)                     -- pre-discount, all sales
 //   discount_usd      = store_discount_usd + membership_discount_usd
-//   revenue_usd        = SUM over RECOGNIZED sales (neither cancelled nor
-//                         awaiting_payment) of (subtotal - store discount -
-//                         membership discount), minus customer refunds --
-//                         "Net sales", excluding tax and delivery
-//   pending_revenue_usd = the same net basis for awaiting_payment (unpaid
-//                         credit) sales -- NOT revenue until paid
+//   revenue_usd        = SUM over RECOGNIZED sales (every sale that is not
+//                         cancelled -- see recognizedExpr) of (subtotal -
+//                         store discount - membership discount), minus
+//                         customer refunds -- "Net sales", excluding tax and
+//                         delivery
+//   pending_revenue_usd = the same net basis restricted to the awaiting_payment
+//                         (unpaid credit) cohort. It is a SUBSET of
+//                         revenue_usd, reported so the unpaid part is visible
+//                         -- never a complement, and never added to revenue.
 //   collected_total_usd = revenue_usd + tax_usd + delivery_usd  -- secondary
 //                         "total collected": what actually changed hands with
 //                         the customer (delivery_usd = customer-paid only)
@@ -77,6 +80,52 @@
 //     Only a 'restock' line qualifies: 'damaged' units are held in
 //     damaged_stock_lots with no sale value, and 'none' means the customer kept
 //     them -- in both cases the cost was really incurred and stays in cost_usd.
+//
+// ---- THE ONE SCOPING RULE (Sep 6 2026, owner ask N6) -----------------------
+//
+// Every money figure produced by this file obeys the same four clauses, and
+// any surface that shows a period revenue/profit number must be measured
+// against them rather than inventing a fifth:
+//
+//   1. A figure inside a window is scoped by the SALE's business day (UTC+7).
+//      A refund and the cost it puts back on the shelf reverse the sale they
+//      belong to, in THAT sale's bucket -- never in the return's own bucket.
+//      (CUSTOMER_REFUND_JOIN carries no date filter of its own; returnedCostSql
+//      joins through `sales`.) A count of returns PROCESSED in a window is a
+//      legitimate but different question -- an ACTIVITY figure, scoped by the
+//      return's date -- and it may never be subtracted from a figure measured
+//      by this rule. Doing so subtracts the same refunds twice, on two
+//      different populations, which is how a period revenue goes negative.
+//   2. A cancelled sale contributes 0 on BOTH sides: no revenue, no COGS, and
+//      no refund reversal. `cancelled_tx_count` reports how many there were.
+//   3. Supplier-scope returns never touch customer revenue or customer COGS.
+//   4. The awaiting_payment cohort is INSIDE revenue, COGS, profit and delivery
+//      (recognizedExpr is `<> 'cancelled'`, lineage commit fd7c49ba) and is
+//      ADDITIONALLY reported as pending_*. The pending block is a subset, not a
+//      complement; nothing may add the two together.
+//
+// NON-NEGATIVITY (owner rule N6: a period revenue or profit figure that is
+// negative is a scoping defect, never something to clamp at display). Two
+// per-sale invariants make a negative period revenue unreachable by
+// construction rather than mopped up afterwards:
+//
+//   * netSaleExpr floors ONE sale's net value at 0. A sale whose recorded
+//     discounts exceed its own subtotal is a broken row, not negative income.
+//   * netRefundExpr caps ONE sale's refund at that same net value. A refund
+//     apportioned onto a sale can never exceed what the sale recognised, so
+//     `net - netRefund >= 0` for every row and therefore for every SUM of rows.
+//
+// Neither is a display clamp and neither hides money: refund_paid_out_usd
+// still reports the cash that actually left the till on the charged basis, and
+// refund_excess_usd reports exactly how much of it the sale could not absorb
+// (the zero-subtotal imported receipts are the live example). A window whose
+// refund_excess_usd is non-zero has a DATA defect to repair, and says so.
+//
+// Profit is NOT floored: a period that genuinely sold below cost made a loss,
+// and hiding it would be the same lie in the other direction. What is removed
+// is the scoping paths that manufactured one -- returned_cost_shortfall_usd
+// reports the reversal the COGS floor could not absorb, which is the missing
+// cost snapshot the floor used to swallow silently.
 import { getDb } from './db'
 import type { Env } from '../index'
 import {
@@ -278,17 +327,45 @@ export interface SalesTotals {
   // figure that is explicitly theoretical.
   pending_cost_usd: number
   pending_profit_usd: number
+  // The awaiting cohort's own line-level discount, the pending twin of
+  // item_discount_usd. It was computed, typed and threaded through five call
+  // sites and then dropped on the floor by deriveTotals; emitted here so the
+  // PENDING block can be reconciled the way the realised one is.
+  pending_item_discount_usd: number
+  // Receipts VOIDED in this window. Scope clause 2: a cancelled sale
+  // contributes 0 to every money figure above, so this count is the only
+  // place it appears ("Voided invoices" beside the official count).
+  cancelled_tx_count: number
   // Cost of goods that came back on the SELLABLE shelf and is therefore no
   // longer cost of goods SOLD. Already subtracted inside cost_usd; reported so
   // the reversal is visible rather than an unexplained dip.
   returned_cost_usd: number
+  // The part of the restocked-return cost the window's own COGS could not
+  // absorb (see the netCostUsd floor in deriveTotals). Non-zero means sold
+  // lines in this window carry no cost snapshot while their returns do --
+  // reported so the floor stops hiding it.
+  returned_cost_shortfall_usd: number
+  // Recognized receipts whose header value was never recorded, and the COGS
+  // held out with them (valuedSaleExpr). Both are 0 on healthy data.
+  unvalued_tx_count: number
+  unvalued_cost_usd: number
   // Canonical revenue = NET SALES (user directive Sep 1 2026): subtotal net of
-  // both discounts, minus customer refunds, over RECOGNIZED sales only (neither
-  // cancelled nor awaiting_payment). Tax and delivery fees are NOT revenue.
+  // both discounts, over RECOGNIZED sales (every sale that is not cancelled),
+  // BEFORE refunds. Tax and delivery fees are NOT revenue.
+  // revenue_usd = net_sales_usd - refund_usd, exactly -- the equation every
+  // "formula with real numbers" on the Dashboard and the Sales strip prints.
+  net_sales_usd: number
   refund_usd: number
+  // The same refunds on the CHARGED basis (what actually left the till) and
+  // the part of them no sale could absorb. refund_usd is the recognition
+  // reversal; these two keep the cash figure and the data defect visible
+  // beside it (owner rule N6 -- never clamp silently).
+  refund_charged_usd: number
+  refund_excess_usd: number
   revenue_usd: number
-  // Unpaid credit (awaiting_payment) is NOT revenue -- it is surfaced here as a
-  // separate figure on the same net basis, and only becomes revenue once paid.
+  // Unpaid credit (awaiting_payment) measured on the same net basis. It is
+  // INSIDE revenue_usd (clause 4 of the scoping rule) and isolated here so the
+  // unpaid part is visible; never add the two together.
   pending_revenue_usd: number
   // Secondary "total collected" figure (Option 3): recognized revenue plus the
   // tax and customer-paid delivery fee actually taken in. Never the headline.
@@ -304,11 +381,18 @@ export interface SalesPeriodRow {
   count: number
   tx_count: number
   revenue_usd: number
+  // gross_sales_usd and refund_usd are on this row because the Dashboard's
+  // "Revenue Flow" chart plots exactly those three series. They were plotted
+  // against keys the row never carried, so two of its three lines were
+  // permanently flat zero; the row shape is the fix, not the chart.
+  gross_sales_usd: number
+  refund_usd: number
   discount_usd: number
   tax_usd: number
   delivery_usd: number
   cost_usd: number
   profit_usd: number
+  cancelled_tx_count: number
 }
 
 export function emptySalesTotals(): SalesTotals {
@@ -319,8 +403,11 @@ export function emptySalesTotals(): SalesTotals {
     delivery_net_usd: 0, recognized_delivery_usd: 0, recognized_delivery_cost_usd: 0,
     pending_tx_count: 0, pending_gross_sales_usd: 0, pending_store_discount_usd: 0, pending_membership_discount_usd: 0,
     pending_delivery_usd: 0, pending_delivery_cost_usd: 0, pending_cost_usd: 0, pending_profit_usd: 0,
-    returned_cost_usd: 0,
-    refund_usd: 0, revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
+    pending_item_discount_usd: 0, cancelled_tx_count: 0,
+    returned_cost_usd: 0, returned_cost_shortfall_usd: 0,
+    unvalued_tx_count: 0, unvalued_cost_usd: 0, net_sales_usd: 0,
+    refund_usd: 0, refund_charged_usd: 0, refund_excess_usd: 0,
+    revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
   }
 }
 
@@ -354,8 +441,51 @@ export function recognizedExpr(p: string): string { return `${saleStatusExpr(p)}
 export function awaitingExpr(p: string): string { return `${saleStatusExpr(p)} = 'awaiting_payment'` }
 export function collectedSaleExpr(p: string): string { return `${saleStatusExpr(p)} NOT IN ('cancelled', 'awaiting_payment')` }
 // Net sale value (subtotal minus both discounts) -- tax and delivery excluded.
-export function netSaleExpr(p: string): string {
+//
+// Floored at zero PER SALE (owner rule N6). Nothing in the schema stops
+// discount_usd + membership_discount_usd exceeding subtotal_usd, and an
+// imported receipt whose subtotal was never written has a basis of 0 while its
+// discounts survive. Such a row is a broken record, not negative income: left
+// unfloored it would drag the whole window's revenue down and present a data
+// defect as a business result. The raw components stay visible beside it --
+// gross_sales_usd is still SUM(subtotal_usd) and both discount lines are
+// reported in full -- so the row that cannot foot is findable, and this is a
+// row-level invariant rather than a clamp on the displayed total.
+export function rawNetSaleExpr(p: string): string {
   return `(COALESCE(${p}subtotal_usd, 0) - COALESCE(${p}discount_usd, 0) - COALESCE(${p}membership_discount_usd, 0))`
+}
+export function netSaleExpr(p: string): string {
+  return `MAX(0, ${rawNetSaleExpr(p)})`
+}
+// A receipt whose HEADER value was recorded at all.
+//
+// `subtotal_usd = 0` on a sale that has line items means the header total was
+// never written -- the Sep 2-3 import wrote 22 such receipts (ids 16842-16863,
+// see lib/legacySubtotalRepair.ts). A genuinely comped sale does not look like
+// this: it records the goods at their price and takes the whole amount off as a
+// discount, so its subtotal is positive and its net is 0. The second half
+// catches the mirror defect -- discounts recorded larger than the subtotal they
+// come off, a header that does not foot.
+//
+// WHY IT GATES COGS. An unvalued receipt already contributes 0 revenue
+// (netSaleExpr floors it), so leaving its COGS in charges the goods against
+// income that no row records -- one day's profit goes negative by the whole
+// cost of the import defect, with nothing on screen to explain it. Revenue and
+// COGS have to be a matched pair over ONE population or profit is not a
+// difference of anything. Nothing is hidden: unvalued_tx_count and
+// unvalued_cost_usd report the receipts and the money held out, so the repair
+// is measurable instead of being averaged into the result.
+//
+// Also the fix for a live asymmetry: routes/compat.ts's by-product
+// apportionment already drops zero-subtotal sales (it cannot divide by 0), so
+// before this the by-product view and the by-sale view were measuring
+// different populations of the same window.
+export function valuedSaleExpr(p: string): string {
+  return `(COALESCE(${p}subtotal_usd, 0) > 0 AND ${rawNetSaleExpr(p)} >= 0)`
+}
+/** Recognized AND valued -- the population COGS is measured over. */
+export function recognizedValuedExpr(p: string): string {
+  return `(${recognizedExpr(p)} AND ${valuedSaleExpr(p)})`
 }
 // Money the till actually took for one sale row.
 //
@@ -400,9 +530,17 @@ function storeDeliveryExpr(p: string): string {
 //
 // NULL means "not recorded", never zero. Measured Sep 4 2026: exactly 12 of
 // 15,044 sales carry a courier cost, they are ids 16836-16872, and every one of
-// them is still awaiting_payment -- so this expression contributes nothing to a
-// recognized figure yet and starts contributing the moment those sales are
-// marked paid. delivery_actual_cost_count reports how many sales recorded a
+// them is awaiting_payment.
+//
+// CORRECTED Sep 6 2026: the note here used to conclude "so this expression
+// contributes nothing to a recognized figure yet". That was already false when
+// it was written -- recognizedExpr is `<> 'cancelled'`, which ADMITS
+// awaiting_payment, so those 12 courier costs reduce delivery_net_usd and
+// therefore profit_usd today, and are reported a second time as
+// pending_delivery_cost_usd. Both readings are deliberate (the pending block is
+// a subset of the realised one, see clause 4 of the scoping rule above); what
+// was wrong was the claim that the cohort was invisible.
+// delivery_actual_cost_count reports how many sales recorded a
 // cost, so a near-empty column reads as missing data rather than free delivery.
 export function deliveryActualCostExpr(p: string): string {
   return `CASE WHEN EXISTS (
@@ -421,10 +559,30 @@ export function deliveryActualCostExpr(p: string): string {
 // subtotal = 0 has no basis to scale against (a fully comped sale, or a manual
 // return with no sale behind it), so the refund passes through unscaled: the
 // money did leave the till.
-export function netRefundExpr(p: string, rf: string): string {
+//
+// CAPPED at the sale's own net value (owner rule N6). The unscaled branch is
+// exactly where a period revenue went negative: with subtotal_usd = 0 the
+// sale's net is 0, and subtracting the full charged refund made that receipt
+// contribute MINUS the refund -- the Sep 2-3 import's zero-subtotal receipts
+// are the live population. The quantity guard in routes/returns.ts bounds
+// UNITS per sale line, never money, so nothing else asserts this.
+//
+// A refund reverses recognition; it cannot reverse more than was recognised.
+// The cash is not lost from the books: refund_paid_out_usd carries the full
+// charged figure and refundExcessExpr carries the difference, so a window
+// with unabsorbable refunds reports the defect instead of absorbing it.
+export function refundBasisExpr(p: string, rf: string): string {
   return `CASE WHEN COALESCE(${p}subtotal_usd, 0) > 0
     THEN COALESCE(${rf}refund_usd, 0) * (${netSaleExpr(p)} / COALESCE(${p}subtotal_usd, 0))
     ELSE COALESCE(${rf}refund_usd, 0) END`
+}
+export function netRefundExpr(p: string, rf: string): string {
+  return `MIN(${netSaleExpr(p)}, ${refundBasisExpr(p, rf)})`
+}
+// The part of a refund the sale it belongs to could not absorb -- always 0 on
+// healthy data, and the size of the data defect when it is not.
+export function refundExcessExpr(p: string, rf: string): string {
+  return `MAX(0, ${refundBasisExpr(p, rf)} - ${netSaleExpr(p)})`
 }
 // Goods that went back on the SELLABLE shelf, in SQL. This is
 // lib/returnsStock.ts's normalizeStockAction spelled for SQLite, and it has to
@@ -456,10 +614,23 @@ export const RECOGNIZED_LEVEL_COLUMNS = `
              -- header); refund_paid_out_usd keeps the cash figure beside it.
              COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netRefundExpr('', 'rf.')} ELSE 0 END), 0) AS refund_usd,
              COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_paid_out_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_charged_usd,
+             -- Money a refund could not take back out of the sale it belongs to
+             -- (netRefundExpr's cap, owner rule N6). Non-zero means a data
+             -- defect in the window -- a receipt refunded for more than it ever
+             -- recognised -- reported rather than absorbed.
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${refundExcessExpr('', 'rf.')} ELSE 0 END), 0) AS refund_excess_usd,
+             -- Recognized receipts whose header value was never recorded (see
+             -- valuedSaleExpr). They contribute 0 revenue and are held out of
+             -- COGS so profit stays a difference over one population; counted
+             -- here so the repair backlog is a number, not an absence.
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} AND NOT ${valuedSaleExpr('')} THEN 1 ELSE 0 END), 0) AS unvalued_tx_count,
              -- The awaiting-payment cohort, split the same way (S4R3-6). Each
-             -- of these is the pending twin of a recognized column above, so
-             -- the theoretical block reads on the same bases as the realised
-             -- statement. None of them enters revenue_usd / profit_usd.
+             -- of these is the pending twin of a recognized column above.
+             -- Clause 4 of the scoping rule: this cohort is INSIDE
+             -- revenue_usd / cost_usd / profit_usd as well, so the pending
+             -- block is a subset that isolates the unpaid part -- never a
+             -- complement, and never added to the realised figures.
              COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN 1 ELSE 0 END), 0) AS pending_tx_count,
              COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN COALESCE(subtotal_usd, 0) ELSE 0 END), 0) AS pending_gross_sales_usd,
              COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN COALESCE(discount_usd, 0) ELSE 0 END), 0) AS pending_store_discount_usd,
@@ -580,26 +751,33 @@ async function salesLevelTotals(env: Env, f: SalesFilters) {
 //
 // The status split moved from the WHERE into the CASEs so the awaiting cohort
 // can be summed in the SAME round trip. cost_usd is byte-identical to the old
-// `WHERE ... AND recognized` form -- an awaiting row now reaches the query but
-// contributes 0 to it -- and pending_cost_usd comes for free instead of
-// costing a second query on every report. Pair it with ITEM_COST_STATUS_CLAUSE.
+// `WHERE ... AND recognized` form, and pending_cost_usd comes for free instead
+// of costing a second query on every report. Pair it with
+// ITEM_COST_STATUS_CLAUSE.
+//
+// NOTE (corrected Sep 6 2026): recognizedExpr admits awaiting_payment, so an
+// awaiting line lands in BOTH cost_usd and pending_cost_usd -- the pending
+// column isolates the unpaid part of the realised figure rather than naming a
+// cohort held outside it (clause 4 of the scoping rule). This is what keeps
+// revenue and COGS a matched pair: the same sales are on both sides.
 export const ITEM_COST_COLUMNS = `
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS cost_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} AND si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines,
+             COALESCE(SUM(CASE WHEN ${recognizedValuedExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS cost_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} AND NOT ${valuedSaleExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS unvalued_cost_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedValuedExpr('s.')} AND si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines,
              COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS pending_cost_usd,
              COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0) ELSE 0 END), 0) AS item_discount_usd,
              COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0) ELSE 0 END), 0) AS pending_item_discount_usd`
 export const ITEM_COST_STATUS_CLAUSE = `(${recognizedExpr('s.')} OR ${awaitingExpr('s.')})`
 
-interface ItemCostRow { cost_usd: number; missing_snapshot_lines: number; pending_cost_usd: number; item_discount_usd: number; pending_item_discount_usd: number }
+interface ItemCostRow { cost_usd: number; unvalued_cost_usd: number; missing_snapshot_lines: number; pending_cost_usd: number; item_discount_usd: number; pending_item_discount_usd: number }
 
 // Item-level cost aggregate. Joins to sales only to apply the date/branch/
 // status filter -- the summed field itself (cost_price_usd * quantity)
 // is per-item, so there's no fan-out to worry about here. COGS is counted over
-// RECOGNIZED sales only (excludes awaiting_payment as well as cancelled), so
-// profit = recognized revenue - recognized cost stays a matched pair -- unpaid
-// credit contributes neither revenue nor cost until it is paid. The awaiting
-// cohort's own cost comes back beside it as pending_cost_usd, never added in.
+// RECOGNIZED sales, i.e. every sale that is not cancelled, so
+// profit = recognized revenue - recognized cost stays a matched pair over one
+// population. The awaiting cohort's own cost is reported beside it as
+// pending_cost_usd -- the unpaid SLICE of cost_usd, not an addition to it.
 async function salesCost(env: Env, f: SalesFilters): Promise<ItemCostRow> {
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('s', f)
@@ -611,6 +789,7 @@ async function salesCost(env: Env, f: SalesFilters): Promise<ItemCostRow> {
   `).get<ItemCostRow>(params)
   return {
     cost_usd: num(row?.cost_usd),
+    unvalued_cost_usd: num(row?.unvalued_cost_usd),
     missing_snapshot_lines: num(row?.missing_snapshot_lines),
     pending_cost_usd: num(row?.pending_cost_usd),
     item_discount_usd: num(row?.item_discount_usd),
@@ -628,6 +807,9 @@ async function salesCost(env: Env, f: SalesFilters): Promise<ItemCostRow> {
 // later month reverses the cost in the month the sale was booked, which is what
 // keeps revenue and cost a matched pair inside every bucket. The refund is
 // attributed to the sale's bucket for the same reason.
+//
+// Gated on recognizedValuedExpr, exactly like the cost it reverses: a return
+// against an unvalued receipt cannot take back a cost that was never counted.
 // `bucketExpr` is any expression over the sale (aliased s) -- a local day, a
 // customer key -- or null for the whole window in one row. It has to be the
 // SAME expression the cost query buckets by, or a return lands in a different
@@ -640,7 +822,7 @@ function returnedCostSql(bucketExpr: string | null, whereSql: string): string {
     JOIN returns r ON r.id = ri.return_id
     JOIN sales s ON s.id = r.sale_id
     WHERE ${whereSql}
-      AND ${recognizedExpr('s.')}
+      AND ${recognizedValuedExpr('s.')}
       AND COALESCE(r.status, 'completed') <> 'cancelled'
       AND COALESCE(r.return_scope, 'customer') = 'customer'
     ${bucketExpr ? 'GROUP BY bucket' : ''}
@@ -662,6 +844,53 @@ async function returnedCostByBucket(env: Env, f: SalesFilters, bucketExpr: strin
   const rows = await db.prepare(returnedCostSql(bucketExpr, whereSql))
     .all<{ bucket: string | number | null; returned_cost_usd: number }>(params)
   return new Map((rows || []).map((r) => [r.bucket == null ? '' : String(r.bucket), num(r.returned_cost_usd)]))
+}
+
+/**
+ * Receipts VOIDED in the window, bucketed the same way everything else is.
+ *
+ * It needs its own query for one structural reason: whereActiveSales pushes
+ * `sale_status <> 'cancelled'` into every other aggregate here (clause 2 of the
+ * scoping rule -- a cancelled sale contributes 0 on both sides), so a cancelled
+ * row is not reachable from the level query at all. Forcing `status:
+ * 'cancelled'` reuses the SAME window, branch, time-of-day, shift and
+ * maxSaleId construction rather than re-spelling it, and the count is the
+ * window's own regardless of any status filter the caller applied -- "how many
+ * were voided here" is asked beside the official count, not inside it.
+ */
+// The SQL alias is voided_tx_count, not cancelled_tx_count: the shift
+// report next door has its own per-shift count query with a column literally
+// aliased `cancelled`, and its test picks that statement out of the issued
+// set by column name. Two different questions should not answer to one name.
+// The RESPONSE field stays cancelled_tx_count -- that is the contract.
+async function cancelledCountByBucket(env: Env, f: SalesFilters, bucketExpr: string | null): Promise<Map<string, number>> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('sales', { ...f, status: 'cancelled' })
+  const rows = await db.prepare(`
+    SELECT ${bucketExpr ? `${bucketExpr} AS bucket,` : `'' AS bucket,`} COUNT(*) AS voided_tx_count
+    FROM sales
+    WHERE ${whereSql}
+    ${bucketExpr ? 'GROUP BY bucket' : ''}
+  `).all<{ bucket: string | number | null; voided_tx_count: number }>(params)
+  return new Map((rows || []).map((r) => [r.bucket == null ? '' : String(r.bucket), num(r.voided_tx_count)]))
+}
+
+/** Same query, grouped, carrying the display label and entity id so a group
+ *  with nothing BUT voids can still be rendered as a row. */
+async function cancelledGroupCounts(env: Env, f: SalesFilters, exprs: { key: string; label: string; id: string }): Promise<Map<string, { count: number; label: string; entity_id: number | null }>> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('sales', { ...f, status: 'cancelled' })
+  const rows = await db.prepare(`
+    SELECT ${exprs.key} AS grp_key, ${exprs.label} AS grp_label, ${exprs.id} AS grp_id,
+           COUNT(*) AS voided_tx_count
+    FROM sales
+    WHERE ${whereSql}
+    GROUP BY grp_key
+  `).all<{ grp_key: string | number | null; grp_label: string | null; grp_id: number | null; voided_tx_count: number }>(params)
+  return new Map((rows || []).map((r) => [
+    r.grp_key == null ? '' : String(r.grp_key),
+    { count: num(r.voided_tx_count), label: r.grp_label == null ? '' : String(r.grp_label), entity_id: r.grp_id == null ? null : Number(r.grp_id) },
+  ]))
 }
 
 /**
@@ -700,6 +929,11 @@ export interface DeriveTotalsOptions {
   costUsd?: number
   itemDiscountUsd?: number
   pendingItemDiscountUsd?: number
+  /** Receipts VOIDED in this bucket -- never reachable from `level`, whose
+   *  own WHERE hides cancelled sales. Supplied by cancelledCountByBucket. */
+  cancelledTxCount?: number
+  /** COGS on recognized-but-unvalued receipts, held out of cost_usd. */
+  unvaluedCostUsd?: number
 }
 
 export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd = 0, options: DeriveTotalsOptions = {}): SalesTotals {
@@ -713,8 +947,10 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   const storeDeliveryUsd = num(level.store_delivery_usd)
   const deliveryActualCostUsd = num(level.delivery_actual_cost_usd)
   // Canonical revenue = NET SALES over recognized sales, minus customer refunds
-  // (user directive Sep 1 2026). The `recognized_*` fields exclude awaiting_payment
-  // (unpaid credit) and cancelled; when a caller doesn't supply them we fall back
+  // (user directive Sep 1 2026). CORRECTED Sep 6 2026: the `recognized_*` fields
+  // exclude ONLY cancelled -- awaiting_payment (unpaid credit) is INSIDE them,
+  // per recognizedExpr and lineage commit fd7c49ba, and is additionally reported
+  // through the pending_* subset. When a caller does not supply them we fall back
   // to the old gross-minus-discount basis so no other consumer of deriveTotals
   // silently zeroes out. gross_sales_usd / tax_usd / delivery_usd stay the full
   // display line items and are intentionally NOT changed.
@@ -735,10 +971,21 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   const collectedTaxUsd = hasRecognized ? num(level.collected_tax_usd) : recognizedTaxUsd
   const collectedDeliveryUsd = hasRecognized ? num(level.collected_delivery_usd) : recognizedDeliveryUsd
   const collectedTotalUsd = collectedNetUsd + collectedTaxUsd + collectedDeliveryUsd - num(level.refund_paid_out_usd)
-  // Goods back on the shelf are not cost of goods SOLD. Floored at zero: a
-  // return whose recorded cost exceeds the window's own COGS (a return against
-  // a sale outside the range, an imported cost) must not manufacture profit.
+  // Goods back on the shelf are not cost of goods SOLD, floored at zero so a
+  // reversal can never manufacture profit.
+  //
+  // CORRECTED Sep 6 2026. The floor's stated reason was "a return against a
+  // sale outside the range" -- which cannot happen: returnedCostSql joins
+  // `JOIN sales s ON s.id = r.sale_id` under the same whereActiveSales window,
+  // so a return only ever reverses cost in its own sale's bucket. The reachable
+  // cause is the opposite one: a SOLD line with a NULL cost_price_usd snapshot
+  // contributes $0 to costUsd while the return_items row for the same goods
+  // carries a real cost. The floor then silently absorbed the difference and
+  // over-stated profit. It still floors -- a negative COGS is not a thing --
+  // but the shortfall is now reported instead of vanishing, next to the
+  // missing_snapshot_lines count that explains it.
   const netCostUsd = Math.max(0, costUsd - returnedCostUsd)
+  const returnedCostShortfallUsd = Math.max(0, returnedCostUsd - costUsd)
   // Delivery contributes what it is worth, once: collected minus paid out. The
   // absorbed fee is NOT subtracted here -- see correction (a) in the header.
   const deliveryNetUsd = recognizedDeliveryUsd - recognizedDeliveryCostUsd
@@ -780,8 +1027,16 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     pending_delivery_cost_usd: round2(pendingDeliveryCostUsd),
     pending_cost_usd: round2(pendingCostUsd),
     pending_profit_usd: round2(pendingProfitUsd),
+    pending_item_discount_usd: round2(num(options.pendingItemDiscountUsd)),
+    cancelled_tx_count: num(options.cancelledTxCount),
     returned_cost_usd: round2(Math.min(costUsd, returnedCostUsd)),
+    returned_cost_shortfall_usd: round2(returnedCostShortfallUsd),
+    unvalued_tx_count: num(level.unvalued_tx_count),
+    unvalued_cost_usd: round2(num(options.unvaluedCostUsd)),
+    net_sales_usd: round2(recognizedNetUsd),
     refund_usd: round2(refundUsd),
+    refund_charged_usd: round2(num(level.refund_charged_usd)),
+    refund_excess_usd: round2(num(level.refund_excess_usd)),
     revenue_usd: round2(revenueUsd),
     pending_revenue_usd: round2(pendingRevenueUsd),
     collected_total_usd: round2(collectedTotalUsd),
@@ -791,13 +1046,34 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   }
 }
 
+// A bucket whose ONLY activity was a VOID has no level row at all --
+// whereActiveSales hides cancelled sales -- so it used to disappear from the
+// series entirely and a chart drew one straight line across a day that did
+// have activity. Union the cancelled buckets back in as zero-money rows.
+function unionBuckets(levelKeys: Iterable<string>, cancelled: Map<string, number>): string[] {
+  const seen = new Set<string>(levelKeys)
+  for (const k of cancelled.keys()) if (k !== '') seen.add(k)
+  return [...seen]
+}
+
+/** hasRecognized must stay true for a synthesised bucket, or deriveTotals
+ *  falls back to the gross-minus-discount basis and reports a phantom. */
+const VOID_ONLY_LEVEL: Record<string, number> = { tx_count: 0, recognized_net_usd: 0 }
+
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
-  const [level, cost, returnedCostUsd] = await Promise.all([
+  const [level, cost, returnedCostUsd, cancelled] = await Promise.all([
     salesLevelTotals(env, f),
     salesCost(env, f),
     salesReturnedCost(env, f),
+    cancelledCountByBucket(env, f, null),
   ])
-  return deriveTotals(level, cost.cost_usd, returnedCostUsd, { costUsd: cost.pending_cost_usd, itemDiscountUsd: cost.item_discount_usd, pendingItemDiscountUsd: cost.pending_item_discount_usd })
+  return deriveTotals(level, cost.cost_usd, returnedCostUsd, {
+    costUsd: cost.pending_cost_usd,
+    itemDiscountUsd: cost.item_discount_usd,
+    pendingItemDiscountUsd: cost.pending_item_discount_usd,
+    cancelledTxCount: cancelled.get('') || 0,
+    unvaluedCostUsd: cost.unvalued_cost_usd,
+  })
 }
 
 // Period-bucketed trend series (for the Dashboard revenue/cost/profit line
@@ -817,7 +1093,7 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
   const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
 
-  const [levelRows, costRows, returnedByPeriod] = await Promise.all([
+  const [levelRows, costRows, returnedByPeriod, cancelledByPeriod] = await Promise.all([
     db.prepare(`
       SELECT ${periodExprS} AS period, COUNT(*) AS tx_count,
              COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
@@ -844,25 +1120,34 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
       GROUP BY ${periodExprJoined}
     `).all<ItemCostRow & { period: string }>(paramsCost),
     returnedCostByBucket(env, f, periodExprJoined),
+    cancelledCountByBucket(env, f, periodExprS),
   ])
 
   const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
   const pendingCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_cost_usd)]))
   const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
   const pendingItemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_item_discount_usd)]))
-  const rows = (levelRows || []).map((r) => {
-    const totals = deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0, { costUsd: pendingCostByPeriod.get(r.period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(r.period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(r.period) || 0 })
+  const unvaluedCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.unvalued_cost_usd)]))
+  const levelByPeriod = new Map((levelRows || []).map((r) => [r.period, r as Record<string, number>]))
+  const rows = unionBuckets(levelByPeriod.keys(), cancelledByPeriod).map((period) => {
+    const totals = deriveTotals(levelByPeriod.get(period) || VOID_ONLY_LEVEL, costByPeriod.get(period) || 0, returnedByPeriod.get(period) || 0, { costUsd: pendingCostByPeriod.get(period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(period) || 0, cancelledTxCount: cancelledByPeriod.get(period) || 0, unvaluedCostUsd: unvaluedCostByPeriod.get(period) || 0 })
     return {
-      period: r.period,
-      date: r.period,
+      period,
+      date: period,
       count: totals.tx_count,
       tx_count: totals.tx_count,
       revenue_usd: totals.revenue_usd,
+      // The two series the Revenue Flow chart plots beside revenue. Straight
+      // off the same deriveTotals call, so the chart cannot describe a
+      // different period than the card above it.
+      gross_sales_usd: totals.gross_sales_usd,
+      refund_usd: totals.refund_usd,
       discount_usd: totals.discount_usd,
       tax_usd: totals.tax_usd,
       delivery_usd: totals.delivery_usd,
       cost_usd: totals.cost_usd,
       profit_usd: totals.profit_usd,
+      cancelled_tx_count: totals.cancelled_tx_count,
     }
   })
   return rows.sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))
@@ -1362,7 +1647,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
   const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
 
-  const [levelRows, costRows, returnedByKey] = await Promise.all([
+  const [levelRows, costRows, returnedByKey, cancelledByKey] = await Promise.all([
     db.prepare(`
       SELECT ${level.key} AS grp_key, ${level.label} AS grp_label, ${level.id} AS grp_id,
              COUNT(*) AS tx_count,
@@ -1387,6 +1672,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       GROUP BY grp_key
     `).all<ItemCostRow & { grp_key: string | number | null }>(paramsCost),
     returnedCostByBucket(env, f, joined.key),
+    cancelledGroupCounts(env, f, level),
   ])
 
   const keyOf = (v: string | number | null | undefined): string => (v == null ? '' : String(v))
@@ -1395,14 +1681,22 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
   const pendingCostByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.pending_cost_usd)]))
   const itemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.item_discount_usd)]))
   const pendingItemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.pending_item_discount_usd)]))
-  const rows: SalesGroupedRow[] = (levelRows || []).map((r) => {
-    const key = keyOf(r.grp_key)
+  const unvaluedCostByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.unvalued_cost_usd)]))
+  const levelByKey = new Map((levelRows || []).map((r) => [keyOf(r.grp_key), r]))
+  const keys = new Set<string>(levelByKey.keys())
+  // A group whose every sale in this window was VOIDED has no level row --
+  // it used to vanish, taking its void count with it. It belongs in the list
+  // at zero money, which is exactly what the voids are worth.
+  for (const k of cancelledByKey.keys()) if (k !== '') keys.add(k)
+  const rows: SalesGroupedRow[] = [...keys].map((key) => {
+    const r = levelByKey.get(key)
+    const voided = cancelledByKey.get(key)
     return {
       key,
-      label: r.grp_label == null ? '' : String(r.grp_label),
-      entity_id: r.grp_id == null ? null : Number(r.grp_id),
+      label: r && r.grp_label != null ? String(r.grp_label) : (voided ? voided.label : ''),
+      entity_id: r ? (r.grp_id == null ? null : Number(r.grp_id)) : (voided ? voided.entity_id : null),
       cost_missing_snapshot_lines: missingByKey.get(key) || 0,
-      ...deriveTotals(r, costByKey.get(key) || 0, returnedByKey.get(key) || 0, { costUsd: pendingCostByKey.get(key) || 0, itemDiscountUsd: itemDiscountByKey.get(key) || 0, pendingItemDiscountUsd: pendingItemDiscountByKey.get(key) || 0 }),
+      ...deriveTotals(r || VOID_ONLY_LEVEL, costByKey.get(key) || 0, returnedByKey.get(key) || 0, { costUsd: pendingCostByKey.get(key) || 0, itemDiscountUsd: itemDiscountByKey.get(key) || 0, pendingItemDiscountUsd: pendingItemDiscountByKey.get(key) || 0, cancelledTxCount: voided ? voided.count : 0, unvaluedCostUsd: unvaluedCostByKey.get(key) || 0 }),
     }
   })
   if (groupBy === 'hour' || groupBy === 'weekday') {
@@ -1504,7 +1798,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
   const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
 
-  const [levelRows, costRows, returnedByPeriod] = await Promise.all([
+  const [levelRows, costRows, returnedByPeriod, cancelledByPeriod] = await Promise.all([
     db.prepare(`
       SELECT ${periodExprS} AS period, COUNT(*) AS tx_count,
              COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
@@ -1528,6 +1822,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
       GROUP BY ${periodExprJoined}
     `).all<ItemCostRow & { period: string }>(paramsCost),
     returnedCostByBucket(env, f, periodExprJoined),
+    cancelledCountByBucket(env, f, periodExprS),
   ])
 
   const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
@@ -1535,10 +1830,12 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
   const pendingCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_cost_usd)]))
   const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
   const pendingItemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_item_discount_usd)]))
-  const rows = (levelRows || []).map((r) => ({
-    date: r.period,
-    cost_missing_snapshot_lines: missingByPeriod.get(r.period) || 0,
-    ...deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0, { costUsd: pendingCostByPeriod.get(r.period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(r.period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(r.period) || 0 }),
+  const unvaluedCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.unvalued_cost_usd)]))
+  const levelByPeriod = new Map((levelRows || []).map((r) => [r.period, r as Record<string, number>]))
+  const rows = unionBuckets(levelByPeriod.keys(), cancelledByPeriod).map((period) => ({
+    date: period,
+    cost_missing_snapshot_lines: missingByPeriod.get(period) || 0,
+    ...deriveTotals(levelByPeriod.get(period) || VOID_ONLY_LEVEL, costByPeriod.get(period) || 0, returnedByPeriod.get(period) || 0, { costUsd: pendingCostByPeriod.get(period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(period) || 0, cancelledTxCount: cancelledByPeriod.get(period) || 0, unvaluedCostUsd: unvaluedCostByPeriod.get(period) || 0 }),
   }))
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 }
