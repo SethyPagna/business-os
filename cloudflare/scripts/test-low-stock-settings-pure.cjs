@@ -399,6 +399,38 @@ async function main() {
     assert.doesNotMatch(portal, /lowStockThresholdSql/)
   })
 
+  await check('the Settings row is gated on the permission the Worker actually enforces', () => {
+    // "Respect the settings permission key for who may change it": the three
+    // keys carry no settings BUCKET (business_identity / sales_policy /
+    // portal_*), so routes/settings.ts's POST falls through to the plain
+    // "settings" grant. The form must therefore be shown to exactly that
+    // holder -- gating it on isAdmin would hide from a manager with full
+    // Settings a control the API would accept from them, and gating it wider
+    // than the server would show a control whose save 403s.
+    const settingsRoute = readCf('routes/settings.ts')
+    for (const key of ['low_stock_alert_enabled', 'low_stock_threshold_mode', 'low_stock_threshold_default']) {
+      assert.doesNotMatch(
+        settingsRoute,
+        new RegExp("'" + key + "'"),
+        key + ' now appears in routes/settings.ts -- if it was put in a bucket set, the UI gate below must move with it',
+      )
+    }
+    assert.match(settingsRoute, /return !hasPermission\(user, 'settings'\)/, 'the unbucketed fallback is the plain settings grant')
+
+    const form = fs.readFileSync(path.join(FRONTEND_SRC, 'components', 'utils-settings', 'Settings.tsx'), 'utf8')
+    assert.match(form, /const canEditSettings = getPermissionTier\('settings'\) === 'full'/, "the form's gate must read the 'settings' key")
+    // The gate immediately above the Stock Alerts section, whichever way the
+    // file is reordered later.
+    const sectionAt = form.indexOf("<SettingsSection title={t('stock_alerts')}>")
+    assert.ok(sectionAt > 0, 'the Stock Alerts section is gone')
+    const gates = form.slice(0, sectionAt).match(/\{(?:isAdmin|canEditSettings) && showSettingsSection\('business'\) \? \(/g) || []
+    assert.equal(
+      gates[gates.length - 1],
+      "{canEditSettings && showSettingsSection('business') ? (",
+      'the Stock Alerts section must be gated on canEditSettings, not isAdmin',
+    )
+  })
+
   console.log(`\n${passed} checks passed`)
 }
 

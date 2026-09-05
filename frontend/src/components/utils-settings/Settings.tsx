@@ -1347,8 +1347,17 @@ export default function Settings() {
             so the row never changes height as it is toggled. The same three
             values are read by the Dashboard card, the Products/Inventory/
             Branches badges and filters, the POS grid, the bell and Telegram
-            (utils/lowStockSettings.ts and its Worker twin). */}
-        {isAdmin && showSettingsSection('business') ? (
+            (utils/lowStockSettings.ts and its Worker twin).
+
+            Gated on canEditSettings, not isAdmin: these three keys carry no
+            settings bucket of their own, so the Worker admits them on the
+            plain "settings" grant (routes/settings.ts's POST falls back to
+            hasPermission(user, 'settings')). Gating the row on isAdmin would
+            hide from a manager holding full Settings a control the API would
+            accept from them -- the same rule the Shift registration row
+            above already follows. isAdmin implies tier 'full', so an admin
+            keeps it. */}
+        {canEditSettings && showSettingsSection('business') ? (
         <SettingsSection title={t('stock_alerts')}>
           <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
             <label className="flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 dark:border-gray-700 dark:bg-gray-800/70">
