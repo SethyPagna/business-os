@@ -5662,5 +5662,17 @@
   "shift_cancel_hint": "This keeps the full shift record and marks it cancelled. Recorded cash counts are not changed or replaced.",
   "shift_cancel_saved": "Shift cancelled and retained with its recorded details.",
   "shift_cancel_failed": "Could not cancel shift.",
-  "inventory_products_load_failed": "Products could not be loaded."
+  "add_payment_method": "Add payment method",
+  "sale_settlement_rate_hint": "Current rate: 1 USD = {rate} KHR. Recorded USD and KHR amounts stay in their original currency.",
+  "sale_settlement_full_required": "The full sale balance must be covered before completing it.",
+  "sale_settlement_record_malformed": "The recorded payment details are malformed. Review and repair this sale before settling it.",
+  "sale_settlement_record_mismatch": "The recorded payment total does not match its payment lines. Review and repair this sale before settling it.",
+  "sale_settlement_method_unavailable": "Choose an active configured payment method for every row.",
+  "sale_settlement_amount_invalid": "Every payment row needs a positive USD or whole KHR amount.",
+  "sale_settlement_methods_missing": "No active payment methods are configured. Configure one before settling this sale.",
+  "inventory_products_load_failed": "Products could not be loaded.",
+  "sale_settlement_allocation_missing": "This sale has a combined payment summary without its original tender allocation. Repair the payment details before settling it.",
+  "sale_settlement_rate_changed": "The exchange rate changed. Review the updated balance, then confirm again.",
+  "outstanding_balance": "Outstanding balance",
+  "sale_settlement_rows_limit": "This sale has {count} recorded payment rows. Settlement supports at most {max}; no recorded rows were removed. Repair the record before completing it."
 }

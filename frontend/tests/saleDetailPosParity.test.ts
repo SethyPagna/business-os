@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import './saleSettlementUi.test.ts'
+import './paymentMethodRename.test.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
