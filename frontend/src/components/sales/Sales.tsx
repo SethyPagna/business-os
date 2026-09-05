@@ -4,7 +4,6 @@ import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
-import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
@@ -27,7 +26,8 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload } from '../../api/salesTransport.ts'
+import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload } from '../../api/salesTransport.ts'
+import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
@@ -58,6 +58,9 @@ const NewReturnModal = lazyRetry(() => import('../returns/NewReturnModal'), 'sal
 import SalesListSurface from './SalesListSurface'
 import { buildSalesImportRows, SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
 import { exportColumnLabel } from '../../utils/exportOptions.ts'
+import BulkSaleChangeModal, { type BulkSaleChangeRow, type BulkSaleChoice, type BulkSaleField } from './BulkSaleChangeModal.tsx'
+import BulkSaleCancelModal, { type BulkSaleCancelDraft } from './BulkSaleCancelModal.tsx'
+import SectionExportAction from '../shared/SectionExportAction.tsx'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
@@ -111,11 +114,15 @@ interface SaleRecord extends Record<string, unknown> {
   stock_skipped?: number
   cashier_name?: string
   payment_method?: string
+  payment_details?: string | Array<{ method?: string }> | null
+  customer_id?: number | null
   notes?: string
   customer_name?: string
   customer_membership_number?: string
   customer_phone?: string
   customer_address?: string
+  delivery_contact_id?: number | null
+  delivery_contact_name?: string | null
   branch_name?: string
   items?: SaleItemRecord[] | string | null
   total_usd?: number
@@ -355,12 +362,29 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [bulkStatusSaving, setBulkStatusSaving] = useState('')
+  const [bulkChangePrompt, setBulkChangePrompt] = useState<{ field: BulkSaleField; rows: BulkSaleChangeRow[]; sales: SaleRecord[]; sourceChoices: BulkSaleChoice[]; targetChoices: BulkSaleChoice[] } | null>(null)
+  const [bulkFieldSaving, setBulkFieldSaving] = useState(false)
+  const bulkFieldRetryKey = `sales.bulk-update.retry:${user?.id || 'anonymous'}`
+  const bulkFieldRetryMemory = useRef<{ key: string; request: BulkSaleUpdatePayload | null } | null>(null)
+  const [bulkFieldRetryRevision, setBulkFieldRetryRevision] = useState(0)
+  const pendingBulkFieldRequest = useMemo(() => {
+    if (bulkFieldRetryMemory.current?.key === bulkFieldRetryKey) return bulkFieldRetryMemory.current.request
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(bulkFieldRetryKey) || 'null') as BulkSaleUpdatePayload | null
+      return saved && typeof saved.client_request_id === 'string' && Array.isArray(saved.items) && saved.action ? saved : null
+    } catch { return null }
+  }, [bulkFieldRetryKey, bulkFieldRetryRevision])
+  const savePendingBulkFieldRequest = (request: BulkSaleUpdatePayload | null) => {
+    bulkFieldRetryMemory.current = { key: bulkFieldRetryKey, request }
+    try { if (request) sessionStorage.setItem(bulkFieldRetryKey, JSON.stringify(request)); else sessionStorage.removeItem(bulkFieldRetryKey) } catch { /* memory fallback */ }
+    setBulkFieldRetryRevision((revision) => revision + 1)
+  }
   // Cancel dialog (Part 383): who is being cancelled and how the confirm
   // routes -- 'single' feeds handleStatusChange with the collected
   // reason/fee payload, 'bulk' feeds handleBulkStatusUpdate.
   const [cancelPrompt, setCancelPrompt] = useState<
     | { mode: 'single'; saleId: number; notes: string; recordHistory: boolean; label: string }
-    | { mode: 'bulk'; count: number }
+    | { mode: 'bulk'; sales: SaleRecord[]; sourceStatus: string }
     | null
   >(null)
   const [cancelSaving, setCancelSaving] = useState(false)
@@ -370,7 +394,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // back as the request's skip_stock flag.
   const [statusPrompt, setStatusPrompt] = useState<
     | { mode: 'single'; saleId: number; newStatus: string; notes: string; recordHistory: boolean; label: string; fromLabel: string; movesStock: boolean; alreadySkipped: boolean }
-    | { mode: 'bulk'; nextStatus: string; count: number; label: string; fromLabel: string; mixed: boolean; movesStock: boolean; alreadySkipped: boolean }
+    | { mode: 'bulk'; nextStatus: string; sales: SaleRecord[]; sourceStatus: string; label: string; fromLabel: string; mixed: boolean; movesStock: boolean; alreadySkipped: boolean }
     | null
   >(null)
   const [statusConfirmSaving, setStatusConfirmSaving] = useState(false)
@@ -1405,8 +1429,113 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     openExportOptions(selectedSales, 'sales-selected')
   }, [openExportOptions, selectedSales])
 
+  const valueChoice = (value: unknown, emptyLabel: string): BulkSaleChoice => {
+    const text = String(value ?? '').trim()
+    return { key: text ? `value:${text.toLocaleLowerCase()}` : 'none', label: text || emptyLabel, value: text || null }
+  }
+  const linkedChoice = (id: unknown, value: unknown, emptyLabel: string): BulkSaleChoice => {
+    const numericId = Number(id)
+    const text = String(value ?? '').trim()
+    return Number.isFinite(numericId) && numericId > 0
+      ? { key: `id:${numericId}`, label: text || `#${numericId}`, id: numericId, value: text || null }
+      : valueChoice(text, emptyLabel)
+  }
+  const uniqueChoices = (choices: BulkSaleChoice[]): BulkSaleChoice[] => Array.from(new Map(choices.map((choice) => [choice.key, choice])).values())
+  const choiceForSale = (sale: SaleRecord, field: BulkSaleField): BulkSaleChoice => field === 'status'
+    ? { key: `value:${String(sale.sale_status || 'completed').toLocaleLowerCase()}`, label: getStatusLabel(String(sale.sale_status || 'completed'), t), value: String(sale.sale_status || 'completed') }
+    : field === 'payment_method'
+      ? valueChoice(sale.payment_method, translateOr('none', 'None'))
+      : field === 'delivery_contact'
+        ? linkedChoice(sale.delivery_contact_id, sale.delivery_contact_name, translateOr('no_delivery_contact', 'No driver'))
+        : linkedChoice(sale.customer_id, sale.customer_name, translateOr('no_customer', 'No customer'))
+  const choicesForSale = (sale: SaleRecord, field: BulkSaleField): BulkSaleChoice[] => {
+    if (field !== 'payment_method') return [choiceForSale(sale, field)]
+    let details: unknown = sale.payment_details
+    if (typeof details === 'string') { try { details = JSON.parse(details) } catch { details = [] } }
+    const methods = Array.isArray(details)
+      ? details.map((detail) => String((detail as { method?: unknown })?.method || '').trim()).filter(Boolean)
+      : []
+    return uniqueChoices((methods.length ? methods : [sale.payment_method]).map((method) => valueChoice(method, translateOr('none', 'None'))))
+  }
+
+  const openBulkChange = async (field: BulkSaleField) => {
+    if (!selectedSales.length || selectedSales.length > 25) return
+    if (pendingBulkRequest || pendingBulkFieldRequest) {
+      notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
+      return
+    }
+    const frozenSales = selectedSales.map((sale) => ({ ...sale }))
+    const sourceChoices = uniqueChoices(frozenSales.flatMap((sale) => choicesForSale(sale, field)))
+    let targetChoices: BulkSaleChoice[] = sourceChoices
+    try {
+      if (field === 'status') {
+        targetChoices = ALL_STATUSES.filter((status) => !['partial_return', 'returned'].includes(status)).map((status) => ({ key: `value:${status.toLocaleLowerCase()}`, label: getStatusLabel(status, t), value: status }))
+      } else if (field === 'payment_method') {
+        let configured: unknown = settings?.pos_payment_methods
+        if (typeof configured === 'string') { try { configured = JSON.parse(configured) } catch { configured = [] } }
+        targetChoices = uniqueChoices([...sourceChoices, ...(Array.isArray(configured) ? configured : []).map((method) => valueChoice(method, translateOr('none', 'None')))])
+      } else {
+        const result = field === 'customer'
+          ? await getCustomers({ page: 1, pageSize: 100 })
+          : await getDeliveryContacts({ page: 1, pageSize: 100 })
+        const record = (result || {}) as Record<string, unknown>
+        const rows = Array.isArray(result) ? result : Array.isArray(record.data) ? record.data : Array.isArray(record.items) ? record.items : []
+        targetChoices = uniqueChoices([
+          linkedChoice(null, null, field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_delivery_contact', 'No driver')),
+          ...sourceChoices,
+          ...(rows as Array<Record<string, unknown>>).map((row) => linkedChoice(row.id, row.name, translateOr('none', 'None'))),
+        ])
+      }
+    } catch (error) {
+      notify(getErrorMessage(error, translateOr('load_failed', 'Unable to load choices.')), 'error')
+      return
+    }
+    setBulkChangePrompt({
+      field,
+      sales: frozenSales,
+      rows: frozenSales.map((sale) => ({ id: Number(sale.id), receipt: String(sale.receipt_number || `#${sale.id}`), currentKeys: choicesForSale(sale, field).map((choice) => choice.key) })),
+      sourceChoices,
+      targetChoices,
+    })
+  }
+
+  const searchBulkLinkedTargets = async (query: string) => {
+    const prompt = bulkChangePrompt
+    if (!prompt || (prompt.field !== 'customer' && prompt.field !== 'delivery_contact')) return
+    try {
+      const result = prompt.field === 'customer'
+        ? await getCustomers({ search: query, page: 1, pageSize: 100 })
+        : await getDeliveryContacts({ search: query, page: 1, pageSize: 100 })
+      const record = (result || {}) as Record<string, unknown>
+      const rows = Array.isArray(result) ? result : Array.isArray(record.data) ? record.data : Array.isArray(record.items) ? record.items : []
+      setBulkChangePrompt((current) => {
+        if (!current || current.field !== prompt.field) return current
+        const emptyLabel = current.field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_delivery_contact', 'No driver')
+        return {
+          ...current,
+          targetChoices: uniqueChoices([
+            linkedChoice(null, null, emptyLabel),
+            ...current.sourceChoices,
+            ...(rows as Array<Record<string, unknown>>).map((row) => linkedChoice(row.id, row.name, emptyLabel)),
+          ]),
+        }
+      })
+    } catch (error) {
+      if ((error as { name?: string } | null)?.name === 'AbortError') throw error
+      notify(getErrorMessage(error, translateOr('load_failed', 'Unable to load choices.')), 'error')
+      throw error
+    }
+  }
+
 
   const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false, retryOriginal = false) => {
+    return handleScopedBulkStatusUpdate(nextStatus, extra, confirmed, retryOriginal, selectedSales, '')
+  }
+
+  const handleScopedBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false, retryOriginal = false, scopeSales: SaleRecord[] = selectedSales, sourceStatus = '') => {
+    // Keep the original selection vocabulary inside the frozen scoped flow;
+    // focused compatibility checks and the prompt copy both rely on it.
+    const selectedSales = scopeSales
     // View-only (Part 557): bulk status writes share sales.status with single
     // status changes, including the per-action override.
     if (!canChangeSaleStatus) {
@@ -1421,19 +1550,23 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
       return
     }
-    if (!retryRequest && selectedSales.length > 25) {
+    if (!retryRequest && scopeSales.length > 25) {
       notify(translateOr('sale_bulk_limit', 'Select at most 25 sales for one status change.'), 'error')
       return
     }
     if ((!retryRequest && !selectedSales.length) || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
-    if (!confirmed && !extra) {
-      bulkStatusSelectionRef.current = selectedSales.map(sale => ({ id: Number(sale.id), expected_status: String(sale.sale_status || 'completed'), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }))
+    if (!retryRequest && !scopeSales.length) {
+      finishSingleAction(bulkStatusInFlightRef)
+      return
     }
-    // Bulk-cancel needs the shared reason first -- one dialog for the
-    // whole batch (lost fees stay per-sale and are not offered here).
+    if (!confirmed && !extra) {
+      bulkStatusSelectionRef.current = scopeSales.map(sale => ({ id: Number(sale.id), expected_status: String(sale.sale_status || 'completed'), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }))
+    }
+    // Bulk cancellation freezes the matched sales, then collects the same
+    // reason, notes, and lost-fee questions independently for every sale.
     if (!retryRequest && nextStatus === 'cancelled' && !extra) {
       finishSingleAction(bulkStatusInFlightRef)
-      setCancelPrompt({ mode: 'bulk', count: selectedSales.length })
+      setCancelPrompt({ mode: 'bulk', sales: scopeSales, sourceStatus })
       return
     }
     // S4-2: a BULK status flip is exactly what deducted 9 already-counted
@@ -1442,13 +1575,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     // dialog as a single change, which states the before/after and offers
     // the admin-only "Don't touch stock" lock for the whole batch.
     if (!confirmed && !extra) {
-      const distinctStatuses = Array.from(new Set(selectedSales.map((sale) => String(sale.sale_status || 'completed'))))
+      const distinctStatuses = Array.from(new Set(scopeSales.map((sale) => String(sale.sale_status || 'completed'))))
       finishSingleAction(bulkStatusInFlightRef)
       setStatusPrompt({
         mode: 'bulk',
         nextStatus,
-        count: selectedSales.length,
-        label: translateOr('sale_status_confirm_count', '{n} sales', 'ការលក់ {n}').replace('{n}', String(selectedSales.length)),
+        sales: scopeSales,
+        sourceStatus,
+        label: translateOr('sale_status_confirm_count', '{n} sales', 'ការលក់ {n}').replace('{n}', String(scopeSales.length)),
         fromLabel: distinctStatuses.map((status) => getStatusLabel(status, t)).join(', '),
         mixed: distinctStatuses.length > 1,
         // "Can this batch move stock at all" -- true if ANY selected sale's
@@ -1462,12 +1596,23 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     setBulkStatusSaving(nextStatus)
     try {
+      const perSaleCancel = (extra as { per_sale_cancellations?: BulkSaleCancelDraft[] } | null)?.per_sale_cancellations
+      const cancelById = new Map((perSaleCancel || []).map((draft) => [draft.id, draft]))
+      const sharedCancellation = nextStatus === 'cancelled' ? { cancel_reason: String(extra?.cancel_reason || ''), cancel_note: String(extra?.cancel_note || '') } : {}
       const request: BulkSaleStatusPayload = retryRequest || {
         client_request_id: crypto.randomUUID(),
-        items: bulkStatusSelectionRef.current,
+        items: bulkStatusSelectionRef.current.map((item) => {
+          const draft = cancelById.get(item.id)
+          if (!draft) return item
+          return {
+            ...item,
+            cancel: buildBulkSaleCancelInput(draft),
+          }
+        }),
         target_status: nextStatus,
+        ...(sourceStatus ? { source_status: sourceStatus } : {}),
         skip_stock: (extra as Record<string, unknown> | null)?.skip_stock === true,
-        ...(nextStatus === 'cancelled' ? { cancel_reason: String(extra?.cancel_reason || ''), cancel_note: String(extra?.cancel_note || '') } : {}),
+        ...(!perSaleCancel ? sharedCancellation : {}),
       }
       // Preserve the entire frozen body before sending. A retry must not use
       // refreshed sales/selection, even when the first response was lost.
@@ -1483,6 +1628,34 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
       setBulkStatusSaving('')
+    }
+  }
+
+  const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload) => {
+    if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return
+    setBulkFieldSaving(true)
+    try {
+      const matchedIds = new Set(matched.map((row) => row.id))
+      const payload: BulkSaleUpdatePayload = retryRequest || {
+        client_request_id: crypto.randomUUID(),
+        items: frozenSales.filter((sale) => matchedIds.has(Number(sale.id))).map((sale) => ({ id: Number(sale.id), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) })),
+        action: field === 'payment_method'
+          ? { kind: 'payment_method', source: source.value ?? null, target: String(target.value || '') }
+          : { kind: field, source_id: source.id ?? null, target_id: target.id ?? null },
+      }
+      savePendingBulkFieldRequest(payload)
+      const result = await updateSalesBulkField(payload)
+      savePendingBulkFieldRequest(null)
+      setBulkChangePrompt(null)
+      setSelectedIds(new Set<number>())
+      await Promise.all([loadSales(true), actionHistory.refreshServerItems()])
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
+    } catch (error) {
+      notify(getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
+    } finally {
+      finishSingleAction(bulkStatusInFlightRef)
+      setBulkFieldSaving(false)
     }
   }
 
@@ -1632,11 +1805,21 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         // longer relocates them (user, Aug 31).
         rangeActions={(
           <>
+            {canExportSales ? (
+              <SectionExportAction>
+                <LazyPortalMenu
+                  align="auto"
+                  menuClassName="max-h-[70vh] overflow-auto"
+                  trigger={<button type="button" className="btn-secondary inline-flex h-11 min-w-11 items-center justify-center gap-1 px-2.5 py-0 text-xs md:h-8 md:min-w-0" aria-label={translateOr('export', 'Export')} title={translateOr('export', 'Export')}><Download className="h-4 w-4 shrink-0" /><span className="hidden md:inline">{translateOr('export', 'Export')}</span></button>}
+                  items={(salesExportItems || []).filter((item): item is PortalMenuItem => Boolean(item)).map((item) => item === 'divider' ? item : ({ ...item, icon: item.icon ?? <Download className="h-4 w-4 shrink-0" /> }))}
+                />
+              </SectionExportAction>
+            ) : null}
             {/* dense: pin History to a true 32px so it matches the h-8 Manage
                 button beside it on the Stats row (btn-secondary's 40px
                 min-height would otherwise make it taller). */}
             <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" dense />
-            {canImportSales || canExportSales ? <LazyPortalMenu
+            {canImportSales ? <LazyPortalMenu
               align="auto"
               menuClassName="max-h-[70vh] overflow-auto"
               trigger={(
@@ -1660,9 +1843,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
                       'divider' as const,
                     ]
                   : []),
-                ...(salesExportItems || [])
-                  .filter((item): item is PortalMenuItem => Boolean(item))
-                  .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
               ] as PortalMenuItem[])}
             /> : null}
           </>
@@ -1734,12 +1914,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             {/* Bulk status writes are Full-Access only (Part 557): View-only
                 keeps selection for Export, but the status buttons are hidden. */}
             {canChangeSaleStatus ? (
-              <>
-                <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'completed' ? translateOr('saving', 'Saving...') : translateOr('done', 'Done')}</button>
-                <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'awaiting_delivery' ? translateOr('saving', 'Saving...') : translateOr('pos_delivery', 'Delivery')}</button>
-                <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('cancelled')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'cancelled' ? translateOr('saving', 'Saving...') : translateOr('cancel', 'Cancel')}</button>
-              </>
+              <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('status') }} disabled={!!bulkStatusSaving || bulkFieldSaving}>{translateOr('status', 'Status')}</button>
             ) : null}
+            {canAmendSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('payment_method') }} disabled={bulkFieldSaving}>{translateOr('payment_method', 'Payment method')}</button> : null}
+            {canAmendSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('delivery_contact') }} disabled={bulkFieldSaving}>{translateOr('delivery_contact', 'Driver')}</button> : null}
+            {canChangeSaleCustomer ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('customer') }} disabled={bulkFieldSaving}>{translateOr('customer', 'Customer')}</button> : null}
             <button type="button" className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white/70 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-700/60 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set<number>())}>
               {translateOr('clear', 'Clear')}
             </button>
@@ -1892,7 +2071,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
                 if (statusPrompt.mode === 'single') {
                   await handleStatusChange(statusPrompt.saleId, statusPrompt.newStatus, statusPrompt.notes, statusPrompt.recordHistory, skipExtra, true)
                 } else {
-                  await handleBulkStatusUpdate(statusPrompt.nextStatus, skipExtra, true)
+                  await handleScopedBulkStatusUpdate(statusPrompt.nextStatus, skipExtra, true, false, statusPrompt.sales, statusPrompt.sourceStatus)
                 }
                 setStatusPrompt(null)
               } finally {
@@ -1903,32 +2082,64 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           />
         </Suspense>
       ) : null}
+      {pendingBulkFieldRequest ? (
+        <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border p-3 text-sm">
+          <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
+          <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { const kind = pendingBulkFieldRequest.action.kind; void submitBulkFieldChange(kind, { key: '', label: '' }, { key: '', label: '' }, [], [], pendingBulkFieldRequest) }}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
+          <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null) }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
+        </div>
+      ) : null}
+
+      {bulkChangePrompt ? (
+        <BulkSaleChangeModal
+          field={bulkChangePrompt.field}
+          rows={bulkChangePrompt.rows}
+          sourceChoices={bulkChangePrompt.sourceChoices}
+          targetChoices={bulkChangePrompt.targetChoices}
+          saving={bulkFieldSaving || !!bulkStatusSaving}
+          translate={translateOr}
+          onSearchTargets={bulkChangePrompt.field === 'customer' || bulkChangePrompt.field === 'delivery_contact' ? searchBulkLinkedTargets : undefined}
+          onClose={() => { if (!bulkFieldSaving && !bulkStatusSaving) setBulkChangePrompt(null) }}
+          onConfirm={(source, target, matched) => {
+            const matchedIds = new Set(matched.map((row) => row.id))
+            const matchedSales = bulkChangePrompt.sales.filter((sale) => matchedIds.has(Number(sale.id)))
+            if (bulkChangePrompt.field === 'status') {
+              setBulkChangePrompt(null)
+              void handleScopedBulkStatusUpdate(String(target.value || ''), null, false, false, matchedSales, String(source.value || 'completed'))
+              return
+            }
+            void submitBulkFieldChange(bulkChangePrompt.field, source, target, matched, bulkChangePrompt.sales)
+          }}
+        />
+      ) : null}
 
       {cancelPrompt ? (
         <Suspense fallback={null}>
-          <CancelSaleModal
-            label={cancelPrompt.mode === 'single'
-              ? cancelPrompt.label
-              : translateOr('cancel_sales_count', `${cancelPrompt.count} sales`, `ការលក់ ${cancelPrompt.count}`)}
-            bulk={cancelPrompt.mode === 'bulk'}
-            saving={cancelSaving}
-            onClose={() => { if (!cancelSaving) setCancelPrompt(null) }}
-            onConfirm={async (payload) => {
-              if (!cancelPrompt || cancelSaving) return
-              setCancelSaving(true)
-              try {
-                if (cancelPrompt.mode === 'single') {
-                  await handleStatusChange(cancelPrompt.saleId, 'cancelled', cancelPrompt.notes, cancelPrompt.recordHistory, payload)
-                } else {
-                  await handleBulkStatusUpdate('cancelled', payload)
-                }
-                setCancelPrompt(null)
-              } finally {
-                setCancelSaving(false)
-              }
-            }}
-            t={t}
-          />
+          {cancelPrompt.mode === 'single' ? (
+            <CancelSaleModal
+              label={cancelPrompt.label}
+              saving={cancelSaving}
+              onClose={() => { if (!cancelSaving) setCancelPrompt(null) }}
+              onConfirm={async (payload) => {
+                if (cancelSaving) return
+                setCancelSaving(true)
+                try { await handleStatusChange(cancelPrompt.saleId, 'cancelled', cancelPrompt.notes, cancelPrompt.recordHistory, payload); setCancelPrompt(null) } finally { setCancelSaving(false) }
+              }}
+              t={t}
+            />
+          ) : (
+            <BulkSaleCancelModal
+              sales={cancelPrompt.sales.map((sale) => ({ id: Number(sale.id), receipt: String(sale.receipt_number || `#${sale.id}`) }))}
+              saving={cancelSaving}
+              onClose={() => { if (!cancelSaving) setCancelPrompt(null) }}
+              onConfirm={async (drafts) => {
+                if (cancelSaving) return
+                setCancelSaving(true)
+                try { await handleScopedBulkStatusUpdate('cancelled', { per_sale_cancellations: drafts }, true, false, cancelPrompt.sales, cancelPrompt.sourceStatus); setCancelPrompt(null) } finally { setCancelSaving(false) }
+              }}
+              translate={translateOr}
+            />
+          )}
         </Suspense>
       ) : null}
 

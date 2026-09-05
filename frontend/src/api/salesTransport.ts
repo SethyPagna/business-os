@@ -48,9 +48,22 @@ export function createSale(payload: SalePayload): Promise<unknown> {
   )
 }
 
-export type BulkSaleStatusItem = { id: number; expected_status: string; expected_updated_at: string | null }
+export type BulkSaleCancelInput = { reason: string; note?: string; fee_usd?: number; fee_khr?: number; fee_note?: string }
+export type BulkSaleStatusItem = { id: number; expected_status: string; expected_updated_at: string | null; cancel?: BulkSaleCancelInput }
 export type BulkSaleStatusResult = { actionHistoryId: number; changedCount: number; unchangedCount: number; changedIds: number[]; unchangedIds: number[] }
-export type BulkSaleStatusPayload = { client_request_id: string; items: BulkSaleStatusItem[]; target_status: string; skip_stock?: boolean; cancel_reason?: string; cancel_note?: string }
+export type BulkSaleStatusPayload = { client_request_id: string; items: BulkSaleStatusItem[]; target_status: string; source_status?: string; skip_stock?: boolean; cancel_reason?: string; cancel_note?: string }
+
+export function buildBulkSaleCancelInput(draft: { cancel_reason: string; cancel_note?: string; cancel_fee_usd?: string | number; cancel_fee_khr?: string | number; cancel_fee_note?: string }): BulkSaleCancelInput {
+  const feeUsd = Number(draft.cancel_fee_usd)
+  const feeKhr = Number(draft.cancel_fee_khr)
+  return {
+    reason: String(draft.cancel_reason || ''),
+    ...(String(draft.cancel_note || '').trim() ? { note: String(draft.cancel_note).trim() } : {}),
+    ...(Number.isFinite(feeUsd) && feeUsd > 0 ? { fee_usd: feeUsd } : {}),
+    ...(Number.isFinite(feeKhr) && feeKhr > 0 ? { fee_khr: feeKhr } : {}),
+    ...(String(draft.cancel_fee_note || '').trim() ? { fee_note: String(draft.cancel_fee_note).trim() } : {}),
+  }
+}
 export async function updateSalesBulkStatus(payload: BulkSaleStatusPayload): Promise<BulkSaleStatusResult> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Connect to the server to change sale status.')
   const result = await route('sales:bulkStatus', () => apiFetch('POST', '/api/sales/bulk-status', payload), null, true) as BulkSaleStatusResult
@@ -58,7 +71,6 @@ export async function updateSalesBulkStatus(payload: BulkSaleStatusPayload): Pro
   cacheInvalidate('actionHistory')
   return result
 }
-
 export function createSaleWithoutWriteDedupe(payload: SalePayload): Promise<unknown> {
   return apiFetch(
     'POST',
@@ -67,6 +79,22 @@ export function createSaleWithoutWriteDedupe(payload: SalePayload): Promise<unkn
     SYNC.REQUEST_TIMEOUT_MS,
     { skipWriteDedupe: true },
   )
+}
+
+export type BulkSaleUpdatePayload = {
+  client_request_id: string
+  items: Array<{ id: number; expected_updated_at: string | null }>
+  action:
+    | { kind: 'payment_method'; source: string | null; target: string }
+    | { kind: 'delivery_contact' | 'customer'; source_id: number | null; target_id: number | null }
+}
+export type BulkSaleUpdateResult = { actionHistoryId?: number; changedCount: number; unchangedCount: number; changedIds?: number[]; unchangedIds?: number[] }
+
+export async function updateSalesBulkField(payload: BulkSaleUpdatePayload): Promise<BulkSaleUpdateResult> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Connect to the server to update sales.')
+  const result = await route('sales:bulkUpdate', () => apiFetch('POST', '/api/sales/bulk-update', payload), null, true) as BulkSaleUpdateResult
+  cacheInvalidate('actionHistory')
+  return result
 }
 
 export function getSales(params: QueryParams = {}): Promise<unknown> {
