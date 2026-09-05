@@ -21,6 +21,7 @@ import { amendmentEntryStatement } from './saleAmendments'
 import { replaySaleBulkStatus } from './saleBulkStatus'
 import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAction'
+import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -757,6 +758,14 @@ export async function recordSaleAddItemsUndoSnapshot(
 }
 
 const APPLIERS: Record<string, UndoApplierDef> = {
+  [STOCK_SESSION_KIND]: {
+    permission: 'inventory',
+    action: 'adjust',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Stock session history context is required.')
+      await replayStockSession(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
   'sale.status.bulk': {
     permission: 'sales', action: 'status',
     run: async (payload, ctx) => {
