@@ -369,6 +369,11 @@ export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvarian
 // by it. Confirmed with an in-memory D1-equivalent test seeded with a
 // non-default org/branch/admin before wiping these tables too.
 export const FACTORY_RESET_TABLES = [
+  // Receipt children must go before their product/lot/movement/history parents.
+  // Keep revision tombstones: reused identities must never resurrect old guards.
+  'stock_session_members',
+  'stock_session_operations',
+  'stock_session_guards',
   'return_bulk_members',
   'return_bulk_operations',
   'return_write_revisions',
@@ -446,6 +451,9 @@ export const FACTORY_RESET_TABLES = [
 // collected (image paths) or cleared before 'products' itself, since this
 // D1 schema has no FK/cascade to do it automatically.
 export const PRODUCTS_RESET_TABLES = [
+  'stock_session_members',
+  'stock_session_operations',
+  'stock_session_guards',
   'product_images',
   'rfid_tags',
   'branch_batch_stock',
