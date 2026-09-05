@@ -36,7 +36,7 @@ import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockSt
 // POST /:id/items below and scripts/test-sale-add-items-pure.cjs.
 import {
   allocateNewSaleLines,
-  buildAllocationStatements,
+  buildOperationAllocationStatements,
   guardSaleLineAddition,
   planSaleLineAddition,
   captureSaleLineKhrSnapshot,
@@ -75,7 +75,6 @@ import {
   type LineAllocation,
   type TaxSettings,
 } from '../lib/saleAmendments'
-import { recordSaleAddItemsUndoSnapshot } from '../lib/undoAppliers'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
@@ -1195,6 +1194,9 @@ app.patch('/:id/status', async (c) => {
     || body.payment_details !== undefined
     || body.amount_paid_usd !== undefined
     || body.amount_paid_khr !== undefined
+  if (body.payment_method !== undefined || body.amount_paid_usd !== undefined || body.amount_paid_khr !== undefined) {
+    return c.json({ error: 'Send the full payment_details snapshot; payment totals and summary are derived by the server.', code: 'unsupported_payment_aggregate' }, 400)
+  }
   const settlementRequestId = paymentFieldsSent ? normalizeClientRequestId(body.client_request_id) : null
   if (paymentFieldsSent && !settlementRequestId) {
     return c.json({ error: 'client_request_id is required when settling a sale.', code: 'client_request_id_required' }, 400)
@@ -1389,7 +1391,8 @@ app.patch('/:id/status', async (c) => {
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
   const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
   const updateParams: Record<string, unknown> = { sale_status: saleStatus, id, updated_at: mutationStamp }
-  if (body.notes !== undefined) {
+  const emptySettlementNote = paymentFieldsSent && body.notes !== undefined && !String(body.notes ?? '').trim()
+  if (body.notes !== undefined && !emptySettlementNote) {
     updates.push('notes = @notes')
     updateParams.notes = body.notes
   }
@@ -1424,7 +1427,7 @@ app.patch('/:id/status', async (c) => {
     if (!isDeferredPaymentSettle) {
       return c.json({ error: 'Payment can only be recorded when completing an awaiting-payment sale.' }, 400)
     }
-    if (body.notes !== undefined || skipStockRequested) {
+    if ((body.notes !== undefined && !emptySettlementNote) || skipStockRequested) {
       return c.json({ error: 'Settle payment separately from notes or stock overrides.' }, 400)
     }
     const settingRows = await db.prepare(`
@@ -1914,8 +1917,27 @@ app.post('/:id/items', async (c) => {
       batch_expiry_date?: string | null
     }>
     notes?: string
+    client_request_id?: string
+    expected_exchange_rate?: number | string
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
+
+  const addItemsRequestId = normalizeClientRequestId(body.client_request_id)
+  if (!addItemsRequestId) return c.json({ error: 'client_request_id is required when adding sale items.', code: 'client_request_id_required' }, 400)
+  const addItemsCanonical = JSON.stringify({
+    sale_id: Number(id),
+    items: body.items ?? null,
+    notes: String(body.notes || '').trim().slice(0, 500) || null,
+    expected_exchange_rate: body.expected_exchange_rate,
+  })
+  const addItemsDigest = await saleMutationDigest(JSON.parse(addItemsCanonical))
+  const priorAddition = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+    WHERE actor_id=@actor AND mutation_kind='add_items' AND request_id=@request`)
+    .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: addItemsRequestId })
+  if (priorAddition) {
+    if (priorAddition.request_digest !== addItemsDigest) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
+    return c.json(JSON.parse(priorAddition.response_json) as Record<string, unknown>)
+  }
 
   const rawItems = Array.isArray(body.items) ? body.items : []
   if (!rawItems.length) return c.json({ error: 'Sale items required' }, 400)
@@ -1923,12 +1945,13 @@ app.post('/:id/items', async (c) => {
   // POS cart itself is the place for a large order.
   if (rawItems.length > 50) return c.json({ error: 'Add at most 50 lines at a time.' }, 400)
 
-  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown> & {
+  const sale = await db.prepare('SELECT s.*,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE s.id = ?').get<Record<string, unknown> & {
     id: number
     sale_status: string | null
     updated_at: string | null
     branch_id: number | null
     receipt_number: string | null
+    write_revision: number
   }>([id])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
@@ -1944,6 +1967,15 @@ app.post('/:id/items', async (c) => {
 
   const saleId = Number(sale.id)
   const saleStatus = String(sale.sale_status || 'completed')
+  const moneySettings = await readAmendmentMoneySettings(db)
+  const exchangeRate = moneySettings.exchangeRate
+  const reviewedRate = Number(body.expected_exchange_rate)
+  if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
+    return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed item addition.', code: 'expected_exchange_rate_required', current: { exchange_rate: exchangeRate } }, 400)
+  }
+  if (Math.abs(reviewedRate - exchangeRate) > 0.0000001) {
+    return c.json({ error: 'The exchange rate changed. Review the added items again.', code: 'exchange_rate_changed', current_exchange_rate: exchangeRate, current: { exchange_rate: exchangeRate } }, 409)
+  }
 
   // A sale can carry real return records while its status row says something
   // else (imported/legacy rows), so the guard is given the evidence, not
@@ -2049,7 +2081,6 @@ app.post('/:id/items', async (c) => {
     skipStock,
   )
 
-  const exchangeRate = Number(sale.exchange_rate) || 4100
   const plan = planSaleLineAddition({
     saleId,
     saleStatus,
@@ -2090,7 +2121,6 @@ app.post('/:id/items', async (c) => {
   const existingSubtotalRow = await db
     .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
     .get<{ subtotal: number }>([saleId])
-  const moneySettings = await readAmendmentMoneySettings(db)
   const subtotalBeforeUsd = Number(existingSubtotalRow?.subtotal) || 0
   const subtotalAfterUsd = subtotalBeforeUsd + plan.addedSubtotalUsd
   const taxPlan = planAmendedTax({
@@ -2099,7 +2129,7 @@ app.post('/:id/items', async (c) => {
     settings: moneySettings.tax,
     subtotalBeforeUsd,
     subtotalAfterUsd,
-    exchangeRate: Number(sale.exchange_rate) || 4100,
+    exchangeRate,
   })
   const money = recomputeSaleMoneyAfterAmendment({
     sale: sale as AmendableSaleRow,
@@ -2108,22 +2138,25 @@ app.post('/:id/items', async (c) => {
     changeExchangeRate: moneySettings.changeExchangeRate,
     exchangeRateOverride: moneySettings.exchangeRate,
   })
-  const moneyBefore = {
-    subtotal_usd: Number(sale.subtotal_usd) || 0,
-    subtotal_khr: Number(sale.subtotal_khr) || 0,
-    total_usd: Number(sale.total_usd) || 0,
-    total_khr: Number(sale.total_khr) || 0,
-    change_usd: Number(sale.change_usd) || 0,
-    change_khr: Number(sale.change_khr) || 0,
-  }
-  const moneyAfter = {
-    subtotal_usd: money.subtotalUsd,
-    subtotal_khr: money.subtotalKhr,
-    total_usd: money.totalUsd,
-    total_khr: money.totalKhr,
-    change_usd: money.changeUsd,
-    change_khr: money.changeKhr,
-  }
+  const addItemsStamp = new Date().toISOString()
+  const addItemsOperationId = crypto.randomUUID()
+  const lineMoneyRowsBefore = await db.prepare(`
+    SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
+           product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
+           manual_discount_usd,manual_discount_khr
+    FROM sale_items WHERE sale_id=? ORDER BY id
+  `).all<Record<string, unknown>>([saleId])
+  const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
+  const lineMoneyAfter = rebaseSaleLineKhrSnapshot(lineMoneyRowsBefore, exchangeRate)
+  const moneyBefore = amendmentMoneyBefore(sale)
+  const moneyAfter = amendmentMoneyAfter(
+    sale,
+    money,
+    exchangeRate,
+    addItemsStamp,
+    taxPlan.outcome.taxUsd,
+    Number(sale.delivery_fee_usd) || 0,
+  )
 
   // ---- The amendment ledger entries for this addition (S4-30).
   //
@@ -2167,100 +2200,7 @@ app.post('/:id/items', async (c) => {
     })
   })
 
-  // ---- One atomic batch: the new lines, their stock, the sale's money, and
-  // the ledger entries that record all three. Deliberately ONE unit -- a
-  // committed line whose sale header still shows the old total is precisely
-  // the inconsistency this endpoint must not be able to produce. ----
-  let batchResults: Array<{ meta?: { last_row_id?: number } }> = []
-  try {
-    batchResults = await db.batch([
-      ...plan.statements,
-      saleMoneyUpdateStatement(saleId, moneyAfter),
-      ...taxPlan.statements,
-      ...ledgerStatements,
-    ]) as typeof batchResults
-  } catch (error) {
-    const message = (error as Error).message || ''
-    if (/CHECK constraint|constraint failed/i.test(message)) {
-      return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
-    }
-    return c.json({ error: `Failed to add sale items: ${message}` }, 500)
-  }
-
-  const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
-    const statementIndex = plan.saleItemStatementIndexByLine[lineIndex]
-    return Number(batchResults[statementIndex]?.meta?.last_row_id || 0) || null
-  })
-
-  // Lot attribution, same second non-atomic pass as POST /: stock is already
-  // correctly moved above (that only needed batch_id/branch_id, known up
-  // front); this is bookkeeping for reporting and returns, so a failure is
-  // logged rather than rolling back a correct stock movement.
-  const allocationStatements = buildAllocationStatements(plan.lines, saleItemIdByLine)
-  if (allocationStatements.length) {
-    try {
-      await db.batch(allocationStatements)
-    } catch (allocationError) {
-      console.error('[sales] failed to record sale_item_batch_allocations for added lines (stock already moved correctly)', allocationError)
-    }
-  }
-
-  // ---- Undo (decision 4). A REAL payload and a real applier: the
-  // sale-status action records `{}`, and resolveUndoApplier({}) returns
-  // null, so its Undo button transitions the history row and changes
-  // nothing. This one stores the added lines with the exact lots they drew
-  // from and both money snapshots, and lib/undoAppliers.ts's
-  // 'sale.add_items' replays it server-side -- reload-durable, and it moves
-  // the stock back into the same lots. ----
-  let undoActionId: number | null = null
-  try {
-    const recorded = await recordSaleAddItemsUndoSnapshot(c.env, user ?? null, {
-      saleId,
-      receiptNumber: sale.receipt_number || null,
-      saleStatus,
-      exchangeRate,
-      moneyBefore,
-      moneyAfter,
-      lines: plan.lines.map((line, lineIndex) => ({
-        saleItemId: Number(saleItemIdByLine[lineIndex] || 0),
-        productId: line.productId,
-        productName: line.productName,
-        quantity: line.quantity,
-        branchId: line.branchId,
-        heldUnits: line.heldUnits,
-        unitPriceUsd: line.unitPriceUsd,
-        lineTotalUsd: line.lineTotalUsd,
-        costPriceUsd: line.costPriceUsd,
-        costPriceKhr: line.costPriceKhr,
-        takes: line.takes,
-      })).filter((line) => line.saleItemId > 0),
-    })
-    undoActionId = recorded?.actionHistoryId ?? null
-  } catch (undoError) {
-    // A missing history row must never fail an otherwise-correct sale write.
-    console.error('[sales] failed to record the add-items undo snapshot', undoError)
-  }
-
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', saleId, {
-    action: 'add_items',
-    receipt_number: sale.receipt_number || null,
-    sale_status: saleStatus,
-    lines: plan.lines.length,
-    units_deducted: plan.deductedUnits,
-    subtotal_before: moneyBefore.subtotal_usd,
-    subtotal_after: moneyAfter.subtotal_usd,
-    total_before: moneyBefore.total_usd,
-    total_after: moneyAfter.total_usd,
-    notes: String(body.notes || '').trim().slice(0, 500) || null,
-  })
-
-  c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
-    bumpVersion(c.env, 'sales'),
-  ]))
-
-  const updated = await db.prepare('SELECT updated_at FROM sales WHERE id = ?').get<{ updated_at: string }>([saleId])
-  return c.json({
+  const baseResponse: Record<string, unknown> = {
     id: saleId,
     receiptNumber: sale.receipt_number || null,
     saleStatus,
@@ -2271,9 +2211,160 @@ app.post('/:id/items', async (c) => {
     totalUsd: moneyAfter.total_usd,
     totalKhr: moneyAfter.total_khr,
     outstandingUsd: round2(Math.max(0, moneyAfter.total_usd - (Number(sale.amount_paid_usd) || 0) - (Number(sale.amount_paid_khr) || 0) / exchangeRate)),
-    undoActionId,
-    updated_at: updated?.updated_at || null,
+    exchangeRate,
+    undoActionId: null,
+    actionHistoryId: null,
+    operationId: addItemsOperationId,
+    currentReplayGeneration: 0,
+    updated_at: addItemsStamp,
+  }
+  const reversal = {
+    saleId,
+    receiptNumber: sale.receipt_number || null,
+    saleStatus,
+    exchangeRate,
+    moneyBefore,
+    moneyAfter,
+    lineMoneyBefore,
+    lineMoneyAfter,
+    operationId: addItemsOperationId,
+    lines: plan.lines.map((line) => ({
+      saleItemId: 0,
+      productId: line.productId,
+      productName: line.productName,
+      quantity: line.quantity,
+      branchId: line.branchId,
+      heldUnits: line.heldUnits,
+      unitPriceUsd: line.unitPriceUsd,
+      lineTotalUsd: line.lineTotalUsd,
+      costPriceUsd: line.costPriceUsd,
+      costPriceKhr: line.costPriceKhr,
+      takes: line.takes,
+    })),
+  }
+
+  const statementsForPlan: StatementList = []
+  const lineOrdinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
+  for (const [statementIndex, statement] of plan.statements.entries()) {
+    statementsForPlan.push(statement)
+    const ordinal = lineOrdinalByStatement.get(statementIndex)
+    if (ordinal !== undefined) {
+      statementsForPlan.push({
+        sql: `INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal)
+              VALUES(@operation,'sale_item',last_insert_rowid(),@ordinal)`,
+        params: { operation: addItemsOperationId, ordinal },
+      })
+    }
+  }
+  let snapshotExpression = '@payload'
+  for (let ordinal = 0; ordinal < plan.lines.length; ordinal += 1) {
+    snapshotExpression = `json_set(${snapshotExpression},'$.lines[${ordinal}].saleItemId',COALESCE((SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=${ordinal}),0))`
+  }
+  snapshotExpression = `json_set(${snapshotExpression},'$.saleStateRevision',COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0))`
+  const saleLabel = sale.receipt_number || `#${saleId}`
+  const lineCount = plan.lines.length
+  const auditDetails = JSON.stringify({
+    action: 'add_items', operation_id: addItemsOperationId,
+    receipt_number: sale.receipt_number || null, sale_status: saleStatus,
+    lines: lineCount, units_deducted: plan.deductedUnits,
+    subtotal_before: moneyBefore.subtotal_usd, subtotal_after: moneyAfter.subtotal_usd,
+    total_before: moneyBefore.total_usd, total_after: moneyAfter.total_usd,
+    exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
+    notes: String(body.notes || '').trim().slice(0, 500) || null,
   })
+
+  // Receipt, core rows, lot allocations, ledger, snapshot and action history
+  // commit as one D1 transaction. Every dynamic row id is captured through
+  // last_insert_rowid() into the operation member table before it is needed.
+  let batchResults: Array<{ meta?: { last_row_id?: number } }> = []
+  let historyStatementIndex = -1
+  try {
+    const atomicStatements: StatementList = [
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      amendmentSettingsGuard(moneySettings),
+      saleRevisionGuard(saleId, Number(sale.write_revision)),
+      saleMutationReceiptStatement({
+        operationId: addItemsOperationId, actorId: Number(user.id), saleId, kind: 'add_items',
+        requestId: addItemsRequestId, requestDigest: addItemsDigest, requestJson: addItemsCanonical,
+        before: { money: moneyBefore, lines: lineMoneyBefore },
+        after: { money: moneyAfter, lines: lineMoneyAfter },
+        response: baseResponse, stamp: addItemsStamp,
+      }),
+      ...statementsForPlan,
+      ...buildOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
+      ...taxPlan.statements,
+      rebaseSaleLineKhrStatement(saleId, exchangeRate),
+      saleMoneyUpdateStatement(saleId, moneyAfter),
+      ...ledgerStatements,
+      {
+        sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
+              VALUES('sale.add_items','applied',${snapshotExpression},@byId,@byName)`,
+        params: { payload: JSON.stringify(reversal), operation: addItemsOperationId, saleId, byId: user.id, byName: user.name },
+      },
+      {
+        sql: `INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal)
+              VALUES(@operation,'undo_snapshot',last_insert_rowid(),0)`,
+        params: { operation: addItemsOperationId },
+      },
+    ]
+    historyStatementIndex = atomicStatements.length
+    atomicStatements.push({
+      sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
+            SELECT 'sales','sale',@entityId,@label,@undoLabel,@redoLabel,1,'undoable',
+                   json_object('applier','sale.add_items','snapshot_id',entity_id,'operation_id',@operation,'generation',0),
+                   json_object('applier','sale.add_items','snapshot_id',entity_id,'operation_id',@operation,'generation',0),@byId,@byName
+            FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='undo_snapshot' AND ordinal=0`,
+      params: {
+        operation: addItemsOperationId, entityId: String(saleId),
+        label: `Added ${lineCount} item${lineCount === 1 ? '' : 's'} to sale ${saleLabel}`,
+        undoLabel: `Undo items added to sale ${saleLabel}`,
+        redoLabel: `Redo items added to sale ${saleLabel}`,
+        byId: user.id, byName: user.name,
+      },
+    })
+    atomicStatements.push(
+      {
+        sql: `UPDATE sale_mutation_receipts SET history_id=last_insert_rowid(),generation=0,
+              sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
+              response_json=json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid()),updated_at=@stamp
+              WHERE id=@operation`,
+        params: { operation: addItemsOperationId, saleId, stamp: addItemsStamp },
+      },
+      {
+        sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+              VALUES(@userId,@userName,'update','sale',@saleId,@details,'sale',@saleId,@details)`,
+        params: { userId: user.id, userName: user.name, saleId: String(saleId), details: auditDetails },
+      },
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    )
+    batchResults = await db.batch(atomicStatements) as typeof batchResults
+  } catch (error) {
+    const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='add_items' AND request_id=@request`)
+      .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: addItemsRequestId })
+    if (retry?.request_digest === addItemsDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+    if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
+    const message = (error as Error).message || ''
+    if (/CHECK constraint|constraint failed/i.test(message)) {
+      return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review the added items again.', code: 'write_conflict' }, 409)
+    }
+    return c.json({ error: `Failed to add sale items: ${message}` }, 500)
+  }
+
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'sales'),
+  ]))
+
+  const committed = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?')
+    .get<{ response_json: string }>([addItemsOperationId])
+  if (!committed) return c.json({ error: 'The added items committed without a durable receipt.', code: 'receipt_missing' }, 500)
+  const response = JSON.parse(committed.response_json) as Record<string, unknown>
+  const historyId = Number(batchResults[historyStatementIndex]?.meta?.last_row_id || 0)
+  if (historyId > 0) response.actionHistoryId = response.undoActionId = historyId
+  return c.json(response)
 })
 
 // ---------------------------------------------------------------------------
