@@ -1,0 +1,55 @@
+# Claude a2 program — Sep 6 2026 (session `business-os-v1-a2`, owner-directed, GPT/Codex as director)
+
+Base: `codex/business-os-reconcile` @ `9ab9fd7a` (production = `c999e909`). Work happens in isolated
+worktrees `C:/Users/mrkl6/Downloads/bos-a2*` on `claude/a2-*` branches. Never dirty main, never
+Codex's `business-os-v1-integration`. Every row below is OPEN until the STATUS column carries evidence.
+
+Order of work (owner): **fixes → new features → logic consistency → UI/UX polish**, checkpoint + deploy
+at each stage. Sonnet/Opus chosen per task; every lane verified by the lane, then by a verifier, then by a2.
+
+## Owner asks — Sep 5 (first message)
+
+| # | Ask | Lane | Status |
+|---|---|---|---|
+| O1 | Receipt 80×50 mm: download→print squeezes/overflows, direct print paginates to 2 pages. Both must yield ONE scaled page. | receipt | open |
+| O2 | Storefront Products: remove "Showing X–Y of N"; compact per-page select; pager (back · page/total · next + per-page) centred, top AND bottom; vertical letter rail (hover/touch open, click letter jumps, click-away closes) replacing JUMP TO BRAND grid; page scroll fix. | storefront | open (scroll not reproducible in emulation at 375/1280 — ask owner device) |
+| O3 | Stock Change: barcode placement, compact rows, branch shown on Sale rows. | ledger | open |
+| O4 | "Newly assigned": configured split-payment rows; payment-method rename consistency; grouped pickers across transfer/remove/set. | pickers / payments | verify status first |
+| O5 | "Still pending": system-wide 4dp migration; barcode merges; guarded imported-subtotal correction; Sep-4 shift closure. | status-check | Codex data-ops; a2 verifies, does NOT write production |
+| O6 | Product pickers (add/remove/set/fast-stock-in/transfer/add-items-to-sale/returns): grouped child rows as ONE title row → POS-style option sheet; standalone opens the same sheet; show "Warehouse: n · Shop: n"; wholesale+selling on one row; drop units line; same design as POS. Transfer source = warehouse only. | pickers | open |
+| O7 | Settings: low-quantity alert toggle + threshold. | lowstock | open |
+| O8 | Shifts: only the same account sees its own shift; POS close-shift actually works end to end. | shifts | open |
+| O9 | Reports (Sales): more side margin on large screens; label and value adjacent. | reports | open |
+| O10 | Review the 89-file uncommitted lane on dirty main. | triage | in progress (read-only) |
+| O11 | Whole-system multi-angle verification: frontend, backend, tests, D1, R2, architecture, layers, button sizing, bounds. | verify | open |
+
+## Owner asks — Sep 6 (second message)
+
+| # | Ask | Lane | Status |
+|---|---|---|---|
+| N1 | Product session: title "Add/Create Products Session"; explanatory text → InfoHint; Brand+Supplier one row; Branch+Date received one row; no footer Close (header X only). | product-session | open |
+| N2 | MINIMIZE affordance on ALL sections/pages/modals with draft state: icon-only, large enough at the edge; lets the user park a draft instead of Discard-vs-Back. | minimize | open |
+| N3 | Small screens: default removes bottom bar; follow reference images 1 & 2 (reference-images session doc). | mobile-nav | open — Codex owns compact navigation; coordinate |
+| N4 | Small screens: buttons out of bounds/broken → fix (icon-only allowed). Delete "Open PDF" (redundant with Print). | mobile-buttons | open |
+| N5 | Shift: compact, clean, clear; on close compare with expenses paid from shift money; clear breakdown, correct math. | shifts | open |
+| N6 | Stats never show negative revenue/profit; returns scoped in; cancelled handled correctly. | stats | open |
+| N7 | Products page sections reachable on small screens (main page or mini sections via bottom bar). | mobile-nav | open |
+| N8 | Stock Change large screen: barcode placement still bad; "Edit reason"/"Revert" → professional consistent larger buttons. | ledger | open |
+| N9 | Sales: show DRIVER in display column; receipt action row order mirrored (Back on the left, Print/Image on the right; drop Open PDF). | sales | open |
+| N10 | Branches › Products: drop SKU column; add date range; more compact; highlighted column headers and numbers, consistent. | branches | open |
+| N11 | POS glitch: total shown but no per-branch counts. POS / add-items / returns: POS-style click-to-choose options; warehouse option GREYED with qty for everyone incl. admin; click → prompt "Only allow Shop sale. Please transfer to Shop first." | pickers | open |
+| N12 | POS label "Pick a lot / Batch" → "Received dates:". | pickers | open |
+| N13 | Every history (stock change, transfer, sales, returns, write-off): show branch; actor = USERNAME not full name; reasons; consistent. | ledger | open |
+| N14 | Stock-in sessions: group by day; date column shows time only; differentiate new vs existing products; supplier name and cost REQUIRED; Set: smarter + explain missing cost. | stock-in | open |
+| N15 | Groups: barcodes differing only by a leading zero → strip and MERGE (no group); costs: mean of distinct costs (per Sep-4 ruling: similar costs only). | identity | open — production data op needs owner gate |
+| N16 | Copy affordance: double-click (large) / long-press (small) copy float for product name, brand, supplier, barcode — everywhere. | copy | open |
+| N17 | Global sweep for errors, inconsistencies, too-small/too-wide/not-compact. | verify | open |
+
+## Process rules (owner, Sep 6)
+- a2 is coordinator/director/manager: one writer per file set, no overlap, every lane verifies, a2 re-verifies, reconciles, chooses the best, ships ONE deploy per checkpoint.
+- Model per task suitability (Sonnet for bounded mechanical slices, Opus for cross-layer/design/verification), effort matched.
+- Don't lose track: this file is the registry; new owner notes are appended here and distributed.
+
+## Ledger
+- 2026-09-06 ~00:00 ICT: worktrees created (`bos-a2`, `bos-a2-{receipt,storefront,ledger,pickers,lowstock,shifts,reports}`), baseline gates green at `9ab9fd7a` (frontend tsc, i18n 4976 keys, cloudflare tsc). Claims posted to `team-state.mjs`. Chrome extension not connected → live ChatGPT handshake blocked; ledger message sent to `codex/main`.
+- Live storefront probe (production, read-only): Products view scrolls at 1280 and at 375 emulation before/during/after a flyout; no body lock, no overlay. "Showing 1-50 of 3,552 products", "per page" (88 px button), "Jump to brand" and 4 pager buttons present.
