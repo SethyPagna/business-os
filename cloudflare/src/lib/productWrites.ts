@@ -88,13 +88,41 @@ function applySearchNormalizedColumns(payload: Record<string, unknown>, body: Re
   }
 }
 
-export async function insertRow(env: Env, table: string, body: Record<string, unknown>, required: Record<string, unknown> = {}) {
-  const columns = await tableColumns(env, table)
+export function buildInsertPayload(
+  body: Record<string, unknown>,
+  columns: Set<string>,
+  required: Record<string, unknown> = {},
+): Record<string, unknown> {
   const payload = { ...cleanPayload(body, columns), ...required }
   applySearchNormalizedColumns(payload, body, columns, true)
   if (columns.has('created_at') && payload.created_at == null) payload.created_at = nowIso()
   if (columns.has('updated_at') && payload.updated_at == null) payload.updated_at = nowIso()
-  const keys = Object.keys(payload).filter((key) => columns.has(key))
+  return Object.fromEntries(Object.entries(payload).filter(([key]) => columns.has(key)))
+}
+
+// Side-effect-free counterpart to insertRow. Stock sessions append this
+// statement to the operation's single D1 batch instead of creating a product
+// before the receipt is known to be durable.
+export function planInsertRow(
+  table: 'products',
+  body: Record<string, unknown>,
+  columns: Set<string>,
+  required: Record<string, unknown> = {},
+): { sql: string; params: Record<string, unknown> } {
+  const payload = buildInsertPayload(body, columns, required)
+  const keys = Object.keys(payload)
+  if (!keys.length) throw new Error(`No writable ${table} fields were supplied`)
+  const params = Object.fromEntries(keys.map((key, index) => [`value${index}`, payload[key]]))
+  return {
+    sql: `INSERT INTO "${table}" (${keys.map((key) => `"${key}"`).join(', ')}) VALUES (${keys.map((_key, index) => `@value${index}`).join(', ')})`,
+    params,
+  }
+}
+
+export async function insertRow(env: Env, table: string, body: Record<string, unknown>, required: Record<string, unknown> = {}) {
+  const columns = await tableColumns(env, table)
+  const payload = buildInsertPayload(body, columns, required)
+  const keys = Object.keys(payload)
   // sql-bound-params: bounded by construction -- one parameter per COLUMN
   // of a single row, capped by the table's schema, not by any row count.
   const placeholders = keys.map(() => '?').join(', ')
