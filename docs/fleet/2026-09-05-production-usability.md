@@ -4,6 +4,33 @@
 
 ### ASAP checkpoint status — 11:05UTC
 
+Update11:22UTC: candidate`4e18e98b`. Four backend fixture failures resolved and
+retested; original clean run219/223 at`ebf5e027`. Independent central review bounded
+PASS; direct-database snapshot-content/member-set hardening remains a tracked
+follow-up, not a demonstrated normal-route blocker. Do not label the whole system
+security/precision audit complete.
+
+Actual browser blockers, currently assigned:
+
+- ProductForm Open Files crashes because FilePickerModal omits required
+  unsavedChanges and hides it with a cast. Galileo fixes, Socrates/main verify.
+- Main native Worker POST stock session rejects compound SELECT limits at
+  stockSession.ts662. Herschel fixes, Aquinas/main verify on workerd, not just
+  better-sqlite3. Zero queued product stays absent until Finish; failed Finish
+  leaves products/members/operations unchanged, retained Retry available.
+
+Main real Branch Products desktop+320px Khmer list/detail load, scoped totals2,
+stock0 and matching row values; console0, body/root320. Screenshots inspected:
+`branch-products-desktop-e4cf.png`, `branch-products-km-mobile-e4cf.png`,
+`branch-detail-mobile-e4cf.png` under local output/playwright. Desktop action-cell
+row height is a deferred compactness polish, not a blank/loading regression.
+
+Readonly production preflight11:11UTC confirms0122, shift1/3 remain open atrev0,
+fixed22 subtotal0/total3462. Recovery bookmark read11:21UTC:
+`000012e1-000000da-000050dd-f0299454b793fae1d29370aa8e15ace8` (refresh before apply).
+Live HTTP health/version checks return Cloudflare challenge403; no WAF bypass or
+security weakening authorized. No migrations, historical edits or deployment yet.
+
 Integrated candidate: `ebf5e027`; last pushed checkpoint: `cc43019b`.
 Production remains `0ffc4bfcc4fd`, Worker `be276770-359d-4002-9d26-560fa5656d33`.
 This snapshot supersedes older in-progress implementation claims below.

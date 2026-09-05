@@ -2,6 +2,21 @@
 
 ## Active continuation — production usability, September 5
 
+Latest11:22UTC: candidate4e18e98b includes all four clean-backend fixture fixes
+(three actual analytics-module loaders and a query-plan-proven exact22/PK date
+guard exception), canonical Add products entry, and frontend assertion fixes.
+Full backend run at ebf5e027:219/223; all four failed files now pass focused.
+Main real Branch Products page loads scoped stats/rows; desktop and320px Khmer
+detail/list screenshots checked, body/root320, console0. Main zero-create browser
+proves draft survives reload and queued save writes nothing before Finish.
+Two REAL release blockers found through browser/native Worker: Open Files crashes
+on missing Modal closeguard (Galileo fix/Socrates verification); Finish session
+fails native D1 compound SELECT limit (Herschel fix/Aquinas verification). Failed
+session left products/members/receipts unchanged. Do not deploy until resolved.
+Readonly production checks: still0122, Sep4 shift1open revision0, Sep5 shift3open,
+22 repair targets subtotal0/total3462. No production mutation. Cloudflare challenge
+still returns403 on live HTTP health/version probes; control-plane access works.
+
 Latest11:05UTC checkpoint freeze: integrated through ebf5e027. Payment/native-change
 and atomic sale-add-items replay are complete locally (central19 race/replay checks,
 FK-on69-table backup roundtrip, coordinator live positive/stale409 probes pass).
