@@ -2,6 +2,19 @@
 
 ## Active continuation — production usability, September 5
 
+Latest09:50UTC: main real browser at17f46b69 confirms compact desktop controls,
+320px no overflow, 09:15–23:44 preserved through1440→320→1440, and reversed-time
+edits display validation without replacing the committed report. The large local
+expense total is explained by4240 imported fixtures sharing an entry timestamp:
+USD129696.60 + KHR82419900/4100 = USD149799.0146 (one conversion).
+Shift independent fixture verifies exact historical close/cash/permissions and
+preservation of Sep5/expenses. New gaps assigned: cancellation Telegram call
+(Plato); POS actual-change provenance and drawer aggregation (payment lane0127).
+Product save layering/supplier lock/image permission fixes underway. Turing owns
+zero-stock atomic-create core and tests, Herschel payment central undo hooks,
+Galileo product UI, Hilbert image API permissions, Pauli guarded fixed-cohort
+subtotal repair helper. None of these new candidates is deployed or applied live.
+
 Owner requests increased parallelism and tighter multi-layer checks. Added Sol-high
 Plato for independent shift integration and Sol-medium Ohm for release provenance;
 Socrates separately reviews Add products, Aquinas stock replay. Completed lane

@@ -234,6 +234,27 @@ reportedzero writes. Sourcecost validity remains distinct from sum correctness.
 
 ## Owner decision and source-data follow-up
 
+- Main browser17f46b69: desktop controls now share a compact row, five presets,
+  no decorative calendar icon;320px document=viewport320. Endpoints09:15/23:44
+  survive1440→320→1440. End08:00 rejected with aria-invalid and visible alert;
+  committed23:44 remains and correcting it clears rejection. Screenshots
+  output/playwright/report-desktop-17f46b69.png and report-mobile-17f46b69.png
+  visually inspected. Local fixture4240 historical fees createdSep5 explain
+  selected-time expenses149799.01:129696.60USD+82419900KHR/4100 exactly once.
+  No live data inference or modification. Main localWorker now45104/8798.
+  Plato shift fixture proves23:44 close/nativecash and permission parity, but
+  cancellation lacks Telegram schedule; assigned own shifts.ts/test fix.
+  POS actualchange was lost and Telegram drawer treated anychange as ambiguous;
+  payment coordinator owns explicitintent+validatedmarker/rate migration0127
+  and bounded telegram.ts aggregation, preserving historicalunknown records.
+  Product reviewer identified hidden child confirmations, image permission and
+  existinglot supplier mismatch. Galileo fixes UI/sharedoptionalchildlayers;
+  Hilbert products.ts image action gate. Turing01a070f2-26da-7281-afb5-61c50452ea1c
+  (Sol high) owns released stockSession.ts/atomic+undo tests for qty0catalogonly
+  sessions. Herschel remains sole centralpaymentundo/history/backup writer.
+  Pauli owns typed allowlisted fixed22-row repair implementation, no rawSQL,
+  no production invocation. Every new path is isolated/claimed; finalgatepending.
+
 - Capacity checkpoint09:24UTC: new Plato (Sol high,01a070db-c205-7571-bc16-366e0cbec68a)
   read-only shift integration; Ohm (Sol medium,01a070db-c592-7f31-9c18-7c3f5bde7e8f)
   read-only release provenance/migrations. Socrates independently checks product
