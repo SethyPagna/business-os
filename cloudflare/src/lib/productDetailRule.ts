@@ -107,6 +107,68 @@ function normalizedBarcode(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
+/**
+ * THE leading-zero barcode fold -- the one normalization every comparison
+ * site shares. It lives HERE, in the module both packages carry verbatim,
+ * because the rule physically existed three times before (the Worker
+ * detector, the Conflicts tab and nowhere else at all) and this codebase has
+ * already been bitten by one rule with three implementations that disagreed.
+ *
+ * The owner's ruling (Sep 4 2026, verbatim): "for same products same barcode
+ * the only difference is a leading zero... remove the leading zero and merge
+ * them". Three properties make that safe to act on automatically:
+ *
+ *   * IDEMPOTENT -- strips EVERY leading zero, not one. Stripping exactly one
+ *     applies to both sides of a pair and moves them in lockstep, so
+ *     '08339327539' and '008339327539' (one real Charlotte Tilbury barcode,
+ *     entered twice) never meet. Three such pairs exist in production.
+ *   * NUMERIC ONLY -- a code containing any non-digit keeps its zeros, since a
+ *     leading zero in an alphanumeric SKU is not a GTIN artefact.
+ *   * MINIMUM LENGTH 3 -- if stripping would leave fewer than three digits the
+ *     original is returned untouched. That is what keeps '0', '00' and '0000'
+ *     (238 production rows carry the placeholder "0") from collapsing to a
+ *     blank barcode and colliding with every unbarcoded row. The bound was 4
+ *     until the owner ruled on 2026-09-04 that the five MAC shade-code pairs
+ *     ('0601'/'601', and the same for 617, 666, 689, 691) must merge; measured
+ *     against production first, those ten rows are the ONLY numeric barcodes
+ *     in the catalogue whose zero-stripped form is exactly three digits.
+ *
+ * Narrow by construction: it only ever removes leading zeros, so '1234' and
+ * '12345' are untouched and can never fold together. GTIN-14 uses a leading
+ * indicator digit of 1-8 for a case/carton and 0 for the plain unit, so
+ * folding zeros can never conflate a carton with a single item.
+ *
+ * COMPARISON ONLY -- nothing anywhere rewrites the stored barcode column. The
+ * merge picks the already-clean row as the survivor instead, which matters:
+ * 27 zero-stripped barcodes in production are also carried, in their already-
+ * stripped form, by a product under a DIFFERENT name, so rewriting barcodes in
+ * place would hand those 27 a duplicate of a live code and make a scan
+ * ambiguous. Picking the clean row as survivor cannot.
+ *
+ * Deliberately NOT the same fold as the SEARCH one (searchMatch.ts's
+ * normalizedBarcodeSql): search ltrims zeros unboundedly so a scan of either
+ * twin finds both rows, and is allowed to be looser because finding a row is
+ * reversible and merging two rows is not.
+ */
+export function normalizeLeadingZeroBarcodeForCleanup(value: unknown): string {
+  const barcode = String(value ?? '').trim().toLowerCase()
+  if (!/^[0-9]+$/.test(barcode)) return barcode
+  const stripped = barcode.replace(/^0+/, '')
+  return stripped.length >= 3 ? stripped : barcode
+}
+
+/**
+ * The barcode as IDENTITY compares it: trimmed, lowercased, and folded past
+ * any leading zeros. Every comparison site -- display grouping, the Conflicts
+ * sweep, the create/edit duplicate guard, transfer and add-stock matching, CSV
+ * import and the auto-merge detector -- reaches the fold through this one
+ * function, so a twin can never be one product on one screen and two on the
+ * next.
+ */
+export function identityBarcodeKey(value: unknown): string {
+  return normalizeLeadingZeroBarcodeForCleanup(normalizedBarcode(value))
+}
+
 export type ProductDetailInput = {
   barcode?: unknown
   cost_price_usd?: unknown
@@ -121,9 +183,13 @@ export type ProductDetailInput = {
  *
  * Deliberately excludes cost (merged by averaging instead -- see
  * resolveMergedCost) and selling/wholesale price -- see the rule above.
+ *
+ * The barcode is compared through identityBarcodeKey, so a pair differing
+ * only by a leading zero is ONE product everywhere -- the owner's N15 ruling.
+ * The stored column is never rewritten; only the comparison folds.
  */
 export function productDetailSignature(row: ProductDetailInput): string {
-  return normalizedBarcode(row.barcode)
+  return identityBarcodeKey(row.barcode)
 }
 
 /**

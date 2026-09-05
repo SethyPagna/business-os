@@ -23,7 +23,7 @@
 // UPDATE (this session, correcting the paragraph above -- it had gone
 // stale and was actively misleading, having sent a full trace down a path
 // that turned out to already be built): products import DOES have a real
-import { COST_OUTLIER_RATIO, normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing } from './productDetailRule'
+import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
 // per-row mode system now, just via a different channel than
@@ -1252,7 +1252,10 @@ export async function classifyProducts(
   for (const record of existing) {
     if (str(record.sku)) bySku.set(lower(record.sku), record)
     if (str(record.barcode)) {
-      const key = lower(record.barcode)
+      // Folded, not merely lowercased: re-importing the supplier file is how
+      // a merged-away leading-zero twin comes back, because the raw key never
+      // matched the survivor and the row was created again.
+      const key = identityBarcodeKey(record.barcode)
       if (!byBarcode.has(key)) byBarcode.set(key, [])
       byBarcode.get(key)!.push(record)
     }
@@ -1566,7 +1569,7 @@ export async function classifyProducts(
     }
 
     const skuMatch = sku ? bySku.get(lower(sku)) || null : null
-    const barcodeCandidates = !skuMatch && barcode ? byBarcode.get(lower(barcode)) || null : null
+    const barcodeCandidates = !skuMatch && barcode ? byBarcode.get(identityBarcodeKey(barcode)) || null : null
     // Prefer the candidate (if any) whose name is actually compatible with
     // this row -- when a barcode has been legitimately split across
     // several distinct products (see the guard below), this is what lets a

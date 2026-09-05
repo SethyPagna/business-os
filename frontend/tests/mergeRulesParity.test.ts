@@ -6,11 +6,20 @@
 //
 // The leading-zero fold physically exists twice, because `frontend/` and
 // `cloudflare/` are separate npm projects with no shared package:
-//   * cloudflare/src/lib/productIdentity.ts  normalizeLeadingZeroBarcodeForCleanup
-//   * frontend/.../ProductDuplicatesTab.tsx  cleanupBarcode
+//   * cloudflare/src/lib/productDetailRule.ts  normalizeLeadingZeroBarcodeForCleanup
+//   * frontend/src/utils/productDetailRule.ts  the same function, verbatim
 // This codebase has already been bitten once by one rule with three
 // implementations that disagreed, so the fold is compared BEHAVIOURALLY here,
 // over the probes that matter -- including the ones that must NOT merge.
+//
+// Until 2026-09-06 the two copies compared here were the Worker's
+// productIdentity.ts and a HAND-COPY inside ProductDuplicatesTab.tsx, and the
+// display grouping used neither -- productDetailSignature compared the raw
+// barcode, so a leading-zero twin rendered as two rows on the products page
+// while the Conflicts tab called it one product. N15 moved the fold into the
+// module the two packages already carry verbatim (pinned byte-for-byte by
+// productDetailRuleParity.test.ts) and every comparison site now calls it, so
+// what this test compares is the pair of copies that still physically exist.
 //
 // Run: node tests/mergeRulesParity.test.ts
 import assert from 'node:assert/strict'
@@ -44,12 +53,12 @@ function extractFn(source: string, marker: string): (value: unknown) => string {
 }
 
 const workerFold = extractFn(
-  fs.readFileSync(path.join(repoRoot, 'cloudflare', 'src', 'lib', 'productIdentity.ts'), 'utf8'),
+  fs.readFileSync(path.join(repoRoot, 'cloudflare', 'src', 'lib', 'productDetailRule.ts'), 'utf8'),
   'export function normalizeLeadingZeroBarcodeForCleanup',
 )
 const clientSource = fs.readFileSync(
-  path.join(repoRoot, 'frontend', 'src', 'components', 'products', 'ProductDuplicatesTab.tsx'), 'utf8')
-const clientFold = extractFn(clientSource, 'function cleanupBarcode')
+  path.join(repoRoot, 'frontend', 'src', 'utils', 'productDetailRule.ts'), 'utf8')
+const clientFold = extractFn(clientSource, 'export function normalizeLeadingZeroBarcodeForCleanup')
 
 // Every probe that decides a real merge, plus every boundary that must not.
 const PROBES: (string | null | undefined)[] = [
@@ -112,9 +121,26 @@ check('the keeper ordering ranks on the NUMBER of zeros shed, in both copies', (
   // lets the dirtier row win the id tie-break, putting the extra zero back
   // into the catalog as the survivor.
   const worker = fs.readFileSync(path.join(repoRoot, 'cloudflare', 'src', 'lib', 'productIdentity.ts'), 'utf8')
-  for (const [label, source] of [['Worker', worker], ['client', clientSource]] as const) {
+  const duplicatesTab = fs.readFileSync(
+    path.join(repoRoot, 'frontend', 'src', 'components', 'products', 'ProductDuplicatesTab.tsx'), 'utf8')
+  for (const [label, source] of [['Worker', worker], ['client', duplicatesTab]] as const) {
     assert.ok(/zerosShed/.test(source),
       `${label} keeper ordering must rank on how many leading zeros a row sheds`)
+  }
+})
+
+// N15: the fold is no longer copied by hand into the surfaces that use it.
+// Both packages import it from their own productDetailRule.ts, so a third
+// spelling cannot reappear in a component and drift from the other two.
+check('no surface carries its own hand-copy of the fold any more', () => {
+  for (const relative of [
+    ['frontend', 'src', 'components', 'products', 'ProductDuplicatesTab.tsx'],
+    ['frontend', 'src', 'utils', 'productGrouping.ts'],
+    ['cloudflare', 'src', 'lib', 'productIdentity.ts'],
+  ]) {
+    const source = fs.readFileSync(path.join(repoRoot, ...relative), 'utf8')
+    assert.ok(!/replace\(\/\^0\+\/, ''\)/.test(source),
+      `${relative.join('/')} must call the shared fold, not strip zeros itself`)
   }
 })
 

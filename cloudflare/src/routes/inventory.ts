@@ -11,7 +11,7 @@ import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
+import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
@@ -1322,7 +1322,10 @@ async function resolveAddStockTarget(
   // compounds on every repeat receipt, so it would have to be re-derived
   // from the ledger's DISTINCT costs, not folded in pairwise), and it is
   // recorded as an open ruling rather than silently taken here.
-  if (lowerTrim(overrides.barcode) === lowerTrim(source.barcode)) {
+  // identityBarcodeKey, not a bare lowerTrim: a barcode retyped with a leading
+  // zero is the SAME code, and forking a row on it is how the twins got into
+  // the catalogue in the first place.
+  if (identityBarcodeKey(overrides.barcode) === identityBarcodeKey(source.barcode)) {
     return { productId: source.id, created: false }
   }
 

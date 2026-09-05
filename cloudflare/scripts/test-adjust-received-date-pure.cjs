@@ -117,7 +117,13 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
-  '../lib/productIdentity': { findIdentityMatch: async () => null },
+  // identityBarcodeKey is the REAL fold, not a stub: the add-stock 'same
+  // barcode means the SOURCE row' rule is exactly what this file exercises,
+  // and stubbing the comparison would make the test agree with itself.
+  '../lib/productIdentity': {
+    findIdentityMatch: async () => null,
+    identityBarcodeKey: require('./harness/identity_barcode_key.cjs'),
+  },
   // routes/products.ts + inventory.ts now build their search tail from the
   // one shared implementation (lib/productSearchQuery.ts). These tests
   // exercise write paths, not search, so an inert builder keeps the WHERE

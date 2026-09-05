@@ -1,6 +1,16 @@
 import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
-import { productDetailSignature, normalizeProductGroupName, normalizeProductFuzzyName } from './productDetailRule'
+import {
+  productDetailSignature, normalizeProductGroupName, normalizeProductFuzzyName,
+  normalizeLeadingZeroBarcodeForCleanup, identityBarcodeKey,
+} from './productDetailRule'
+
+// Re-exported so the many callers that reach identity through THIS module keep
+// one import, while the definition lives in the rule module both packages carry
+// verbatim (frontend/tests/productDetailRuleParity.test.ts byte-compares them, so
+// the fold can no longer drift between the Worker and the client the way the old
+// hand-copied pair could).
+export { normalizeLeadingZeroBarcodeForCleanup, identityBarcodeKey }
 
 // Applies THE product identity rule (lib/productDetailRule.ts) at branch-
 // transfer, add-stock and merge-duplicates time, so those paths reach the
@@ -39,61 +49,34 @@ export type ProductIdentityRow = {
   image_path?: string | null
 }
 
-/**
- * Cleanup-only barcode normalization for the import typo the production audit
- * found: the same real barcode entered once normally and once with extra
- * leading zeros. Placeholder/short barcodes stay untouched, and this helper is
- * deliberately not used by ordinary create/transfer identity matching.
- *
- * The owner's ruling (Sep 4 2026, verbatim): "for same products same barcode
- * the only difference is a leading zero... remove the leading zero and merge
- * them". Three properties make that safe to act on automatically:
- *
- *   * IDEMPOTENT -- strips EVERY leading zero, not one. Stripping exactly one
- *     was the original bug: applied to both sides of a pair it moves them in
- *     lockstep and they never meet, so `08339327539` and `008339327539` (one
- *     real Charlotte Tilbury barcode, entered twice) stayed two child rows
- *     forever. Three such pairs exist in production; `ltrim`-style stripping
- *     converges them because the result never begins with a zero.
- *   * NUMERIC ONLY -- a code containing any non-digit keeps its zeros, since a
- *     leading zero in an alphanumeric SKU is not a GTIN artefact.
- *   * MINIMUM LENGTH 3 -- if stripping would leave fewer than three digits the
- *     original is returned untouched. This is what keeps the placeholder codes
- *     safe: '0', '00' and '0000' all strip to nothing, so they stay verbatim
- *     rather than collapsing to a blank barcode, which would make them collide
- *     with every unbarcoded row.
- *
- *     The bound was 4 until the owner ruled otherwise on 2026-09-04. Four
- *     excluded exactly one thing in the real catalogue: the five MAC shade-code
- *     pairs ('0601'/'601', and the same for 617, 666, 689 and 691), which are
- *     one product entered twice and which the owner asked to merge. Measured
- *     against production (SELECT-only, 2026-09-04) before moving it: of 10,272
- *     product rows, the numeric barcodes whose zero-stripped form is exactly
- *     three digits are those ten rows and NOTHING else, so dropping the bound
- *     to 3 admits the five pairs the owner named and no other pair at all. A
- *     3-digit code is also still too short to be a GTIN, so this cannot
- *     conflate two genuinely different scannable products.
- *
- * Narrow by construction: it only ever removes leading zeros, so `1234` and
- * `12345` are untouched and can never fold together. Because the fold is
- * applied on top of an EXACT name match, and because GTIN-14 uses a leading
- * indicator digit of 1-8 for a case/carton and 0 for the plain unit, folding
- * zeros can never conflate a carton with a single item.
- *
- * COMPARISON ONLY -- nothing here rewrites the stored barcode column. See the
- * bucketing in findDuplicateProductGroups: the already-clean row is chosen as
- * the survivor and the extra-zero row is folded into it, so the catalog ends
- * up with the clean barcode without any UPDATE to a barcode ever being issued.
- * That matters -- 27 zero-stripped barcodes in production are also carried, in
- * their already-stripped form, by a product under a DIFFERENT name. Rewriting
- * barcodes in place would hand those 27 a duplicate of a live code and make a
- * scan ambiguous; picking the clean row as survivor cannot.
- */
-export function normalizeLeadingZeroBarcodeForCleanup(value: unknown): string {
-  const barcode = String(value ?? '').trim().toLowerCase()
-  if (!/^[0-9]+$/.test(barcode)) return barcode
-  const stripped = barcode.replace(/^0+/, '')
-  return stripped.length >= 3 ? stripped : barcode
+// The leading-zero fold itself now lives in lib/productDetailRule.ts (see the
+// re-export at the top of this file): it is a COMPARISON rule, and every
+// comparison site -- display grouping, the Conflicts sweep, the create/edit
+// guard, transfer/add-stock matching, CSV import and the auto-merge detector
+// below -- has to reach the same one. It used to live here, which is exactly
+// why the client needed a hand-copy and the display path never got one.
+
+// Picks, out of the ACTIVE same-name rows the manual create/edit guard reads,
+// the one that is the SAME PRODUCT as the row being written -- i.e. the one
+// whose barcode folds to the same identity key.
+//
+// It lives here rather than inline in the route for two reasons. Cost used to
+// be part of the guard's SQL, which contradicted the Sep-4 ruling ("so now
+// only diffeerent barcode creates new child row... rest merge") and let the
+// manual form MINT exactly the duplicates the merge tool then had to clean up.
+// And the leading-zero fold cannot be written in SQL without hand-copying it
+// into a third language -- the drift trap this whole module exists to close --
+// so the SQL narrows to the name group and the fold is applied here, over the
+// same identityBarcodeKey every other comparison site uses.
+export function pickSameIdentityRow<T extends { barcode?: string | null }>(
+  rows: T[],
+  barcode: unknown,
+): T | null {
+  const key = identityBarcodeKey(barcode)
+  for (const row of rows) {
+    if (identityBarcodeKey(row.barcode) === key) return row
+  }
+  return null
 }
 
 // Finds another ACTIVE product row that is genuinely the same item as
@@ -208,7 +191,7 @@ export type ProductDuplicateGroup = {
 // pair at a time or dismiss a cluster (product_duplicate_dismissals,
 // migration 0083 -- same persistence model as the contacts panel).
 
-export type PossiblySameSeverity = 'same_barcode' | 'same_name' | 'similar_name'
+export type PossiblySameSeverity = 'leading_zero' | 'same_barcode' | 'same_name' | 'similar_name'
 
 export type PossiblySameProductEntry = {
   id: number
@@ -222,7 +205,7 @@ export type PossiblySameProductEntry = {
 }
 
 export type PossiblySameProductCluster = {
-  type: 'barcode' | 'name' | 'similar'
+  type: 'leadingzero' | 'barcode' | 'name' | 'similar'
   value: string
   severity: PossiblySameSeverity
   products: PossiblySameProductEntry[]
@@ -254,7 +237,12 @@ const dismissKey = (type: string, value: string): string => `${type}${DISMISS_DE
 // so a value the panel echoes back (a display name, say) folds to the exact
 // stored key: 'barcode' -> trimmed barcode, 'name' -> name_key, 'similar' ->
 // fuzzy key.
-export function normalizeProductClusterKey(type: 'barcode' | 'name' | 'similar', value: unknown): string {
+export function normalizeProductClusterKey(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: unknown): string {
+  // A leading-zero cluster is keyed by the FOLDED barcode, so a dismissal
+  // recorded from either twin's spelling records -- and later matches -- the
+  // same key: dismissing '0601' must suppress the cluster the sweep reports
+  // under '601'. Keying it raw is what made the same defect as the detector's.
+  if (type === 'leadingzero') return identityBarcodeKey(value)
   if (type === 'barcode') return String(value ?? '').trim()
   if (type === 'similar') return normalizeProductFuzzyName(value)
   return normalizeProductGroupName(value)
@@ -278,9 +266,22 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
   const dismissed = new Set(dismissalRows.map((row) => dismissKey(row.cluster_type, row.cluster_value)))
 
   const byBarcode = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
+  // Keyed by name_key + FOLDED barcode: a leading-zero twin is only ever a twin
+  // inside one exact name, the same bound the auto-merge detector applies. The
+  // floor is the fold's own 3-digit one, NOT MIN_REAL_BARCODE_LENGTH: the two
+  // bounds were set by different rulings, and 4 would hide exactly the five MAC
+  // shade pairs ('0601'/'601', 617, 666, 689, 691) the owner named when he
+  // lowered the merge bound to 3.
+  const byLeadingZeroKey = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
   const byNameKey = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
   const byFuzzyKey = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
   for (const row of rows) {
+    const folded = identityBarcodeKey(row.barcode)
+    if (row.name_key && folded.length >= 3) {
+      const zeroKey = dismissKey(row.name_key, folded)
+      if (!byLeadingZeroKey.has(zeroKey)) byLeadingZeroKey.set(zeroKey, [])
+      byLeadingZeroKey.get(zeroKey)!.push(row)
+    }
     const barcode = String(row.barcode || '').trim()
     if (barcode.length >= MIN_REAL_BARCODE_LENGTH) {
       if (!byBarcode.has(barcode)) byBarcode.set(barcode, [])
@@ -305,6 +306,24 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
   })
 
   const clusters: PossiblySameProductCluster[] = []
+  // FIRST class, and the strongest evidence there is: one exact name, and
+  // barcodes that are the same number written with different leading zeros.
+  // Before this class existed the pair arrived as an ordinary same_name cluster,
+  // indistinguishable from two genuinely different SKUs -- so the reviewer had no
+  // way to tell the owner's N15 case from a shade pair, and the tab's bulk gate
+  // refused it whenever the two costs differed.
+  const leadingZeroIds = new Set<number>()
+  for (const group of byLeadingZeroKey.values()) {
+    if (group.length < 2) continue
+    // Identical raw barcodes are the same_barcode cluster's job; this class
+    // exists for the pair the raw key can never bring together.
+    const raws = new Set(group.map((row) => String(row.barcode || '').trim().toLowerCase()))
+    if (raws.size < 2) continue
+    for (const row of group) leadingZeroIds.add(row.id)
+    const folded = identityBarcodeKey(group[0].barcode)
+    if (dismissed.has(dismissKey('leadingzero', folded))) continue
+    clusters.push({ type: 'leadingzero', value: folded, severity: 'leading_zero', products: group.map(toEntry) })
+  }
   for (const [barcode, group] of byBarcode) {
     if (group.length < 2) continue
     if (dismissed.has(dismissKey('barcode', barcode))) continue
@@ -318,6 +337,11 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
     // two. Groups with mixed/placeholder barcodes still show here.
     const barcodes = new Set(group.map((row) => String(row.barcode || '').trim()))
     if (barcodes.size === 1 && [...barcodes][0].length >= MIN_REAL_BARCODE_LENGTH) continue
+    // ...and a name group that is ENTIRELY one leading-zero twin set is the
+    // cluster above. Same de-dup the barcode rule does one line up: one decision
+    // must never be shown as two.
+    if (group.every((row) => leadingZeroIds.has(row.id))
+      && new Set(group.map((row) => identityBarcodeKey(row.barcode))).size === 1) continue
     clusters.push({ type: 'name', value: group[0].name || nameKey, severity: 'same_name', products: group.map(toEntry) })
   }
   for (const [fuzzyKey, group] of byFuzzyKey) {
@@ -339,7 +363,7 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
   }
   // Worst-first: a shared real barcode is the strongest same-item evidence, a
   // shared exact display name next, a fuzzy-only name match the weakest.
-  const rank: Record<PossiblySameSeverity, number> = { same_barcode: 0, same_name: 1, similar_name: 2 }
+  const rank: Record<PossiblySameSeverity, number> = { leading_zero: 0, same_barcode: 1, same_name: 2, similar_name: 3 }
   return clusters.sort((a, b) => rank[a.severity] - rank[b.severity])
 }
 
@@ -401,10 +425,17 @@ export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductD
     const buckets = new Map<string, (ProductIdentityRow & { name_key: string })[]>()
     for (const candidate of candidates) {
       if (manualOnlyIds.has(candidate.id)) continue
-      // Exact barcode matches behave as before. A pair differing only by one
-      // leading zero also lands together, but still only inside the same exact
-      // name and same-cost bucket. Same barcode + different name therefore
-      // remains in the manual-review list, exactly as requested.
+      // Exact barcode matches behave as before, and a pair differing only by
+      // leading zeros lands together -- inside the same exact NAME, which is the
+      // only bound left. (This comment used to end "and same-cost bucket"; cost
+      // left productDetailSignature on Sep 4 2026, so anyone auditing the fold
+      // from its own comments would have concluded the bulk merge was cost-gated
+      // when it is not.) Same barcode + different name therefore remains in the
+      // manual-review list, exactly as requested.
+      //
+      // productDetailSignature ALREADY folds leading zeros (identityBarcodeKey),
+      // so the explicit fold here is redundant -- kept because it is idempotent
+      // and because spelling it out is what makes the survivor ordering legible.
       const bucketKey = productDetailSignature({
         ...candidate,
         barcode: normalizeLeadingZeroBarcodeForCleanup(candidate.barcode),
