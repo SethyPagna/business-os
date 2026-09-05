@@ -758,10 +758,10 @@ async function writeBackupDocument(
 // `restoreCloudflareBackup` above already deletes+restores only whichever
 // tables are present in `payload.tables` and treats `r2.copiedKeys`/
 // `assetsPrefix` as optional, so a manifest with a subset of tables and an
-// empty asset list restores correctly through the exact same code path --
-// no restore-side changes needed. Same manifest format/prefix as a full
-// backup, so it still lists in `listCloudflareBackups` and is restorable
-// from the same UI.
+// empty asset list uses the same restore code path. The dependency preflight
+// must also pass: a partial sales/stock snapshot without its replay history
+// cannot safely replace a newer live database. Same manifest format/prefix
+// as a full backup, so it still lists in `listCloudflareBackups`.
 //
 // The caller is responsible for passing EVERY table its reset will delete:
 // a scoped backup that misses one is a backup that cannot undo the reset
@@ -1046,6 +1046,48 @@ async function openBackupStream(env: Env, key: string): Promise<ReadableStream<U
 // the restore's crash-visibility contract is already broken.
 export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; table?: string; rowsDone?: number }
 
+// Replay snapshots and revision counters have application-level links that
+// SQLite FKs cannot express. Restoring their sales/stock independently can
+// leave a valid-looking undo action pointing at a different generation.
+const SALE_REPLAY_RESTORE_BUNDLE = [
+  'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
+  'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
+  'return_item_batch_allocations', 'fees', 'inventory_movements', 'action_history',
+  'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
+] as const
+
+async function restoreDependencyError(env: Env, documentTables: ReadonlySet<string>): Promise<string | null> {
+  const liveTables = new Set<string>()
+  for (const table of BACKUP_TABLES) {
+    if (await tableExists(env, table)) liveTables.add(table)
+  }
+  const restored = new Set([...liveTables].filter(table => documentTables.has(table)))
+  if (restored.size === liveTables.size) return null
+  const missing = new Set<string>()
+  if (SALE_REPLAY_RESTORE_BUNDLE.some(table => restored.has(table))) {
+    for (const table of SALE_REPLAY_RESTORE_BUNDLE) {
+      if (liveTables.has(table) && !restored.has(table)) missing.add(table)
+    }
+  }
+  // Check both ends of declared dependencies among backed-up tables. Missing
+  // children can BLOCK or CASCADE a parent DELETE; missing parents can make
+  // later INSERTs fail. Never clear an absent table to work around either.
+  // Table presence, not current row counts, determines safety: an empty table
+  // can gain rows between validation and restore. Unrelated scoped backups
+  // (e.g. settings alone) still work.
+  for (const table of liveTables) {
+    const references = await env.DB.prepare(`PRAGMA foreign_key_list(${qid(table)})`).all<{ table: string }>()
+    for (const reference of references.results || []) {
+      if (!liveTables.has(reference.table) || restored.has(table) === restored.has(reference.table)) continue
+      missing.add(restored.has(table) ? reference.table : table)
+    }
+  }
+  if (!missing.size) return null
+  return `Cannot restore this backup: missing dependency tables: ${[...missing].sort().join(', ')}. `
+    + 'Choose a complete backup containing the related sales, stock and replay history, or recover this older backup in a separate compatible database. '
+    + 'No database rows have been changed; unbacked live history will not be discarded.'
+}
+
 export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
   const key = resolveBackupKey(source)
 
@@ -1109,10 +1151,15 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // the DOCUMENT doesn't carry (an older backup, from before that table
   // joined BACKUP_TABLES) is neither cleared nor restored -- its live rows
   // survive against otherwise-rolled-back data. That can leave e.g. the lot
-  // ledger describing stock the restored branch_stock no longer has. Report
-  // exactly which tables that applies to instead of letting the restore
-  // read as complete.
+  // ledger describing stock the restored branch_stock no longer has. Refuse
+  // unsafe dependency gaps below; report any unrelated omitted tables rather
+  // than letting a scoped restore read as complete.
   const tablesNotInBackup = (BACKUP_TABLES as readonly string[]).filter((t) => !documentTables.has(t))
+
+  // Recheck against the live schema even if the caller already validated the
+  // document. This MUST precede progress callbacks and every DELETE/write.
+  const dependencyError = await restoreDependencyError(env, documentTables)
+  if (dependencyError) throw new Error(dependencyError)
 
   // Order by BACKUP_TABLES (the writer's dependency order) so the reverse
   // delete respects foreign keys regardless of the document's own order.
@@ -1230,6 +1277,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
 export async function validateCloudflareBackup(env: Env, source: string) {
   const key = resolveBackupKey(source)
   const streamed = await inspectCloudflareBackupStream(await openBackupStream(env, key))
+  const dependencyError = await restoreDependencyError(env, new Set(streamed.tableNames))
   const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
   const lifecycle = await getCloudflareBackupState(env, backupName)
   const copiedCount = lifecycle?.copiedKeys.length ?? streamed.r2?.copiedKeys?.length ?? streamed.summary?.assetsBackedUp ?? 0
@@ -1246,7 +1294,8 @@ export async function validateCloudflareBackup(env: Env, source: string) {
     assetCount,
     status: lifecycle?.status || 'finalized',
     failedAssets: lifecycle?.failedKeys.length || 0,
-    restorable: !lifecycle || lifecycle.status === 'finalized',
+    restorable: (!lifecycle || lifecycle.status === 'finalized') && !dependencyError,
+    restoreError: dependencyError || undefined,
   }
 }
 
@@ -1258,6 +1307,7 @@ export type StreamedBackupInspection = {
   r2: BackupPayload['r2'] | null
   tableCount: number
   rowCount: number
+  tableNames: string[]
 }
 
 /**
@@ -1278,8 +1328,9 @@ export async function inspectCloudflareBackupStream(
   let r2: BackupPayload['r2'] | null = null
   let tableCount = 0
   let rowCount = 0
+  const tableNames: string[] = []
   for await (const event of streamBackupEvents(body)) {
-    if (event.type === 'table') tableCount += 1
+    if (event.type === 'table') { tableCount += 1; tableNames.push(event.table) }
     else if (event.type === 'row') rowCount += 1
     else if (event.key === 'format') format = String(event.value || '')
     else if (event.key === 'formatVersion') formatVersion = Number(event.value || 0)
@@ -1298,7 +1349,7 @@ export async function inspectCloudflareBackupStream(
   if (Number(summary.tableCount) !== tableCount || Number(summary.rowCount) !== rowCount) {
     throw new Error('Backup summary counts do not match its streamed table data')
   }
-  return { createdAt, source, runtime, summary, r2, tableCount, rowCount }
+  return { createdAt, source, runtime, summary, r2, tableCount, rowCount, tableNames }
 }
 
 export async function storeSystemJob(env: Env, job: Record<string, unknown>) {
