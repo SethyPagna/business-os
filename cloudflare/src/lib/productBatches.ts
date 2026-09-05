@@ -397,9 +397,11 @@ export async function receiveBatchStock(db: D1Compat, input: {
   ).get<{ id: number }>({ productId: input.productId, batchKey: plan.batchKey })
   await db.batch(plan.statements)
   const batch = await db.prepare(
-    `SELECT id, batch_number FROM product_batches WHERE id = @batchId
-      OR (variant_product_id = @productId AND batch_key = @batchKey) ORDER BY id LIMIT 1`,
-  ).get<{ id: number; batch_number: number | null }>({
+    `SELECT id, batch_number, lot_code FROM product_batches
+      WHERE variant_product_id = @productId AND
+        ((@batchId IS NOT NULL AND id = @batchId)
+          OR (@batchId IS NULL AND batch_key = @batchKey)) LIMIT 1`,
+  ).get<{ id: number; batch_number: number | null; lot_code: string | null }>({
     batchId: input.batchId ?? null,
     productId: input.productId,
     batchKey: plan.batchKey,
@@ -409,7 +411,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
     batchId: Number(batch.id),
     created: !before && input.batchId == null,
     batchNumber: batch.batch_number != null ? Number(batch.batch_number) : null,
-    lotCode: plan.lotCode,
+    lotCode: batch.lot_code ?? plan.lotCode,
   }
 }
 

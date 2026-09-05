@@ -119,15 +119,17 @@ function rejectUnknown(value: Row, allowed: readonly string[], message: string) 
 }
 
 function integer(value: unknown, field: string, nullable = false): number | null {
-  if (nullable && (value == null || value === '')) return null
-  const parsed = typeof value === 'number' ? value : Number(value)
+  if (nullable && value == null) return null
+  if (typeof value !== 'number') fail(`${field} must be a JSON number.`, 400, 'invalid_request')
+  const parsed = value
   if (!Number.isSafeInteger(parsed) || parsed <= 0) fail(`${field} must be a positive integer.`, 400, 'invalid_request')
   return parsed
 }
 
 function finite(value: unknown, field: string, nullable = false, maximum = 1_000_000_000): number | null {
-  if (nullable && (value == null || value === '')) return null
-  const parsed = typeof value === 'number' ? value : Number(value)
+  if (nullable && value == null) return null
+  if (typeof value !== 'number') fail(`${field} must be a JSON number.`, 400, 'invalid_request')
+  const parsed = value
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > maximum) fail(`${field} is out of range.`, 400, 'invalid_request')
   return parsed
 }
@@ -246,7 +248,7 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
     const kind = line.kind as CommandKind
     const product = kind === 'create_receive' ? canonicalProduct(line.product, defaults, quantity, branchId, maxImages) : null
     const productId = kind === 'receive' ? integer(line.product_id, 'product_id') as number : null
-    const batchId = line.batch_id == null || line.batch_id === '' ? null : integer(line.batch_id, 'batch_id') as number
+    const batchId = line.batch_id == null ? null : integer(line.batch_id, 'batch_id') as number
     if (kind === 'create_receive' && batchId != null) fail('create_receive cannot reference an existing batch.', 400, 'invalid_request')
     if (kind === 'receive' && line.product != null) fail('receive cannot include a product object.', 400, 'invalid_request')
     if (kind === 'create_receive' && line.product_id != null) fail('create_receive cannot include product_id.', 400, 'invalid_request')
@@ -310,6 +312,52 @@ function assertion(predicate: string, params: Row = {}): StockWriteStatement {
   return { sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params }
 }
 
+// Bracket all preimage reads with the same bounded revision selection. Each
+// fence is one SQLite SELECT: even rows discovered through lot/asset identity
+// are resolved with their revisions in that statement. Retained revisions
+// detect ABA; changing the resolved row id also changes the fence. Equal
+// fences prove the preimages and the later commit guards share one state.
+async function snapshotFence(db: D1Compat, request: StockSessionRequest): Promise<string> {
+  const pairs: Array<[string, string]> = []
+  const targets: Array<{ product: number; branch: number; batch: number | null; key: string }> = []
+  const paths = new Set<string>()
+  for (const line of request.items) {
+    pairs.push(['branch', String(line.branch_id)])
+    if (line.supplier_id != null) pairs.push(['supplier', String(line.supplier_id)])
+    if (line.product_id != null) {
+      pairs.push(['product', String(line.product_id)], ['branch_stock', `${line.product_id}:${line.branch_id}`])
+      if (line.batch_id != null) pairs.push(['batch', String(line.batch_id)])
+      else pairs.push(['batch_identity', `${line.product_id}:${receivedBatchKey(line.received_date)}`])
+      targets.push({ product: line.product_id, branch: line.branch_id, batch: line.batch_id, key: receivedBatchKey(line.received_date) })
+    }
+    if (line.product) {
+      pairs.push(['product_catalog', 'all'], ['branch_catalog', 'all'])
+      for (const path of (line.product.image_gallery as string[] | undefined) || []) paths.add(path)
+      if (line.product.image_path) paths.add(String(line.product.image_path))
+    }
+  }
+  // Three JSON binds regardless of line count; inputs are already capped at
+  // 25 lines / 64 KiB. No scan or materialization of the whole revision ledger.
+  const rows = await db.prepare(`WITH targets AS (
+      SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch,
+        json_extract(value,'$.batch') batch, json_extract(value,'$.key') batch_key
+      FROM json_each(@targets)
+    ), lots AS (
+      SELECT pb.id,pb.variant_product_id,pb.batch_key,t.branch FROM targets t JOIN product_batches pb
+      ON pb.variant_product_id=t.product AND ((t.batch IS NOT NULL AND pb.id=t.batch)
+        OR (t.batch IS NULL AND pb.batch_key=t.batch_key))
+    ), wanted(entity_type,entity_key) AS (
+      SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]') FROM json_each(@pairs)
+      UNION SELECT 'batch',CAST(id AS TEXT) FROM lots
+      UNION SELECT 'batch_identity',CAST(variant_product_id AS TEXT)||':'||batch_key FROM lots
+      UNION SELECT 'branch_batch_stock',CAST(id AS TEXT)||':'||CAST(branch AS TEXT) FROM lots
+      UNION SELECT 'asset',CAST(a.id AS TEXT) FROM file_assets a JOIN json_each(@paths) p ON a.public_path=p.value
+    ) SELECT w.entity_type,w.entity_key,COALESCE(r.revision,0) revision FROM wanted w
+      LEFT JOIN stock_session_revisions r ON r.entity_type=w.entity_type AND r.entity_key=w.entity_key
+      ORDER BY w.entity_type,w.entity_key`).all<Row>({ targets: JSON.stringify(targets), pairs: JSON.stringify(pairs), paths: JSON.stringify([...paths]) })
+  return JSON.stringify(rows)
+}
+
 function revisionAssertion(type: string, key: string, predicate: string, params: Row, revision: number): StockWriteStatement {
   return assertion(`(${predicate}) AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type=@revisionType AND entity_key=@revisionKey),0)=@revision`, {
     ...params, revisionType: type, revisionKey: key, revision,
@@ -356,6 +404,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const branchIds = request.items.map((line) => line.branch_id)
   const supplierIds = request.items.flatMap((line) => line.supplier_id == null ? [] : [line.supplier_id])
   const explicitBatchIds = request.items.flatMap((line) => line.batch_id == null ? [] : [line.batch_id])
+  const beforeFence = await snapshotFence(db, request)
   const products = await rowsIn<Row>(db, receiveIds, 'id', 'SELECT * FROM products')
   const branches = await rowsIn<Row>(db, branchIds, 'id', 'SELECT * FROM branches')
   const suppliers = await rowsIn<Row>(db, supplierIds, 'id', 'SELECT * FROM suppliers')
@@ -439,10 +488,15 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const branchStocks = existingProductIds.length && branchIds.length
     ? await db.prepare(`SELECT * FROM branch_stock WHERE product_id IN (${buildInClause('product', existingProductIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
       .all<Row>({ ...buildInClause('product', existingProductIds).params, ...buildInClause('branch', [...new Set(branchIds)]).params })
+      .then((rows) => rows.filter((row) => request.items.some((line) => line.product_id === row.product_id && line.branch_id === row.branch_id)))
     : []
   const batchStocks = existingBatchIds.length && branchIds.length
     ? await db.prepare(`SELECT * FROM branch_batch_stock WHERE batch_id IN (${buildInClause('batch', existingBatchIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
       .all<Row>({ ...buildInClause('batch', existingBatchIds).params, ...buildInClause('branch', [...new Set(branchIds)]).params })
+      .then((rows) => rows.filter((row) => request.items.some((line) => {
+        const batch = line.batch_id != null ? explicitBatchMap.get(line.batch_id) : dateBatchMap.get(`${line.product_id}:${receivedBatchKey(line.received_date)}`)
+        return batch?.id === row.batch_id && line.branch_id === row.branch_id
+      })))
     : []
   const branchStockMap = new Map(branchStocks.map((row) => [`${row.product_id}:${row.branch_id}`, row]))
   const batchStockMap = new Map(batchStocks.map((row) => [`${row.batch_id}:${row.branch_id}`, row]))
@@ -463,6 +517,9 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     if (batch) revisionPairs.push(['branch_batch_stock', `${batch.id}:${line.branch_id}`])
   }
   const revisions = await readRevisions(db, revisionPairs)
+  if (await snapshotFence(db, request) !== beforeFence) {
+    fail('Stock session state changed while reading its snapshot. Refresh and retry.', 409, 'stale_state')
+  }
   const rev = (type: string, key: unknown) => revisions.get(revisionKey(type, key)) || 0
   const operationId = crypto.randomUUID()
   const stamp = new Date().toISOString()
