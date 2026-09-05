@@ -30,6 +30,8 @@ for (const now of [new Date(2026, 0, 1), new Date(2026, 8, 5), new Date(2026, 3,
   }
 }
 assert.match(css, /@media \(min-width: 1024px\)[\s\S]*?\[data-reports-hub\][\s\S]*?--ui-size-body: 14px/)
+assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(12px, 2vw, 24px\);/)
+assert.ok(css.indexOf('@media (min-width: 768px)') < css.indexOf('@media (min-width: 1024px)'), 'desktop gutter overrides tablet gutter; phones remain unchanged')
 assert.match(css, /\[data-reports-hub\] \.reports-overview-statement\s*\{[^}]*max-width: 34rem/)
 assert.match(overview, /className="reports-overview-statement"/)
 assert.match(hub, /showTime=\{supportsTime\}/)

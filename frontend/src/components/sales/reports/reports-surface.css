@@ -227,6 +227,14 @@
   .reports-mobile-range { font-size: 12px; gap: 4px; padding-inline: 8px; }
 }
 
+/* Embedded reports need a gutter beside the sidebar at tablet widths too.
+   Keep phone density unchanged; wider desktops retain the larger gutter below. */
+@media (min-width: 768px) {
+  [data-reports-hub] {
+    padding-inline: clamp(12px, 2vw, 24px);
+  }
+}
+
 /* Desktop-only, report-local readability. Do not enlarge global UI tokens
    or reduce the existing mobile/Khmer text and line-height floors. */
 @media (min-width: 1024px) {
