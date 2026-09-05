@@ -49,7 +49,7 @@ runTest('a single status change goes through the dialog, not window.confirm', ()
 runTest('a BULK status change also confirms first -- the shape of the Sep-3 incident', () => {
   assert.match(sales, /if \(!confirmed && !extra\) \{[\s\S]{0,900}setStatusPrompt\(\{\s*\n\s*mode: 'bulk'/,
     'handleBulkStatusUpdate must open the same confirmation before applying anything')
-  assert.match(sales, /handleBulkStatusUpdate = async \(nextStatus: string, extra[^)]*, confirmed = false\)/,
+  assert.match(sales, /handleBulkStatusUpdate = async \(nextStatus: string, extra[^)]*, confirmed = false, retryOriginal = false\)/,
     'the bulk handler takes the confirmed flag the dialog sets')
 })
 
