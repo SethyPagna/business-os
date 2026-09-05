@@ -458,9 +458,14 @@ export interface StatementLine {
   key: string
   labelKey: string
   fallback: string
+  /** Canonical USD used by statement arithmetic, comparison, and export. */
   usd: number
-  /** Raw KHR portion when the figure is dual-currency (expenses). */
-  khr?: number
+  /**
+   * Statement lines must not also expose a native KHR portion: a formatter
+   * would interpret `(usd, khr)` as a raw pair and convert the KHR again.
+   * Native pairs remain on the source expense rows and summary block.
+   */
+  khr?: never
   prevUsd?: number | null
   kind: StatementKind
   group: StatementGroup
@@ -619,7 +624,6 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
         labelKey: 'rpt_operating_expenses',
         fallback: 'Operating expenses',
         usd: expUsd,
-        khr: expenses.khr,
         prevUsd: prevExpUsd,
         kind: 'sub',
         group: 'profit',
