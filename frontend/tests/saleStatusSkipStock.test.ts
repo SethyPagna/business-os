@@ -125,3 +125,6 @@ if (failed) {
   process.exit(1)
 }
 console.log('All sale status skip-stock frontend tests passed')
+// Keep related integration suites reachable without exceeding Windows' command-line limit.
+import './saleBulkStatus.test.ts'
+import './membershipDefaults20260905.test.cjs'

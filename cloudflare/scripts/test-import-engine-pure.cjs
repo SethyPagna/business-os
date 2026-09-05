@@ -1187,7 +1187,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifyContacts(db, 'customers', [row({ name: 'Dara' }, 1)], null)
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].action, 'create')
-    assert.ok(/^LC-\d{5}$/.test(String(results[0].data.membership_number || '')), 'new customer with no membership_number in the CSV gets one auto-generated, in the LC-##### house format from lib/membershipNumber.ts')
+    assert.ok(/^[A-Z0-9]{8}$/.test(String(results[0].data.membership_number || '')), 'new customers receive an eight-character membership ID from the shared authority')
   }
 
   // 2) Matched existing customer whose stored membership_number is
