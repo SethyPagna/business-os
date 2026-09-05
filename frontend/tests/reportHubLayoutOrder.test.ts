@@ -40,6 +40,10 @@ assert.match(folded, /onClick=\{\(\) => setControlsFolded\(false\)\}/, 'the hand
 assert.match(folded, /trh\(view\.labelKey, view\.fallback\)/, 'the folded line names the view')
 assert.match(folded, /rangeSubtitle\(filters, trh\)/, 'and the range, through the shared subtitle helper')
 assert.match(folded, /\{filtersButton\}/, 'the Filters button stays mounted while folded')
+// The fold shrinks the content, never the tap area: 44px like the rest of
+// the compact tier (a2 measured 18-20px targets on the first cut, Sep 6 2026).
+assert.match(folded, /<button\s+type="button"\s+className="flex min-h-\[44px\] min-w-0 flex-1/, 'the handle keeps a 44px tap height')
+assert.match(folded, /<div className="flex h-11 w-11 shrink-0 items-center justify-center \[&_button\]:h-11 \[&_button\]:w-11">\{filtersButton\}<\/div>/, 'the folded Filters button is a 44px square')
 assert.match(hub, /import \{[^}]*rangeSubtitle[^}]*\} from '\.\/reports\/reportTypes\.ts'/)
 
 // The desktop tier is untouched: sticky ControlRow plus the preset row.
