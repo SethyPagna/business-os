@@ -7,6 +7,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
+import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -1271,7 +1272,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const refundUsd = Number(stripReturns.refund_usd) || 0
     const cogsUsd = Number(totals.cost_usd) || 0
     const profitUsd = Number(totals.profit_usd) || 0
-    const storeDeliveryUsd = Number(totals.store_delivery_usd) || 0
+    // The two figures the cards below print equations for. net_sales_usd
+    // arrived with the Sep 6 kernel; read the identity backwards if an
+    // older Worker is answering, rather than print a sum that will not foot.
+    const kernelRefundUsd = Number(totals.refund_usd) || 0
+    const formulaTotals = {
+      ...totals,
+      net_sales_usd: totals.net_sales_usd ?? (revenueUsd + kernelRefundUsd),
+    }
     const feeTotals = feeStripData?.totals || {}
     const expensesUsd = Number(feeTotals.amount_usd) || 0
     const expensesKhr = Number(feeTotals.amount_khr) || 0
@@ -1286,7 +1294,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         label: t('sales') || 'Sales',
         value: String(txCount),
         sub: txCount > 0 ? `${translateOr('stats_avg_sale', 'avg')} ${fmtUSD(Number(totals.avg_order_usd) || 0)}` : undefined,
-        hint: translateOr('stats_sales_hint', 'Completed and delivery sales in the range (cancelled and awaiting-payment excluded from money figures). The breakdown counts every status, including those two.'),
+        hint: translateOr('stats_sales_hint', 'Every non-cancelled sale in the range. Sales still awaiting payment ARE counted in the money figures — the goods left the shop; what is still owed is reported separately as Not Paid. Only cancelled sales contribute nothing. The breakdown counts every status.'),
         details: byStatus.map((row) => ({
           label: getStatusLabel(String(row.sale_status || 'completed'), t),
           value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.total_usd) || 0)}`,
@@ -1297,11 +1305,18 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         label: t('revenue') || 'Revenue',
         value: fmtUSD(revenueUsd),
         tone: 'accent',
-        hint: translateOr('stats_revenue_hint', 'Net revenue = gross sales minus store and membership discounts (before tax and delivery). Collected = what actually changed hands including tax and customer-paid delivery.'),
+        hint: `${translateOr('stats_revenue_hint', 'Revenue is net sales minus the refunds that reverse them, before tax and delivery. Collected = what actually changed hands, including tax and customer-paid delivery.')}
+
+${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenueTerms(formulaTotals), fmtUSD, translateOr)}`,
         details: [
           { label: translateOr('stats_gross', 'Gross sales'), value: fmtUSD(Number(totals.gross_sales_usd) || 0) },
           { label: translateOr('stats_store_discount', 'Store discount'), value: fmtUSD(Number(totals.store_discount_usd) || 0), tone: 'warn' as const },
           { label: translateOr('stats_member_discount', 'Member discount'), value: fmtUSD(Number(totals.membership_discount_usd) || 0), tone: 'warn' as const },
+          // The refund term of the revenue identity: refunds attributed back
+          // to the period of the SALE they reverse. The Returns card's figure
+          // is a different quantity (by return date) and this drill must not
+          // borrow it -- revenue already has THIS one out.
+          { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(kernelRefundUsd), tone: kernelRefundUsd > 0 ? ('warn' as const) : undefined },
           { label: translateOr('stats_tax', 'Tax'), value: fmtUSD(Number(totals.tax_usd) || 0) },
           { label: translateOr('stats_delivery_fees', 'Delivery fees'), value: fmtUSD(Number(totals.delivery_usd) || 0) },
           { label: translateOr('stats_collected', 'Collected'), value: fmtUSD(Number(totals.collected_total_usd) || 0), tone: 'ok' as const },
@@ -1325,11 +1340,17 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         value: fmtUSD(profitUsd),
         tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
         sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
-        hint: translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (including Not Paid).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងមិនទាន់បង់)។'),
+        hint: `${translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (including Not Paid).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងមិនទាន់បង់)។')}
+
+${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd }, profitTerms(formulaTotals), fmtUSD, translateOr)}`,
         details: [
           { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
           { label: t('cogs') || 'COGS', value: fmtUSD(cogsUsd), tone: 'warn' as const },
-          { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(storeDeliveryUsd), tone: storeDeliveryUsd > 0 ? ('warn' as const) : undefined },
+          // The hint has said "+ delivery fees charged − courier cost" since
+          // the delivery correction; the drill still listed the WAIVED fee,
+          // which profit does not subtract. These are the real two terms.
+          { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(totals.recognized_delivery_usd) || 0) },
+          { label: translateOr('rpt_delivery_paid', 'Delivery paid to couriers'), value: fmtUSD(Number(totals.recognized_delivery_cost_usd) || 0), tone: 'warn' as const },
           { label: t('gross_profit') || 'Gross profit', value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
         ],
       },
@@ -1353,7 +1374,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         hint: translateOr('stats_returns_hint', 'Customer returns created in the range (cancelled returns excluded). Refunds here are not subtracted from the Revenue card — Revenue matches the Dashboard for the same range.'),
         details: [
           { label: t('returns') || 'Returns', value: String(returnCount) },
-          { label: translateOr('stats_refunded', 'Refunded'), value: fmtUSD(refundUsd), tone: returnCount > 0 ? ('crit' as const) : undefined },
+          { label: translateOr('stats_refunded_by_return_date', 'Refunded (by return date)'), value: fmtUSD(refundUsd), tone: returnCount > 0 ? ('crit' as const) : undefined },
+          { label: translateOr('stats_refund_in_revenue', "Taken off this period's revenue"), value: fmtUSD(kernelRefundUsd) },
         ],
       },
     ]

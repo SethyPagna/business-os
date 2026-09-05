@@ -580,8 +580,10 @@ function statementFigures(t: ReportTotals): Record<string, number> {
  * arithmetically closed on the canonical kernel figures it was given, and
  * every input of every step is on screen:
  *
- *   REVENUE    gross sales - discounts -> net sales - unpaid credit
- *              - refunds -> REVENUE
+ *   REVENUE    gross sales - discounts -> net sales - refunds -> REVENUE
+ *              (unpaid credit is NOT taken off: an awaiting-payment sale is
+ *              recognized revenue, and the amount still owed is reported
+ *              below as its own PENDING block, never as a subtraction)
  *   COLLECTED  revenue + tax/delivery -> COLLECTED TOTAL
  *   PROFIT     revenue (carried down) - COGS + delivery collected
  *              - delivery paid to couriers -> GROSS PROFIT

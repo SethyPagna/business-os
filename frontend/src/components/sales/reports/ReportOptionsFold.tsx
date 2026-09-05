@@ -116,7 +116,7 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
         <Group
           title={tr('profit', 'Profit')}
           hint={showProfit
-            ? tr('rpt_profit_hint', 'Gross profit = revenue − cost of goods − store-paid delivery. Net after expenses also subtracts recorded expenses (Overview only).')
+            ? tr('rpt_profit_hint', 'Profit = revenue − cost of goods sold + delivery fees charged − courier costs. Includes Not Paid sales. Operating expenses are deducted separately; this option selects which profit subtotal leads the summary.')
             : tr('rpt_cost_hidden_hint', 'Cost and profit figures are visible to admins only.')}
         >
           {profitModes.map((m) => (
