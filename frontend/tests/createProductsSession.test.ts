@@ -250,9 +250,13 @@ runTest('the header is seeded into the item form through ProductForm createDefau
   // Seeded LAST so the form's own blank defaults stay authoritative for
   // every field the session does not carry.
   assert.match(productFormSource, /\.\.\.\(createDefaults \|\| \{\}\),/)
-  assert.match(modalSource, /createDefaults=\{itemDefaults\}/)
+  assert.match(modalSource, /const itemCreateDefaults = useMemo\(\(\) => \(\{ \.\.\.itemDefaults, received_date: receivedDate \}\)/)
+  assert.match(modalSource, /createDefaults=\{itemCreateDefaults\}/)
+  assert.match(modalSource, /showReceivedDate/, 'new child forms expose a receipt-date override')
+  assert.match(productFormSource, /received_date\?: string \| null/)
+  assert.match(productFormSource, /isCreateMode && showReceivedDate/)
   // A fresh key per item, or item two inherits item one's typed state.
-  assert.match(modalSource, /key=\{`create-products-item-\$\{itemFormSeq\}`\}/)
+  assert.match(modalSource, /key=\{editingNewLine \? `create-products-line-\$\{editingNewLine\.lineId\}` : `create-products-item-\$\{itemFormSeq\}`\}/)
 })
 
 runTest('positive new and existing lines use one atomic stock-session write', () => {
@@ -265,6 +269,27 @@ runTest('positive new and existing lines use one atomic stock-session write', ()
   assert.match(inventoryWriteTransportSource, /export function createInventorySession/)
   assert.match(inventoryWriteTransportSource, /'POST', '\/api\/inventory\/sessions'/)
   assert.match(inventoryWriteTransportSource, /route\([\s\S]*?null,[\s\S]*?true,?\s*\)/, 'stock sessions stay network-only writes')
+})
+
+runTest('queued rows reopen for correction without changing line identity or overwriting saved overrides', () => {
+  assert.match(modalSource, /const \[editingLineId, setEditingLineId\] = useState<string \| null>\(null\)/)
+  assert.match(modalSource, /if \(submissionLocked \|\| saving \|\| line\.status !== 'queued'\) return/)
+  assert.match(modalSource, /draftScope=\{editingNewLine \? `create-products-session-\$\{sessionIdRef\.current\}-line-\$\{editingNewLine\.lineId\}`/)
+  assert.match(modalSource, /lineId,[\s\S]*?product: stockSessionProduct\(prepared\)/, 'a New edit replaces the same logical line')
+  assert.match(modalSource, /prev\.map\(\(row\) => row\.lineId === lineId \? updated : row\)/)
+  assert.match(modalSource, /lineId: replaceLineId \|\| `receive_/, 'an Existing edit also keeps its line id')
+  assert.match(modalSource, /name: editingNewLine\.name[\s\S]*?received_date: editingNewLine\.receivedDate/, 'saved child values seed after current header defaults')
+  assert.match(modalSource, /receivedDate: String\(payload\.received_date \|\| current\.receivedDate \|\| receivedDate\)/)
+})
+
+runTest('an idempotency conflict stays explicit, frozen, and cannot mint or retry a new request', () => {
+  assert.match(modalSource, /submissionErrorCode\?: string/)
+  assert.match(modalSource, /const idempotencyConflict = submissionLocked && submissionErrorCode === 'idempotency_conflict'/)
+  assert.match(modalSource, /if \(saving \|\| idempotencyConflict\) return/)
+  assert.match(modalSource, /idempotency_conflict · \{tr\('resolve', 'Resolve'\)\}/)
+  assert.match(modalSource, /disabled=\{saving \|\| idempotencyConflict/)
+  assert.match(modalSource, /submittedItems: attemptItems, submissionErrorCode: errorCode/)
+  assert.doesNotMatch(modalSource, /sessionRequestIdRef\.current\s*=/)
 })
 
 runTest('the whole run carries stable request and line ids for safe retry', () => {
