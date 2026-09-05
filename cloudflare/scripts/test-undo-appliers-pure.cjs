@@ -351,7 +351,7 @@ await check('source lock: the applier permission gate (full tier) guards BOTH re
   assert.ok(/canUseNamedAppliers\(user, \[body\.undo_payload, body\.redo_payload\]\)/.test(routeSrc),
     'canRecordHistory must gate payloads naming a registered applier')
   assert.ok(/applierPermissionTier\(user, applier\) !== 'full'/.test(routeSrc),
-    'the applier gate must demand the FULL tier of the applier-declared permission (via applierPermissionTier, which honours an action-gated applier)')
+    'non-stock appliers must demand the FULL tier of their declared permission')
   // Operate time: the gate must sit inside the transition handler BEFORE the
   // status-flip UPDATE (and therefore before applier.run, which follows it).
   const handlerStart = routeSrc.indexOf('completeServerHistoryTransition')
@@ -371,8 +371,11 @@ await check('source lock: routes/actionHistory.ts stamps server_replayable and r
   // permission, so the UI is never offered a button the operate gate refuses.
   assert.ok(/server_replayable: !!\(applier && canUseNamedAppliers\(user, \[undoPayload, redoPayload\]\)\)/.test(routeSrc), 'mapRow must gate BOTH directional payloads through the full-tier permission helper')
   const permissionHelper = routeSrc.slice(routeSrc.indexOf('function canUseNamedAppliers('), routeSrc.indexOf('function canRecordHistory('))
-  assert.ok(/applierPermissionTier\(user, applier\) !== 'full'\) return false/.test(permissionHelper), 'shared helper must retain the full-tier applier gate')
-  assert.ok(/requires_product_add[\s\S]*getActionTier\(user, 'products', 'add'\) !== 'full'\) return false/.test(permissionHelper), 'mixed stock sessions must additionally require full product-add permission')
+  assert.ok(/else if \(applier && applierPermissionTier\(user, applier\) !== 'full'\) return false/.test(permissionHelper), 'shared helper must retain the full-tier gate for every non-stock applier')
+  assert.ok(/payload\.snapshot_version !== 2 \|\| !canReplayStockSessionPayload\(user, payload\)/.test(permissionHelper), 'stock list/replayability must use the authoritative payload permission union and reject old snapshot formats')
+  assert.ok(/STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession/.test(routeSrc), 'action history must import the stock permission helper')
+  const operateHandler = routeSrc.slice(routeSrc.indexOf('completeServerHistoryTransition'))
+  assert.ok(/applier\.name === STOCK_SESSION_KIND[\s\S]*!canReplayStockSessionPayload\(user, payload\)[\s\S]*applierPermissionTier\(user, applier\) !== 'full'/.test(operateHandler), 'stock operate-time permission must use the authoritative union while other appliers keep their static full-tier gate')
   // The require_applied refusal must come BEFORE the status-flip UPDATE inside
   // the transition handler -- refusing after the flip would record a reversal
   // that never happened.
