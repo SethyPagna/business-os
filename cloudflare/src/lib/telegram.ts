@@ -40,11 +40,11 @@ function cleanLine(value: unknown, max = 300): string {
 // grow a third way of printing a dollar amount.
 const round2 = (value: number) => Math.round(value * 100) / 100
 const usd = (value: unknown) => `$${round2(Number(value) || 0).toFixed(2)}`
-function money(usd: unknown, khr: unknown): string {
+function money(usd: unknown, khr: unknown, separator = ' · '): string {
   const usdValue = Number(usd) || 0; const khrValue = Number(khr) || 0; const parts: string[] = []
   if (usdValue) parts.push(`$${usdValue.toFixed(2)}`)
   if (khrValue) parts.push(`${Math.round(khrValue).toLocaleString()}៛`)
-  return parts.length ? parts.join(' · ') : '$0.00'
+  return parts.length ? parts.join(separator) : '$0.00'
 }
 
 // The alerts chat id setting doubles as the COMMAND ALLOW-LIST. A Telegram
@@ -899,8 +899,14 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   const items = sale.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
     const quantity = Number(item.quantity) || 0
     const base = Number(item.basePriceUsd)
-    const lineDiscount = Number.isFinite(base) && base > item.unitPriceUsd ? round2((base - item.unitPriceUsd) * quantity) : 0
-    return `• ${cleanLine(item.name, 100)} ${quantity} × ${usd(item.unitPriceUsd)}${lineDiscount ? ` (−${usd(lineDiscount)})` : ''} = ${usd(item.lineTotalUsd)}`
+    const netUnitPrice = round2(Number(item.unitPriceUsd) || 0)
+    const netLineTotal = round2(Number(item.lineTotalUsd) || 0)
+    const grossUnitPrice = round2(base)
+    const lineDiscount = Number.isFinite(base) && grossUnitPrice > netUnitPrice
+      ? round2(Math.max(0, round2(grossUnitPrice * quantity) - netLineTotal))
+      : 0
+    const displayedUnitPrice = lineDiscount > 0 ? grossUnitPrice : netUnitPrice
+    return `• ${cleanLine(item.name, 100)} ${quantity} × ${usd(displayedUnitPrice)}${lineDiscount ? ` (−${usd(lineDiscount)})` : ''} = ${usd(netLineTotal)}`
   })
   const deliveryFee = Number(sale.deliveryFeeUsd) || 0
   // Who paid it comes from the ONE rule that produced total_usd
@@ -929,7 +935,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',
     `Net Total: ${money(sale.totalUsd, sale.totalKhr)}`,
     paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr)}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : 'Paid: unpaid',
-    change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr)}` : '',
+    change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, ' + ')}` : '',
     sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
   ]
 }
