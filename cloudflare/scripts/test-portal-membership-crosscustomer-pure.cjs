@@ -59,6 +59,7 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../index': {},
   '../lib/db': { getDb: () => db },
   '../lib/sqlBinding': { buildInClause: () => '', inlineIntegerIds: () => '', selectInChunks: async () => [] },
