@@ -40,11 +40,9 @@ async function main() {
     // Simulate append-only 0127 without taking ownership of its migration.
     // The backup implementation discovers live columns, so this exercises the
     // exact full-row stream and legacy-default restore behavior.
-    f.sql.exec(`
-      ALTER TABLE sales ADD COLUMN change_is_actual INTEGER NOT NULL DEFAULT 0
-        CHECK (change_is_actual IN (0,1));
-      ALTER TABLE sales ADD COLUMN change_exchange_rate REAL;
-    `)
+    const existingSaleColumns = new Set(f.sql.prepare('PRAGMA table_info(sales)').all().map(column => column.name))
+    if (!existingSaleColumns.has('change_is_actual')) f.sql.exec(`ALTER TABLE sales ADD COLUMN change_is_actual INTEGER NOT NULL DEFAULT 0 CHECK (change_is_actual IN (0,1))`)
+    if (!existingSaleColumns.has('change_exchange_rate')) f.sql.exec('ALTER TABLE sales ADD COLUMN change_exchange_rate REAL')
     bulk.seed(f, 3)
     f.sql.exec("INSERT INTO users(id,username,name,password) VALUES(1,'synthetic-review','Synthetic','unused')")
     f.sql.pragma('foreign_keys = ON')
