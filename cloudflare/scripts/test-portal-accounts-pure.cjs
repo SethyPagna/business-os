@@ -71,7 +71,7 @@ const dbModule = { getDb: () => db }
 const phone = loadReal('lib/phone.ts')
 const passwordPolicy = loadReal('lib/passwordPolicy.ts')
 const contactOptions = loadReal('lib/contactOptions.ts')
-// The ONE membership-number minter (LC-##### , gap-filling). portalAccounts
+// The ONE membership-number minter (eight uppercase letters/digits). portalAccounts
 // no longer generates its own id, so this must be the REAL module.
 const membershipNumber = loadReal('lib/membershipNumber.ts')
 const contactDuplicates = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions })
@@ -125,9 +125,9 @@ async function run() {
   await check('signup (new customer, no membership id) creates account + folded contact + auto id', async () => {
     const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret123' })
     assert.strictEqual(res.ok, true)
-    // One house format across the whole app: lib/membershipNumber.ts's
-    // gap-filling LC-##### sequence, not this file's old random LCMN- id.
-    assert.ok(/^LC-\d{5,}$/.test(res.membershipId), 'auto membership id uses the LC- house format')
+    // New IDs use the shared eight-character A-Z/0-9 contract. Existing
+    // supplied membership IDs retain their separate compatibility coverage.
+    assert.ok(/^[A-Z0-9]{8}$/.test(res.membershipId), 'auto membership id uses eight uppercase letters/digits')
     assert.ok(!portalAccountSource.includes('Math.random('), 'account identifiers must never use Math.random')
     assert.ok(!portalAccountSource.includes('getRandomValues'), 'portalAccounts no longer mints its own id -- lib/membershipNumber.ts is the one authority')
     const account = rawDb.prepare('SELECT phone, contact_id, membership_id FROM portal_accounts WHERE id = ?').get([res.accountId])
