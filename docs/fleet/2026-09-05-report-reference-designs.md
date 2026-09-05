@@ -95,12 +95,39 @@ Cashiers view per #10) so the range and Show button are the first thing on the s
 This is a reorder inside `ReportsHub.tsx` only, no data change, and it is the cheapest win
 on the list.
 
+## Implementation status (Sep 6 2026)
+
+Branch `claude/reports-redesign-2026-09-06`, worktree `../bos-ref-reports`, based on
+`9ab9fd7a` (the deployed lineage). File split agreed with the INV-9 session (a2), binding:
+a2 holds `ReportsHub.tsx`, `ReportFrame.tsx`, `reports-surface.css` and all report MATH;
+this lane owns the report VIEW layout files, `statsStripPresets.ts` and `ReportTable.tsx`.
+
+| Commit | Slice | Rule(s) above |
+|---|---|---|
+| `8cc9d0aa` | `yesterday` preset in `statsStripPresets` + both packs; Overview excel statement as Line · Detail (inner) · Amount (outer), totals alone in the outer column, headline badged, captions only for delivery/pending, tint still keyed on `data-statement-group` | 2, 3, 8 |
+| `8eef3889` | `ReportTable` receipt cards in reference order (money → total → counts muted → detail) via `orderReceiptColumns` / `receiptLineKind`; excel count cells muted | 3, 6 |
+
+Each commit is green on its own: tsc 0, `verify:i18n` OK, build OK, every `tests/*.test.ts`
+file run individually (215 files, no red). New tests: `reportYesterdayPreset`,
+`reportStatementLedger`, `reportReceiptCardOrder`, all in `test:utils`.
+
+**Held back, on purpose:** the Yesterday chip in `DateTimeRangePicker` and the hub's
+`mobilePresets` row must land in ONE commit (`reportResponsiveLayout.test.ts` pins the two
+lists equal) and the hub file is a2's; the picker hunk is parked in this session's scratchpad
+and the three hub lines were sent to a2 (type union line 85, `activeMobilePreset` list line
+92, `mobilePresets` entry line 348). Also waiting on a2's reports sha: the hub reorder
+(shift blocks below the view), the fold-away filter card, and the data-dependent rows
+(category + Remaining, New/Return + gender, courier paid-vs-AR).
+
+The sibling statement folds in `PeriodReport` and `GroupedReport` already render through
+`ReceiptSheet` blocks, which is the #13 shape, so they needed no change for parity.
+
 ## What this lane has NOT done
 
-- No file under `frontend/` or `cloudflare/` has been edited by this session. This is a
-  reading of the screenshots, coordinated with the live session
+- Nothing is deployed and nothing is merged; the branch is handed to a2's reconciliation.
+  The reading above was coordinated with the live session
   `Comprehensive system review and UI fixes` (the INV-9 owner) and the Codex surface before
-  any implementation is claimed.
+  any implementation was claimed.
 - The figures in the screenshots (Gross 1,531 / Discount 61 / Net 1,470 / COGS 1,236.54 /
   Operating profit 209.75 for Sep 3) are the old system's; they match the live Sep 3 report
   Codex verified (`gross1,531, itemdiscount61, net1,470, COGS1,236.54`) and are not evidence
