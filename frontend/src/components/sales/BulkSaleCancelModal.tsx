@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -15,17 +15,54 @@ export default function BulkSaleCancelModal({ sales, saving = false, translate, 
   const dirty = drafts.some((draft) => draft.cancel_reason || draft.cancel_note.trim() || draft.cancel_fee_usd || draft.cancel_fee_khr || draft.cancel_fee_note.trim())
   const update = (id: number, patch: Partial<BulkSaleCancelDraft>) => setDrafts((current) => current.map((draft) => draft.id === id ? { ...draft, ...patch } : draft))
   const closeGuard = useCloseGuard({ dirty }, onClose)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
+  const closeGuardRef = useRef(closeGuard)
+  const savingRef = useRef(saving)
+  closeGuardRef.current = closeGuard
+  savingRef.current = saving
   const requestClose = () => {
     if (saving) return
     closeGuard.requestClose()
   }
 
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null
+    closeButtonRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !savingRef.current) {
+        event.preventDefault()
+        if (closeGuardRef.current.promptOpen) closeGuardRef.current.dismissPrompt()
+        else closeGuardRef.current.requestClose()
+        return
+      }
+      if (event.key !== 'Tab' || closeGuardRef.current.promptOpen) return
+      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])') || [])
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('keydown', onKeyDown); previousFocus?.focus() }
+  }, [])
+
+  useEffect(() => {
+    if (!closeGuard.promptOpen) return
+    window.requestAnimationFrame(() => {
+      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
+      dialogs[dialogs.length - 1]?.querySelector<HTMLElement>('button:not([disabled])')?.focus()
+    })
+  }, [closeGuard.promptOpen])
+
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={requestClose}>
-      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-2xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-2xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b p-4 dark:border-gray-700">
-          <div><h2 className="font-bold">{translate('cancel_sale_title', 'Cancel sales', 'បោះបង់ការលក់')}</h2><p className="text-xs text-gray-400">{translate('bulk_cancel_review_hint', 'Review every sale before cancelling.', 'ពិនិត្យការលក់នីមួយៗមុនពេលបោះបង់។')}</p></div>
-          <button type="button" className="flex h-11 w-11 items-center justify-center rounded-lg" onClick={requestClose} disabled={saving} aria-label={translate('close', 'Close', 'បិទ')}><X className="h-4 w-4" /></button>
+          <div><h2 id={titleId} className="font-bold">{translate('cancel_sale_title', 'Cancel sales', 'បោះបង់ការលក់')}</h2><p className="text-xs text-gray-400">{translate('bulk_cancel_review_hint', 'Review every sale before cancelling.', 'ពិនិត្យការលក់នីមួយៗមុនពេលបោះបង់។')}</p></div>
+          <button ref={closeButtonRef} type="button" className="flex h-11 w-11 items-center justify-center rounded-lg" onClick={requestClose} disabled={saving} aria-label={translate('close', 'Close', 'បិទ')}><X className="h-4 w-4" /></button>
         </div>
         <div className="modal-scroll max-h-[65vh] space-y-2 overflow-y-auto p-4">
           {drafts.map((draft, index) => {

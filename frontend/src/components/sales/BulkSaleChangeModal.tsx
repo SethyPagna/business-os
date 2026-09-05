@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -25,6 +25,13 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
   const [targetKey, setTargetKey] = useState('')
   const [searching, setSearching] = useState(false)
   const searchVersion = useRef(0)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
+  const closeRef = useRef(onClose)
+  const savingRef = useRef(saving)
+  closeRef.current = onClose
+  savingRef.current = saving
   const source = sourceChoices.find((choice) => choice.key === sourceKey)
   const target = targetChoices.find((choice) => choice.key === targetKey)
   const matched = useMemo(() => rows.filter((row) => row.currentKeys.includes(sourceKey)), [rows, sourceKey])
@@ -42,15 +49,36 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
     try { await onSearchTargets(query) } catch { /* The page owns the error toast. */ } finally { if (version === searchVersion.current) setSearching(false) }
   }
 
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null
+    closeButtonRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !savingRef.current) {
+        event.preventDefault()
+        closeRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])') || [])
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('keydown', onKeyDown); previousFocus?.focus() }
+  }, [])
+
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={saving ? undefined : onClose}>
-      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
-            <h2 className="font-bold text-gray-900 dark:text-white">{fieldLabel}</h2>
+            <h2 id={titleId} className="font-bold text-gray-900 dark:text-white">{fieldLabel}</h2>
             <p className="text-xs text-gray-400">{translate('selected_count', '{n} selected', 'បានជ្រើស {n}').replace('{n}', String(rows.length))}</p>
           </div>
-          <button type="button" className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" onClick={onClose} disabled={saving} aria-label={translate('close', 'Close', 'បិទ')}><X className="h-4 w-4" /></button>
+          <button ref={closeButtonRef} type="button" className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" onClick={onClose} disabled={saving} aria-label={translate('close', 'Close', 'បិទ')}><X className="h-4 w-4" /></button>
         </div>
         <div className="modal-scroll space-y-4 p-4">
           {linkedField && onSearchTargets ? (
