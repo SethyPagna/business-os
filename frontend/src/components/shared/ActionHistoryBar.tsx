@@ -39,14 +39,28 @@ type HistoryItem = {
 
 function bulkHistoryLabel(item: HistoryItem, T: Translate): string {
   const p = item.undo_payload
-  if (p?.applier !== 'sale.status.bulk') return item.label || ''
-  return T('sale_bulk_history_summary', '{changed} sales → {status}; {unchanged} unchanged')
+  if (p?.applier === 'sale.status.bulk') return T('sale_bulk_history_summary', '{changed} sales → {status}; {unchanged} unchanged')
     .replace('{changed}', String(p.changed_count)).replace('{unchanged}', String(p.unchanged_count))
     .replace('{status}', T(`status_${String(p.target_status)}`, String(p.target_status).replaceAll('_', ' ')))
+  if (p?.applier === 'sale.fields.bulk' || p?.applier === 'sale.customer.bulk') return item.label || ''
+  if (p?.applier === 'return.fields.bulk') {
+    const noun = T('returns', 'returns')
+    const field = T(String(p.field || p.action || ''), String(p.field || p.action || '').replaceAll('_', ' '))
+    const source = String(p.source ?? p.source_name ?? '—') || '—'
+    const target = String(p.target ?? p.target_name ?? '—') || '—'
+    return T('bulk_field_history_summary', '{changed} {noun}: {field} {source} → {target}; {unchanged} unchanged')
+      .replace('{changed}', String(p.changed_count)).replace('{unchanged}', String(p.unchanged_count))
+      .replace('{noun}', noun).replace('{field}', field).replace('{source}', source).replace('{target}', target)
+  }
+  return item.label || ''
 }
 
+const isGroupedHistory = (item: HistoryItem): boolean => ['sale.status.bulk', 'sale.fields.bulk', 'sale.customer.bulk', 'return.fields.bulk'].includes(String(item.undo_payload?.applier || ''))
+
 function BulkHistoryDetails({ item, T }: { item: HistoryItem; T: Translate }) {
-  const [details, setDetails] = useState<Array<{ id: number; receipt_number: string; before: string; after: string; stock_skipped: boolean }>>([])
+  type Detail = { id: number; receipt_number: string; before: string | Record<string, unknown>; after: string | Record<string, unknown>; stock_skipped?: boolean; changed?: boolean; reason?: string }
+  const [details, setDetails] = useState<Detail[]>([])
+  const [action, setAction] = useState('')
   const [total, setTotal] = useState(0)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -57,7 +71,8 @@ function BulkHistoryDetails({ item, T }: { item: HistoryItem; T: Translate }) {
     setError('')
     try {
       const api = await import('../../api/actionHistoryTransport.ts')
-      const result = await api.getActionHistoryDetails(item.id!, details.length) as { items: typeof details; total: number }
+      const result = await api.getActionHistoryDetails(item.id!, details.length) as { action?: string; items: typeof details; total: number }
+      setAction(String(result.action || ''))
       setDetails(previous => [...previous, ...result.items]); setTotal(result.total); setOpen(true)
     } catch (e) { setError(e instanceof Error ? e.message : T('error', 'Error')) }
     finally { setBusy(false) }
@@ -67,7 +82,16 @@ function BulkHistoryDetails({ item, T }: { item: HistoryItem; T: Translate }) {
     <button type="button" className="py-1 text-blue-600 underline" disabled={busy} onClick={() => details.length ? setOpen(!open) : void load()} aria-expanded={open}>{T('sale_bulk_history_details', 'Affected sales')}</button>
     {error && <p role="alert">{error}</p>}
     {open && <div className="max-h-48 space-y-1 overflow-y-auto">
-      {details.map(sale => <div key={sale.id} className="break-words">{sale.receipt_number}: {T(`status_${sale.before}`, sale.before.replaceAll('_', ' '))} → {T(`status_${sale.after}`, sale.after.replaceAll('_', ' '))}{sale.stock_skipped ? ` · ${T('sale_stock_skipped', 'Stock skipped')}` : ''}</div>)}
+      {details.map(sale => {
+        const display = (value: Detail['before']) => {
+          if (typeof value === 'string') return action ? value : T(`status_${value}`, value.replaceAll('_', ' '))
+          if (action === 'customer') return String(value?.customer_name || value?.name || (value?.customer_id ? `#${value.customer_id}` : '—'))
+          if (action === 'delivery_contact') return String(value?.delivery_contact_name || value?.name || (value?.delivery_contact_id ? `#${value.delivery_contact_id}` : '—'))
+          if (action === 'payment_method') return String(value?.payment_method || value?.value || '—')
+          return String(value?.name || value?.value || '—')
+        }
+        return <div key={sale.id} className="break-words">{sale.receipt_number}: {display(sale.before)} → {display(sale.after)}{sale.stock_skipped ? ` · ${T('sale_stock_skipped', 'Stock skipped')}` : ''}{sale.changed === false && sale.reason ? ` · ${sale.reason.replaceAll('_', ' ')}` : ''}</div>
+      })}
       {details.length < total && <button type="button" className="py-1 text-blue-600 underline" disabled={busy} onClick={() => void load()}>{T('load_more', 'Load more')}</button>}
     </div>}
   </div>
@@ -315,7 +339,7 @@ export default function ActionHistoryBar({
               </button>
             ))}
             {recordedItems.map((item) => {
-              const grouped = item.undo_payload?.applier === 'sale.status.bulk'
+              const grouped = isGroupedHistory(item)
               const displayLabel = bulkHistoryLabel(item, T)
               // K1 slice 2: a server row whose payload the Worker can replay
               // is a REAL Undo/Redo button even though no live closure exists
@@ -347,7 +371,7 @@ export default function ActionHistoryBar({
                       {direction === 'redo' ? T('redo', 'Redo') : T('undo', 'Undo')}
                     </span>
                   </button>
-                  {grouped && <BulkHistoryDetails item={item} T={T} />}
+                  {grouped && item.undo_payload?.applier !== 'return.fields.bulk' && <BulkHistoryDetails item={item} T={T} />}
                   </div>
                 )
               }
@@ -365,7 +389,7 @@ export default function ActionHistoryBar({
                 <span className="min-w-0 whitespace-normal break-words text-slate-700 dark:text-slate-200" title={displayLabel}>{displayLabel}</span>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{formatServerStatus(item, T, false)}</span>
               </div>
-              {grouped && <BulkHistoryDetails item={item} T={T} />}
+              {grouped && item.undo_payload?.applier !== 'return.fields.bulk' && <BulkHistoryDetails item={item} T={T} />}
               </div>
               )
             })}
