@@ -1,11 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { getStockInSessionLines, getStockInSessions } from '../../api/productReadTransport.ts'
 import { revertStockMovement } from '../../api/inventoryWriteTransport.ts'
 import { updateBatch } from '../../api/batchesTransport.ts'
-import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtClock24, fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
+import { groupByBusinessDay } from '../../utils/businessDayGroups.ts'
 import { stockSessionId } from '../../utils/timestampId.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import Modal from '../shared/Modal.tsx'
@@ -135,6 +136,14 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     return () => window.clearTimeout(timer)
   }, [load])
 
+  // N14: one date per business DAY on a divider row, and each session row then
+  // carries only its wall clock -- the same treatment the Stock Changes ledger
+  // has shipped since Aug 30 2026. The shared helper (utils/businessDayGroups)
+  // keys on Asia/Phnom_Penh, not the device calendar, so a 23:30 Phnom Penh
+  // receipt does not slide onto the neighbouring day for a device abroad.
+  // Rows already arrive created_at DESC from GET /products/stock-in-sessions.
+  const dayGroups = useMemo(() => groupByBusinessDay(sessions, (session) => session.createdAt), [sessions])
+
   const open = async (summary: Session) => {
     if (opening) return
     setOpening(true)
@@ -217,8 +226,10 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         <div className="scroll-x">
           <table className="dense-data-table min-w-[900px]" aria-label={tr('stock_in_sessions', 'Stock-in Sessions')}>
             <colgroup><col className="w-[8rem]" /><col className="w-[18%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[12%]" /><col className="w-[8rem]" /><col className="w-[7rem]" /><col /></colgroup>
-            <thead><tr><th>{tr('session_id', 'Session ID')}</th><th data-tone="blue">{tr('supplier', 'Supplier')}</th><th>{tr('branch', 'Branch')}</th><th>{tr('cashier_user', 'User')}</th><th data-tone="violet">{tr('payment', 'Payment')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('total_cost', 'Total cost')}</th><th>{tr('recorded', 'Recorded')}</th></tr></thead>
-            <tbody>{sessions.map((session) => <tr key={session.key} data-clickable="true" tabIndex={0} onClick={() => void open(session)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void open(session) } }} aria-label={`${session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}, ${session.quantity}`}>
+            <thead><tr><th>{tr('session_id', 'Session ID')}</th><th data-tone="blue">{tr('supplier', 'Supplier')}</th><th>{tr('branch', 'Branch')}</th><th>{tr('cashier_user', 'User')}</th><th data-tone="violet">{tr('payment', 'Payment')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('total_cost', 'Total cost')}</th><th>{tr('time', 'Time')}</th></tr></thead>
+            <tbody>{dayGroups.flatMap((group) => [
+              <tr key={`day-${group.key}`} className="dense-day-row"><td colSpan={8}>{group.key} · {group.rows.length}</td></tr>,
+              ...group.rows.map((session) => <tr key={session.key} data-clickable="true" tabIndex={0} onClick={() => void open(session)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void open(session) } }} aria-label={`${session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}, ${session.quantity}`}>
               <td><span className="dense-cell-truncate dense-id font-semibold text-blue-700 dark:text-blue-300" title={session.key}>{stockSessionId(session.createdAt) || session.key}</span></td>
               <td><span className="dense-cell-truncate font-semibold" title={session.supplier.supplierName}>{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span></td>
               <td><span className="dense-cell-truncate" title={session.branchName}>{session.branchName || '—'}</span></td>
@@ -226,15 +237,21 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
               <td><span className={`inline-flex rounded px-1.5 py-0.5 font-semibold ${session.paymentStatus === 'credit' ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300' : session.paymentStatus === 'paid' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800'}`}>{session.paymentStatus === 'credit' ? tr('on_credit', 'On credit') : session.paymentStatus === 'paid' ? tr('paid', 'Paid') : tr('not_recorded', 'Not recorded')}</span></td>
               <td className="text-right font-bold tabular-nums text-emerald-600">+{session.quantity}</td>
               <td className="text-right font-semibold tabular-nums">{session.costUsd == null ? '—' : `$${session.costUsd.toFixed(2)}`}</td>
-              <td><span className="dense-cell-truncate tabular-nums" title={fmtDateTime24(session.createdAt)}>{fmtDateTime24(session.createdAt)}</span></td>
-            </tr>)}</tbody>
+              {/* Time only -- the day divider above carries the date, and the
+                  full stamp stays revealable on hover (truncated-text rule). */}
+              <td><span className="dense-cell-truncate tabular-nums" title={fmtDateTime24(session.createdAt)}>{fmtClock24(session.createdAt)}</span></td>
+            </tr>),
+            ])}</tbody>
           </table>
         </div>
       </div>
-      <div className="mobile-cards-only space-y-1.5">{sessions.map((session) => <button key={session.key} type="button" disabled={opening} onClick={() => void open(session)} className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left shadow-sm hover:border-blue-300 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900">
-        <span className="min-w-0"><span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span><span className="block truncate dense-id text-gray-400" title={session.key}>{stockSessionId(session.createdAt) || session.key} · {fmtDateTime24(session.createdAt)}</span><span className="block truncate text-[11px] text-gray-400">{session.branchName || '—'} · {session.userName || tr('unknown_user', 'Unknown user')}</span></span>
-        <span className="shrink-0 text-right"><span className="block text-sm font-bold text-emerald-600">+{session.quantity}</span><span className="block text-[11px] font-semibold text-gray-500">{session.costUsd == null ? '—' : `$${session.costUsd.toFixed(2)}`}</span></span>
-      </button>)}</div>
+      <div className="mobile-cards-only space-y-1.5">{dayGroups.flatMap((group) => [
+        <div key={`day-${group.key}`} className="px-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{group.key} · {group.rows.length}</div>,
+        ...group.rows.map((session) => <button key={session.key} type="button" disabled={opening} onClick={() => void open(session)} className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left shadow-sm hover:border-blue-300 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900">
+          <span className="min-w-0"><span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span><span className="block truncate dense-id text-gray-400" title={fmtDateTime24(session.createdAt)}>{stockSessionId(session.createdAt) || session.key} · {fmtClock24(session.createdAt)}</span><span className="block truncate text-[11px] text-gray-400">{session.branchName || '—'} · {session.userName || tr('unknown_user', 'Unknown user')}</span></span>
+          <span className="shrink-0 text-right"><span className="block text-sm font-bold text-emerald-600">+{session.quantity}</span><span className="block text-[11px] font-semibold text-gray-500">{session.costUsd == null ? '—' : `$${session.costUsd.toFixed(2)}`}</span></span>
+        </button>),
+      ])}</div>
     </>)}
     <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalSessions} label={tr('stock_in_sessions', 'stock-in sessions')} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div>
 
