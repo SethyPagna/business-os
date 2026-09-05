@@ -1225,11 +1225,20 @@ export default function ProductForm({
   const supplierMatches = form.supplier
     ? supplierList.filter((supplier) => String(supplier.name || '').toLowerCase().includes(String(form.supplier || '').toLowerCase()))
     : []
+  const preserveAndMinimize = isCreateMode && onMinimize ? () => {
+    // The shared unsaved prompt may offer Minimize only through an explicit
+    // preservation capability. Finish this form's pending debounce before the
+    // parent parks/closes it; an already-fired debounce is already durable.
+    flushPendingWorkDraft(draftKey)
+    const typedName = String(form.name || '').trim()
+    onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
+  } : undefined
 
   return (
     <Modal
       title={isEditMode ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product?.name || ''}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
       onClose={onClose}
+      onMinimize={preserveAndMinimize}
       wide
       headerExtra={(
         <>
@@ -1242,14 +1251,11 @@ export default function ProductForm({
               (100dvh minus the safe-area insets, styles/main.css), so it now
               sits at the end of the form and stays on screen at every
               breakpoint. Only the minimize control remains up here. */}
-          {onMinimize ? (
+          {preserveAndMinimize ? (
             <MinimizeButton
               disabled={saving}
               tr={tr}
-              onMinimize={() => {
-                const typedName = String(form.name || '').trim()
-                onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
-              }}
+              onMinimize={preserveAndMinimize}
             />
           ) : null}
         </>
