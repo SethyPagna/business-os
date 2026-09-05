@@ -54,6 +54,15 @@ function loadUndoAppliers(d1) {
     './saleBulkStatus': {
       replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-product-merge-undo-pure.cjs') },
     },
+    './saleBulkUpdate': {
+      BULK_UPDATE_KIND: 'sale.fields.bulk',
+      BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk',
+      replaySaleBulkUpdate: () => { throw new Error('Unexpected bulk sale update replay in test-product-merge-undo-pure.cjs') },
+    },
+    './returnBulkAction': {
+      RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
+      replayReturnBulkAction: () => { throw new Error('Unexpected return bulk replay in test-product-merge-undo-pure.cjs') },
+    },
     '../index': {},
     './auth': {},
     './db': { getDb: () => dbAdapter },

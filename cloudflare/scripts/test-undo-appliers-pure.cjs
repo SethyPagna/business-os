@@ -95,6 +95,10 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk',
     replaySaleBulkUpdate: async () => { throw new Error('Use the dedicated bulk fixture') },
   }
+  if (id === './returnBulkAction') return {
+    RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
+    replayReturnBulkAction: async () => { throw new Error('Use the dedicated return bulk fixture') },
+  }
   if (id === './db') return { getDb: () => wrapDb(sharedDb) }
   if (id === './audit') return { audit: async () => {} }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
@@ -232,6 +236,7 @@ await check('resolveUndoApplier recognizes a registered applier and falls throug
   assert.ok(registeredUndoAppliers().includes('branch.update'))
   assert.ok(registeredUndoAppliers().includes('sale.fields.bulk'))
   assert.ok(registeredUndoAppliers().includes('sale.customer.bulk'))
+  assert.ok(registeredUndoAppliers().includes('return.fields.bulk'))
 })
 
 await check('source lock: routes/branches.ts replays the same write via branchUpdateStatements', () => {

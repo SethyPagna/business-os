@@ -124,6 +124,8 @@ function parseRequest(raw: Row): SaleBulkUpdateRequest {
 
 async function rowsIn<T>(db: D1Compat, ids: number[], sql: (marks: string) => string): Promise<T[]> {
   if (!ids.length) return []
+  // sql-bound-params: bounded by construction. parseRequest caps every
+  // selected-id list at BULK_STATUS_LIMIT (25), below D1's 100-bind limit.
   if (ids.length > BULK_STATUS_LIMIT || ids.length > D1_MAX_BOUND_PARAMS) fail('Selection exceeds the single-query bound.', 400)
   return db.prepare(sql(ids.map(() => '?').join(','))).all<T>(ids)
 }

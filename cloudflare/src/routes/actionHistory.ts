@@ -7,8 +7,10 @@ import { isServerReplayable, resolveUndoApplier, applierPermissionTier } from '.
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
+import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
+const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND])
 
 // Ported from backend/src/routes/actionHistory.ts. This replaces the
 // read-only GET-only stub that lived in compat.ts (no create, no
@@ -101,7 +103,7 @@ function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boole
 }
 
 function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boolean {
-  if ([body.undo_payload, body.redo_payload].some(p => p && typeof p === 'object' && SERVER_SALE_BULK_KINDS.has(String((p as Record<string, unknown>).applier || '')))) return false
+  if ([body.undo_payload, body.redo_payload].some(p => p && typeof p === 'object' && SERVER_BULK_KINDS.has(String((p as Record<string, unknown>).applier || '')))) return false
   if (isAdminControlUser(user)) return true
   if (!canUseNamedAppliers(user, [body.undo_payload, body.redo_payload])) return false
   const permission = permissionForActionHistory({ entity: body.entity, scope: body.scope })
@@ -179,13 +181,18 @@ app.get('/:id/details', async (c) => {
   const row = await db.prepare('SELECT * FROM action_history WHERE id=?').get<ActionHistoryRow>([Number(c.req.param('id'))])
   if (!row || !canOperateHistoryRow(user, row)) return c.json({ error: 'Action not found.' }, 404)
   const payload = parseJson(row.undo_payload)
-  if (!SERVER_SALE_BULK_KINDS.has(String(payload.applier || '')) || !canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
-  const operation = await db.prepare('SELECT receipt_json FROM sale_bulk_operations WHERE history_id=?').get<{ receipt_json: string }>([row.id])
+  const applierKind = String(payload.applier || '')
+  if (!SERVER_BULK_KINDS.has(applierKind) || !canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
+  const operationTable = applierKind === RETURN_BULK_ACTION_KIND ? 'return_bulk_operations' : 'sale_bulk_operations'
+  const operation = await db.prepare(`SELECT receipt_json FROM ${operationTable} WHERE history_id=?`).get<{ receipt_json: string }>([row.id])
   if (!operation) return c.json({ error: 'Saved details unavailable.' }, 404)
   const receipt = JSON.parse(operation.receipt_json)
   const offset = Math.max(0, Math.min(25, Number.parseInt(c.req.query('offset') || '0', 10) || 0))
   const limit = Math.max(1, Math.min(10, Number.parseInt(c.req.query('limit') || '10', 10) || 10))
-  return c.json({ action: receipt.action || null, items: receipt.items.slice(offset, offset + limit), total: receipt.items.length, changedCount: receipt.changedCount, unchangedCount: receipt.unchangedCount })
+  const action = receipt.action || (applierKind === RETURN_BULK_ACTION_KIND
+    ? { field: payload.field, source: payload.source, target: payload.target }
+    : null)
+  return c.json({ action, items: receipt.items.slice(offset, offset + limit), total: receipt.items.length, changedCount: receipt.changedCount, unchangedCount: receipt.unchangedCount })
 })
 
 app.post('/', async (c) => {
@@ -239,7 +246,7 @@ app.patch('/:id', async (c) => {
       .get<ActionHistoryRow>({ id: actionId, user_id: user?.id || 0 })
     if (!existing) return c.json({ success: false, error: 'Action history item not found' }, 404)
 
-    if ([parseJson(existing.undo_payload), parseJson(existing.redo_payload)].some(p => SERVER_SALE_BULK_KINDS.has(String(p.applier || '')))) return c.json({ success: false, error: 'Grouped sale history is server-managed.' }, 403)
+    if ([parseJson(existing.undo_payload), parseJson(existing.redo_payload)].some(p => SERVER_BULK_KINDS.has(String(p.applier || '')))) return c.json({ success: false, error: 'Grouped history is server-managed.' }, 403)
 
     await db.prepare(`
       UPDATE action_history SET status = @status, last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id
@@ -312,17 +319,19 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation })
         applied = true
       } catch (error) {
-        if (!SERVER_SALE_BULK_KINDS.has(applier.name)) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
+        if (!SERVER_BULK_KINDS.has(applier.name)) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
         const status = Number((error as Error & { statusCode?: number })?.statusCode) === 409 ? 409 : 500
         return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action` }, status)
       }
     }
 
-    if (applier && SERVER_SALE_BULK_KINDS.has(applier.name)) {
-      c.executionCtx.waitUntil(applier.name === BULK_STATUS_KIND
-        ? notifyBulkStatus(c.env)
-        : notifySaleBulkUpdate(c.env, String(payload.action || '')))
+    if (applier && SERVER_BULK_KINDS.has(applier.name)) {
+      c.executionCtx.waitUntil(applier.name === RETURN_BULK_ACTION_KIND
+        ? notifyReturnBulkAction(c.env)
+        : applier.name === BULK_STATUS_KIND
+          ? notifyBulkStatus(c.env)
+          : notifySaleBulkUpdate(c.env, String(payload.action || '')))
       const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
       return c.json({ success: true, applied: true, item: row ? mapRow(row, user) : null, payload })
     }
