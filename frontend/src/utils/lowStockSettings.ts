@@ -140,6 +140,39 @@ export function isLowStock(
   if (qty <= (Number.isFinite(out) ? out : 0)) return false
   return qty <= effectiveLowStockThreshold(config, productLowThreshold)
 }
+export type LowStockSettingsWriteError =
+  | 'invalid_low_stock_alert_enabled'
+  | 'invalid_low_stock_threshold_mode'
+  | 'invalid_low_stock_threshold'
+
+/**
+ * The write guard, shared by the Settings form and the Worker's
+ * POST /api/settings so frontend validation and backend enforcement can never
+ * disagree. Returns the first offending key's code, or null when the payload
+ * (which normally carries the WHOLE settings form) is acceptable. Keys absent
+ * from the payload are not this function's business.
+ *
+ * Rejects rather than clamps: a threshold quietly rounded or capped is how a
+ * shop ends up colouring its catalog by a number nobody chose.
+ */
+export function validateLowStockSettingsWrite(
+  body?: Record<string, unknown> | null,
+): LowStockSettingsWriteError | null {
+  const payload = body || {}
+  if (Object.prototype.hasOwnProperty.call(payload, LOW_STOCK_ALERT_ENABLED_KEY)) {
+    const text = String(payload[LOW_STOCK_ALERT_ENABLED_KEY] ?? '').trim().toLowerCase()
+    const known = ['true', 'false', '1', '0', 'on', 'off', 'yes', 'no']
+    if (known.indexOf(text) < 0) return 'invalid_low_stock_alert_enabled'
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, LOW_STOCK_THRESHOLD_MODE_KEY)) {
+    const text = String(payload[LOW_STOCK_THRESHOLD_MODE_KEY] ?? '').trim().toLowerCase()
+    if (text !== 'product' && text !== 'global') return 'invalid_low_stock_threshold_mode'
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, LOW_STOCK_THRESHOLD_KEY)) {
+    if (normalizeLowStockThreshold(payload[LOW_STOCK_THRESHOLD_KEY]) === null) return 'invalid_low_stock_threshold'
+  }
+  return null
+}
 // <<< SHARED LOW-STOCK RULE <<<
 
 export type StockTier = 'out_of_stock' | 'low_stock' | 'in_stock'

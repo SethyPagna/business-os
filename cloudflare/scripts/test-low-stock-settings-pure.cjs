@@ -175,6 +175,51 @@ async function main() {
     assert.ok(worker.includes('export function isLowStock('), 'the extracted block must actually contain the rule')
   })
 
+  await check('the write guard rejects (never clamps) every shape the form can send', () => {
+    const { validateLowStockSettingsWrite } = lowStock
+    // A payload with none of the three keys is none of this guard's business.
+    assert.strictEqual(validateLowStockSettingsWrite({ theme: 'dark' }), null)
+    assert.strictEqual(validateLowStockSettingsWrite(null), null)
+    // Accepted shapes.
+    assert.strictEqual(validateLowStockSettingsWrite({
+      [LOW_STOCK_ALERT_ENABLED_KEY]: 'true',
+      [LOW_STOCK_THRESHOLD_MODE_KEY]: 'global',
+      [LOW_STOCK_THRESHOLD_KEY]: '0',
+    }), null)
+    assert.strictEqual(validateLowStockSettingsWrite({ [LOW_STOCK_ALERT_ENABLED_KEY]: 'off' }), null)
+    // Rejected shapes, each named by its own code.
+    assert.strictEqual(validateLowStockSettingsWrite({ [LOW_STOCK_ALERT_ENABLED_KEY]: 'maybe' }), 'invalid_low_stock_alert_enabled')
+    assert.strictEqual(validateLowStockSettingsWrite({ [LOW_STOCK_ALERT_ENABLED_KEY]: '' }), 'invalid_low_stock_alert_enabled')
+    assert.strictEqual(validateLowStockSettingsWrite({ [LOW_STOCK_THRESHOLD_MODE_KEY]: 'everything' }), 'invalid_low_stock_threshold_mode')
+    for (const bad of ['-4', '2.5', 'ten', '', MAX_LOW_STOCK_THRESHOLD + 1]) {
+      assert.strictEqual(
+        validateLowStockSettingsWrite({ [LOW_STOCK_THRESHOLD_KEY]: bad }),
+        'invalid_low_stock_threshold',
+        `${String(bad)} must be rejected by the write guard`,
+      )
+    }
+    // An explicit null/undefined VALUE for the key is still a write of that
+    // key, and still invalid -- hasOwnProperty, not truthiness.
+    assert.strictEqual(validateLowStockSettingsWrite({ [LOW_STOCK_THRESHOLD_KEY]: null }), 'invalid_low_stock_threshold')
+  })
+
+  await check('POST /api/settings actually runs that guard before writing', () => {
+    const route = readCf('routes/settings.ts')
+    assert.match(route, /import \{[^}]*validateLowStockSettingsWrite[^}]*\} from '\.\.\/lib\/lowStockSettings'/)
+    assert.match(route, /const lowStockError = validateLowStockSettingsWrite\(body\)/)
+    assert.match(route, /code: lowStockError,\s*\}, 400\)/)
+    // ...and before the rows are written, not after.
+    assert.ok(
+      route.indexOf('validateLowStockSettingsWrite(body)') < route.indexOf('VALUES (@key, @value, CURRENT_TIMESTAMP)'),
+      'the guard must run before the upsert',
+    )
+    // Positive control: this file is capable of showing a key is UNguarded --
+    // 'theme' is stored on trust like most keys, so the same search finds
+    // nothing for it. Without this the assertions above would look just as
+    // green against a route that validated nothing.
+    assert.doesNotMatch(route, /validateTheme|invalid_theme_setting/)
+  })
+
   console.log(`\n${passed} checks passed`)
 }
 

@@ -23,6 +23,7 @@ import {
   resolveLowStockConfig,
   resolveLowStockThresholdMode,
   resolveStockTier,
+  validateLowStockSettingsWrite,
 } from '../src/utils/lowStockSettings.ts'
 
 // -- the validation rule shared with the Worker's POST /api/settings guard --
@@ -125,5 +126,21 @@ assert.equal(isLowStock(productMode, 4, 3, 6), false)
 // Missing/garbage quantity is not an alert.
 assert.equal(isLowStock(productMode, null, 10, 0), false)
 assert.equal(isLowStock(productMode, 'abc', 10, 0), false)
+
+// -- the write guard: the SAME function the Worker's POST /api/settings runs --
+// (cloudflare/src/lib/lowStockSettings.ts, byte-identical shared block; the
+// Worker side of this is pinned by cloudflare/scripts/test-low-stock-settings-pure.cjs)
+assert.equal(validateLowStockSettingsWrite({ theme: 'dark' }), null)
+assert.equal(validateLowStockSettingsWrite(null), null)
+assert.equal(validateLowStockSettingsWrite({
+  [LOW_STOCK_ALERT_ENABLED_KEY]: 'false',
+  [LOW_STOCK_THRESHOLD_MODE_KEY]: 'product',
+  [LOW_STOCK_THRESHOLD_KEY]: '25',
+}), null)
+assert.equal(validateLowStockSettingsWrite({ [LOW_STOCK_ALERT_ENABLED_KEY]: 'maybe' }), 'invalid_low_stock_alert_enabled')
+assert.equal(validateLowStockSettingsWrite({ [LOW_STOCK_THRESHOLD_MODE_KEY]: 'both' }), 'invalid_low_stock_threshold_mode')
+assert.equal(validateLowStockSettingsWrite({ [LOW_STOCK_THRESHOLD_KEY]: '-4' }), 'invalid_low_stock_threshold')
+assert.equal(validateLowStockSettingsWrite({ [LOW_STOCK_THRESHOLD_KEY]: '2.5' }), 'invalid_low_stock_threshold')
+assert.equal(validateLowStockSettingsWrite({ [LOW_STOCK_THRESHOLD_KEY]: '' }), 'invalid_low_stock_threshold')
 
 console.log('lowStockSettings.test.ts OK')
