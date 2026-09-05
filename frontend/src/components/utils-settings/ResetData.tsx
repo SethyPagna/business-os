@@ -13,6 +13,7 @@ import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
+import LegacySubtotalRepair from './LegacySubtotalRepair.tsx'
 
 type ResetMode = 'sales' | 'products' | 'all'
 type ResetColor = 'red' | 'danger'
@@ -377,6 +378,8 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
 
   return (
     <div className="space-y-4">
+      <LegacySubtotalRepair />
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {MODES.map((entry) => {
           const Icon = entry.icon
