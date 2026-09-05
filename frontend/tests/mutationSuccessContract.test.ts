@@ -58,6 +58,20 @@ runTest('the transfer + branch-delete fixes are present (positive assertion)', (
   assert.match(branches, /res\?\.success === false/, 'branch delete must only fail on an explicit success:false')
 })
 
+runTest('sale status mutations preserve normal notes and omit settlement notes', () => {
+  const sales = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  assert.match(
+    sales,
+    /const isSettlementRequest = Array\.isArray\([\s\S]*?runSaleStatusMutation\(saleId, newStatus, isSettlementRequest \? undefined : notes, extra\)/,
+    'the shared status guard must pass notes for ordinary transitions and omit them only for a tender settlement',
+  )
+  assert.doesNotMatch(
+    sales,
+    /await runSaleStatusMutation\(saleId, newStatus, notes, extra\)/,
+    'settlement must not regress to always sending the notes field rejected by its route contract',
+  )
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} mutation-success-contract test(s) failed`)
