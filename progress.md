@@ -2,6 +2,11 @@
 
 ## Active continuation — production usability, September 5
 
+Owner now supplies historical close time: Roune Rath Sep4 at23:44 Cambodia
+(2026-09-04T16:44:00.000Z), closing cash133700KHR/0USD. S3 time ambiguity
+resolved; fresh guarded live preflight and audited closure still pending. Preserve
+Sep5 shift and existing150000KHR expenses; do not insert duplicates.
+
 Release focus explicitly reaffirmed: draft/header/navigation/date/Telegram/report
 fixes plus shifts, sale picker, branch products, report layout, atomic Add products
 and expanded bulk actions. Main integrated sale picker, bulk Sales/Returns,

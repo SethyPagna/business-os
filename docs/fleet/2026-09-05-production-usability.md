@@ -234,6 +234,31 @@ reportedzero writes. Sourcecost validity remains distinct from sum correctness.
 
 ## Owner decision and source-data follow-up
 
+- Independent re-certification75bdd89a at8799589b clears all four original shift
+  blockers with actual route probes and faulty in-memory negative controls;
+  close-report25, frontend78/60, lifecycle/security/report/window/Telegram pass.
+  Stock atomic12 also clears prior batch identity and snapshot race failures.
+  Stock undo/backup and full release certification remain separate gates.
+- Main integrated report time90cfe2a9, responsive layoutf4ee0b97, B1 branch
+  products4c5d2a13, stock corefa881cda/eed9aaea and bulk final38db993a. Full frontend
+  chain passed before final report additions; integrated report tests pass after
+  updating their old daily-window expectations and adding continuous-time tests.
+  Backend sweep213 had only shift audit-census failure; stronger atomic audit
+  contract8799589b now passes59checks. No failure is waived as merely cosmetic.
+  Latest B1 i18n missing key corrected423d175e;4929keys/515sources pass. Latest
+  frontend build/typecheck and backendtypecheck passed; final immutable gates
+  still need rerun after pending stock/payment/UI commits.
+- Main real browser320EN: POS Cart Shift button opens centered floating history,
+  documentwidth320 equals viewport320; screenshot visually inspected. Reports
+  loads real synthetic API data, exact five presets and24h endpoints visible,
+  no document overflow; responsive screenshot inspected. These fixtures contain
+  no production records and do not certify actual Telegram delivery.
+
+- S3 clarification received: close Roune Rath Sep4 at23:44 Cambodia, exactly
+  2026-09-04T16:44:00.000Z, closing133700KHR/0USD. Supersedes earlier unresolved
+  time blocker. Fresh live row/revision/overlap checks and audited close remain
+  pending; Sep5 shift and existing expenses must stay untouched.
+
 - Release priority: current UI/report/shift/picker/branch/stock/bulk scope before
   unrelated backlog. Main integrated picker f6314203/10046f64/e8b8628f; bulk through
   caa7ad21; shifts/Telegram through189f17a1; product followups d1e8658f/e8e1c97c.
