@@ -81,6 +81,7 @@ const subject = compile('saleAmendments.ts', {
   './saleTransitions': saleTransitions,
   './productBatches': productBatches,
   './saleTotals': saleTotals,
+  './financialPrecision': financialPrecision,
   './saleLineAddition': saleLineAddition,
 })
 

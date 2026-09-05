@@ -42,6 +42,8 @@ function load(rel) {
 
 const sales = load('routes/sales.ts').default
 const settlementAction = load('lib/saleSettlementAction.ts')
+const lineAddition = load('lib/saleLineAddition.ts')
+const amendments = load('lib/saleAmendments.ts')
 
 function fixture() {
   const sql = new Database(':memory:')
@@ -162,6 +164,23 @@ async function run() {
   assert.equal(line.manual_discount_khr, 0)
   assert.match(sale.search_normalized, /aba bank/)
   assert.deepEqual([sale.change_is_actual,sale.change_exchange_rate],[0,null])
+  const fractional = settlementAction.buildSaleSettlementAfterState(
+    {},
+    { subtotal_usd: 1.2345, discount_usd: 0.0001, tax_usd: 0.0002, total_usd: 1.2346,
+      delivery_fee_usd: 0, membership_discount_usd: 0, receipt_number: 'S-FX' },
+    [{ id: 1, applied_price_usd: 1.2345, total_usd: 1.2346, product_discount_usd: 0.0001,
+      base_price_usd: 1.2345, manual_discount_usd: 0.0001 }],
+    'completed', { ...request(), ...applied.body, exchangeRate: 4200, paymentMethod: 'ABA Bank',
+      paymentDetailsJson: '[]', paymentCurrency: 'USD', amountPaidUsd: 2, amountPaidKhr: 0,
+      changeUsd: 0, changeKhr: 0, changeExchangeRate: 4000 },
+  )
+  assert.deepEqual(
+    [fractional.subtotal_khr,fractional.discount_khr,fractional.tax_khr,fractional.total_khr,
+      fractional.lines[0].applied_price_khr,fractional.lines[0].total_khr],
+    [5184.9,0.42,0.84,5185.32,5184.9,5185.32],
+  )
+  assert.equal(lineAddition.rebaseSaleLineKhrSnapshot([{ id: 1, total_usd: 1.2345 }], 4200)[0].total_khr, 5184.9)
+  assert.equal(amendments.planDeliveryFeeChange({ saleId: 1, sale: { delivery_fee_usd: 1 }, newFeeUsd: 2.01, exchangeRate: 4200.1234 }).statements[0].params.fee_khr, 8442.248)
   assert.ok(applied.body.actionHistoryId > 0)
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 1)
   console.log('PASS settlement canonicalizes active methods, preserves inactive legacy tender, uses latest rate once, and moves no stock')

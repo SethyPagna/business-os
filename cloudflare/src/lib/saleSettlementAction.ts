@@ -3,7 +3,7 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
-import { actualKhrValue, financialCalculationValue } from './financialPrecision'
+import { financialCalculationValue } from './financialPrecision'
 import type { SettlementPlan } from './paymentSettlement'
 import { normalizeSearchText } from './searchMatch'
 
@@ -105,7 +105,7 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
 
 function khr(usd: unknown, rate: number): number | null {
   if (usd == null) return null
-  return actualKhrValue(financialCalculationValue(usd as number) * rate)
+  return financialCalculationValue(financialCalculationValue(usd as number) * financialCalculationValue(rate))
 }
 
 export function buildSaleSettlementAfterState(

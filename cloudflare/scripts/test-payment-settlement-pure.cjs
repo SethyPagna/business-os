@@ -74,6 +74,8 @@ for (const [label, patch, code] of [
   ['negative amount', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: -1 }] }, 'invalid_payment_amount'],
   ['fractional cent', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: 0.005 }, { method: 'ABA Bank', amount_khr: 21000 }] }, 'invalid_payment_amount'],
   ['hidden fifth-decimal cent', { existingPaidUsd: 0, existingPaymentDetailsRaw: null, paymentDetailsRaw: [{ method: 'Cash', amount_usd: '1.00001' }, { method: 'ABA Bank', amount_khr: 16800 }] }, 'invalid_payment_amount'],
+  ['tiny negative KHR', { existingPaidUsd: 0, existingPaymentDetailsRaw: null, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 5, amount_khr: '-0.000000000001' }] }, 'invalid_payment_amount'],
+  ['forged fifth decimal on recorded row', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: '1.234599999', amount_khr: 0 }, { method: 'Cash', amount_usd: 1 }, { method: 'ABA Bank', amount_khr: 12600 }] }, 'invalid_payment_amount'],
   ['fractional new riel', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: 1.2346 }, { method: 'ABA Bank', amount_khr: 12600.5 }] }, 'invalid_payment_amount'],
   ['partial reduction', { existingPaidUsd: 3, existingPaymentDetailsRaw: '[{"method":"Cash","amount_usd":3,"amount_khr":0}]', paymentDetailsRaw: [{ method: 'Cash', amount_usd: 2 }, { method: 'ABA Bank', amount_khr: 12600 }] }, 'partial_payment_reduced'],
   ['underpayment', { totalUsd: 99 }, 'insufficient_payment'],
