@@ -57,12 +57,14 @@ const saleTransitions = compile('saleTransitions.ts', {
   './salesStatus': salesStatus,
   './productBatches': productBatches,
 })
+const financialPrecision = compile('financialPrecision.ts')
 const saleLineAddition = compile('saleLineAddition.ts', {
   './salesStatus': salesStatus,
   './saleTransitions': saleTransitions,
   './productBatches': productBatches,
   './db': {},
   './saleTotals': compile('saleTotals.ts'),
+  './financialPrecision': financialPrecision,
 })
 
 const { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES, RETURN_STATUSES } = salesStatus
