@@ -25,6 +25,20 @@ import StatusBadge, { getStatusLabel } from './StatusBadge.tsx'
 import SaleDetailProductPicker, { type SaleDetailProductCandidate, type SaleDetailProductChoice } from './SaleDetailProductPicker.tsx'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
+import SaleSettlementEditor from './SaleSettlementEditor.tsx'
+import {
+  buildSettlementPayload,
+  configuredSettlementMethods,
+  createSettlementRequestId,
+  initialSettlementRows,
+  recordedSettlementIssue,
+  settlementRowsEqual,
+  settlementRowsIssue,
+  settlementTotals,
+  type SettlementRow,
+} from './saleSettlement.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -51,6 +65,7 @@ interface SaleDetail {
   receipt_number?: string | null
   source_return_id?: number | string | null
   created_at?: string | Date | null
+  updated_at?: string | null
   sale_status?: string | null
   customer_membership_number?: string | null
   items?: SaleLineItem[] | string | null
@@ -181,7 +196,7 @@ interface SaleDetailModalProps {
   settings?: unknown
   onClose: () => void
   // recordHistory/extra mirror Sales.tsx's handleStatusChange -- `extra`
-  // carries the Y10 payment payload when completing an awaiting-payment sale.
+  // carries the reviewed full tender when settling an awaiting-payment sale.
   onStatusChange?: (saleId: string | number, status: string, notes: string, recordHistory?: boolean, extra?: Record<string, unknown> | null) => Promise<unknown> | unknown
   onAttachMembership?: (saleId: string | number, membershipNumber: string) => Promise<boolean | unknown> | boolean | unknown
   onPrint?: (sale: SaleDetail) => void
@@ -242,6 +257,7 @@ function parseItems(raw: SaleDetail['items']): SaleLineItem[] {
 
 export default function SaleDetailModal({
   sale,
+  settings,
   onClose,
   onStatusChange,
   onAttachMembership,
@@ -257,14 +273,40 @@ export default function SaleDetailModal({
   const [newStatus, setNewStatus] = useState(sale?.sale_status || 'completed')
   const [statusNotes, setStatusNotes] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
-  // Y10: payment entered when completing an awaiting-payment sale. USD
-  // prefills with the sale total (the common exact-payment case is one tap).
-  const [payMethod, setPayMethod] = useState('Cash')
-  const [payUsd, setPayUsd] = useState(() => {
-    const total = toNumber(sale?.total_usd || sale?.total)
-    return total > 0 ? total.toFixed(2) : ''
-  })
-  const [payKhr, setPayKhr] = useState('')
+  const settlementSnapshot = (selectedSale: SaleDetail | null | undefined) => {
+    const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
+    const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
+    const exchangeRateValue = Number(rawSettings.exchange_rate)
+    const exchangeRate = Number.isFinite(exchangeRateValue) && exchangeRateValue > 0 ? exchangeRateValue : 4100
+    const rows = initialSettlementRows({
+      paymentDetails: selectedSale?.payment_details,
+      paymentMethod: selectedSale?.payment_method,
+      amountPaidUsd: selectedSale?.amount_paid_usd,
+      amountPaidKhr: selectedSale?.amount_paid_khr,
+      totalUsd: toNumber(selectedSale?.total_usd || selectedSale?.total),
+      exchangeRate,
+      configuredMethods,
+    })
+    return {
+      saleId: String(selectedSale?.id ?? ''),
+      expectedUpdatedAt: String(selectedSale?.updated_at || ''),
+      configuredMethods,
+      exchangeRate,
+      rows,
+      recordedIssue: recordedSettlementIssue({
+        paymentDetails: selectedSale?.payment_details,
+        paymentMethod: selectedSale?.payment_method,
+        amountPaidUsd: selectedSale?.amount_paid_usd,
+        amountPaidKhr: selectedSale?.amount_paid_khr,
+      }),
+    }
+  }
+  const [settlementSession, setSettlementSession] = useState(() => settlementSnapshot(sale))
+  const [settlementRows, setSettlementRows] = useState<SettlementRow[]>(settlementSession.rows)
+  const settlementBaselineRef = useRef<SettlementRow[]>(settlementSession.rows)
+  const settlementRequestIdRef = useRef(createSettlementRequestId())
+  const modalPanelRef = useRef<HTMLDivElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const [payError, setPayError] = useState('')
   // Z8 (user, Aug 29): "credit is the same as awaiting payment, just that you
   // can click near the payment method to edit later." The Record-payment
@@ -336,6 +378,17 @@ export default function SaleDetailModal({
   const [amendReloadToken, setAmendReloadToken] = useState(0)
 
   const saleId = sale?.id
+  useEffect(() => {
+    const next = settlementSnapshot(sale)
+    setSettlementSession(next)
+    setSettlementRows(next.rows)
+    settlementBaselineRef.current = next.rows
+    settlementRequestIdRef.current = createSettlementRequestId()
+    setPayError('')
+    // Settings changes while this sale is open deliberately do not alter the
+    // reviewed rate/method snapshot. A different sale starts a new review.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saleId])
   useEffect(() => {
     if (!onLoadAmendments || saleId === undefined || saleId === null) return
     let cancelled = false
@@ -552,6 +605,48 @@ export default function SaleDetailModal({
     })
   }
 
+  const settlementDirty = sale?.sale_status === 'awaiting_payment'
+    && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
+    && !settlementRowsEqual(settlementRows, settlementBaselineRef.current)
+  const closeGuard = useCloseGuard({ dirty: settlementDirty }, onClose)
+
+  useEffect(() => {
+    if (!saleId) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    requestAnimationFrame(() => closeButtonRef.current?.focus())
+    return () => previousFocus?.focus()
+  }, [saleId])
+
+  useEffect(() => {
+    if (!saleId || addPicking || closeGuard.promptOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        closeGuard.requestClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const panel = modalPanelRef.current
+      if (!panel) return
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.offsetParent !== null)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [addPicking, closeGuard.promptOpen, closeGuard.requestClose, saleId])
+
   if (!sale) return null
 
   const currentStatus = sale.sale_status || 'completed'
@@ -637,11 +732,11 @@ export default function SaleDetailModal({
   // the whole total as still owed.
   const outstandingUsd = totals.outstandingUsd
 
-  // Y10: an awaiting-payment sale with nothing recorded gets its payment
-  // entered HERE, at completion time -- the whole point of the status.
+  // An awaiting-payment sale is settled here even when it already has a
+  // partial tender. The editor carries the full existing tender snapshot and
+  // appends the outstanding amount; the server remains the coverage authority.
   const needsPaymentEntry = currentStatus === 'awaiting_payment'
     && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
-    && amountPaidUsd <= 0 && amountPaidKhr <= 0
 
   // S4-24b. The surface is offered only where the Worker would actually
   // accept the write: a status that takes new lines, and no recorded returns
@@ -701,28 +796,58 @@ export default function SaleDetailModal({
     if (!onStatusChange || newStatus === currentStatus) return
     let extra: Record<string, unknown> | null = null
     if (needsPaymentEntry) {
-      const method = payMethod.trim()
-      const paidUsdNum = parseFloat(payUsd) || 0
-      const paidKhrNum = parseFloat(payKhr) || 0
-      if (!method) {
-        setPayError(translateOr('payment_method_required', 'Enter the payment method.', 'បញ្ចូលវិធីទូទាត់។'))
+      if (settlementSession.recordedIssue === 'malformed') {
+        setPayError(translateOr('sale_settlement_record_malformed', 'The recorded payment details are malformed. Review and repair this sale before settling it.', 'ព័ត៌មានការទូទាត់ដែលបានកត់ត្រាមិនត្រឹមត្រូវ។ សូមពិនិត្យ និងកែការលក់នេះ មុនបញ្ចប់ការទូទាត់។'))
         return
       }
-      if (paidUsdNum <= 0 && paidKhrNum <= 0) {
+      if (settlementSession.recordedIssue === 'mismatch') {
+        setPayError(translateOr('sale_settlement_record_mismatch', 'The recorded payment total does not match its payment lines. Review and repair this sale before settling it.', 'ចំនួនការទូទាត់ដែលបានកត់ត្រា មិនត្រូវនឹងបន្ទាត់ការទូទាត់ទេ។ សូមពិនិត្យ និងកែការលក់នេះ មុនបញ្ចប់ការទូទាត់។'))
+        return
+      }
+      if (settlementSession.recordedIssue === 'allocation') {
+        setPayError(translateOr('sale_settlement_allocation_missing', 'This sale has a combined payment summary without its original tender allocation. Repair the payment details before settling it.', 'ការលក់នេះមានសង្ខេបការទូទាត់រួម ប៉ុន្តែគ្មានការបែងចែកការទូទាត់ដើម។ សូមកែព័ត៌មានការទូទាត់ មុនបញ្ចប់។'))
+        return
+      }
+      const payload = buildSettlementPayload(settlementRows, settlementSession.configuredMethods)
+      const rowIssue = settlementRowsIssue(settlementRows, settlementSession.configuredMethods)
+      if (rowIssue === 'method') {
+        setPayError(translateOr('sale_settlement_method_unavailable', 'Choose an active configured payment method for every row.', 'សូមជ្រើសវិធីទូទាត់សកម្មដែលបានកំណត់ សម្រាប់គ្រប់បន្ទាត់។'))
+        return
+      }
+      if (rowIssue === 'amount') {
+        setPayError(translateOr('sale_settlement_amount_invalid', 'Every payment row needs a positive USD or whole KHR amount.', 'គ្រប់បន្ទាត់ការទូទាត់ត្រូវការចំនួន USD វិជ្ជមាន ឬចំនួន KHR គត់។'))
+        return
+      }
+      if (!payload) {
         setPayError(translateOr('payment_amount_required', 'Enter the amount received.', 'បញ្ចូលចំនួនទឹកប្រាក់ដែលបានទទួល។'))
+        return
+      }
+      const reviewedTotals = settlementTotals(settlementRows, settlementSession.exchangeRate)
+      if (Math.round(reviewedTotals.paidEquivalentUsd * 10000) < Math.round(totalUsd * 10000)) {
+        setPayError(translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.', 'ត្រូវទូទាត់គ្រប់ចំនួនសរុប មុនបញ្ចប់ការលក់។'))
         return
       }
       setPayError('')
       extra = {
-        payment_method: method,
-        amount_paid_usd: paidUsdNum,
-        amount_paid_khr: paidKhrNum,
+        ...payload,
+        client_request_id: settlementRequestIdRef.current,
+        expected_exchange_rate: settlementSession.exchangeRate,
+        expected_updated_at: settlementSession.expectedUpdatedAt,
       }
     }
     setStatusSaving(true)
     try {
-      await onStatusChange(sale.id, newStatus, statusNotes, true, extra)
-      onClose()
+      const result = await onStatusChange(sale.id, newStatus, statusNotes, true, extra)
+      const changedRate = result && typeof result === 'object'
+        ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged)
+        : NaN
+      if (Number.isFinite(changedRate) && changedRate > 0) {
+        setSettlementSession((current) => ({ ...current, exchangeRate: changedRate }))
+        settlementRequestIdRef.current = createSettlementRequestId()
+        setPayError(translateOr('sale_settlement_rate_changed', 'The exchange rate changed. Review the updated balance, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យសមតុល្យថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
+      } else if (result !== false) {
+        onClose()
+      }
     } finally {
       setStatusSaving(false)
     }
@@ -743,11 +868,15 @@ export default function SaleDetailModal({
   return createPortal(
     <div
       className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4"
-      onClick={addPicking ? undefined : onClose}
+      onClick={addPicking ? undefined : closeGuard.requestClose}
       inert={addPicking ? true : undefined}
       aria-hidden={addPicking ? true : undefined}
     >
       <div
+        ref={modalPanelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={translateOr('sale_details', 'Sale details', 'ព័ត៌មានលម្អិតការលក់')}
         className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
@@ -775,9 +904,10 @@ export default function SaleDetailModal({
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <StatusBadge status={currentStatus} t={t} />
             <button
+              ref={closeButtonRef}
               type="button"
-              onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600"
+              onClick={closeGuard.requestClose}
+              className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
               aria-label={t('close') || 'Close'}
             >
               <X className="h-4 w-4" />
@@ -1623,53 +1753,34 @@ export default function SaleDetailModal({
                 notes={statusNotes}
                 saving={statusSaving}
                 t={t}
-                onSelect={setNewStatus}
-                onNotesChange={setStatusNotes}
+                onSelect={(status) => {
+                  setNewStatus(status)
+                  settlementRequestIdRef.current = createSettlementRequestId()
+                }}
+                onNotesChange={(notes) => {
+                  setStatusNotes(notes)
+                  settlementRequestIdRef.current = createSettlementRequestId()
+                }}
                 onConfirm={handleStatusUpdate}
               >
               {needsPaymentEntry ? (
-                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-800/70 dark:bg-emerald-950/20">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                    {translateOr('record_payment', 'Record payment', 'កត់ត្រាការទូទាត់')}
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <div>
-                      <label htmlFor="sale-pay-method" className="mb-1 block text-xs text-gray-400">
-                        {t('payment_method') || 'Payment method'}
-                      </label>
-                      <input
-                        id="sale-pay-method"
-                        className="input h-10 text-sm"
-                        value={payMethod}
-                        onChange={(event) => setPayMethod(event.target.value)}
-                        placeholder="Cash / ABA / Wing"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="sale-pay-usd" className="mb-1 block text-xs text-gray-400">USD</label>
-                      <input
-                        id="sale-pay-usd"
-                        className="input h-10 text-sm"
-                        inputMode="decimal"
-                        value={payUsd}
-                        onChange={(event) => setPayUsd(event.target.value)}
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="sale-pay-khr" className="mb-1 block text-xs text-gray-400">KHR</label>
-                      <input
-                        id="sale-pay-khr"
-                        className="input h-10 text-sm"
-                        inputMode="numeric"
-                        value={payKhr}
-                        onChange={(event) => setPayKhr(event.target.value)}
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-                  {payError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{payError}</p> : null}
-                </div>
+                <SaleSettlementEditor
+                  rows={settlementRows}
+                  configuredMethods={settlementSession.configuredMethods}
+                  exchangeRate={settlementSession.exchangeRate}
+                  totalUsd={totalUsd}
+                  saving={statusSaving}
+                  error={payError}
+                  recordedIssue={settlementSession.recordedIssue}
+                  translate={translateOr}
+                  fmtUSD={fmtUSD}
+                  fmtKHR={fmtKHR}
+                  onChange={(rows) => {
+                    setSettlementRows(rows)
+                    settlementRequestIdRef.current = createSettlementRequestId()
+                    setPayError('')
+                  }}
+                />
               ) : null}
               </SaleStatusWorkflow>
             </section>
@@ -1777,6 +1888,7 @@ export default function SaleDetailModal({
           ) : null}
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

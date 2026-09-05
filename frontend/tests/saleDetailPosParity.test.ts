@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import './saleSettlementUi.test.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -74,7 +75,8 @@ assert.match(detail, /const addSearchInputRef = useRef<HTMLInputElement \| null>
 assert.match(detail, /ref=\{addSearchInputRef\}/)
 assert.match(detail, /inert=\{addPicking \? true : undefined\}/)
 assert.match(detail, /aria-hidden=\{addPicking \? true : undefined\}/)
-assert.match(detail, /onClick=\{addPicking \? undefined : onClose\}/)
+assert.match(detail, /onClick=\{addPicking \? undefined : closeGuard\.requestClose\}/)
+assert.match(detail, /<UnsavedChangesPrompt guard=\{closeGuard\}/)
 assert.match(detail, /requestAnimationFrame\(\(\) => addSearchInputRef\.current\?\.focus\(\)\)/)
 assert.match(picker, /import Modal from '\.\.\/shared\/Modal\.tsx'/)
 assert.match(picker, /layer="nested"/)

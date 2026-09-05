@@ -802,9 +802,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     )
   ), [])
 
-  // `extra` also carries the Y10 payment payload when SaleDetailModal
-  // completes an awaiting-payment sale (payment_method/amount_paid_*).
-  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<boolean> => {
+  // `extra` carries the full reviewed tender snapshot when SaleDetailModal
+  // settles an awaiting-payment sale. That write returns a durable server
+  // history row; ordinary status changes keep the local reversible entry.
+  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<boolean | { exchangeRateChanged: number }> => {
     // View-only (Part 557): status changes are Full-Access only. The backend
     // already refuses these through sales.status, so this matching client
     // guard also honors a Full role whose one action was switched off.
@@ -856,7 +857,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const actionKey = String(numericId)
     if (!beginKeyedAction(statusActionRef, actionKey)) return false
     try {
-      await runSaleStatusMutation(saleId, newStatus, notes, extra)
+      const mutationResult = await runSaleStatusMutation(saleId, newStatus, notes, extra) as {
+        actionHistoryId?: string | number | null
+        actionKind?: string | null
+      } | null
+      const hasServerSettlementHistory = mutationResult?.actionKind === 'sale.settlement'
+        && mutationResult.actionHistoryId != null
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       await loadSales(true)
       void loadSalesStats() // Z3a: refresh the summary aggregate immediately, not only via the sync round-trip
@@ -864,7 +870,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
-      if (recordHistory && previousSale && previousStatus !== newStatus) {
+      if (hasServerSettlementHistory) {
+        await actionHistory.refreshServerItems()
+      } else if (recordHistory && previousSale && previousStatus !== newStatus) {
         actionHistory.pushAction({
           label: `Update sale ${previousSale.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}`,
           undo: () => handleStatusChange(saleId, previousStatus, 'Undo sale status update', false),
@@ -873,6 +881,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       }
       return true
     } catch (error) {
+      if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
+        const current = (error as { current?: unknown }).current
+        const exchangeRateChanged = current && typeof current === 'object'
+          ? Number((current as { exchange_rate?: unknown }).exchange_rate)
+          : NaN
+        if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
+      }
       if (isWriteConflict(error)) {
         await loadSales()
         return false
