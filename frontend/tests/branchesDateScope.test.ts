@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
+import './branchProductsSurface.test.ts'
 
 const source = fs.readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
 const hubSource = fs.readFileSync(new URL('../src/components/branches/BranchesHubPage.tsx', import.meta.url), 'utf8')
@@ -14,9 +15,11 @@ test('Branches exposes one compact standalone date range and one Export action',
   assert.match(source, /\{showDateRange \? branchExportButton : null\}/)
 })
 
-test('the hub owns one range and controls Product stats, Branches and transfers', () => {
+test('the hub owns one range for Branches and transfers while Products owns branch-stock scope', () => {
   assert.match(hubSource, /const \[sharedDateRange, setSharedDateRange\] = useState<DateTimeRange>/)
-  assert.match(hubSource, /<InventorySection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}/)
+  assert.match(hubSource, /active === 'products'[\s\S]{0,300}<InventorySection[\s\S]{0,120}hostSection="products"/)
+  const productsMount = hubSource.match(/active === 'products'[\s\S]*?<InventorySection([\s\S]*?)\/>/)?.[1] || ''
+  assert.doesNotMatch(productsMount, /dateRange=\{sharedDateRange\}/)
   assert.match(hubSource, /<BranchesSection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}[\s\S]{0,160}showDateRange/)
   assert.match(hubSource, /view="transfers"[\s\S]{0,180}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}/)
   assert.match(inventorySource, /const stripRange = dateRange \?\? localStripRange/)
@@ -24,12 +27,12 @@ test('the hub owns one range and controls Product stats, Branches and transfers'
   assert.match(inventorySource, /range=\{stripRange\} onRangeChange=\{handleStripRangeChange\}/)
 })
 
-test('Branches keeps branch Overview, product economics and Transfer history separate', () => {
+test('Branches keeps branch Overview, product stock and Transfer history separate', () => {
   assert.match(hubSource, /type BranchesHubSection = 'overview' \| 'products' \| 'transfers' \| 'rfid'/)
   assert.match(hubSource, /id: 'overview'.*'Overview'/)
   assert.match(hubSource, /id: 'products'.*'Products'/)
   assert.match(hubSource, /id: 'transfers'.*trh\('transfer', 'Transfer'\)/)
-  assert.match(hubSource, /active === 'products'[\s\S]*hostSection="stats"/)
+  assert.match(hubSource, /active === 'products'[\s\S]*hostSection="products"/)
   assert.doesNotMatch(hubSource, /active === 'products'[\s\S]{0,500}view="branches"/)
   assert.doesNotMatch(hubSource, /hostSection="movements"/)
   assert.match(hubSource, /focus === 'movements'\) navigateTo\('products'\)/)

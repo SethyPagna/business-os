@@ -10,7 +10,7 @@ import HubSectionNav, { type HubSectionDef } from '../shared/HubSectionNav.tsx'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 
 // Branches is one hub with one navigation layer. Overview owns branch cards;
-// Products owns the ranged product/COGS/revenue/profit summary; Transfer owns
+// Products owns the branch-scoped stock list; Transfer owns
 // transfer history (the complete movement ledger lives in Products -> Stock Changes).
 const BranchesSection = lazy(() => import('./Branches'))
 const InventorySection = lazy(() => import('../inventory/Inventory.tsx'))
@@ -57,8 +57,8 @@ export default function BranchesHubPage() {
   const canBranchList = getPermissionTier('branches') !== 'none'
   const canInventory = getPermissionTier('inventory') !== 'none'
   const [section, setSection] = useHubSection<BranchesHubSection>('branches', () => initialSection(canBranchList, canInventory), getHubDestinations('branches', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
-  // The hub owns one range. Product stats and Transfer History receive the
-  // exact same controlled value after a section switch.
+  // The hub owns one range for Overview and Transfer History. Products uses
+  // branch/search scope instead of presenting unrelated dated statistics.
   const [sharedDateRange, setSharedDateRange] = useState<DateTimeRange>(() => ({
     startDate: '',
     endDate: '',
@@ -134,10 +134,8 @@ export default function BranchesHubPage() {
         ) : active === 'products' && canInventory ? (
           <div className="page-scroll flex min-h-0 flex-1 flex-col">
             <InventorySection
-              hostSection="stats"
+              hostSection="products"
               embedded
-              dateRange={sharedDateRange}
-              onDateRangeChange={setSharedDateRange}
             />
           </div>
         ) : active === 'transfers' && canBranchList ? (
