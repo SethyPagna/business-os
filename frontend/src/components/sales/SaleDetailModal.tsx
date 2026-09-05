@@ -843,10 +843,15 @@ export default function SaleDetailModal({
       const changedRate = result && typeof result === 'object'
         ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged)
         : NaN
+      const settlementError = result && typeof result === 'object'
+        ? String((result as { settlementError?: unknown }).settlementError || '')
+        : ''
       if (Number.isFinite(changedRate) && changedRate > 0) {
         setSettlementSession((current) => ({ ...current, exchangeRate: changedRate }))
         settlementRequestIdRef.current = createSettlementRequestId()
         setPayError(translateOr('sale_settlement_rate_changed', 'The exchange rate changed. Review the updated balance, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យសមតុល្យថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
+      } else if (settlementError) {
+        setPayError(settlementError)
       } else if (result !== false) {
         onClose()
       }
@@ -1766,6 +1771,7 @@ export default function SaleDetailModal({
                 onConfirm={handleStatusUpdate}
                 reviewRequestId={statusReviewRequestId}
                 confirmDisabled={needsPaymentEntry && settlementRows.length > MAX_SETTLEMENT_ROWS}
+                showNotes={!needsPaymentEntry}
               >
               {needsPaymentEntry ? (
                 <SaleSettlementEditor

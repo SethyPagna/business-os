@@ -16,6 +16,7 @@ export default function SaleStatusWorkflow({
   children,
   reviewRequestId = 0,
   confirmDisabled = false,
+  showNotes = true,
 }: {
   currentStatus: string
   selectedStatus: string
@@ -28,6 +29,7 @@ export default function SaleStatusWorkflow({
   children?: React.ReactNode
   reviewRequestId?: number
   confirmDisabled?: boolean
+  showNotes?: boolean
 }) {
   const [step, setStep] = useState<'closed' | 'destination' | 'review'>('closed')
   useEffect(() => {
@@ -78,10 +80,10 @@ export default function SaleStatusWorkflow({
               <div><div className="text-[11px] text-gray-400">{t('new_status') || 'New status'}</div><div className="font-semibold text-blue-700 dark:text-blue-300">{getStatusLabel(selectedStatus, t)}</div></div>
             </div>
           </div>
-          <div>
+          {showNotes ? <div>
             <label htmlFor="sale-status-notes" className="mb-1 block text-xs text-gray-400">{t('notes') || 'Notes'}</label>
             <textarea id="sale-status-notes" className="input min-h-[80px] resize-none text-sm" value={notes} onChange={(event) => onNotesChange(event.target.value)} placeholder={t('status_notes_placeholder') || 'Optional notes about this status change'} />
-          </div>
+          </div> : null}
           {children}
           <button type="button" className="btn-primary w-full text-sm" disabled={saving || confirmDisabled || selectedStatus === currentStatus} onClick={onConfirm}>
             {saving ? (t('loading') || 'Saving') : (t('confirm') || 'Confirm')}
