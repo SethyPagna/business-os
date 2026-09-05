@@ -39,6 +39,8 @@ recovery evidence. Never infer a closing timestamp or user from a calendar date.
 | F1 | Four-decimal internal calculations system-wide; display/cash semantics explicit | Canonical math and reader/writer matrix, division/rounding/ledger/replay parity | Owner confirmed nearest, fifth digit 5+ up / 0–4 down; Pauli implementing bounded helpers/fixtures before writer migration |
 | T2 | Currency equivalents use slash (Net Total); actual mixed tender/change uses plus | Derived-vs-native field trace, real formatter fixtures across sales/returns | Queued Volta after picker |
 | V1 | Integrated release preserves membership, grouped sale undo, reports and stock safeguards | Focused regressions then both package gates, isolated committed build, live read-only verification | Pending |
+| F2 | Trace and correct each report row, USD/KHR conversion, delivery/expense/COGS, totals and exports | Actual model+formatter and backend fixtures, no double conversion/counting, row arithmetic closes; distinguish source-data issues | Pauli Sol high assigned; screenshot expense double-conversion suspect |
+| U5 | Compact Overview selector and range row; no decorative calendar icon; consistent 24h time controls and desktop typography/gutters with nearby values | Narrow and desktop EN/KM browser checks; every time filter maps to real backend scope | Bernoulli assigned layout scope review; preserve date presets and shift integration |
 
 ## Agent contracts — initial read-only discovery
 
@@ -181,3 +183,15 @@ Next financial writer slice waits for separately owned Sales/Returns bulk work;
 exact decimal arithmetic operations and replay versions remain explicit work.
 Cross-task Returns migration0125 is reserved; backup/coreDataInvariants and
 frontend actionHistory/ActionHistoryBar ownership also precedes stock milestoneB.
+
+## New screenshot request — conversion and report layout
+
+Reference codex-clipboard-b0b57de4-3e67-4d90-9706-b6caf0e86c36.png, range Aug30
+00:00–Sep5 23:59. Displayed totalprofit -1219.38 minus expenses5623.87 should
+equal -6843.25, but screenshot final is -6751.31. Main traced expense line carrying
+already converted USD plus rawKHR into a pair-converting formatter; Pauli owns
+behavioral reproduction and full sibling math audit. This is not authorization
+to rewrite historical fee/cost values. Courier row visibly29.36, COGS10185.02;
+large source values need separate provenance/unit checks, not guessed repairs.
+User requests consistent time-enabled 24h filters; backend overview currently
+date-scopes returns/expenses, so no false promise from adding time UI alone.
