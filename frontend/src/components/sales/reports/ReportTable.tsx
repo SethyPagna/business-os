@@ -18,7 +18,7 @@ import { useColumnPreferences } from '../../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../../shared/columnPreferences.ts'
 import { DenseTable, EmptyState, Skeleton } from '../../shared/kit'
 import { fmtDateOnly, fmtDateTime24 } from '../../../utils/formatters.ts'
-import ReceiptSheet, { type ReceiptBlock, type ReceiptLine } from './ReceiptSheet.tsx'
+import ReceiptSheet, { type ReceiptBlock, type ReceiptLine, type ReceiptLineKind } from './ReceiptSheet.tsx'
 import { fmtInt, fmtPct, fmtQty, num, sortRows, toggleSort, type CsvColumn, type ReportStyle, type SortState } from './reportModel.ts'
 
 export type ReportCellKind = 'text' | 'money' | 'int' | 'qty' | 'pct' | 'date' | 'datetime'
@@ -99,6 +99,30 @@ function isNumericKind(kind: ReportCellKind | undefined): boolean {
   return kind === 'money' || kind === 'int' || kind === 'qty' || kind === 'pct'
 }
 
+function isCountKind(kind: ReportCellKind | undefined): boolean {
+  return kind === 'int' || kind === 'qty'
+}
+
+// Receipt cards read in the order the owner's old-POS reference cards do
+// (Sep 5 2026, screenshots #6 / #10: one entity = one card, money block
+// first, the headline total closing it, then the counts in muted text, then
+// any detail). The column order stays the spreadsheet order; only the card
+// reorders, so the two styles keep the same columns and the same numbers.
+export function orderReceiptColumns<T>(columns: Array<ReportColumn<T>>): Array<ReportColumn<T>> {
+  const money = columns.filter((c) => !c.emphasis && (c.kind === 'money' || c.kind === 'pct'))
+  const totals = columns.filter((c) => c.emphasis)
+  const counts = columns.filter((c) => !c.emphasis && isCountKind(c.kind))
+  const detail = columns.filter((c) => !c.emphasis && !isNumericKind(c.kind))
+  return [...money, ...totals, ...counts, ...detail]
+}
+
+export function receiptLineKind<T>(column: ReportColumn<T>): ReceiptLineKind | undefined {
+  if (column.emphasis) return 'total'
+  if (isCountKind(column.kind)) return 'muted'
+  if (isNumericKind(column.kind)) return undefined
+  return 'info'
+}
+
 /** CSV columns for the visible set (or all), values formatted the same way the table shows them, money as plain numbers. */
 export function csvColumnsFor<Row>(columns: Array<ReportColumn<Row>>, fmtMoney: (usd: number, khr?: number) => string): Array<CsvColumn<Row>> {
   return columns.map((c) => ({
@@ -155,19 +179,19 @@ export default function ReportTable<Row>({
 
   if (style === 'receipt') {
     const primary = columns.find((c) => c.primary) || columns[0]
-    const lineColumns = visibleColumns.filter((c) => c !== primary)
+    const lineColumns = orderReceiptColumns(visibleColumns.filter((c) => c !== primary))
     const blocks: ReceiptBlock[] = sortedRows.map((row) => {
       const key = rowKey(row)
       const lines: ReceiptLine[] = lineColumns.map((c) => ({
         key: c.key,
         label: c.label,
         value: formatCell(c, row, fmtMoney),
-        kind: c.emphasis ? 'total' : isNumericKind(c.kind) ? 'add' : 'info',
+        kind: receiptLineKind(c),
       }))
       return {
         key,
         title: formatCell(primary, row, fmtMoney),
-        lines: lines.map((l) => (l.kind === 'add' ? { ...l, kind: undefined } : l)),
+        lines,
         onClick: onRowClick ? (el) => onRowClick(row, el) : undefined,
         selected: selectedKey != null && selectedKey === key,
       }
@@ -176,7 +200,7 @@ export default function ReportTable<Row>({
       blocks.push({
         key: '__totals',
         title: labels.total,
-        lines: lineColumns.filter((c) => isNumericKind(c.kind)).map((c) => ({ key: c.key, label: c.label, value: formatCell(c, totalsRow, fmtMoney), kind: c.emphasis ? 'total' : undefined })),
+        lines: lineColumns.filter((c) => isNumericKind(c.kind)).map((c) => ({ key: c.key, label: c.label, value: formatCell(c, totalsRow, fmtMoney), kind: receiptLineKind(c) })),
       })
     }
     return (
@@ -235,7 +259,7 @@ export default function ReportTable<Row>({
                 onClick={onRowClick ? (e) => onRowClick(row, e.currentTarget) : undefined}
               >
                 {visibleColumns.map((c) => (
-                  <td key={c.key} className={[isNumericKind(c.kind) ? 'text-right whitespace-nowrap' : 'max-w-[200px] truncate', c.emphasis ? 'font-semibold' : ''].join(' ').trim()} title={c.kind === 'text' || !c.kind ? String(c.value(row) ?? '') : undefined}>
+                  <td key={c.key} className={[isNumericKind(c.kind) ? 'text-right whitespace-nowrap' : 'max-w-[200px] truncate', c.emphasis ? 'font-semibold' : '', !c.emphasis && isCountKind(c.kind) ? 'text-[var(--ui-ink-2)]' : ''].join(' ').trim()} title={c.kind === 'text' || !c.kind ? String(c.value(row) ?? '') : undefined}>
                     {formatCell(c, row, fmtMoney)}
                   </td>
                 ))}
