@@ -63,6 +63,9 @@ const { branchUpdateStatements } = branchWrites
 // side channels, which have their own coverage).
 let sharedDb = null
 let settlementReplayCalls = 0
+let exerciseAtomicSaleItems = false
+let failAtomicAllocation = false
+let beforeAtomicBatch = null
 function wrapDb(sqlite) {
   return {
     prepare(sql) {
@@ -74,6 +77,11 @@ function wrapDb(sqlite) {
       }
     },
     batch(statements) {
+      if (beforeAtomicBatch) {
+        const inject = beforeAtomicBatch
+        beforeAtomicBatch = null
+        inject(sqlite)
+      }
       const tx = sqlite.transaction((stmts) => {
         for (const s of stmts) {
           const st = sqlite.prepare(s.sql)
@@ -106,6 +114,10 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   }
   if (id === './saleSettlementAction') return {
     SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement',
+    saleMutationGuard: (predicate, params) => ({
+      sql: `INSERT INTO sale_mutation_guards(id,guard_value) SELECT 1,CASE WHEN ${predicate} THEN 1 ELSE 0 END`,
+      params,
+    }),
     replaySaleSettlementAction: async (_env, _user, direction, historyId, generation, payload) => {
       settlementReplayCalls += 1
       assert.strictEqual(direction, 'undo')
@@ -129,10 +141,31 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   // test-sale-add-items-pure.cjs, which is where that applier is proved.
   if (id === './saleLineAddition') return {
     buildAllocationStatements: () => [],
-    planSaleLineAddition: () => ({ lines: [], statements: [], saleItemStatementIndexByLine: [], deductions: [], deductedUnits: 0, addedSubtotalUsd: 0 }),
-    planSaleLineRemoval: () => ({ statements: [], restoredUnits: 0 }),
+    buildOperationAllocationStatements: (_lines, operationId) => exerciseAtomicSaleItems ? [{
+      sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,quantity)
+            SELECT entity_id,@quantity FROM sale_mutation_members
+            WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0`,
+      params: { operation: operationId, quantity: failAtomicAllocation ? -1 : 1 },
+    }] : [],
+    planSaleLineAddition: ({ saleId, lines }) => exerciseAtomicSaleItems ? ({
+      lines,
+      statements: [{
+        sql: 'INSERT INTO sale_items(sale_id,product_id,product_name,quantity,total_usd) VALUES(@saleId,@productId,@productName,@quantity,@totalUsd)',
+        params: { saleId, productId: lines[0].productId, productName: lines[0].productName, quantity: lines[0].quantity, totalUsd: lines[0].lineTotalUsd },
+      }],
+      saleItemStatementIndexByLine: [0], deductions: [], deductedUnits: 0, addedSubtotalUsd: lines[0].lineTotalUsd,
+    }) : ({ lines: [], statements: [], saleItemStatementIndexByLine: [], deductions: [], deductedUnits: 0, addedSubtotalUsd: 0 }),
+    planSaleLineRemoval: ({ saleId, lines }) => exerciseAtomicSaleItems ? ({
+      statements: [
+        { sql: 'DELETE FROM sale_item_batch_allocations WHERE sale_item_id=@lineId', params: { lineId: lines[0].saleItemId } },
+        { sql: 'DELETE FROM sale_items WHERE id=@lineId AND sale_id=@saleId', params: { lineId: lines[0].saleItemId, saleId } },
+      ],
+      restoredUnits: lines[0].heldUnits,
+    }) : ({ statements: [], restoredUnits: 0 }),
     plannedLineFromRecord: (record) => record,
-    saleMoneyUpdateStatement: () => ({ sql: 'SELECT 1', params: {} }),
+    saleMoneyUpdateStatement: (saleId, money) => exerciseAtomicSaleItems
+      ? { sql: 'UPDATE sales SET total_usd=@total WHERE id=@saleId', params: { saleId, total: money.total_usd } }
+      : { sql: 'SELECT 1', params: {} },
     saleLineKhrSnapshotStatement: () => ({ sql: 'SELECT 1', params: {} }),
   }
   // S4-30: the same applier now also appends an amendment-ledger entry, so an
@@ -169,6 +202,70 @@ function freshDb() {
            CREATE TABLE returns (branch_id INTEGER, branch_name TEXT);
            CREATE TABLE stock_row_moves (branch_id INTEGER, branch_name TEXT);`)
   return db
+}
+
+const atomicUser = { id: 7, name: 'Atomic verifier' }
+
+function atomicSaleItemsFixture() {
+  const db = new Database(':memory:')
+  db.exec(`
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT);
+    CREATE TABLE sales(id INTEGER PRIMARY KEY,sale_status TEXT,total_usd REAL);
+    CREATE TABLE sale_items(id INTEGER PRIMARY KEY AUTOINCREMENT,sale_id INTEGER,product_id INTEGER,product_name TEXT,quantity REAL,total_usd REAL);
+    CREATE TABLE sale_item_batch_allocations(id INTEGER PRIMARY KEY AUTOINCREMENT,sale_item_id INTEGER,quantity REAL CHECK(quantity>0));
+    CREATE TABLE sale_write_revisions(sale_id INTEGER PRIMARY KEY,revision INTEGER NOT NULL);
+    CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY,kind TEXT,status TEXT,payload_json TEXT,updated_at TEXT);
+    CREATE TABLE action_history(id INTEGER PRIMARY KEY,status TEXT,undo_payload TEXT,redo_payload TEXT,last_error TEXT,updated_at TEXT);
+    CREATE TABLE sale_mutation_receipts(id TEXT PRIMARY KEY,sale_id INTEGER,history_id INTEGER,mutation_kind TEXT,generation INTEGER,sale_revision INTEGER,updated_at TEXT);
+    CREATE TABLE sale_mutation_members(operation_id TEXT,entity_kind TEXT,entity_id INTEGER,ordinal INTEGER,PRIMARY KEY(operation_id,entity_kind,ordinal));
+    CREATE TABLE sale_mutation_guards(id INTEGER PRIMARY KEY,guard_value INTEGER NOT NULL CHECK(guard_value=1));
+    CREATE TABLE audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT);
+    CREATE TRIGGER revision_sale_update AFTER UPDATE ON sales BEGIN
+      INSERT INTO sale_write_revisions(sale_id,revision) VALUES(NEW.id,1)
+      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
+    END;
+    CREATE TRIGGER revision_line_insert AFTER INSERT ON sale_items BEGIN
+      INSERT INTO sale_write_revisions(sale_id,revision) VALUES(NEW.sale_id,1)
+      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
+    END;
+    CREATE TRIGGER revision_line_delete AFTER DELETE ON sale_items BEGIN
+      INSERT INTO sale_write_revisions(sale_id,revision) VALUES(OLD.sale_id,1)
+      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
+    END;
+    CREATE TRIGGER revision_allocation_insert AFTER INSERT ON sale_item_batch_allocations BEGIN
+      INSERT INTO sale_write_revisions(sale_id,revision)
+      SELECT sale_id,1 FROM sale_items WHERE id=NEW.sale_item_id
+      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
+    END;
+    CREATE TRIGGER revision_allocation_delete AFTER DELETE ON sale_item_batch_allocations BEGIN
+      INSERT INTO sale_write_revisions(sale_id,revision)
+      SELECT sale_id,1 FROM sale_items WHERE id=OLD.sale_item_id
+      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
+    END;
+  `)
+  const reversal = {
+    saleId: 77, receiptNumber: 'ATOMIC-77', saleStatus: 'completed', exchangeRate: 4100,
+    operationId: 'add-operation-77', saleStateRevision: 5,
+    moneyBefore: { total_usd: 10 }, moneyAfter: { total_usd: 15 },
+    lines: [{ saleItemId: 10, productId: 9, productName: 'Serum', quantity: 1, branchId: 1, heldUnits: 1, lineTotalUsd: 5, takes: [{ batchId: 501, quantity: 1 }] }],
+  }
+  const payload = { applier: 'sale.add_items', snapshot_id: 1, operation_id: reversal.operationId, generation: 0 }
+  db.prepare("INSERT INTO sales(id,sale_status,total_usd) VALUES(77,'completed',15)").run()
+  db.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,total_usd) VALUES(10,77,9,'Serum',1,5)").run()
+  db.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,quantity) VALUES(10,1)').run()
+  db.prepare('INSERT OR REPLACE INTO sale_write_revisions(sale_id,revision) VALUES(77,5)').run()
+  db.prepare("INSERT INTO undo_snapshots(id,kind,status,payload_json) VALUES(1,'sale.add_items','applied',?)").run(JSON.stringify(reversal))
+  db.prepare("INSERT INTO action_history(id,status,undo_payload,redo_payload) VALUES(41,'undoable',?,?)").run(JSON.stringify(payload), JSON.stringify(payload))
+  db.prepare("INSERT INTO sale_mutation_receipts(id,sale_id,history_id,mutation_kind,generation,sale_revision) VALUES('add-operation-77',77,41,'add_items',0,5)").run()
+  db.prepare("INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES('add-operation-77','sale_item',10,0)").run()
+  db.prepare("INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES('add-operation-77','undo_snapshot',1,0)").run()
+  return { db, payload }
+}
+
+function atomicSaleItemsState(db) {
+  return Object.fromEntries(['sales', 'sale_items', 'sale_item_batch_allocations', 'sale_write_revisions', 'undo_snapshots',
+    'action_history', 'sale_mutation_receipts', 'sale_mutation_members', 'sale_mutation_guards', 'audit_logs']
+    .map(table => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
 }
 
 function readBranch(db, id) {
@@ -325,6 +422,109 @@ await check('sale.settlement is a real server applier and invokes the authoritat
   assert.strictEqual(settlementReplayCalls, 1, 'the registered applier must execute the settlement replay helper exactly once')
 })
 
+await check('sale.add_items atomically advances revision, receipt, snapshot, history, allocations and audit', async () => {
+  exerciseAtomicSaleItems = true
+  try {
+    const fixture = atomicSaleItemsFixture()
+    sharedDb = fixture.db
+    const resolved = resolveUndoApplier(fixture.payload)
+    assert.ok(resolved)
+    await resolved.run(fixture.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 0)
+    assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'redoable')
+    assert.equal(fixture.db.prepare('SELECT generation FROM sale_mutation_receipts').get().generation, 1)
+    const reversedSnapshot = fixture.db.prepare('SELECT status,payload_json FROM undo_snapshots WHERE id=1').get()
+    assert.equal(reversedSnapshot.status, 'reversed')
+    const reversedRevision = JSON.parse(reversedSnapshot.payload_json).saleStateRevision
+    assert.equal(reversedRevision, fixture.db.prepare('SELECT revision FROM sale_write_revisions WHERE sale_id=77').get().revision)
+    assert.equal(reversedRevision, fixture.db.prepare('SELECT sale_revision FROM sale_mutation_receipts').get().sale_revision)
+
+    const afterUndo = atomicSaleItemsState(fixture.db)
+    await assert.rejects(
+      () => resolved.run(fixture.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 }),
+      error => error?.statusCode === 409,
+    )
+    assert.deepEqual(atomicSaleItemsState(fixture.db), afterUndo, 'an exact retry of the acknowledged generation cannot replay or write twice')
+
+    const redoPayload = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
+    await resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
+    const newLineId = fixture.db.prepare('SELECT id FROM sale_items').get().id
+    assert.notEqual(newLineId, 10, 'redo must persist the newly inserted sale-item identity')
+    assert.equal(fixture.db.prepare('SELECT sale_item_id FROM sale_item_batch_allocations').get().sale_item_id, newLineId)
+    assert.equal(fixture.db.prepare("SELECT entity_id FROM sale_mutation_members WHERE entity_kind='sale_item'").get().entity_id, newLineId)
+    const appliedSnapshot = fixture.db.prepare('SELECT status,payload_json FROM undo_snapshots WHERE id=1').get()
+    assert.equal(appliedSnapshot.status, 'applied')
+    assert.equal(JSON.parse(appliedSnapshot.payload_json).lines[0].saleItemId, newLineId)
+    assert.equal(JSON.parse(appliedSnapshot.payload_json).saleStateRevision, fixture.db.prepare('SELECT revision FROM sale_write_revisions WHERE sale_id=77').get().revision)
+    assert.equal(fixture.db.prepare('SELECT generation FROM sale_mutation_receipts').get().generation, 2)
+    assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable')
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 2)
+  } finally {
+    exerciseAtomicSaleItems = false
+    sharedDb = null
+  }
+})
+
+await check('sale.add_items rejects stale and boundary races without partial replay writes', async () => {
+  exerciseAtomicSaleItems = true
+  try {
+    const stale = atomicSaleItemsFixture()
+    sharedDb = stale.db
+    const resolved = resolveUndoApplier(stale.payload)
+    stale.db.prepare('UPDATE sales SET total_usd=16 WHERE id=77').run()
+    const staleState = atomicSaleItemsState(stale.db)
+    await assert.rejects(
+      () => resolved.run(stale.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 }),
+      error => error?.statusCode === 409,
+    )
+    assert.deepEqual(atomicSaleItemsState(stale.db), staleState, 'pre-existing stale revision changes nothing')
+
+    const malformed = atomicSaleItemsFixture()
+    sharedDb = malformed.db
+    const malformedSnapshot = JSON.parse(malformed.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=1').get().payload_json)
+    malformedSnapshot.saleStateRevision = '5'
+    malformed.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=1').run(JSON.stringify(malformedSnapshot))
+    const malformedState = atomicSaleItemsState(malformed.db)
+    await assert.rejects(
+      () => resolved.run(malformed.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 }),
+      error => error?.statusCode === 409,
+    )
+    assert.deepEqual(atomicSaleItemsState(malformed.db), malformedState, 'operation-backed snapshots cannot fall back to legacy replay when their revision is malformed')
+
+    const raced = atomicSaleItemsFixture()
+    sharedDb = raced.db
+    beforeAtomicBatch = sqlite => sqlite.prepare('UPDATE sales SET total_usd=17 WHERE id=77').run()
+    await assert.rejects(
+      () => resolved.run(raced.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 }),
+      error => error?.statusCode === 409,
+    )
+    assert.equal(raced.db.prepare('SELECT total_usd FROM sales WHERE id=77').get().total_usd, 17, 'the adversarial concurrent write occurs')
+    assert.equal(raced.db.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1, 'guard race cannot remove the line')
+    assert.equal(raced.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable')
+    assert.equal(raced.db.prepare('SELECT status FROM undo_snapshots WHERE id=1').get().status, 'applied')
+    assert.equal(raced.db.prepare('SELECT generation FROM sale_mutation_receipts').get().generation, 0)
+    assert.equal(raced.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 0)
+
+    const boundary = atomicSaleItemsFixture()
+    sharedDb = boundary.db
+    await resolved.run(boundary.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
+    const redoPayload = JSON.parse(boundary.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
+    const beforeFailedRedo = atomicSaleItemsState(boundary.db)
+    failAtomicAllocation = true
+    await assert.rejects(
+      () => resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 }),
+      error => error?.statusCode === 409,
+    )
+    assert.deepEqual(atomicSaleItemsState(boundary.db), beforeFailedRedo, 'allocation failure rolls back line, member, money, revision, snapshot, history, receipt and audit')
+  } finally {
+    exerciseAtomicSaleItems = false
+    failAtomicAllocation = false
+    beforeAtomicBatch = null
+    sharedDb = null
+  }
+})
+
 await check('source lock: sale settlement history is server-managed and never takes the generic status-only path', () => {
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
   assert.ok(/SALE_SETTLEMENT_ACTION_KIND/.test(routeSrc), 'action history must import the settlement kind')
@@ -332,7 +532,7 @@ await check('source lock: sale settlement history is server-managed and never ta
   assert.ok(/applier\.name === SALE_SETTLEMENT_ACTION_KIND[\s\S]*notifySaleSettlementAction/.test(routeSrc), 'successful settlement replay must notify through its helper')
   assert.ok(/SALE_SETTLEMENT_ACTION_KIND[\s\S]*sale_mutation_receipts/.test(routeSrc), 'settlement details must load its durable receipt table')
   assert.ok(/response_json/.test(routeSrc), 'settlement details must read the saved settlement response')
-  const serverBranchAt = routeSrc.indexOf('applier && SERVER_BULK_KINDS.has(applier.name)')
+  const serverBranchAt = routeSrc.indexOf('if (serverManagedReplay && applier)')
   const genericFlipAt = routeSrc.indexOf('UPDATE action_history SET status = @status, last_error = NULL', serverBranchAt)
   assert.ok(serverBranchAt > -1 && genericFlipAt > serverBranchAt, 'server-managed settlement must return before the generic status-only flip')
 })
@@ -342,6 +542,13 @@ await check('source lock: add-items replay restores optional exact KHR snapshots
   assert.ok(/reversal\.lineMoneyBefore\s*\?\s*\[saleLineKhrSnapshotStatement\(saleId, reversal\.lineMoneyBefore\)\]\s*:\s*\[\]/.test(source), 'undo must restore the optional before-line snapshot')
   assert.ok(/reversal\.lineMoneyAfter\s*\?\s*\[saleLineKhrSnapshotStatement\(saleId, reversal\.lineMoneyAfter\)\]\s*:\s*\[\]/.test(source), 'redo must restore the optional after-line snapshot')
   assert.ok(/Number\(reversal\.moneyAfter\.exchange_rate \?\? reversal\.exchangeRate\) \|\| 4100/.test(source), 'redo must prefer the frozen after-snapshot rate and retain the legacy fallback')
+  assert.ok(/saleStateRevision[\s\S]*replayAtomicSaleAddItems/.test(source), 'new snapshots must enter the revision-guarded atomic replay path')
+  assert.ok(/buildOperationAllocationStatements\(plan\.lines, operationId, stamp\)/.test(source), 'redo allocations must be statements in the operation batch')
+  assert.ok(/UPDATE undo_snapshots SET status=@status,payload_json=\$\{snapshotPayload\}/.test(source), 'snapshot status, line ids and post-direction revision must update in the replay batch')
+  assert.ok(/UPDATE sale_mutation_receipts SET generation=@nextGeneration/.test(source), 'durable receipt generation must advance in the replay batch')
+  const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
+  assert.ok(/SALE_ADD_ITEMS_ACTION_KIND[\s\S]*operation_id/.test(route), 'operation-backed add-items history must be server-managed')
+  assert.ok(/if \(serverManagedReplay && applier\)/.test(route), 'operation-backed add-items must return before the generic history flip')
 })
 
 await check('source lock: the applier permission gate (full tier) guards BOTH record and operate, before any status flip or replay', () => {

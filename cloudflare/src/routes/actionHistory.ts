@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { isServerReplayable, resolveUndoApplier, applierPermissionTier } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier } from '../lib/undoAppliers'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
@@ -107,8 +107,16 @@ function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boole
   return true
 }
 
+function isServerManagedPayload(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const payload = value as Record<string, unknown>
+  const kind = String(payload.applier || '')
+  return SERVER_BULK_KINDS.has(kind)
+    || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
+}
+
 function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boolean {
-  if ([body.undo_payload, body.redo_payload].some(p => p && typeof p === 'object' && SERVER_BULK_KINDS.has(String((p as Record<string, unknown>).applier || '')))) return false
+  if ([body.undo_payload, body.redo_payload].some(isServerManagedPayload)) return false
   if (isAdminControlUser(user)) return true
   if (!canUseNamedAppliers(user, [body.undo_payload, body.redo_payload])) return false
   const permission = permissionForActionHistory({ entity: body.entity, scope: body.scope })
@@ -308,6 +316,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // applier leaves the action reversible and retryable rather than half-done.
     const payload = direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload)
     const applier = resolveUndoApplier(payload)
+    const serverManagedReplay = !!(applier && isServerManagedPayload(payload))
     // The applier's own declared permission gates its replay -- full tier,
     // checked HERE at operate time too (recording is gated the same way, but
     // rows written before this gate existed, or by a user since demoted,
@@ -335,7 +344,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation })
         applied = true
       } catch (error) {
-        if (!SERVER_BULK_KINDS.has(applier.name)) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
+        if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
         const status = stockReplay && (code === 400 || code === 403) ? code : code === 409 ? 409 : 500
@@ -343,16 +352,16 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       }
     }
 
-    if (applier && SERVER_BULK_KINDS.has(applier.name)) {
-      c.executionCtx.waitUntil(applier.name === STOCK_SESSION_KIND
+    if (serverManagedReplay && applier) {
+      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND) c.executionCtx.waitUntil(applier.name === STOCK_SESSION_KIND
         ? notifyStockSession(c.env, { operationId: String(payload.operation_id) })
         : applier.name === SALE_SETTLEMENT_ACTION_KIND
           ? notifySaleSettlementAction(c.env)
-        : applier.name === RETURN_BULK_ACTION_KIND
-        ? notifyReturnBulkAction(c.env)
-        : applier.name === BULK_STATUS_KIND
-          ? notifyBulkStatus(c.env)
-          : notifySaleBulkUpdate(c.env, String(payload.action || '')))
+          : applier.name === RETURN_BULK_ACTION_KIND
+            ? notifyReturnBulkAction(c.env)
+            : applier.name === BULK_STATUS_KIND
+              ? notifyBulkStatus(c.env)
+              : notifySaleBulkUpdate(c.env, String(payload.action || '')))
       const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
       return c.json({ success: true, applied: true, item: row ? mapRow(row, user) : null, payload })
     }
