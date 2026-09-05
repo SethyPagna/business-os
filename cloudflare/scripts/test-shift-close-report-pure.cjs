@@ -122,6 +122,9 @@ sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0123_shift_
 // offset it interpolates is part of what "today's shift" means, and a stub of
 // it would quietly make the route look for the wrong day.
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
+const saleTotals = loadReal('lib/saleTotals.ts')
+const financialPrecision = loadReal('lib/financialPrecision.ts')
+const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const sent = []
 let currentUserId = 7
 const primaryD1 = d1(sqlite)
@@ -306,7 +309,8 @@ async function main() {
     // telegram.ts imports lib/saleTotals.ts (the receipt lane: a shop-absorbed
     // delivery fee must not be billed into the alert Total). Loaded REAL -- a
     // stub of that rule would test the stub. Without the key loadReal throws.
-    './saleTotals': loadReal('lib/saleTotals.ts'),
+    './saleTotals': saleTotals,
+    './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', {
       './db': { getDb: () => settingsOnly }, './businessDateWindow': businessDateWindow,
     }),
