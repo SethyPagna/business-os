@@ -926,8 +926,14 @@ export async function getItemDiscountUsd(env: Env, f: SalesFilters): Promise<num
  * sites read as what they are (S4R3-6).
  */
 export interface DeriveTotalsOptions {
+  /** The AWAITING cohort's COGS, despite the name -- pending_cost_usd. */
   costUsd?: number
-  itemDiscountUsd?: number
+  /** REQUIRED, not optional (Sep 6 2026, owner ask N6.6). Every entry point
+   *  already computed it in the same ITEM_COST_COLUMNS round trip; leaving it
+   *  optional meant a new caller could omit it and silently report
+   *  item_discount_usd = 0 and a total_discount_usd short by the whole
+   *  line-discount column, with nothing to catch it. The type catches it. */
+  itemDiscountUsd: number
   pendingItemDiscountUsd?: number
   /** Receipts VOIDED in this bucket -- never reachable from `level`, whose
    *  own WHERE hides cancelled sales. Supplied by cancelledCountByBucket. */
@@ -936,7 +942,7 @@ export interface DeriveTotalsOptions {
   unvaluedCostUsd?: number
 }
 
-export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd = 0, options: DeriveTotalsOptions = {}): SalesTotals {
+export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd: number, options: DeriveTotalsOptions): SalesTotals {
   const txCount = num(level.tx_count)
   const grossSalesUsd = num(level.gross_sales_usd)
   const storeDiscountUsd = num(level.store_discount_usd)
@@ -1183,6 +1189,17 @@ export interface DeliveryContactTotalsRow {
   margin_usd: number
   last_delivery_at: string | null
   last_expense_at: string | null
+  // ---- additive (peer reports-redesign lane, Sep 6 2026) ----------------
+  // charged_fee_usd split by whether the sale it rode on has been settled.
+  // The two always sum back to charged_fee_usd: the window is recognized
+  // sales, and every recognized sale is either collected or awaiting
+  // payment. Nothing here re-derives a fee -- it is the same
+  // customerDeliveryFeeExpr, cut by sale status.
+  paid_fee_usd: number
+  receivable_fee_usd: number
+  // How the settled fees were taken, so a courier line reconciles against a
+  // till. Only methods with a fee appear.
+  paid_by_method: { payment_method: string; count: number; fee_usd: number }[]
 }
 
 // One receipt inside a day's drill. revenue_usd is computed the SAME way the
@@ -1261,12 +1278,29 @@ export async function getDeliveryContactTotals(
            COUNT(*) AS deliveries,
            COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END), 0) AS charged_fee_usd,
            COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN COALESCE(delivery_fee_usd, 0) ELSE 0 END), 0) AS absorbed_fee_usd,
+           COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS paid_fee_usd,
+           COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS receivable_fee_usd,
            COALESCE(SUM(delivery_actual_cost_usd), 0) AS actual_cost_usd,
            COALESCE(SUM(CASE WHEN delivery_actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END), 0) AS actual_cost_count,
            MAX(created_at) AS last_delivery_at
     FROM sales
     WHERE ${clauses.join(' AND ')}
     GROUP BY delivery_contact_id, LOWER(TRIM(COALESCE(delivery_contact_name, '')))
+  `).all<Record<string, unknown>>(params)
+
+  // Settled delivery fees by the method the sale was paid with. Grouped on
+  // the same contact identity as the totals above so the rows merge by the
+  // same key, and on the same normalized method label getPaymentMethodBreakdown
+  // uses, so a courier fold and the payments fold name a method identically.
+  const methodRows = await db.prepare(`
+    SELECT delivery_contact_id,
+           COALESCE(NULLIF(TRIM(delivery_contact_name), ''), '') AS delivery_contact_name,
+           COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
+           COUNT(*) AS count,
+           COALESCE(SUM(${customerDeliveryFeeExpr('')}), 0) AS fee_usd
+    FROM sales
+    WHERE ${clauses.join(' AND ')} AND ${collectedSaleExpr('')}
+    GROUP BY delivery_contact_id, LOWER(TRIM(COALESCE(delivery_contact_name, ''))), COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown')
   `).all<Record<string, unknown>>(params)
 
   // Standalone courier payments are expense rows, not sale rows. Keep the
@@ -1323,6 +1357,8 @@ export async function getDeliveryContactTotals(
     const add = {
       deliveries: num(r.deliveries),
       charged: num(r.charged_fee_usd),
+      paid: num(r.paid_fee_usd),
+      receivable: num(r.receivable_fee_usd),
       absorbed: num(r.absorbed_fee_usd),
       actual: num(r.actual_cost_usd),
       actualCount: num(r.actual_cost_count),
@@ -1333,6 +1369,9 @@ export async function getDeliveryContactTotals(
         delivery_contact_name: name,
         deliveries: add.deliveries,
         charged_fee_usd: add.charged,
+        paid_fee_usd: add.paid,
+        receivable_fee_usd: add.receivable,
+        paid_by_method: [],
         absorbed_fee_usd: add.absorbed,
         actual_cost_usd: add.actual,
         actual_cost_count: add.actualCount,
@@ -1348,6 +1387,8 @@ export async function getDeliveryContactTotals(
     }
     existing.deliveries += add.deliveries
     existing.charged_fee_usd += add.charged
+    existing.paid_fee_usd += add.paid
+    existing.receivable_fee_usd += add.receivable
     existing.absorbed_fee_usd += add.absorbed
     existing.actual_cost_usd += add.actual
     existing.actual_cost_count += add.actualCount
@@ -1370,6 +1411,9 @@ export async function getDeliveryContactTotals(
         delivery_contact_name: name,
         deliveries: 0,
         charged_fee_usd: 0,
+        paid_fee_usd: 0,
+        receivable_fee_usd: 0,
+        paid_by_method: [],
         absorbed_fee_usd: 0,
         actual_cost_usd: 0,
         actual_cost_count: 0,
@@ -1389,10 +1433,29 @@ export async function getDeliveryContactTotals(
     existing.last_expense_at = expenseAt || existing.last_expense_at
     if (name) existing.delivery_contact_name = name
   }
+  for (const r of methodRows || []) {
+    const id = r.delivery_contact_id == null ? null : Number(r.delivery_contact_id)
+    const name = String(r.delivery_contact_name || '')
+    const target = merged.get(id != null ? `id:${id}` : `name:${name.toLowerCase()}`)
+    if (!target) continue
+    const method = String(r.payment_method || 'Unknown')
+    const existing = target.paid_by_method.find((m) => m.payment_method === method)
+    if (existing) {
+      existing.count += num(r.count)
+      existing.fee_usd += num(r.fee_usd)
+    } else {
+      target.paid_by_method.push({ payment_method: method, count: num(r.count), fee_usd: num(r.fee_usd) })
+    }
+  }
   return [...merged.values()]
     .map(({ _lastAt, ...row }) => ({
       ...row,
       charged_fee_usd: round2(row.charged_fee_usd),
+      paid_fee_usd: round2(row.paid_fee_usd),
+      receivable_fee_usd: round2(row.receivable_fee_usd),
+      paid_by_method: row.paid_by_method
+        .map((m) => ({ ...m, fee_usd: round2(m.fee_usd) }))
+        .sort((a, b) => b.fee_usd - a.fee_usd || a.payment_method.localeCompare(b.payment_method)),
       absorbed_fee_usd: round2(row.absorbed_fee_usd),
       actual_cost_usd: round2(row.actual_cost_usd),
       linked_expense_usd: round2(row.linked_expense_usd),
@@ -1584,8 +1647,9 @@ export async function getProductSalesBreakdown(
 // branch" and "Products" views. Every grouped row is a full canonical
 // SalesTotals built from the SAME per-sale expressions salesLevelTotals uses
 // (recognized net sales - customer refunds = revenue; profit = revenue - COGS
-// - store-paid delivery), so the rows of one view sum to getSalesTotals for
-// the same filters -- one revenue definition, sliced, never re-derived.
+// + delivery fees charged - courier cost paid), so the rows of one view sum
+// to getSalesTotals for the same filters -- one revenue definition, sliced,
+// never re-derived.
 // ---------------------------------------------------------------------------
 
 export type SalesGroupKey = 'customer' | 'cashier' | 'payment_method' | 'hour' | 'weekday' | 'branch'
@@ -1598,6 +1662,121 @@ export interface SalesGroupedRow extends SalesTotals {
   label: string
   entity_id: number | null
   cost_missing_snapshot_lines: number
+  // ---- additive per-group columns (peer reports-redesign lane, Sep 6 2026).
+  // Present only on the groupings they mean something for; none of them
+  // changes a money field above. by=customer gets the identity three,
+  // by=cashier the cohort counts, by=branch the two activity counts.
+  is_new?: boolean
+  gender?: string
+  phone?: string
+  new_customer_count?: number
+  return_customer_count?: number
+  unregistered_count?: number
+  paid_tx_count?: number
+  customer_count?: number
+  items_sold_qty?: number
+}
+
+/**
+ * A customer is NEW when their first-ever recognized sale is the one inside
+ * this window, and RETURNING when they bought before it. "First-ever" is not
+ * window-relative: a roll-up over the whole table decides it, so one customer
+ * is not counted new in every range they happen to appear in.
+ *
+ * Walk-ins (customer_id NULL) are neither -- there is no identity to be new,
+ * and counting a nameless receipt as a new customer inflates acquisition.
+ * They are reported separately, as unregistered_count.
+ */
+const FIRST_SALE_CTE = `WITH first_sale AS (
+  SELECT customer_id, MIN(datetime(created_at)) AS first_at
+  FROM sales
+  WHERE customer_id IS NOT NULL AND ${recognizedExpr('')}
+  GROUP BY customer_id
+)`
+
+interface CohortCounts { new_customer_count: number; return_customer_count: number; unregistered_count: number; paid_tx_count: number }
+
+async function cohortCountsByGroup(env: Env, f: SalesFilters, keyExpr: string): Promise<Map<string, CohortCounts>> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('sales', f)
+  const rows = await db.prepare(`
+    ${FIRST_SALE_CTE}
+    SELECT ${keyExpr} AS grp_key,
+           COUNT(DISTINCT CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) = fs.first_at THEN sales.customer_id END) AS new_customer_count,
+           COUNT(DISTINCT CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) > fs.first_at THEN sales.customer_id END) AS return_customer_count,
+           COALESCE(SUM(CASE WHEN sales.customer_id IS NULL THEN 1 ELSE 0 END), 0) AS unregistered_count,
+           COALESCE(SUM(CASE WHEN ${collectedSaleExpr('sales.')} THEN 1 ELSE 0 END), 0) AS paid_tx_count
+    FROM sales
+    LEFT JOIN first_sale fs ON fs.customer_id = sales.customer_id
+    WHERE ${whereSql}
+    GROUP BY grp_key
+  `).all<Record<string, unknown>>(params)
+  return new Map((rows || []).map((r) => [
+    r.grp_key == null ? '' : String(r.grp_key),
+    {
+      new_customer_count: num(r.new_customer_count),
+      return_customer_count: num(r.return_customer_count),
+      unregistered_count: num(r.unregistered_count),
+      paid_tx_count: num(r.paid_tx_count),
+    },
+  ]))
+}
+
+interface CustomerIdentity { is_new: boolean; gender: string; phone: string }
+
+/** The identity three for by=customer. The phone falls back to the snapshot
+ *  on the sale, because a walk-in row has no customers record to read. */
+async function customerIdentityByGroup(env: Env, f: SalesFilters, keyExpr: string): Promise<Map<string, CustomerIdentity>> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('sales', f)
+  const rows = await db.prepare(`
+    ${FIRST_SALE_CTE}
+    SELECT ${keyExpr} AS grp_key,
+           MAX(CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) = fs.first_at THEN 1 ELSE 0 END) AS is_new,
+           MAX(COALESCE(NULLIF(TRIM(c.gender), ''), '')) AS gender,
+           MAX(COALESCE(NULLIF(TRIM(c.phone), ''), NULLIF(TRIM(sales.customer_phone), ''), '')) AS phone
+    FROM sales
+    LEFT JOIN first_sale fs ON fs.customer_id = sales.customer_id
+    LEFT JOIN customers c ON c.id = sales.customer_id
+    WHERE ${whereSql}
+    GROUP BY grp_key
+  `).all<Record<string, unknown>>(params)
+  return new Map((rows || []).map((r) => [
+    r.grp_key == null ? '' : String(r.grp_key),
+    { is_new: num(r.is_new) === 1, gender: String(r.gender || ''), phone: String(r.phone || '') },
+  ]))
+}
+
+interface BranchActivity { customer_count: number; items_sold_qty: number }
+
+/** by=branch activity. customer_count is DISTINCT identified customers: a
+ *  branch's walk-in receipts have no identity to count and would otherwise
+ *  collapse into one phantom customer. */
+async function branchActivityByGroup(env: Env, f: SalesFilters, levelKey: string, joinedKey: string): Promise<Map<string, BranchActivity>> {
+  const db = getDb(env)
+  const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
+  const { sql: whereJoined, params: paramsJoined } = whereActiveSales('s', f)
+  const [customerRows, itemRows] = await Promise.all([
+    db.prepare(`
+      SELECT ${levelKey} AS grp_key, COUNT(DISTINCT sales.customer_id) AS customer_count
+      FROM sales WHERE ${whereLevel} GROUP BY grp_key
+    `).all<Record<string, unknown>>(paramsLevel),
+    db.prepare(`
+      SELECT ${joinedKey} AS grp_key, COALESCE(SUM(si.quantity), 0) AS items_sold_qty
+      FROM sale_items si JOIN sales s ON s.id = si.sale_id
+      WHERE ${whereJoined} GROUP BY grp_key
+    `).all<Record<string, unknown>>(paramsJoined),
+  ])
+  const keyOf = (v: unknown) => (v == null ? '' : String(v))
+  const out = new Map<string, BranchActivity>()
+  for (const r of customerRows || []) out.set(keyOf(r.grp_key), { customer_count: num(r.customer_count), items_sold_qty: 0 })
+  for (const r of itemRows || []) {
+    const key = keyOf(r.grp_key)
+    const existing = out.get(key) || { customer_count: 0, items_sold_qty: 0 }
+    existing.items_sold_qty = num(r.items_sold_qty)
+    out.set(key, existing)
+  }
+  return out
 }
 
 function salesGroupExprs(alias: string, groupBy: SalesGroupKey): { key: string; label: string; id: string } {
@@ -1699,6 +1878,35 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       ...deriveTotals(r || VOID_ONLY_LEVEL, costByKey.get(key) || 0, returnedByKey.get(key) || 0, { costUsd: pendingCostByKey.get(key) || 0, itemDiscountUsd: itemDiscountByKey.get(key) || 0, pendingItemDiscountUsd: pendingItemDiscountByKey.get(key) || 0, cancelledTxCount: voided ? voided.count : 0, unvaluedCostUsd: unvaluedCostByKey.get(key) || 0 }),
     }
   })
+  // ---- the additive per-group columns ------------------------------------
+  // One extra query for the groupings that carry them, none for the rest.
+  // They are attached AFTER deriveTotals so they cannot reach a money field,
+  // which is the whole contract with the reports lane: additive only.
+  if (groupBy === 'customer') {
+    const identity = await customerIdentityByGroup(env, f, level.key)
+    for (const row of rows) {
+      const hit = identity.get(row.key) || { is_new: false, gender: '', phone: '' }
+      row.is_new = hit.is_new
+      row.gender = hit.gender
+      row.phone = hit.phone
+    }
+  } else if (groupBy === 'cashier') {
+    const cohorts = await cohortCountsByGroup(env, f, level.key)
+    for (const row of rows) {
+      const hit = cohorts.get(row.key)
+      row.new_customer_count = hit ? hit.new_customer_count : 0
+      row.return_customer_count = hit ? hit.return_customer_count : 0
+      row.unregistered_count = hit ? hit.unregistered_count : 0
+      row.paid_tx_count = hit ? hit.paid_tx_count : 0
+    }
+  } else if (groupBy === 'branch') {
+    const activity = await branchActivityByGroup(env, f, level.key, joined.key)
+    for (const row of rows) {
+      const hit = activity.get(row.key)
+      row.customer_count = hit ? hit.customer_count : 0
+      row.items_sold_qty = hit ? hit.items_sold_qty : 0
+    }
+  }
   if (groupBy === 'hour' || groupBy === 'weekday') {
     rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
   } else {
@@ -1719,6 +1927,19 @@ export interface ProductSalesRankingRow {
   /** line_sales_usd - cost_usd (item-level gross profit; NULL cost snapshots count as 0 and are flagged). */
   profit_usd: number
   cost_missing_snapshot_lines: number
+  // ---- additive identity/stock columns (peer reports-redesign lane, Sep 6
+  // 2026). None of them touches the money above. `category_id` is NULL when
+  // the product's free-text category does not match a row in `categories` --
+  // products.category is TEXT, there is no FK, so the id is a best-effort
+  // resolution by name rather than a claim of one.
+  category_id: number | null
+  category_name: string
+  barcode: string
+  // On-hand NOW, not as of the range: a stock level has no history here.
+  // Branch-scoped to f.branchId when one is set (branch_stock), otherwise the
+  // catalog-wide products.stock_quantity -- the same two ledgers the rest of
+  // the app reads, never mixed.
+  on_hand_qty: number
 }
 
 /**
@@ -1730,6 +1951,11 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('s', f)
   const cap = Math.max(1, Math.min(1000, Math.trunc(limit) || 200))
+  // Two stock ledgers, never mixed: branch_stock when the report is scoped to
+  // a branch, products.stock_quantity when it is not.
+  const onHandExpr = f.branchId
+    ? `COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = si.product_id AND bs.branch_id = @branchId), 0)`
+    : `COALESCE(p.stock_quantity, 0)`
   const rows = await db.prepare(`
     SELECT si.product_id AS product_id,
            MAX(COALESCE(si.product_name, '')) AS product_name,
@@ -1737,14 +1963,20 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
            COALESCE(SUM(si.quantity), 0) AS qty,
            COALESCE(SUM(si.total_usd), 0) AS line_sales_usd,
            COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
-           COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS cost_missing_snapshot_lines
+           COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS cost_missing_snapshot_lines,
+           MAX(COALESCE(p.barcode, '')) AS barcode,
+           MAX(COALESCE(p.category, '')) AS category_name,
+           MAX(cat.id) AS category_id,
+           MAX(${onHandExpr}) AS on_hand_qty
     FROM sale_items si
     JOIN sales s ON s.id = si.sale_id
+    LEFT JOIN products p ON p.id = si.product_id
+    LEFT JOIN categories cat ON lower(trim(cat.name)) = lower(trim(COALESCE(p.category, ''))) AND COALESCE(p.category, '') <> ''
     WHERE ${whereSql} AND ${recognizedExpr('s.')}
     GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
     ORDER BY line_sales_usd DESC, qty DESC
     LIMIT @limit
-  `).all<{ product_id: number | null; product_name: string; sale_count: number; qty: number; line_sales_usd: number; cost_usd: number; cost_missing_snapshot_lines: number }>({ ...params, limit: cap })
+  `).all<{ product_id: number | null; product_name: string; sale_count: number; qty: number; line_sales_usd: number; cost_usd: number; cost_missing_snapshot_lines: number; barcode: string | null; category_name: string | null; category_id: number | null; on_hand_qty: number }>({ ...params, limit: cap })
   const r2 = (v: number) => Math.round(v * 100) / 100
   return (rows || []).map((r) => {
     const lineSales = r2(num(r.line_sales_usd))
@@ -1758,6 +1990,10 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
       cost_usd: cost,
       profit_usd: r2(lineSales - cost),
       cost_missing_snapshot_lines: num(r.cost_missing_snapshot_lines),
+      category_id: r.category_id == null ? null : Number(r.category_id),
+      category_name: String(r.category_name || ''),
+      barcode: String(r.barcode || ''),
+      on_hand_qty: num(r.on_hand_qty),
     }
   })
 }

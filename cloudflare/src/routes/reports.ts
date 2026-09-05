@@ -193,7 +193,15 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   // cost_usd / profit_usd, so they leave with them. The rest of the pending
   // block (unpaid gross sales, discounts, revenue, delivery) is sale-header
   // money any sales-reading caller can already see and stays in `rest`.
-  const { cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd, ...rest } = row as Record<string, unknown>
+  // unvalued_cost_usd and returned_cost_shortfall_usd (Sep 6 2026) are COGS
+  // the kernel HELD OUT of cost_usd -- the cost of receipts with no sale
+  // value, and the part of a return's cost that had no counted cost to come
+  // off. They are the same money as cost_usd, reported separately so the
+  // repair is auditable rather than silent, so they leave by the same door.
+  const {
+    cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd,
+    unvalued_cost_usd, returned_cost_shortfall_usd, ...rest
+  } = row as Record<string, unknown>
   if (!isAdmin) return rest
   const revenue = num(rest.revenue_usd)
   const profit = num(profit_usd)
@@ -205,6 +213,8 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     margin_pct: revenue > 0 ? round2((profit / revenue) * 100) : null,
     pending_cost_usd: round2(num(pending_cost_usd)),
     pending_profit_usd: round2(num(pending_profit_usd)),
+    unvalued_cost_usd: round2(num(unvalued_cost_usd)),
+    returned_cost_shortfall_usd: round2(num(returned_cost_shortfall_usd)),
   }
 }
 

@@ -51,7 +51,7 @@ db.exec(`
     tax_usd REAL, total_usd REAL, total_khr REAL,
     delivery_fee_usd REAL, delivery_fee_paid_by TEXT, is_delivery INTEGER,
     delivery_actual_cost_usd REAL, delivery_contact_id INTEGER, delivery_contact_name TEXT,
-    branch_id INTEGER, branch_name TEXT, customer_id INTEGER, customer_name TEXT,
+    branch_id INTEGER, branch_name TEXT, customer_id INTEGER, customer_name TEXT, customer_phone TEXT,
     cashier_id INTEGER, cashier_name TEXT, payment_method TEXT, amount_paid_usd REAL
   );
   CREATE TABLE sale_items (id INTEGER PRIMARY KEY, sale_id INTEGER, quantity REAL, cost_price_usd REAL,
@@ -67,6 +67,10 @@ db.exec(`
     fee_date TEXT, sale_id INTEGER, branch_id INTEGER, delivery_contact_id INTEGER, created_by INTEGER, created_at TEXT);
   CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY, movement_type TEXT, quantity REAL, created_at TEXT);
   CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);
+  CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, gender TEXT);
+  CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, category TEXT, stock_quantity REAL);
+  CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT);
+  CREATE TABLE branch_stock (id INTEGER PRIMARY KEY, product_id INTEGER, branch_id INTEGER, quantity REAL);
 `)
 
 // 2026-08-10 05:00Z = 12:00 local (UTC+7). The day is not the variable here.

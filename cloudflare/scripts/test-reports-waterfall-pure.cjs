@@ -89,7 +89,7 @@ const level = {
   pending_delivery_usd: 20,
   pending_delivery_cost_usd: 17,
 }
-const totals = lib.deriveTotals(level, /* costUsd */ 120, /* returnedCostUsd */ 20, { costUsd: 70 })
+const totals = lib.deriveTotals(level, /* costUsd */ 120, /* returnedCostUsd */ 20, { costUsd: 70, itemDiscountUsd: 0 })
 
 test('the two halves of delivery_net_usd are emitted and reconcile to it', () => {
   assert.equal(totals.recognized_delivery_usd, 10, 'customer-paid fees on RECOGNIZED sales')
@@ -127,12 +127,15 @@ test('the realised waterfall foots: revenue - COGS + delivery collected - courie
 })
 
 test('Not Paid detail does not get added twice by deriveTotals', () => {
-  const withoutPending = lib.deriveTotals(level, 120, 20)
+  // itemDiscountUsd is REQUIRED as of Sep 6 2026 (owner ask item 6): every
+  // caller states the line-discount it measured, so no report can quietly
+  // report $0 of item discount because it forgot to pass one.
+  const withoutPending = lib.deriveTotals(level, 120, 20, { itemDiscountUsd: 0 })
   const movedPending = lib.deriveTotals(
     { ...level, pending_revenue_usd: 999, pending_delivery_usd: 999, pending_delivery_cost_usd: 999, pending_gross_sales_usd: 999 },
     120,
     20,
-    { costUsd: 999 },
+    { costUsd: 999, itemDiscountUsd: 0 },
   )
   for (const k of ['revenue_usd', 'cost_usd', 'profit_usd', 'collected_total_usd', 'gross_sales_usd', 'delivery_net_usd', 'avg_order_usd', 'margin_pct']) {
     assert.equal(movedPending[k], withoutPending[k], `${k} is untouched by the awaiting cohort`)
@@ -214,7 +217,16 @@ test('the level columns carry the whole pending cohort, and every cost query use
 test('gateTotals keeps pending COGS and pending profit admin-only', () => {
   const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'reports.ts'), 'utf8')
   const gate = routes.slice(routes.indexOf('export function gateTotals'), routes.indexOf('export function gateProductRow'))
-  assert.ok(/const \{ cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd, \.\.\.rest \}/.test(gate), 'both pending money keys are destructured out before the non-admin return')
+  // Asserted key by key over the destructuring PROLOGUE (everything before
+  // the non-admin early return) rather than as one literal line: the list
+  // grows -- unvalued_cost_usd and returned_cost_shortfall_usd joined it on
+  // Sep 6 2026 -- and a one-line regex fails on the reformat rather than on
+  // the leak, which is the wrong thing to be sensitive to.
+  const prologue = gate.slice(0, gate.indexOf('if (!isAdmin) return rest'))
+  for (const key of ['cost_usd', 'profit_usd', 'cost_missing_snapshot_lines', 'pending_cost_usd', 'pending_profit_usd', 'unvalued_cost_usd', 'returned_cost_shortfall_usd']) {
+    assert.ok(new RegExp(`[{,]\\s*${key}\\s*[,}]`).test(prologue), `${key} is destructured out before the non-admin return`)
+  }
+  assert.ok(/\.\.\.rest\s*\}/.test(prologue), 'and what is left leaves as ...rest')
   assert.ok(gate.indexOf('if (!isAdmin) return rest') < gate.indexOf('pending_cost_usd: round2'), 'they are re-added only after the non-admin early return')
   assert.ok(gate.includes('pending_profit_usd: round2(num(pending_profit_usd))'), 'the admin branch re-adds pending profit')
   // The rest of the pending block is sale-header money and stays readable.
