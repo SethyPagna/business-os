@@ -221,6 +221,8 @@ runTest('money rounds to cents rather than accumulating float dust', () => {
 const modalSource = readFileSync(new URL('../src/components/products/CreateProductsSessionModal.tsx', import.meta.url), 'utf8')
 const productsSource = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const productFormSource = readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
+const fastStockInSource = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
+const inventoryWriteTransportSource = readFileSync(new URL('../src/api/inventoryWriteTransport.ts', import.meta.url), 'utf8')
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, unknown>
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, unknown>
 
@@ -253,25 +255,73 @@ runTest('the header is seeded into the item form through ProductForm createDefau
   assert.match(modalSource, /key=\{`create-products-item-\$\{itemFormSeq\}`\}/)
 })
 
-runTest('opening stock goes through the one shared kernel, never a parallel write', () => {
-  assert.match(modalSource, /import \{ receiveBatchStock \} from '\.\.\/\.\.\/api\/batchesTransport\.ts'/)
+runTest('positive new and existing lines use one atomic stock-session write', () => {
+  assert.match(modalSource, /import \{[\s\S]*?createInventorySession/)
   assert.doesNotMatch(modalSource, /apiFetch|fetch\(/, 'no bespoke HTTP in this flow')
-  // Products are written by the page's own create path, handed in as a prop.
-  assert.doesNotMatch(modalSource, /createProduct\(/)
-  assert.match(modalSource, /onCreateProduct\(\{/)
-  // Created at zero, then received -- otherwise the same units land twice
-  // (seedInitialBatchForNewProduct already seeds the chosen branch).
-  assert.match(modalSource, /stock_quantity: 0,/)
+  assert.match(modalSource, /kind: 'create_receive'/)
+  assert.match(modalSource, /kind: 'receive'/)
+  assert.match(modalSource, /mode: 'stock_in'/)
+  assert.doesNotMatch(modalSource, /kind: '(?:transfer|remove|set)'/, 'unfinished stock commands must not leak into Add products')
+  assert.match(inventoryWriteTransportSource, /export function createInventorySession/)
+  assert.match(inventoryWriteTransportSource, /'POST', '\/api\/inventory\/sessions'/)
+  assert.match(inventoryWriteTransportSource, /route\([\s\S]*?null,[\s\S]*?true,?\s*\)/, 'stock sessions stay network-only writes')
 })
 
-runTest('the whole run carries ONE session id, so it lands as one stock-in session', () => {
+runTest('the whole run carries stable request and line ids for safe retry', () => {
   assert.match(modalSource, /sessionIdRef = useRef\(draft\?\.sessionId \|\| Date\.now\(\)\)/)
-  assert.equal((modalSource.match(/openingStockRequest\(/g) || []).length, 2, 'first save + retry, both from the same helper')
-  assert.match(modalSource, /openingStockRequest\(row, header, sessionIdRef\.current, receivedDateRef\.current\)/)
+  assert.match(modalSource, /client_request_id: sessionRequestIdRef\.current/)
+  assert.match(modalSource, /line_id: line\.lineId/)
+  assert.match(modalSource, /setRows\(\(prev\) => \[row, \.\.\.prev\]\)/, 'queued line identity survives parent rerenders')
+  assert.doesNotMatch(modalSource, /client_request_id:\s*[^\n]*Date\.now\(\)/, 'a retry must not mint a new request id')
+  assert.match(modalSource, /submittedItems\?: InventoryStockSessionLine\[\] \| null/)
+  assert.match(modalSource, /const attemptItems = submittedItems \|\| pending\.map\(sessionLine\)/)
+  assert.match(modalSource, /submittedItems: attemptItems/)
+  assert.match(modalSource, /items: attemptItems/)
+  assert.match(modalSource, /const submissionLocked = submittedItems !== null/)
+})
+
+runTest('Add products exposes New and Have Already without exposing unfinished actions', () => {
+  assert.match(modalSource, /type AddProductsMode = 'new' \| 'existing'/)
+  assert.match(modalSource, /tr\('add_product'/)
+  assert.match(modalSource, /tr\('existing_product'/)
+  assert.match(productsSource, /initialMode=\{createSessionInitialMode\}/)
+  assert.match(productsSource, /onAddStock=.*setCreateSessionInitialMode\('existing'\)/s)
+  assert.doesNotMatch(modalSource, />\s*(?:Transfer|Remove|Set quantity)\s*</i)
+})
+
+runTest('existing-product search groups families then opens a topmost inert-safe option surface', () => {
+  assert.match(modalSource, /buildProductGroups\(candidates, productsById, \{ preserveInputOrder: true \}\)/)
+  assert.match(modalSource, /selectedGroup/)
+  assert.match(modalSource, /layer="nested"/)
+  assert.match(modalSource, /setAttribute\('inert', ''\)/)
+  assert.match(modalSource, /event\.key !== 'Escape'/)
+  assert.match(modalSource, /searchInputRef\.current\?\.focus\(\)/)
+  assert.match(modalSource, /group\.sellableItems/)
+  assert.match(modalSource, /getProductBatches/)
+  assert.match(modalSource, /exactBatchLoadKey/)
+  assert.match(fastStockInSource, /buildProductGroups\(candidates, productsById, \{ preserveInputOrder: true \}\)/)
+  assert.match(fastStockInSource, /layer="nested"/)
+})
+
+runTest('corrected stock-session wire receives real JSON numbers and explicit batch identity', () => {
+  assert.match(modalSource, /branch_id: Number\(line\.branchId\)/)
+  assert.match(modalSource, /quantity: Number\(line\.quantity\)/)
+  assert.match(modalSource, /product_id: Number\(line\.productId\)/)
+  assert.match(modalSource, /batch_id: line\.batchId == null \? null : Number\(line\.batchId\)/)
+  assert.match(modalSource, /unit_cost_usd: Number\(line\.unitCostUsd\)/)
+  assert.match(modalSource, /const STOCK_SESSION_MAX_LINES = 25/)
+  assert.match(modalSource, /const STOCK_SESSION_MAX_BYTES = 64 \* 1024/)
+  assert.match(modalSource, /new TextEncoder\(\)\.encode\(JSON\.stringify\(attemptPayload\)\)\.length/)
+})
+
+runTest('zero-stock New remains a catalog create because milestone A cannot encode it', () => {
+  assert.match(modalSource, /if \(quantity === 0\)/)
+  assert.match(modalSource, /await onCreateProduct\(\{ \.\.\.payload, stock_quantity: 0 \}\)/)
+  assert.match(modalSource, /Zero-stock products stay on the catalog create path/)
 })
 
 runTest('the session shows the header it captured', () => {
-  assert.match(modalSource, /summarizeCreateProductsSession\(rows, header, \{/)
+  assert.match(modalSource, /summarizeCreateProductsSession\(summaryRows, header, \{/)
   // The always-visible strip on the items step.
   assert.match(modalSource, /\{summary\.brand\}/)
   assert.match(modalSource, /\{summary\.supplier\}/)
@@ -308,13 +358,13 @@ runTest('Close on a dirty header offers Discard / Back', () => {
 
 runTest('the session survives a reload, like the stock-in session draft does', () => {
   assert.match(modalSource, /scopedWorkDraftKey\('create_products_session'\)/)
-  assert.match(modalSource, /scheduleWorkDraftWrite<CreateProductsSessionDraft>/)
+  assert.match(modalSource, /scheduleWorkDraftWrite<UnifiedSessionDraft>/)
   // A session resumed the next morning keeps the delivery's own lot date
   // rather than silently splitting the same shipment across two lot codes.
-  assert.match(modalSource, /useRef\(draft\?\.receivedDate \|\| todayStr\(\)\)/)
-  assert.match(modalSource, /receivedDate: receivedDateRef\.current,/)
+  assert.match(modalSource, /useState\(draft\?\.receivedDate \|\| todayStr\(\)\)/)
+  assert.match(modalSource, /receivedDate, mode, query, submittedItems/)
   // Written synchronously before the item form replaces this UI.
-  assert.match(modalSource, /writeWorkDraft<CreateProductsSessionDraft>/)
+  assert.match(modalSource, /writeWorkDraft<UnifiedSessionDraft>/)
   assert.match(modalSource, /clearWorkDraft\(draftKey\)/)
 })
 

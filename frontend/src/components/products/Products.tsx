@@ -153,7 +153,6 @@ const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), '
 // The Add button's merged "Add Stock" flow (user, Aug 31: "the fast stockin
 // can also do one by one... can be merged into one Add stock function") --
 // the shipment receiver covers a whole delivery AND a single product.
-const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal'), 'products-fast-stock-in-modal')
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
 const CreateProductsSessionModal = lazyRetry(() => import('./CreateProductsSessionModal'), 'products-create-products-session-modal')
@@ -701,9 +700,9 @@ function ProductsFullEditor() {
   // row beside info/History/Manage (user, Aug 31). null when that section is
   // not mounted, so the header controls disappear with it.
   const [ledgerActions, setLedgerActions] = useState<StockChangeHeaderActions | null>(null)
-  // The Add menu's merged Add Stock flow (the shipment receiver). Add New
-  // Product keeps the existing `modal === 'form'` path.
-  const [addStockOpen, setAddStockOpen] = useState(false)
+  // Both Add-menu choices now land in one session shell; the initiating
+  // choice only decides which mode is selected first.
+  const [createSessionInitialMode, setCreateSessionInitialMode] = useState<'new' | 'existing'>('new')
   // Dashboard stock-card drills land HERE now (the Branches hub's redundant
   // Products slice was removed, Aug 31): BranchesHubPage forwards the old
   // inventory-focus payload as this key, carrying the stock filter.
@@ -1342,15 +1341,22 @@ function ProductsFullEditor() {
   // the session modal owns the header/session model, never a second product
   // write route. Resolves the new id; throws so the item form can report the
   // failure and keep the typed product on screen to be corrected.
-  const createProductForSession = async (payload: Record<string, unknown>): Promise<number | string> => {
+  const prepareProductForSession = async (payload: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const form = payload as unknown as ProductRecord
     if (!String(form.name || '').trim()) throw new Error(t('name') + ' required')
     const galleryInput = normalizeProductGallery(form.image_gallery, form.image_path || null)
     const uploadedGallery = await uploadGalleryImages(null, galleryInput)
-    const res = await runProductWriteMutation(() => productApi.createProduct({
+    return {
       ...form,
       image_gallery: uploadedGallery,
       image_path: uploadedGallery[0] || null,
+    }
+  }
+
+  const createProductForSession = async (payload: Record<string, unknown>): Promise<number | string> => {
+    const prepared = await prepareProductForSession(payload)
+    const res = await runProductWriteMutation(() => productApi.createProduct({
+      ...prepared,
       client_request_id: `product_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       userId: user?.id,
       userName: user?.name,
@@ -3834,10 +3840,10 @@ function ProductsFullEditor() {
                HeaderActions hides any undefined-handler control. */
             /* S4-12: Add now opens the header step first -- brand, supplier
                and branch once, then the same product form for each item. */
-            onAdd={canAddProduct && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('create_session')} : undefined}
+            onAdd={canAddProduct && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setCreateSessionInitialMode('new');setModal('create_session')} : undefined}
             // The merged Add Stock flow rides the same Add menu. Hidden on
             // the Stock Changes section, which carries its own Adjust menu.
-            onAddStock={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockOpen(true) : undefined}
+            onAddStock={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => { setCreateSessionInitialMode('existing'); setModal('create_session') } : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}
@@ -4407,22 +4413,6 @@ function ProductsFullEditor() {
         </div>
       ) : null}
 
-      {/* The Add menu's merged Add Stock flow (any section) -- the shipment
-          receiver, which covers a whole delivery and a single product. */}
-      {addStockOpen ? (
-        <Suspense fallback={null}>
-          <FastStockInModal
-            branchOptions={branches.map((branch) => ({ value: String(branch.id), label: String(branch.name || branch.id) }))}
-            defaultBranchId={null}
-            tr={tr}
-            notify={notify}
-            exchangeRate={exchangeRate}
-            onClose={() => setAddStockOpen(false)}
-            onDone={() => { void load(true) }}
-          />
-        </Suspense>
-      ) : null}
-
       {/* Duplicates review section -- mirrors the contacts Possible
           Duplicates panel for the product catalog. "Open" on a row jumps
           resolution happens IN PLACE via the tab's own edit float — it
@@ -4575,6 +4565,11 @@ function ProductsFullEditor() {
             brandOptions={brandOptions}
             groupCandidates={products.map((product) => ({ id: product.id, name: String(product.name || '') }))}
             defaultBranchId={defaultBranchId}
+            initialMode={createSessionInitialMode}
+            allowNew={canAddProduct}
+            allowExisting={canAdjustInventoryStock}
+            canReceiveStock={canAdjustInventoryStock}
+            onPrepareProduct={prepareProductForSession}
             onCreateProduct={createProductForSession}
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
             onDone={() => { void load(true) }}
