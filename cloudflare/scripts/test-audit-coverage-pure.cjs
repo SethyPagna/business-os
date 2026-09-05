@@ -56,12 +56,51 @@ for (const file of files) {
 }
 
 // Rule 1 -- the general law: every route file that registers a mutation
-// handler must contain at least one audit( call. No exemption list: the two
-// deliberate non-audit paths live in files that audit elsewhere, so they do
-// not need one.
+// handler must contain at least one audit( call. Shifts is the one stronger
+// contract: its mutation and guarded audit INSERT share the same D1 batch, so
+// it is checked path-by-path below instead of being weakened to an async call.
 for (const { file, src } of withMutations) {
+  if (file === 'shifts.ts') continue
   ok(src.includes('audit('), `${file} registers mutations and calls audit(`)
 }
+
+// Shifts deliberately does not call the generic async audit helper. Every
+// lifecycle write and its `WHERE changes()=1` audit INSERT must commit or roll
+// back together. These checks name every registered mutation route so adding
+// a generic exemption cannot silently leave a new shift write unaudited. The
+// executable route rollback/concurrency assertions remain in the focused
+// shift suites; this file pins the cross-route coverage census.
+const shifts = fs.readFileSync(path.join(routesDir, 'shifts.ts'), 'utf8')
+const section = (start, end) => {
+  const from = shifts.indexOf(start)
+  const to = end ? shifts.indexOf(end, from + start.length) : shifts.length
+  return from >= 0 && to > from ? shifts.slice(from, to) : ''
+}
+const continuationWriter = section('async function writeContinuation', 'function currentResponse')
+const openRoute = section("app.post('/open'", 'async function writeClose')
+const closeWriter = section('async function writeClose', "app.post('/close'")
+const currentCloseRoute = section("app.post('/close'", "app.post('/:id/close'")
+const historicCloseRoute = section("app.post('/:id/close'", "app.post('/:id/cancel'")
+const cancelRoute = section("app.post('/:id/cancel'", "app.post('/:id/reopen'")
+const reopenRoute = section("app.post('/:id/reopen'", "app.patch('/:id'")
+const amendRoute = section("app.patch('/:id'", 'export default app')
+
+ok(/INSERT INTO audit_logs[\s\S]*WHERE changes\(\)=1/.test(section('function transitionAuditSql', 'function openAuditSql')),
+  'shifts.ts transition audit is guarded by the winning mutation')
+ok(/db\.batch\(\[[\s\S]*continuationAuditSql\(\)/.test(continuationWriter),
+  'shifts.ts continuation/reopen writes audit in the same batch')
+ok(/writeContinuation\([\s\S]*auditAction: 'shift\.open_after_cancel'/.test(openRoute)
+  && /db\.batch\(\[[\s\S]*openAuditSql\(\)/.test(openRoute),
+  'shifts.ts opening paths use same-batch root and continuation audits')
+ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(closeWriter)
+  && currentCloseRoute.includes('writeClose(db') && historicCloseRoute.includes('writeClose(db'),
+  'shifts.ts current and historic close share the atomic audited writer')
+ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(cancelRoute),
+  'shifts.ts cancellation writes audit in the same batch')
+ok(/writeContinuation\([\s\S]*auditAction: 'shift\.reopen'/.test(reopenRoute),
+  'shifts.ts reopen uses the atomic audited continuation writer')
+ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(amendRoute),
+  'shifts.ts amendment writes audit in the same batch')
 
 // Rule 2 -- the read-only four are actually read-only (no mutation handlers
 // AND no direct writes). If one of these grows a write path, this fails and
