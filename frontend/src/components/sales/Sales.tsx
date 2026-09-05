@@ -805,7 +805,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
   // history row; ordinary status changes keep the local reversible entry.
-  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<boolean | { exchangeRateChanged: number }> => {
+  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<boolean | { exchangeRateChanged: number } | { settlementError: string }> => {
     // View-only (Part 557): status changes are Full-Access only. The backend
     // already refuses these through sales.status, so this matching client
     // guard also honors a Full role whose one action was switched off.
@@ -856,8 +856,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const actionKey = String(numericId)
     if (!beginKeyedAction(statusActionRef, actionKey)) return false
+    const isSettlementRequest = Array.isArray((extra as { payment_details?: unknown } | null)?.payment_details)
     try {
-      const mutationResult = await runSaleStatusMutation(saleId, newStatus, notes, extra) as {
+      const mutationResult = await runSaleStatusMutation(saleId, newStatus, isSettlementRequest ? undefined : notes, extra) as {
         actionHistoryId?: string | number | null
         actionKind?: string | null
       } | null
@@ -887,6 +888,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           ? Number((current as { exchange_rate?: unknown }).exchange_rate)
           : NaN
         if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
+      }
+      if (isSettlementRequest) {
+        return { settlementError: getErrorMessage(error, String(error || 'Unable to settle this sale.')) }
       }
       if (isWriteConflict(error)) {
         await loadSales()

@@ -26,6 +26,10 @@ function roundUsd(value: number): number {
   return Math.round((value + Number.EPSILON) * 10000) / 10000
 }
 
+function roundLegacyKhr(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000
+}
+
 export function paymentMethodIdentity(value: unknown): string {
   return String(value ?? '').trim().toLocaleLowerCase()
 }
@@ -56,7 +60,10 @@ export function settlementRowsIssue(rows: readonly SettlementRow[], configured: 
     const khr = row.khr.trim() === '' ? 0 : Number(row.khr)
     const usdUnits = Math.round(usd * 100)
     const hasCentPrecision = Math.abs(usd * 100 - usdUnits) < 0.000001
-    if (!Number.isFinite(usd) || !Number.isFinite(khr) || usd < 0 || khr < 0 || !Number.isInteger(khr) || (!recorded && !hasCentPrecision) || (usd <= 0 && khr <= 0)) return 'amount'
+    const validKhrPrecision = recorded
+      ? Math.abs(khr - roundLegacyKhr(khr)) <= 0.0000001
+      : Number.isInteger(khr)
+    if (!Number.isFinite(usd) || !Number.isFinite(khr) || usd < 0 || khr < 0 || !validKhrPrecision || (!recorded && !hasCentPrecision) || (usd <= 0 && khr <= 0)) return 'amount'
   }
   return rows.length ? null : 'amount'
 }
@@ -110,22 +117,22 @@ export function recordedSettlementIssue(input: {
       || !Number.isFinite(khr)
       || usd < 0
       || khr < 0
-      || !Number.isInteger(khr)
+      || Math.abs(khr - roundLegacyKhr(khr)) > 0.0000001
       || (usd <= 0 && khr <= 0)
   })
   if (invalidLine) return 'malformed'
   const details = parseSettlementDetails(parsed)
   const detailUsd = roundUsd(details.reduce((sum, row) => sum + amount(row.amount_usd), 0))
-  const detailKhr = Math.round(details.reduce((sum, row) => sum + amount(row.amount_khr), 0))
+  const detailKhr = roundLegacyKhr(details.reduce((sum, row) => sum + amount(row.amount_khr), 0))
   return detailUsd !== roundUsd(amount(input.amountPaidUsd))
-    || detailKhr !== Math.round(amount(input.amountPaidKhr))
+    || detailKhr !== roundLegacyKhr(amount(input.amountPaidKhr))
     ? 'mismatch'
     : null
 }
 
 export function settlementTotals(rows: readonly SettlementRow[], exchangeRate: number) {
   const amountPaidUsd = roundUsd(rows.reduce((sum, row) => sum + amount(row.usd), 0))
-  const amountPaidKhr = Math.round(rows.reduce((sum, row) => sum + amount(row.khr), 0))
+  const amountPaidKhr = roundLegacyKhr(rows.reduce((sum, row) => sum + amount(row.khr), 0))
   const rate = Number.isFinite(exchangeRate) && exchangeRate > 0 ? exchangeRate : 4100
   return {
     amountPaidUsd,
@@ -153,7 +160,7 @@ export function initialSettlementRows(input: {
     id: `recorded-${index}`,
     method: canonicalSettlementMethod(detail.method, input.configuredMethods) || input.configuredMethods[0] || '',
     usd: amount(detail.amount_usd) > 0 ? String(amount(detail.amount_usd)) : '',
-    khr: amount(detail.amount_khr) > 0 ? String(Math.round(amount(detail.amount_khr))) : '',
+    khr: amount(detail.amount_khr) > 0 ? String(roundLegacyKhr(amount(detail.amount_khr))) : '',
   }))
   const paid = settlementTotals(rows, input.exchangeRate).paidEquivalentUsd
   const outstandingUsd = Math.ceil(Math.max(0, input.totalUsd - paid) * 100 - Number.EPSILON) / 100
@@ -173,7 +180,7 @@ export function buildSettlementPayload(rows: readonly SettlementRow[], configure
     .map((row) => ({
       method: canonicalSettlementMethod(row.method, configured),
       amount_usd: row.id.startsWith('recorded-') ? roundUsd(amount(row.usd)) : Math.round((amount(row.usd) + Number.EPSILON) * 100) / 100,
-      amount_khr: Math.round(amount(row.khr)),
+      amount_khr: row.id.startsWith('recorded-') ? roundLegacyKhr(amount(row.khr)) : Math.round(amount(row.khr)),
     }))
     .filter((row) => row.method && (row.amount_usd > 0 || row.amount_khr > 0))
   if (!details.length) return null
