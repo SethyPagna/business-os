@@ -11,7 +11,17 @@ import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // a sale uses one. Both sides use the same rules so an automatic registration
 // and this file's manual backfill can never disagree about what counts as
 // "already configured", or resurrect a retired method.
-import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '../lib/paymentMethodRegistry'
+import {
+  MAX_CONFIGURED_METHODS,
+  MAX_METHOD_LENGTH,
+  mergePaymentMethods,
+  parseConfiguredMethods,
+  parseConfiguredMethodsStrict,
+  paymentMethodKey,
+  saleMethodsUsed,
+} from '../lib/paymentMethodRegistry'
+import { renameSalePaymentMethod } from '../lib/paymentSettlement'
+import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -182,17 +192,268 @@ const SALES_POLICY_KEYS = new Set([
 ])
 
 function normalizeReferenceName(value: unknown): string {
-  return String(value ?? '').trim().toLocaleLowerCase()
+  return paymentMethodKey(value)
 }
 
-async function loadPaymentMethods(env: Env): Promise<string[]> {
-  const row = await getDb(env).prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>()
-  try {
-    const parsed = JSON.parse(row?.value || '[]')
-    return Array.isArray(parsed) ? parsed.map((value) => String(value || '').trim()).filter(Boolean) : []
-  } catch {
-    return []
+const PAYMENT_METHOD_SCAN_PAGE_SIZE = 200
+
+type PaymentMethodSettingSnapshot = {
+  raw: string
+  updatedAt: string | null
+  methods: string[]
+}
+
+type PaymentMethodSaleRow = {
+  id: number
+  receipt_number: string | null
+  cashier_name: string | null
+  customer_name: string | null
+  customer_phone: string | null
+  branch_name: string | null
+  payment_method: string | null
+  payment_details: string | null
+  write_revision: number
+}
+
+type PaymentMethodImpactSummary = {
+  candidateCount: number
+  linkedSales: number
+  linkedDetails: number
+  summaryMatches: number
+  splitSummarySales: number
+  malformedSales: number
+  malformedSaleIds: number[]
+}
+
+const PAYMENT_SUMMARY_SOURCE_MATCH_SQL = `EXISTS(
+  WITH RECURSIVE split(rest,token) AS (
+    SELECT COALESCE(s.payment_method,'') || '+',''
+    UNION ALL
+    SELECT substr(rest,instr(rest,'+')+1),trim(substr(rest,1,instr(rest,'+')-1))
+    FROM split WHERE rest!=''
+  )
+  SELECT 1 FROM split WHERE lower(token)=@source
+)`
+
+const PAYMENT_METHOD_CANDIDATE_WHERE = `(
+  ${PAYMENT_SUMMARY_SOURCE_MATCH_SQL}
+  OR EXISTS(
+    SELECT 1 FROM json_each(CASE WHEN json_valid(s.payment_details) THEN s.payment_details ELSE '[]' END) detail
+    WHERE lower(trim(COALESCE(json_extract(detail.value,'$.method'),'')))=@source
+  )
+  OR (
+    s.payment_details IS NOT NULL AND NOT json_valid(s.payment_details)
+    AND instr(lower(s.payment_details),@source)>0
+  )
+)`
+
+const VALID_PAYMENT_DETAILS_SQL = `(
+  s.payment_details IS NOT NULL AND trim(s.payment_details)!=''
+  AND json_valid(s.payment_details) AND json_type(s.payment_details)='array'
+)`
+
+const PAYMENT_DETAILS_RENAME_SQL = `(
+  SELECT json_group_array(json(
+    CASE WHEN lower(trim(COALESCE(json_extract(detail.value,'$.method'),'')))=@source
+      THEN json_set(detail.value,'$.method',@target)
+      ELSE detail.value END
+  ))
+  FROM json_each(s.payment_details) detail
+)`
+
+const PAYMENT_SUMMARY_FROM_DETAILS_SQL = `(
+  SELECT group_concat(method,' + ') FROM (
+    SELECT method,MIN(ordinal) AS first_ordinal FROM (
+      SELECT CASE WHEN lower(trim(COALESCE(json_extract(detail.value,'$.method'),'')))=@source
+        THEN @target ELSE trim(COALESCE(json_extract(detail.value,'$.method'),'')) END AS method,
+        CAST(detail.key AS INTEGER) AS ordinal
+      FROM json_each(s.payment_details) detail
+    ) renamed_methods
+    WHERE method!=''
+    GROUP BY lower(method)
+    ORDER BY first_ordinal
+  )
+)`
+
+const PAYMENT_SUMMARY_FROM_TEXT_SQL = `(
+  WITH RECURSIVE split(rest,token,ordinal) AS (
+    SELECT COALESCE(s.payment_method,'') || '+','',0
+    UNION ALL
+    SELECT substr(rest,instr(rest,'+')+1),trim(substr(rest,1,instr(rest,'+')-1)),ordinal+1
+    FROM split WHERE rest!=''
+  ), renamed AS (
+    SELECT CASE WHEN lower(token)=@source THEN @target ELSE token END AS method,ordinal
+    FROM split WHERE token!=''
+  )
+  SELECT group_concat(method,' + ') FROM (
+    SELECT method,MIN(ordinal) AS first_ordinal FROM renamed
+    GROUP BY lower(method)
+    ORDER BY first_ordinal
+  )
+)`
+
+const PAYMENT_METHOD_RENAMED_SUMMARY_SQL = `CASE
+  WHEN ${VALID_PAYMENT_DETAILS_SQL} AND json_array_length(s.payment_details)>0
+    THEN ${PAYMENT_SUMMARY_FROM_DETAILS_SQL}
+  ELSE ${PAYMENT_SUMMARY_FROM_TEXT_SQL}
+END`
+
+const PAYMENT_METHOD_SEARCH_SQL = normalizedHaystackSql(`(
+  COALESCE(s.receipt_number,'') || ' ' || COALESCE(s.cashier_name,'') || ' ' ||
+  COALESCE(s.customer_name,'') || ' ' || COALESCE(s.customer_phone,'') || ' ' ||
+  COALESCE(s.branch_name,'') || ' ' || COALESCE(${PAYMENT_METHOD_RENAMED_SUMMARY_SQL},'')
+)`)
+
+const PAYMENT_METHOD_MALFORMED_RELEVANT_SQL = `(
+  ${PAYMENT_METHOD_CANDIDATE_WHERE}
+  AND s.payment_details IS NOT NULL AND trim(s.payment_details)!=''
+  AND (
+    NOT json_valid(s.payment_details)
+    OR json_type(s.payment_details)!='array'
+    OR EXISTS(
+      SELECT 1 FROM json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail
+      WHERE json_type(detail.value)!='object'
+        OR trim(COALESCE(json_extract(detail.value,'$.method'),''))=''
+        OR length(trim(COALESCE(json_extract(detail.value,'$.method'),'')))>${MAX_METHOD_LENGTH}
+        OR EXISTS(
+          SELECT 1 FROM json_each(json_array('amount_usd','amount_khr')) amount_field
+          WHERE json_type(detail.value,'$.' || amount_field.value) NOT IN ('null','integer','real','text')
+            OR (
+              json_type(detail.value,'$.' || amount_field.value) IN ('integer','real')
+              AND CAST(json_extract(detail.value,'$.' || amount_field.value) AS REAL)<0
+            )
+            OR (
+              json_type(detail.value,'$.' || amount_field.value)='text'
+              AND trim(CAST(json_extract(detail.value,'$.' || amount_field.value) AS TEXT))!=''
+              AND (
+                NOT json_valid('[' || trim(CAST(json_extract(detail.value,'$.' || amount_field.value) AS TEXT)) || ']')
+                OR json_type('[' || trim(CAST(json_extract(detail.value,'$.' || amount_field.value) AS TEXT)) || ']','$[0]') NOT IN ('integer','real')
+                OR CAST(json_extract(detail.value,'$.' || amount_field.value) AS REAL)<0
+              )
+            )
+        )
+    )
+  )
+)`
+
+function validMethodName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const method = value.trim()
+  return method && method.length <= MAX_METHOD_LENGTH ? method : null
+}
+
+function paymentMethodListForWrite(raw: unknown): string[] | null {
+  let values: unknown = raw
+  if (typeof raw === 'string') {
+    try { values = JSON.parse(raw) } catch { return null }
   }
+  if (!Array.isArray(values) || values.length === 0 || values.length > MAX_CONFIGURED_METHODS) return null
+  if (values.some((value) => !validMethodName(value))) return null
+  const normalized = parseConfiguredMethods(values)
+  return normalized.length ? normalized : null
+}
+
+async function loadPaymentMethodSetting(env: Env): Promise<PaymentMethodSettingSnapshot | null> {
+  const row = await getDb(env).prepare(
+    "SELECT value,updated_at FROM settings WHERE key='pos_payment_methods'",
+  ).get<{ value: string; updated_at: string | null }>()
+  const parsed = parseConfiguredMethodsStrict(row?.value)
+  if (!row || !parsed.ok) return null
+  let supplied: unknown
+  try { supplied = JSON.parse(row.value) } catch { return null }
+  if (!Array.isArray(supplied) || supplied.length !== parsed.methods.length || supplied.some((value) => !validMethodName(value))) return null
+  const suppliedKeys = supplied.map(paymentMethodKey)
+  if (new Set(suppliedKeys).size !== suppliedKeys.length) return null
+  return { raw: row.value, updatedAt: row.updated_at ?? null, methods: parsed.methods }
+}
+
+function paymentSummaryMatches(raw: unknown, source: string): { matches: number; split: boolean } {
+  const tokens = String(raw ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+  return {
+    matches: tokens.filter((token) => paymentMethodKey(token) === source).length,
+    split: tokens.length > 1,
+  }
+}
+
+function malformedPaymentDetails(raw: unknown): boolean {
+  if (raw == null || String(raw).trim() === '') return false
+  let parsed: unknown
+  try { parsed = JSON.parse(String(raw)) } catch { return true }
+  if (!Array.isArray(parsed)) return true
+  return parsed.some((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return true
+    const detail = entry as Record<string, unknown>
+    if (!validMethodName(detail.method)) return true
+    return ['amount_usd', 'amount_khr'].some((field) => {
+      const value = detail[field]
+      if (value == null || value === '') return false
+      if (!['number', 'string'].includes(typeof value)) return true
+      if (typeof value === 'string') {
+        const text = value.trim()
+        if (!text) return false
+        try {
+          const parsed = JSON.parse(`[${text}]`)
+          if (!Array.isArray(parsed) || typeof parsed[0] !== 'number') return true
+        } catch { return true }
+      }
+      const numeric = Number(value)
+      return !Number.isFinite(numeric) || numeric < 0
+    })
+  })
+}
+
+async function loadPaymentMethodCandidates(
+  env: Env,
+  from: string,
+  to: string,
+): Promise<PaymentMethodImpactSummary> {
+  const db = getDb(env)
+  const source = paymentMethodKey(from)
+  const summary: PaymentMethodImpactSummary = {
+    candidateCount: 0,
+    linkedSales: 0,
+    linkedDetails: 0,
+    summaryMatches: 0,
+    splitSummarySales: 0,
+    malformedSales: 0,
+    malformedSaleIds: [],
+  }
+  let afterId = 0
+  for (;;) {
+    const rows = await db.prepare(`
+      SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name,
+             s.payment_method,s.payment_details,COALESCE(v.revision,0) AS write_revision
+      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
+      WHERE s.id>@afterId AND ${PAYMENT_METHOD_CANDIDATE_WHERE}
+      ORDER BY s.id LIMIT @pageSize
+    `).all<PaymentMethodSaleRow>({ source, afterId, pageSize: PAYMENT_METHOD_SCAN_PAGE_SIZE })
+    if (!rows.length) break
+    summary.candidateCount += rows.length
+    for (const row of rows) {
+      if (malformedPaymentDetails(row.payment_details)) {
+        summary.malformedSales += 1
+        if (summary.malformedSaleIds.length < 20) summary.malformedSaleIds.push(Number(row.id))
+        continue
+      }
+      const renamed = renameSalePaymentMethod(row.payment_method, row.payment_details, from, to)
+      if (!renamed.ok) {
+        if (renamed.relevant) {
+          summary.malformedSales += 1
+          if (summary.malformedSaleIds.length < 20) summary.malformedSaleIds.push(Number(row.id))
+        }
+        continue
+      }
+      if (!renamed.changed) continue
+      const currentSummary = paymentSummaryMatches(row.payment_method, source)
+      summary.linkedSales += 1
+      summary.linkedDetails += renamed.detailMatches
+      summary.summaryMatches += currentSummary.matches
+      if (currentSummary.matches > 0 && currentSummary.split) summary.splitSummarySales += 1
+    }
+    afterId = Number(rows[rows.length - 1].id)
+    if (rows.length < PAYMENT_METHOD_SCAN_PAGE_SIZE) break
+  }
+  return summary
 }
 
 /**
@@ -249,23 +510,33 @@ app.post('/payment-methods/backfill', async (c) => {
 app.get('/payment-methods/impact', async (c) => {
   const from = String(c.req.query('from') || '').trim()
   const to = String(c.req.query('to') || '').trim()
-  if (!from || !to) return c.json({ error: 'Source and target payment methods are required' }, 400)
-  const db = getDb(c.env)
-  const sales = Number((await db.prepare("SELECT COUNT(*) AS n FROM sales WHERE lower(trim(COALESCE(payment_method,''))) = @from").get<{ n: number }>({ from: normalizeReferenceName(from) }))?.n || 0)
-  const rows = await db.prepare("SELECT payment_details FROM sales WHERE payment_details IS NOT NULL AND trim(payment_details) != ''").all<{ payment_details: string }>()
-  let detailLines = 0
-  for (const row of rows) {
-    try {
-      const details = JSON.parse(row.payment_details)
-      if (Array.isArray(details)) detailLines += details.filter((detail) => normalizeReferenceName(detail?.method) === normalizeReferenceName(from)).length
-    } catch { /* malformed legacy JSON is preserved, never guessed */ }
+  if (!from || !to || from.length > MAX_METHOD_LENGTH || to.length > MAX_METHOD_LENGTH) {
+    return c.json({ error: `Source and target payment methods are required and must be at most ${MAX_METHOD_LENGTH} characters.` }, 400)
   }
-  const methods = await loadPaymentMethods(c.env)
+  if (from === to) return c.json({ error: 'Source and target payment methods are already identical.' }, 400)
+  const setting = await loadPaymentMethodSetting(c.env)
+  if (!setting) {
+    return c.json({ error: 'Configured payment methods are unreadable. Repair them before renaming a method.', code: 'invalid_payment_methods_setting' }, 409)
+  }
+  const impact = await loadPaymentMethodCandidates(c.env, from, to)
+  const sourceKey = paymentMethodKey(from)
+  const targetKey = paymentMethodKey(to)
   return c.json({
-    from, to, configured: methods.some((method) => normalizeReferenceName(method) === normalizeReferenceName(from)),
-    target_exists: methods.some((method) => normalizeReferenceName(method) === normalizeReferenceName(to)),
-    live_snapshots: { sales, payment_detail_lines: detailLines },
-    linked_records: sales + detailLines,
+    from,
+    to,
+    configured: setting.methods.some((method) => paymentMethodKey(method) === sourceKey),
+    configured_methods: setting.methods,
+    target_exists: setting.methods.some((method) => paymentMethodKey(method) === targetKey),
+    settings_updated_at: setting.updatedAt,
+    live_snapshots: {
+      sales: impact.linkedSales,
+      payment_detail_lines: impact.linkedDetails,
+      summary_matches: impact.summaryMatches,
+      split_summary_sales: impact.splitSummarySales,
+      malformed_sales: impact.malformedSales,
+    },
+    malformed_sale_ids: impact.malformedSaleIds,
+    linked_records: impact.linkedSales + impact.linkedDetails,
     historical_snapshots_preserved: ['audit_logs', 'action history payloads'],
   })
 })
@@ -276,63 +547,140 @@ app.post('/payment-methods/replace', async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const from = String(body.from || '').trim()
   const to = String(body.to || '').trim()
-  const scope = body.scope === 'linked' ? 'linked' : 'settings_only'
-  if (!from || !to) return c.json({ error: 'Source and target payment methods are required' }, 400)
+  if (body.scope !== 'linked' && body.scope !== 'settings_only') return c.json({ error: 'Choose whether linked sales should be updated.' }, 400)
+  const scope = body.scope
+  if (!from || !to || from.length > MAX_METHOD_LENGTH || to.length > MAX_METHOD_LENGTH) {
+    return c.json({ error: `Source and target payment methods are required and must be at most ${MAX_METHOD_LENGTH} characters.` }, 400)
+  }
+  if (from === to) return c.json({ error: 'Source and target payment methods are already identical.' }, 400)
   const fromKey = normalizeReferenceName(from)
   const toKey = normalizeReferenceName(to)
-  const methods = await loadPaymentMethods(c.env)
+  if (fromKey === toKey && scope !== 'linked') {
+    return c.json({ error: 'A spelling-only rename must update linked sales at the same time.', code: 'linked_rename_required' }, 409)
+  }
+  const setting = await loadPaymentMethodSetting(c.env)
+  if (!setting) {
+    return c.json({ error: 'Configured payment methods are unreadable. Repair them before renaming a method.', code: 'invalid_payment_methods_setting' }, 409)
+  }
+  const expectedUpdatedAt = getExpectedUpdatedAt(body)
+  if (expectedUpdatedAt && expectedUpdatedAt !== setting.updatedAt) {
+    return c.json({
+      error: 'Payment methods changed after this review. Refresh and try again.',
+      code: 'write_conflict',
+      conflict: true,
+      expectedUpdatedAt,
+      actualUpdatedAt: setting.updatedAt,
+      current: { updated_at: setting.updatedAt, configured_methods: setting.methods },
+    }, 409)
+  }
+  if (!setting.methods.some((method) => paymentMethodKey(method) === fromKey)) {
+    return c.json({
+      error: 'The source payment method is no longer configured. Refresh and review the rename again.',
+      code: 'write_conflict',
+      conflict: true,
+      current: { updated_at: setting.updatedAt, configured_methods: setting.methods },
+    }, 409)
+  }
   const next: string[] = []
   const seen = new Set<string>()
-  for (const method of methods) {
-    const replaced = normalizeReferenceName(method) === fromKey ? to : method
+  for (const method of setting.methods) {
+    const keyBefore = normalizeReferenceName(method)
+    const replaced = keyBefore === fromKey || keyBefore === toKey ? to : method
     const key = normalizeReferenceName(replaced)
     if (!key || seen.has(key)) continue
     seen.add(key)
     next.push(replaced)
   }
   if (!seen.has(toKey)) next.push(to)
-  const db = getDb(c.env)
-  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
-    sql: `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
-          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-    params: { value: JSON.stringify(next) },
-  }]
-  let linkedSales = 0
-  let linkedDetails = 0
-  if (scope === 'linked') {
-    const saleRows = await db.prepare("SELECT id, payment_method, payment_details FROM sales WHERE lower(trim(COALESCE(payment_method,''))) = @from OR (payment_details IS NOT NULL AND trim(payment_details) != '')").all<{ id: number; payment_method: string; payment_details: string | null }>({ from: fromKey })
-    for (const sale of saleRows) {
-      const summaryMatches = normalizeReferenceName(sale.payment_method) === fromKey
-      let detailsChanged = false
-      let paymentDetails = sale.payment_details
-      if (paymentDetails) {
-        try {
-          const details = JSON.parse(paymentDetails)
-          if (Array.isArray(details)) {
-            for (const detail of details) {
-              if (normalizeReferenceName(detail?.method) === fromKey) {
-                detail.method = to
-                detailsChanged = true
-                linkedDetails += 1
-              }
-            }
-            if (detailsChanged) paymentDetails = JSON.stringify(details)
-          }
-        } catch { /* preserve malformed legacy JSON */ }
-      }
-      if (!summaryMatches && !detailsChanged) continue
-      if (summaryMatches) linkedSales += 1
-      statements.push({
-        sql: `UPDATE sales SET payment_method = @method, payment_details = @details, updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
-        params: { method: summaryMatches ? to : sale.payment_method, details: paymentDetails, id: sale.id },
-      })
-    }
+  if (!next.length || next.length > MAX_CONFIGURED_METHODS) {
+    return c.json({ error: 'The resulting payment-method list is invalid.', code: 'invalid_payment_methods_setting' }, 400)
   }
-  await db.batch(statements)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'payment_method', null, { from, to, scope, linkedSales, linkedDetails })
+  const db = getDb(c.env)
+  const impact = await loadPaymentMethodCandidates(c.env, from, to)
+  if (scope === 'linked' && impact.malformedSales > 0) {
+    return c.json({
+      error: `${impact.malformedSales} linked sale${impact.malformedSales === 1 ? '' : 's'} have unreadable payment allocations. Repair them before renaming this method.`,
+      code: 'malformed_payment_details',
+      malformed_sales: impact.malformedSales,
+      malformed_sale_ids: impact.malformedSaleIds,
+    }, 409)
+  }
+
+  const stamp = new Date().toISOString()
+  const operationId = crypto.randomUUID()
+  const nextRaw = JSON.stringify(next)
+  const saleRevisionRow = scope === 'linked'
+    ? await db.prepare('SELECT COALESCE(SUM(revision),0) AS revision_sum FROM sale_write_revisions').get<{ revision_sum: number }>()
+    : null
+  const expectedSaleRevisionSum = Number(saleRevisionRow?.revision_sum || 0)
+  const auditDetails = {
+    action: 'payment_method_replace',
+    operationId,
+    from,
+    to,
+    scope,
+    configuredBefore: setting.methods,
+    configuredAfter: next,
+  }
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+    { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+    {
+      sql: `INSERT INTO sale_mutation_guards(id,guard_value)
+            SELECT 1,CASE WHEN
+              EXISTS(SELECT 1 FROM settings WHERE key='pos_payment_methods' AND value=@expectedRaw)
+              ${scope === 'linked' ? `AND COALESCE((SELECT SUM(revision) FROM sale_write_revisions),0)=@expectedSaleRevisionSum
+              AND NOT EXISTS(SELECT 1 FROM sales s WHERE ${PAYMENT_METHOD_MALFORMED_RELEVANT_SQL})` : ''}
+            THEN 1 ELSE 0 END`,
+      params: { expectedRaw: setting.raw, expectedSaleRevisionSum, source: fromKey },
+    },
+    {
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value,device_name,device_tz,created_at)
+            SELECT @userId,@userName,'replace','payment_method',@operationId,
+              json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
+                '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE lower(trim(COALESCE(json_extract(detail.value,'$.method'),'')))=@source)` : '0'}),
+              'payment_method',@operationId,
+              json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
+                '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE lower(trim(COALESCE(json_extract(detail.value,'$.method'),'')))=@source)` : '0'}),
+              (SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
+              (SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
+              @stamp`,
+      params: { userId: user?.id ?? null, userName: user?.name ?? null, operationId, details: JSON.stringify(auditDetails), source: fromKey, stamp },
+    },
+    {
+      sql: `INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_methods',@value,@stamp)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`,
+      params: { value: nextRaw, stamp },
+    },
+  ]
+  if (scope === 'linked') {
+    statements.push({
+      sql: `UPDATE sales AS s SET
+              payment_method=${PAYMENT_METHOD_RENAMED_SUMMARY_SQL},
+              payment_details=CASE WHEN ${VALID_PAYMENT_DETAILS_SQL} THEN ${PAYMENT_DETAILS_RENAME_SQL} ELSE s.payment_details END,
+              search_normalized=${PAYMENT_METHOD_SEARCH_SQL},
+              updated_at=@stamp
+            WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE}`,
+      params: { source: fromKey, target: to, stamp },
+    })
+  }
+  statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    if (/guard_value/i.test(String(error))) {
+      return c.json({ error: 'Payment methods or linked sales changed during the rename. Refresh and try again.', code: 'write_conflict', conflict: true }, 409)
+    }
+    throw error
+  }
+  const auditRow = await db.prepare('SELECT details FROM audit_logs WHERE entity_id=@operationId AND entity=\'payment_method\'').get<{ details: string }>({ operationId })
+  let committedCounts = { linkedSales: scope === 'linked' ? impact.linkedSales : 0, linkedDetails: scope === 'linked' ? impact.linkedDetails : 0 }
+  try {
+    const parsed = JSON.parse(auditRow?.details || '{}') as { linkedSales?: number; linkedDetails?: number }
+    committedCounts = { linkedSales: Number(parsed.linkedSales || 0), linkedDetails: Number(parsed.linkedDetails || 0) }
+  } catch { /* the committed audit row remains the authoritative evidence */ }
   await Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'sales')])
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'payment_method_replace', from, to, scope }))
-  return c.json({ success: true, methods: next, scope, linkedSales, linkedDetails })
+  return c.json({ success: true, methods: next, scope, ...committedCounts, settings_updated_at: stamp })
 })
 
 // Customer-portal content buckets (Part 557 slice 8): the storefront editor is
@@ -444,6 +792,32 @@ app.post('/', async (c) => {
         ? `You do not have permission to change "${missingBucket}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
         : 'You do not have permission to perform this action',
     }, 403)
+  }
+
+  // The ordinary Settings save may add, remove, or reorder methods, but it
+  // must not provide a quiet second route for changing the canonical casing
+  // of a method that is already present on sales. That correction belongs to
+  // the impact-reviewed linked replacement above. Normalize duplicate input
+  // identities here so the persisted chooser can never contain FCB and fcb.
+  if (attemptedKeys.includes('pos_payment_methods')) {
+    const normalized = paymentMethodListForWrite(body.pos_payment_methods)
+    if (!normalized) {
+      return c.json({ error: 'Payment methods must be a non-empty JSON list of bounded names.', code: 'invalid_payment_methods_setting' }, 400)
+    }
+    const current = await loadPaymentMethodSetting(c.env)
+    if (current) {
+      const spellingOnlyChange = current.methods.find((method) => {
+        const replacement = normalized.find((candidate) => paymentMethodKey(candidate) === paymentMethodKey(method))
+        return replacement !== undefined && replacement !== method
+      })
+      if (spellingOnlyChange) {
+        return c.json({
+          error: `Rename "${spellingOnlyChange}" through the reviewed payment-method rename action so linked sales stay consistent.`,
+          code: 'linked_rename_required',
+        }, 409)
+      }
+    }
+    body.pos_payment_methods = JSON.stringify(normalized)
   }
 
   const expectedUpdatedAt = getExpectedUpdatedAt(body)
