@@ -452,6 +452,8 @@ app.post('/:id/cancel', async (c) => {
   if (batchChanges(results[0]) !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const cancelled = await readShiftById(db, id)
   if (!cancelled) return c.json({ error: 'Cancelled shift could not be read back.' }, 500)
+  const report = sendTelegramShiftReport(c.env, cancelled.id)
+  try { c.executionCtx.waitUntil(report) } catch { void report }
   return c.json({ shift: responseShift(user, cancelled), cancelled: true }, 200)
 })
 

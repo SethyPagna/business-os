@@ -206,6 +206,8 @@ async function main() {
     'only winning reopen transitions have audit rows')
 
   const grandchild = sqlite.prepare('SELECT * FROM shift_sessions WHERE parent_shift_id=?').get(child.id)
+  const notificationsBeforeRejectedCancels = sent.length
+  const waitsBeforeRejectedCancels = waited.length
   user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.stringify({ pos: true }) }
   assert.equal((await call('POST', `/${grandchild.id}/cancel`, {
     expected_revision: grandchild.revision, reason: 'Owner cannot cancel',
@@ -216,11 +218,18 @@ async function main() {
   assert.equal((await call('POST', `/${grandchild.id}/cancel`, {
     expected_revision: grandchild.revision, reason: 'x'.repeat(501),
   })).status, 400, 'cancel reason is bounded')
+  assert.equal(sent.length, notificationsBeforeRejectedCancels, 'rejected cancellation attempts do not schedule Telegram')
+  assert.equal(waited.length, waitsBeforeRejectedCancels, 'rejected cancellation attempts do not register background work')
   const beforeCancel = sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(grandchild.id)
   sent.length = 0
-  const cancel = await call('POST', `/${grandchild.id}/cancel`, {
-    expected_revision: grandchild.revision, reason: 'Opening was registered against the wrong drawer',
-  })
+  const waitsBeforeCancelRace = waited.length
+  const cancelBody = { expected_revision: grandchild.revision, reason: 'Opening was registered against the wrong drawer' }
+  const [cancelA, cancelB] = await Promise.all([
+    call('POST', `/${grandchild.id}/cancel`, cancelBody),
+    call('POST', `/${grandchild.id}/cancel`, cancelBody),
+  ])
+  assert.deepEqual([cancelA.status, cancelB.status].sort(), [200, 409], 'concurrent cancellation has one winner')
+  const cancel = cancelA.status === 200 ? cancelA : cancelB
   assert.equal(cancel.status, 200)
   const cancelled = (await cancel.json()).shift
   assert.equal(cancelled.cancel_reason, 'Opening was registered against the wrong drawer')
@@ -230,9 +239,14 @@ async function main() {
   assert.equal(cancelled.closing_counted_khr, beforeCancel.closing_counted_khr, 'cancelling never invents KHR closing cash')
   assert.equal(cancelled.opening_float_usd, beforeCancel.opening_float_usd, 'cancellation retains original figures')
   assert.deepEqual(cancelled.capabilities, { can_edit: false, can_close: false, can_reopen: false, can_cancel: false })
-  assert.equal(sent.length, 0, 'cancellation does not send the old formatter that would mislabel an open cancellation')
+  assert.deepEqual(sent, [grandchild.id], 'only the winning cancellation schedules its cancellation-aware Telegram report')
+  assert.equal(waited.length, waitsBeforeCancelRace + 1, 'only the winning cancellation registers background work')
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.cancel'").get().n, 1,
     'cancel and audit commit together')
+  assert.equal((await call('POST', `/${grandchild.id}/cancel`, cancelBody)).status, 409,
+    'retrying a completed cancellation is rejected')
+  assert.deepEqual(sent, [grandchild.id], 'retrying a completed cancellation does not schedule Telegram again')
+  assert.equal(waited.length, waitsBeforeCancelRace + 1, 'retrying a completed cancellation registers no background work')
   assert.throws(() => sqlite.prepare('UPDATE shift_sessions SET cancel_reason=? WHERE id=?').run('rewrite', grandchild.id), /immutable/)
 
   user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.stringify({ pos: true }) }
