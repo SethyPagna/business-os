@@ -6,6 +6,7 @@ import { apiFetch, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getReturn, getReturns } from './returnsReadTransport.ts'
+import type { ReturnBulkPayload, ReturnBulkResult } from '../components/returns/helpers/returnBulkAction.ts'
 
 type ReturnPayload = ExpectedUpdatedAtPayload
 type ReturnUpdateAttempt = {
@@ -108,6 +109,15 @@ export function createSupplierReturn(payload: ReturnPayload = {}): Promise<unkno
     null,
     true,
   )
+}
+
+// Bulk return actions deliberately bypass route()/the offline write queue.
+// They are optimistic-concurrency guarded against live stock and return
+// revisions, so replaying them later from an offline snapshot would turn a
+// safe all-or-none action into an unknowable partial-time action.
+export function bulkUpdateReturns(payload: ReturnBulkPayload): Promise<ReturnBulkResult> {
+  if (navigator.onLine === false) return Promise.reject(new Error('Connect to the server before changing returns in bulk.'))
+  return apiFetch('POST', '/api/returns/bulk', payload) as Promise<ReturnBulkResult>
 }
 
 export async function updateReturn(id: number | string, payload: ReturnPayload = {}): Promise<unknown> {

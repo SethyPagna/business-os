@@ -19,6 +19,7 @@ import {
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
+import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -836,6 +837,22 @@ app.post('/reasons/replace', async (c) => {
   return c.json({ success: true, configured: true, presets: nextPresets, scope: replaceScope, linkedChanged })
 })
 
+// Conditional grouped action: every selected row is revision checked, while
+// only rows whose chosen field still equals `source` move to `target`.
+// applyReturnBulkAction owns the atomic stock/snapshot/idempotency contract;
+// this route only translates typed business failures to HTTP responses.
+app.post('/bulk', async (c) => {
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  try {
+    const result = await applyReturnBulkAction(c.env, c.get('user'), body)
+    c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
+    return c.json(result)
+  } catch (error) {
+    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action' }, error.statusCode)
+    throw error
+  }
+})
+
 // GET /api/returns/:id
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
@@ -933,9 +950,9 @@ app.post('/', async (c) => {
     async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number = ? LIMIT 1').get([candidate])),
   )
 
-  let saleMeta: { receipt_number?: string; customer_id?: number; customer_name?: string; customer_phone?: string; customer_address?: string; branch_id?: number; branch_name?: string; exchange_rate?: number } = {}
+  let saleMeta: { receipt_number?: string; customer_id?: number; customer_name?: string; customer_phone?: string; customer_address?: string; branch_id?: number; branch_name?: string; exchange_rate?: number; sale_status?: string; status_before_return?: string } = {}
   if (body.sale_id) {
-    const sale = await db.prepare('SELECT receipt_number, customer_id, customer_name, customer_phone, customer_address, branch_id, branch_name, exchange_rate FROM sales WHERE id = ?').get<typeof saleMeta>([body.sale_id])
+    const sale = await db.prepare('SELECT receipt_number, customer_id, customer_name, customer_phone, customer_address, branch_id, branch_name, exchange_rate, sale_status, status_before_return FROM sales WHERE id = ?').get<typeof saleMeta>([body.sale_id])
     if (sale) saleMeta = sale
   }
   const branchId = body.branch_id || saleMeta.branch_id || null
@@ -1603,7 +1620,9 @@ app.post('/', async (c) => {
       `).all<{ product_id: number; total_qty: number }>([body.sale_id])
       const returnedMap = new Map(returnedRows.map((r) => [r.product_id, r.total_qty]))
       const fullyReturned = saleItems.every((si) => (returnedMap.get(si.product_id) || 0) >= si.quantity)
-      await db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run([fullyReturned ? 'returned' : 'partial_return', body.sale_id])
+      await db.prepare(`UPDATE sales SET
+        status_before_return = CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END,
+        sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run([fullyReturned ? 'returned' : 'partial_return', body.sale_id])
     }
   } catch (error) {
     // Reverse the stock FIRST, then delete the rows (Part-77): the restocks
@@ -1848,6 +1867,7 @@ app.post('/supplier', async (c) => {
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
     const touchedProductIds = new Set<number>()
+    const supplierPerItemBatchSplits: ReturnBatchSplit[][] = []
     // Draw the deducted units out of the product's active lots FIFO, same as a
     // sale of a no-lot line, so a supplier return of a batch-tracked product
     // keeps branch_batch_stock in step with branch_stock instead of leaving the
@@ -1936,6 +1956,12 @@ app.post('/supplier', async (c) => {
           statements.push(decrementBatchStockStrictStatement(take.batchId, itemBranchId, take.quantity))
         }
       }
+      supplierPerItemBatchSplits.push(supplierReturnTakes.map((take) => ({
+        batchId: take.batchId,
+        branchId: itemBranchId,
+        quantity: take.quantity,
+        saleItemId: null,
+      })))
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
               VALUES (@product_id, @product_name, @branch_id, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
@@ -1955,6 +1981,22 @@ app.post('/supplier', async (c) => {
         },
       })
       if (item.product_id) touchedProductIds.add(item.product_id)
+    }
+    for (const [itemIndex, splits] of supplierPerItemBatchSplits.entries()) {
+      for (const split of splits) {
+        statements.push({
+          sql: `INSERT INTO return_item_batch_allocations (return_item_id, sale_item_id, batch_id, branch_id, quantity)
+                SELECT id, NULL, @batch_id, @branch_id, @quantity
+                FROM return_items WHERE return_id = @return_id ORDER BY id ASC LIMIT 1 OFFSET @item_index`,
+          params: {
+            return_id: returnId,
+            item_index: itemIndex,
+            batch_id: split.batchId,
+            branch_id: split.branchId,
+            quantity: split.quantity,
+          },
+        })
+      }
     }
     for (const productId of touchedProductIds) {
       statements.push({
@@ -2476,8 +2518,11 @@ app.patch('/:id', async (c) => {
     const returnedMap = new Map(returnedRows.map((r) => [r.product_id, r.total_qty]))
     const hasAny = returnedRows.length > 0
     const fullyReturned = saleItems.every((si) => (returnedMap.get(si.product_id) || 0) >= si.quantity)
-    const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : 'completed'
-    await db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run([newStatus, existing.sale_id])
+    const saleState = await db.prepare('SELECT sale_status,status_before_return FROM sales WHERE id=?').get<{ sale_status: string | null; status_before_return: string | null }>([existing.sale_id])
+    const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : (saleState?.status_before_return || 'completed')
+    await db.prepare(`UPDATE sales SET
+      status_before_return = CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END,
+      sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run([newStatus, existing.sale_id])
   }
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'return', id, { reason: body.reason })

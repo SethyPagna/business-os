@@ -184,6 +184,9 @@ export const BACKUP_TABLES = [
   'sale_write_revisions',
   'sale_bulk_operations',
   'sale_bulk_members',
+  'return_write_revisions',
+  'return_bulk_operations',
+  'return_bulk_members',
   'audit_logs',
   'custom_tables',
   'custom_fields',
@@ -1054,6 +1057,7 @@ const SALE_REPLAY_RESTORE_BUNDLE = [
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
   'return_item_batch_allocations', 'fees', 'inventory_movements', 'action_history',
   'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
+  'return_write_revisions', 'return_bulk_operations', 'return_bulk_members',
 ] as const
 
 async function restoreDependencyError(env: Env, documentTables: ReadonlySet<string>): Promise<string | null> {
