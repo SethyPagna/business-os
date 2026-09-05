@@ -17,27 +17,34 @@ recovery evidence. Never infer a closing timestamp or user from a calendar date.
 
 | ID | Required outcome | Evidence needed | Status |
 |---|---|---|---|
-| P1 | Barcode/name and all product fields survive typing, scanning, rerenders, navigation and save | Reproduced failing case; state lifecycle regression; browser persistence | Investigating |
+| P1 | Barcode/name and all product fields survive typing, scanning, rerenders, navigation and save | Reproduced failing case; state lifecycle regression; browser persistence | First fix integrated d2f25971; legacy draft/unmount follow-up and browser certification pending |
 | P2 | Add products offers Have Already/មានហើយ and New/ថ្មី; shared brand/branch/supplier/received date defaults; explicit child overrides; compact session list | Both modes create/add correctly; scoped stock/AP/audit assertions; no duplicate retry | Design investigation |
 | P3 | Barcode first, name second; existing matches highlighted without fuzzy auto-merges | Barcode/name search stale-response tests; server duplicate parity | Design investigation |
 | P4 | Multiple transfers/adjustments in one session/action with grouped history and whole-action undo | Atomic bounded batch, conflicts/retry/undo tests; before/after quantities | Open |
 | S1 | Authorized users view others' shifts; only owner edits, admin exception; all amendments audited | Backend role/owner/branch matrix, frontend parity, stale revision tests | Investigating |
 | S2 | Shift detail shows opening/closing cash/change; POS entry; floating popup on every shift surface | POS/Sales/Expenses/Reports/Profile browser matrix, EN/KM mobile | Investigating |
 | S3 | Exact September 4 shift closed with owner's cash data | Identify shift/user/time from session/live evidence; pre/post and no duplicate expenses/report | Main investigating; no write |
-| U1 | Current compact navigation has two layers, one topbar row and no bottom bar; legacy remains available | Both modes at 320/375/desktop, no overflow or lost actions | Investigating |
+| U1 | Current compact navigation has two layers, one topbar row and no bottom bar; legacy remains available | Both modes at 320/375/desktop, no overflow or lost actions | Integrated 621bf4d9 + 8be01e6c; focused tests pass, browser certification pending |
 | U2 | Back/discard concise; minus minimizes without losing draft | Dirty navigation, minimize/resume/discard and nested modal tests | Investigating |
 | U3 | Sale add-product options above detail popup; editable price/barcode/received date accessible | Nested modal browser interaction and save assertions | Investigating |
 | T1 | Telegram gross69 minus4 equals65; no double discount; dual change currencies joined by plus | Real formatter behavioral regression for gross/net legacy callers | Investigating |
 | S4 | Manual close; next-day opening prompt; reasoned same-day reopen with retained close history; opening Telegram notice | Lifecycle/revision/audit/concurrent-close/reopen tests; user cash entry preserved | Added after clarification, investigating |
 | S5 | Compact shift list: date, open/close, cashier, native cash before/after; secondary ID in existing line; duration/difference/breakdowns in popup/report | EN/KM list/detail at 320/375/desktop; money and duration math | Added, assigned to shift lane |
-| D1 | Date presets above endpoints: All time, Today, Last 7 days, Last 30 days, This Month | Ordered presets and date math; browser small-screen placement | Sol low implementing |
+| D1 | Date presets above endpoints: All time, Today, Last 7 days, Last 30 days, This Month | Ordered presets and date math; browser small-screen placement | Integrated; focused tests pass; browser certification pending |
 | D2 | Sales custom rows-per-page override defaults, date-range results grouped day by day | List/count/date scope and pagination tests across sections | Open |
+| U4 | Sales add-item search groups variants; click opens POS-style options; immediate No Stock/Not Enough Stock errors | Zero/over/staged-quantity/batch checks, server race rejection, sibling standalone picker | Assigned Volta |
+| S6 | Shift history in Users/each user/Reports, removed from Settings; admin audited soft cancellation retains details | Placement/browser matrix; nonadmin denial; cancellation/revision/report lifecycle | Assigned Socrates + Hubble |
+| B1 | Branch Products section and stats render real scoped data and retained grouped columns | Reproduce blank response/UI, source/history comparison, branch isolation tests | Hilbert queued after D2 |
+| M1 | Merge groups differing only in leading-zero barcode; average distinct costs per owner | Exact candidate manifest, aliases/stock/sales references, guarded rehearsal/pre/post/recovery | Astra architect audit; no live mutation |
+| F1 | Four-decimal internal calculations system-wide; display/cash semantics explicit | Canonical math and reader/writer matrix, division/rounding/ledger/replay parity | Owner confirmed nearest, fifth digit 5+ up / 0–4 down; Pauli implementing bounded helpers/fixtures before writer migration |
+| T2 | Currency equivalents use slash (Net Total); actual mixed tender/change uses plus | Derived-vs-native field trace, real formatter fixtures across sales/returns | Queued Volta after picker |
 | V1 | Integrated release preserves membership, grouped sale undo, reports and stock safeguards | Focused regressions then both package gates, isolated committed build, live read-only verification | Pending |
 
 ## Agent contracts — initial read-only discovery
 
-All lanes own no source paths yet, may inspect/test locally, and may not deploy,
-query production, modify secrets or edit repository files. Main integrates findings,
+Initial discovery lanes were read-only. The subsequent isolated write allocations
+below supersede that initial restriction only for their named paths. No agent may
+deploy, query production or modify secrets. Main integrates findings,
 assigns disjoint isolated writers and independently verifies. Stop on overlap or
 unsafe data assumptions. Durable handoffs use original checkout's team-state tool.
 
@@ -64,7 +71,7 @@ earlier acceptance, record supersession explicitly, and never equate discovery
 or a worker's green tests with integrated/released/visually verified completion.
 
 Main owns this document, progress checkpoint, live shift investigation and final
-integration/release. Existing production Cloudflare challenges prevented previous
+  integration/release. Existing production Cloudflare challenges prevented previous
 authenticated verification; do not treat prior builds as live behavior proof.
 
 ## Live shift preflight (read-only, September 5 ~05:47 UTC)
@@ -84,3 +91,68 @@ authenticated verification; do not treat prior builds as live behavior proof.
   timestamp attribution is unresolved; no fabricated earlier opening timestamp.
 - Both D1 queries report zero writes. No closure, expense edit, Telegram send or
   stock change performed in this continuation.
+
+## Follow-up evidence / integration
+
+- Current awaiting-payment query found one new September 5 sale 16889, $27.50;
+  outside historical cohort and preserved under normal payment process.
+- Actual YSL example is sale 16891: base $73, applied $69, manual discount $4,
+  line total $69. Correct display is $73 minus $4 = $69; no authorization inferred
+  to reduce this live sale to $65. Owner informed. Generic base69/net65 fixture
+  verifies the requested arithmetic format without double discounting.
+- Integrated date commits `8594504c`, `812303f4` (worker originals 4ee8245d,
+  4d01d9fb), Telegram `44fb2106` (1121dfca). Main reran date-entry surfaces,
+  stats-strip, Telegram message/bilingual and shift-report tests: all pass.
+  These are integrated, not yet deployed or fully visually certified.
+- Main local real-browser baseline: create session -> Add item -> type name and
+  barcode -> Pricing -> type prices -> Basic Info wipes all input except unit.
+  Screenshot `output/playwright/product-draft-baseline-cleared.png`; synthetic
+  local data only. Product worker notified; this interaction must pass post-fix.
+- Shift backend Socrates now owns shifts.ts / lifecycle tests / append-only0123
+  linked reopen-segment migration. Hubble `01a0702b-e73c-7f80-9dde-13165a0a2b02`
+  (Sol high) owns isolated shift frontend/transport/POS/Profile and shift language
+  keys. Exact API contract coordinated before frontend write. Main owns live data.
+
+## Verification checkpoint after integration 8be01e6c
+
+- Main independently reran hubSectionNav and sectionNavigation tests: both pass.
+  Current-mode direct theme/language/header actions were retained in follow-up;
+  source tests are not a substitute for the pending 320px EN/KM browser check.
+- Product first patch d2f25971 is integrated. Main found a CRLF-sensitive source
+  test plus legacy draft migration and last-800ms unmount preservation gaps;
+  Galileo owns the follow-up. Do not certify draft reliability yet.
+- Pauli's F1 read-only audit finds cent rounding before line aggregation, mixed
+  always-up/nearest semantics, imports truncating costs, and offline replay using
+  current formulas despite byte-stable fingerprints. A blanket round2-to-round4
+  replacement is rejected. Owner subsequently confirmed fifth digit 5+ rounds up,
+  0–4 rounds down (four-place nearest; not always ceiling). Negative reversals
+  use the same magnitude rule to preserve sign symmetry. Pauli owns the initial
+  helper/fixture/test slice only; production formulas are not changed yet;
+  versioned calculation, settlement/display separation and historical undo
+  fidelity are explicit release prerequisites for that separate financial slice.
+- Shift backend draft includes linked reopen segments and soft cancellation.
+  Main flagged cancelled-parent amendment parity for Socrates. Migration 0123
+  remains local/unapplied; no live shift has been closed or cancelled.
+- Remaining work is intentionally open: unified Add products/stock atomicity,
+  picker group/stock behavior, branch products/stats, pagination, shift UI/API
+  integration, currency-equivalence labels, barcode candidate surgery, precision,
+  full certification and deployment. No scope item is removed by a newer note.
+
+## Browser and ownership follow-up
+
+- At 375px, product name/barcode and cost10/sell15 survive Basic/Pricing switching
+  after 8f656861 (baseline erased them). Successful local synthetic create keeps
+  name/barcode/sell15, but DB purchase_price_usd is unexpectedly 0 despite confirm
+  displaying cost10. Galileo notified: save fidelity remains open, not certified.
+- Shared preservation-capability prompt integrated106376df; main guard and modal
+  placement tests pass. Consumer hookups remain explicit, not implied by a draft.
+- Herschel (Sol high, 01a07055-2ec4-7753-a367-cb6e0cdba643) owns isolated stock
+  session backend milestone A, migration0124 reserved/unapplied. Receipt/create
+  atomicity and retry deduplication first; undo/backup milestone later gated.
+- Aquinas (Sol high, 01a07050-d68d-7100-a6c3-e9475f87a338) independently reviews
+  shift backend99902cea/frontend737ab4e7 read-only before integration.
+- Separate user task01a0704d-6ac3-7530-890b-40443a5b17f9 owns new conditional
+  Sales bulk status/payment/driver/customer, Returns bulk dialogs/actions and
+  export placements. Exact route/UI claims coordinated; its undoAppliers.ts and
+  actionHistory.ts ownership precedes stock milestone B. No duplicate writer.
+  Main continues current shift/product/picker/precision/branch scope.
