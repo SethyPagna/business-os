@@ -291,6 +291,18 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('single-sale accounting ignores revision-trigger writes included in native D1 metadata', async () => {
+    resetHarness()
+    const plan = await legacyRepair.prepareLegacySubtotalRepair(requestFor(), RESTORE_USER)
+    const nativeShapedDb = { batch: async (statements) => (await db.batch(statements)).map((result, index) => {
+      const direct = Number(result.changes ?? result.meta?.changes ?? 0)
+      const triggered = index >= plan.updateStartIndex && index < plan.updateStartIndex + plan.saleCount && direct > 0
+      return { meta: { changes: triggered ? direct + 1 : direct } }
+    }) }
+    assert.deepStrictEqual(await legacyRepair.applyLegacySubtotalRepair(nativeShapedDb, plan), { outcome: 'applied', changedSales: 22 })
+    assert.deepStrictEqual(await legacyRepair.applyLegacySubtotalRepair(nativeShapedDb, plan), { outcome: 'already_applied', changedSales: 0 })
+  })
+
   await check('live preview is read-only, permission-gated, uncached and yields a canonical immutable request', async () => {
     resetHarness()
     const before = protectedSnapshot()

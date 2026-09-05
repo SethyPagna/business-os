@@ -465,10 +465,14 @@ function changed(result: unknown): number {
 export async function applyLegacySubtotalRepair(db: Pick<D1Compat, 'batch'>, plan: PreparedLegacySubtotalRepair): Promise<{ outcome: 'applied' | 'already_applied'; changedSales: number }> {
   try {
     const results = await db.batch(plan.statements)
-    const changedSales = results.slice(plan.updateStartIndex, plan.updateStartIndex + plan.saleCount).reduce((sum, result) => sum + changed(result), 0)
+    // Each statement targets exactly one primary-key sale. Native D1 includes
+    // its revision-trigger write in meta.changes (2, not 1), unlike SQLite's
+    // direct changes count. Count successful single-sale statements, not all
+    // triggered writes. The atomic final assertion already proves all22 rows.
+    const changedSales = results.slice(plan.updateStartIndex, plan.updateStartIndex + plan.saleCount).filter((result) => changed(result) > 0).length
     const historyInserted = changed(results[plan.historyStatementIndex])
     if (changedSales !== 0 && changedSales !== plan.saleCount) throw new Error('Unexpected partial guarded repair result')
-    return { outcome: historyInserted === 1 ? 'applied' : 'already_applied', changedSales }
+    return { outcome: historyInserted > 0 ? 'applied' : 'already_applied', changedSales }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (/CHECK constraint failed.*(?:sale_bulk_guards|guard_value\s*=\s*1)|sale_bulk_guards\.guard_value/i.test(message)) {
