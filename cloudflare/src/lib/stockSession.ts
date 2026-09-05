@@ -84,10 +84,10 @@ export type StockSessionReceipt = {
     productName: string
     createdProduct: boolean
     branchId: number
-    batchId: number
+    batchId: number | null
     batchNumber: number | null
     lotCode: string | null
-    movementId: number
+    movementId: number | null
     quantity: number
     unitCostUsd: number | null
   }>
@@ -103,6 +103,16 @@ export class StockSessionError extends Error {
     super(message)
     this.name = 'StockSessionError'
   }
+}
+
+// Action history must use the same permission union as the authoritative
+// replay below. Missing/invalid inventory metadata is deliberately treated as
+// requiring inventory adjust so every pre-zero-stock receipt remains gated by
+// the legacy permission contract.
+export function canReplayStockSessionPayload(user: SessionUser, payload: Record<string, unknown>): boolean {
+  if (payload.requires_inventory_adjust !== 0 && getActionTier(user, 'inventory', 'adjust') !== 'full') return false
+  if (Number(payload.requires_product_add) === 1 && getActionTier(user, 'products', 'add') !== 'full') return false
+  return true
 }
 
 function fail(message: string, status: 400 | 403 | 404 | 409 = 409, code = 'stock_session_rejected', details?: Row): never {
@@ -239,13 +249,13 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
     const expanded = (field: string) => field in line ? line[field] : defaults[field]
     const branchId = integer(expanded('branch_id'), 'branch_id') as number
     const quantity = finite(line.quantity, 'quantity', false) as number
-    if (quantity <= 0) fail('quantity must be greater than zero.', 400, 'invalid_quantity')
     const receivedDate = date(expanded('received_date'), 'received_date', false) as string
     const payment = expanded('payment_status')
     if (payment != null && payment !== '' && payment !== 'paid' && payment !== 'credit') fail('payment_status must be paid or credit.', 400, 'invalid_request')
     const paymentStatus = payment === 'paid' || payment === 'credit' ? payment : null
     const creditDueDate = paymentStatus === 'credit' ? date(expanded('credit_due_date'), 'credit_due_date') : null
     const kind = line.kind as CommandKind
+    if (quantity === 0 && kind !== 'create_receive') fail('quantity must be greater than zero for receive.', 400, 'invalid_quantity')
     const product = kind === 'create_receive' ? canonicalProduct(line.product, defaults, quantity, branchId, maxImages) : null
     const productId = kind === 'receive' ? integer(line.product_id, 'product_id') as number : null
     const batchId = line.batch_id == null ? null : integer(line.batch_id, 'batch_id') as number
@@ -331,7 +341,8 @@ async function snapshotFence(db: D1Compat, request: StockSessionRequest): Promis
       targets.push({ product: line.product_id, branch: line.branch_id, batch: line.batch_id, key: receivedBatchKey(line.received_date) })
     }
     if (line.product) {
-      pairs.push(['product_catalog', 'all'], ['branch_catalog', 'all'])
+      pairs.push(['product_catalog', 'all'])
+      if (line.quantity > 0) pairs.push(['branch_catalog', 'all'])
       for (const path of (line.product.image_gallery as string[] | undefined) || []) paths.add(path)
       if (line.product.image_path) paths.add(String(line.product.image_path))
     }
@@ -382,12 +393,15 @@ function parseStoredReceipt(row: Row, replayed: boolean): StockSessionReceipt {
 }
 
 export async function commitStockSession(env: Env, user: SessionUser, raw: unknown): Promise<StockSessionReceipt> {
-  const inventoryTier = getActionTier(user, 'inventory', 'adjust')
-  if (inventoryTier !== 'full') fail(
-    inventoryTier === 'review' ? 'Stock sessions cannot be submitted for review; a full inventory permission is required.' : 'No permission to receive stock.',
-    403, inventoryTier === 'review' ? 'review_not_supported' : 'permission_denied',
-  )
   const request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
+  const requiresInventoryAdjust = request.items.some((line) => line.quantity > 0)
+  if (requiresInventoryAdjust) {
+    const inventoryTier = getActionTier(user, 'inventory', 'adjust')
+    if (inventoryTier !== 'full') fail(
+      inventoryTier === 'review' ? 'Stock sessions cannot be submitted for review; a full inventory permission is required.' : 'No permission to receive stock.',
+      403, inventoryTier === 'review' ? 'review_not_supported' : 'permission_denied',
+    )
+  }
   if (request.items.some((line) => line.kind === 'create_receive') && getActionTier(user, 'products', 'add') !== 'full') {
     fail('create_receive requires full product-add permission.', 403, 'permission_denied')
   }
@@ -447,7 +461,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
 
   const productColumns = request.items.some((line) => line.kind === 'create_receive') ? await tableColumns(env, 'products') : new Set<string>()
   const createLines = request.items.filter((line) => line.kind === 'create_receive')
-  const activeBranches = createLines.length ? await db.prepare('SELECT id FROM branches WHERE is_active=1 ORDER BY id').all<Row>() : []
+  const stockCreateLines = createLines.filter((line) => line.quantity > 0)
+  const activeBranches = stockCreateLines.length ? await db.prepare('SELECT id FROM branches WHERE is_active=1 ORDER BY id').all<Row>() : []
   const identityKeys = new Set<string>()
   for (const line of createLines) {
     const product = line.product as CanonicalProduct
@@ -502,7 +517,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const batchStockMap = new Map(batchStocks.map((row) => [`${row.batch_id}:${row.branch_id}`, row]))
 
   const revisionPairs: Array<[string, string]> = [['product_catalog', 'all']]
-  if (createLines.length) revisionPairs.push(['branch_catalog', 'all'])
+  if (stockCreateLines.length) revisionPairs.push(['branch_catalog', 'all'])
   for (const row of products) revisionPairs.push(['product', String(row.id)])
   for (const row of branches) revisionPairs.push(['branch', String(row.id)])
   for (const row of suppliers) revisionPairs.push(['supplier', String(row.id)])
@@ -564,7 +579,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   }
   if (createLines.length) {
     statements.push(revisionAssertion('product_catalog', 'all', '1=1', {}, rev('product_catalog', 'all')))
-    statements.push(revisionAssertion('branch_catalog', 'all', '1=1', {}, rev('branch_catalog', 'all')))
+    if (stockCreateLines.length) statements.push(revisionAssertion('branch_catalog', 'all', '1=1', {}, rev('branch_catalog', 'all')))
     for (const line of createLines) {
       const product = line.product as CanonicalProduct
       statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE is_active=1
@@ -582,8 +597,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: STOCK_SESSION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: user.name } })
   statements.push({ sql: 'UPDATE stock_session_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
-    SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'snapshot_version',2),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'snapshot_version',2),@actor,@name
-    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: user.name, creates: createLines.length ? 1 : 0 } })
+    SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_inventory_adjust',@adjusts,'snapshot_version',2),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_inventory_adjust',@adjusts,'snapshot_version',2),@actor,@name
+    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: user.name, creates: createLines.length ? 1 : 0, adjusts: requiresInventoryAdjust ? 1 : 0 } })
   statements.push({ sql: 'UPDATE stock_session_operations SET history_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
 
   for (const line of request.items) {
@@ -592,12 +607,18 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       statements.push(planInsertRow('products', line.product as CanonicalProduct, productColumns, {
         name: line.product?.name, is_active: line.product?.is_active ?? 1, stock_quantity: 0, client_request_id: productRequestId,
       }))
-      statements.push({ sql: `INSERT OR IGNORE INTO branch_stock(product_id,branch_id,quantity)
+      if (line.quantity > 0) statements.push({ sql: `INSERT OR IGNORE INTO branch_stock(product_id,branch_id,quantity)
         SELECT products.id,b.id,0 FROM products CROSS JOIN branches b WHERE products.client_request_id=@productRequestId AND b.is_active=1`, params: { productRequestId } })
       for (const [order, imagePath] of ((line.product?.image_gallery as string[] | undefined) || []).entries()) {
         statements.push({ sql: `INSERT INTO product_images(product_id,image_path,sort_order)
           SELECT id,@path,@order FROM products WHERE client_request_id=@productRequestId`, params: { path: imagePath, order, productRequestId } })
       }
+    }
+    if (line.quantity === 0) {
+      statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,movement_id,quantity,unit_cost_usd)
+        SELECT @operationId,@lineId,@kind,id,1,@branchId,NULL,NULL,0,@unitCostUsd FROM products WHERE client_request_id=@productRequestId`,
+      params: { operationId, lineId: line.line_id, kind: line.kind, branchId: line.branch_id, unitCostUsd: line.unit_cost_usd, productRequestId } })
+      continue
     }
     const plan = planReceiveBatchStock({
       productId: line.product_id, productClientRequestId: productRequestId, branchId: line.branch_id,
@@ -688,7 +709,7 @@ async function stockReplayStateSql(env: Env): Promise<string> {
   return `(WITH m AS (SELECT * FROM stock_session_members WHERE operation_id=@id),
     wanted(entity_type,entity_key) AS (
       SELECT 'product',CAST(product_id AS TEXT) FROM m
-      UNION SELECT 'batch',CAST(batch_id AS TEXT) FROM m
+      UNION SELECT 'batch',CAST(batch_id AS TEXT) FROM m WHERE batch_id IS NOT NULL
       UNION SELECT 'branch',CAST(branch_id AS TEXT) FROM m
       UNION SELECT 'supplier',CAST(supplier_id AS TEXT) FROM product_batches WHERE id IN (SELECT batch_id FROM m) AND supplier_id IS NOT NULL
       UNION SELECT 'branch_stock',CAST(product_id AS TEXT)||':'||branch_id FROM branch_stock WHERE product_id IN (SELECT product_id FROM m)
@@ -738,7 +759,6 @@ function captureReplayState(id: string, stateSql: string, initial = false): Stoc
 
 export async function replayStockSession(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number,
   generation: unknown, payload: Row): Promise<void> {
-  if (getActionTier(user, 'inventory', 'adjust') !== 'full') fail('Inventory adjust permission is required.', 403)
   if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0) fail('expected_generation must be a nonnegative JSON integer.', 400)
   const db = getDb(env)
   const op = await db.prepare(`SELECT o.*,s.kind,s.payload_json,h.status FROM stock_session_operations o
@@ -747,6 +767,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   if (!op || op.id !== payload.operation_id || op.snapshot_id !== payload.snapshot_id || op.kind !== STOCK_SESSION_KIND) fail('Stock session history does not match its operation.')
   const snapshot = JSON.parse(String(op.payload_json)) as Row
   const request = snapshot.request as StockSessionRequest
+  if (request.items.some(line => line.quantity > 0) && getActionTier(user, 'inventory', 'adjust') !== 'full') fail('Inventory adjust permission is required.', 403)
   if (request.items.some(line => line.kind === 'create_receive') && getActionTier(user, 'products', 'add') !== 'full') fail('Product add permission is required to reverse this session.', 403)
   const targetStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
@@ -812,7 +833,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
     SELECT m.product_id,p.name,m.branch_id,b.name,@movement,m.quantity*@sign,COALESCE(m.unit_cost_usd,0),0,m.quantity*COALESCE(m.unit_cost_usd,0)*@sign,0,@reason,o.rowid,@actor,@name,m.batch_id
     FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
-    WHERE m.operation_id=@id`, params: { id: op.id, movement: direction === 'undo' ? 'remove' : 'add', sign: direction === 'undo' ? -1 : 1, reason: `Stock session ${op.id} ${direction} generation ${generation + 1}`, actor: user.id, name: user.name } })
+    WHERE m.operation_id=@id AND m.quantity>0`, params: { id: op.id, movement: direction === 'undo' ? 'remove' : 'add', sign: direction === 'undo' ? -1 : 1, reason: `Stock session ${op.id} ${direction} generation ${generation + 1}`, actor: user.id, name: user.name } })
   statements.push({ sql: 'UPDATE stock_session_operations SET generation=generation+1 WHERE id=@id', params: { id: op.id } })
   statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot', params: { status: direction === 'undo' ? 'reversed' : 'applied', snapshot: op.snapshot_id } })
   statements.push({ sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=CURRENT_TIMESTAMP,
