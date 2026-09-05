@@ -82,11 +82,17 @@ assert.equal(getSalesImportAccrueLoyalty(JSON.stringify({ accrue_loyalty: false 
 assert.equal(getSalesImportAccrueLoyalty(null), false, 'absent policy defaults to no accrual')
 assert.equal(getSalesImportAccrueLoyalty('{bad json'), false, 'malformed policy defaults to no accrual')
 assert.match(engine, /accrueLoyalty,\n\s*\}\)/, 'apply loop threads accrueLoyalty into the sale writer')
-assert.match(salesRoute, /loyalty_accrual: !loyaltyPointsEnabled \|\| body\.loyalty_accrual === false \? 0 : 1/, 'POS route: the shop-wide switch is AND-ed over the body, and only an explicit false opts out')
+assert.match(salesRoute, /loyalty_accrual: \(typeof body\.loyalty_accrual === 'boolean' \? body\.loyalty_accrual : loyaltyPointsEnabled\) \? 1 : 0/, 'POS route: explicit boolean wins, otherwise use the current setting default')
 const contacts = read(path.join('routes', 'contacts.ts'))
 assert.match(contacts, /COALESCE\(loyalty_accrual, 1\) AS loyalty_accrual/, 'contacts feeds the flag into summarizePoints')
 const pos = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'pos', 'POS.tsx'), 'utf8').replace(/\r\n/g, '\n')
-assert.match(pos, /loyalty_accrual: active\.loyaltyAccrual !== false/, 'POS checkout sends the flag with on-by-default semantics')
+const posPayload = pos.match(/loyalty_accrual: ([^,\n]+),/)
+assert.ok(posPayload, 'POS checkout sends an explicit accrual decision')
+// Execute the actual payload expression. The membership worker resolves the
+// tab's inherited default into loyaltyAccrual before constructing this body;
+// the earlier isolated base expresses its explicit boolean on active instead.
+const posAccrual = new Function('active', 'loyaltyAccrual', 'return ' + posPayload[1])
+for (const flag of [true, false]) assert.equal(posAccrual({ loyaltyAccrual: flag }, flag), flag, 'POS payload preserves the explicit boolean in either direction')
 
 // ---- Part-77 (MEDIUM): manual awards count at CHECKOUT, not just in the
 // display. summarizePoints (the balance POS shows) adds
@@ -104,15 +110,9 @@ assert.match(portalRoute, /\+ rewarded \+ manuallyAwarded\)/, 'summarizePoints k
 
 // ---- 6. The shop-wide membership-points switch (settings key
 // `loyalty_points_enabled`). User, Sep 4 2026: "make the membership points on
-// off in settings", ruled FORWARD-ONLY -- off stops sales earning from that
-// moment and stops any balance being spent, and rewrites no existing row.
-//
-// The security of the whole thing is that the flag is resolved SERVER-SIDE.
-// The POS sends `loyalty_accrual` in the request body; a till tab left open
-// all day keeps sending true long after an admin flips the switch. If the
-// server trusted the body, the toggle would appear to work in a fresh tab and
-// silently fail on the one machine that matters. So: read the setting, AND it
-// over whatever arrived.
+// off in settings". Sep 5 clarification: the setting is the default for new
+// sales; an explicit per-sale boolean overrides it. Existing rows are never
+// rewritten. Redemption still has its separate shop-wide gate below.
 assert.match(
   salesRoute,
   /SELECT value FROM settings WHERE key = 'loyalty_points_enabled'/,
@@ -123,7 +123,7 @@ assert.match(
 // shipped expression rather than a restatement of it.
 const switchReadMatch = salesRoute.match(/const loyaltyPointsEnabled = !\[[^\]]*\]\.includes\(String\(loyaltyEnabledRow\?\.value \?\? ''\)[^\n]*\)/)
 assert.ok(switchReadMatch, 'routes/sales.ts still resolves loyaltyPointsEnabled from the settings row')
-const writerMatch = salesRoute.match(/loyalty_accrual: (![^,]*\? 0 : 1)/)
+const writerMatch = salesRoute.match(/loyalty_accrual: (\(typeof body\.loyalty_accrual[^\n]+\? 1 : 0),/)
 assert.ok(writerMatch, 'routes/sales.ts still writes loyalty_accrual through a single expression')
 
 const resolveAccrual = new Function('settingValue', 'bodyFlag', [
@@ -133,10 +133,11 @@ const resolveAccrual = new Function('settingValue', 'bodyFlag', [
   'return ' + writerMatch[1],
 ].join('\n'))
 
-// The case that matters: switch OFF, stale client insists true -> 0.
-assert.equal(resolveAccrual('false', true), 0, 'switch off + client sends true must still write 0')
+// Default OFF can be deliberately overridden ON on this sale.
+assert.equal(resolveAccrual('false', true), 1, 'explicit true overrides default off')
 for (const off of ['0', 'false', 'no', 'off', 'OFF', ' False ']) {
-  assert.equal(resolveAccrual(off, true), 0, `"${off}" must read as off`)
+  assert.equal(resolveAccrual(off, true), 1, `explicit true overrides "${off}"`)
+  assert.equal(resolveAccrual(off, false), 0, `explicit false preserves "${off}"`)
   assert.equal(resolveAccrual(off, undefined), 0, `"${off}" must read as off with no body flag`)
 }
 // On, and absent, both accrue -- a shop that has never touched the switch is
@@ -147,6 +148,10 @@ for (const on of [undefined, '', 'true', '1', 'yes', 'anything']) {
 }
 // The per-sale opt-out still works while the programme is on.
 assert.equal(resolveAccrual('true', false), 0, 'an explicit per-sale opt-out still opts out')
+for (const invalid of [null, '', 'false', 'true', 0, 1, {}, []]) {
+  assert.equal(resolveAccrual('true', invalid), 1, 'non-boolean body uses default on')
+  assert.equal(resolveAccrual('false', invalid), 0, 'non-boolean body uses default off')
+}
 
 // Off must also stop a redemption being TAKEN. Dropping it silently would
 // charge the full total while the cashier's screen still showed the discount,

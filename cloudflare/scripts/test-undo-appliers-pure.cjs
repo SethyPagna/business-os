@@ -88,6 +88,8 @@ function wrapDb(sqlite) {
 }
 
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
+  // The dedicated bulk test executes this applier with its actual Hono/SQL.
+  if (id === './saleBulkStatus') return { replaySaleBulkStatus: async () => { throw new Error('Use the dedicated bulk fixture') } }
   if (id === './db') return { getDb: () => wrapDb(sharedDb) }
   if (id === './audit') return { audit: async () => {} }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }

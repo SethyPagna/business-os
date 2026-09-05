@@ -371,9 +371,13 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     setBusy(direction)
     try {
       const api = await loadActionHistoryTransport()
+      if (navigator.onLine === false) throw new Error('Connect to the server to replay history.')
+      const item = serverItems.find(item => String(item.id) === String(serverId))
+      const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
+      const replayRequest = { require_applied: true, ...(payload?.applier === 'sale.status.bulk' ? { expected_generation: payload.generation } : {}) }
       const response = direction === 'undo'
-        ? await api.undoActionHistory(serverId, { require_applied: true })
-        : await api.redoActionHistory(serverId, { require_applied: true })
+        ? await api.undoActionHistory(serverId, replayRequest)
+        : await api.redoActionHistory(serverId, replayRequest)
       const applied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
       refreshServerItems()
       if (!applied) {
@@ -389,7 +393,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     } finally {
       setBusy('')
     }
-  }, [busy, notify, refreshServerItems])
+  }, [busy, notify, refreshServerItems, serverItems])
 
   const undoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('undo', serverId, label), [runServerEntry])
   const redoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('redo', serverId, label), [runServerEntry])

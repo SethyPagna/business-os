@@ -1,4 +1,8 @@
 {
+  "sale_stock_skipped": "Stock skipped",
+  "sale_bulk_status_result": "Updated {changed} sales; {unchanged} unchanged.",
+  "sale_bulk_history_summary": "{changed} sales → {status}; {unchanged} unchanged",
+  "sale_bulk_history_details": "Affected sales",
   "No data to export": "No data to export",
   "keep_current_link": "Keep current link",
   "ignore_group": "Ignore",

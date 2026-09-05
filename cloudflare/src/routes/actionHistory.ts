@@ -5,6 +5,7 @@ import { audit } from '../lib/audit'
 import { getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
 import { isServerReplayable, resolveUndoApplier, applierPermissionTier } from '../lib/undoAppliers'
 import type { Env } from '../index'
+import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 
 // Ported from backend/src/routes/actionHistory.ts. This replaces the
 // read-only GET-only stub that lived in compat.ts (no create, no
@@ -97,6 +98,7 @@ function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boole
 }
 
 function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boolean {
+  if ([body.undo_payload, body.redo_payload].some(p => p && typeof p === 'object' && (p as Record<string, unknown>).applier === BULK_STATUS_KIND)) return false
   if (isAdminControlUser(user)) return true
   if (!canUseNamedAppliers(user, [body.undo_payload, body.redo_payload])) return false
   const permission = permissionForActionHistory({ entity: body.entity, scope: body.scope })
@@ -169,6 +171,20 @@ app.get('/', async (c) => {
   }
 })
 
+app.get('/:id/details', async (c) => {
+  const user = c.get('user'), db = getDb(c.env)
+  const row = await db.prepare('SELECT * FROM action_history WHERE id=?').get<ActionHistoryRow>([Number(c.req.param('id'))])
+  if (!row || !canOperateHistoryRow(user, row)) return c.json({ error: 'Action not found.' }, 404)
+  const payload = parseJson(row.undo_payload)
+  if (payload.applier !== BULK_STATUS_KIND || !canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
+  const operation = await db.prepare('SELECT receipt_json FROM sale_bulk_operations WHERE history_id=?').get<{ receipt_json: string }>([row.id])
+  if (!operation) return c.json({ error: 'Saved details unavailable.' }, 404)
+  const receipt = JSON.parse(operation.receipt_json)
+  const offset = Math.max(0, Math.min(25, Number.parseInt(c.req.query('offset') || '0', 10) || 0))
+  const limit = Math.max(1, Math.min(10, Number.parseInt(c.req.query('limit') || '10', 10) || 10))
+  return c.json({ items: receipt.items.slice(offset, offset + limit), total: receipt.items.length, changedCount: receipt.changedCount, unchangedCount: receipt.unchangedCount })
+})
+
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -219,6 +235,8 @@ app.patch('/:id', async (c) => {
     const existing = await db.prepare('SELECT * FROM action_history WHERE id = @id AND created_by_id = @user_id')
       .get<ActionHistoryRow>({ id: actionId, user_id: user?.id || 0 })
     if (!existing) return c.json({ success: false, error: 'Action history item not found' }, 404)
+
+    if ([parseJson(existing.undo_payload), parseJson(existing.redo_payload)].some(p => p.applier === BULK_STATUS_KIND)) return c.json({ success: false, error: 'Grouped sale history is server-managed.' }, 403)
 
     await db.prepare(`
       UPDATE action_history SET status = @status, last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id
@@ -288,14 +306,20 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     let applied = false
     if (applier) {
       try {
-        await applier.run(payload, { env: c.env, user, direction })
+        await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation })
         applied = true
       } catch (error) {
-        await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
+        if (applier.name !== BULK_STATUS_KIND) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
         const status = Number((error as Error & { statusCode?: number })?.statusCode) === 409 ? 409 : 500
         return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action` }, status)
       }
+    }
+
+    if (applier?.name === BULK_STATUS_KIND) {
+      c.executionCtx.waitUntil(notifyBulkStatus(c.env))
+      const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
+      return c.json({ success: true, applied: true, item: row ? mapRow(row, user) : null, payload })
     }
 
     await db.prepare(`

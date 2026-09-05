@@ -1,4 +1,8 @@
 {
+  "sale_stock_skipped": "មិនប៉ះពាល់ស្តុក",
+  "sale_bulk_status_result": "បានកែប្រែការលក់ {changed}; មិនផ្លាស់ប្តូរ {unchanged}។",
+  "sale_bulk_history_summary": "ការលក់ {changed} → {status}; មិនផ្លាស់ប្តូរ {unchanged}",
+  "sale_bulk_history_details": "ការលក់ដែលពាក់ព័ន្ធ",
   "No data to export": "គ្មានទិន្នន័យដើម្បីនាំចេញ",
   "keep_current_link": "រក្សាតំណបច្ចុប្បន្ន",
   "ignore_group": "មិនអើពើ",

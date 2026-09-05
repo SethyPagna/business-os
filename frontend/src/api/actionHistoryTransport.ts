@@ -4,6 +4,10 @@ import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 
 type ActionHistoryPayload = Record<string, unknown>
 
+export function getActionHistoryDetails(id: string | number, offset = 0): Promise<unknown> {
+  return route(`actionHistory:details:${id}:${offset}`, () => apiFetch('GET', `/api/action-history/${encodeURIComponent(String(id))}/details?offset=${offset}&limit=10`), null)
+}
+
 function getDevicePayload(): ActionHistoryPayload {
   return { ...getClientDeviceInfo() }
 }

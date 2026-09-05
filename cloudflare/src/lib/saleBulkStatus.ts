@@ -1,0 +1,349 @@
+import { getDb, type D1Compat } from './db';
+import type { Env } from '../index';
+import type { SessionUser } from './auth';
+import { getActionTier, isAdminControlUser } from './permissions';
+import { selectInChunks } from './sqlBinding';
+import { VALID_SALE_STATUSES } from './salesStatus';
+import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
+import { bumpVersion } from './cache';
+import { broadcast } from '../durable-objects/broadcastHub';
+export const BULK_STATUS_KIND = 'sale.status.bulk';
+export const BULK_STATUS_LIMIT = 25;
+type Row = Record<string, unknown>;
+type Item = TransitionItem & {
+    sale_id: number;
+    damaged_lot_id: number | null;
+};
+type Allocation = Row & {
+    id: number;
+    sale_item_id: number;
+    batch_id: number;
+    quantity: number;
+    released_quantity: number;
+    released_at: string | null;
+};
+type StockDelta = {
+    product: number;
+    branch: number;
+    quantity: number;
+    batch: number | null;
+    lot: number | null;
+    name: string | null;
+    costUsd: number;
+    costKhr: number;
+    sale: number;
+};
+type BatchDelta = {
+    batch: number;
+    branch: number;
+    product: number;
+    quantity: number;
+};
+type Member = {
+    id: number;
+    receipt: string;
+    before: Row;
+    after: Row;
+    changed: boolean;
+    skipped: boolean;
+    items: Item[];
+    returned: [
+        number,
+        number
+    ][];
+    stock: StockDelta[];
+    batches: BatchDelta[];
+    allocations: {
+        before: Allocation;
+        after: Allocation;
+    }[];
+    fee: Row | null;
+};
+type Snapshot = {
+    version: 1;
+    operationId: string;
+    members: Member[];
+};
+export type BulkStatusRequest = {
+    client_request_id: string;
+    items: {
+        id: number;
+        expected_status: string;
+        expected_updated_at: string | null;
+    }[];
+    target_status: string;
+    notes?: string;
+    cancel_reason?: string;
+    cancel_note?: string;
+    skip_stock?: boolean;
+};
+export class SaleBulkError extends Error {
+    constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409) { super(message); }
+}
+const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancelled_at', 'cancelled_by_name', 'status_before_cancel', 'cancel_fee_id'] as const;
+// reference_id is polymorphic: use a conservative read guard, never revision
+// triggers that would write to an unrelated sale with the same numeric id.
+function movementFingerprint(idSql: string) {
+    return `(SELECT json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr)) FROM (SELECT * FROM inventory_movements WHERE reference_id=${idSql} AND movement_type IN ('sale','return','damage_in','damage_out') ORDER BY id))`;
+}
+function fail(message: string): never { throw new SaleBulkError(message); }
+function permission(user: SessionUser) { if (getActionTier(user, 'sales', 'status') !== 'full')
+    throw new SaleBulkError('No permission to change sale status.', 403); }
+export function bulkAssertion(predicate: string, params: Row = {}): StockStatement {
+    return { sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params };
+}
+export function saleRevisionGuard(id: number, revision: number): StockStatement {
+    return bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM sales WHERE id=@id) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0)=@revision", { id, revision });
+}
+function parseRequest(raw: Row): BulkStatusRequest {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        throw new SaleBulkError('A bulk status object is required.', 400);
+    const allowed = ['client_request_id', 'items', 'target_status', 'notes', 'cancel_reason', 'cancel_note', 'skip_stock'];
+    if (Object.keys(raw).some(k => !allowed.includes(k)))
+        throw new SaleBulkError('Unsupported bulk status field; payment and lost fees are per-sale actions.', 400);
+    if (typeof raw.client_request_id !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(raw.client_request_id))
+        throw new SaleBulkError('A stable request id is required.', 400);
+    if (!Array.isArray(raw.items) || !raw.items.length || raw.items.length > BULK_STATUS_LIMIT)
+        throw new SaleBulkError(`Select between 1 and ${BULK_STATUS_LIMIT} sales.`, 400);
+    const ids = new Set<number>();
+    for (const item of raw.items) {
+        if (!item || typeof item !== 'object' || Object.keys(item).some(k => !['id', 'expected_status', 'expected_updated_at'].includes(k)) || !Number.isSafeInteger(item.id) || item.id <= 0 || ids.has(item.id) || !VALID_SALE_STATUSES.includes(item.expected_status) || !(typeof item.expected_updated_at === 'string' || item.expected_updated_at === null))
+            throw new SaleBulkError('Unique sale ids and expected states are required.', 400);
+        ids.add(item.id);
+    }
+    if (!VALID_SALE_STATUSES.includes(String(raw.target_status)))
+        throw new SaleBulkError('Invalid sale status.', 400);
+    if (raw.skip_stock !== undefined && typeof raw.skip_stock !== 'boolean')
+        throw new SaleBulkError('skip_stock must be boolean.', 400);
+    for (const key of ['notes', 'cancel_reason', 'cancel_note'])
+        if (raw[key] !== undefined && (typeof raw[key] !== 'string' || String(raw[key]).length > 1000))
+            throw new SaleBulkError('Invalid notes.', 400);
+    if (raw.target_status === 'cancelled' && (!normalizeCancelReason(raw.cancel_reason) || (raw.cancel_reason === 'other' && !String(raw.cancel_note || '').trim())))
+        throw new SaleBulkError('Choose a cancellation reason and supply a note for Other.', 400);
+    // Fixed key order and sorted ids make semantically identical retries identical.
+    return { client_request_id: raw.client_request_id, items: raw.items.map(i => ({ id: i.id, expected_status: i.expected_status, expected_updated_at: i.expected_updated_at })).sort((a, b) => a.id - b.id), target_status: String(raw.target_status), ...(raw.notes !== undefined ? { notes: raw.notes as string } : {}), ...(raw.cancel_reason !== undefined ? { cancel_reason: raw.cancel_reason as string } : {}), ...(raw.cancel_note !== undefined ? { cancel_note: raw.cancel_note as string } : {}), skip_stock: raw.skip_stock === true };
+}
+async function rowsIn<T>(db: D1Compat, ids: number[], sql: (marks: string) => string): Promise<T[]> {
+    return selectInChunks(ids, 0, chunk => db.prepare(sql(chunk.map(() => '?').join(','))).all<T>(chunk));
+}
+function scalar(row: Row): Row { return Object.fromEntries(fields.map(k => [k, row[k] ?? null])); }
+function bounded(statements: StockStatement[], snapshot: Snapshot) {
+    if (statements.length > 500 || new TextEncoder().encode(JSON.stringify(snapshot)).length > 512000)
+        throw new SaleBulkError('Selection is too large for one atomic action. Select fewer sales.', 400);
+}
+function stockStatements(member: Member, sign: number, user: SessionUser, stamp: string): StockStatement[] {
+    const out: StockStatement[] = [];
+    for (const move of member.stock) {
+        const q = move.quantity * sign;
+        const p = { product: move.product, branch: move.branch, q, lot: move.lot, stamp };
+        if (move.lot) {
+            out.push(bulkAssertion('EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND product_id=@product AND branch_id IS @branch AND quantity_remaining+@q BETWEEN 0 AND quantity)', p));
+            out.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@q, updated_at=@stamp WHERE id=@lot', params: p });
+        }
+        else {
+            out.push(bulkAssertion('EXISTS(SELECT 1 FROM products WHERE id=@product AND stock_quantity+@q>=0) AND EXISTS(SELECT 1 FROM branches WHERE id=@branch) AND (@q>=0 OR EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity+@q>=0))', p));
+            out.push({ sql: 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@product,@branch,@q) ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+@q', params: p });
+            // The INSERT value must itself satisfy CHECK on an existing row too.
+            if (q < 0)
+                out[out.length - 1] = { sql: 'UPDATE branch_stock SET quantity=quantity+@q WHERE product_id=@product AND branch_id=@branch', params: p };
+            out.push({ sql: 'UPDATE products SET stock_quantity=stock_quantity+@q, updated_at=@stamp WHERE id=@product', params: p });
+        }
+        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch,@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: move.costUsd, khr: move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: user.name, batch: move.batch } });
+    }
+    for (const move of member.batches) {
+        const p = { ...move, q: move.quantity * sign, stamp };
+        out.push(bulkAssertion('EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product) AND (@q>=0 OR EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity+@q>=0))', p));
+        out.push({ sql: p.q < 0 ? 'UPDATE branch_batch_stock SET quantity=quantity+@q, updated_at=@stamp WHERE batch_id=@batch AND branch_id=@branch' : 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@batch,@branch,@q) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+@q,updated_at=@stamp', params: p });
+    }
+    for (const a of member.allocations) {
+        const target = sign < 0 ? a.before : a.after;
+        out.push({ sql: 'UPDATE sale_item_batch_allocations SET released_quantity=@quantity,released_at=@released WHERE id=@id', params: { id: target.id, quantity: target.released_quantity, released: target.released_at } });
+    }
+    return out;
+}
+function memberStatements(member: Member, sign: number, user: SessionUser, stamp: string): StockStatement[] {
+    if (!member.changed)
+        return [];
+    const target = sign < 0 ? member.before : member.after;
+    const out = stockStatements(member, sign, user, stamp);
+    if (member.fee) {
+        if (sign > 0)
+            out.push({ sql: 'DELETE FROM fees WHERE id=@id', params: { id: member.fee.id } });
+        else {
+            // Only server-captured fee columns; identifiers are validated and the
+            // target table is fixed. Generic history APIs cannot create this snapshot.
+            const keys = Object.keys(member.fee);
+            if (keys.some(k => !/^[a-z_]+$/.test(k)))
+                fail('Invalid saved fee.');
+            out.push({ sql: `INSERT INTO fees(${keys.join(',')}) VALUES(${keys.map(k => `@${k}`).join(',')})`, params: member.fee });
+        }
+    }
+    out.push({ sql: `UPDATE sales SET ${fields.map(k => `${k}=@${k}`).join(',')}, updated_at=@stamp${member.skipped ? ', stock_skipped=1, stock_skipped_at=COALESCE(stock_skipped_at,@stamp), stock_skipped_by_name=COALESCE(stock_skipped_by_name,@actor)' : ''} WHERE id=@id`, params: { ...target, id: member.id, stamp, actor: user.name } });
+    return out;
+}
+function auditStatement(user: SessionUser, operationId: string, direction: string, count: number): StockStatement {
+    return { sql: 'INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@action,\'sale\',@id,@details,\'sales\',@id,@details)', params: { uid: user.id, name: user.name, action: direction, id: operationId, details: JSON.stringify({ kind: BULK_STATUS_KIND, count }) } };
+}
+export async function notifyBulkStatus(env: Env) {
+    await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'products'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
+}
+export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row) {
+    permission(user);
+    const request = parseRequest(raw);
+    if (request.skip_stock && !isAdminControlUser(user))
+        throw new SaleBulkError('Administrator access required to skip stock.', 403);
+    const db = getDb(env), canonical = JSON.stringify(request);
+    const previous = await db.prepare('SELECT * FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id });
+    if (previous) {
+        if (previous.request_json !== canonical)
+            fail('Request id was already used with different data.');
+        return JSON.parse(String(previous.receipt_json));
+    }
+    const ids = request.items.map(i => i.id);
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const items = await rowsIn<Item>(db, ids, m => `SELECT * FROM sale_items WHERE sale_id IN (${m}) ORDER BY id`);
+    if (items.length > 150)
+        throw new SaleBulkError('Select fewer sale lines (maximum 150).', 400);
+    const allocations = await rowsIn<Allocation>(db, items.map(i => i.id), m => `SELECT * FROM sale_item_batch_allocations WHERE sale_item_id IN (${m}) ORDER BY id`);
+    if (allocations.length > 300)
+        throw new SaleBulkError('Select fewer batch allocations (maximum 300).', 400);
+    const returns = await rowsIn<{
+        sale_id: number;
+        sale_item_id: number | null;
+        product_id: number | null;
+        quantity: number;
+    }>(db, ids, m => `SELECT r.sale_id,ri.sale_item_id,ri.product_id,SUM(ri.quantity) quantity FROM returns r JOIN return_items ri ON ri.return_id=r.id WHERE r.sale_id IN (${m}) AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer' GROUP BY r.sale_id,ri.sale_item_id,ri.product_id`);
+    const fees = await rowsIn<Row>(db, sales.map(s => Number(s.cancel_fee_id)).filter(Boolean), m => `SELECT * FROM fees WHERE id IN (${m})`);
+    const stamp = new Date().toISOString(), operationId = crypto.randomUUID(), members: Member[] = [], guards: StockStatement[] = [];
+    for (const expected of request.items) {
+        const sale = sales.find(s => s.id === expected.id);
+        if (!sale || (sale.sale_status || 'completed') !== expected.expected_status || (sale.updated_at ?? null) !== expected.expected_updated_at)
+            fail(`Sale ${expected.id} changed. Refresh before retrying.`);
+        guards.push(saleRevisionGuard(expected.id, Number(sale.write_revision)));
+        guards.push(bulkAssertion(`${movementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: sale.movement_fingerprint }));
+        const old = String(sale.sale_status || 'completed'), changed = old !== request.target_status;
+        const guard = guardSaleStatusTransition(old, request.target_status, String(sale.status_before_cancel || '') || null);
+        if (changed && !guard.ok)
+            throw new SaleBulkError(guard.error || 'Invalid transition.', 400);
+        const before = scalar(sale), after: Row = { ...before, sale_status: request.target_status };
+        if (request.notes !== undefined)
+            after.notes = request.notes;
+        if (request.target_status === 'cancelled' && changed)
+            Object.assign(after, { cancel_reason: request.cancel_reason, cancel_note: request.cancel_note?.trim() || null, cancelled_at: stamp, cancelled_by_name: user.name, status_before_cancel: old });
+        else if (old === 'cancelled' && changed)
+            Object.assign(after, { cancel_reason: null, cancel_note: null, cancelled_at: null, cancelled_by_name: null, status_before_cancel: null, cancel_fee_id: null });
+        const own = items.filter(i => i.sale_id === expected.id), itemReturned = new Map<number, number>(), productReturned = new Map<number, number>();
+        for (const r of returns.filter(r => r.sale_id === expected.id)) {
+            const map = r.sale_item_id ? itemReturned : productReturned;
+            const key = Number(r.sale_item_id || r.product_id);
+            map.set(key, (map.get(key) || 0) + r.quantity);
+        }
+        const returned = allocateReturnedQuantities(own, itemReturned, productReturned);
+        for (const item of own) {
+            item.allocations = allocations.filter(a => a.sale_item_id === item.id);
+            if (allocations.some(a => a.sale_item_id === item.id && a.branch_id != null && Number(a.branch_id) !== item.branch_id))
+                fail('Sale allocation belongs to a different branch.');
+        }
+        const skipped = (changed && !!request.skip_stock) || Number(sale.stock_skipped) === 1;
+        const member: Member = { id: expected.id, receipt: String(sale.receipt_number || expected.id), before, after, changed, skipped, items: own, returned: [...returned], stock: [], batches: [], allocations: [], fee: null };
+        if (changed && old === 'cancelled' && sale.cancel_fee_id) {
+            member.fee = fees.find(f => f.id === sale.cancel_fee_id) || null;
+            if (!member.fee)
+                fail('Linked cancellation fee is missing.');
+        }
+        const plan = planSaleStockTransition({ saleId: expected.id, oldStatus: old, newStatus: request.target_status, items: own.filter(i => !i.damaged_lot_id), returnedByItem: returned, reason: 'Grouped sale status', userId: user.id, userName: user.name, skipStock: skipped });
+        // The existing transition kernel decides every regular movement and batch delta.
+        // Persist typed deltas, never executable SQL, for an exact inverse after reload.
+        for (const statement of plan.statements) {
+            const p = statement.params;
+            if (statement.sql.startsWith('INSERT INTO inventory_movements'))
+                member.stock.push({ product: Number(p.product_id), branch: Number(p.branch_id), quantity: Number(p.quantity), batch: p.batch_id ? Number(p.batch_id) : null, lot: null, name: p.product_name as string | null, costUsd: Number(p.unit_cost_usd), costKhr: Number(p.unit_cost_khr), sale: expected.id });
+            if (statement.sql.startsWith('UPDATE branch_batch_stock') || statement.sql.startsWith('INSERT INTO branch_batch_stock')) {
+                const item = own.find(i => i.batch_id === p.batchId || i.allocations?.some(a => a.batch_id === p.batchId))!;
+                member.batches.push({ batch: Number(p.batchId), branch: Number(p.branchId), product: Number(item.product_id), quantity: Number(p.quantity) * (statement.sql.startsWith('UPDATE') ? -1 : 1) });
+            }
+            if (statement.sql.includes('UPDATE sale_item_batch_allocations') && p.id) {
+                const a = allocations.find(a => a.id === p.id)!, next = { ...a };
+                next.released_quantity += Number(p.give || 0) - Number(p.take || 0);
+                next.released_at = next.released_quantity <= 0 ? null : next.released_quantity >= next.quantity ? stamp : a.released_at;
+                member.allocations.push({ before: { ...a }, after: next });
+            }
+        }
+        if (changed && !skipped)
+            for (const item of own) {
+                const delta = heldQuantity(old, item.quantity, returned.get(item.id) || 0) - heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0);
+                if (!delta)
+                    continue;
+                if (!item.product_id || !item.branch_id)
+                    fail('A stock-moving line has no product or branch.');
+                if (item.damaged_lot_id)
+                    member.stock.push({ product: item.product_id, branch: item.branch_id, quantity: delta, batch: null, lot: item.damaged_lot_id, name: item.product_name, costUsd: 0, costKhr: 0, sale: expected.id });
+                else if (item.allocations?.length) {
+                    const capacity = item.allocations.reduce((n, a) => n + (delta > 0 ? a.quantity - a.released_quantity : a.released_quantity), 0);
+                    if (capacity < Math.abs(delta) || item.allocations.some(a => a.released_quantity < 0 || a.released_quantity > a.quantity))
+                        fail('Sale batch allocations cannot cover the transition.');
+                }
+            }
+        members.push(member);
+    }
+    const snapshot: Snapshot = { version: 1, operationId, members };
+    const changedIds = members.filter(m => m.changed).map(m => m.id), unchangedIds = members.filter(m => !m.changed).map(m => m.id);
+    const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, before: m.before.sale_status, after: m.after.sale_status, changed: m.changed, stock_skipped: m.skipped })) };
+    const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
+    for (const m of members)
+        statements.push(...memberStatements(m, 1, user, stamp));
+    statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_STATUS_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: user.name } });
+    statements.push({ sql: 'UPDATE sale_bulk_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } });
+    const historyStatementIndex = statements.length;
+    statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name) SELECT 'global','sale',id,@label,@reversible,@status,json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'changed_count',@changed,'unchanged_count',@unchanged,'target_status',@target),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'changed_count',@changed,'unchanged_count',@unchanged,'target_status',@target),@actor,@name FROM sale_bulk_operations WHERE id=@id`, params: { id: operationId, label: `${changedIds.length} sales → ${request.target_status}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: BULK_STATUS_KIND, actor: user.id, name: user.name, changed: changedIds.length, unchanged: unchangedIds.length, target: request.target_status } });
+    statements.push({ sql: "UPDATE sale_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } });
+    for (const m of members)
+        statements.push({ sql: `INSERT INTO sale_bulk_members(operation_id,sale_id,revision,movement_fingerprint) VALUES(@op,@id,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),${movementFingerprint('@id')})`, params: { op: operationId, id: m.id } });
+    statements.push(auditStatement(user, operationId, 'sale_status_bulk', changedIds.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
+    bounded(statements, snapshot);
+    try {
+        const results = await db.batch(statements);
+        return { ...receipt, actionHistoryId: Number(results[historyStatementIndex].meta.last_row_id) };
+    }
+    catch (error) {
+        const retry = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id });
+        if (retry?.request_json === canonical)
+            return JSON.parse(String(retry.receipt_json));
+        if (/constraint/i.test(String(error)))
+            fail('Sale or stock changed. The entire group was rejected; refresh before retrying.');
+        throw error;
+    }
+}
+export async function replaySaleBulkStatus(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row) {
+    permission(user);
+    if (!Number.isSafeInteger(generation) || Number(generation) < 0)
+        fail('Refresh history before replaying this group.');
+    const db = getDb(env);
+    const op = await db.prepare('SELECT o.*,s.payload_json,s.kind,s.status snapshot_status FROM sale_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.history_id=?').get<Row>([historyId]);
+    if (!op || op.kind !== BULK_STATUS_KIND || op.id !== payload.operation_id || op.snapshot_id !== payload.snapshot_id || op.generation !== generation)
+        fail('This group has changed or its snapshot does not match.');
+    const snapshot = JSON.parse(String(op.payload_json)) as Snapshot;
+    if (snapshot.version !== 1 || snapshot.operationId !== op.id || snapshot.members.length > BULK_STATUS_LIMIT)
+        fail('Unsupported bulk snapshot.');
+    const sign = direction === 'undo' ? -1 : 1, expected = direction === 'undo' ? 'undoable' : 'redoable', next = direction === 'undo' ? 'redoable' : 'undoable', stamp = new Date().toISOString();
+    const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })];
+    for (const m of snapshot.members)
+        statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${movementFingerprint('s.id')})`, { op: op.id, id: m.id }));
+    for (const m of snapshot.members)
+        statements.push(...memberStatements(m, sign, user, stamp));
+    for (const m of snapshot.members)
+        statements.push({ sql: `UPDATE sale_bulk_members SET revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),movement_fingerprint=${movementFingerprint('@id')} WHERE operation_id=@op AND sale_id=@id`, params: { op: op.id, id: m.id } });
+    statements.push({ sql: 'UPDATE sale_bulk_operations SET generation=generation+1 WHERE id=@op', params: { op: op.id } });
+    statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=@stamp WHERE id=@id', params: { id: op.snapshot_id, status: direction === 'undo' ? 'reversed' : 'applied', stamp } });
+    statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: next, stamp, generation: Number(generation) + 1 } });
+    statements.push(auditStatement(user, String(op.id), `action_${direction}`, snapshot.members.filter(m => m.changed).length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
+    bounded(statements, snapshot);
+    try {
+        await db.batch(statements);
+    }
+    catch (error) {
+        if (/constraint/i.test(String(error)))
+            fail('A sale, its stock, or this replay changed. Nothing in the group was applied.');
+        throw error;
+    }
+}
