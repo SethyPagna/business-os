@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
@@ -16,6 +16,9 @@ import {
 } from '../../api/legacySubtotalRepairTransport.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh.ts'
+import { isoToDisplayDate } from '../../utils/dateEntry.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 
 type Translate = (key: string, fallback?: string) => string | undefined
 type AppContextValue = {
@@ -57,13 +60,27 @@ function LegacySubtotalRepair() {
   const [needsNewPreview, setNeedsNewPreview] = useState(false)
   const [acknowledged, setAcknowledged] = useState(false)
   const [typedConfirmation, setTypedConfirmation] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const previewInFlight = useRef(false)
   const applyInFlight = useRef(false)
+  const pendingConfirmationRef = useRef(false)
 
   const sales = useMemo<LegacySubtotalRepairSale[]>(() => preview?.request.manifest.sales || [], [preview])
   const request: LegacySubtotalRepairRequest | null = preview?.request || null
   const confirmed = acknowledged && typedConfirmation === LEGACY_SUBTOTAL_REPAIR_CONFIRMATION
   const completed = applyResult?.success === true
+  const repairTitle = T('legacy_subtotal_title', 'Repair September 2–3 legacy subtotals')
+  pendingConfirmationRef.current = confirmOpen
+
+  useEffect(() => registerDirtyWork({
+    key: 'legacy-subtotal-repair-confirmation',
+    pageId: 'settings',
+    label: repairTitle,
+    isDirty: () => pendingConfirmationRef.current,
+    discard: () => {
+      if (!applyInFlight.current) setConfirmOpen(false)
+    },
+  }), [repairTitle])
 
   if (!permitted) return null
 
@@ -123,6 +140,7 @@ function LegacySubtotalRepair() {
     } finally {
       finishSingleAction(applyInFlight)
       setApplyLoading(false)
+      setConfirmOpen(false)
     }
   }
 
@@ -134,7 +152,7 @@ function LegacySubtotalRepair() {
         </div>
         <div className="min-w-0 flex-1">
           <h2 id="legacy-subtotal-repair-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            {T('legacy_subtotal_title', 'Repair September 2–3 legacy subtotals')}
+            {repairTitle}
           </h2>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
             {T('legacy_subtotal_desc', 'A fixed, backup-first correction for 22 imported paid sales. This is separate from destructive migration finalization and accepts no SQL or files.')}
@@ -204,7 +222,7 @@ function LegacySubtotalRepair() {
                 {sales.map((sale) => (
                   <tr key={sale.id}>
                     <td className="px-2 py-1.5 font-mono text-gray-800 dark:text-gray-200">{sale.id}</td>
-                    <td className="px-2 py-1.5 text-gray-600 dark:text-gray-400">{sale.business_date}</td>
+                    <td className="px-2 py-1.5 text-gray-600 dark:text-gray-400">{isoToDisplayDate(sale.business_date)}</td>
                     <td className="px-2 py-1.5 font-mono text-gray-600 dark:text-gray-400">{fourDecimalUsd(sale.expected_subtotal_usd)}</td>
                     <td className="px-2 py-1.5 font-mono font-medium text-gray-800 dark:text-gray-200">{fourDecimalUsd(sale.target_subtotal_usd)}</td>
                     <td className="px-2 py-1.5 font-mono text-gray-600 dark:text-gray-400">{fourDecimalUsd(sale.item_discount_usd)}</td>
@@ -267,7 +285,7 @@ function LegacySubtotalRepair() {
                 ) : (
                   <button
                     type="button"
-                    onClick={applyRepair}
+                    onClick={() => setConfirmOpen(true)}
                     disabled={!confirmed || applyLoading}
                     className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-40"
                   >
@@ -294,6 +312,31 @@ function LegacySubtotalRepair() {
             <div className="mt-0.5 text-xs">{applyResult?.message || T('legacy_subtotal_apply_success', 'Legacy subtotals repaired.')}</div>
           </div>
         </div>
+      ) : null}
+
+      {confirmOpen && preview && request && !completed ? (
+        <ConfirmDialog
+          t={t}
+          title={repairTitle}
+          message={T('legacy_subtotal_ack', 'I reviewed all 22 rows and understand that the server must create a fresh backup before changing only these subtotals.')}
+          items={[
+            { label: T('legacy_subtotal_summary_sales', 'Sales'), value: preview.summary.sale_count },
+            { label: T('legacy_subtotal_summary_subtotal', 'Target subtotal'), value: fourDecimalUsd(preview.summary.subtotal_usd) },
+            { label: T('legacy_subtotal_summary_discount', 'Item discounts'), value: fourDecimalUsd(preview.summary.item_discount_usd) },
+            { label: T('legacy_subtotal_plan_id', 'Plan ID'), value: preview.request.manifest.plan_id },
+          ]}
+          note={T('legacy_subtotal_server_history', 'The server records the single audit/history action; this panel does not add a duplicate.')}
+          confirmLabel={applyFailure?.uncertain
+            ? T('legacy_subtotal_retry_same', 'Retry same request')
+            : T('legacy_subtotal_apply_button', 'Back up and apply repair')}
+          working={applyLoading}
+          workingLabel={T('legacy_subtotal_apply_working', 'Backing up and applying...')}
+          confirmDisabled={!confirmed || needsNewPreview}
+          onConfirm={applyRepair}
+          onClose={() => {
+            if (!applyLoading) setConfirmOpen(false)
+          }}
+        />
       ) : null}
     </section>
   )
