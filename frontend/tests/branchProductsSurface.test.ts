@@ -97,6 +97,28 @@ test('real loading/error/empty render paths and absent metrics never fake financ
   assert.ok(empty.includes('—'))
   assert.ok(!empty.includes('$0'))
 })
+
+test('nullable server metrics sum real merged members without recalculating business policy', () => {
+  const metrics = rows.map((row, index) => ({ ...row, display_quantity: index ? 7 : 3, stock_value_usd: index ? 28 : 6, stock_value_khr: 0, qty_sold: index ? -1 : 4, revenue_usd: index ? -5 : 20, revenue_khr: index ? -20000 : 80000, cogs_usd: index ? -2 : 8, cogs_khr: 0, profit_usd: index ? -3 : 12 }))
+  const [group] = api.groupInventoryProducts(metrics)
+  const row = group.rows[0]
+  assert.equal(api.mergedInventoryMetric(row, metrics, 'display_quantity'), 10)
+  assert.equal(api.mergedInventoryMetric(row, metrics, 'stock_value_usd'), 34)
+  assert.equal(api.mergedInventoryMetric(row, metrics, 'qty_sold'), 3)
+  assert.equal(api.mergedInventoryMetric(row, metrics, 'revenue_usd'), 15)
+  assert.equal(api.mergedInventoryMetric(row, metrics, 'revenue_khr'), 60000)
+  assert.equal(api.mergedInventoryMetric(row, metrics, 'cogs_usd'), 6)
+  assert.equal(api.mergedInventoryMetric(row, metrics, 'profit_usd'), 9)
+  assert.equal(api.mergedInventoryMetric(row, [metrics[0], { ...metrics[1], revenue_usd: null }], 'revenue_usd'), null)
+  assert.equal(api.mergedInventoryMetric(row, [metrics[0]], 'revenue_usd'), null, 'incomplete merged members are not partial totals')
+  assert.equal(api.mergedInventoryMetric(row, metrics, 'cogs_khr'), 0, 'explicit server zero is retained')
+  const html = render(React.createElement(api.default, { ...props, items: metrics }))
+  for (const label of ['net_sold', 'revenue', 'cogs', 'profit']) assert.ok(html.includes(label))
+  for (const value of ['$34', '$15', '60000KHR', '$6', '$9']) assert.ok(html.includes(value))
+  const missing = render(React.createElement(api.default, { ...props, items: [{ id: 8, name: 'Unknown' }], serverStats: null }))
+  assert.ok(missing.includes('—'))
+  assert.ok(!missing.includes('$0'), 'missing financial metrics are not fabricated zero')
+})
 test('product stats lifecycle uses existing filtered server endpoint and scope tags hide stale results', () => {
   assert.match(inventory, /needsStatsData = .*inventorySection === 'products'/)
   assert.match(inventory, /getInventoryStats\(statsQuery\)/)
