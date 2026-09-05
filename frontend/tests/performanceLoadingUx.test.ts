@@ -1511,11 +1511,12 @@ assert.match(
   /const SALES_USER_OPTIONS_TIMEOUT_MS = 8000/,
   'sales user filter options should use an explicit timeout',
 )
-assert.match(
-  sales,
-  /import \{ getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip \} from '\.\.\/\.\.\/api\/salesTransport\.ts'[\s\S]*import \{ getUsers as fetchUsers \} from '\.\.\/\.\.\/api\/userReadTransport\.ts'/,
-  'sales route-start reads should use focused sales and user transports instead of app-api-methods',
-)
+const salesReadImport = sales.match(/import\s*\{([^}]+)\}\s*from ['"]\.\.\/\.\.\/api\/salesTransport\.ts['"]/)?.[1]
+const salesReadBindings = (salesReadImport || '').split(',').map(binding => binding.trim())
+for (const binding of ['getSales as fetchSales', 'getSalesStats as fetchSalesStats', 'getSalesStatsStrip']) {
+  assert.ok(salesReadBindings.includes(binding), `sales route-start ${binding} must come from the focused sales transport; additional bulk imports must not hide a missing read`)
+}
+assert.match(sales, /import\s*\{\s*getUsers as fetchUsers\s*\}\s*from ['"]\.\.\/\.\.\/api\/userReadTransport\.ts['"]/, 'sales user filter reads must keep the focused user transport')
 assert.match(
   sales,
   /withLoaderTimeout\(\(\) => fetchSales\(params\), 'Sales', 20000\)/,
