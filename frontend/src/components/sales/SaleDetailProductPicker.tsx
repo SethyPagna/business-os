@@ -62,7 +62,7 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
   const [batchId, setBatchId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [loadedProductId, setLoadedProductId] = useState<number | null>(null)
+  const [loadedSelectionKey, setLoadedSelectionKey] = useState('')
   const [quantityText, setQuantityText] = useState('1')
   const [priceText, setPriceText] = useState(String(number(selected?.selling_price_usd)))
 
@@ -88,18 +88,19 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
 
   useEffect(() => {
     const productId = number(selected?.id)
+    const selectionKey = productId && branchId != null ? `${productId}:${String(branchId)}` : ''
     setBatchId(null)
     setBatches([])
     setFailed(false)
-    setLoadedProductId(null)
-    if (!productId || branchId == null) return
+    setLoadedSelectionKey('')
+    if (!selectionKey || branchId == null) { setLoading(false); return }
     let cancelled = false
     setLoading(true)
     void getProductBatches(productId, branchId, true)
       .then((payload) => {
         if (cancelled) return
         setBatches(Array.isArray(payload?.batches) ? payload.batches : [])
-        setLoadedProductId(productId)
+        setLoadedSelectionKey(selectionKey)
       })
       .catch(() => { if (!cancelled) setFailed(true) })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -110,9 +111,14 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
   const rawQuantity = Number(quantityText)
   const parsedQuantity = Math.max(1, Math.floor(rawQuantity || 1))
   const parsedPrice = Number(priceText)
-  const quantityValid = Number.isFinite(rawQuantity) && rawQuantity >= 1
+  const quantityValid = Number.isInteger(rawQuantity) && rawQuantity >= 1
   const priceValid = priceText.trim() !== '' && Number.isFinite(parsedPrice) && parsedPrice >= 0
   const productId = number(selected?.id)
+  const selectionKey = productId && branchId != null ? `${productId}:${String(branchId)}` : ''
+  // This key closes the render-before-effect window on BOTH dimensions. Old
+  // batches can still be present for one render after an option/branch switch,
+  // but they can neither render as selectable nor enable Continue.
+  const batchesReady = !!selectionKey && loadedSelectionKey === selectionKey && !loading && !failed
   const selectedBatchId = batch?.id ?? null
   const stagedQuantity = stagedLines
     .filter((row) => row.productId === productId && row.batchId === selectedBatchId)
@@ -122,14 +128,13 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
     ? number(batch.quantity)
     : batches.length > 0 ? trackedAvailableQuantity : number(selected?.stock_quantity)
   const availableAfterStaged = Math.max(0, availableQuantity - stagedQuantity)
-  const availabilityKnown = branchId != null
-    && loadedProductId === productId
+  const availabilityKnown = batchesReady
     && (batches.length === 0 || batch != null || trackedAvailableQuantity <= 0)
   const stockError = stockMoves && availabilityKnown && availableAfterStaged <= 0 ? 'no-stock'
     : stockMoves && availabilityKnown && parsedQuantity > availableAfterStaged ? 'not-enough-stock'
       : null
   const choose = () => {
-    if (!productId || !quantityValid || !priceValid || stockError || (batches.length > 0 && !batch)) return
+    if (!productId || !batchesReady || !quantityValid || !priceValid || stockError || (batches.length > 0 && !batch)) return
     onChoose({
       productId,
       name: String(selected?.__displayName || selected?.name || `#${productId}`),
@@ -203,12 +208,12 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
 
       <div>
         <div className="text-xs font-semibold text-gray-500">{t('batch') || 'Stock batch'}</div>
-        {branchId == null ? <p className="mt-1 text-xs text-amber-700">{t('branch_required') || 'This sale has no branch, so an exact stock batch cannot be loaded.'}</p> : loading ? <p className="mt-1 text-xs text-gray-400">{t('loading') || 'Loading'}</p> : failed ? <p className="mt-1 text-xs text-red-600">{t('load_failed') || 'Could not load stock batches.'}</p> : batches.length ? (
+        {branchId == null ? <p className="mt-1 text-xs text-amber-700">{t('branch_required') || 'This sale has no branch, so an exact stock batch cannot be loaded.'}</p> : failed ? <p className="mt-1 text-xs text-red-600">{t('load_failed') || 'Could not load stock batches.'}</p> : !batchesReady ? <p className="mt-1 text-xs text-gray-400">{t('loading') || 'Loading'}</p> : batches.length ? (
           <div className="mt-1.5 space-y-2">{batches.map((row) => <button key={row.id} type="button" aria-pressed={row.id === batchId} onClick={() => setBatchId(row.id)} className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm ${row.id === batchId ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800'}`}><span><span className="block font-mono font-medium">{batchDisplayLabel(row, t('batch') || 'Batch')}</span><span className="block text-[11px] opacity-80">{t('received_date') || 'Received'}: {row.received_at ? String(row.received_at).slice(0, 10) : '—'}{row.expiry_date ? ` · ${t('expiry_date') || 'Expiry'}: ${row.expiry_date}` : ''}</span></span><span className="shrink-0 tabular-nums">{row.quantity}</span></button>)}</div>
         ) : <p className="mt-1 text-xs text-gray-500">{t('no_batches') || 'No tracked stock batches. This item will use normal product stock.'}</p>}
       </div>
-      {stockError ? <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{`${t('error') || 'Error'}: ${stockError === 'no-stock' ? 'No Stock' : (t('not_enough_stock') || 'Not Enough Stock')}`}</p> : null}
-      <div className="flex gap-2"><button type="button" className="btn-secondary flex-1 text-sm" onClick={onCancel}>{t('cancel') || 'Cancel'}</button><button type="button" className="btn-primary flex-1 text-sm" disabled={loading || failed || !!stockError || !quantityValid || !priceValid || (batches.length > 0 && !batch)} onClick={choose}>{batches.length > 0 && !batch ? (t('select_batch_required') || 'Select a stock batch') : (t('continue') || 'Continue')}</button></div>
+      {stockError ? <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{`${t('error') || 'Error'}: ${stockError === 'no-stock' ? t('no_stock_in_branch') : t('not_enough_stock')}`}</p> : null}
+      <div className="flex gap-2"><button type="button" className="btn-secondary flex-1 text-sm" onClick={onCancel}>{t('cancel') || 'Cancel'}</button><button type="button" className="btn-primary flex-1 text-sm" disabled={!batchesReady || loading || failed || !!stockError || !quantityValid || !priceValid || (batches.length > 0 && !batch)} onClick={choose}>{batches.length > 0 && !batch ? (t('select_batch_required') || 'Select a stock batch') : (t('continue') || 'Continue')}</button></div>
       </div>
     </Modal>
   )

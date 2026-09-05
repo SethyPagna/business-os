@@ -358,6 +358,10 @@ export default function SaleDetailModal({
     setAddSearching(true)
     const timer = window.setTimeout(async () => {
       try {
+        // The endpoint paginates product FAMILIES, not raw child rows, and a
+        // text search expands every matched family/name sibling before this
+        // payload returns (routes/products.ts). Eight therefore bounds the
+        // visible groups without truncating the options inside any one group.
         const payload = await searchProducts({ query: text, pageSize: 8, branchId: sale?.branch_id ?? undefined }) as { items?: AddProductCandidate[] }
         if (seq !== addSearchSeqRef.current) return
         setAddCandidates(Array.isArray(payload?.items) ? payload.items : [])
@@ -375,6 +379,8 @@ export default function SaleDetailModal({
   const stageAddLine = (choice: SaleDetailProductChoice): void => {
     const productId = Number(choice.productId)
     if (!Number.isFinite(productId) || productId <= 0) return
+    const quantity = Math.max(1, Math.floor(Number(choice.quantity) || 1))
+    const price = toNumber(choice.unitPriceUsd)
     setAddQuery('')
     setAddCandidates([])
     setAddLines((current) => {
@@ -384,14 +390,27 @@ export default function SaleDetailModal({
       const existing = current.findIndex((line) => line.productId === productId && line.batchId === choice.batchId)
       if (existing >= 0) {
         const next = [...current]
-        next[existing] = { ...next[existing], quantity: next[existing].quantity + Math.max(1, Math.floor(Number(choice.quantity) || 1)) }
+        // A reopened picker is an explicit edit. The most recently confirmed
+        // unit price wins instead of silently retaining the earlier staged
+        // price while still combining the quantities for this product+batch.
+        next[existing] = {
+          ...next[existing],
+          quantity: next[existing].quantity + quantity,
+          unitPriceUsd: price,
+          priceText: price > 0 ? String(price) : '0',
+          stockQuantity: choice.batchQuantity ?? toNumber(choice.stockQuantity),
+          barcode: choice.barcode,
+          batchLabel: choice.batchLabel,
+          batchReceivedAt: choice.batchReceivedAt,
+          batchExpiryDate: choice.batchExpiryDate,
+          batchQuantity: choice.batchQuantity,
+        }
         return next
       }
-      const price = toNumber(choice.unitPriceUsd)
       return [...current, {
         productId,
         name: String(choice.name || `#${productId}`),
-        quantity: Math.max(1, Math.floor(Number(choice.quantity) || 1)),
+        quantity,
         unitPriceUsd: price,
         priceText: price > 0 ? String(price) : '0',
         stockQuantity: choice.batchQuantity ?? toNumber(choice.stockQuantity),
@@ -1384,7 +1403,7 @@ export default function SaleDetailModal({
                         </div>
                         {addStockMoves && (line.stockQuantity <= 0 || line.quantity > line.stockQuantity) ? (
                           <p role="alert" className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">
-                            {`${t('error') || 'Error'}: ${line.stockQuantity <= 0 ? 'No Stock' : (t('not_enough_stock') || 'Not Enough Stock')}`}
+                            {`${t('error') || 'Error'}: ${line.stockQuantity <= 0 ? t('no_stock_in_branch') : t('not_enough_stock')}`}
                           </p>
                         ) : null}
                       </li>
