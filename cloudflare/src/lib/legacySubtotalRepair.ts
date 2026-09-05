@@ -252,6 +252,56 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+// One statement reads a consistent snapshot of the fixed cohort. No caller
+// supplies identifiers or SQL, and every text column is bounded before transfer.
+// Overlong values retain one extra character so canonical validation rejects
+// them rather than silently signing a truncated snapshot.
+export const LEGACY_SUBTOTAL_PREVIEW_SQL = `SELECT
+  s.id, substr(s.receipt_number,1,161) AS receipt_number,
+  s.created_at, s.updated_at, date(datetime(s.created_at,'+7 hours')) AS business_date,
+  substr(s.notes,1,2001) AS notes, COALESCE(s.sale_status,'completed') AS sale_status,
+  ${MONEY_FIELDS.filter((field) => !field.startsWith('item_')).map((field) => {
+    const column = field === 'target_subtotal_usd' ? 'total_usd' : field.replace(/^expected_/, '')
+    return `printf('%.4f',COALESCE(s.${column},0)) AS ${field}`
+  }).join(',\n  ')},
+  COALESCE(s.stock_skipped,0) AS stock_skipped,
+  substr(s.payment_method,1,201) AS payment_method,
+  substr(s.payment_details,1,20001) AS payment_details,
+  (SELECT revision FROM sale_write_revisions v WHERE v.sale_id=s.id) AS expected_revision,
+  (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id) AS item_count,
+  ${(['usd', 'khr'] as const).flatMap((currency) => [
+    `printf('%.4f',COALESCE((SELECT SUM(COALESCE(si.total_${currency},0)) FROM sale_items si WHERE si.sale_id=s.id),0)) AS item_total_${currency}`,
+    `printf('%.4f',COALESCE((SELECT SUM(COALESCE(si.product_discount_${currency},0)+COALESCE(si.manual_discount_${currency},0)) FROM sale_items si WHERE si.sale_id=s.id),0)) AS item_discount_${currency}`,
+  ]).join(',\n  ')}
+  FROM sales s WHERE s.id IN (SELECT value FROM json_each(@ids)) ORDER BY s.id`
+
+export async function previewLegacySubtotalRepair(db: Pick<D1Compat, 'prepare'>, actor: { id?: unknown; name?: unknown }) {
+  const maintenance = await db.prepare("SELECT 1 AS active FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").get()
+  if (maintenance) throw new LegacySubtotalRepairConflictError()
+  const sales = await db.prepare(LEGACY_SUBTOTAL_PREVIEW_SQL).all({ ids: JSON.stringify(EXPECTED_IDS) })
+  const manifest = canonicalizeManifest({
+    schema_version: SCHEMA_VERSION,
+    plan_id: `sep23-subtotal-${crypto.randomUUID()}`,
+    generated_at_utc: new Date().toISOString(),
+    operator_name: actor.name,
+    source_note: 'Owner-authorized Sep 2-3 2026 imported-sale subtotal correction from canonical net item totals. Stock, payments, discounts and COGS remain unchanged.',
+    sales,
+  })
+  const request = {
+    step: LEGACY_SUBTOTAL_REPAIR_STEP,
+    apply: true as const,
+    confirmation: LEGACY_SUBTOTAL_REPAIR_CONFIRMATION,
+    manifest_sha256: await sha256(JSON.stringify(manifest)),
+    manifest,
+  }
+  // Share all application validation; preview never backs up or executes a batch.
+  await prepareLegacySubtotalRepair(request, actor)
+  return {
+    success: true as const, state: 'ready' as const, request,
+    summary: { sale_count: EXPECTED_IDS.length, subtotal_usd: EXPECTED_TOTAL_USD, item_discount_usd: EXPECTED_ITEM_DISCOUNT_USD },
+  }
+}
+
 const EXPECTED_CTE = `WITH expected AS (
   SELECT
     CAST(json_extract(value,'$.id') AS INTEGER) AS id,
