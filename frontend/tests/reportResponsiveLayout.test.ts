@@ -82,6 +82,15 @@ assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\
 // the Line/Amount columns stretch across the whole (34rem, or uncapped on
 // tablet) statement box and land far apart.
 assert.match(overview, /<DenseTable fit>/, 'the Overview statement table hugs its columns')
+// A hugged table is only as narrow as its widest cell. The statement's data
+// note ("no courier cost recorded on 11,834 deliveries") used to sit inline in
+// the label span, so under `fit` (min-w-max) it became the Line column's
+// max-content and pushed the Amount column out of the 34rem statement box
+// into the table's own horizontal scroller -- every value hidden (seen live
+// on All time at 1280). The note is its own capped, wrapping block under the
+// label instead: a block's max-width also caps its max-content contribution.
+assert.doesNotMatch(overview, /<span className="[^"]*">\(\{note\}\)<\/span>/, 'the statement note is not an inline span inside the label cell')
+assert.match(overview, /<div className="max-w-\[\d+rem\] whitespace-normal[^"]*">\(\{note\}\)<\/div>/, 'the statement note is a capped, wrapping block under its label')
 
 // The receipt style's "segment" (one block = one till-receipt-like ledger)
 // renders every label/value pair through ONE grid per block instead of a
