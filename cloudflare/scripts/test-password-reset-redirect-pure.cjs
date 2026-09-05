@@ -26,10 +26,11 @@ function loadModule(relPath, requireShim) {
   return module.exports
 }
 
-// verification.ts pulls in db + env types; only resolvePasswordResetBase is
+// verification.ts pulls in db + timestamp formatting; only resolvePasswordResetBase is
 // exercised here, so stub the heavy imports out.
 const verification = loadModule('lib/verification.ts', (id) => {
   if (id === './db') return { getDb: () => { throw new Error('db not needed here') } }
+  if (id === './rateLimit') return { sqliteUtcTimestamp: () => { throw new Error('timestamp not needed here') } }
   return require(id)
 })
 const { resolvePasswordResetBase } = verification
