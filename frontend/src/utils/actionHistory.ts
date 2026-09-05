@@ -375,7 +375,8 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       const item = serverItems.find(item => String(item.id) === String(serverId))
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
       const applier = String(payload?.applier || '')
-      const replayRequest = { require_applied: true, ...(applier.endsWith('.bulk') && payload?.generation != null ? { expected_generation: payload.generation } : {}) }
+      const generationGuarded = applier.endsWith('.bulk') || applier === 'sale.settlement'
+      const replayRequest = { require_applied: true, ...(generationGuarded && payload?.generation != null ? { expected_generation: payload.generation } : {}) }
       const response = direction === 'undo'
         ? await api.undoActionHistory(serverId, replayRequest)
         : await api.redoActionHistory(serverId, replayRequest)
