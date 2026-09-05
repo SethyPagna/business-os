@@ -2,14 +2,14 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getActionTier, getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
+import { getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
 import { isServerReplayable, resolveUndoApplier, applierPermissionTier } from '../lib/undoAppliers'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
 import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
-import { STOCK_SESSION_KIND, notifyStockSession } from '../lib/stockSession'
+import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
 const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
@@ -99,10 +99,10 @@ function canOperateHistoryRow(user: SessionUser, row: ActionHistoryRow | null | 
 function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boolean {
   for (const raw of payloads) {
     const applier = resolveUndoApplier(raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null)
-    if (applier && applierPermissionTier(user, applier) !== 'full') return false
-    if (applier?.name === STOCK_SESSION_KIND && (raw as Record<string, unknown>).snapshot_version !== 2) return false
-    if (applier?.name === STOCK_SESSION_KIND && Number((raw as Record<string, unknown>).requires_product_add) === 1
-      && getActionTier(user, 'products', 'add') !== 'full') return false
+    if (applier?.name === STOCK_SESSION_KIND) {
+      const payload = raw as Record<string, unknown>
+      if (payload.snapshot_version !== 2 || !canReplayStockSessionPayload(user, payload)) return false
+    } else if (applier && applierPermissionTier(user, applier) !== 'full') return false
   }
   return true
 }
@@ -313,7 +313,9 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // rows written before this gate existed, or by a user since demoted,
     // must not replay on the strength of the row alone). Runs before any
     // status flip so a refusal changes nothing.
-    if (applier && applierPermissionTier(user, applier) !== 'full') {
+    if (applier && (applier.name === STOCK_SESSION_KIND
+      ? !canReplayStockSessionPayload(user, payload)
+      : applierPermissionTier(user, applier) !== 'full')) {
       return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
     }
     // Refuse BEFORE any status flip: if the caller cannot replay the payload
