@@ -560,6 +560,44 @@ export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMon
   }
 }
 
+/**
+ * Atomic counterpart used when the sale_item ids are created inside the same
+ * D1 batch. The route records each inserted id in sale_mutation_members with
+ * its bounded line ordinal, then these INSERT..SELECT statements attach every
+ * required lot row before the batch can commit.
+ */
+export function buildOperationAllocationStatements(
+  lines: PlannedSaleLine[],
+  operationId: string,
+  releasedAt: string,
+): StockStatement[] {
+  const statements: StockStatement[] = []
+  for (const [lineIndex, line] of lines.entries()) {
+    if (!line.branchId || !line.takes.length) continue
+    const deducted = line.heldUnits > 0
+    for (const take of line.takes) {
+      statements.push({
+        sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date,released_quantity,released_at)
+              SELECT entity_id,@batch_id,@branch_id,@quantity,@lot_code,@expiry_date,@released_quantity,@released_at
+              FROM sale_mutation_members
+              WHERE operation_id=@operation_id AND entity_kind='sale_item' AND ordinal=@ordinal`,
+        params: {
+          operation_id: operationId,
+          ordinal: lineIndex,
+          batch_id: take.batchId,
+          branch_id: line.branchId,
+          quantity: take.quantity,
+          lot_code: take.lotCode ?? null,
+          expiry_date: take.expiryDate ?? null,
+          released_quantity: deducted ? 0 : take.quantity,
+          released_at: deducted ? null : releasedAt,
+        },
+      })
+    }
+  }
+  return statements
+}
+
 export type SaleLineKhrSnapshot = {
   id: number
   applied_price_khr: number | null

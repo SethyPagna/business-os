@@ -555,8 +555,11 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   assert.match(route, /resolveExplicitSaleLineBatches\(candidateLines, lotsByKey\)/,
     'explicit batch identity, availability and metadata are resolved before the write plan')
   assert.match(route, /assertUpdatedAtMatch\('sale', sale, getExpectedUpdatedAt\(body\)\)/, 'optimistic concurrency, same as the other sale writes')
-  assert.match(route, /recordSaleAddItemsUndoSnapshot/, 'a real undo payload is recorded')
+  assert.match(route, /INSERT INTO undo_snapshots\(kind,status,payload_json/, 'a real undo payload is recorded inside the mutation batch')
+  assert.match(route, /INSERT INTO action_history\(scope,entity,entity_id/, 'the server history pointer is created in that same batch')
+  assert.match(route, /buildOperationAllocationStatements\(plan\.lines, addItemsOperationId/, 'required lot allocations are created before the core batch can commit')
   assert.match(route, /saleMoneyUpdateStatement\(saleId, moneyAfter\)/, 'the money update rides the SAME atomic batch as the lines')
+  assert.match(route, /mutation_kind='add_items'/, 'exact retries are served by the durable actor-scoped mutation receipt')
   // The peer-owned status handler must be untouched by this lane.
   assert.match(route, /app\.patch\('\/:id\/status'/, 'the status route is still there')
 

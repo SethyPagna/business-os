@@ -109,6 +109,8 @@ function request(key = 'settle-request-1') {
 
 async function run() {
   const f = fixture(); seed(f)
+  assert.equal((await f.call('/1/status', { ...request('unsupported-aggregate'), amount_paid_usd: 99 })).body.code, 'unsupported_payment_aggregate')
+  console.log('PASS client aggregate payment fields are rejected in favor of server-derived tender totals')
   const stockBefore = f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
   const applied = await f.call('/1/status', request())
   assert.equal(applied.status, 200, JSON.stringify(applied))
@@ -200,6 +202,46 @@ async function run() {
   assert.equal(amendmentRace.sql.prepare('SELECT delivery_fee_usd FROM sales WHERE id=1').get().delivery_fee_usd, 1)
   assert.equal(amendmentRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='amendment'").get().n, 0)
   console.log('PASS amendment settings race rolls back fee, rate rebase, ledger, and receipt together')
+
+  const addition = fixture(); seed(addition)
+  addition.sql.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_number,batch_key,is_active,received_at,lot_code)
+    VALUES(501,1,1,'lot-501',1,'2026-01-01','LOT-501')`).run()
+  addition.sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,8)').run()
+  const additionRequest = {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 2 }],
+    expected_updated_at: 'sale-v1',
+    expected_exchange_rate: 4200,
+    client_request_id: 'add-items-request-1',
+  }
+  const additionApplied = await addition.call('/1/items', additionRequest, 'POST')
+  assert.equal(additionApplied.status, 200, JSON.stringify(additionApplied))
+  assert.equal(additionApplied.body.exchangeRate, 4200)
+  assert.ok(additionApplied.body.actionHistoryId > 0)
+  assert.equal(additionApplied.body.undoActionId, additionApplied.body.actionHistoryId)
+  const addedSale = addition.sql.prepare('SELECT * FROM sales WHERE id=1').get()
+  assert.deepEqual([addedSale.exchange_rate,addedSale.subtotal_usd,addedSale.total_usd,addedSale.total_khr],[4200,7,7,29400])
+  assert.deepEqual(addition.sql.prepare('SELECT total_khr FROM sale_items WHERE sale_id=1 ORDER BY id').all().map((r) => r.total_khr), [21000,8400])
+  assert.equal(addition.sql.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 1)
+  assert.equal(addition.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_members WHERE entity_kind='sale_item'").get().n, 1)
+  assert.equal(addition.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items' AND history_id IS NOT NULL").get().n, 1)
+  const storedSnapshot = JSON.parse(addition.sql.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='sale.add_items'").get().payload_json)
+  assert.ok(storedSnapshot.lines[0].saleItemId > 0)
+  assert.ok(storedSnapshot.saleStateRevision > 0)
+  assert.equal(storedSnapshot.moneyBefore.exchange_rate, 4100)
+  assert.equal(storedSnapshot.moneyAfter.exchange_rate, 4200)
+  addition.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
+  assert.deepEqual(await addition.call('/1/items', additionRequest, 'POST'), additionApplied)
+  assert.equal((await addition.call('/1/items', { ...additionRequest, items: [{ product_id: 1, quantity: 2 }] }, 'POST')).status, 409)
+  console.log('PASS add-items atomically stores dynamic line/allocation/history ids, freezes latest rate, and retries exactly')
+
+  const additionRace = fixture(); seed(additionRace)
+  additionRace.barrier(() => additionRace.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run())
+  const additionConflict = await additionRace.call('/1/items', { ...additionRequest, client_request_id: 'add-items-race-1' }, 'POST')
+  assert.equal(additionConflict.status, 409, JSON.stringify(additionConflict))
+  assert.equal(additionRace.sql.prepare('SELECT COUNT(*) n FROM sale_items WHERE sale_id=1').get().n, 1)
+  assert.equal(additionRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items'").get().n, 0)
+  assert.equal(additionRace.sql.prepare("SELECT COUNT(*) n FROM action_history WHERE entity='sale'").get().n, 0)
+  console.log('PASS add-items settings race rejects core rows, history, allocations, and receipt together')
 }
 
 run().catch((error) => { console.error(error); process.exitCode = 1 })
