@@ -314,6 +314,9 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   ]
 
   const language = settings?.language || 'en'
+  const mobileTitle = currentSection
+    ? sectionLabel(currentSection)
+    : getNavLabel(NAV_CONFIG_ITEMS.find((item) => item.id === page) || { id: page, key: page, permission: null }, t, language)
   const brandLogo = settings?.customer_portal_logo_image || ''
   const brandName = settings?.business_name || 'Business OS'
   const sidebarBg = settings?.ui_sidebar_color || ''
@@ -508,15 +511,15 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           padding-top is matched to this same total height. */}
       <header
         data-bos-mobile-header={inline ? 'inline' : 'sections'}
-        className={`fixed left-0 right-0 z-40 flex items-center justify-between border-b border-gray-200 bg-white pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] transition-[transform,top] duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${appUpdateVisible ? (inline ? 'top-[calc(3rem+env(safe-area-inset-top))] h-28 pt-0' : 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0') : (inline ? 'top-0 h-[calc(7rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]')} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'} ${inline ? 'flex-wrap content-center gap-y-1' : ''}`}
+        className={`fixed left-0 right-0 z-40 flex items-center justify-between border-b border-gray-200 bg-white transition-[transform,top] duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${inline ? 'pl-[calc(0.25rem+env(safe-area-inset-left))] pr-[calc(0.25rem+env(safe-area-inset-right))]' : 'pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))]'} ${appUpdateVisible ? 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]'} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
       >
         {inline ? (
-          <div className="flex min-h-11 w-full min-w-0 items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             <button type="button" onClick={openSectionMenu} aria-label={t('back') || 'Back'} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800">
               <ChevronLeft className="h-5 w-5" />
             </button>
-            <div className="min-w-0 flex-1 break-words text-sm font-semibold leading-snug">
-              {currentSection ? sectionLabel(currentSection) : (getNavLabel(NAV_CONFIG_ITEMS.find((item) => item.id === page) || { id: page, key: page, permission: null }, t, language))}
+            <div className="min-w-0 flex-1 truncate text-sm font-semibold" title={mobileTitle}>
+              {mobileTitle}
             </div>
           </div>
         ) : (
@@ -532,12 +535,14 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           </div>
         </div>
         )}
-        <div className="mx-2 min-w-0 flex-1 [&_button]:min-h-11 [&_button]:min-w-11">
-          <MinimizedWorkTray variant="mobile" />
-        </div>
+        {inline ? null : (
+          <div className="mx-2 min-w-0 flex-1 [&_button]:min-h-11 [&_button]:min-w-11">
+            <MinimizedWorkTray variant="mobile" />
+          </div>
+        )}
         <div className="flex shrink-0 items-center gap-1 [&_button]:min-h-11 [&_button]:min-w-11">
           {notificationSlot}
-          {showQuickPreferences ? (
+          {showQuickPreferences && !inline ? (
             <Suspense fallback={<QuickPreferenceTogglesFallback />}>
               <QuickPreferenceToggles />
             </Suspense>
@@ -571,6 +576,18 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                       <div className="truncate text-xs text-gray-400">{user?.role_name || t('no_role') || 'No role'}</div>
                     </div>
                   </div>
+                  {inline ? (
+                    <div className="mb-1 border-b border-gray-100 px-1 pb-1 dark:border-gray-700">
+                      <div className="max-w-full overflow-x-auto [&_button]:min-h-11 [&_button]:min-w-11">
+                        <MinimizedWorkTray variant="mobile" />
+                      </div>
+                      {showQuickPreferences ? (
+                        <Suspense fallback={<QuickPreferenceTogglesFallback />}>
+                          <QuickPreferenceToggles className="justify-center py-1 [&_button]:h-11 [&_button]:w-11" />
+                        </Suspense>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {accountActions.map(renderAccountAction)}
                 </div>
               </>
@@ -579,6 +596,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
         </div>
       </header>
 
+      {!inline ? (
       <nav className="safe-area-inset-bottom fixed bottom-0 left-0 right-0 z-40 flex h-14 items-stretch border-t border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-900 md:hidden">
         {pinnedItems.map((item) => {
           const Icon = item.icon
@@ -614,6 +632,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           <span className="block max-w-[68px] truncate whitespace-nowrap text-center text-[9.5px] font-medium leading-3">{t('more') || 'More'}</span>
         </button>
       </nav>
+      ) : null}
 
       {moreOpen ? (
         <>
@@ -623,7 +642,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               instead of a flat bottom-16, so this drawer doesn't slide in
               underneath -- and get hidden behind -- the taller nav bar that
               env(safe-area-inset-bottom) produces on notched iPhones. */}
-          <div className="fixed bottom-[calc(3.55rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 md:hidden">
+          <div className={`fixed left-0 right-0 z-40 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 md:hidden ${inline ? 'bottom-0 pb-[env(safe-area-inset-bottom)]' : 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'}`}>
             <div className="sticky top-0 bg-white px-3 pb-1 pt-3 dark:bg-gray-900">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" />
             </div>
