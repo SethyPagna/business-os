@@ -8,6 +8,8 @@ import AppSelect from './AppSelect'
 import DateEntryInput from './DateEntryInput.tsx'
 import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './statsStripPresets.ts'
 
+type PickerPresetKey = StatsPresetKey | '30d'
+
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
 // trigger pill, and a panel laid out as two ENDPOINT BOXES
 // (Start | → | End), each holding a large editable DD/MM/YYYY date with its
@@ -130,6 +132,19 @@ function normalizeTime(raw: string): string | null {
 
 function todayIso(): string {
   return statsPresetRange('today').startDate
+}
+
+function pickerPresetRange(preset: PickerPresetKey, today: string): DateTimeRange {
+  if (preset !== '30d') return statsPresetRange(preset)
+  const [year, month, day] = today.split('-').map(Number)
+  const start = new Date(Date.UTC(year, month - 1, day))
+  start.setUTCDate(start.getUTCDate() - 29)
+  return {
+    startDate: isoOf(start.getUTCFullYear(), start.getUTCMonth() + 1, start.getUTCDate()),
+    endDate: today,
+    startTime: '00:00',
+    endTime: '23:59',
+  }
 }
 
 function lastDayOfMonth(year: number, month1: number): number {
@@ -292,21 +307,23 @@ export default function DateTimeRangePicker({
   const isEdge = (iso: string) => iso === value.startDate || iso === value.endDate
 
   const hasSelection = isDateTimeRangeActive(value) || Boolean(value.startTime || value.endTime)
-  const activePreset = activeStatsPreset(value)
+  const thirtyDayRange = pickerPresetRange('30d', today)
+  const activePreset: PickerPresetKey | null = value.startDate === thirtyDayRange.startDate && value.endDate === thirtyDayRange.endDate
+    ? '30d'
+    : activeStatsPreset(value)
   const quickRangeLabel = (key: string, fallback: string) => {
     const label = t(key)
     return label && label !== key ? label : fallback
   }
-  const quickRanges: Array<{ id: StatsPresetKey; label: string }> = [
+  const quickRanges: Array<{ id: PickerPresetKey; label: string }> = [
     { id: 'all', label: quickRangeLabel('all_time', 'All time') },
     { id: 'today', label: quickRangeLabel('today', 'Today') },
     { id: '7d', label: quickRangeLabel('last_7_days', 'Last 7 days') },
-    { id: 'week', label: quickRangeLabel('this_week', 'This week') },
+    { id: '30d', label: quickRangeLabel('last_30_days', 'Last 30 days') },
     { id: 'month', label: quickRangeLabel('this_month', 'This month') },
-    { id: 'year', label: quickRangeLabel('this_year', 'This year') },
   ]
-  const applyQuickRange = (preset: StatsPresetKey) => {
-    const next = statsPresetRange(preset)
+  const applyQuickRange = (preset: PickerPresetKey) => {
+    const next = pickerPresetRange(preset, today)
     onChange(showTime ? next : { ...next, startTime: '', endTime: '' })
     const anchor = next.startDate || today
     setViewYear(Number(anchor.slice(0, 4)))
@@ -433,6 +450,26 @@ export default function DateTimeRangePicker({
             </button>
           </div>
 
+          {/* Quick ranges lead the panel so the most common choices are
+              available before the manual Start / End fields. */}
+          <div className="mb-2 border-b border-slate-100 pb-2 dark:border-slate-700/60">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{quickRangeLabel('quick_range', 'Quick range')}</div>
+            <div className="flex flex-wrap gap-1">
+              {quickRanges.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => applyQuickRange(preset.id)}
+                  className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
+                    ? 'border-blue-500 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500 dark:text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-200'}`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Start | → | End endpoint boxes (see renderEndpointBox above). */}
           <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
             {renderEndpointBox('start')}
@@ -545,26 +582,6 @@ export default function DateTimeRangePicker({
             </div>
           </div>
 
-          {/* Quick ranges live inside the opened date/time control—not as a
-              second toolbar outside it. They sit below the calendar so manual
-              endpoint selection remains the primary interaction. */}
-          <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-700/60">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{quickRangeLabel('quick_range', 'Quick range')}</div>
-            <div className="flex flex-nowrap gap-1 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
-              {quickRanges.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => applyQuickRange(preset.id)}
-                  className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
-                    ? 'border-blue-500 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500 dark:text-white'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-200'}`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       ) : null}
     </div>

@@ -168,6 +168,22 @@ runTest('the range picker still scopes list and stats through the same onChange'
   assert.ok(!source.includes('function parseManualDate'), 'the old local parser must be gone, not left as a second source of truth')
 })
 
+runTest('the range picker exposes the exact ordered presets above the date fields', () => {
+  const source = read('components/shared/DateTimeRangePicker.tsx')
+  const quickRanges = /const quickRanges:[\s\S]*?= \[([\s\S]*?)\n  \]/.exec(source)?.[1] || ''
+  const ids = [...quickRanges.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1])
+  assert.deepEqual(ids, ['all', 'today', '7d', '30d', 'month'], 'picker presets must remain exact and ordered')
+  for (const label of ['All time', 'Today', 'Last 7 days', 'Last 30 days', 'This month']) {
+    assert.ok(quickRanges.includes(`'${label}'`), `picker must render the ${label} fallback label`)
+  }
+
+  const renderedPresets = source.indexOf('{quickRanges.map((preset) => (')
+  const renderedStart = source.indexOf("{renderEndpointBox('start')}")
+  const renderedEnd = source.indexOf("{renderEndpointBox('end')}")
+  assert.ok(renderedPresets >= 0 && renderedPresets < renderedStart, 'presets must render above the Start field')
+  assert.ok(renderedPresets < renderedEnd, 'presets must render above the End field')
+})
+
 runTest('the normalizer and the field are both reachable from one place', () => {
   const helper = read('utils/dateEntry.ts')
   for (const exported of ['normalizeDateEntry', 'applyDateEntryMask', 'isoToDisplayDate']) {
