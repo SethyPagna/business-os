@@ -42,6 +42,8 @@ const lang = loadReal('lib/telegramLang.ts')
 // so the message and the stored total_usd cannot disagree about it. Loaded
 // REAL -- stubbing that rule here would test the stub, not the rule.
 const saleTotals = loadReal('lib/saleTotals.ts')
+const financialPrecision = loadReal('lib/financialPrecision.ts')
+const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 
 const KHMER = /[ក-៿]/
@@ -191,6 +193,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
   './saleTotals': saleTotals,
+  './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': salesAnalytics,
 })
 
@@ -360,6 +363,7 @@ const wired = loadReal('lib/telegram.ts', {
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
   './saleTotals': saleTotals,
+  './nativeSaleChange': nativeSaleChange,
   // The real kernel over the same stub db, so `/shift` goes down its actual
   // query path here rather than a hand-written imitation of it.
   './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow }),
