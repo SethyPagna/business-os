@@ -11,6 +11,15 @@ export type InventoryProductRow = Record<string, any> & {
   brand?: string
   category?: string
   branch_stock?: Array<Record<string, any>>
+  display_quantity?: number | null
+  stock_value_usd?: number | null
+  stock_value_khr?: number | null
+  qty_sold?: number | null
+  revenue_usd?: number | null
+  revenue_khr?: number | null
+  cogs_usd?: number | null
+  cogs_khr?: number | null
+  profit_usd?: number | null
 }
 
 export type InventoryProductsPayload = {
@@ -48,6 +57,21 @@ export function groupInventoryProducts(items: InventoryProductRow[]) {
 
 export function inventoryMoney(value: unknown): number | null {
   return value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value)
+}
+
+type InventoryMetric = 'display_quantity' | 'stock_value_usd' | 'stock_value_khr' | 'qty_sold' | 'revenue_usd' | 'revenue_khr' | 'cogs_usd' | 'cogs_khr' | 'profit_usd'
+
+/** Merge server-scoped real rows, not the canonical display row's inherited lead metrics. */
+export function mergedInventoryMetric(product: InventoryProductRow, items: InventoryProductRow[], field: InventoryMetric): number | null {
+  const ids = new Set<number>((product.__mergedProductIds || [product.id]).map(Number))
+  const byId = new Map(items.map((item) => [Number(item.id), item]))
+  let total = 0
+  for (const id of ids) {
+    const value = inventoryMoney(byId.get(id)?.[field])
+    if (value === null) return null
+    total += value
+  }
+  return ids.size ? total : null
 }
 
 export function inventoryCost(product: InventoryProductRow, currency: 'usd' | 'khr'): number | null {
@@ -96,7 +120,9 @@ export default function InventoryProductsSurface({
   const groups = useMemo(() => groupInventoryProducts(items), [items])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const toggle = (key: string) => setCollapsed((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next })
-  const columnCount = 9
+  const columnCount = 13
+  const metric = (product: InventoryProductRow, field: InventoryMetric) => mergedInventoryMetric(product, items, field)
+  const quantity = (product: InventoryProductRow) => metric(product, 'display_quantity') ?? scopedProductQuantity(product, branchFilter)
   const money = (usd: unknown, khr?: unknown) => {
     const u = inventoryMoney(usd), k = inventoryMoney(khr)
     return <span className="block whitespace-nowrap text-right tabular-nums">{u === null ? '—' : fmtUSD(u)}{k !== null && k !== 0 ? <span className="block text-[11px] text-slate-500">{fmtKHR(k)}</span> : null}</span>
@@ -137,6 +163,10 @@ export default function InventoryProductsSurface({
               <th className="px-3 py-2 text-right">{t('cost') || 'Cost'}</th>
               <th className="px-3 py-2 text-right">{t('price') || 'Price'}</th>
               <th className="px-3 py-2 text-right">{t('stock_val') || 'Stock value'}</th>
+              <th className="px-3 py-2 text-right">{t('net_sold') || 'Net sold'}</th>
+              <th className="px-3 py-2 text-right">{t('revenue') || 'Revenue'}</th>
+              <th className="px-3 py-2 text-right">{t('cogs') || 'COGS'}</th>
+              <th className="px-3 py-2 text-right">{t('profit') || 'Profit'}</th>
               <th className="px-3 py-2 text-right">{t('actions') || 'Actions'}</th>
             </tr>
           </thead>
@@ -159,11 +189,15 @@ export default function InventoryProductsSurface({
                     <td className="max-w-[18rem] px-3 py-2"><div className="truncate font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></td>
                     <td className="px-3 py-2 font-mono text-slate-500">{product.sku || '—'}</td>
                     <td className="px-3 py-2 font-mono text-slate-500">{product.barcode || '—'}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{scopedProductQuantity(product, branchFilter)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{quantity(product)}</td>
                     <td className="min-w-28 px-3 py-2 text-[11px]">{branchLines(product)}</td>
                     <td className="px-3 py-2">{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'))}</td>
                     <td className="px-3 py-2">{money(product.selling_price_usd, product.selling_price_khr)}</td>
-                    <td className="px-3 py-2">{money(scopedProductValue(product, group.items, branchFilter))}</td>
+                    <td className="px-3 py-2">{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{metric(product, 'qty_sold') ?? '—'}</td>
+                    <td className="px-3 py-2">{money(metric(product, 'revenue_usd'), metric(product, 'revenue_khr'))}</td>
+                    <td className="px-3 py-2">{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</td>
+                    <td className="px-3 py-2">{money(metric(product, 'profit_usd'))}</td>
                     <td className="px-3 py-2">{actions(product)}</td>
                   </tr>
                 ))}
@@ -180,10 +214,18 @@ export default function InventoryProductsSurface({
               : groups.map((group) => <div key={group.key} className="min-w-0 space-y-1">
                 {group.items.length > 1 ? <button type="button" className="min-h-11 w-full break-words text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-3 text-sm">
-                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 break-words font-medium">{product.name || '—'}</span><strong>{scopedProductQuantity(product, branchFilter)}</strong></div>
+                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 break-words font-medium">{product.name || '—'}</span><strong>{quantity(product)}</strong></div>
                   <p className="break-all text-[11px] text-slate-500">{[product.sku, product.barcode].filter(Boolean).join(' · ') || '—'}</p>
                   <div className="my-1 text-xs">{branchLines(product)}</div>
-                  <dl className="grid grid-cols-2 gap-1 text-xs"><dt>{t('cost') || 'Cost'}</dt><dd>{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'))}</dd><dt>{t('price') || 'Price'}</dt><dd>{money(product.selling_price_usd, product.selling_price_khr)}</dd><dt>{t('stock_val') || 'Stock value'}</dt><dd>{money(scopedProductValue(product, group.items, branchFilter))}</dd></dl>
+                  <dl className="grid grid-cols-2 gap-1 text-xs">
+                    <dt>{t('cost') || 'Cost'}</dt><dd>{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'))}</dd>
+                    <dt>{t('price') || 'Price'}</dt><dd>{money(product.selling_price_usd, product.selling_price_khr)}</dd>
+                    <dt>{t('stock_val') || 'Stock value'}</dt><dd>{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</dd>
+                    <dt>{t('net_sold') || 'Net sold'}</dt><dd className="text-right tabular-nums">{metric(product, 'qty_sold') ?? '—'}</dd>
+                    <dt>{t('revenue') || 'Revenue'}</dt><dd>{money(metric(product, 'revenue_usd'), metric(product, 'revenue_khr'))}</dd>
+                    <dt>{t('cogs') || 'COGS'}</dt><dd>{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</dd>
+                    <dt>{t('profit') || 'Profit'}</dt><dd>{money(metric(product, 'profit_usd'))}</dd>
+                  </dl>
                   {actions(product)}
                 </div>)}
               </div>)}
