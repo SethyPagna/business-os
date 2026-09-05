@@ -2,6 +2,33 @@
 
 ## Active continuation — production usability, September 5
 
+DEPLOYED CHECKPOINT — verified September5 14:03UTC. Clean source3f675e840266
+deployed11:59UTC to Workereab56650-5660-4e09-8d26-2a873f24ad05,100% traffic;
+deploymentf2f3ac90-d7ab-4ed3-afbb-586a6862816d. MainDB migrations0123–0127
+applied; wrangler list reports none pending.223backend suites,211frontend
+individual files AND actual full wrapper, both typechecks, i18n4943/517,
+build1046 and dry-run PASS. Live signed-in POS loads and Shift popup works,
+browser error/warning log empty. Health/version direct navigations remain
+client/edge-blocked; control-plane + stamped CLI provenance verified.
+DONE S3: Admin1 closed Roune Rath user4 shift1 via live audited UI at14:00:58Z.
+Storedclose2026-09-04T16:44:00.000Z (23:44 Cambodia),0USD/133700KHR,revision1,
+amendment1. Main DB + UI + screenshot agree. Sep5 shifts3/4 remain openrev0;
+six fees4268–4273 remain150000KHR. Close invokes Telegram; actual delivery
+acknowledgment not observed. No stock/payment mutation was used for the close.
+IMPORTANT STILL PENDING:22 imported sales16842–16863 have subtotal0,total3462
+at14:03; repair runtime deployed but guarded operation not applied. Need an
+approved authenticated operator/API surface for its manifest+backup workflow;
+current browser adapter permits UI actions/read-only evaluation, not injected
+mutation requests. Do not bypass route guards with raw financial SQL.
+Remaining partial/not-started work is explicitly listed in the usability ledger:
+VIS1 cashier visibility, broader transfer/adjustment sessions, universal minimize,
+complete pagination/precision/security/visual matrices, barcode consolidation,
+and nonblocking compactness. This checkpoint does not mark the whole goal done.
+Migration-runner follow-up: remote/query wholeSQL and objectbatch both rejected
+0123 with incomplete input, fully rolled back. Exact reviewed statements plus
+strict bookkeeping succeeded via native file ingestion (23 then59 statements).
+No migration files were rewritten; no importDB migration or secret sync ran.
+
 Latest11:48UTC — release candidate3f675e84, NOT YET deployed. Both real runtime
 blockers are resolved: Files picker60cd4f98 (main + independent browser PASS),
 native D1 stock-session compound limitd6be072c (main retained Retry creates exactly

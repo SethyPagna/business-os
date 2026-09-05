@@ -19184,3 +19184,45 @@ Only migrations 0120–0122 applied, with recorded money/stock controls identica
 Cloudflare challenges blocked live API/asset verification; control-plane release
 is verified, but no authenticated production-flow or Telegram receipt claim is
 made. Final provenance and recovery are in the membership/bulk release note.
+
+## Part 608 — usability checkpoint deployed; historical shift closed (2026-09-05)
+
+Ask: accelerate with appropriate Sol agents, verify the priority usability slices,
+deploy a bounded checkpoint, retain every remaining task in progress, and close
+Roune Rath's September4 shift at23:44 Cambodia with133700KHR cash.
+
+Changed: integrated separately committed draft/session/layering, shift lifecycle,
+report/Telegram/date, sale picker/bulk/payment/replay and branch-scoped products
+slices. Native browser tests exposed Files closeguard and workerd compound-SQL
+limits; fixes60cd4f98/d6be072c were independently checked and main verified.
+Frontend registration3f675e84 keeps the full211-test wrapper below Windows length
+limits without dropping tests. Original dirty checkout and unrelated fees edits
+preserved. Main stayed sole integrator/deployer; reviewers did no production writes.
+
+Verified:223backend suites,211frontend individual files and actual npm wrapper,
+both package typechecks, i18n4943keys/517sources, Vite1046modules, clean dry-run.
+Bounded native stock commit/undo/redo/retry/race/permission matrix and real product,
+report, branch desktop/mobile checks recorded in usability ledger. Main built
+from isolated real npmci dependencies, clean source3f675e840266.
+
+Deployment: Workereab56650-5660-4e09-8d26-2a873f24ad05 at100%, control-plane
+deploymentf2f3ac90-d7ab-4ed3-afbb-586a6862816d created11:59:26UTC. MainDB0127
+highest, no pending. Remote query parser rejected0123 twice with full rollback;
+native file ingestion applied exact committed schema + strict bookkeeping,23
+then59 statements. Recorded sale/stock counts and totals identical pre/post.
+No importDB migration/secret sync. Recovery bookmarks and caveats in ledger.
+
+Historical operation: after user admin sign-in, actual UI close of shift1/user4
+stored2026-09-04T16:44:00.000Z,0USD/133700KHR,revision1,amendment1/Admin1.
+Main SQL/UI/screenshot agree; Sep5 shifts3/4 remain openrev0, six original
+fees4268–4273 still150000KHR. No duplicate expenses, no stock/payment mutation.
+Close invokes Telegram; actual destination delivery acknowledgment not observed.
+
+Not done: fixed22-sale subtotal repair (runtime deployed but operation unapplied,
+fresh14:03 subtotal0,total3462); operator UI/API access for guarded manifest apply;
+full VIS1; broader transfer/adjustment session parity, universal minimize, complete
+pagination/precision/security/visual matrices, leading-zero consolidation and
+nonblocking compactness. Direct public health/version probes blocked by client/
+edge; authenticated POS/popup works with empty browser error/warning log. Native
+goal remains paused and incomplete; this is a deployed checkpoint, not whole-goal
+completion. See docs/fleet/2026-09-05-production-usability.md for current matrix.

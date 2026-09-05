@@ -2,7 +2,70 @@
 
 ## Objective and boundaries
 
-### Current checkpoint — 11:48UTC (supersedes historical snapshots below)
+### Deployed checkpoint and historical close — 14:03UTC
+
+Source `3f675e84026663b6048ebf6c8cb654410414ec5a` deployed at11:59:26UTC:
+Worker `eab56650-5660-4e09-8d26-2a873f24ad05`, deployment
+`f2f3ac90-d7ab-4ed3-afbb-586a6862816d`,100% traffic. Stamped CLI source hash
+`0b9b63f87d080403`, builtAt`2026-09-05T11:58:02.566Z`; control-plane rechecked
+14:02UTC. All runtime rows marked locally ready in the matrix below are now
+included in this deployed checkpoint; partial/deferred rows remain partial.
+
+Final gates:223/223 backend;211/211 frontend individual files plus actual full
+Windows `npm run test:utils` exit0 at3f675e84 (all211 reachable, mounted Files
+regression executed); main both typechecks, i18n4943/517, build1046 and dry-run PASS.
+Build still reports existing circular-chunk/large-bundle warnings, not errors.
+Live authenticated POS has Shift and configured payment rows; historical popup
+opens and saves. Browser error/warning log empty; saved-close screenshot inspected.
+Direct health/version navigation is client-blocked and shell probes were edge
+challenged, so no blanket public-health/unauthenticated endpoint certification.
+
+MainDB migrations0123–0127 applied, no pending migrations. Standard remote
+migrations command and then explicit query batch both rejected0123 with
+`incomplete input`; read-only schema/ledger checks proved complete rollback
+after each. Independent local Miniflare batch/forced-final-failure controls
+passed but did NOT prove remote parser behavior. Native file ingestion solved
+the remote parser limitation:23 statements for0123, then59 for0124–0127.
+Each artifact compared statement-for-statement with unchanged committed SQL,
+strict migration-name INSERTs included; no ignored conflicts or partial tail.
+Record this as an open runner/remote-parser guard follow-up, not a SQL logic fix.
+
+| Migration pre/post control | Before = after |
+|---|---|
+| Sales count / total USD |15077 /1894868.3010|
+| Sale-item count / quantity |36307 /58792|
+| Product count |10273|
+| Branch-stock rows / quantity |20438 /23009|
+| Branch-batch-stock rows / quantity |47129 /23038|
+
+All existing sales retained change_is_actual0/change_exchange_rateNULL; nine
+new shift triggers present. No active maintenance flag/restore. Recovery bookmark
+before migrations:`000012e1-000000e4-000050dd-bb4dfbd47cc6beed87fe1a94fde7dad2`;
+after migrations:`000012e1-0000010e-000050dd-5d4e908748260c7c908df73363b6245d`.
+Do not restore the entire DB over subsequent business; retain additive schema on
+code rollback and replay metadata. No secret sync or importDB migration performed.
+
+S3 DONE: user signed into admin browser. Main closed only shift1/user4 through
+the actual guarded UI as Admin1. Fresh rowrev0 and existing fees checked first.
+Closing form DOM value2026-09-04T23:44 maps explicitly to Cambodia+07:00.
+Stored close `2026-09-04T16:44:00.000Z`,USD0/KHR133700,revision1. Amendment1,
+actor1,reason`Historic manual close`,recorded`2026-09-05T14:00:58.900Z`.
+UI shows Closed,23:44,8hr32min,opening283700KHR,closing133700KHR,difference
+-150000KHR and matching audit. Sep5 shifts3/4 remain openrev0. Six original
+fees4268–4273 remain0USD/150000KHR. No duplicate expenses or stock/payment write.
+Pre-close recovery bookmark:`000012e1-00000112-000050dd-8cd3e164802ad995bd24faf36f77195d`.
+The close route invokes Telegram asynchronously; delivery acknowledgment is not
+stored by this implementation and was not observed in the destination chat.
+
+STILL PENDING: fixed22 subtotal repair. Read-only14:03 confirms22 targets,
+subtotal0,total3462USD. Runtime is deployed; no financial source repair applied.
+The available authenticated browser supports normal UI actions but no injected
+mutation requests, and the one-off manifest route has no operator UI yet. Next
+bounded slice is a permission-gated preview/apply operator surface for the existing
+manifest/digest/revision/backup path (or a supported authenticated API session),
+then fresh guards and pre/post certification. Never replace it with unguarded SQL.
+
+### Predeployment checkpoint — 11:48UTC (historical)
 
 Candidate `3f675e84`, deployment pending. Main final clean typechecks, i18n
 4943 keys/517 sources, Vite1046 modules and clean stamped dry-run PASS. Backend
