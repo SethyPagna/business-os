@@ -49,6 +49,8 @@ import {
   writeStoredJson,
   type ReportTotals,
 } from '../src/components/sales/reports/reportModel.ts'
+import { makeReportMoneyFormatter } from '../src/utils/reportMoney.ts'
+import { normalizePriceValue } from '../src/utils/pricing.ts'
 
 let failed = 0
 const test = (name: string, fn: () => void): void => {
@@ -188,7 +190,7 @@ test('buildIncomeStatement: the profit bridge names every term and never uses th
 
   const net = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), profitMode: 'net', khrToUsd, expenses: { usd: 10, khr: 40000 } }))
   assert.equal(net.expenses.usd, 20, '$10 + 40,000៛ at 4000 = $20')
-  assert.equal(net.expenses.khr, 40000, 'the raw KHR is kept for display')
+  assert.ok(!('khr' in net.expenses), 'a canonical USD statement line never also carries the source KHR')
   assert.equal(net.expenses.hintKey, 'rpt_hint_expenses_line')
   assert.equal(net.net_result.usd, 150, 'net result = total profit - expenses')
   assert.equal(net.net_result.kind, 'total')
@@ -203,6 +205,59 @@ test('buildIncomeStatement: the profit bridge names every term and never uses th
   // No expenses block at all (the caller cannot read expenses) -> no net lines.
   const netNoExp = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), profitMode: 'net', khrToUsd }))
   assert.ok(!('expenses' in netNoExp) && !('net_result' in netNoExp))
+})
+
+test('buildIncomeStatement: converted expenses stay canonical through USD/KHR/BOTH, comparison, and CSV rows', () => {
+  // Exact Aug 30-Sep 5 source totals: $5,440 + 373,700៛ at 4,065 =
+  // $5,531.93. The former statement line also retained 373,700៛, so the
+  // real report formatter folded that source amount in a second time and
+  // displayed $5,623.87 while Final Profit correctly used $5,531.93.
+  const screenshotTotals = normalizeTotals({
+    ...adminTotals,
+    revenue_usd: 8924,
+    cost_usd: 10185.02,
+    recognized_delivery_usd: 71,
+    recognized_delivery_cost_usd: 29.36,
+    profit_usd: -1219.38,
+  })
+  const expenses = { usd: 5440, khr: 373700 }
+  const previousExpenses = { usd: 1, khr: 4065 }
+  const lines = buildIncomeStatement({
+    sales: screenshotTotals,
+    prevSales: screenshotTotals,
+    expenses,
+    prevExpenses: previousExpenses,
+    profitMode: 'net',
+    khrToUsd: (value) => normalizePriceValue(value) / 4065,
+  })
+  const m = lineMap(lines)
+  assert.equal(m.expenses.usd, 5531.93)
+  assert.ok(!('khr' in m.expenses), 'the source pair stays outside the canonical statement line')
+  assert.deepEqual(expenses, { usd: 5440, khr: 373700 }, 'native expense capture remains untouched at the model boundary')
+
+  const deps = (displayCurrency: string) => ({
+    displayCurrency,
+    fmtUSD: (value: number | string) => `$${normalizePriceValue(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    fmtKHR: (value: number | string) => `${normalizePriceValue(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}៛`,
+    khrToUsd: (value: unknown) => normalizePriceValue(value) / 4065,
+    usdToKhr: (value: unknown) => normalizePriceValue(value) * 4065,
+  })
+  const statementKhr = (m.expenses as typeof m.expenses & { khr?: number }).khr
+  assert.equal(makeReportMoneyFormatter(deps('usd'))(m.expenses.usd, statementKhr), '$5,531.93')
+  const khrDeps = deps('khr')
+  assert.equal(
+    makeReportMoneyFormatter(khrDeps)(m.expenses.usd, statementKhr),
+    khrDeps.fmtKHR(khrDeps.usdToKhr(m.expenses.usd)),
+    'KHR display converts the canonical statement value without adding the native KHR again',
+  )
+  assert.equal(makeReportMoneyFormatter(deps('both'))(m.expenses.usd, statementKhr), '$5,531.93')
+
+  assert.equal(m.expenses.prevUsd, 2, 'comparison converts its native pair exactly once')
+  assert.equal(m.net_result.prevUsd, -1221.38, 'comparison final profit uses the same canonical expense basis')
+  const csvRows = lines.map((line) => ({ Line: line.key, Amount_USD: line.usd, Previous_USD: line.prevUsd ?? '' }))
+  assert.equal(csvRows.find((row) => row.Line === 'expenses')?.Amount_USD, 5531.93)
+  assert.equal(csvRows.find((row) => row.Line === 'net_result')?.Amount_USD, -6751.31)
+  assert.equal(m.gross_profit.usd - m.expenses.usd, m.net_result.usd, 'statement and canonical CSV rows foot to Final Profit')
 })
 
 test('buildIncomeStatement: the waterfall foots to the cent, and says so when cost is missing', () => {
