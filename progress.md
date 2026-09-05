@@ -1,5 +1,15 @@
 # progress.md — business-os
 
+## Active continuation — production usability, September 5
+
+Owner prioritizes reliable product drafts/unified Add products sessions, grouped
+stock operations, owner/admin shift amendments and September 4 closure, floating
+shift/POS dialogs, one-row topbar/two-layer navigation, sale-picker layering and
+Telegram arithmetic. Four bounded Sol discovery lanes are active; main owns live
+data and verification. Nothing in this continuation is deployed or marked done.
+Acceptance, model/effort assignments and safeguards:
+`docs/fleet/2026-09-05-production-usability.md`.
+
 ## Current checkpoint — September 5, membership/bulk continuation
 
 Historical reconciliation is applied: 89 sales fully paid/Completed, 100 exact
