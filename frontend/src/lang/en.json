@@ -4504,6 +4504,8 @@
   "shared_device_security_note": "On shared devices, choose \"Until I close the browser\" for better security.",
   "sharp": "Sharp",
   "show": "Show",
+
+  "show_filters": "Show filters",
   "showAbout": "Show about section",
   "showAddress": "Show address",
   "showCatalog": "Show product catalog",
@@ -4885,6 +4887,7 @@
   "timezone_display_note": "Time is always accurate — only the display label changes",
   "to_branch": "To Branch",
   "today": "Today",
+  "yesterday": "Yesterday",
   "today_sales": "Today's Sales",
   "topProductBadge": "Top Product",
   "topSellerBadge": "Top Seller",
@@ -5408,6 +5411,8 @@
   "rpt_basis_hint": "The figure that leads the summary line and divides the margin. Revenue is the app-wide definition: net sales of recognized sales minus refunds, tax and delivery excluded.",
   "rpt_breakdown": "Breakdown",
   "rpt_change": "Change",
+
+  "rpt_detail": "Detail",
   "rpt_collected_group": "Collected",
   "rpt_compare": "Compare",
   "rpt_compare_hint": "Overview: also load the previous period of equal length and show the change.",

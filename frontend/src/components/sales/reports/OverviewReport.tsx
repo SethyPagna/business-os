@@ -217,7 +217,17 @@ export default function OverviewReport(p: ReportViewProps) {
     { key: 'amount', label: tr('amount', 'Amount'), kind: 'money', value: (r) => r.amount_usd, khr: (r) => r.amount_khr, emphasis: true },
   ]
 
-  const cols = compare ? 4 : 2
+  // Excel style: the old-POS profit ledger the owner supplied as the layout
+  // reference (Sep 5 2026, screenshot #13) -- a label column and TWO amount
+  // columns. Detail lines (+ / - / memo) indent and put their figure in the
+  // INNER column; every total sits alone in the OUTER column, so the outer
+  // column reads as the statement and the inner one as "how it was made up".
+  // The group caption rows are gone for the arithmetic groups (their totals
+  // name them); the two memo groups keep a caption because nothing else
+  // introduces them, and the Not Paid block keeps its warning tint, which is
+  // load-bearing (S4R3-6): a theoretical figure must never read as realised.
+  const cols = compare ? 5 : 3
+  const captioned = (g: StatementGroup) => g === 'delivery' || g === 'pending'
   const statementBody = state.loading && !data ? (
     <Skeleton rows={8} variant={style === 'receipt' ? 'text' : 'table'} />
   ) : lines.length === 0 ? null : style === 'receipt' ? (
@@ -243,6 +253,7 @@ export default function OverviewReport(p: ReportViewProps) {
       <thead>
         <tr>
           <th>{tr('rpt_line', 'Line')}</th>
+          <th className="!text-right">{tr('rpt_detail', 'Detail')}</th>
           <th className="!text-right">{tr('amount', 'Amount')}</th>
           {compare ? (
             <>
@@ -257,27 +268,49 @@ export default function OverviewReport(p: ReportViewProps) {
           const highlight = isTheoreticalGroup(g)
           return (
             <Fragment key={g}>
-              <tr className={highlight ? '' : '!bg-[var(--ui-surface-2)]'} data-statement-group={g}>
-                <td colSpan={cols} className={['text-[length:var(--ui-size-meta)] font-medium', highlight ? 'text-[var(--ui-warn-ink)]' : 'text-[var(--ui-ink-2)]'].join(' ')}>
-                  {groupLabel(g)}
-                </td>
-              </tr>
+              {captioned(g) ? (
+                <tr className={highlight ? '' : '!bg-[var(--ui-surface-2)]'} data-statement-group={g}>
+                  <td colSpan={cols} className={['text-[length:var(--ui-size-meta)] font-medium', highlight ? 'text-[var(--ui-warn-ink)]' : 'text-[var(--ui-ink-2)]'].join(' ')}>
+                    {groupLabel(g)}
+                  </td>
+                </tr>
+              ) : null}
               {lines
                 .filter((l) => l.group === g)
                 .map((l) => {
                   const ch = changeOf(l)
                   const note = noteText(l)
+                  const total = l.kind === 'total'
+                  const amount = fmtMoney(l.usd, l.khr)
                   return (
-                    <tr key={l.key} className={l.kind === 'total' ? 'font-semibold' : ''} data-statement-group={g}>
-                      <td>
+                    <tr
+                      key={l.key}
+                      className={total ? 'font-semibold' : ''}
+                      data-statement-group={g}
+                      data-statement-kind={l.kind}
+                    >
+                      <td className={total ? '' : 'pl-[calc(var(--ui-cell-px,12px)+1rem)] text-[var(--ui-ink-2)]'}>
                         <span className="inline-flex items-center gap-1">
-                          <span className="w-3 text-[var(--ui-ink-3)]">{statementOperator(l.kind)}</span>
+                          {total ? null : <span className="w-3 text-[var(--ui-ink-3)]">{statementOperator(l.kind)}</span>}
                           {lineLabel(l)}
                           {l.hintKey ? <InfoHint text={tr(l.hintKey, l.hintFallback || '')} label={lineLabel(l)} /> : null}
-                          {note ? <span className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">({note})</span> : null}
                         </span>
+                        {/* The data note is a BLOCK under the label, never inline: with
+                            `fit` the table hugs max-content, and an inline note ("no
+                            courier cost recorded on 11,834 deliveries") widened the Line
+                            column past the 34rem statement box and pushed Amount behind
+                            the scroller (a2, Sep 6 2026, measured at 1280 on All time).
+                            A block's max-width caps what it contributes. */}
+                        {note ? <div className="max-w-[16rem] whitespace-normal text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">({note})</div> : null}
                       </td>
-                      <td className="text-right whitespace-nowrap">{fmtMoney(l.usd, l.khr)}</td>
+                      <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{total ? '' : amount}</td>
+                      <td className="text-right whitespace-nowrap">
+                        {total ? (
+                          l.headline
+                            ? <span className="inline-block rounded-[var(--ui-radius-sm)] bg-[var(--ui-ink)] px-1.5 py-0.5 text-[var(--ui-surface)]">{amount}</span>
+                            : amount
+                        ) : ''}
+                      </td>
                       {compare ? (
                         <>
                           <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{l.prevUsd == null ? '—' : fmtMoney(l.prevUsd)}</td>

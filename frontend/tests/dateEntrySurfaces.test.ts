@@ -172,8 +172,8 @@ runTest('the range picker exposes the exact ordered presets above the date field
   const source = read('components/shared/DateTimeRangePicker.tsx')
   const quickRanges = /const quickRanges:[\s\S]*?= \[([\s\S]*?)\n  \]/.exec(source)?.[1] || ''
   const ids = [...quickRanges.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1])
-  assert.deepEqual(ids, ['all', 'today', '7d', '30d', 'month'], 'picker presets must remain exact and ordered')
-  for (const label of ['All time', 'Today', 'Last 7 days', 'Last 30 days', 'This month']) {
+  assert.deepEqual(ids, ['all', 'today', 'yesterday', '7d', '30d', 'month'], 'picker presets must remain exact and ordered')
+  for (const label of ['All time', 'Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'This month']) {
     assert.ok(quickRanges.includes(`'${label}'`), `picker must render the ${label} fallback label`)
   }
 

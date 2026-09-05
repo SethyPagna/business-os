@@ -313,6 +313,7 @@ export default function DateTimeRangePicker({
   const quickRanges: Array<{ id: StatsPresetKey; label: string }> = [
     { id: 'all', label: quickRangeLabel('all_time', 'All time') },
     { id: 'today', label: quickRangeLabel('today', 'Today') },
+    { id: 'yesterday', label: quickRangeLabel('yesterday', 'Yesterday') },
     { id: '7d', label: quickRangeLabel('last_7_days', 'Last 7 days') },
     { id: '30d', label: quickRangeLabel('last_30_days', 'Last 30 days') },
     { id: 'month', label: quickRangeLabel('this_month', 'This month') },
