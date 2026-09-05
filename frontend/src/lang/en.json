@@ -5626,5 +5626,8 @@
   "return_bulk_method_preserves_values": "Recorded amounts and item stock actions stay unchanged.",
   "search_customers": "Search customers",
   "search_delivery_contacts": "Search delivery contacts",
-  "fee_note": "Fee note"
+  "fee_note": "Fee note",
+  "return_bulk_limit": "Select at most 25 returns.",
+  "return_type": "Return type",
+  "bulk_field_history_summary": "{changed} {noun}: {field} {source} → {target}; {unchanged} unchanged"
 }
