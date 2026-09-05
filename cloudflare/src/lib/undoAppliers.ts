@@ -321,6 +321,7 @@ async function replayAtomicSaleAddItems(
   if (!ctx.user || !Number.isSafeInteger(ctx.historyId) || !Number.isSafeInteger(ctx.generation) || Number(ctx.generation) < 0) {
     throw new UndoConflictError('Refresh history before replaying these added items.')
   }
+  const user = ctx.user
   if (typeof reversal.saleStateRevision !== 'number' || !Number.isSafeInteger(reversal.saleStateRevision) || reversal.saleStateRevision < 0) {
     throw new UndoConflictError('The saved sale revision is invalid.')
   }
@@ -421,7 +422,7 @@ async function replayAtomicSaleAddItems(
         totalBeforeUsd: reversal.moneyAfter.total_usd, totalAfterUsd: reversal.moneyBefore.total_usd,
         unitsMoved: line.heldUnits, via: 'undo',
         note: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
-        userId: ctx.user.id, userName: ctx.user.name,
+        userId: user.id, userName: user.name,
       })),
     )
   } else {
@@ -456,7 +457,7 @@ async function replayAtomicSaleAddItems(
         totalBeforeUsd: reversal.moneyBefore.total_usd, totalAfterUsd: reversal.moneyAfter.total_usd,
         unitsMoved: -line.heldUnits || 0, via: 'redo',
         note: `Redo: items re-added to sale ${reversal.receiptNumber || `#${saleId}`}`,
-        userId: ctx.user.id, userName: ctx.user.name,
+        userId: user.id, userName: user.name,
       })),
     )
   }
@@ -1033,7 +1034,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   //
   // Gated by the SAME granular action as the live route (sales ->
   // add_items), full tier, at record and operate time.
-  [SALE_ADD_ITEMS_ACTION_KIND]: {
+  'sale.add_items': {
     permission: 'sales',
     action: 'add_items',
     run: async (payload, ctx) => {
