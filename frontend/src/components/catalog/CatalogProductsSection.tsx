@@ -292,6 +292,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     [letterFilteredProducts, page, pageSize, serverPaged],
   )
   const totalProducts = serverPaged ? Number(productTotal || 0) : letterFilteredProducts.length
+  // One fact, consulted by BOTH pager mounts. They used to disagree: the top
+  // one rendered unconditionally while the bottom one was gated on
+  // `totalProducts > effectivePageSize`, so a single-page result showed a
+  // pager above the grid and nothing below it.
+  const showPager = totalProducts > effectivePageSize
   const visiblePromotionItems = useMemo(
     () => Array.isArray(promotionItems)
       ? promotionItems.filter((item) => item?.title || item?.subtitle || item?.body || item?.mediaUrl)
@@ -698,24 +703,32 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       ) : null}
 
-      <CatalogPaginationControls
-        className="mb-4"
-        page={effectivePage}
-        pageSize={effectivePageSize}
-        totalItems={totalProducts}
-        label={copy('products', 'products')}
-        t={(key) => ({
-          page: copy('page', 'Page'),
-          of: copy('of', 'of'),
-          showing: copy('showing', 'Showing'),
-          per_page: copy('perPage', 'per page'),
-        })[key] || key}
-        onPageChange={updatePage}
-        onPageSizeChange={(size) => {
-          updatePageSize?.(size)
-          updatePage?.(1)
-        }}
-      />
+      {/* Back / page / total / Next / per-page, centred, above the grid --
+          and the identical mount below it. `back` and `next` have to be in
+          this map: PaginationControls treats any truthy return as the label,
+          so the map's `|| key` fallback was printing the raw lowercase keys
+          "back" and "next" as the button captions in every language. */}
+      {showPager ? (
+        <CatalogPaginationControls
+          className="mb-4"
+          page={effectivePage}
+          pageSize={effectivePageSize}
+          totalItems={totalProducts}
+          label={copy('products', 'products')}
+          t={(key) => ({
+            page: copy('page', 'Page'),
+            of: copy('of', 'of'),
+            back: copy('back', 'Back'),
+            next: copy('next', 'Next'),
+            per_page: copy('perPage', 'per page'),
+          })[key] || key}
+          onPageChange={updatePage}
+          onPageSizeChange={(size) => {
+            updatePageSize?.(size)
+            updatePage?.(1)
+          }}
+        />
+      ) : null}
 
       {/* Tighter vertical rhythm on phones so more products show per screen
           (user, Aug 31: "minimized for better useability ... same for public
@@ -925,7 +938,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         })}
       </div>
 
-      {totalProducts > effectivePageSize ? (
+      {showPager ? (
         <CatalogPaginationControls
           className="mt-4"
           page={effectivePage}
@@ -935,7 +948,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           t={(key) => ({
             page: copy('page', 'Page'),
             of: copy('of', 'of'),
-            showing: copy('showing', 'Showing'),
+            back: copy('back', 'Back'),
+            next: copy('next', 'Next'),
             per_page: copy('perPage', 'per page'),
           })[key] || key}
           onPageChange={updatePage}
