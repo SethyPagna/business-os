@@ -440,6 +440,13 @@ await check('sale.add_items atomically advances revision, receipt, snapshot, his
     assert.equal(reversedRevision, fixture.db.prepare('SELECT revision FROM sale_write_revisions WHERE sale_id=77').get().revision)
     assert.equal(reversedRevision, fixture.db.prepare('SELECT sale_revision FROM sale_mutation_receipts').get().sale_revision)
 
+    const afterUndo = atomicSaleItemsState(fixture.db)
+    await assert.rejects(
+      () => resolved.run(fixture.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 }),
+      error => error?.statusCode === 409,
+    )
+    assert.deepEqual(atomicSaleItemsState(fixture.db), afterUndo, 'an exact retry of the acknowledged generation cannot replay or write twice')
+
     const redoPayload = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
     await resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
     const newLineId = fixture.db.prepare('SELECT id FROM sale_items').get().id
