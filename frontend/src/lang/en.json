@@ -5661,5 +5661,6 @@
   "shift_cancel_title": "Cancel and close out shift",
   "shift_cancel_hint": "This keeps the full shift record and marks it cancelled. Recorded cash counts are not changed or replaced.",
   "shift_cancel_saved": "Shift cancelled and retained with its recorded details.",
-  "shift_cancel_failed": "Could not cancel shift."
+  "shift_cancel_failed": "Could not cancel shift.",
+  "inventory_products_load_failed": "Products could not be loaded."
 }
