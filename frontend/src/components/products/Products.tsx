@@ -3840,10 +3840,9 @@ function ProductsFullEditor() {
                HeaderActions hides any undefined-handler control. */
             /* S4-12: Add now opens the header step first -- brand, supplier
                and branch once, then the same product form for each item. */
-            onAdd={canAddProduct && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setCreateSessionInitialMode('new');setModal('create_session')} : undefined}
+            onAdd={(canAddProduct || canAdjustInventoryStock) && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setCreateSessionInitialMode(canAddProduct ? 'new' : 'existing');setModal('create_session')} : undefined}
             // The merged Add Stock flow rides the same Add menu. Hidden on
             // the Stock Changes section, which carries its own Adjust menu.
-            onAddStock={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => { setCreateSessionInitialMode('existing'); setModal('create_session') } : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}
