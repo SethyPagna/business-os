@@ -38,11 +38,12 @@ function fixture(migrate = true) {
   for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || !f.startsWith('0120_'))).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
   sql.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'),(2,'Warehouse'); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',100),(2,'B',100); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,50),(1,2,50),(2,1,100)")
   let failAt=null, beforeBatch=null, batches=0, reads=0
+  const readRows=[]
   const env={DB:{
     prepare(text) {
       return {bind(...params) {
         if(params.length>100) throw Error('too many SQL variables')
-        return {text,params, async first(){reads++;return sql.prepare(text).get(...params)||null}, async all(){reads++;return {results:sql.prepare(text).all(...params)}},async run(){const r=sql.prepare(text).run(...params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}}
+        return {text,params, async first(){reads++;return sql.prepare(text).get(...params)||null}, async all(){reads++;const results=sql.prepare(text).all(...params);readRows.push({text,bindings:params.length,rows:results.length});return {results}},async run(){const r=sql.prepare(text).run(...params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}}
       }}
     },
     async batch(statements) {
@@ -53,7 +54,7 @@ function fixture(migrate = true) {
   }}
   const ctx={waitUntil(){},passThroughOnException(){}}
   const call=async(app,url,body,method='POST')=>{const response=await app.request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},env,ctx);return {status:response.status,body:await response.json()}}
-  return {sql,env,call,fail(value){failAt=value},barrier(fn){beforeBatch=fn},metrics:()=>({batches,reads})}
+  return {sql,env,call,fail(value){failAt=value},barrier(fn){beforeBatch=fn},metrics:()=>({batches,reads,readRows})}
 }
 function seed(f,count=9) {
   for(let id=1;id<=count;id++) {
@@ -230,5 +231,72 @@ async function run() {
   f.sql.prepare("UPDATE action_history SET undo_payload=json_set(undo_payload,'$.snapshot_id',999999) WHERE id=?").run(h)
   const forged=snapshot(f);assert.equal((await replay(f,h)).status,409);assert.equal(snapshot(f),forged)
   console.log('PASS bounded input, POS/review/view/action/skip/foreign/demoted permissions, generation and forged snapshot guards')
+
+  {
+  f=fixture();seed(f,25)
+  f.sql.exec(`WITH RECURSIVE n(i) AS (VALUES(26) UNION ALL SELECT i+1 FROM n WHERE i<2000)
+    INSERT INTO sale_items(id,sale_id,product_id,quantity,branch_id) SELECT i,1,1,1,1 FROM n`)
+  let before=snapshot(f)
+  assert.equal((await f.call(sales,'/bulk-status',request(f))).status,400)
+  assert.equal(snapshot(f),before);assert.equal(f.metrics().batches,0)
+  let limited=f.metrics().readRows.filter(r=>r.text.includes('FROM sale_items WHERE'))
+  assert.equal(limited.length,1);assert.equal(limited[0].rows,151);assert.equal(limited[0].bindings,25)
+
+  f=fixture();seed(f,25)
+  f.sql.exec(`WITH RECURSIVE n(i) AS (VALUES(26) UNION ALL SELECT i+1 FROM n WHERE i<150)
+    INSERT INTO sale_items(id,sale_id,product_id,quantity,branch_id) SELECT i,1,1,1,1 FROM n;
+    WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<2000)
+    INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity) SELECT (i%150)+1,1,1,1 FROM n`)
+  before=snapshot(f)
+  assert.equal((await f.call(sales,'/bulk-status',request(f))).status,400)
+  assert.equal(snapshot(f),before);assert.equal(f.metrics().batches,0)
+  limited=f.metrics().readRows.filter(r=>r.text.includes('FROM sale_item_batch_allocations a'))
+  assert.equal(limited.length,1);assert.equal(limited[0].rows,301);assert.equal(limited[0].bindings,25)
+
+  f=fixture();seed(f,1)
+  f.sql.exec(`INSERT INTO returns(id,sale_id) VALUES(1,1);
+    WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<2000)
+    INSERT INTO return_items(return_id,sale_item_id,product_id,quantity) SELECT 1,1,1,0 FROM n`)
+  before=snapshot(f)
+  assert.equal((await f.call(sales,'/bulk-status',request(f))).status,400)
+  assert.equal(snapshot(f),before);assert.equal(f.metrics().batches,0)
+  limited=f.metrics().readRows.filter(r=>r.text.includes('FROM returns r JOIN return_items'))
+  assert.equal(limited.length,1);assert.equal(limited[0].rows,301)
+  assert.doesNotMatch(limited[0].text,/GROUP BY|SUM\(/)
+  console.log('PASS SQL sentinel caps return only 151 lines/301 allocations/301 raw returns; 25 ids use one query')
+
+  const addMovements=(f,count)=>f.sql.exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<${count})
+    INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reference_id) SELECT 1,1,'sale',0,1 FROM n`)
+  f=fixture();seed(f,1);addMovements(f,2000);before=snapshot(f)
+  assert.equal((await f.call(sales,'/bulk-status',request(f))).status,400)
+  assert.equal(snapshot(f),before);assert.equal(f.metrics().batches,0)
+  const fingerprintRead=f.metrics().readRows.find(r=>r.text.includes('AS movement_fingerprint'))
+  assert.match(fingerprintRead.text,/LIMIT 257/)
+  assert.equal(f.sql.prepare(fingerprintRead.text).get(1).movement_fingerprint,null)
+
+  // Exactly at the cap may change status without stock. New movement rows
+  // overflowing the cap must roll back, never save a truncated precondition.
+  f=fixture();seed(f,1);addMovements(f,256)
+  assert.equal((await f.call(sales,'/bulk-status',request(f))).status,200)
+  f=fixture();seed(f,1);addMovements(f,256);before=snapshot(f)
+  assert.equal((await f.call(sales,'/bulk-status',request(f,'cancelled'))).status,400)
+  assert.equal(snapshot(f),before);assert.equal(f.metrics().batches,0)
+  f=fixture();seed(f,1);addMovements(f,254)
+  h=(await f.call(sales,'/bulk-status',request(f,'cancelled'))).body.actionHistoryId
+  assert.equal((await replay(f,h)).status,200)
+  before=snapshot(f)
+  assert.equal((await replay(f,h,'redo',1)).status,409);assert.equal(snapshot(f),before)
+  // A concurrent edit to the last selected member's history must also be
+  // detected even when its first 256 rows still match the saved fingerprint.
+  f=fixture();seed(f,1)
+  h=(await f.call(sales,'/bulk-status',request(f,'cancelled'))).body.actionHistoryId
+  addMovements(f,2000);before=snapshot(f)
+  assert.equal((await replay(f,h)).status,409);assert.equal(snapshot(f),before)
+  // A concurrent append beyond the cap also invalidates a prepared plan.
+  f=fixture();seed(f,1);f.barrier(()=>{addMovements(f,2000);before=snapshot(f)})
+  assert.equal((await f.call(sales,'/bulk-status',request(f,'cancelled'))).status,409)
+  assert.equal(snapshot(f),before)
+  console.log('PASS movement fingerprint overflow rejects reads, final writes, replay and concurrent append atomically')
+  }
 }
 run().catch(error=>{console.error(error);process.exitCode=1})
