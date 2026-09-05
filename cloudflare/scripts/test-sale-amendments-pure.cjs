@@ -68,11 +68,13 @@ const productBatches = compile('productBatches.ts', {
 })
 const saleTransitions = compile('saleTransitions.ts', { './salesStatus': salesStatus, './productBatches': productBatches })
 const saleTotals = compile('saleTotals.ts')
+const financialPrecision = compile('financialPrecision.ts')
 const saleLineAddition = compile('saleLineAddition.ts', {
   './salesStatus': salesStatus,
   './saleTransitions': saleTransitions,
   './productBatches': productBatches,
   './saleTotals': saleTotals,
+  './financialPrecision': financialPrecision,
 })
 const subject = compile('saleAmendments.ts', {
   './salesStatus': salesStatus,

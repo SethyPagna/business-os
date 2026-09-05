@@ -55,6 +55,7 @@ import {
   type FifoLotTake,
 } from './productBatches'
 import { computeSaleTotals, round2, type SaleTotals } from './saleTotals'
+import { actualKhrValue, financialCalculationValue } from './financialPrecision'
 
 export type StockStatement = { sql: string; params: Record<string, unknown> }
 
@@ -489,12 +490,18 @@ export function plannedLineFromRecord(record: AddedSaleLineRecord): PlannedSaleL
 }
 
 export type SaleMoneySnapshot = {
+  exchange_rate?: number | null
+  updated_at?: string | null
   subtotal_usd: number
-  subtotal_khr: number
+  subtotal_khr: number | null
   total_usd: number
-  total_khr: number
+  total_khr: number | null
   change_usd: number
-  change_khr: number
+  change_khr: number | null
+  discount_khr?: number | null
+  tax_khr?: number | null
+  delivery_fee_khr?: number | null
+  membership_discount_khr?: number | null
 }
 
 export type SaleAddItemsReversal = {
@@ -512,26 +519,112 @@ export type SaleAddItemsReversal = {
    */
   moneyBefore: SaleMoneySnapshot
   moneyAfter: SaleMoneySnapshot
+  lineMoneyBefore?: SaleLineKhrSnapshot[]
+  lineMoneyAfter?: SaleLineKhrSnapshot[]
   lines: AddedSaleLineRecord[]
 }
 
 /** The one UPDATE that writes a money snapshot back onto the sale row. */
 export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMoneySnapshot): StockStatement {
   return {
-    sql: `UPDATE sales SET subtotal_usd = @subtotal_usd, subtotal_khr = @subtotal_khr,
+    sql: `UPDATE sales SET exchange_rate = CASE WHEN @has_exchange_rate=1 THEN @exchange_rate ELSE exchange_rate END,
+            subtotal_usd = @subtotal_usd, subtotal_khr = @subtotal_khr,
             total_usd = @total_usd, total_khr = @total_khr,
             change_usd = @change_usd, change_khr = @change_khr,
-            updated_at = CURRENT_TIMESTAMP
+            discount_khr = CASE WHEN @has_discount_khr=1 THEN @discount_khr ELSE discount_khr END,
+            tax_khr = CASE WHEN @has_tax_khr=1 THEN @tax_khr ELSE tax_khr END,
+            delivery_fee_khr = CASE WHEN @has_delivery_fee_khr=1 THEN @delivery_fee_khr ELSE delivery_fee_khr END,
+            membership_discount_khr = CASE WHEN @has_membership_discount_khr=1 THEN @membership_discount_khr ELSE membership_discount_khr END,
+            updated_at = COALESCE(@updated_at, CURRENT_TIMESTAMP)
           WHERE id = @sale_id`,
     params: {
       sale_id: saleId,
-      subtotal_usd: round2(Number(money.subtotal_usd) || 0),
-      subtotal_khr: Math.round(Number(money.subtotal_khr) || 0),
-      total_usd: round2(Number(money.total_usd) || 0),
-      total_khr: Math.round(Number(money.total_khr) || 0),
-      change_usd: round2(Number(money.change_usd) || 0),
-      change_khr: Math.round(Number(money.change_khr) || 0),
+      has_exchange_rate: Object.prototype.hasOwnProperty.call(money, 'exchange_rate') ? 1 : 0,
+      exchange_rate: money.exchange_rate ?? null,
+      updated_at: money.updated_at ?? null,
+      subtotal_usd: money.subtotal_usd,
+      subtotal_khr: money.subtotal_khr,
+      total_usd: money.total_usd,
+      total_khr: money.total_khr,
+      change_usd: money.change_usd,
+      change_khr: money.change_khr,
+      has_discount_khr: Object.prototype.hasOwnProperty.call(money, 'discount_khr') ? 1 : 0,
+      discount_khr: money.discount_khr ?? null,
+      has_tax_khr: Object.prototype.hasOwnProperty.call(money, 'tax_khr') ? 1 : 0,
+      tax_khr: money.tax_khr ?? null,
+      has_delivery_fee_khr: Object.prototype.hasOwnProperty.call(money, 'delivery_fee_khr') ? 1 : 0,
+      delivery_fee_khr: money.delivery_fee_khr ?? null,
+      has_membership_discount_khr: Object.prototype.hasOwnProperty.call(money, 'membership_discount_khr') ? 1 : 0,
+      membership_discount_khr: money.membership_discount_khr ?? null,
     },
+  }
+}
+
+export type SaleLineKhrSnapshot = {
+  id: number
+  applied_price_khr: number | null
+  total_khr: number | null
+  product_discount_khr: number | null
+  base_price_khr: number | null
+  manual_discount_khr: number | null
+}
+
+function nullableMoney(value: unknown): number | null {
+  return value == null ? null : Number(value) || 0
+}
+
+export function captureSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>): SaleLineKhrSnapshot[] {
+  return rows.map((row) => ({
+    id: Number(row.id),
+    applied_price_khr: nullableMoney(row.applied_price_khr),
+    total_khr: nullableMoney(row.total_khr),
+    product_discount_khr: nullableMoney(row.product_discount_khr),
+    base_price_khr: nullableMoney(row.base_price_khr),
+    manual_discount_khr: nullableMoney(row.manual_discount_khr),
+  }))
+}
+
+function convertedKhr(value: unknown, rate: number): number | null {
+  if (value == null) return null
+  return actualKhrValue(financialCalculationValue(value as number) * rate)
+}
+
+export function rebaseSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>, exchangeRate: number): SaleLineKhrSnapshot[] {
+  return rows.map((row) => ({
+    id: Number(row.id),
+    applied_price_khr: convertedKhr(row.applied_price_usd, exchangeRate),
+    total_khr: convertedKhr(row.total_usd, exchangeRate),
+    product_discount_khr: convertedKhr(row.product_discount_usd, exchangeRate),
+    base_price_khr: convertedKhr(row.base_price_usd, exchangeRate),
+    manual_discount_khr: convertedKhr(row.manual_discount_usd, exchangeRate),
+  }))
+}
+
+/** One bounded JSON parameter restores every snapshotted line exactly. */
+export function saleLineKhrSnapshotStatement(saleId: number | string, lines: SaleLineKhrSnapshot[]): StockStatement {
+  return {
+    sql: `UPDATE sale_items SET
+            applied_price_khr=(SELECT json_extract(value,'$.applied_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
+            total_khr=(SELECT json_extract(value,'$.total_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
+            product_discount_khr=(SELECT json_extract(value,'$.product_discount_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
+            base_price_khr=(SELECT json_extract(value,'$.base_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
+            manual_discount_khr=(SELECT json_extract(value,'$.manual_discount_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id)
+          WHERE sale_id=@sale_id AND id IN (SELECT json_extract(value,'$.id') FROM json_each(@lines))`,
+    params: { sale_id: saleId, lines: JSON.stringify(lines) },
+  }
+}
+
+/** Rebase every surviving/new line to one authoritative receipt rate. */
+export function rebaseSaleLineKhrStatement(saleId: number | string, exchangeRate: number): StockStatement {
+  return {
+    sql: `UPDATE sale_items SET
+            applied_price_khr=CASE WHEN applied_price_usd IS NULL THEN NULL ELSE ROUND(applied_price_usd*@rate) END,
+            total_khr=CASE WHEN total_usd IS NULL THEN NULL ELSE ROUND(total_usd*@rate) END,
+            product_discount_khr=CASE WHEN product_discount_usd IS NULL THEN NULL ELSE ROUND(product_discount_usd*@rate) END,
+            base_price_khr=CASE WHEN base_price_usd IS NULL THEN NULL ELSE ROUND(base_price_usd*@rate) END,
+            manual_discount_khr=CASE WHEN manual_discount_usd IS NULL THEN NULL ELSE ROUND(manual_discount_usd*@rate) END
+          WHERE sale_id=@sale_id`,
+    params: { sale_id: saleId, rate: exchangeRate },
   }
 }
 
@@ -655,9 +748,10 @@ export function recomputeSaleMoneyAfterLineChange(input: {
   subtotalUsd: number
   /** The raw `change_exchange_rate` setting (Part 534). */
   changeExchangeRate?: unknown
+  exchangeRateOverride?: unknown
 }): SaleTotals & { subtotalUsd: number; subtotalKhr: number } {
   const sale = input.sale
-  const exchangeRate = Number(sale.exchange_rate) || 4100
+  const exchangeRate = Number(input.exchangeRateOverride) || Number(sale.exchange_rate) || 4100
   const subtotalUsd = round2(Number(input.subtotalUsd) || 0)
   const totals = computeSaleTotals({
     subtotalUsd,

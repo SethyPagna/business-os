@@ -50,11 +50,30 @@ assert.equal(plan.changeUsd, 0.23)
 assert.equal(plan.changeKhr, 938)
 console.log('PASS canonical configured methods, repeated rows, native 4dp USD + whole KHR and derived totals')
 
+const legacyKhr = planSaleSettlement({
+  configuredMethodsRaw: '["Cash"]',
+  paymentDetailsRaw: [
+    { method: 'Legacy KHR', amount_usd: 0, amount_khr: 4100.1234 },
+    { method: 'cash', amount_usd: 0, amount_khr: 4200 },
+  ],
+  existingPaidUsd: 0,
+  existingPaidKhr: 4100.1234,
+  existingPaymentDetailsRaw: '[{"method":"Legacy KHR","amount_usd":0,"amount_khr":4100.1234}]',
+  existingPaymentMethodRaw: 'Legacy KHR',
+  totalUsd: 1,
+  exchangeRate: 4200,
+})
+assert.equal(legacyKhr.paymentDetails[0].amount_khr, 4100.1234)
+assert.equal(legacyKhr.amountPaidKhr, 8300.1234)
+assert.equal(legacyKhr.paymentMethod, 'Legacy KHR + Cash')
+console.log('PASS recorded legacy 4dp KHR remains exact while a new whole-riel tender is appended')
+
 for (const [label, patch, code] of [
   ['malformed config', { configuredMethodsRaw: '{' }, 'invalid_payment_methods_setting'],
   ['unknown method', { paymentDetailsRaw: [{ method: 'Wing', amount_usd: 6 }] }, 'inactive_payment_method'],
   ['negative amount', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: -1 }] }, 'invalid_payment_amount'],
   ['fractional cent', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: 0.005 }, { method: 'ABA Bank', amount_khr: 21000 }] }, 'invalid_payment_amount'],
+  ['fractional new riel', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: 1.2346 }, { method: 'ABA Bank', amount_khr: 12600.5 }] }, 'invalid_payment_amount'],
   ['partial reduction', { existingPaidUsd: 3, existingPaymentDetailsRaw: '[{"method":"Cash","amount_usd":3,"amount_khr":0}]', paymentDetailsRaw: [{ method: 'Cash', amount_usd: 2 }, { method: 'ABA Bank', amount_khr: 12600 }] }, 'partial_payment_reduced'],
   ['underpayment', { totalUsd: 99 }, 'insufficient_payment'],
   ['too many rows', { paymentDetailsRaw: Array.from({ length: 13 }, () => ({ method: 'Cash', amount_usd: 1 })) }, 'payment_details_limit'],
