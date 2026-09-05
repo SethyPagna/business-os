@@ -67,7 +67,11 @@ export function parseConfiguredMethodsStrict(raw: unknown): StrictConfiguredMeth
       return { ok: false, methods: [], error: 'invalid_payment_methods_setting' }
     }
   }
-  if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string' || !String(value).trim())) {
+  if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string' || !String(value).trim() || String(value).trim().length > MAX_METHOD_LENGTH)) {
+    return { ok: false, methods: [], error: 'invalid_payment_methods_setting' }
+  }
+  const suppliedKeys = parsed.map(paymentMethodKey)
+  if (new Set(suppliedKeys).size !== suppliedKeys.length) {
     return { ok: false, methods: [], error: 'invalid_payment_methods_setting' }
   }
   const methods = normalizeMethodList(parsed)

@@ -1,6 +1,8 @@
 import {
   actualKhrMinorUnits,
   actualKhrValue,
+  actualUsdMinorUnits,
+  actualUsdValue,
   financialCalculationUnits,
   financialCalculationValue,
   type FinancialDecimalInput,
@@ -28,6 +30,7 @@ export type SettlementErrorCode =
   | 'invalid_payment_method'
   | 'inactive_payment_method'
   | 'invalid_payment_amount'
+  | 'stored_payment_invalid'
   | 'partial_payment_reduced'
   | 'insufficient_payment'
 
@@ -41,26 +44,6 @@ export class SettlementValidationError extends Error {
 
 function fail(message: string, code: SettlementErrorCode): never {
   throw new SettlementValidationError(message, code)
-}
-
-function safeUnits(
-  value: unknown,
-  currency: 'USD' | 'KHR',
-  rowNumber: number,
-): bigint {
-  if (value === undefined || value === null || value === '') return 0n
-  if (!['string', 'number', 'bigint'].includes(typeof value)) {
-    return fail(`Payment row ${rowNumber} has an invalid ${currency} amount.`, 'invalid_payment_amount')
-  }
-  try {
-    const units = currency === 'USD'
-      ? financialCalculationUnits(value as FinancialDecimalInput)
-      : actualKhrMinorUnits(value as FinancialDecimalInput)
-    if (units < 0n) fail(`Payment row ${rowNumber} cannot contain a negative ${currency} amount.`, 'invalid_payment_amount')
-    return units
-  } catch {
-    return fail(`Payment row ${rowNumber} has an invalid ${currency} amount.`, 'invalid_payment_amount')
-  }
 }
 
 function calculationUnitsValue(units: bigint): number {
@@ -85,6 +68,8 @@ export function planSaleSettlement(input: {
   paymentDetailsRaw: unknown
   existingPaidUsd: unknown
   existingPaidKhr: unknown
+  existingPaymentDetailsRaw?: unknown
+  existingPaymentMethodRaw?: unknown
   totalUsd: unknown
   exchangeRate: unknown
   changeExchangeRateRaw?: unknown
@@ -101,6 +86,69 @@ export function planSaleSettlement(input: {
   }
 
   const canonical = new Map(configured.methods.map((method) => [paymentMethodKey(method), method]))
+  let existingUsdUnits: bigint
+  let existingKhrUnits: bigint
+  try {
+    existingUsdUnits = financialCalculationUnits((input.existingPaidUsd ?? 0) as FinancialDecimalInput)
+    existingKhrUnits = actualKhrMinorUnits((input.existingPaidKhr ?? 0) as FinancialDecimalInput)
+  } catch {
+    fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid')
+  }
+  type ExistingRow = { key: string; method: string; usdUnits: bigint; khrUnits: bigint; matched: boolean }
+  const existingRows: ExistingRow[] = []
+  let storedDetails: unknown = input.existingPaymentDetailsRaw
+  const storedDetailsSupplied = Array.isArray(storedDetails) || (typeof storedDetails === 'string' && Boolean(storedDetails.trim()))
+  if (typeof storedDetails === 'string' && storedDetails.trim()) {
+    try { storedDetails = JSON.parse(storedDetails) } catch {
+      fail('The sale has unreadable stored payment details and cannot be settled safely.', 'stored_payment_invalid')
+    }
+  }
+  if (Array.isArray(storedDetails)) {
+    for (const raw of storedDetails) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        fail('The sale has invalid stored payment details and cannot be settled safely.', 'stored_payment_invalid')
+      }
+      const detail = raw as Record<string, unknown>
+      const method = String(detail.method ?? '').trim()
+      if (!method || method.length > MAX_METHOD_LENGTH) fail('The sale has invalid stored payment details and cannot be settled safely.', 'stored_payment_invalid')
+      try {
+        const row = {
+          key: paymentMethodKey(method),
+          method,
+          usdUnits: financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput),
+          khrUnits: actualKhrMinorUnits((detail.amount_khr ?? 0) as FinancialDecimalInput),
+          matched: false,
+        }
+        if (row.usdUnits < 0n || row.khrUnits < 0n) throw new Error('negative')
+        existingRows.push(row)
+      } catch { fail('The sale has invalid stored payment details and cannot be settled safely.', 'stored_payment_invalid') }
+    }
+  }
+  if (storedDetailsSupplied && !Array.isArray(storedDetails)) {
+    fail('The sale has invalid stored payment details and cannot be settled safely.', 'stored_payment_invalid')
+  }
+  if (existingRows.length) {
+    const detailUsd = existingRows.reduce((sum, row) => sum + row.usdUnits, 0n)
+    const detailKhr = existingRows.reduce((sum, row) => sum + row.khrUnits, 0n)
+    if (detailUsd !== existingUsdUnits || detailKhr !== existingKhrUnits) {
+      fail('Stored payment rows do not match the sale payment totals.', 'stored_payment_invalid')
+    }
+  }
+  if (!existingRows.length) {
+    const tokens = String(input.existingPaymentMethodRaw ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+    if ((existingUsdUnits !== 0n || existingKhrUnits !== 0n) && tokens.length !== 1) {
+      fail('This partially paid sale does not identify how its split payment was allocated.', 'stored_payment_invalid')
+    }
+    if (tokens.length === 1 && (existingUsdUnits !== 0n || existingKhrUnits !== 0n)) {
+      try {
+        existingRows.push({
+          key: paymentMethodKey(tokens[0]), method: tokens[0],
+          usdUnits: existingUsdUnits,
+          khrUnits: existingKhrUnits, matched: false,
+        })
+      } catch { fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid') }
+    }
+  }
   const paymentDetails: NativeTenderRow[] = []
   let paidUsdUnits = 0n
   let paidKhrUnits = 0n
@@ -111,13 +159,36 @@ export function planSaleSettlement(input: {
     const detail = raw as Record<string, unknown>
     const suppliedMethod = String(detail.method ?? '').trim()
     const key = paymentMethodKey(suppliedMethod)
-    if (!key || suppliedMethod.length > MAX_METHOD_LENGTH || RETIRED_PAYMENT_METHODS.has(key)) {
+    if (!key || suppliedMethod.length > MAX_METHOD_LENGTH) {
       fail(`Payment row ${index + 1} needs an active configured method.`, 'invalid_payment_method')
     }
-    const method = canonical.get(key)
-    if (!method) fail(`"${suppliedMethod}" is not an active configured payment method.`, 'inactive_payment_method')
-    const usdUnits = safeUnits(detail.amount_usd, 'USD', index + 1)
-    const khrUnits = safeUnits(detail.amount_khr, 'KHR', index + 1)
+    let comparisonUsd: bigint
+    let khrUnits: bigint
+    try {
+      comparisonUsd = financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput)
+      khrUnits = actualKhrMinorUnits((detail.amount_khr ?? 0) as FinancialDecimalInput)
+    } catch {
+      fail(`Payment row ${index + 1} has an invalid amount.`, 'invalid_payment_amount')
+    }
+    const preserved = existingRows.find((row) => !row.matched && row.key === key && row.usdUnits === comparisonUsd && row.khrUnits === khrUnits)
+    let method: string
+    let usdUnits: bigint
+    if (preserved) {
+      preserved.matched = true
+      method = canonical.get(key) || preserved.method
+      usdUnits = comparisonUsd
+    } else {
+      const activeMethod = canonical.get(key)
+      if (!activeMethod || RETIRED_PAYMENT_METHODS.has(key)) fail(`"${suppliedMethod}" is not an active configured payment method.`, 'inactive_payment_method')
+      if (comparisonUsd % 100n !== 0n) {
+        fail(`Payment row ${index + 1} must use whole USD cents.`, 'invalid_payment_amount')
+      }
+      method = activeMethod
+      try { usdUnits = actualUsdMinorUnits((detail.amount_usd ?? 0) as FinancialDecimalInput) * 100n } catch {
+        fail(`Payment row ${index + 1} has an invalid USD amount.`, 'invalid_payment_amount')
+      }
+    }
+    if (khrUnits < 0n || usdUnits < 0n) fail(`Payment row ${index + 1} cannot contain a negative amount.`, 'invalid_payment_amount')
     if (usdUnits === 0n && khrUnits === 0n) {
       fail(`Payment row ${index + 1} must contain a positive USD or KHR amount.`, 'invalid_payment_amount')
     }
@@ -130,14 +201,10 @@ export function planSaleSettlement(input: {
     })
   }
 
-  let existingUsdUnits: bigint
-  let existingKhrUnits: bigint
-  try {
-    existingUsdUnits = financialCalculationUnits((input.existingPaidUsd ?? 0) as FinancialDecimalInput)
-    existingKhrUnits = actualKhrMinorUnits((input.existingPaidKhr ?? 0) as FinancialDecimalInput)
-  } catch {
-    fail('The sale has invalid stored payment totals and cannot be settled safely.', 'invalid_payment_amount')
+  if (existingRows.some((row) => !row.matched && (row.usdUnits !== 0n || row.khrUnits !== 0n))) {
+    fail('Every previously recorded payment row must remain in the settlement unchanged.', 'partial_payment_reduced')
   }
+
   if (paidUsdUnits < existingUsdUnits || paidKhrUnits < existingKhrUnits) {
     fail('The settlement cannot reduce payment already recorded on this sale.', 'partial_payment_reduced')
   }
@@ -170,7 +237,7 @@ export function planSaleSettlement(input: {
     paymentCurrency: paidUsdUnits > 0n && paidKhrUnits > 0n ? 'MIXED' : paidKhrUnits > 0n ? 'KHR' : 'USD',
     amountPaidUsd,
     amountPaidKhr,
-    changeUsd: financialCalculationValue(overpayExactUsd),
+    changeUsd: actualUsdValue(overpayExactUsd),
     changeKhr: actualKhrValue(overpayExactUsd * changeRate),
     exchangeRate: rate,
     changeExchangeRate: changeRate,
@@ -232,6 +299,22 @@ export function renameSalePaymentMethod(
   }
   if (!Array.isArray(parsed)) {
     return { ok: false, relevant: summaryResult.matches > 0, error: 'malformed_payment_details' }
+  }
+  const structurallyValid = parsed.every((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false
+    const detail = entry as Record<string, unknown>
+    const method = String(detail.method ?? '').trim()
+    if (!method || method.length > MAX_METHOD_LENGTH) return false
+    return ['amount_usd', 'amount_khr'].every((field) => {
+      const raw = detail[field]
+      if (raw == null || raw === '') return true
+      if (!['number', 'string'].includes(typeof raw)) return false
+      const value = Number(raw)
+      return Number.isFinite(value) && value >= 0
+    })
+  })
+  if (!structurallyValid) {
+    return { ok: false, relevant: summaryResult.matches > 0 || originalDetails.toLocaleLowerCase().includes(fromKey), error: 'malformed_payment_details' }
   }
   let detailMatches = 0
   let detailsChanged = false

@@ -19,6 +19,15 @@ import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/
 // lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
 // every sale writer rather than done in the POS component.
 import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '../lib/paymentMethodRegistry'
+import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
+import {
+  SALE_SETTLEMENT_ACTION_KIND,
+  buildSaleSettlementAfterState,
+  readSaleSettlementState,
+  saleMutationGuard,
+  saleSettlementStateStatements,
+  type SaleSettlementSnapshot,
+} from '../lib/saleSettlementAction'
 import { CUSTOMER_REFUND_JOIN, awaitingExpr, getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -224,6 +233,11 @@ function normalizeClientRequestId(value: unknown): string | null {
   const normalized = String(value ?? '').trim()
   if (!normalized) return null
   return normalized.length > 120 ? normalized.slice(0, 120) : normalized
+}
+
+async function saleMutationDigest(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 app.post('/', async (c) => {
@@ -1146,6 +1160,8 @@ app.patch('/:id/status', async (c) => {
     payment_details?: Array<{ method?: string; amount_usd?: number | string; amount_khr?: number | string }>
     amount_paid_usd?: number | string
     amount_paid_khr?: number | string
+    client_request_id?: string
+    expected_exchange_rate?: number | string
     // S4-2: admin-only "Don't touch stock" -- change the status and move
     // NO stock (see lib/saleTransitions.ts's planSaleStockTransition for
     // why, and why it is sticky once set).
@@ -1169,6 +1185,34 @@ app.patch('/:id/status', async (c) => {
 
   if (!saleStatus || !VALID_SALE_STATUSES.includes(saleStatus)) {
     return c.json({ error: `Invalid status. Must be one of: ${VALID_SALE_STATUSES.join(', ')}` }, 400)
+  }
+
+  const paymentFieldsSent = body.payment_method !== undefined
+    || body.payment_details !== undefined
+    || body.amount_paid_usd !== undefined
+    || body.amount_paid_khr !== undefined
+  const settlementRequestId = paymentFieldsSent ? normalizeClientRequestId(body.client_request_id) : null
+  if (paymentFieldsSent && !settlementRequestId) {
+    return c.json({ error: 'client_request_id is required when settling a sale.', code: 'client_request_id_required' }, 400)
+  }
+  const settlementCanonical = paymentFieldsSent ? JSON.stringify({
+    sale_id: Number(id),
+    sale_status: saleStatus,
+    payment_details: body.payment_details,
+    expected_exchange_rate: body.expected_exchange_rate,
+  }) : null
+  const settlementDigest = settlementCanonical ? await saleMutationDigest(JSON.parse(settlementCanonical)) : null
+  if (settlementRequestId && settlementDigest) {
+    const previous = await db.prepare(`
+      SELECT request_digest,response_json FROM sale_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='settlement' AND request_id=@request
+    `).get<{ request_digest: string; response_json: string }>({ actor: user.id, request: settlementRequestId })
+    if (previous) {
+      if (previous.request_digest !== settlementDigest) {
+        return c.json({ error: 'client_request_id was already used with different settlement data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json(JSON.parse(previous.response_json) as Record<string, unknown>)
+    }
   }
 
   const sale = await db.prepare('SELECT s.*, COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE id = ?').get<Record<string, unknown> & {
@@ -1195,7 +1239,7 @@ app.patch('/:id/status', async (c) => {
   }
 
   const oldStatus = sale.sale_status || 'completed'
-  if (oldStatus === saleStatus) {
+  if (oldStatus === saleStatus && !paymentFieldsSent) {
     return c.json({ id: Number(id), sale_status: saleStatus, updated_at: sale.updated_at || null })
   }
 
@@ -1337,9 +1381,10 @@ app.patch('/:id/status', async (c) => {
     }
   }
 
+  const mutationStamp = new Date().toISOString()
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
-  const updates = ['sale_status = @sale_status', 'updated_at = CURRENT_TIMESTAMP']
-  const updateParams: Record<string, unknown> = { sale_status: saleStatus, id }
+  const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
+  const updateParams: Record<string, unknown> = { sale_status: saleStatus, id, updated_at: mutationStamp }
   if (body.notes !== undefined) {
     updates.push('notes = @notes')
     updateParams.notes = body.notes
@@ -1364,46 +1409,66 @@ app.patch('/:id/status', async (c) => {
   // completed -- accept it here, on exactly that transition. Same
   // normalization rules as POST /. Payment fields on any other transition
   // are refused rather than silently dropped.
-  const paymentFieldsSent = body.payment_method !== undefined
-    || body.payment_details !== undefined
-    || body.amount_paid_usd !== undefined
-    || body.amount_paid_khr !== undefined
-  // Lifted out of the block below so the settled methods can be registered
-  // after the write succeeds. A credit sale is settled HERE, not at the till,
-  // so this is the second of the two places a new method can enter the system
-  // -- and the one most likely to see a method the shop only takes for
-  // settlements (a bank transfer against an invoice).
-  let settledPaymentSummary: { payment_method: string; payment_details: string } | null = null
+  let settlementSnapshot: SaleSettlementSnapshot | null = null
+  let settlementResponse: Record<string, unknown> | null = null
+  let settlementOperationId: string | null = null
+  let settlementHistoryIndex = -1
+  let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
   if (paymentFieldsSent) {
     const isDeferredPaymentSettle = oldStatus === 'awaiting_payment'
       && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
     if (!isDeferredPaymentSettle) {
       return c.json({ error: 'Payment can only be recorded when completing an awaiting-payment sale.' }, 400)
     }
-    const paidUsd = round2(Math.max(0, Number(body.amount_paid_usd) || 0))
-    const paidKhr = Math.round(Math.max(0, Number(body.amount_paid_khr) || 0))
-    const details = Array.isArray(body.payment_details)
-      ? body.payment_details
-        .slice(0, 12)
-        .map((detail) => ({
-          method: String(detail?.method || '').trim().slice(0, 80),
-          amount_usd: round2(Math.max(0, Number(detail?.amount_usd) || 0)),
-          amount_khr: Math.round(Math.max(0, Number(detail?.amount_khr) || 0)),
-        }))
-        .filter((detail) => detail.method && (detail.amount_usd > 0 || detail.amount_khr > 0))
-      : []
-    const effectiveDetails = details.length
-      ? details
-      : [{ method: String(body.payment_method || 'Cash').trim().slice(0, 80) || 'Cash', amount_usd: paidUsd, amount_khr: paidKhr }]
-    const methodSummary = Array.from(new Set(effectiveDetails.map((detail) => detail.method))).join(' + ')
-    const rate = Number(sale.exchange_rate) > 0 ? Number(sale.exchange_rate) : 4100
-    const paidCombinedUsd = paidUsd + paidKhr / rate
-    // Exact overpay kept for the riel conversion below -- same
-    // order-of-operations rule as lib/saleTotals.ts (round2 first shifts
-    // whole tens of riel off what the cashier was shown).
-    const overpayExactUsd = Math.max(0, paidCombinedUsd - (Number(sale.total_usd) || 0))
-    const overpayUsd = round2(overpayExactUsd)
+    if (body.notes !== undefined || skipStockRequested) {
+      return c.json({ error: 'Settle payment separately from notes or stock overrides.' }, 400)
+    }
+    const settingRows = await db.prepare(`
+      SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','pos_payment_methods')
+    `).all<{ key: string; value: string }>()
+    const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
+    const latestRate = Number(settingMap.exchange_rate || 4100)
+    const reviewedRate = Number(body.expected_exchange_rate)
+    if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
+      return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed settlement.', code: 'expected_exchange_rate_required', current_exchange_rate: latestRate }, 400)
+    }
+    if (!Number.isFinite(latestRate) || latestRate <= 0 || Math.abs(reviewedRate - latestRate) > 0.0000001) {
+      return c.json({ error: 'The exchange rate changed. Review the payment again.', code: 'exchange_rate_changed', current_exchange_rate: latestRate, current: { exchange_rate: latestRate } }, 409)
+    }
+    let settlementPlan
+    try {
+      settlementPlan = planSaleSettlement({
+        configuredMethodsRaw: settingMap.pos_payment_methods,
+        paymentDetailsRaw: body.payment_details,
+        existingPaidUsd: sale.amount_paid_usd,
+        existingPaidKhr: sale.amount_paid_khr,
+        existingPaymentDetailsRaw: sale.payment_details,
+        existingPaymentMethodRaw: sale.payment_method,
+        totalUsd: sale.total_usd,
+        exchangeRate: latestRate,
+        changeExchangeRateRaw: settingMap.change_exchange_rate,
+      })
+    } catch (error) {
+      if (error instanceof SettlementValidationError) return c.json({ error: error.message, code: error.code }, error.statusCode)
+      throw error
+    }
+    const before = await readSaleSettlementState(db, Number(id))
+    if (!before) return c.json({ error: 'Sale not found' }, 404)
+    const lineMoneyRows = await db.prepare(`
+      SELECT id,applied_price_usd,total_usd,product_discount_usd,
+             COALESCE(base_price_usd,0) AS base_price_usd,
+             COALESCE(manual_discount_usd,0) AS manual_discount_usd
+      FROM sale_items WHERE sale_id=@id ORDER BY id
+    `).all<Record<string, unknown>>({ id: Number(id) })
+    const after = buildSaleSettlementAfterState(before, sale, lineMoneyRows, saleStatus, settlementPlan)
     updates.push(
+      'exchange_rate = @exchange_rate',
+      'subtotal_khr = @subtotal_khr',
+      'discount_khr = @discount_khr',
+      'tax_khr = @tax_khr',
+      'total_khr = @total_khr',
+      'delivery_fee_khr = @delivery_fee_khr',
+      'membership_discount_khr = @membership_discount_khr',
       'payment_method = @payment_method',
       'payment_details = @payment_details',
       'payment_currency = @payment_currency',
@@ -1411,20 +1476,40 @@ app.patch('/:id/status', async (c) => {
       'amount_paid_khr = @amount_paid_khr',
       'change_usd = @change_usd',
       'change_khr = @change_khr',
+      'search_normalized = @search_normalized',
     )
-    updateParams.payment_method = methodSummary
-    updateParams.payment_details = JSON.stringify(effectiveDetails)
-    updateParams.payment_currency = paidUsd > 0 && paidKhr > 0 ? 'MIXED' : paidKhr > 0 ? 'KHR' : 'USD'
-    updateParams.amount_paid_usd = paidUsd
-    updateParams.amount_paid_khr = paidKhr
-    updateParams.change_usd = overpayUsd
-    // Same Part-534 rule as sale creation: KHR change converts at the
-    // configured change rate, falling back to this sale's own rate.
-    const changeRateRow = await db.prepare(
-      `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
-    ).get<{ value: string }>()
-    updateParams.change_khr = Math.round(overpayExactUsd * resolveChangeExchangeRate(changeRateRow?.value, rate))
-    settledPaymentSummary = { payment_method: methodSummary, payment_details: JSON.stringify(effectiveDetails) }
+    Object.assign(updateParams, { ...after, lines: undefined })
+    settlementLineStatements = saleSettlementStateStatements(Number(id), after, mutationStamp).slice(1)
+    settlementOperationId = crypto.randomUUID()
+    settlementSnapshot = { version: 1, operationId: settlementOperationId, saleId: Number(id), receiptNumber: sale.receipt_number == null ? null : String(sale.receipt_number), before, after }
+    settlementResponse = {
+      id: Number(id),
+      sale_status: saleStatus,
+      updated_at: mutationStamp,
+      exchange_rate: after.exchange_rate,
+      payment_method: after.payment_method,
+      payment_details: after.payment_details,
+      payment_currency: after.payment_currency,
+      amount_paid_usd: after.amount_paid_usd,
+      amount_paid_khr: after.amount_paid_khr,
+      change_usd: after.change_usd,
+      change_khr: after.change_khr,
+      actionKind: SALE_SETTLEMENT_ACTION_KIND,
+      operationId: settlementOperationId,
+      currentReplayGeneration: 0,
+    }
+    statements.unshift(
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      saleMutationGuard(`
+        COALESCE((SELECT value FROM settings WHERE key='exchange_rate'),'')=@exchangeRate
+        AND COALESCE((SELECT value FROM settings WHERE key='change_exchange_rate'),'')=@changeRate
+        AND COALESCE((SELECT value FROM settings WHERE key='pos_payment_methods'),'')=@paymentMethods
+      `, {
+        exchangeRate: settingMap.exchange_rate ?? '',
+        changeRate: settingMap.change_exchange_rate ?? '',
+        paymentMethods: settingMap.pos_payment_methods ?? '',
+      }),
+    )
   }
   if (saleStatus === 'cancelled') {
     updates.push(
@@ -1478,6 +1563,7 @@ app.patch('/:id/status', async (c) => {
     updates.push('cancel_fee_id = last_insert_rowid()')
   }
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
+  statements.push(...settlementLineStatements)
   statements.push(...plan.statements)
 
   // A provisional restore can be spent by another request before a status
@@ -1510,11 +1596,89 @@ app.patch('/:id/status', async (c) => {
     })
   }
 
+  if (settlementSnapshot && settlementResponse && settlementOperationId && settlementRequestId && settlementDigest && settlementCanonical) {
+    const historyPayload = JSON.stringify({
+      applier: SALE_SETTLEMENT_ACTION_KIND,
+      operation_id: settlementOperationId,
+      generation: 0,
+    })
+    settlementHistoryIndex = statements.length
+    statements.push({
+      sql: `INSERT INTO action_history(
+              scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
+              undo_payload,redo_payload,created_by_id,created_by_name
+            ) VALUES(
+              'sales','sale',@saleId,@label,@undoLabel,@redoLabel,1,'undoable',
+              @payload,@payload,@actor,@actorName
+            )`,
+      params: {
+        saleId: String(id),
+        label: `Settled sale ${sale.receipt_number || `#${id}`}`,
+        undoLabel: `Undo settlement of sale ${sale.receipt_number || `#${id}`}`,
+        redoLabel: `Redo settlement of sale ${sale.receipt_number || `#${id}`}`,
+        payload: historyPayload,
+        actor: user.id,
+        actorName: user.name,
+      },
+    })
+    statements.push({
+      sql: `INSERT INTO sale_mutation_receipts(
+              id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
+              before_json,after_json,response_json,history_id,generation,sale_revision,updated_at
+            ) VALUES(
+              @operation,@actor,@saleId,'settlement',@request,@digest,@requestJson,
+              @beforeJson,@afterJson,json_set(@responseJson,'$.actionHistoryId',last_insert_rowid()),
+              last_insert_rowid(),0,
+              COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
+            )`,
+      params: {
+        operation: settlementOperationId,
+        actor: user.id,
+        saleId: Number(id),
+        request: settlementRequestId,
+        digest: settlementDigest,
+        requestJson: settlementCanonical,
+        beforeJson: JSON.stringify(settlementSnapshot.before),
+        afterJson: JSON.stringify(settlementSnapshot.after),
+        responseJson: JSON.stringify(settlementResponse),
+        stamp: mutationStamp,
+      },
+    })
+    statements.push({
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            VALUES(@actor,@actorName,'sale_settlement','sale',@saleId,@details,'sale',@saleId,@details)`,
+      params: {
+        actor: user.id,
+        actorName: user.name,
+        saleId: String(id),
+        details: JSON.stringify({
+          operationId: settlementOperationId,
+          before: settlementSnapshot.before,
+          after: settlementSnapshot.after,
+        }),
+      },
+    })
+  }
+
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
+  if (settlementSnapshot) statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
   try {
-    await db.batch(statements)
+    const results = await db.batch(statements)
+    if (settlementResponse && settlementHistoryIndex >= 0) {
+      settlementResponse.actionHistoryId = Number(results[settlementHistoryIndex]?.meta?.last_row_id || 0)
+    }
   } catch (error) {
     const message = (error as Error).message || ''
+    if (settlementRequestId && settlementDigest) {
+      const retry = await db.prepare(`
+        SELECT request_digest,response_json FROM sale_mutation_receipts
+        WHERE actor_id=@actor AND mutation_kind='settlement' AND request_id=@request
+      `).get<{ request_digest: string; response_json: string }>({ actor: user.id, request: settlementRequestId })
+      if (retry) {
+        if (retry.request_digest === settlementDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+        return c.json({ error: 'client_request_id was already used with different settlement data.', code: 'idempotency_conflict' }, 409)
+      }
+    }
     if (/guard_value/i.test(message)) {
       return c.json({ error: 'This sale changed while the status update was being prepared. Refresh and try again.', code: 'write_conflict' }, 409)
     }
@@ -1555,17 +1719,8 @@ app.patch('/:id/status', async (c) => {
       ? [broadcast(c.env, 'fees', { action: 'update' })]
       : []),
   ]))
-  // The settle path's half of the payment-method registry (see POST / above).
-  if (settledPaymentSummary) {
-    const settled = settledPaymentSummary
-    c.executionCtx.waitUntil(
-      registerUsedPaymentMethods(c.env, settled)
-        .then((added) => (added.length ? bumpVersion(c.env, 'settings') : undefined)),
-    )
-  }
-
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
-  const payload = updated || { id: Number(id), sale_status: saleStatus }
+  const payload = settlementResponse || updated || { id: Number(id), sale_status: saleStatus }
   // S4-6: name who made the change. The actor is the request's authenticated
   // user (requireAuth, above) -- known synchronously here regardless of
   // whether it is ALSO persisted for later in-app display (that is S4-11b's

@@ -5,6 +5,7 @@ import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
 import { actualKhrValue, financialCalculationValue } from './financialPrecision'
 import type { SettlementPlan } from './paymentSettlement'
+import { normalizeSearchText } from './searchMatch'
 
 export const SALE_SETTLEMENT_ACTION_KIND = 'sale.settlement'
 
@@ -12,29 +13,30 @@ type Statement = { sql: string; params: Record<string, unknown> }
 
 export type SaleSettlementLineMoney = {
   id: number
-  applied_price_khr: number
-  total_khr: number
-  product_discount_khr: number
-  base_price_khr: number
-  manual_discount_khr: number
+  applied_price_khr: number | null
+  total_khr: number | null
+  product_discount_khr: number | null
+  base_price_khr: number | null
+  manual_discount_khr: number | null
 }
 
 export type SaleSettlementState = {
-  sale_status: string
-  exchange_rate: number
-  subtotal_khr: number
-  discount_khr: number
-  tax_khr: number
-  total_khr: number
-  delivery_fee_khr: number
-  membership_discount_khr: number
+  sale_status: string | null
+  exchange_rate: number | null
+  subtotal_khr: number | null
+  discount_khr: number | null
+  tax_khr: number | null
+  total_khr: number | null
+  delivery_fee_khr: number | null
+  membership_discount_khr: number | null
   payment_method: string | null
   payment_details: string | null
   payment_currency: string | null
-  amount_paid_usd: number
-  amount_paid_khr: number
-  change_usd: number
-  change_khr: number
+  amount_paid_usd: number | null
+  amount_paid_khr: number | null
+  change_usd: number | null
+  change_khr: number | null
+  search_normalized: string | null
   lines: SaleSettlementLineMoney[]
 }
 
@@ -51,43 +53,47 @@ function n(value: unknown): number {
   return Number(value) || 0
 }
 
+function nullableNumber(value: unknown): number | null {
+  return value == null ? null : n(value)
+}
+
 export async function readSaleSettlementState(db: D1Compat, saleId: number): Promise<SaleSettlementState | null> {
   const sale = await db.prepare(`
     SELECT sale_status,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
            delivery_fee_khr,membership_discount_khr,payment_method,payment_details,
-           payment_currency,amount_paid_usd,amount_paid_khr,change_usd,change_khr
+           payment_currency,amount_paid_usd,amount_paid_khr,change_usd,change_khr,search_normalized
     FROM sales WHERE id=@id
   `).get<Record<string, unknown>>({ id: saleId })
   if (!sale) return null
   const lines = await db.prepare(`
     SELECT id,applied_price_khr,total_khr,product_discount_khr,
-           COALESCE(base_price_khr,0) AS base_price_khr,
-           COALESCE(manual_discount_khr,0) AS manual_discount_khr
+           base_price_khr,manual_discount_khr
     FROM sale_items WHERE sale_id=@id ORDER BY id
   `).all<Record<string, unknown>>({ id: saleId })
   return {
-    sale_status: String(sale.sale_status || 'completed'),
-    exchange_rate: n(sale.exchange_rate),
-    subtotal_khr: n(sale.subtotal_khr),
-    discount_khr: n(sale.discount_khr),
-    tax_khr: n(sale.tax_khr),
-    total_khr: n(sale.total_khr),
-    delivery_fee_khr: n(sale.delivery_fee_khr),
-    membership_discount_khr: n(sale.membership_discount_khr),
+    sale_status: sale.sale_status == null ? null : String(sale.sale_status),
+    exchange_rate: nullableNumber(sale.exchange_rate),
+    subtotal_khr: nullableNumber(sale.subtotal_khr),
+    discount_khr: nullableNumber(sale.discount_khr),
+    tax_khr: nullableNumber(sale.tax_khr),
+    total_khr: nullableNumber(sale.total_khr),
+    delivery_fee_khr: nullableNumber(sale.delivery_fee_khr),
+    membership_discount_khr: nullableNumber(sale.membership_discount_khr),
     payment_method: sale.payment_method == null ? null : String(sale.payment_method),
     payment_details: sale.payment_details == null ? null : String(sale.payment_details),
     payment_currency: sale.payment_currency == null ? null : String(sale.payment_currency),
-    amount_paid_usd: n(sale.amount_paid_usd),
-    amount_paid_khr: n(sale.amount_paid_khr),
-    change_usd: n(sale.change_usd),
-    change_khr: n(sale.change_khr),
+    amount_paid_usd: nullableNumber(sale.amount_paid_usd),
+    amount_paid_khr: nullableNumber(sale.amount_paid_khr),
+    change_usd: nullableNumber(sale.change_usd),
+    change_khr: nullableNumber(sale.change_khr),
+    search_normalized: sale.search_normalized == null ? null : String(sale.search_normalized),
     lines: lines.map((line) => ({
       id: Number(line.id),
-      applied_price_khr: n(line.applied_price_khr),
-      total_khr: n(line.total_khr),
-      product_discount_khr: n(line.product_discount_khr),
-      base_price_khr: n(line.base_price_khr),
-      manual_discount_khr: n(line.manual_discount_khr),
+      applied_price_khr: nullableNumber(line.applied_price_khr),
+      total_khr: nullableNumber(line.total_khr),
+      product_discount_khr: nullableNumber(line.product_discount_khr),
+      base_price_khr: nullableNumber(line.base_price_khr),
+      manual_discount_khr: nullableNumber(line.manual_discount_khr),
     })),
   }
 }
@@ -120,6 +126,14 @@ export function buildSaleSettlementAfterState(
     amount_paid_khr: plan.amountPaidKhr,
     change_usd: plan.changeUsd,
     change_khr: plan.changeKhr,
+    search_normalized: normalizeSearchText([
+      sale.receipt_number,
+      sale.cashier_name,
+      sale.customer_name,
+      sale.customer_phone,
+      sale.branch_name,
+      plan.paymentMethod,
+    ].filter(Boolean).join(' ')),
     lines: lineRows.map((line) => ({
       id: Number(line.id),
       applied_price_khr: khr(line.applied_price_usd, rate),
@@ -139,7 +153,8 @@ export function saleSettlementStateStatements(saleId: number, state: SaleSettlem
           membership_discount_khr=@membership_discount_khr,payment_method=@payment_method,
           payment_details=@payment_details,payment_currency=@payment_currency,
           amount_paid_usd=@amount_paid_usd,amount_paid_khr=@amount_paid_khr,
-          change_usd=@change_usd,change_khr=@change_khr,updated_at=@stamp WHERE id=@id`,
+          change_usd=@change_usd,change_khr=@change_khr,search_normalized=@search_normalized,
+          updated_at=@stamp WHERE id=@id`,
     params: { id: saleId, stamp, ...state, lines: undefined },
   }, ...state.lines.map((line) => ({
     sql: `UPDATE sale_items SET applied_price_khr=@applied_price_khr,total_khr=@total_khr,

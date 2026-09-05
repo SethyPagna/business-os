@@ -73,7 +73,7 @@ for (const raw of [undefined, null, '', 'not json', '{}', '[1,2]', '[""]', '   '
 }
 check('drops non-string entries', parseConfiguredMethods('["Cash",7,null,"Card"]').join('|') === 'Cash|Card')
 check('strict parser accepts a non-empty valid array', parseConfiguredMethodsStrict('["Cash","ABA Bank"]').ok === true)
-for (const raw of [undefined, null, '', 'not json', '{}', '[]', '[1,2]', '["Cash",null]']) {
+for (const raw of [undefined, null, '', 'not json', '{}', '[]', '[1,2]', '["Cash",null]', '["Cash","cash"]', JSON.stringify(['x'.repeat(MAX_METHOD_LENGTH + 1)])]) {
   check(`strict parser rejects ${JSON.stringify(raw)}`, parseConfiguredMethodsStrict(raw).ok === false)
 }
 
