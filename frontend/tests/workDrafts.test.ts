@@ -25,7 +25,7 @@ const eventListeners = new Map<string, Array<() => void>>()
   },
 }
 
-const { flushPendingWorkDrafts, readWorkDraft, writeWorkDraft, clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } = await import('../src/utils/workDrafts.ts')
+const { flushPendingWorkDraft, flushPendingWorkDrafts, readWorkDraft, writeWorkDraft, clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } = await import('../src/utils/workDrafts.ts')
 
 let failed = 0
 
@@ -85,21 +85,35 @@ await runTest('pending drafts flush synchronously when iOS backgrounds the page'
   assert.equal(readWorkDraft<{ v: string }>('k8')?.data.v, 'latest')
 })
 
+await runTest('one pending key can flush on form unmount without writing or clearing its siblings', () => {
+  scheduleWorkDraftWrite('unmount-a', { v: 'latest' }, 60_000)
+  scheduleWorkDraftWrite('unmount-b', { v: 'other flow' }, 60_000)
+  assert.equal(flushPendingWorkDraft('unmount-a'), true)
+  assert.equal(readWorkDraft<{ v: string }>('unmount-a')?.data.v, 'latest')
+  assert.equal(readWorkDraft('unmount-b'), null)
+  clearWorkDraft('unmount-b')
+  assert.equal(flushPendingWorkDraft('unmount-b'), false)
+  assert.equal(readWorkDraft('unmount-b'), null)
+})
+
 await runTest('draft keys are scoped to organization and user', () => {
   memory.set('businessos_user', JSON.stringify({ id: 42, organization_public_id: 'shop-a' }))
   assert.equal(scopedWorkDraftKey('product_new'), 'businessos_draft_shop-a_42_product_new')
   memory.delete('businessos_user')
 })
 
-const productFormSource = readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
-const fastStockInSource = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
-const receiveBatchSource = readFileSync(new URL('../src/components/inventory/ReceiveBatchModal.tsx', import.meta.url), 'utf8')
+const readSource = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
+const productFormSource = readSource('../src/components/products/forms/ProductForm.tsx')
+const fastStockInSource = readSource('../src/components/inventory/FastStockInModal.tsx')
+const receiveBatchSource = readSource('../src/components/inventory/ReceiveBatchModal.tsx')
 
 await runTest('all flows ride the ONE store -- no leftover hand-rolled localStorage dialects', () => {
   // ProductForm: restore honors server updated_at, save/discard clear
   assert.match(productFormSource, /readWorkDraft<Partial<ProductFormState>>\(draftKey, \{ notOlderThanMs: serverEditedAt \|\| 0 \}\)/)
   assert.match(productFormSource, /return scheduleWorkDraftWrite\(draftKey, form\)/)
-  assert.match(productFormSource, /discard: \(\) => clearWorkDraft\(draftKey\)/)
+  assert.match(productFormSource, /discard: clearCurrentProductDraft/)
+  assert.match(productFormSource, /if \(restoredLegacyDraftKeyRef\.current\) \{\s+clearWorkDraft\(restoredLegacyDraftKeyRef\.current\)/)
+  assert.match(productFormSource, /flushPendingWorkDraft\(draftKey\)/)
   assert.doesNotMatch(productFormSource, /localStorage\.(get|set|remove)Item\(draftKey/)
   // FastStockIn: header + in-progress line persist; Done (and only Done)
   // completes the batch and clears; X/backdrop keep the shipment

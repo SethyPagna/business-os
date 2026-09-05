@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 
-const productFormSource = readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
-const fastStockInSource = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
-const createSessionSource = readFileSync(new URL('../src/components/products/CreateProductsSessionModal.tsx', import.meta.url), 'utf8')
-const productsSource = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+const readSource = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
+const productFormSource = readSource('../src/components/products/forms/ProductForm.tsx')
+const fastStockInSource = readSource('../src/components/inventory/FastStockInModal.tsx')
+const createSessionSource = readSource('../src/components/products/CreateProductsSessionModal.tsx')
+const productsSource = readSource('../src/components/products/Products.tsx')
 
 assert.match(productFormSource, /draftScope\?: string/, 'ProductForm needs an explicit create-flow draft scope')
 assert.match(productFormSource, /useStableHydratedState/, 'form hydration must be guarded by a stable entity/session key')
@@ -17,6 +18,9 @@ assert.match(createSessionSource, /useState\(\(\) => draft\?\.rows\?\.length \|\
 assert.match(productsSource, /draftScope="standalone-create"/, 'standalone creation needs its own draft namespace')
 assert.match(productsSource, /if \(!res\?\.success\) throw new Error/, 'failed product creates must reject back to ProductForm')
 assert.match(productFormSource, /clearAfterSuccessfulProductSave/, 'draft clearing must be gated by a resolved save')
+assert.match(productFormSource, /const legacyDraft = !draft && legacyDraftKey/, 'legacy fallback must run only when the new scoped draft is absent')
+assert.match(productFormSource, /restoredLegacyDraftKeyRef\.current = legacyDraft\?\.data \? legacyDraftKey : null/, 'legacy clearing must be armed only by an actual fallback restore')
+assert.match(productFormSource, /useEffect\(\(\) => \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?\}, \[draftKey\]\)/, 'unmount/key change must flush only this form pending draft')
 
 console.log('PASS product draft lifecycle source contracts')
 
@@ -139,7 +143,14 @@ Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value:
 Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: MemoryNode })
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true })
 
-const { scopedWorkDraftKey } = await import('../src/utils/workDrafts.ts')
+const {
+  clearWorkDraft,
+  flushPendingWorkDraft,
+  readWorkDraft,
+  scheduleWorkDraftWrite,
+  scopedWorkDraftKey,
+  writeWorkDraft,
+} = await import('../src/utils/workDrafts.ts')
 const { STORAGE_KEYS } = await import('../src/constants.ts')
 
 // Node executes this repository's .ts helpers directly but does not load JSX
@@ -162,7 +173,7 @@ const useStableHydratedState = Function(
 )(React.useState, React.useRef, React.useEffect) as <T>(initialState: T, hydrationKey: string) => [T, React.Dispatch<React.SetStateAction<T>>]
 
 const draftKeyStart = productFormSource.indexOf('export function productFormDraftBaseKey')
-const draftKeyEnd = productFormSource.indexOf('\n\n// ProductForm receives', draftKeyStart)
+const draftKeyEnd = productFormSource.indexOf('\n\n// Before create flows were isolated', draftKeyStart)
 assert.ok(draftKeyStart >= 0 && draftKeyEnd > draftKeyStart, 'draft-key helper source must be extractable')
 const draftKeySource = productFormSource.slice(draftKeyStart, draftKeyEnd)
   .replace(
@@ -170,6 +181,16 @@ const draftKeySource = productFormSource.slice(draftKeyStart, draftKeyEnd)
     "return function productFormDraftBaseKey(productId, draftScope = 'standalone-create') {",
   )
 const productFormDraftBaseKey = Function(draftKeySource)() as (productId: unknown, draftScope?: string) => string
+
+const legacyKeyStart = productFormSource.indexOf('export function legacyStandaloneProductDraftBaseKey')
+const legacyKeyEnd = productFormSource.indexOf('\n\n// ProductForm receives', legacyKeyStart)
+assert.ok(legacyKeyStart >= 0 && legacyKeyEnd > legacyKeyStart, 'legacy-key helper source must be extractable on LF and CRLF checkouts')
+const legacyKeySource = productFormSource.slice(legacyKeyStart, legacyKeyEnd)
+  .replace(
+    /export function legacyStandaloneProductDraftBaseKey\(productId: unknown, draftScope = 'standalone-create'\): string \| null \{/,
+    "return function legacyStandaloneProductDraftBaseKey(productId, draftScope = 'standalone-create') {",
+  )
+const legacyStandaloneProductDraftBaseKey = Function(legacyKeySource)() as (productId: unknown, draftScope?: string) => string | null
 
 const saveGateStart = productFormSource.indexOf('export async function clearAfterSuccessfulProductSave')
 const saveGateEnd = productFormSource.indexOf('\n\nfunction editableInitialForm', saveGateStart)
@@ -272,6 +293,71 @@ const actorTwoStandalone = scopedWorkDraftKey(productFormDraftBaseKey(null, 'sta
 assert.notEqual(actorTwoStandalone, actorOneStandalone, 'different users must not share a standalone draft')
 assert.equal(productFormDraftBaseKey(123, 'ignored-flow'), 'product_123', 'existing-product drafts remain entity keyed')
 console.log('PASS product draft keys isolate actor, workflow, session item, and edit entity')
+
+sessionStorage.clear()
+localStorage.clear()
+sessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id: 51, organization_public_id: 'org-upgrade' }))
+const upgradedStandaloneKey = scopedWorkDraftKey(productFormDraftBaseKey(null, 'standalone-create'))
+const actorOneLegacyKey = scopedWorkDraftKey(legacyStandaloneProductDraftBaseKey(null, 'standalone-create')!)
+writeWorkDraft(actorOneLegacyKey, { name: 'Existing deployed draft' })
+assert.equal(readWorkDraft(upgradedStandaloneKey), null, 'upgrade starts without the new standalone key')
+assert.equal(readWorkDraft<{ name: string }>(actorOneLegacyKey)?.data.name, 'Existing deployed draft', 'same actor can restore the deployed standalone draft')
+assert.equal(legacyStandaloneProductDraftBaseKey(null, 'fast-stock-in-1-code'), null, 'fast stock-in must never inspect the ambiguous legacy draft')
+assert.equal(legacyStandaloneProductDraftBaseKey(null, 'create-products-session-1-item-0'), null, 'create session must never inspect the ambiguous legacy draft')
+assert.equal(legacyStandaloneProductDraftBaseKey(123, 'standalone-create'), null, 'editing an existing product must never inspect the create draft')
+
+sessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id: 52, organization_public_id: 'org-upgrade' }))
+assert.equal(readWorkDraft(scopedWorkDraftKey('product_new')), null, 'another actor cannot see the deployed draft')
+sessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id: 51, organization_public_id: 'org-upgrade' }))
+
+// A pre-existing new-key draft wins and leaves the ambiguous legacy draft
+// untouched. Only a fallback-selected legacy key is eligible for later clear.
+writeWorkDraft(upgradedStandaloneKey, { name: 'New scoped draft wins' })
+const primary = readWorkDraft<{ name: string }>(upgradedStandaloneKey)
+const selectedLegacyKey = primary ? null : actorOneLegacyKey
+clearWorkDraft(upgradedStandaloneKey)
+if (selectedLegacyKey) clearWorkDraft(selectedLegacyKey)
+assert.equal(readWorkDraft<{ name: string }>(actorOneLegacyKey)?.data.name, 'Existing deployed draft', 'saving a new-key draft must not silently delete unrelated legacy state')
+const restoredLegacyKey = readWorkDraft(upgradedStandaloneKey) ? null : actorOneLegacyKey
+clearWorkDraft(upgradedStandaloneKey)
+if (restoredLegacyKey) clearWorkDraft(restoredLegacyKey)
+assert.equal(readWorkDraft(actorOneLegacyKey), null, 'save/discard clears legacy only after fallback selected it')
+console.log('PASS standalone-only legacy fallback survives upgrade, stays actor-isolated, and clears conditionally')
+
+const pendingKey = scopedWorkDraftKey('product_new_unmount-test')
+function DraftUnmountHarness({ draftKey, name }: { draftKey: string; name: string }) {
+  React.useEffect(() => () => {
+    flushPendingWorkDraft(draftKey)
+  }, [draftKey])
+  React.useEffect(() => scheduleWorkDraftWrite(draftKey, { name }, 60_000), [draftKey, name])
+  return React.createElement('span', null, name)
+}
+const unmountContainer = memoryDocument.createElement('div')
+const unmountRoot = createRoot(unmountContainer as unknown as Element)
+await act(async () => {
+  unmountRoot.render(React.createElement(DraftUnmountHarness, { draftKey: pendingKey, name: 'Initial value' }))
+})
+await act(async () => {
+  unmountRoot.render(React.createElement(DraftUnmountHarness, { draftKey: pendingKey, name: 'Latest before minimize' }))
+})
+assert.equal(readWorkDraft(pendingKey), null, 'debounce remains asynchronous during typing')
+await act(async () => unmountRoot.unmount())
+assert.equal(readWorkDraft<{ name: string }>(pendingKey)?.data.name, 'Latest before minimize')
+
+const clearedKey = scopedWorkDraftKey('product_new-cleared-unmount-test')
+const clearedContainer = memoryDocument.createElement('div')
+const clearedRoot = createRoot(clearedContainer as unknown as Element)
+await act(async () => {
+  clearedRoot.render(React.createElement(DraftUnmountHarness, { draftKey: clearedKey, name: 'Saved value' }))
+})
+clearWorkDraft(clearedKey)
+await act(async () => clearedRoot.unmount())
+assert.equal(flushPendingWorkDraft(clearedKey), false, 'cleared success/discard cannot be resurrected by later unmount cleanup')
+assert.equal(readWorkDraft(clearedKey), null)
+clearWorkDraft(pendingKey)
+assert.equal(flushPendingWorkDraft(pendingKey), false, 'cleared success/discard cannot be resurrected by later unmount cleanup')
+assert.equal(readWorkDraft(pendingKey), null)
+console.log('PASS mounted React unmount/minimize flush preserves latest dirty state without resurrecting cleared work')
 
 let clearCount = 0
 await assert.rejects(

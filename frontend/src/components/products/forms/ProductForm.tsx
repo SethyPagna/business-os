@@ -19,7 +19,7 @@ import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialo
 import { useMergeStockChoice } from '../useMergeStockChoice.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
-import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
+import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
@@ -381,6 +381,15 @@ export function productFormDraftBaseKey(productId: unknown, draftScope = 'standa
   return `product_new_${scope}`
 }
 
+// Before create flows were isolated, standalone ProductForm drafts used the
+// actor-scoped `product_new` base key. Only standalone create can safely claim
+// that history: session/stock-in callers must never inspect the ambiguous key.
+export function legacyStandaloneProductDraftBaseKey(productId: unknown, draftScope = 'standalone-create'): string | null {
+  if (String(productId ?? '').trim()) return null
+  const scope = String(draftScope || 'standalone-create').trim() || 'standalone-create'
+  return scope === 'standalone-create' ? 'product_new' : null
+}
+
 // ProductForm receives reference data and mapped product objects from a busy
 // catalog page. Those references may change during background refreshes even
 // though the operator is still editing the same entity/session item. React
@@ -507,6 +516,8 @@ export default function ProductForm({
   const isEditMode = !isCreateMode
   const imageLimit = isAdminProductUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
   const draftKey = scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope))
+  const legacyDraftBaseKey = legacyStandaloneProductDraftBaseKey(product?.id, draftScope)
+  const legacyDraftKey = legacyDraftBaseKey ? scopedWorkDraftKey(legacyDraftBaseKey) : null
 
   const initialForm = useMemo<ProductFormState>(() => {
     if (product?.id) {
@@ -575,6 +586,7 @@ export default function ProductForm({
   // see reorderImage/moveImage above.
   const [dragImageIndex, setDragImageIndex] = useState<number | null>(null)
   const supplierRequestRef = useRef(0)
+  const restoredLegacyDraftKeyRef = useRef<string | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   // Locked-name-of-a-grouped-product feature (this session). isGroupedProduct
   // is computed off the SAVED name this form loaded with (initialForm.name),
@@ -739,6 +751,18 @@ export default function ProductForm({
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  function clearCurrentProductDraft(): void {
+    formDirtyRef.current = false
+    clearWorkDraft(draftKey)
+    // Do not erase an ambiguous deployed-version draft merely because a newer
+    // standalone draft exists. It belongs to this form only after fallback
+    // restoration actually selected it.
+    if (restoredLegacyDraftKeyRef.current) {
+      clearWorkDraft(restoredLegacyDraftKeyRef.current)
+      restoredLegacyDraftKeyRef.current = null
+    }
+  }
+
   // Part 388 "Canva-level" persistence: the in-progress form autosaves to
   // localStorage (debounced) and comes back after a crash, reload, or
   // accidental close. The draft is cleared on a successful save and on an
@@ -855,14 +879,20 @@ export default function ProductForm({
 
   useEffect(() => {
     formDirtyRef.current = false
+    restoredLegacyDraftKeyRef.current = null
     // F3 slice 1: same restore, through the ONE shared store (which also
     // reads Part 388's original { form } field for existing drafts).
     {
       const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? Date.parse(String((product as Record<string, unknown>).updated_at)) : 0
       const draft = readWorkDraft<Partial<ProductFormState>>(draftKey, { notOlderThanMs: serverEditedAt || 0 })
-      if (draft?.data) {
-        setForm((current) => ({ ...current, ...draft.data }))
+      const legacyDraft = !draft && legacyDraftKey
+        ? readWorkDraft<Partial<ProductFormState>>(legacyDraftKey, { notOlderThanMs: serverEditedAt || 0 })
+        : null
+      const restoredDraft = draft || legacyDraft
+      if (restoredDraft?.data) {
+        setForm((current) => ({ ...current, ...restoredDraft.data }))
         formDirtyRef.current = true
+        restoredLegacyDraftKeyRef.current = legacyDraft?.data ? legacyDraftKey : null
         // (no notify prop here -- the restored values themselves are the signal)
       }
     }
@@ -876,9 +906,16 @@ export default function ProductForm({
       // identity validation -- auto-submitting from a navigation prompt
       // would surface those errors in a page the user is trying to leave.
       // The guard offers Discard & Leave / Stay for this entry.
-      discard: () => clearWorkDraft(draftKey),
+      discard: clearCurrentProductDraft,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
+
+  useEffect(() => () => {
+    // Runs only when this form unmounts or switches entity/session key. It is
+    // declared before the debounced writer so React flushes the pending value
+    // before that writer's ordinary cleanup can cancel it.
+    flushPendingWorkDraft(draftKey)
   }, [draftKey])
 
   useEffect(() => {
@@ -1125,8 +1162,7 @@ export default function ProductForm({
         () => onSave(payload),
         () => {
           // Saved for real -- the autosaved draft is now history (Part 388).
-          formDirtyRef.current = false
-          clearWorkDraft(draftKey)
+          clearCurrentProductDraft()
         },
       )
     } catch (error) {
@@ -1142,8 +1178,7 @@ export default function ProductForm({
         try {
           const outcome = await mergeWithChoice({ id: collision.id, name: collision.name }, { id: Number(product.id), name: String(form.name || '') })
           if (outcome === 'merged') {
-            formDirtyRef.current = false
-            clearWorkDraft(draftKey)
+            clearCurrentProductDraft()
             onClose()
             return
           }
