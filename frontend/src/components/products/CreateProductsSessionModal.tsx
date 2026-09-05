@@ -144,6 +144,14 @@ function currentCost(product: ProductCandidate | null): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
 }
 
+function isDefinitiveNoWriteStockSessionError(error: unknown): boolean {
+  const failure = error as { status?: unknown; code?: unknown } | null
+  const status = Number(failure?.status)
+  const code = String(failure?.code || '')
+  if ([400, 403, 404].includes(status)) return true
+  return status === 409 && !!code && code !== 'idempotency_conflict'
+}
+
 function quantityAtBranch(product: ProductCandidate, branchId: string): number {
   const entry = (product.branch_stock || []).find((row) => String(row.branch_id ?? '') === String(branchId))
   const value = Number(entry?.quantity ?? product.stock_quantity ?? 0)
@@ -286,11 +294,12 @@ export default function CreateProductsSessionModal({
   }, [resolvedDefaultBranchId])
 
   useEffect(() => {
+    const seq = ++searchSeqRef.current
+    const invalidate = () => { if (searchSeqRef.current === seq) searchSeqRef.current += 1 }
     if (mode !== 'existing' || selectedGroup || query.trim().length < 2) {
-      setCandidates([]); setSearching(false); setSearchFailed(false); return
+      setCandidates([]); setSearching(false); setSearchFailed(false); return invalidate
     }
     const text = query.trim()
-    const seq = ++searchSeqRef.current
     const timer = window.setTimeout(() => {
       setSearching(true); setSearchFailed(false)
       void searchProducts({ query: text, pageSize: 8 })
@@ -305,7 +314,7 @@ export default function CreateProductsSessionModal({
         })
         .finally(() => { if (seq === searchSeqRef.current) setSearching(false) })
     }, 250)
-    return () => window.clearTimeout(timer)
+    return () => { window.clearTimeout(timer); invalidate() }
   }, [mode, query, selectedGroup])
 
   useEffect(() => {
@@ -367,11 +376,15 @@ export default function CreateProductsSessionModal({
     if (!selectedProduct) return
     const productId = Number(selectedProduct.id)
     const branchId = Number(lineBranchId)
-    const quantity = Math.floor(Number(lineQuantity))
-    const unitCostUsd = Number(lineUnitCost)
+    const quantity = Number(lineQuantity)
+    const unitCostText = lineUnitCost.trim()
+    const unitCostUsd = Number(unitCostText)
     const expectedLoadKey = `${productId}:${branchId}`
     if (!productId || !branchId || !Number.isSafeInteger(quantity) || quantity <= 0) {
-      notify(tr('fast_stockin_qty', 'Quantity must be at least 1'), 'error'); return
+      notify(tr('invalid_quantity', 'Invalid quantity'), 'error'); return
+    }
+    if (!unitCostText || !Number.isFinite(unitCostUsd) || unitCostUsd < 0) {
+      notify(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`, 'error'); return
     }
     if (batchLoading || batchFailed || exactBatchLoadKey !== expectedLoadKey) {
       notify(tr('load_failed', 'Could not load stock batches.'), 'error'); return
@@ -384,7 +397,7 @@ export default function CreateProductsSessionModal({
       branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: lineReceivedDate || receivedDate,
       expiryDate: lineExpiryDate, batchId: chosenBatch ? Number(chosenBatch.id) : null,
       batchLabel: chosenBatch ? batchDisplayLabel(chosenBatch, tr('batch', 'Batch')) : tr('new_batch', '+ New batch'),
-      quantity, unitCostUsd: Number.isFinite(unitCostUsd) && unitCostUsd >= 0 ? unitCostUsd : 0,
+      quantity, unitCostUsd,
       status: 'queued', detail: tr('ready_to_receive', 'Ready'),
     }
     setRows((prev) => [row, ...prev]); setCommitError(''); setQuery(''); closeExistingOptions()
@@ -398,11 +411,15 @@ export default function CreateProductsSessionModal({
 
   const saveNewItem = async (payload: Record<string, unknown>) => {
     if (saving) throw new Error(tr('saving_label', 'Saving…'))
-    const quantity = Math.max(0, Math.floor(Number(payload.stock_quantity) || 0))
+    const quantityValue = payload.stock_quantity == null || payload.stock_quantity === '' ? 0 : Number(payload.stock_quantity)
+    if (!Number.isSafeInteger(quantityValue) || quantityValue < 0) throw new Error(tr('invalid_quantity', 'Invalid quantity'))
+    const quantity = quantityValue
     const branchId = Number(payload.branch_id ?? header.branchId)
     const name = String(payload.name || '').trim()
     const barcode = String(payload.barcode || '').trim()
-    const cost = Number(payload.cost_price_usd || 0)
+    const costValue = payload.cost_price_usd == null || payload.cost_price_usd === '' ? 0 : Number(payload.cost_price_usd)
+    if (!Number.isFinite(costValue) || costValue < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
+    const cost = costValue
     if (!name || !branchId) throw new Error(tr('create_products_branch_required', 'Choose the branch this delivery goes to.'))
     const queuedTwin = rows.find((row) => row.kind === 'create_receive' && row.name.trim().toLowerCase() === name.toLowerCase()
       && row.barcode.trim() === barcode && Math.round(row.unitCostUsd * 10000) === Math.round((Number.isFinite(cost) ? cost : 0) * 10000))
@@ -410,8 +427,10 @@ export default function CreateProductsSessionModal({
     setSaving(true)
     try {
       if (quantity === 0) {
-        // Zero-stock products stay on the catalog create path: milestone A
-        // cannot encode a product-only create without a receipt quantity.
+        // Bounded NON-ATOMIC exception: milestone A cannot encode a
+        // product-only create without a receipt quantity. Do not describe a
+        // mixed session containing this row as wholly atomic; the proper fix
+        // is a create-only line in the idempotent session API.
         const productId = await onCreateProduct({ ...payload, stock_quantity: 0 })
         const row: SessionLine = {
           lineId: `created_${String(productId)}_${Date.now()}`, kind: 'created_zero', productId: Number(productId) || null, product: null,
@@ -499,6 +518,16 @@ export default function CreateProductsSessionModal({
       clearWorkDraft(draftKey); onDone(); onClose()
     } catch (error) {
       const message = error instanceof Error ? error.message : tr('failed', 'Failed')
+      if (isDefinitiveNoWriteStockSessionError(error)) {
+        // The server positively rejected this request before applying stock,
+        // so correction may reuse the same known-unused request identity.
+        // Unknown outcomes and idempotency conflicts stay frozen for exact retry.
+        setSubmittedItems(null)
+        writeWorkDraft<UnifiedSessionDraft>(draftKey, {
+          sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
+          rows: [], lines: rows, step: 'items', receivedDate, mode, query, submittedItems: null,
+        })
+      }
       setCommitError(message); notify(message, 'error')
     } finally { setSaving(false) }
   }

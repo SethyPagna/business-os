@@ -314,10 +314,42 @@ runTest('corrected stock-session wire receives real JSON numbers and explicit ba
   assert.match(modalSource, /new TextEncoder\(\)\.encode\(JSON\.stringify\(attemptPayload\)\)\.length/)
 })
 
+runTest('existing-line quantity and unit cost reject invalid input instead of coercing it', () => {
+  const queueBlock = modalSource.slice(modalSource.indexOf('const queueExistingLine ='), modalSource.indexOf('const writeDraft ='))
+  assert.match(queueBlock, /const quantity = Number\(lineQuantity\)/)
+  assert.match(queueBlock, /!Number\.isSafeInteger\(quantity\)/)
+  assert.doesNotMatch(queueBlock, /Math\.floor\(Number\(lineQuantity\)\)/)
+  assert.match(queueBlock, /const unitCostText = lineUnitCost\.trim\(\)/)
+  assert.match(queueBlock, /!unitCostText \|\| !Number\.isFinite\(unitCostUsd\) \|\| unitCostUsd < 0/)
+  assert.match(queueBlock, /quantity, unitCostUsd,/)
+  assert.doesNotMatch(queueBlock, /unitCostUsd: Number\.isFinite[\s\S]*?\? unitCostUsd : 0/)
+  const newItemBlock = modalSource.slice(modalSource.indexOf('const saveNewItem ='), modalSource.indexOf('const removeLine ='))
+  assert.match(newItemBlock, /!Number\.isSafeInteger\(quantityValue\) \|\| quantityValue < 0/)
+  assert.match(newItemBlock, /!Number\.isFinite\(costValue\) \|\| costValue < 0/)
+  assert.doesNotMatch(newItemBlock, /Math\.max\(0, Math\.floor/)
+})
+
+runTest('every search dependency change and unmount invalidates an in-flight result', () => {
+  const searchEffect = modalSource.slice(modalSource.indexOf("if (mode !== 'existing'" ) - 1200, modalSource.indexOf("if (mode !== 'existing'") + 1200)
+  assert.match(searchEffect, /const seq = \+\+searchSeqRef\.current[\s\S]*?if \(mode !== 'existing'/)
+  assert.match(searchEffect, /const invalidate = \(\) => \{ if \(searchSeqRef\.current === seq\) searchSeqRef\.current \+= 1 \}/)
+  assert.match(searchEffect, /return invalidate/)
+  assert.match(searchEffect, /window\.clearTimeout\(timer\); invalidate\(\)/)
+})
+
+runTest('definitive no-write failures unlock correction under the same request id', () => {
+  assert.match(modalSource, /function isDefinitiveNoWriteStockSessionError/)
+  assert.match(modalSource, /\[400, 403, 404\]\.includes\(status\)/)
+  assert.match(modalSource, /status === 409 && !!code && code !== 'idempotency_conflict'/)
+  assert.match(modalSource, /if \(isDefinitiveNoWriteStockSessionError\(error\)\) \{[\s\S]*?setSubmittedItems\(null\)[\s\S]*?submittedItems: null/)
+  assert.doesNotMatch(modalSource, /sessionRequestIdRef\.current\s*=/, 'correction must reuse the known-unused identity')
+})
+
 runTest('zero-stock New remains a catalog create because milestone A cannot encode it', () => {
   assert.match(modalSource, /if \(quantity === 0\)/)
   assert.match(modalSource, /await onCreateProduct\(\{ \.\.\.payload, stock_quantity: 0 \}\)/)
-  assert.match(modalSource, /Zero-stock products stay on the catalog create path/)
+  assert.match(modalSource, /Bounded NON-ATOMIC exception/)
+  assert.match(modalSource, /proper fix[\s\S]*create-only line in the idempotent session API/)
 })
 
 runTest('the session shows the header it captured', () => {
