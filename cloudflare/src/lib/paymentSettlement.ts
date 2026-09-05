@@ -49,10 +49,40 @@ function calculationUnitsValue(units: bigint): number {
   return Number(units) / 10_000
 }
 
-function isExactNativeIncrement(value: unknown, multiplier: number): boolean {
-  const numeric = Number(value ?? 0)
-  return Number.isFinite(numeric)
-    && Math.abs(numeric * multiplier - Math.round(numeric * multiplier)) < 1e-9
+const MAX_DECIMAL_SOURCE_LENGTH = 256
+const MAX_ABS_DECIMAL_EXPONENT = 100_000
+const DECIMAL_PATTERN = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/
+
+type DecimalShape = { negative: boolean; coefficient: string; decimalScale: number }
+
+function decimalShape(value: unknown): DecimalShape | null {
+  if (!['string', 'number', 'bigint'].includes(typeof value)) return null
+  if (typeof value === 'number' && !Number.isFinite(value)) return null
+  const source = String(value).trim()
+  if (!source || source.length > MAX_DECIMAL_SOURCE_LENGTH) return null
+  const match = DECIMAL_PATTERN.exec(source)
+  if (!match) return null
+  const exponent = Number(match[5] || '0')
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > MAX_ABS_DECIMAL_EXPONENT) return null
+  const fraction = match[3] ?? match[4] ?? ''
+  const coefficient = `${match[2] || ''}${fraction}`.replace(/^0+/, '') || '0'
+  return {
+    negative: match[1] === '-' && coefficient !== '0',
+    coefficient,
+    decimalScale: fraction.length - exponent,
+  }
+}
+
+function hasExactIncrement(shape: DecimalShape, decimals: number): boolean {
+  const discardedDigits = shape.decimalScale - decimals
+  if (discardedDigits <= 0 || shape.coefficient === '0') return true
+  if (discardedDigits > shape.coefficient.length) return false
+  return !/[1-9]/.test(shape.coefficient.slice(-discardedDigits))
+}
+
+function isExactNonNegativeAmount(value: unknown, decimals: number): boolean {
+  const shape = decimalShape(value)
+  return Boolean(shape && !shape.negative && hasExactIncrement(shape, decimals))
 }
 
 export type SettlementPlan = {
@@ -94,6 +124,8 @@ export function planSaleSettlement(input: {
   let existingUsdUnits: bigint
   let existingKhrUnits: bigint
   try {
+    if (!isExactNonNegativeAmount(input.existingPaidUsd ?? 0, 4)
+      || !isExactNonNegativeAmount(input.existingPaidKhr ?? 0, 4)) throw new Error('invalid stored precision')
     existingUsdUnits = financialCalculationUnits((input.existingPaidUsd ?? 0) as FinancialDecimalInput)
     existingKhrUnits = financialCalculationUnits((input.existingPaidKhr ?? 0) as FinancialDecimalInput)
   } catch {
@@ -117,6 +149,8 @@ export function planSaleSettlement(input: {
       const method = String(detail.method ?? '').trim()
       if (!method || method.length > MAX_METHOD_LENGTH) fail('The sale has invalid stored payment details and cannot be settled safely.', 'stored_payment_invalid')
       try {
+        if (!isExactNonNegativeAmount(detail.amount_usd ?? 0, 4)
+          || !isExactNonNegativeAmount(detail.amount_khr ?? 0, 4)) throw new Error('invalid stored precision')
         const row = {
           key: paymentMethodKey(method),
           method,
@@ -170,6 +204,8 @@ export function planSaleSettlement(input: {
     let comparisonUsd: bigint
     let khrUnits: bigint
     try {
+      if (!isExactNonNegativeAmount(detail.amount_usd ?? 0, 4)
+        || !isExactNonNegativeAmount(detail.amount_khr ?? 0, 4)) throw new Error('invalid submitted precision')
       comparisonUsd = financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput)
       khrUnits = financialCalculationUnits((detail.amount_khr ?? 0) as FinancialDecimalInput)
     } catch {
@@ -185,10 +221,10 @@ export function planSaleSettlement(input: {
     } else {
       const activeMethod = canonical.get(key)
       if (!activeMethod || RETIRED_PAYMENT_METHODS.has(key)) fail(`"${suppliedMethod}" is not an active configured payment method.`, 'inactive_payment_method')
-      if (!isExactNativeIncrement(detail.amount_usd, 100) || comparisonUsd % 100n !== 0n) {
+      if (!isExactNonNegativeAmount(detail.amount_usd ?? 0, 2) || comparisonUsd % 100n !== 0n) {
         fail(`Payment row ${index + 1} must use whole USD cents.`, 'invalid_payment_amount')
       }
-      if (!isExactNativeIncrement(detail.amount_khr, 1) || khrUnits % 10_000n !== 0n) {
+      if (!isExactNonNegativeAmount(detail.amount_khr ?? 0, 0) || khrUnits % 10_000n !== 0n) {
         fail(`Payment row ${index + 1} must use whole KHR riel.`, 'invalid_payment_amount')
       }
       method = activeMethod

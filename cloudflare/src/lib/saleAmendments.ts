@@ -78,7 +78,12 @@ import {
   type FifoLotTake,
 } from './productBatches'
 import { round2 } from './saleTotals'
+import { financialCalculationValue } from './financialPrecision'
 import { recomputeSaleMoneyAfterLineChange, type SaleMoneyRow, type StockStatement } from './saleLineAddition'
+
+function calculatedKhr(value: unknown, exchangeRate: number): number {
+  return financialCalculationValue(financialCalculationValue(Number(value) || 0) * financialCalculationValue(exchangeRate))
+}
 
 export type { StockStatement }
 
@@ -631,7 +636,7 @@ function lineQuantityUpdateStatement(
       id: line.id,
       quantity,
       total_usd: totalUsd,
-      total_khr: Math.round(totalUsd * exchangeRate),
+      total_khr: calculatedKhr(totalUsd, exchangeRate),
     },
   }
 }
@@ -706,7 +711,7 @@ export function planDeliveryFeeChange(input: {
       params: {
         sale_id: input.saleId,
         fee_usd: feeAfterUsd,
-        fee_khr: Math.round(feeAfterUsd * exchangeRate),
+        fee_khr: calculatedKhr(feeAfterUsd, exchangeRate),
       },
     }],
     feeBeforeUsd,
@@ -836,7 +841,7 @@ export function saleTaxUpdateStatement(saleId: number | string, taxUsd: number, 
     params: {
       sale_id: saleId,
       tax_usd: usd,
-      tax_khr: Math.round(usd * (Number(exchangeRate) || 4100)),
+      tax_khr: calculatedKhr(usd, Number(exchangeRate) || 4100),
     },
   }
 }

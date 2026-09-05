@@ -55,7 +55,7 @@ import {
   type FifoLotTake,
 } from './productBatches'
 import { computeSaleTotals, round2, type SaleTotals } from './saleTotals'
-import { actualKhrValue, financialCalculationValue } from './financialPrecision'
+import { financialCalculationValue } from './financialPrecision'
 
 export type StockStatement = { sql: string; params: Record<string, unknown> }
 
@@ -331,16 +331,16 @@ export function planSaleLineAddition(input: {
         product_name: line.productName,
         quantity: line.quantity,
         applied_price_usd: line.unitPriceUsd,
-        applied_price_khr: Math.round(line.unitPriceUsd * exchangeRate),
+        applied_price_khr: convertedKhr(line.unitPriceUsd, exchangeRate),
         cost_price_usd: line.costPriceUsd,
         cost_price_khr: line.costPriceKhr,
         total_usd: line.lineTotalUsd,
-        total_khr: Math.round(line.lineTotalUsd * exchangeRate),
+        total_khr: convertedKhr(line.lineTotalUsd, exchangeRate),
         branch_id: line.branchId,
         price_mode: 'selling',
         // Same "no manual discount" default POST / uses: base = applied.
         base_price_usd: line.unitPriceUsd,
-        base_price_khr: Math.round(line.unitPriceUsd * exchangeRate),
+        base_price_khr: convertedKhr(line.unitPriceUsd, exchangeRate),
         // A single-lot line stamps its lot on the row, identical to an
         // explicit pick at checkout; a multi-lot split keeps NULL and the
         // detail lives in sale_item_batch_allocations.
@@ -632,7 +632,7 @@ export function captureSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>)
 
 function convertedKhr(value: unknown, rate: number): number | null {
   if (value == null) return null
-  return actualKhrValue(financialCalculationValue(value as number) * rate)
+  return financialCalculationValue(financialCalculationValue(value as number) * financialCalculationValue(rate))
 }
 
 export function rebaseSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>, exchangeRate: number): SaleLineKhrSnapshot[] {
@@ -664,11 +664,11 @@ export function saleLineKhrSnapshotStatement(saleId: number | string, lines: Sal
 export function rebaseSaleLineKhrStatement(saleId: number | string, exchangeRate: number): StockStatement {
   return {
     sql: `UPDATE sale_items SET
-            applied_price_khr=CASE WHEN applied_price_usd IS NULL THEN NULL ELSE ROUND(applied_price_usd*@rate) END,
-            total_khr=CASE WHEN total_usd IS NULL THEN NULL ELSE ROUND(total_usd*@rate) END,
-            product_discount_khr=CASE WHEN product_discount_usd IS NULL THEN NULL ELSE ROUND(product_discount_usd*@rate) END,
-            base_price_khr=CASE WHEN base_price_usd IS NULL THEN NULL ELSE ROUND(base_price_usd*@rate) END,
-            manual_discount_khr=CASE WHEN manual_discount_usd IS NULL THEN NULL ELSE ROUND(manual_discount_usd*@rate) END
+            applied_price_khr=CASE WHEN applied_price_usd IS NULL THEN NULL ELSE ROUND(applied_price_usd*@rate,4) END,
+            total_khr=CASE WHEN total_usd IS NULL THEN NULL ELSE ROUND(total_usd*@rate,4) END,
+            product_discount_khr=CASE WHEN product_discount_usd IS NULL THEN NULL ELSE ROUND(product_discount_usd*@rate,4) END,
+            base_price_khr=CASE WHEN base_price_usd IS NULL THEN NULL ELSE ROUND(base_price_usd*@rate,4) END,
+            manual_discount_khr=CASE WHEN manual_discount_usd IS NULL THEN NULL ELSE ROUND(manual_discount_usd*@rate,4) END
           WHERE sale_id=@sale_id`,
     params: { sale_id: saleId, rate: exchangeRate },
   }
@@ -815,5 +815,10 @@ export function recomputeSaleMoneyAfterLineChange(input: {
     rawAmountPaidUsd: Number(sale.amount_paid_usd) || 0,
     rawAmountPaidKhr: Number(sale.amount_paid_khr) || 0,
   })
-  return { ...totals, subtotalUsd, subtotalKhr: Math.round(subtotalUsd * exchangeRate) }
+  return {
+    ...totals,
+    totalKhr: convertedKhr(totals.totalUsd, exchangeRate) ?? 0,
+    subtotalUsd,
+    subtotalKhr: convertedKhr(subtotalUsd, exchangeRate) ?? 0,
+  }
 }

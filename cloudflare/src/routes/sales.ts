@@ -92,7 +92,7 @@ import {
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
-import { actualKhrValue, financialCalculationValue } from '../lib/financialPrecision'
+import { financialCalculationValue } from '../lib/financialPrecision'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
@@ -2950,7 +2950,7 @@ function nullableNumber(value: unknown): number | null {
 
 function receiptKhrFromUsd(value: unknown, exchangeRate: number): number | null {
   if (value == null) return null
-  return actualKhrValue(financialCalculationValue(Number(value) || 0) * exchangeRate)
+  return financialCalculationValue(financialCalculationValue(Number(value) || 0) * financialCalculationValue(exchangeRate))
 }
 
 function amendmentMoneyBefore(sale: Record<string, unknown>) {
