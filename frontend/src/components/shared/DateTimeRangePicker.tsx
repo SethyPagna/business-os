@@ -65,6 +65,8 @@ interface DateTimeRangePickerProps {
   // Time row is optional per surface -- the Sales daily report wants it,
   // a plain list filter may not.
   showTime?: boolean
+  /** Hide only the decorative trigger icon on space-constrained surfaces. */
+  showCalendarIcon?: boolean
   align?: 'left' | 'right'
   className?: string
   // Layout/shape utilities for the trigger button. Omitted => the default
@@ -141,6 +143,7 @@ export default function DateTimeRangePicker({
   onChange,
   t,
   showTime = true,
+  showCalendarIcon = true,
   align = 'left',
   className = '',
   triggerClassName,
@@ -400,7 +403,7 @@ export default function DateTimeRangePicker({
         aria-expanded={open}
         aria-label={t('date_time_range') || 'Date and time range'}
       >
-        <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />
+        {showCalendarIcon && <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />}
         <span className={`min-w-0 truncate ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{startTriggerLabel}</span>
         <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} />
         <span className={`min-w-0 truncate ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{endTriggerLabel}</span>
