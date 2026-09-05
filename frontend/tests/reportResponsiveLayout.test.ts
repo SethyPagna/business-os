@@ -69,6 +69,14 @@ for (const lang of ['en', 'km']) {
 // rounding fix (c999e909) already on this line.
 assert.match(css, /@media \(min-width: 1280px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(40px, 4vw, 64px\);/, '1280px gets its own, larger gutter')
 assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[^}]*max-width: 96rem;[^}]*margin-inline: auto;[^}]*padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ caps the reading width and centers it, so 1920/4K keeps growing margin instead of a saturated 48px')
+// REPAIR (verifier, Sep 6): `margin-inline: auto` on a flex item does not
+// stretch it (CSS Flexbox 9.6) -- without an explicit `width: 100%` the hub
+// shrinks to fit-content and `max-width: 96rem` never binds, so the whole
+// surface floats mid-screen at >=1536px instead of centering at its cap.
+// This assertion must fail against the un-repaired declaration list (it did,
+// before `width: 100%` was added) so it actually guards the stretch
+// contract instead of freezing the flex-collapse defect.
+assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[^}]*width: 100%;[^}]*max-width: 96rem;[^}]*margin-inline: auto;[^}]*padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ hub is given an explicit width so the auto margins can stretch-then-center it against the max-width cap, instead of shrinking to fit-content')
 const gutterOrder = ['@media (min-width: 768px)', '@media (min-width: 1024px)', '@media (min-width: 1280px)', '@media (min-width: 1536px)']
 for (let i = 1; i < gutterOrder.length; i += 1) {
   assert.ok(css.indexOf(gutterOrder[i - 1]) < css.indexOf(gutterOrder[i]), `${gutterOrder[i - 1]} must precede ${gutterOrder[i]} so wider screens win the cascade`)
