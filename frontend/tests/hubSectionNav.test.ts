@@ -132,8 +132,8 @@ await runTest('mobile body has no intermediate picker or extra history, legacy p
   assert.match(navSource, /aria-pressed=\{isActive\}/)
   const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
   assert.match(sidebar, /mobileGroupAction/)
-  assert.match(sidebar, /navigateTo\(item.id, hubAnchor\(item.id, section.id\)\)/)
-  assert.match(sidebar, /grid min-w-0 grid-cols-2/)
+  assert.match(sidebar, /navigateTo\(entry.ownerId, hubAnchor\(entry.ownerId, section.id\)\)/)
+  assert.match(sidebar, /col-span-2 grid min-w-0 grid-cols-2/)
 })
 
 await runTest('pages mode uses one compact header and its inline group drawer without legacy bottom chrome', () => {

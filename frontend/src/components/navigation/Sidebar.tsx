@@ -1,5 +1,6 @@
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import { getHubDestinations, hubAnchor, mobileGroupAction, resolveHubSection } from '../shared/hubNavigation.ts'
+import { buildMobileHomeLayout, mobileHomeSectionsPanelId } from '../../utils/mobileHomeTiles.ts'
 import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
@@ -643,35 +644,38 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" />
             </div>
             {inline ? (
-              <div className="space-y-1 px-3 pb-4">
-                {inlineItems.map((item) => {
-                  const Icon = item.icon
-                  const sections = destinations(item.id)
-                  const expanded = expandedGroup === item.id
-                  return (
-                    <div key={item.id} className="min-w-0 rounded-xl bg-gray-50 dark:bg-gray-800">
-                      <button type="button" data-bos-nav-id={item.id} aria-expanded={sections.length ? expanded : undefined}
-                        aria-controls={sections.length ? `mobile-sections-${item.id}` : undefined}
-                        onClick={() => openMobileGroup(item.id)}
-                        className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium">
-                        <Icon className="h-4 w-4 shrink-0" />
-                        <span className="min-w-0 flex-1 break-words">{getNavLabel(item, t, language)}</span>
-                        {dirtyPageIds.has(item.id) ? <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" /> : null}
-                        {sections.length ? <ChevronUp className={`h-4 w-4 shrink-0 ${expanded ? '' : 'rotate-180'}`} /> : null}
-                      </button>
-                      {expanded && sections.length ? (
-                        <div id={`mobile-sections-${item.id}`} className="grid min-w-0 grid-cols-2 gap-1 px-2 pb-2">
-                          {sections.map((section) => (
-                            <button key={section.id} type="button" data-bos-section={`${item.id}:${section.id}`}
-                              aria-current={page === item.id && currentSectionId === section.id ? 'page' : undefined}
-                              onClick={() => navigateTo(item.id, hubAnchor(item.id, section.id))}
-                              className="min-h-11 min-w-0 break-words rounded-lg border border-gray-200 bg-white px-2 py-2 text-left text-sm leading-snug hover:bg-blue-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-700">
-                              {sectionLabel(section)}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
+              /* Home tiles: a 2-column grid whose tapped tile unfolds its own
+                 sections as a full-width 2-column sub-grid under that tile's
+                 ROW (reference images #1/#2, layout only). The order and the
+                 sub-grid's insertion point are buildMobileHomeLayout's --
+                 see utils/mobileHomeTiles.ts for why placing it "after the
+                 tile" is the wrong-looking-right implementation. */
+              <div className="grid grid-cols-2 gap-2 px-3 pb-4">
+                {buildMobileHomeLayout(inlineItems, expandedGroup, destinations).map((entry) => {
+                  if (entry.kind === 'sections') return (
+                    <div key={entry.key} id={mobileHomeSectionsPanelId(entry.ownerId)} className="col-span-2 grid min-w-0 grid-cols-2 gap-1 rounded-xl bg-gray-50 p-2 dark:bg-gray-800">
+                      {entry.sections.map((section) => (
+                        <button key={section.id} type="button" data-bos-section={`${entry.ownerId}:${section.id}`}
+                          aria-current={page === entry.ownerId && currentSectionId === section.id ? 'page' : undefined}
+                          onClick={() => navigateTo(entry.ownerId, hubAnchor(entry.ownerId, section.id))}
+                          className="min-h-11 min-w-0 break-words rounded-lg border border-gray-200 bg-white px-2 py-2 text-left text-sm leading-snug hover:bg-blue-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-700">
+                          {sectionLabel(section)}
+                        </button>
+                      ))}
                     </div>
+                  )
+                  const { item, expanded, hasSections } = entry
+                  const Icon = item.icon
+                  return (
+                    <button key={entry.key} type="button" data-bos-nav-id={item.id} aria-expanded={hasSections ? expanded : undefined}
+                      aria-controls={hasSections ? mobileHomeSectionsPanelId(item.id) : undefined}
+                      onClick={() => openMobileGroup(item.id)}
+                      className={`relative flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-2 py-3 text-sm font-medium ${expanded ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-50 dark:bg-gray-800'}`}>
+                      <Icon className="h-5 w-5 shrink-0" />
+                      <span className="min-w-0 break-words text-center leading-tight">{getNavLabel(item, t, language)}</span>
+                      {dirtyPageIds.has(item.id) ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-400" /> : null}
+                      {hasSections ? <ChevronUp className={`absolute bottom-1.5 right-1.5 h-3.5 w-3.5 opacity-60 ${expanded ? '' : 'rotate-180'}`} /> : null}
+                    </button>
                   )
                 })}
               </div>
