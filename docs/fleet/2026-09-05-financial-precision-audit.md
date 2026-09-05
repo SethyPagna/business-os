@@ -5,18 +5,21 @@
 This is a read-only architecture audit of integration commit `44fb2106`
 (`fix(telegram): reconcile sale line equations`) plus the latest fleet scope available
 during the audit. It records current behavior, risks, and a phased implementation
-recommendation. It does not authorize or implement a precision change.
+recommendation. The owner has now authorized the pure precision helpers, shared
+fixtures, and focused tests described in Phase 1. No live financial writer or reader
+migration is authorized by this document.
 
 The requested outcome is four-decimal internal financial calculation across the
-system while keeping stored settlement money and displayed money explicit. The
-rounding direction for the general rule is still an **owner decision**:
+system while keeping stored settlement money and displayed money explicit.
 
-- round to nearest at four decimals; or
-- always round up at four decimals.
+**Owner decision recorded September 5, 2026:** round to the nearest four decimal
+places; when the first discarded digit is 5 or above, round the magnitude up, and
+when it is 4 or below, round the magnitude down. Negative ties are symmetric away
+from zero so reversing a value reverses its rounded result exactly.
 
-Nothing in this document chooses between those policies. The existing always-up
-four-decimal product-cost merge rule is a narrowly scoped precedent, not evidence
-that always-up is the intended whole-system rule.
+The existing always-up four-decimal product-cost merge rule remains a narrowly
+scoped rule. It is not the general financial calculation policy and is not changed
+by this decision.
 
 Excluded from this audit and migration plan:
 
@@ -52,6 +55,11 @@ defects:
 7. Amendments, undo snapshots, fingerprints, and backups preserve historical
    numbers. Reinterpreting or re-rounding them under a new rule would break replay
    fidelity and audit evidence.
+
+The rounding-direction gate is now resolved: general financial calculations use
+nearest four-decimal, half-up-by-magnitude rounding. This does not authorize live
+writer migration; the first authorized implementation is limited to pure helpers,
+shared fixtures, and focused tests.
 
 ## Precision model
 
@@ -89,9 +97,9 @@ The recommended design separates four concepts:
 | Booked/settled money | Round actual USD invoice settlement, tender, change, refund, AP, AR, and payment amounts once to cents. Round actual KHR settlement and physical cash once to whole riel. |
 | Display | Format USD to two decimals and KHR to whole riel unless a separately approved view requires otherwise. Display formatting must never feed calculations or writes. |
 
-The recommended rounding stage is independent of the pending rounding-direction
-decision. Whichever direction the owner selects, the operation should occur at an
-explicit named boundary, not opportunistically on every line or intermediate.
+The recommended rounding stage remains distinct from the now-confirmed direction.
+Nearest half-up-by-magnitude quantization should occur at an explicit named boundary,
+not opportunistically on every line or intermediate.
 
 ## Existing helper inventory
 
@@ -416,29 +424,29 @@ downstream code.
 
 ### Phase 0 — owner decision and contract lock
 
-Owner decides nearest versus always-up for the general four-decimal computation
-rule. The decision should also state treatment of negative values, exact ties,
-zero/negative zero, overflow, non-finite values, and residual allocation.
-
-Until that decision, code may introduce only policy-explicit helpers and fixtures;
-there must be no default mode and no production caller migration.
+**Complete for rounding direction.** General four-decimal computation uses nearest
+rounding, with a discarded 5 rounding magnitude up and 4 or below rounding magnitude
+down. Negative ties round away from zero to preserve reversal symmetry. The pure
+contract rejects invalid and unsafe-overflow input rather than silently coercing it.
+Residual allocation remains a separate owner decision before writer migration.
 
 ### Phase 1 — pure precision contract, no behavior change
 
-Recommended first bounded write set:
+Authorized first bounded write set:
 
 - new `cloudflare/src/lib/financialPrecision.ts`;
 - new `frontend/src/utils/financialPrecision.ts`;
 - new `ops/fixtures/financial-precision-cases.json`;
 - new `cloudflare/scripts/test-financial-precision-pure.cjs`;
 - new `frontend/tests/financialPrecision.test.ts`;
-- `frontend/package.json` and `frontend/tests/testChainCoverage.test.ts` only to wire
-  the new test into the existing gate.
+- one static import from the already chained
+  `frontend/tests/posMoneyRounding.test.ts`.
 
-The frontend/backend helper twins should follow the repository's existing parity
-pattern and consume the same fixtures. Functions should distinguish concepts in
-their names, for example computation quantization, USD settlement, KHR settlement,
-and display formatting. A generic replacement named only `round4` is insufficient.
+This avoids extending the already very long Windows `test:utils` command in
+`frontend/package.json`. `testChainCoverage.test.ts` follows static test imports
+transitively, so the focused test remains reachable from the existing chain. The
+frontend/backend helper twins follow the repository's existing parity pattern and
+consume the same fixtures. No live calculation caller migrates in this phase.
 
 ### Phase 2 — versioned online and offline sale vertical slice
 
@@ -490,8 +498,8 @@ reconciliation evidence.
 
 ## Behavioral acceptance matrix
 
-The selected rounding mode supplies the expected boundary values, but all cases below
-are required regardless of mode.
+The owner-confirmed nearest, half-up-by-magnitude mode supplies the expected boundary
+values for every case below.
 
 | Case | Required behavior |
 |---|---|
@@ -539,6 +547,15 @@ Before deployment, explicitly prove:
 - Offline hashes protect payload bytes but do not pin calculation semantics.
 - Historical snapshots and backups must remain exact.
 
+### Decided by the owner on September 5, 2026
+
+- General financial computation rounds to nearest at four decimals.
+- A discarded 5 or above rounds magnitude up; 4 or below rounds magnitude down.
+- Negative ties round away from zero, preserving reversal symmetry.
+- This decision does not replace the separate always-up merged-product-cost rule.
+- The first implementation is pure helpers, one shared fixture, and focused tests
+  only; live writer migration is deferred to versioned slices sequenced by main.
+
 ### Recommendations in this audit
 
 - Carry four-decimal computational values until one explicit settlement boundary.
@@ -550,7 +567,6 @@ Before deployment, explicitly prove:
 
 ### Still awaiting owner decision
 
-- General four-decimal rounding direction: nearest or always-up.
 - Whether any displayed unit prices should expose four decimals, independently of
   internal precision.
 - Whether precise pre-settlement invoice components require persisted companion

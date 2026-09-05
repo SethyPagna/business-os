@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import './financialPrecision.test.ts'
 
 // Locks the Part-77 money fixes in POS.tsx (frontend audit):
 //
