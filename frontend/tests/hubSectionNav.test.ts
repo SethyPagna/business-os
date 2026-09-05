@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import './hubResponsiveRemount.test.ts'
 import {
   DEFAULT_MOBILE_SECTION_NAV_MODE,
   MOBILE_SECTION_NAV_SETTINGS_KEY,
@@ -125,7 +126,7 @@ await runTest('mobile section-nav preference constants are stable (host pages / 
 await runTest('mobile body has no intermediate picker or extra history, legacy pills remain touch-safe', () => {
   const navSource = fs.readFileSync(new URL('../src/components/shared/HubSectionNav.tsx', import.meta.url), 'utf8')
   assert.doesNotMatch(navSource, /pushState|history.back|hub-section-grid|HUB_HISTORY_MARKER/)
-  assert.match(navSource, /if \(layered \|\| visible.length <= 1\) return <>{children}<\/>/)
+  assert.match(navSource, /if \(layered \|\| visible.length <= 1\) return <>{content}<\/>/)
   assert.match(navSource, /hub-section-pills[^"']*flex-wrap/)
   assert.match(navSource, /hub-section-pill[^"']*min-h-11/)
   assert.match(navSource, /aria-pressed=\{isActive\}/)
