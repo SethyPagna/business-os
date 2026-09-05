@@ -57,8 +57,14 @@ export default function BranchesHubPage() {
   const canBranchList = getPermissionTier('branches') !== 'none'
   const canInventory = getPermissionTier('inventory') !== 'none'
   const [section, setSection] = useHubSection<BranchesHubSection>('branches', () => initialSection(canBranchList, canInventory), getHubDestinations('branches', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
-  // The hub owns one range for Overview and Transfer History. Products uses
-  // branch/search scope instead of presenting unrelated dated statistics.
+  // The hub owns ONE range and all three data sections read it: Overview,
+  // Products and Transfer History. Products was originally left out on the
+  // theory that a stock list carries no dated statistics -- but its Net sold,
+  // Revenue, COGS and Profit columns are dated, and the Worker route already
+  // scoped them by startDate/endDate. Not wiring the range through did not
+  // remove those figures, it made them answer all-time while the section
+  // beside them answered the picked window (N10). Stock quantities and the
+  // stock-value cards stay unscoped on purpose: stock is a right-now fact.
   const [sharedDateRange, setSharedDateRange] = useState<DateTimeRange>(() => ({
     startDate: '',
     endDate: '',
@@ -136,6 +142,8 @@ export default function BranchesHubPage() {
             <InventorySection
               hostSection="products"
               embedded
+              dateRange={sharedDateRange}
+              onDateRangeChange={setSharedDateRange}
             />
           </div>
         ) : active === 'transfers' && canBranchList ? (

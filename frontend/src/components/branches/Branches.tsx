@@ -1553,9 +1553,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                           spaces between the name and stock quantity") -- the
                                           name block no longer stretches (no flex-1), only the
                                           receive button floats to the card edge (ml-auto). */}
+                                      {/* No SKU sub-line (N10): SKU was an
+                                          app-wide outlier and left the Products
+                                          tab's table; the same field in the same
+                                          branch-stock context goes with it, and
+                                          stays on the product's own detail
+                                          surfaces. */}
                                       <div className="min-w-0">
                                         <div className="whitespace-normal break-words font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
-                                        {product.sku ? <div className="break-all font-mono text-[10px] leading-tight text-gray-400">{product.sku}</div> : null}
                                       </div>
                                       <span
                                         className={`shrink-0 whitespace-nowrap text-sm font-bold tabular-nums ${

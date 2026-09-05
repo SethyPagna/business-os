@@ -6,7 +6,10 @@ import { buildProductGroups } from '../../utils/productGrouping.ts'
 export type InventoryProductRow = Record<string, any> & {
   id?: number | string
   name?: string
-  sku?: string
+  // No `sku` on purpose (N10): SKU is a product-detail field (ProductDetailModal,
+  // the product row's detail pills). This table was the app's ONLY SKU column,
+  // so it was removed rather than kept as a one-off. Barcode stays -- it is the
+  // identifier people scan and read off a shelf.
   barcode?: string
   brand?: string
   category?: string
@@ -120,13 +123,24 @@ export default function InventoryProductsSurface({
   const groups = useMemo(() => groupInventoryProducts(items), [items])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const toggle = (key: string) => setCollapsed((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next })
-  const columnCount = 13
+  const columnCount = 12
   const metric = (product: InventoryProductRow, field: InventoryMetric) => mergedInventoryMetric(product, items, field)
   const quantity = (product: InventoryProductRow) => metric(product, 'display_quantity') ?? scopedProductQuantity(product, branchFilter)
-  const money = (usd: unknown, khr?: unknown) => {
+  // Money cell shape copied from the Sales list's amount cell: the USD figure
+  // is the bold primary line, the KHR equivalent a muted sub-line. `tone`
+  // carries the Products page's column convention (cost red, price green,
+  // profit blue / yellow on a loss) so the same number means the same thing
+  // on every list.
+  const money = (usd: unknown, khr?: unknown, tone = 'text-slate-800 dark:text-slate-100') => {
     const u = inventoryMoney(usd), k = inventoryMoney(khr)
-    return <span className="block whitespace-nowrap text-right tabular-nums">{u === null ? '—' : fmtUSD(u)}{k !== null && k !== 0 ? <span className="block text-[11px] text-slate-500">{fmtKHR(k)}</span> : null}</span>
+    return <span className="block whitespace-nowrap text-right tabular-nums">
+      <span className={`block font-semibold ${tone}`}>{u === null ? '—' : fmtUSD(u)}</span>
+      {k !== null && k !== 0 ? <span className="block text-[11px] font-normal text-slate-400">{fmtKHR(k)}</span> : null}
+    </span>
   }
+  const profitTone = (value: number | null) => (value !== null && value < 0 ? 'text-yellow-600' : 'text-blue-600 dark:text-blue-400')
+  const costTone = 'text-red-700 dark:text-red-400'
+  const priceTone = 'text-green-700 dark:text-green-400'
   const branchLines = (product: InventoryProductRow) => (product.branch_stock || [])
     .filter((row) => branchFilter === 'all' || String(row.branch_id) === branchFilter)
     .map((row) => <div key={String(row.branch_id)} className="break-words">{row.branch_name || row.branch_id}: <span className="font-semibold">{Number(row.quantity) || 0}</span></div>)
@@ -153,21 +167,23 @@ export default function InventoryProductsSurface({
       {statsError ? <p role="alert" className="text-xs text-red-600">{statsError}</p> : null}
       <div className="card hidden max-w-full overflow-x-auto md:block">
         <table className="w-full border-collapse text-xs" style={{ minWidth: 680 }}>
-          <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+          {/* Header weight and the red/green column tints match
+              ProductsListSurface / SalesListSurface exactly -- this table used
+              to be the one dense list with unweighted, uncoloured headers. */}
+          <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
             <tr>
-              <th className="px-3 py-2 text-left">{t('product') || 'Product'}</th>
-              <th className="px-3 py-2 text-left">{t('sku') || 'SKU'}</th>
-              <th className="px-3 py-2 text-left">{t('barcode') || 'Barcode'}</th>
-              <th className="px-3 py-2 text-right">{t('quantity') || 'Quantity'}</th>
-              <th className="px-3 py-2 text-left">{t('branches') || 'Branches'}</th>
-              <th className="px-3 py-2 text-right">{t('cost') || 'Cost'}</th>
-              <th className="px-3 py-2 text-right">{t('price') || 'Price'}</th>
-              <th className="px-3 py-2 text-right">{t('stock_val') || 'Stock value'}</th>
-              <th className="px-3 py-2 text-right">{t('net_sold') || 'Net sold'}</th>
-              <th className="px-3 py-2 text-right">{t('revenue') || 'Revenue'}</th>
-              <th className="px-3 py-2 text-right">{t('cogs') || 'COGS'}</th>
-              <th className="px-3 py-2 text-right">{t('profit') || 'Profit'}</th>
-              <th className="px-3 py-2 text-right">{t('actions') || 'Actions'}</th>
+              <th className="px-3 py-1.5 text-left">{t('product') || 'Product'}</th>
+              <th className="px-3 py-1.5 text-left">{t('barcode') || 'Barcode'}</th>
+              <th className="px-3 py-1.5 text-right">{t('quantity') || 'Quantity'}</th>
+              <th className="px-3 py-1.5 text-left">{t('branches') || 'Branches'}</th>
+              <th className="col-highlight-red px-3 py-1.5 text-right text-red-600 dark:text-red-400">{t('cost') || 'Cost'}</th>
+              <th className="col-highlight-green px-3 py-1.5 text-right text-green-600 dark:text-green-400">{t('price') || 'Price'}</th>
+              <th className="px-3 py-1.5 text-right">{t('stock_val') || 'Stock value'}</th>
+              <th className="px-3 py-1.5 text-right">{t('net_sold') || 'Net sold'}</th>
+              <th className="px-3 py-1.5 text-right">{t('revenue') || 'Revenue'}</th>
+              <th className="px-3 py-1.5 text-right">{t('cogs') || 'COGS'}</th>
+              <th className="px-3 py-1.5 text-right text-blue-600 dark:text-blue-400">{t('profit') || 'Profit'}</th>
+              <th className="px-3 py-1.5 text-right">{t('actions') || 'Actions'}</th>
             </tr>
           </thead>
           <tbody>
@@ -186,19 +202,18 @@ export default function InventoryProductsSurface({
                 ) : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => (
                   <tr key={String(product.id)} className="border-t border-slate-100 hover:bg-blue-50/60 dark:border-slate-800 dark:hover:bg-blue-900/10" onClick={() => { if (product.__mergedProductIds?.length <= 1) onOpenDetail(product) }}>
-                    <td className="max-w-[18rem] px-3 py-2"><div className="truncate font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></td>
-                    <td className="px-3 py-2 font-mono text-slate-500">{product.sku || '—'}</td>
-                    <td className="px-3 py-2 font-mono text-slate-500">{product.barcode || '—'}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{quantity(product)}</td>
-                    <td className="min-w-28 px-3 py-2 text-[11px]">{branchLines(product)}</td>
-                    <td className="px-3 py-2">{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'))}</td>
-                    <td className="px-3 py-2">{money(product.selling_price_usd, product.selling_price_khr)}</td>
-                    <td className="px-3 py-2">{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{metric(product, 'qty_sold') ?? '—'}</td>
-                    <td className="px-3 py-2">{money(metric(product, 'revenue_usd'), metric(product, 'revenue_khr'))}</td>
-                    <td className="px-3 py-2">{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</td>
-                    <td className="px-3 py-2">{money(metric(product, 'profit_usd'))}</td>
-                    <td className="px-3 py-2">{actions(product)}</td>
+                    <td className="max-w-[18rem] px-3 py-1.5"><div className="truncate font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></td>
+                    <td className="px-3 py-1.5 font-mono text-slate-500">{product.barcode || '—'}</td>
+                    <td className="px-3 py-1.5 text-right font-semibold">{quantity(product)}</td>
+                    <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
+                    <td className="col-highlight-red px-3 py-1.5">{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'), costTone)}</td>
+                    <td className="col-highlight-green px-3 py-1.5">{money(product.selling_price_usd, product.selling_price_khr, priceTone)}</td>
+                    <td className="px-3 py-1.5">{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{metric(product, 'qty_sold') ?? '—'}</td>
+                    <td className="px-3 py-1.5">{money(metric(product, 'revenue_usd'), metric(product, 'revenue_khr'))}</td>
+                    <td className="px-3 py-1.5">{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</td>
+                    <td className="px-3 py-1.5">{money(metric(product, 'profit_usd'), null, profitTone(metric(product, 'profit_usd')))}</td>
+                    <td className="px-3 py-1.5">{actions(product)}</td>
                   </tr>
                 ))}
               </Fragment>
@@ -213,18 +228,21 @@ export default function InventoryProductsSurface({
             : groups.length === 0 ? <div className="card p-6 text-center text-sm text-gray-400">{t('no_data') || 'No data'}</div>
               : groups.map((group) => <div key={group.key} className="min-w-0 space-y-1">
                 {group.items.length > 1 ? <button type="button" className="min-h-11 w-full break-words text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
-                {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-3 text-sm">
+                {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-2 text-sm">
                   <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 break-words font-medium">{product.name || '—'}</span><strong>{quantity(product)}</strong></div>
-                  <p className="break-all text-[11px] text-slate-500">{[product.sku, product.barcode].filter(Boolean).join(' · ') || '—'}</p>
+                  {/* Barcode only -- the SKU half of this line went with the column. */}
+                  <p className="break-all text-[11px] text-slate-500">{product.barcode || '—'}</p>
                   <div className="my-1 text-xs">{branchLines(product)}</div>
-                  <dl className="grid grid-cols-2 gap-1 text-xs">
-                    <dt>{t('cost') || 'Cost'}</dt><dd>{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'))}</dd>
-                    <dt>{t('price') || 'Price'}</dt><dd>{money(product.selling_price_usd, product.selling_price_khr)}</dd>
+                  {/* Same colour language as the desktop columns, so a value
+                      does not change meaning when the layout does. */}
+                  <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-xs">
+                    <dt className="text-red-600 dark:text-red-400">{t('cost') || 'Cost'}</dt><dd>{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'), costTone)}</dd>
+                    <dt className="text-green-600 dark:text-green-400">{t('price') || 'Price'}</dt><dd>{money(product.selling_price_usd, product.selling_price_khr, priceTone)}</dd>
                     <dt>{t('stock_val') || 'Stock value'}</dt><dd>{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</dd>
-                    <dt>{t('net_sold') || 'Net sold'}</dt><dd className="text-right tabular-nums">{metric(product, 'qty_sold') ?? '—'}</dd>
+                    <dt>{t('net_sold') || 'Net sold'}</dt><dd className="text-right font-semibold tabular-nums">{metric(product, 'qty_sold') ?? '—'}</dd>
                     <dt>{t('revenue') || 'Revenue'}</dt><dd>{money(metric(product, 'revenue_usd'), metric(product, 'revenue_khr'))}</dd>
                     <dt>{t('cogs') || 'COGS'}</dt><dd>{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</dd>
-                    <dt>{t('profit') || 'Profit'}</dt><dd>{money(metric(product, 'profit_usd'))}</dd>
+                    <dt className="text-blue-600 dark:text-blue-400">{t('profit') || 'Profit'}</dt><dd>{money(metric(product, 'profit_usd'), null, profitTone(metric(product, 'profit_usd')))}</dd>
                   </dl>
                   {actions(product)}
                 </div>)}

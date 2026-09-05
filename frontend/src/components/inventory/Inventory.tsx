@@ -44,6 +44,7 @@ const ExportRangeDialog = lazyRetry(() => import('../shared/ExportRangeDialog'),
 
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
 import { buildStockHealthSegments } from './stockHealthSummary'
+import { buildInventoryProductsSearchParams } from './inventoryProductsQuery.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { type DateTimeRange } from '../shared/DateTimeRangePicker'
@@ -645,8 +646,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
 
   const needsStatsData = inventorySection === 'all' || inventorySection === 'stats' || inventorySection === 'products'
   const needsProductsData = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
+  // Stock state (the summary cards: products, in/low/out of stock, stock
+  // value) is a "right now" fact and stays deliberately date-free -- so does
+  // its scope key, and /api/inventory/stats takes no date params at all.
   const inventoryStatsScope = JSON.stringify([branchFilter, deferredSearch, searchMode])
-  const productsScope = JSON.stringify([inventoryStatsScope, productsPage, productsPageSize])
+  // The products page DOES carry the range: its Net sold / Revenue / COGS /
+  // Profit columns are scoped by it server-side, so two different windows are
+  // two different results and must not share one cached page (N10).
+  const productsScope = JSON.stringify([inventoryStatsScope, productsPage, productsPageSize, stripRange.startDate, stripRange.endDate])
   const needsMovementData = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
   const needsRfidData = inventorySection === 'rfid' || (inventorySection === 'all' && tab === 'rfid')
 
@@ -657,13 +664,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setProductsError(null)
     try {
       const response = await withLoaderTimeout(
-        () => getInventoryApi().searchInventoryProducts({
-          ...(branchFilter !== 'all' ? { branchId: Number.parseInt(branchFilter, 10) } : {}),
-          query: deferredSearch || undefined,
+        () => getInventoryApi().searchInventoryProducts(buildInventoryProductsSearchParams({
+          branchFilter,
+          query: deferredSearch,
           searchMode,
           page: productsPage,
           pageSize: productsPageSize,
-        }),
+          range: stripRange,
+        })),
         'Inventory products',
         INVENTORY_PRODUCTS_TIMEOUT_MS,
       )
@@ -689,11 +697,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     } finally {
       if (isTrackedRequestCurrent(productsRequestRef, requestId)) setProductsLoading(false)
     }
-  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, tr])
+  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, stripRange.endDate, stripRange.startDate, tr])
 
   useEffect(() => {
     setProductsPage(1)
-  }, [branchFilter, deferredSearch, searchMode])
+  }, [branchFilter, deferredSearch, searchMode, stripRange.endDate, stripRange.startDate])
 
   useEffect(() => {
     if (!isActive || !needsProductsData) {
@@ -2373,6 +2381,19 @@ ${inventoryFeesFormulaText}`,
           renders for the Products tab, same as before. */}
       {showInventorySections ? (
       <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        {/* N10: the Products list's Net sold / Revenue / COGS / Profit columns
+            are scoped server-side by this range, so the tab needs the same
+            Start → End row every other list pins above its search box. It is
+            skipped when the stats strip is showing, because that block already
+            draws this exact control for the same stripRange -- two pickers for
+            one clock would be the duplicate-control trap. In the Branches hub
+            the range is the hub's own, shared with Overview and Transfers.
+            No showTime: attachInventoryProductMetrics bounds these columns by
+            LOCAL DATE (localDateAtOrAfter on created_at), so advertising a
+            time filter here would be a control that does nothing. */}
+        {showProductsSection && !showInventoryStats ? (
+          <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={handleStripRangeChange} t={t} />
+        ) : null}
         {/* Search row: search input + (products) AND/OR toggle + icon-only
             Filter. Filter placement is consistent across every tab,
             matching the Sales/Returns pattern. Same overflow fix as
