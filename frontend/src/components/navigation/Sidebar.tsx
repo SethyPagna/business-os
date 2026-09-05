@@ -542,7 +542,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
         )}
         <div className="flex shrink-0 items-center gap-1 [&_button]:min-h-11 [&_button]:min-w-11">
           {notificationSlot}
-          {showQuickPreferences && !inline ? (
+          {showQuickPreferences ? (
             <Suspense fallback={<QuickPreferenceTogglesFallback />}>
               <QuickPreferenceToggles />
             </Suspense>
@@ -577,15 +577,10 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                     </div>
                   </div>
                   {inline ? (
-                    <div className="mb-1 border-b border-gray-100 px-1 pb-1 dark:border-gray-700">
-                      <div className="max-w-full overflow-x-auto [&_button]:min-h-11 [&_button]:min-w-11">
+                    <div className="mb-1 max-w-full border-b border-gray-100 px-1 pb-1 dark:border-gray-700 [&>div]:flex-wrap [&>div]:overflow-visible">
+                      <div className="max-w-full [&_button]:min-h-11 [&_button]:min-w-11">
                         <MinimizedWorkTray variant="mobile" />
                       </div>
-                      {showQuickPreferences ? (
-                        <Suspense fallback={<QuickPreferenceTogglesFallback />}>
-                          <QuickPreferenceToggles className="justify-center py-1 [&_button]:h-11 [&_button]:w-11" />
-                        </Suspense>
-                      ) : null}
                     </div>
                   ) : null}
                   {accountActions.map(renderAccountAction)}
