@@ -55,6 +55,7 @@ function fixture() {
   let beforeNextBatch = null
   let beforeRevisionRead = null
   let failStatement = null
+  let failSqlPattern = null
   let batchLength = 0
   const wrap = (text, params = []) => ({
     text, params,
@@ -67,6 +68,10 @@ function fixture() {
   })
   const runBatch = (statements) => sql.transaction(() => statements.map((statement, index) => {
     if (failStatement === index) { failStatement = null; throw new Error(`injected replay phase ${index}`) }
+    if (failSqlPattern && failSqlPattern.test(statement.text)) {
+      failSqlPattern = null
+      throw new Error('injected matching SQL failure')
+    }
     if (failAfterMetadata && /INSERT INTO branch_batch_stock/i.test(statement.text)) {
       failAfterMetadata = false
       throw new Error('injected failure after batch metadata')
@@ -113,6 +118,7 @@ function fixture() {
     beforeCommit(mutate) { beforeNextBatch = mutate },
     beforeRevisionCapture(mutate) { beforeRevisionRead = mutate },
     failBatchStatement(index) { failStatement = index },
+    failWhenSqlMatches(pattern) { failSqlPattern = pattern },
     lastBatchLength() { return batchLength },
   }
 }
@@ -127,6 +133,15 @@ function receiveRequest(requestId = 'stock-request-001', quantity = 5) {
     client_request_id: requestId, mode: 'stock_in',
     defaults: { branch_id: 1, received_date: '2026-09-05' },
     items: [{ line_id: 'line-001', kind: 'receive', product_id: 1, quantity, unit_cost_usd: 2 }],
+  }
+}
+
+function zeroCreateRequest(requestId = 'zero-create-request-001', name = 'Catalog only cream') {
+  return {
+    client_request_id: requestId, mode: 'stock_in',
+    defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Catalog supplier' },
+    items: [{ line_id: 'zero-create-line', kind: 'create_receive', quantity: 0,
+      product: { name, barcode: `ZERO-${requestId}`, cost_price_usd: 1.25, selling_price_usd: 2.5, stock_quantity: 0, branch_id: 1 } }],
   }
 }
 
@@ -247,6 +262,112 @@ async function main() {
     }, f.env, { waitUntil(promise) { promise.catch(() => {}) } })
     assert.equal(response.status, 200, await response.text())
     assert.equal(receiptState(f.sql).product.stock_quantity, 1)
+
+    const zeroReceive = fixture()
+    const zeroResponse = await app.request('/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(receiveRequest('stock-zero-receive', 0)),
+    }, zeroReceive.env, { waitUntil() {} })
+    assert.equal(zeroResponse.status, 400)
+    assert.deepEqual(receiptState(zeroReceive.sql), {
+      product: { stock_quantity: 0 }, branch: { quantity: 0 }, batches: [], lots: [],
+      operations: 0, members: 0, movements: 0, audits: 0, history: 0, snapshots: 0,
+    })
+  })
+
+  await check('actual POST accepts zero create as catalog-only without inventory-adjust or review bypass', async () => {
+    const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) }
+    const f = fixture()
+    const app = loadStockSession('routes/inventory.ts', noAdjust).default
+    const response = await app.request('/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(zeroCreateRequest()),
+    }, f.env, { waitUntil(promise) { promise.catch(() => {}) } })
+    assert.equal(response.status, 200, await response.clone().text())
+    const receipt = await response.json()
+    assert.deepEqual(receipt.items.map(({ batchId, batchNumber, lotCode, movementId, quantity }) => ({ batchId, batchNumber, lotCode, movementId, quantity })), [
+      { batchId: null, batchNumber: null, lotCode: null, movementId: null, quantity: 0 },
+    ])
+    assert.deepEqual(f.sql.prepare("SELECT stock_quantity,is_active FROM products WHERE name='Catalog only cream'").get(), { stock_quantity: 0, is_active: 1 })
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM branch_stock WHERE product_id=?').get(receipt.items[0].productId).n, 0)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=?').get(receipt.items[0].productId).n, 0)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM branch_batch_stock').get().n, 0)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+    assert.deepEqual(f.sql.prepare('SELECT batch_id,movement_id,quantity FROM stock_session_members').get(), { batch_id: null, movement_id: null, quantity: 0 })
+    const history = f.sql.prepare('SELECT undo_payload FROM action_history').get()
+    assert.deepEqual(Object.fromEntries(Object.entries(JSON.parse(history.undo_payload)).filter(([key]) => key.startsWith('requires_'))), {
+      requires_product_add: 1, requires_inventory_adjust: 0,
+    })
+
+    for (const [label, actor] of [
+      ['review', { ...user, permissions: JSON.stringify({ inventory: true, products: 'review' }) }],
+      ['blocked add', { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false }) }],
+    ]) {
+      const denied = fixture()
+      const deniedApp = loadStockSession('routes/inventory.ts', actor).default
+      const before = receiptState(denied.sql)
+      const deniedResponse = await deniedApp.request('/sessions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(zeroCreateRequest(`zero-denied-${label.replace(' ', '-')}`)),
+      }, denied.env, { waitUntil() {} })
+      assert.equal(deniedResponse.status, 403, label)
+      assert.deepEqual(receiptState(denied.sql), before, label)
+      assert.equal(denied.sql.prepare('SELECT COUNT(*) n FROM pending_actions').get().n, 0, `${label} must not queue a review outside the product workflow`)
+    }
+  })
+
+  await check('zero catalog commit is atomic and lost acknowledgements replay one nullable receipt', async () => {
+    const failed = fixture()
+    const before = receiptState(failed.sql)
+    failed.failWhenSqlMatches(/INSERT INTO stock_session_members/i)
+    await assert.rejects(() => commitStockSession(failed.env, user, zeroCreateRequest('zero-atomic-failure')), /injected matching SQL failure/)
+    assert.deepEqual(receiptState(failed.sql), before)
+    assert.equal(failed.sql.prepare("SELECT COUNT(*) n FROM products WHERE name='Catalog only cream'").get().n, 0)
+
+    const f = fixture()
+    f.loseNextCommitAcknowledgement()
+    const first = await commitStockSession(f.env, user, zeroCreateRequest('zero-lost-ack'))
+    assert.equal(first.replayed, true)
+    const saved = receiptState(f.sql)
+    assert.deepEqual(await commitStockSession(f.env, user, zeroCreateRequest('zero-lost-ack')), first)
+    assert.deepEqual(receiptState(f.sql), saved)
+    assert.equal(saved.operations, 1)
+    assert.equal(saved.members, 1)
+    assert.equal(saved.movements, 0)
+    await assert.rejects(
+      () => commitStockSession(f.env, user, zeroCreateRequest('zero-lost-ack', 'Changed catalog product')),
+      (error) => error instanceof StockSessionError && error.code === 'idempotency_conflict',
+    )
+    assert.deepEqual(receiptState(f.sql), saved)
+  })
+
+  await check('mixed zero and positive lines require the permission union and share one receipt', async () => {
+    const mixed = {
+      client_request_id: 'mixed-zero-positive', mode: 'stock_in', defaults: { branch_id: 1, received_date: '2026-09-05' },
+      items: [zeroCreateRequest().items[0], { line_id: 'positive-receive', kind: 'receive', product_id: 1, quantity: 2, unit_cost_usd: 2 }],
+    }
+    for (const actor of [
+      { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) },
+      { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false }) },
+    ]) {
+      const denied = fixture()
+      await assert.rejects(() => commitStockSession(denied.env, actor, mixed), (error) => error instanceof StockSessionError && error.statusCode === 403)
+      assert.equal(denied.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n, 0)
+      assert.equal(denied.sql.prepare("SELECT COUNT(*) n FROM products WHERE name='Catalog only cream'").get().n, 0)
+    }
+    const f = fixture()
+    const receipt = await commitStockSession(f.env, user, mixed)
+    assert.equal(receipt.memberCount, 2)
+    assert.equal(receipt.createdCount, 1)
+    assert.equal(receipt.receivedCount, 1)
+    assert.equal(receipt.totalQuantity, 2)
+    const zero = receipt.items.find(item => item.lineId === 'zero-create-line')
+    const positive = receipt.items.find(item => item.lineId === 'positive-receive')
+    assert.deepEqual([zero.batchId, zero.movementId, zero.quantity], [null, null, 0])
+    assert.equal(Number.isInteger(positive.batchId), true)
+    assert.equal(Number.isInteger(positive.movementId), true)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 1)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM product_batches').get().n, 1)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM branch_stock WHERE product_id=?').get(zero.productId).n, 0)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM action_history').get().n, 1)
+    assert.equal(JSON.parse(f.sql.prepare('SELECT undo_payload FROM action_history').get().undo_payload).requires_inventory_adjust, 1)
   })
 
   await check('metadata failure rolls back the entire stock session', async () => {
@@ -359,5 +480,5 @@ async function main() {
   if (failures.length) throw new Error(`${failures.length} stock-session atomic regression(s) failed`)
 }
 
-module.exports = { fixture, loadStockSession, user, receiveRequest, receiptState }
+module.exports = { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest, receiptState }
 if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1 })

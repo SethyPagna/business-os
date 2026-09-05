@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { fixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
+const { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest } = require('./test-stock-session-atomic.cjs')
 
 function payload(f, receipt) {
   return JSON.parse(f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(receipt.actionHistoryId).undo_payload)
@@ -22,6 +22,61 @@ async function main() {
   const api = loadStockSession()
   const replay = (f, receipt, direction, generation, actor = user) =>
     api.replayStockSession(f.env, actor, direction, receipt.actionHistoryId, generation, payload(f, receipt))
+  {
+    const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) }
+    const noProductAdd = { ...user, permissions: JSON.stringify({ inventory: true, products: 'review' }) }
+    assert.equal(api.canReplayStockSessionPayload(noAdjust, { requires_product_add: 1, requires_inventory_adjust: 0 }), true)
+    assert.equal(api.canReplayStockSessionPayload(noAdjust, { requires_product_add: 1 }), false, 'legacy payloads fail closed to inventory adjust')
+    assert.equal(api.canReplayStockSessionPayload(noProductAdd, { requires_product_add: 1, requires_inventory_adjust: 0 }), false)
+
+    const f = fixture()
+    const r = await api.commitStockSession(f.env, noAdjust, zeroCreateRequest('zero-replay-permissions'))
+    assert.deepEqual([r.items[0].batchId, r.items[0].movementId], [null, null])
+    const original = f.sql.prepare('SELECT * FROM products WHERE id=?').get(r.items[0].productId)
+    const beforeDenied = state(f)
+    await assert.rejects(replay(f, r, 'undo', 0, noProductAdd), e => e.statusCode === 403)
+    assert.deepEqual(state(f), beforeDenied)
+    f.loseNextCommitAcknowledgement()
+    await replay(f, r, 'undo', 0, noAdjust)
+    assert.deepEqual(f.sql.prepare('SELECT stock_quantity,is_active FROM products WHERE id=?').get(r.items[0].productId), { stock_quantity: 0, is_active: 0 })
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+    const undone = state(f)
+    await replay(f, r, 'undo', 0, noAdjust)
+    assert.deepEqual(state(f), undone, 'lost-ack retry must not reapply zero undo')
+    f.loseNextCommitAcknowledgement()
+    await loadStockSession().replayStockSession(f.env, noAdjust, 'redo', r.actionHistoryId, 1, payload(f, r))
+    assert.deepEqual(f.sql.prepare('SELECT * FROM products WHERE id=?').get(r.items[0].productId), original)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+    assert.equal(f.sql.prepare('SELECT generation FROM stock_session_operations').get().generation, 2)
+    console.log('PASS zero catalog reload undo/redo needs product-add only, is lost-ack idempotent and writes no movements')
+  }
+  {
+    const f = fixture()
+    const r = await api.commitStockSession(f.env, user, zeroCreateRequest('zero-replay-revision'))
+    f.sql.prepare("UPDATE products SET name='Concurrent catalog rename' WHERE id=?").run(r.items[0].productId)
+    const saved = state(f)
+    await assert.rejects(replay(f, r, 'undo', 0), e => e.statusCode === 409)
+    assert.deepEqual(state(f), saved)
+    console.log('PASS zero catalog replay rejects a newer product revision without history/audit writes')
+  }
+  for (const direction of ['undo', 'redo']) {
+    const f = fixture()
+    const r = await api.commitStockSession(f.env, user, zeroCreateRequest(`zero-${direction}-atomic`))
+    if (direction === 'redo') await replay(f, r, 'undo', 0)
+    const probe = fixture()
+    const pr = await api.commitStockSession(probe.env, user, zeroCreateRequest(`zero-${direction}-probe`))
+    if (direction === 'redo') await replay(probe, pr, 'undo', 0)
+    await replay(probe, pr, direction, direction === 'undo' ? 0 : 1)
+    const phases = probe.lastBatchLength()
+    for (let i = 0; i < phases; i++) {
+      const saved = state(f)
+      f.failBatchStatement(i)
+      await assert.rejects(replay(f, r, direction, direction === 'undo' ? 0 : 1), /injected replay phase/)
+      assert.deepEqual(state(f), saved, `zero ${direction} phase ${i} must be all-or-none`)
+    }
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+    console.log(`PASS zero catalog ${direction} rollback at every one of ${phases} statement boundaries`)
+  }
   for (const payment of ['paid', 'credit']) {
     const f = fixture()
     f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Supplier A'),(2,'Supplier B'); INSERT INTO branches(id,name,is_active) VALUES(2,'Warehouse',1)")
