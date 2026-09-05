@@ -699,6 +699,15 @@ app.get('/report', async (c) => {
   if (endDate) { clauses.push(localDateAtOrBefore('created_at')); params.endDate = endDate }
   if (query.branchId) { clauses.push('branch_id = @branchId'); params.branchId = query.branchId }
   const where = clauses.join(' AND ')
+  // RETURN-DATE ACTIVITY, not a revenue term. Every figure below is scoped
+  // by the date the RETURN was created, which answers "what did the returns
+  // desk do in this window". The kernel reverses a refund in the period of
+  // the SALE it belongs to, so these two totals differ whenever a return
+  // crosses a period boundary, and they are not interchangeable. Nothing may
+  // subtract this from a revenue, profit or collected figure -- doing so
+  // takes refunds off twice, on mismatched bases, and can drive a period
+  // below zero. The sale-basis reversal is SalesTotals.refund_usd.
+  //
   // Sum BOTH currencies (Part 553): refunds/compensation/loss can be recorded
   // in KHR, and a USD-only sum showed "$0.00" for real KHR returns (same class
   // of bug the fees report had). No conversion -- the UI shows "$X · Y៛".

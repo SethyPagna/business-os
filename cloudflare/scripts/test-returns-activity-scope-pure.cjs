@@ -133,4 +133,22 @@ check('compat.ts names the dashboard returns tile as return-date ACTIVITY, not a
   /RETURN-DATE ACTIVITY, customer scope only/.test(compat)
   && /nothing may subtract it from a revenue figure/.test(compat))
 
+// SIBLING PARITY. compat.ts is not the only route that answers "what came
+// back", and a warning that lives on one of four identical queries is a
+// warning the next reader will not find. Every route that sums refunds by
+// RETURN date carries the same note, in the same words, so the boundary is
+// stated wherever the mistake is available to make.
+const ACTIVITY_SURFACES = {
+  'routes/returns.ts': 'the Returns page report',
+  'routes/reports.ts': 'the Reports Overview returns block',
+  'routes/sales.ts': 'the Sales stats strip',
+}
+for (const [file, what] of Object.entries(ACTIVITY_SURFACES)) {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8')
+  check(`${file} names ${what} as RETURN-DATE ACTIVITY and forbids the subtraction`,
+    /RETURN-DATE ACTIVITY, not a revenue term/.test(src)
+    && /subtract this from a revenue, profit or collected figure/.test(src)
+    && /SalesTotals\.refund_usd/.test(src))
+}
+
 console.log(`\nALL ${passed} CHECKS PASSED`)
