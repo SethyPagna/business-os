@@ -172,6 +172,34 @@ run(`INSERT INTO sales(id,receipt_number,payment_method,payment_details,search_n
   assert.equal(bypass.status, 409)
   assert.equal(bypass.body.code, 'linked_rename_required')
 
+  // The generic save's spelling check and its write are one guarded act.
+  // Without the exact raw-value guard, a same-second writer can introduce a
+  // case variant after the check and this request silently overwrites it.
+  let genericRaced = false
+  const genericRacingDb = {
+    prepare: (sql) => db.prepare(sql),
+    exec: (sql) => db.exec(sql),
+    get staging() { return this },
+    async batch(statements) {
+      if (!genericRaced) {
+        genericRaced = true
+        run("UPDATE settings SET value=@value WHERE key='pos_payment_methods'", {
+          value: JSON.stringify(['Cash', 'fcb bank', 'ABA', 'Card']),
+        })
+      }
+      return db.batch(statements)
+    },
+  }
+  const genericRace = await request('/', 'POST', {
+    pos_payment_methods: ['Cash', 'FCB Bank', 'ABA', 'Card', 'Wing'],
+  }, { DB: genericRacingDb })
+  assert.equal(genericRace.status, 409)
+  assert.equal(genericRace.body.code, 'write_conflict')
+  assert.deepEqual(JSON.parse(get("SELECT value FROM settings WHERE key='pos_payment_methods'").value), ['Cash', 'fcb bank', 'ABA', 'Card'])
+  run("UPDATE settings SET value=@value WHERE key='pos_payment_methods'", {
+    value: JSON.stringify(['Cash', 'FCB Bank', 'ABA', 'Card']),
+  })
+
   // Mutate the raw setting after replace has read it but immediately before
   // its D1 batch. The transaction guard must roll back audit/sale/config work.
   const racePreview = await request('/payment-methods/impact?from=FCB%20Bank&to=Bank%20Transfer')
@@ -255,6 +283,34 @@ run(`INSERT INTO sales(id,receipt_number,payment_method,payment_details,search_n
   assert.equal(bulkRename.status, 200)
   assert.equal(bulkRename.body.linkedSales, 300)
   assert.equal(get("SELECT COUNT(*) AS count FROM sales WHERE payment_method='BULK'").count, 300)
+
+  // SQLite lower() only folds ASCII. The route therefore discovers exact
+  // spellings with the shared JS identity rule and supplies those bounded
+  // variants to the SQL transaction, including accented case variants.
+  const configuredBeforeUnicode = JSON.parse(get("SELECT value FROM settings WHERE key='pos_payment_methods'").value)
+  run("UPDATE settings SET value=@value,updated_at='2026-09-05T08:50:00.000Z' WHERE key='pos_payment_methods'", {
+    value: JSON.stringify([...configuredBeforeUnicode, 'Épay']),
+  })
+  run(`INSERT INTO sales(id,receipt_number,payment_method,payment_details,updated_at)
+       VALUES(301,'R-301','ÉPAY + Cash',@details,'2026-09-05T08:50:00.000Z')`, {
+    details: JSON.stringify([{ method: 'épay', amount_usd: '1.234500', amount_khr: 0 }, { method: 'Cash', amount_usd: 2, amount_khr: 0 }]),
+  })
+  run("INSERT INTO sales(id,receipt_number,payment_method,payment_details,updated_at) VALUES(302,'R-302','Épay + éPAY',NULL,'2026-09-05T08:50:00.000Z')")
+  run("INSERT INTO sales(id,receipt_number,payment_method,payment_details,updated_at) VALUES(303,'R-303','éPAY',NULL,'target-unchanged')")
+  const unicodePreview = await request('/payment-methods/impact?from=%C3%89pay&to=%C3%A9PAY')
+  assert.equal(unicodePreview.status, 200)
+  assert.equal(unicodePreview.body.live_snapshots.sales, 2)
+  const unicodeRename = await request('/payment-methods/replace', 'POST', {
+    from: 'Épay', to: 'éPAY', scope: 'linked', expected_updated_at: unicodePreview.body.settings_updated_at,
+  })
+  assert.equal(unicodeRename.status, 200)
+  assert.equal(get('SELECT payment_method FROM sales WHERE id=301').payment_method, 'éPAY + Cash')
+  assert.deepEqual(JSON.parse(get('SELECT payment_details FROM sales WHERE id=301').payment_details), [
+    { method: 'éPAY', amount_usd: '1.234500', amount_khr: 0 },
+    { method: 'Cash', amount_usd: 2, amount_khr: 0 },
+  ])
+  assert.equal(get('SELECT payment_method FROM sales WHERE id=302').payment_method, 'éPAY')
+  assert.equal(get('SELECT updated_at FROM sales WHERE id=303').updated_at, 'target-unchanged')
 
   console.log('PASS payment-method route canonical rename, malformed refusal, same-second preservation, atomic guard, and generic-save parity')
 })().catch((error) => {
