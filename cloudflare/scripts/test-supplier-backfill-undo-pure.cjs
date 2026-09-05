@@ -41,6 +41,10 @@ function loadUndoAppliers(d1) {
     batch: (stmts) => d1.batch(stmts),
   }
   const stubs = {
+    // Bulk status replay is outside this suite; fail if it is invoked.
+    './saleBulkStatus': {
+      replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-supplier-backfill-undo-pure.cjs') },
+    },
     '../index': {},
     './auth': {},
     './db': { getDb: () => dbAdapter },
