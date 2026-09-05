@@ -3,6 +3,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -653,6 +654,29 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
 const PORTAL_CONFIG_TTL_SECONDS = 60
 const PORTAL_CATALOG_TTL_SECONDS = 30
 
+const PORTAL_SEARCH_CACHE_PARAMS = [
+  'page', 'pageSize', 'query', 'q', 'brand', 'category', 'branchId', 'branch_id',
+  'stockState', 'initial', 'promo',
+] as const
+
+// Consume Hono's SAME parsed first-value query object as the producer. Keep
+// alias precedence, empty values and duplicate branch-list values unchanged.
+// Only these five public GET producers ignore unknown query parameters.
+export function portalCacheRequest(request: Request, query: Record<string, string>, routePath: string): Request {
+  const url = new URL(request.url)
+  const search = routePath === '/api/portal/catalog/products/search'
+  if (!search && !['/api/portal/config', '/api/portal/bootstrap', '/api/portal/catalog/meta', '/api/portal/catalog/products'].includes(routePath)) return request
+  // Hono decodes encoded literal path characters before matching routes.
+  url.pathname = routePath
+  url.search = ''
+  if (search) {
+    for (const key of PORTAL_SEARCH_CACHE_PARAMS) {
+      if (Object.prototype.hasOwnProperty.call(query, key)) url.searchParams.set(key, query[key])
+    }
+  }
+  return new Request(url.toString(), request)
+}
+
 async function portalCacheVersion(c: { env: Env }): Promise<string> {
   // 6.3: the portal's responses depend on PRODUCTS and on SETTINGS (the
   // whole storefront config lives in settings rows) -- composing both
@@ -663,12 +687,12 @@ async function portalCacheVersion(c: { env: Env }): Promise<string> {
     getVersionWithFallback(c.env, 'products'),
     getVersionWithFallback(c.env, 'settings'),
   ])
-  return `${productsVersion}:${settingsVersion}`
+  return `portal-query-v1:${productsVersion}:${settingsVersion}`
 }
 
 app.get('/config', async (c) => {
   const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
     return buildPortalConfig(settings, c.env)
   }))
@@ -676,7 +700,7 @@ app.get('/config', async (c) => {
 
 app.get('/bootstrap', async (c) => {
   const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     const [meta, catalog] = await Promise.all([
@@ -703,7 +727,7 @@ app.get('/bootstrap', async (c) => {
 // helpers /bootstrap above already calls.
 app.get('/catalog/meta', async (c) => {
   const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     return buildPortalMeta(c.env, showOutOfStockProducts)
@@ -711,7 +735,7 @@ app.get('/catalog/meta', async (c) => {
 })
 app.get('/catalog/products', async (c) => {
   const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     return buildPortalCatalog(c.env, showOutOfStockProducts)
@@ -877,6 +901,8 @@ app.post('/ai/chat', async (c) => {
       return c.json({ error: 'Portal AI is currently disabled' }, 403)
     }
 
+    const rejection = await admitRequestBody(c, SMALL_BODY_BYTES)
+    if (rejection) return rejection
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
     const question = String(body?.question || '').trim().slice(0, 2000)
     const profile = sanitizeAiProfile(body?.profile)
@@ -1343,6 +1369,8 @@ app.post('/submissions', async (c) => {
   const config = buildPortalConfig(settings, c.env)
   if (!config.submissionEnabled) return c.json({ error: 'Customer submissions are currently disabled' }, 403)
 
+  const rejection = await admitRequestBody(c, PORTAL_SCREENSHOT_BODY_BYTES)
+  if (rejection) return rejection
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const membershipNumber = String(body.membershipNumber || '').trim()
   if (!membershipNumber) return c.json({ error: 'Membership number is required' }, 400)
@@ -1843,7 +1871,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
 app.get('/catalog/products/search', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(
-    c.req.raw,
+    portalCacheRequest(c.req.raw, c.req.query(), c.req.path),
     c.executionCtx,
     version,
     PORTAL_CATALOG_TTL_SECONDS,

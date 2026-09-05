@@ -31,6 +31,8 @@ import telegramRoute from './routes/telegram'
 import reviewQueueRoute from './routes/reviewQueue'
 import { createSyncRoute } from './routes/sync'
 import { getSessionUser } from './lib/auth'
+import { hasPermission, isAdminControlUser } from './lib/permissions'
+import { admitRequestBody, SMALL_BODY_BYTES, smallBodyAccess } from './lib/requestBodyGuard'
 import { ensureCoreDataInvariantsOnce } from './lib/coreDataInvariants'
 import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
 import { reportError } from './lib/errorReporting'
@@ -176,39 +178,6 @@ app.onError((error, c) => {
   }, 500)
 })
 
-// Fresh D1 database (migrations applied, never factory-reset) starts with
-// zero branches/roles/admin user -- nothing to log in with and nowhere for
-// a product to be assigned. This makes sure a default org/branch/roles/
-// admin always exist before any request is handled, so "empty app" behaves
-// the same as "just factory-reset" instead of being a dead end. Memoized
-// per-isolate inside ensureCoreDataInvariantsOnce(), so this is a no-op
-// DB-wise after the isolate's first request.
-app.use('*', async (c, next) => {
-  await ensureCoreDataInvariantsOnce(c.env)
-  return next()
-})
-
-// Restore maintenance gate (Part-77 slice C, lib/maintenance.ts): while a
-// backup restore streams its DELETE-then-reinsert, every state-changing
-// /api request except auth and the restore flow itself is refused with 503
-// -- a write that interleaves with a half-restored database corrupts it
-// (and would itself be clobbered or orphaned). Reads stay open: browsing a
-// mid-restore snapshot is harmless and the admin needs the UI alive. Costs
-// one D1 point-read per WRITE request only (GETs skip it); a missing
-// system_flags table (pre-0089 local DB) fails open inside getMaintenance.
-app.use('/api/*', async (c, next) => {
-  if (isMaintenanceGatedRequest(c.req.method, c.req.path)) {
-    const maintenance = await getMaintenance(c.env)
-    if (maintenance) {
-      return c.json({
-        error: 'A backup restore is in progress. The system is read-only until it finishes.',
-        maintenance: { mode: maintenance.mode, phase: maintenance.phase, startedAt: maintenance.startedAt },
-      }, 503)
-    }
-  }
-  return next()
-})
-
 // Baseline security headers on every response. Previously none of these
 // were set at all -- the app relied entirely on Cloudflare's own edge
 // defaults. These are conservative (won't break the SPA/API split this
@@ -243,6 +212,56 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(self), payment=(), usb=()')
   c.header('Strict-Transport-Security', 'max-age=15552000; includeSubDomains')
+})
+
+// Security headers must wrap every early response. Public small envelopes are
+// admitted before even bootstrap/maintenance DB work. Other body classes are
+// deliberately untouched; AI and screenshots are admitted inside portal gates.
+app.use('*', async (c, next) => {
+  if (smallBodyAccess(c.req.method, c.req.path) === 'public') {
+    const rejection = await admitRequestBody(c, SMALL_BODY_BYTES)
+    if (rejection) return rejection
+  }
+  return next()
+})
+
+// Fresh D1 databases need a default org/branch/roles/admin. Memoized per isolate;
+// run after public body admission so rejected bodies cannot trigger seeding.
+app.use('*', async (c, next) => {
+  await ensureCoreDataInvariantsOnce(c.env)
+  return next()
+})
+
+// Refuse writes during DELETE/reinsert restore. Auth/restore and reads retain
+// their existing exemptions; a missing system_flags table still fails open.
+app.use('/api/*', async (c, next) => {
+  if (isMaintenanceGatedRequest(c.req.method, c.req.path)) {
+    const maintenance = await getMaintenance(c.env)
+    if (maintenance) {
+      return c.json({
+        error: 'A backup restore is in progress. The system is read-only until it finishes.',
+        maintenance: { mode: maintenance.mode, phase: maintenance.phase, startedAt: maintenance.startedAt },
+      }, 503)
+    }
+  }
+  return next()
+})
+
+// Preserve the existing unauthenticated/backup-permission responses without
+// consuming their bodies. These are control envelopes, never backup contents.
+// Body-dependent permission checks still run in the original handlers.
+app.use('/api/*', async (c, next) => {
+  if (smallBodyAccess(c.req.method, c.req.path) !== 'staff') return next()
+  const user = await getSessionUser(c)
+  if (!user) return next()
+  if (c.req.path === '/api/auth/devices/sessions/revoke-user' && !isAdminControlUser(user)) return next()
+  if (c.req.path.startsWith('/api/backups')) {
+    if (!hasPermission(user, 'backup')) return next()
+    if (c.req.path === '/api/backups/maintenance/clear' && !hasPermission(user, 'backup_restore')) return next()
+  }
+  const rejection = await admitRequestBody(c, SMALL_BODY_BYTES)
+  if (rejection) return rejection
+  return next()
 })
 
 app.get('/health', (c) => c.json({ status: 'ok', version: 'cloudflare-portal-bootstrap-20260728', time: new Date().toISOString() }))
