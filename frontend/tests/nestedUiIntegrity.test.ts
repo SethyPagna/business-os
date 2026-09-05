@@ -94,10 +94,18 @@ for (const file of ['components/shared/InfoHint.tsx', 'components/shared/Truncat
 
 // The rename-cascade prompt is awaited by saves that run INSIDE a z-[1050]
 // shared Modal; below that layer it is invisible and the save never resolves.
-// Accept the literal layer or the token alias the RC branch introduces.
+// The default prompt stays above the normal form; a nested form explicitly
+// raises its prompt again. Check both branches, not an obsolete static class.
 const renameCascade = read('components/shared/RenameCascadeModal.tsx')
 assert.match(renameCascade, /createPortal\(/, 'RenameCascadeModal must portal to the viewport layer')
-assert.match(renameCascade, /fixed inset-0 z-\[(?:1060|var\(--z-modal-2\))\]/, 'RenameCascadeModal must layer above the z-[1050] shared Modal it is opened from')
+assert.match(renameCascade, /layer = 'default'/, 'existing callers retain the normal prompt layer')
+assert.match(renameCascade, /className=\{`fixed inset-0 \$\{layer === 'nested' \? 'z-\[1080\]' : 'z-\[1060\]'\}/,
+  'rename prompts must sit above both normal 1050 and nested 1070 forms')
+const productFormLayers = read('components/products/forms/ProductForm.tsx')
+assert.match(productFormLayers, /<RenameCascadeModal[^>]*layer=\{modalLayer\}/,
+  'nested product forms must pass their layer to rename prompts')
+assert.doesNotMatch(productFormLayers, /const effectiveModalLayer\s*=/,
+  'opening a child must not lower the parent behind its own session')
 
 // Sibling-surface parity: every contact tab with live name snapshots asks the
 // rename question the same way (Customers, Suppliers, Delivery) -- fetch the
