@@ -395,13 +395,16 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
 
   // One line standing in for the folded card: what is showing, for which
   // range, and the Filters button (which also keeps the options fold's
-  // anchor mounted). The whole line is the handle.
+  // anchor mounted). The whole line is the handle. The fold shrinks the
+  // CONTENT, never the tap area: the handle and the Filters button keep the
+  // tier's 44px height (a2 measured 18-20px targets on the first cut, Sep 6
+  // 2026), the glyphs stay their size.
   const foldedControls = (
     <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
       <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 text-left"
           aria-expanded={false}
           aria-label={trh('show_filters', 'Show filters')}
           onClick={() => setControlsFolded(false)}
@@ -410,7 +413,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
           <span className="min-w-0 truncate text-[length:var(--ui-size-body)] font-medium">{view ? trh(view.labelKey, view.fallback) : trh('reports', 'Reports')}</span>
           <span className="min-w-0 truncate text-[length:var(--ui-size-meta)] text-[var(--ui-ink-2)]">{rangeSubtitle(filters, trh)}</span>
         </button>
-        {filtersButton}
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center [&_button]:h-11 [&_button]:w-11">{filtersButton}</div>
       </div>
     </section>
   )
