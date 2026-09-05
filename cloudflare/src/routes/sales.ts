@@ -63,7 +63,7 @@ import {
   type TaxSettings,
 } from '../lib/saleAmendments'
 import { recordSaleAddItemsUndoSnapshot } from '../lib/undoAppliers'
-import { applySaleBulkStatus, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
+import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -1446,33 +1446,20 @@ app.patch('/:id/status', async (c) => {
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
   statements.push(...plan.statements)
 
-  // Damaged-lot moves first (each statement self-guards; see the kernel).
-  // If the atomic batch below then fails, these reverse in its catch --
-  // same compensation shape POST / uses.
-  const appliedDamagedOps: Array<{ lotId: number; productId: number; delta: number }> = []
-  const reverseAppliedDamagedOps = async () => {
-    for (const op of appliedDamagedOps) {
-      try {
-        if (op.delta > 0) await restoreDamagedLot(db, { lotId: op.lotId, quantity: op.delta })
-        else await consumeDamagedLot(db, { lotId: op.lotId, productId: op.productId, quantity: -op.delta })
-      } catch { /* best-effort compensation */ }
-    }
-  }
+  // A provisional restore can be spent by another request before a status
+  // conflict is discovered. Keep damaged stock and its ledger in the SAME
+  // revision-guarded batch as regular stock, with the bulk path's identity
+  // and quantity bounds. Any failure rolls back the entire transition.
   for (const op of damagedTransitionOps) {
-    try {
-      if (op.delta > 0) {
-        // stock goes OUT with the sale again (e.g. un-cancel)
-        await consumeDamagedLot(db, { lotId: op.lotId, productId: op.productId, quantity: op.delta })
-      } else {
-        // stock comes BACK to the lot (e.g. cancel)
-        await restoreDamagedLot(db, { lotId: op.lotId, quantity: -op.delta })
-      }
-      appliedDamagedOps.push({ lotId: op.lotId, productId: op.productId, delta: op.delta })
-    } catch (error) {
-      await reverseAppliedDamagedOps()
-      const status = error instanceof DamagedLotShortfallError ? 409 : 400
-      return c.json({ error: (error as Error).message }, status)
-    }
+    const lotParams = { lot: op.lotId, product: op.productId, branch: op.branchId, q: -op.delta }
+    statements.push(bulkAssertion(
+      'EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND product_id=@product AND branch_id IS @branch AND quantity_remaining+@q BETWEEN 0 AND quantity)',
+      lotParams,
+    ))
+    statements.push({
+      sql: `UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@q, updated_at=datetime('now') WHERE id=@lot`,
+      params: lotParams,
+    })
     statements.push({
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
             VALUES (@product_id, @product_name, @branch_id, '${op.delta > 0 ? DAMAGE_OUT_MOVEMENT : DAMAGE_IN_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name)`,
@@ -1493,7 +1480,6 @@ app.patch('/:id/status', async (c) => {
   try {
     await db.batch(statements)
   } catch (error) {
-    await reverseAppliedDamagedOps()
     const message = (error as Error).message || ''
     if (/guard_value/i.test(message)) {
       return c.json({ error: 'This sale changed while the status update was being prepared. Refresh and try again.', code: 'write_conflict' }, 409)
