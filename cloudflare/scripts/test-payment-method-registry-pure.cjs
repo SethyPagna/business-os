@@ -44,6 +44,7 @@ const registry = loadTs('lib/paymentMethodRegistry.ts', {})
 const {
   paymentMethodKey,
   parseConfiguredMethods,
+  parseConfiguredMethodsStrict,
   mergePaymentMethods,
   saleMethodsUsed,
   RETIRED_PAYMENT_METHODS,
@@ -71,6 +72,10 @@ for (const raw of [undefined, null, '', 'not json', '{}', '[1,2]', '[""]', '   '
   check(`tolerates ${JSON.stringify(raw)}`, Array.isArray(parsed))
 }
 check('drops non-string entries', parseConfiguredMethods('["Cash",7,null,"Card"]').join('|') === 'Cash|Card')
+check('strict parser accepts a non-empty valid array', parseConfiguredMethodsStrict('["Cash","ABA Bank"]').ok === true)
+for (const raw of [undefined, null, '', 'not json', '{}', '[]', '[1,2]', '["Cash",null]']) {
+  check(`strict parser rejects ${JSON.stringify(raw)}`, parseConfiguredMethodsStrict(raw).ok === false)
+}
 
 // --- what a sale actually used -------------------------------------------
 // payment_method is a SUMMARY column: on a split payment it is the ' + '-join
