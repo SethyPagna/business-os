@@ -25,7 +25,7 @@ import StatusBadge, { getStatusLabel } from './StatusBadge.tsx'
 import SaleDetailProductPicker, { type SaleDetailProductCandidate, type SaleDetailProductChoice } from './SaleDetailProductPicker.tsx'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
-import SaleSettlementEditor from './SaleSettlementEditor.tsx'
+import SaleSettlementEditor, { MAX_SETTLEMENT_ROWS } from './SaleSettlementEditor.tsx'
 import {
   buildSettlementPayload,
   configuredSettlementMethods,
@@ -308,6 +308,7 @@ export default function SaleDetailModal({
   const modalPanelRef = useRef<HTMLDivElement | null>(null)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const [payError, setPayError] = useState('')
+  const [statusReviewRequestId, setStatusReviewRequestId] = useState(0)
   // Z8 (user, Aug 29): "credit is the same as awaiting payment, just that you
   // can click near the payment method to edit later." The Record-payment
   // affordance lives on the Payment-method field for an awaiting-payment
@@ -316,6 +317,7 @@ export default function SaleDetailModal({
   const statusSectionRef = useRef<HTMLDivElement | null>(null)
   const startRecordPayment = () => {
     if (newStatus === 'awaiting_payment' || newStatus === (sale?.sale_status || 'completed')) setNewStatus('completed')
+    setStatusReviewRequestId((requestId) => requestId + 1)
     setTimeout(() => statusSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60)
   }
   const [membershipNumber, setMembershipNumber] = useState(sale?.customer_membership_number || '')
@@ -1762,6 +1764,8 @@ export default function SaleDetailModal({
                   settlementRequestIdRef.current = createSettlementRequestId()
                 }}
                 onConfirm={handleStatusUpdate}
+                reviewRequestId={statusReviewRequestId}
+                confirmDisabled={needsPaymentEntry && settlementRows.length > MAX_SETTLEMENT_ROWS}
               >
               {needsPaymentEntry ? (
                 <SaleSettlementEditor

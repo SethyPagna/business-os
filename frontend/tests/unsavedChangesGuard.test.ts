@@ -314,7 +314,6 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   // when this pass ran, and SaleDetailModal in particular DOES carry losable
   // work (its "Update status" notes and "Record payment" fields, around
   // line 1476). Whoever lands those files should wire the guard there.
-  'components/sales/SaleDetailModal.tsx': 'NOT REACHED -- held by another lane; it has an Update-status/Record-payment form that still needs the guard',
   'components/pos/ProductDetailSheet.tsx': 'NOT REACHED -- held by another lane; a viewer, so read-only in all likelihood',
   'components/dashboard/Dashboard.tsx': 'NOT REACHED -- another lane owns this file this cycle',
 }

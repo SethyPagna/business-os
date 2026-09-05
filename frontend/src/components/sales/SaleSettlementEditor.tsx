@@ -17,6 +17,8 @@ type Props = {
   onChange: (rows: SettlementRow[]) => void
 }
 
+export const MAX_SETTLEMENT_ROWS = 12
+
 export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, saving, error, recordedIssue, translate, fmtUSD, fmtKHR, onChange }: Props) {
   const totals = settlementTotals(rows, exchangeRate)
   const remaining = Math.max(0, totalUsd - totals.paidEquivalentUsd)
@@ -24,7 +26,13 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
   const balance = remaining > 0 ? remaining : change
   const balanceText = balance > 0 && balance < 0.01 ? `${balance.toFixed(4)} USD` : fmtUSD(balance)
   const rowIssue = settlementRowsIssue(rows, configuredMethods)
-  const reviewError = recordedIssue === 'malformed'
+  const rateText = exchangeRate.toLocaleString(undefined, { maximumFractionDigits: 4 })
+  const rowsLimitMessage = translate('sale_settlement_rows_limit', 'This sale has {count} recorded payment rows. Settlement supports at most {max}; no recorded rows were removed. Repair the record before completing it.', 'ការលក់នេះមានបន្ទាត់ការទូទាត់ដែលបានកត់ត្រា {count}។ ការបញ្ចប់ការទូទាត់គាំទ្រអតិបរមា {max} បន្ទាត់ ហើយមិនបានដកបន្ទាត់ដែលបានកត់ត្រាណាមួយទេ។ សូមកែទិន្នន័យ មុនបញ្ចប់។')
+    .replace('{count}', String(rows.length))
+    .replace('{max}', String(MAX_SETTLEMENT_ROWS))
+  const reviewError = rows.length > MAX_SETTLEMENT_ROWS
+    ? rowsLimitMessage
+    : recordedIssue === 'malformed'
     ? translate('sale_settlement_record_malformed', 'The recorded payment details are malformed. Review and repair this sale before settling it.', 'ព័ត៌មានការទូទាត់ដែលបានកត់ត្រាមិនត្រឹមត្រូវ។ សូមពិនិត្យ និងកែការលក់នេះ មុនបញ្ចប់ការទូទាត់។')
     : recordedIssue === 'mismatch'
       ? translate('sale_settlement_record_mismatch', 'The recorded payment total does not match its payment lines. Review and repair this sale before settling it.', 'ចំនួនការទូទាត់ដែលបានកត់ត្រា មិនត្រូវនឹងបន្ទាត់ការទូទាត់ទេ។ សូមពិនិត្យ និងកែការលក់នេះ មុនបញ្ចប់ការទូទាត់។')
@@ -46,7 +54,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
         {translate('record_payment', 'Record payment', 'កត់ត្រាការទូទាត់')}
       </div>
       <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-        {translate('sale_settlement_rate_hint', 'Current rate: 1 USD = {rate} KHR. Recorded USD and KHR amounts stay in their original currency.', 'អត្រាបច្ចុប្បន្ន៖ 1 USD = {rate} រៀល។ ចំនួន USD និង KHR ដែលបានកត់ត្រា នៅតែរក្សារូបិយប័ណ្ណដើម។').replace('{rate}', Math.round(exchangeRate).toLocaleString())}
+        {translate('sale_settlement_rate_hint', 'Current rate: 1 USD = {rate} KHR. Recorded USD and KHR amounts stay in their original currency.', 'អត្រាបច្ចុប្បន្ន៖ 1 USD = {rate} រៀល។ ចំនួន USD និង KHR ដែលបានកត់ត្រា នៅតែរក្សារូបិយប័ណ្ណដើម។').replace('{rate}', rateText)}
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2" aria-label={translate('payment_methods', 'Payment methods', 'វិធីទូទាត់')}>
@@ -58,7 +66,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
               type="button"
               className={`min-h-11 rounded-full border px-3 py-2 text-sm font-medium ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-emerald-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'}`}
               aria-label={`${translate('add_payment_method', 'Add payment method', 'បន្ថែមវិធីទូទាត់')}: ${method}`}
-              disabled={saving || rows.length >= 12}
+              disabled={saving || rows.length >= MAX_SETTLEMENT_ROWS}
               onClick={() => addMethod(method)}
             >
               <span className="inline-flex items-center gap-1.5"><Plus className="h-4 w-4" aria-hidden="true" />{method}</span>
