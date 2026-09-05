@@ -6,6 +6,8 @@
 // (cloudflare/src/lib/salesAnalytics.ts, routes/reports.ts) -- this file
 // only arranges figures it received and never re-derives revenue.
 
+import { actualUsdValue } from '../../../utils/financialPrecision.ts'
+
 export type ReportArea = 'sales' | 'returns' | 'fees'
 export type ReportViewId =
   | 'overview'
@@ -245,7 +247,7 @@ export function num(v: unknown): number {
 }
 
 export function round2(v: number): number {
-  return Math.round(v * 100) / 100
+  return actualUsdValue(v)
 }
 
 /** A count and its noun: "1 sale", "4 sales". English needs the singular

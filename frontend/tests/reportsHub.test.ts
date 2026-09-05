@@ -43,6 +43,7 @@ import {
   reportFileName,
   reportQueryParams,
   resolveReportView,
+  round2,
   rowsToCsvObjects,
   sortRows,
   sumTotals,
@@ -260,6 +261,60 @@ test('buildIncomeStatement: converted expenses stay canonical through USD/KHR/BO
   assert.equal(csvRows.find((row) => row.Line === 'expenses')?.Amount_USD, 5531.93)
   assert.equal(csvRows.find((row) => row.Line === 'net_result')?.Amount_USD, -6751.31)
   assert.equal(m.gross_profit.usd - m.expenses.usd, m.net_result.usd, 'statement and canonical CSV rows foot to Final Profit')
+})
+
+test('Overview and expense rows share nearest-cent display for the exact Sep 5 production pair', () => {
+  const exchangeRate = 4065
+  const nativeExpenses = { usd: 0, khr: 69000 }
+  const exactFoldedUsd = nativeExpenses.khr / exchangeRate
+  const productionDeps = {
+    displayCurrency: 'usd',
+    fmtUSD: (value: number | string) => `$${normalizePriceValue(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    fmtKHR: (value: number | string) => `${normalizePriceValue(value).toLocaleString('en-US')}៛`,
+    khrToUsd: (value: unknown) => Number(value) / exchangeRate,
+    usdToKhr: (value: unknown) => Number(value) * exchangeRate,
+  }
+  const fmtMoney = makeReportMoneyFormatter(productionDeps)
+  const statement = lineMap(buildIncomeStatement({
+    sales: normalizeTotals(adminTotals),
+    profitMode: 'net',
+    expenses: nativeExpenses,
+    khrToUsd: productionDeps.khrToUsd,
+  }))
+
+  assert.equal(exactFoldedUsd.toFixed(12), '16.974169741697')
+  assert.equal(productionDeps.fmtUSD(exactFoldedUsd), '$16.98', 'unmodified global pricing formatting reproduces the observed summary bug')
+  assert.equal(statement.expenses.usd, 16.97, 'the canonical statement/table amount rounds nearest-cent')
+  assert.equal(fmtMoney(nativeExpenses.usd, nativeExpenses.khr), '$16.97', 'Overview summary formats the raw pair to the same cent')
+  assert.equal(fmtMoney(statement.expenses.usd), '$16.97', 'statement/table formatting remains identical')
+  assert.deepEqual(nativeExpenses, { usd: 0, khr: 69000 }, 'the production raw pair remains immutable')
+
+  const overviewSource = read('src/components/sales/reports/OverviewReport.tsx')
+  assert.match(overviewSource, /fmtMoney\(num\(expenses\.amount_usd\), num\(expenses\.amount_khr\)\)/, 'Overview passes the raw pair to the shared formatter')
+  assert.doesNotMatch(overviewSource, /round2\(num\(expenses\.amount_/, 'Overview does not pre-round either component')
+})
+
+test('report model and display share canonical half-up-magnitude cent boundaries', () => {
+  assert.equal(round2(1.005), 1.01)
+  assert.equal(round2(1.004), 1)
+  assert.equal(round2(-1.005), -1.01)
+  assert.equal(round2(-1.004), -1)
+
+  const fmtMoney = makeReportMoneyFormatter({
+    displayCurrency: 'usd',
+    fmtUSD: (value: number | string) => `$${normalizePriceValue(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    fmtKHR: (value: number | string) => `${normalizePriceValue(value)}៛`,
+    khrToUsd: (value: unknown) => Number(value) / 4000,
+    usdToKhr: (value: unknown) => Number(value) * 4000,
+  })
+  const statement = lineMap(buildIncomeStatement({
+    sales: normalizeTotals(adminTotals),
+    profitMode: 'net',
+    expenses: { usd: 1.005, khr: 0 },
+    khrToUsd: (value) => Number(value) / 4000,
+  }))
+  assert.equal(statement.expenses.usd, 1.01)
+  assert.equal(fmtMoney(1.005), fmtMoney(statement.expenses.usd), 'Overview raw summary and statement row display the same cent')
 })
 
 test('buildIncomeStatement: the waterfall foots to the cent, and says so when cost is missing', () => {
