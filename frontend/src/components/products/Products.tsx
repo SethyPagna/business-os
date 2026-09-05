@@ -1367,8 +1367,8 @@ function ProductsFullEditor() {
   }
 
   const handleSaveWithGallery = async (form: ProductRecord) => {
-    if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
-    if (!beginSingleAction(productSaveInFlightRef)) return
+    if (!form.name?.trim()) throw new Error(t('name') + ' required')
+    if (!beginSingleAction(productSaveInFlightRef)) throw new Error(t('saving_label') || 'Saving…')
     try {
       const previousSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const galleryInput = normalizeProductGallery(form.image_gallery, form.image_path || null)
@@ -1388,11 +1388,11 @@ function ProductsFullEditor() {
 
       if (!selected) {
         const res = await runProductWriteMutation(() => productApi.createProduct(payload), 'Create product')
-        if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
+        if (!res?.success) throw new Error(res?.error || 'Failed to create product')
         createdProductId = extractHistoryResultId(res)
       } else {
         const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload), 'Update product')
-        if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
+        if (res?.success === false) throw new Error(res.error || 'Failed to update product')
       }
 
       // The write itself is now confirmed done -- tell the person right
@@ -1452,7 +1452,7 @@ function ProductsFullEditor() {
       }
     } catch (e) {
       console.error('[handleSaveWithGallery] error:', e)
-      notify(getErrorMessage(e, 'Failed to save product'), 'error')
+      throw e instanceof Error ? e : new Error(getErrorMessage(e, 'Failed to save product'))
     } finally {
       finishSingleAction(productSaveInFlightRef)
     }
@@ -4591,6 +4591,7 @@ function ProductsFullEditor() {
         <Suspense fallback={null}>
           <ProductForm
             product={modalProduct}
+            draftScope="standalone-create"
             categories={categoryOptions}
             units={unitOptions}
             branches={branchOptions}

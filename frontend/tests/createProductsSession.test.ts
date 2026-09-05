@@ -17,6 +17,7 @@
 // Run: node tests/createProductsSession.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import './productDraftLifecycle.test.ts'
 import {
   canStartCreateProductsSession,
   createProductsSessionDefaults,

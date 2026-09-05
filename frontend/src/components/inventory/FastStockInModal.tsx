@@ -4,7 +4,7 @@
 // lines remain editable/removable until Complete writes them through the
 // same receiveBatchStock kernel used by every other add-stock surface.
 // Each outcome stays visible, so a partial failure can be fixed and retried.
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
@@ -173,6 +173,18 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const searchSeqRef = useRef(0)
   const sessionIdRef = useRef(draft?.sessionId || Date.now())
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const scannedCreateUnits = useMemo(
+    () => (createUnits.length ? createUnits : [{ id: 'pcs', name: 'pcs' }]),
+    [createUnits],
+  )
+  const scannedCreateBranches = useMemo(
+    () => branchOptions.map((branch) => ({
+      id: branch.value,
+      name: branch.label,
+      is_default: String(branch.value) === String(defaultBranchId || ''),
+    })),
+    [branchOptions, defaultBranchId],
+  )
 
   // Autosave the header + in-progress line (debounced, shared cadence).
   // Deliberately NO dirtyWork registration: with the draft persisting,
@@ -492,9 +504,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       <Suspense fallback={null}>
         <ProductForm
           product={{ barcode: createBarcode, branch_id: branchId, name: '', stock_quantity: 0 }}
+          draftScope={`fast-stock-in-${sessionIdRef.current}-${createBarcode}`}
           categories={createCategories}
-          units={createUnits.length ? createUnits : [{ id: 'pcs', name: 'pcs' }]}
-          branches={branchOptions.map((branch) => ({ id: branch.value, name: branch.label, is_default: String(branch.value) === String(defaultBranchId || '') }))}
+          units={scannedCreateUnits}
+          branches={scannedCreateBranches}
           onSave={(payload) => createProductForScannedBarcode((payload || {}) as Record<string, unknown>)}
           onClose={() => setCreateBarcode('')}
           t={(key: string) => tr(key, key)}
