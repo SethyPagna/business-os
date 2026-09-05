@@ -72,6 +72,24 @@ app.use('*', async (c, next) => {
   return next()
 })
 
+// Milestone A: one immutable, bounded envelope for existing-product receipts
+// and product-create-plus-opening-receipt. Every durable row is committed by
+// commitStockSession's single D1 batch; cache/broadcast work is post-commit.
+app.post('/sessions', async (c) => {
+  const body = await c.req.json<unknown>().catch(() => null)
+  const stockSession = await import('../lib/stockSession')
+  try {
+    const receipt = await stockSession.commitStockSession(c.env, c.get('user'), body)
+    if (!receipt.replayed) c.executionCtx.waitUntil(stockSession.notifyStockSession(c.env, receipt))
+    return c.json(receipt)
+  } catch (error) {
+    if (error instanceof stockSession.StockSessionError) {
+      return c.json({ error: error.message, code: error.code, ...(error.details || {}) }, error.statusCode)
+    }
+    throw error
+  }
+})
+
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ''), 10)
   if (!Number.isFinite(n)) return fallback
