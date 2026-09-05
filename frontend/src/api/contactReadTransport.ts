@@ -158,6 +158,11 @@ export function getCustomers(params: QueryParams = {}): Promise<unknown> {
   return readContacts(CUSTOMER_READ, params)
 }
 
+// Authenticated exact lookup: never mirror a balance or fall back after denial.
+export function lookupCustomerMembership(membershipNumber: string): Promise<unknown> {
+  return apiFetch('GET', `/api/customers/membership/${encodeURIComponent(membershipNumber.trim())}`)
+}
+
 export function getSuppliers(params: QueryParams = {}): Promise<unknown> {
   return readContacts(SUPPLIER_READ, params)
 }

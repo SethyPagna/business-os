@@ -1,29 +1,5 @@
-// The ONE membership-number authority for the whole app.
-//
-// Before this file there were four independent minters, all producing a
-// random `LCMN-XXXXXXXX`:
-//   1. routes/contacts.ts  generateMembershipNumber()   (manual add/edit)
-//   2. lib/importEngine.ts nextMembershipNumber()       (spreadsheet import)
-//   3. lib/portalAccounts.ts generateMembershipId()     (storefront signup)
-//   4. frontend customerMembershipNumber.ts             (composed in the browser!)
-// Four sources on one column is how you get a collision the day someone
-// imports a spreadsheet while a cashier registers a walk-in -- each source
-// only checked the rows IT knew about.
-//
-// The house format is now `LC-#####` (Leang Cosmetic), zero-padded to
-// MEMBERSHIP_SEQUENCE_DIGITS, and the sequence is GAP-FILLING: the next
-// number handed out is the smallest positive integer not currently in use,
-// so a number freed by a deleted/merged customer is reused before the
-// sequence grows. (The pre-existing minters were not sequential at all --
-// they were random entropy, so nothing "appended" either; the gap-fill
-// below is new behaviour, not a restoration.)
-//
-// Uniqueness has exactly one guarantee: the partial UNIQUE index
-// `idx_customers_membership_lower_pg` on lower(membership_number)
-// (migration 0015). Everything here is an optimisation on top of it --
-// mintMembershipNumber() picks the gap, and withMintedMembershipNumber()
-// re-mints and retries when a concurrent writer wins the race.
-
+// One authority for newly minted IDs. Legacy helpers below remain for historical compatibility;
+// existing identities are never renumbered. New IDs contain eight secure random A-Z/0-9 characters.
 import type { D1Compat } from './db'
 
 export const MEMBERSHIP_PREFIX = 'LC-'
@@ -113,64 +89,46 @@ export function allocateMembershipSequences(taken: Iterable<number>, count: numb
  * row. Numbers it hands out are added to the snapshot, so two blank rows in
  * one file can't collide with each other.
  */
-export function createMembershipNumberAllocator(existingNumbers: Iterable<unknown>): () => string {
-  const takenSequences = new Set<number>()
-  for (const value of existingNumbers) {
-    const sequence = parseMembershipSequence(value)
-    if (sequence !== null) takenSequences.add(sequence)
+const MEMBERSHIP_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+const MEMBERSHIP_ATTEMPTS = 32
+
+export function randomMembershipNumber(): string {
+  let result = ''
+  // Rejection sampling avoids bias from 256 not being divisible by 36.
+  for (let draw = 0; draw < MEMBERSHIP_ATTEMPTS && result.length < 8; draw += 1) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16))
+    for (const byte of bytes) {
+      if (byte < 252) result += MEMBERSHIP_ALPHABET[byte % 36]
+      if (result.length === 8) break
+    }
   }
+  if (result.length !== 8) throw new Error('Could not generate a membership number')
+  return result
+}
+
+export function createMembershipNumberAllocator(existingNumbers: Iterable<unknown>): () => string {
+  const taken = new Set(Array.from(existingNumbers, normalizeMembershipNumber))
   return () => {
-    const sequence = firstFreeMembershipSequence(takenSequences)
-    takenSequences.add(sequence)
-    return formatMembershipNumber(sequence)
+    for (let attempt = 0; attempt < MEMBERSHIP_ATTEMPTS; attempt += 1) {
+      const candidate = randomMembershipNumber()
+      if (taken.has(candidate)) continue
+      taken.add(candidate)
+      return candidate
+    }
+    throw new Error('Could not mint a unique membership number')
   }
 }
 
-// --- D1-facing -------------------------------------------------------------
-
-type SequenceShapeRow = { taken: number; max_sequence: number }
-
-/**
- * The next house number for `customers`, gap-filled.
- *
- * Two steps so the common case stays cheap. Step one is a pure aggregate: how
- * many house numbers exist, and what is the largest. When those are equal the
- * sequence is exactly 1..max with no holes, so the answer is max + 1 without
- * transferring a single row. Only when they disagree (something was deleted,
- * merged, or hand-edited) do we pull the sequence list and find the hole.
- *
- * `extraTaken` lets a caller fold in numbers held outside customers --
- * portalAccounts.ts passes portal_accounts.membership_id. Passing any forces
- * the slow path, since the aggregate shortcut can only reason about one table.
- */
 export async function mintMembershipNumber(db: D1Compat, extraTaken: Iterable<unknown> = []): Promise<string> {
-  const extraSequences: number[] = []
-  for (const value of extraTaken) {
-    const sequence = parseMembershipSequence(value)
-    if (sequence !== null) extraSequences.push(sequence)
+  const allocate = createMembershipNumberAllocator(extraTaken)
+  for (let attempt = 0; attempt < MEMBERSHIP_ATTEMPTS; attempt += 1) {
+    const candidate = allocate()
+    const collision = await db.prepare(
+      'SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(@candidate) LIMIT 1',
+    ).get({ candidate })
+    if (!collision) return candidate
   }
-
-  if (extraSequences.length === 0) {
-    const shape = await db.prepare(`
-      SELECT COUNT(*) AS taken,
-             COALESCE(MAX(CAST(substr(membership_number, ${MEMBERSHIP_PREFIX.length + 1}) AS INTEGER)), 0) AS max_sequence
-      FROM customers
-      WHERE ${MEMBERSHIP_SQL_GLOB}
-    `).get<SequenceShapeRow>()
-    const taken = Number(shape?.taken ?? 0)
-    const maxSequence = Number(shape?.max_sequence ?? 0)
-    if (taken === maxSequence) return formatMembershipNumber(maxSequence + 1)
-  }
-
-  const rows = await db.prepare(`
-    SELECT membership_number FROM customers WHERE ${MEMBERSHIP_SQL_GLOB}
-  `).all<{ membership_number: string }>()
-  const sequences: number[] = extraSequences.slice()
-  for (const row of rows) {
-    const sequence = parseMembershipSequence(row.membership_number)
-    if (sequence !== null) sequences.push(sequence)
-  }
-  return formatMembershipNumber(firstFreeMembershipSequence(sequences))
+  throw new Error('Could not mint a unique membership number')
 }
 
 /**
@@ -186,10 +144,8 @@ export function isMembershipCollision(error: unknown): boolean {
 
 /**
  * Mint a number, run the write with it, and if the DB says someone else took
- * that number first, mint the next one and try again. This is the concurrency
- * story for a deterministic sequence: two cashiers registering walk-ins at the
- * same instant both compute the same next number, one INSERT loses, and this
- * hands the loser the following number instead of an error.
+ * that number first, mint a fresh random value and retry. The database unique
+ * index remains the final arbiter when concurrent writers choose the same ID.
  */
 export async function withMintedMembershipNumber<T>(
   db: D1Compat,

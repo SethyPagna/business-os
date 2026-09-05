@@ -452,7 +452,6 @@ let productReadTransportPromise: Promise<typeof import('../../api/productReadTra
 let lookupTransportPromise: Promise<typeof import('../../api/lookupTransport.ts')> | null = null
 let contactReadTransportPromise: Promise<typeof import('../../api/contactReadTransport.ts')> | null = null
 let contactWriteTransportPromise: Promise<typeof import('../../api/contactWriteTransport.ts')> | null = null
-let portalTransportPromise: Promise<typeof import('../../api/portalTransport.ts')> | null = null
 let saleWriteTransportPromise: Promise<typeof import('../../api/saleWriteTransport.ts')> | null = null
 
 function getProductReadTransport(): Promise<typeof import('../../api/productReadTransport.ts')> {
@@ -473,11 +472,6 @@ function getContactReadTransport(): Promise<typeof import('../../api/contactRead
 function getContactWriteTransport(): Promise<typeof import('../../api/contactWriteTransport.ts')> {
   if (!contactWriteTransportPromise) contactWriteTransportPromise = import('../../api/contactWriteTransport.ts')
   return contactWriteTransportPromise
-}
-
-function getPortalTransport(): Promise<typeof import('../../api/portalTransport.ts')> {
-  if (!portalTransportPromise) portalTransportPromise = import('../../api/portalTransport.ts')
-  return portalTransportPromise
 }
 
 function getSaleWriteTransport(): Promise<typeof import('../../api/saleWriteTransport.ts')> {
@@ -565,9 +559,15 @@ async function createPosDeliveryContact(payload: DeliveryFormState & { confirmDu
   return createDeliveryContact(payload) as Promise<Partial<DeliveryContactRecord>>
 }
 
-async function lookupPosPortalMembership(membershipNumber: string): Promise<MembershipInfo | null> {
-  const { lookupPortalMembership } = await getPortalTransport()
-  return lookupPortalMembership(membershipNumber) as Promise<MembershipInfo | null>
+async function lookupPosMembership(membershipNumber: string): Promise<MembershipInfo | null> {
+  const { lookupCustomerMembership } = await getContactReadTransport()
+  return lookupCustomerMembership(membershipNumber) as Promise<MembershipInfo | null>
+}
+
+// Missing means no manual choice. Resolve on every render so delayed/cached
+// settings work, while each saved draft keeps its explicit boolean override.
+export function resolveOrderLoyaltyAccrual(override: unknown, setting: unknown): boolean {
+  return typeof override === 'boolean' ? override : !['0', 'false', 'no', 'off'].includes(String(setting ?? 'true').trim().toLowerCase())
 }
 
 async function createPosSale(payload: Record<string, unknown>): Promise<SaleResult> {
@@ -783,6 +783,7 @@ export default function POS() {
   // The currently visible order. Derived, not stored separately.
   const resolvedActiveId = activeId && orders.find(o => o.id === activeId) ? activeId : orders[0]?.id
   const active = orders.find(o => o.id === resolvedActiveId) || orders[0] || normalizeOrder({}, 1)
+  const loyaltyAccrual = resolveOrderLoyaltyAccrual(active.loyaltyAccrual, settings.loyalty_points_enabled)
 
 // Sync payment method default when settings load
   useEffect(() => {
@@ -1094,7 +1095,6 @@ export default function POS() {
   const customerSearchRef = useRef('')
   const deliveryOptionsLoadedRef = useRef(false)
   const membershipRequestRef = useRef(0)
-  const membershipInfoRef = useRef<MembershipInfo | null>(null)
   const savingCustomerRef = useRef(false)
   const savingDeliveryRef = useRef(false)
   const checkoutInFlightRef = useRef(false)
@@ -1195,10 +1195,6 @@ export default function POS() {
       initials: aggregateInitialOptions((filters?.initials || fallbackInitials) as Array<Record<string, unknown>>),
     })
   }, [])
-
-  useEffect(() => {
-    membershipInfoRef.current = membershipInfo
-  }, [membershipInfo])
 
   // Filters are persisted in sessionStorage across visits (see setPersistedBranch
   // etc. above) so a value picked in a previous session -- a branch that's since
@@ -1441,7 +1437,7 @@ export default function POS() {
     setMembershipError('')
     try {
       const data = await withLoaderTimeout(
-        () => lookupPosPortalMembership(membershipNumber),
+        () => lookupPosMembership(membershipNumber),
         label,
         POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )
@@ -1451,11 +1447,6 @@ export default function POS() {
       return data || null
     } catch (error) {
       if (!isTrackedRequestCurrent(membershipRequestRef, requestId)) return null
-      const currentMembershipNumber = String(membershipInfoRef.current?.customer?.membership_number || '').trim().toLowerCase()
-      if (currentMembershipNumber && currentMembershipNumber === String(membershipNumber || '').trim().toLowerCase()) {
-        setMembershipError('')
-        return membershipInfoRef.current
-      }
       setMembershipInfo(null)
       setMembershipError(getErrorMessage(error, posCopy('Membership lookup failed')))
       return null
@@ -2892,7 +2883,7 @@ export default function POS() {
       membership_discount_usd: membershipDiscUsd,
       membership_discount_khr: membershipDiscKhr,
       membership_points_redeemed: membershipRedeemUnits * redeemPointsStep,
-      loyalty_accrual: active.loyaltyAccrual !== false,
+      loyalty_accrual: loyaltyAccrual,
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,
       payment_method:   saleStatus === 'awaiting_payment' && !hasPaymentInput ? '' : paymentMethodSummary(activePaymentDetails),
@@ -3559,19 +3550,19 @@ export default function POS() {
                 {/* Earn-points toggle: any sale attached to a customer accrues
                     points (balances are computed by summing sales server-side),
                     so this shows for every selected customer, not only members.
-                    Default ON preserves the long-standing auto-accrual. */}
+                    Each new order follows settings; a manual choice stays on this draft. */}
                 {active.customer?.id ? (
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-gray-500">{posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}</span>
                     <button
                       type="button"
                       role="switch"
-                      aria-checked={active.loyaltyAccrual !== false}
+                      aria-checked={loyaltyAccrual}
                       aria-label={posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}
-                      onClick={() => patchActive({ loyaltyAccrual: active.loyaltyAccrual === false })}
-                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${active.loyaltyAccrual !== false ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      onClick={() => patchActive({ loyaltyAccrual: !loyaltyAccrual })}
+                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${loyaltyAccrual ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${active.loyaltyAccrual !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${loyaltyAccrual ? 'translate-x-4' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
                 ) : null}

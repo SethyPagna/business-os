@@ -1878,14 +1878,17 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   // duplicating routes/contacts.ts's. Two minters on one column is a
   // collision waiting for the day someone imports a spreadsheet while a
   // cashier registers a walk-in. Both now come from lib/membershipNumber.ts:
-  // one house format (`LC-#####`), one gap-fill rule. The allocator is the
+  // one random eight-character format. The allocator is the
   // synchronous flavour, seeded from the full `existing` snapshot this pass
   // already loaded (no D1 round trip per row) and remembering every number it
-  // hands out, so two blank rows in one file can't collide with each other
+  // hands out plus all supplied IDs, so blank rows cannot take a later row's ID
   // either. The partial UNIQUE index from migration 0015 stays the final
   // arbiter at write time.
   const nextMembershipNumber = table === 'customers'
-    ? createMembershipNumberAllocator(existing.map((record) => (record as { membership_number?: unknown }).membership_number))
+    ? createMembershipNumberAllocator([
+        ...existing.map((record) => (record as { membership_number?: unknown }).membership_number),
+        ...rows.map((row) => row.membership_number),
+      ])
     : (): string => { throw new Error('Membership numbers are customers-only') }
 
   // Same-name-can't-coexist rule applies within one file too, not just
@@ -2091,6 +2094,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       // is pinned to whatever `match` already has, and the warning above
       // tells the reviewer why.
       if (customerPhoneConflict) merged.phone = match.phone ?? null
+      if (table === 'customers') merged.membership_number = match.membership_number ?? null
       // Deliberately NOT auto-assigned on the merge path (only on true
       // creation, just above) -- a matched existing customer keeps
       // whatever membership_number it already had, blank or not; this
@@ -5695,7 +5699,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       for (const r of actionable) {
         const d = r.data as Record<string, unknown>
         if (r.action === 'update' && r.existingId) {
-          const assignments = columns.map((c) => `"${c}"=@${c}`).join(', ')
+          // A saved import review may predate a customer edit. Never replace identity.
+          const assignments = columns.filter((c) => c !== 'membership_number').map((c) => `"${c}"=@${c}`).join(', ')
           statements.push({ sql: `UPDATE "${table}" SET ${assignments}, updated_at=@updated_at WHERE id=@id`, params: { ...d, id: r.existingId, updated_at: nowIso } })
         } else {
           const cols = [...columns, 'created_at', 'updated_at']

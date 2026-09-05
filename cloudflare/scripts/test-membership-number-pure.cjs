@@ -5,10 +5,9 @@
 // nothing here reimplements the logic.
 //
 // What it pins:
-//   1. the house format LC-##### (and that a legacy LCMN- number is NOT one)
-//   2. the gap-fill order -- the smallest free number is handed out first
-//   3. concurrent minting -- two writers computing the same next number, the
-//      UNIQUE index from 0015 arbitrating, and the loser getting the NEXT one
+//   1. legacy LC-##### formatting/parsing remains compatible
+//   2. new allocation is random, exactly eight uppercase alphanumeric characters
+//   3. concurrent minting -- the UNIQUE index arbitrates and the loser retries
 //   4. one minter: no source file mints its own membership number any more
 //   5. migration 0110 backfilling existing rows into the same sequence
 //
@@ -90,9 +89,9 @@ check(() => assert.deepEqual(
 ))
 
 const allocate = membership.createMembershipNumberAllocator(['LC-00001', 'LC-00003', null, '', 'LCMN-DEADBEEF'])
-check(() => assert.equal(allocate(), 'LC-00002', 'the allocator fills the hole first'))
-check(() => assert.equal(allocate(), 'LC-00004', 'and remembers what it just handed out'))
-check(() => assert.equal(allocate(), 'LC-00005'))
+const allocated = [allocate(), allocate(), allocate()]
+check(() => assert.ok(allocated.every(n => /^[A-Z0-9]{8}$/.test(n))))
+check(() => assert.equal(new Set(allocated).size, 3))
 
 // --- 3. minting against a real database ------------------------------------
 
@@ -124,73 +123,23 @@ async function main() {
   ).get()
   check(() => assert.ok(index, 'migration 0015 UNIQUE index on lower(membership_number) must exist'))
 
-  assert.equal(await membership.mintMembershipNumber(db), 'LC-00001', 'first customer of an empty shop')
-  checks += 1
-
-  insertCustomer('First', 'LC-00001')
-  insertCustomer('Second', 'LC-00002')
-  insertCustomer('Third', 'LC-00003')
-  assert.equal(await membership.mintMembershipNumber(db), 'LC-00004', 'contiguous sequence appends')
-  checks += 1
-
-  // Delete the middle customer: the number it held is now free and must be
-  // reused before the sequence grows -- this is the whole point of gap-filling.
-  rawDb.prepare("DELETE FROM customers WHERE membership_number = 'LC-00002'").run({})
-  assert.equal(await membership.mintMembershipNumber(db), 'LC-00002', 'a freed number is reused')
-  checks += 1
-
-  // A legacy LCMN- row does not reserve a sequence slot.
-  insertCustomer('Legacy', 'LCMN-A1B2C3D4')
-  assert.equal(await membership.mintMembershipNumber(db), 'LC-00002', 'a non-house number holds no slot')
-  checks += 1
-
-  // portal_accounts ids fold in as extra taken numbers.
-  assert.equal(
-    await membership.mintMembershipNumber(db, ['LC-00002']), 'LC-00004',
-    'a number held by a storefront account is not handed out again',
-  )
-  checks += 1
-
-  // --- concurrent minting -------------------------------------------------
-  // Two cashiers registering a walk-in at the same instant both compute the
-  // same next number; the UNIQUE index rejects the loser, and the retry hands
-  // it the following one instead of an error.
-  const first = await membership.mintMembershipNumber(db)
-  const second = await membership.mintMembershipNumber(db)
-  assert.equal(first, second, 'two mints with no write between them DO collide -- that is why the retry exists')
-  checks += 1
-
-  const winner = await membership.withMintedMembershipNumber(db, async (number) => {
-    insertCustomer('Walk-in A', number)
-    return number
-  })
-  assert.equal(winner, 'LC-00002', 'the first writer takes the gap')
-  checks += 1
-
-  let attempts = 0
-  const loser = await membership.withMintedMembershipNumber(db, async (number) => {
-    attempts += 1
-    insertCustomer('Walk-in B', number)
-    return number
-  })
-  assert.equal(attempts, 1, 'no retry needed once the gap is filled')
-  assert.equal(loser, 'LC-00004', 'the next writer gets the next free number, not a duplicate')
-  checks += 2
-
-  // Force the race for real: mint, let someone else take that exact number,
-  // then run the write. The retry must recover rather than throw.
-  const stolen = await membership.mintMembershipNumber(db)
+  insertCustomer('Legacy', 'lc-00001')
+  insertCustomer('Legacy long', 'LCMN-A1B2C3D4')
+  const before = await db.prepare('SELECT membership_number FROM customers ORDER BY id').all()
+  const minted = await membership.mintMembershipNumber(db)
+  assert.match(minted, /^[A-Z0-9]{8}$/)
   let raceAttempts = 0
   const recovered = await membership.withMintedMembershipNumber(db, async (number) => {
     raceAttempts += 1
-    if (raceAttempts === 1) insertCustomer('Interloper', stolen)
-    insertCustomer(`Racer ${raceAttempts}`, number)
+    if (raceAttempts === 1) insertCustomer('Interloper', number)
+    insertCustomer('Racer', number)
     return number
   })
-  assert.equal(raceAttempts, 2, 'the collision is caught and the mint retried')
-  assert.notEqual(recovered, stolen, 'the retry lands on a different number')
-  assert.equal(membership.parseMembershipSequence(recovered) !== null, true, 'and it is still a house number')
-  checks += 3
+  assert.equal(raceAttempts, 2)
+  assert.match(recovered, /^[A-Z0-9]{8}$/)
+  const after = await db.prepare('SELECT membership_number FROM customers ORDER BY id LIMIT 2').all()
+  assert.deepEqual(after, before, 'minting never rewrites legacy identities')
+  checks += 4
 
   const collisionError = new Error('D1_ERROR: UNIQUE constraint failed: index \'idx_customers_membership_lower_pg\'')
   assert.equal(membership.isMembershipCollision(collisionError), true)
@@ -283,7 +232,7 @@ check(() => assert.equal(bulk[4999], 'LC-05000'))
 check(() => assert.equal(new Set(bulk).size, 5000, 'no number is issued twice'))
 
 main().then(() => {
-  console.log(`PASS ${checks} membership-number checks (LC- format, gap-fill, concurrency, one minter, 0110 backfill)`)
+  console.log(`PASS ${checks} membership-number checks (legacy compatibility, random IDs, concurrency, historical migration)`)
 }).catch((error) => {
   console.error(error)
   process.exit(1)
