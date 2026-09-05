@@ -442,6 +442,18 @@ const ALLOWLIST = [
       + "still describe them.",
   },
   {
+    file: 'src/lib/legacySubtotalRepair.ts', table: 'sales', column: 'created_at', alias: 's',
+    reason: "the one-off Sep 2-3 repair uses this expression only to verify each captured "
+      + "row's business date after stateCount joins a canonical expected manifest row to "
+      + "sales by s.id=e.id. That manifest is hard-limited to the exact 22 IDs 16842-16863, "
+      + "so created_at never selects or orders the sales table. EXPLAIN QUERY PLAN for the "
+      + "generated entry guard reports SCAN json_each followed by SEARCH s USING INTEGER "
+      + "PRIMARY KEY (rowid=?) for both the before and retry branches; it does not scan sales "
+      + "or use idx_sales_created_pg. The structural regression assertion below pins the "
+      + "single wrapped check, exact cohort bound, and primary-key join that justify this "
+      + "exception; revisit the allowlist if any of those conditions changes.",
+  },
+  {
     file: 'src/routes/compat.ts', table: 'products', column: 'expiry_date', alias: null,
     reason: 'the low-stock/expiry alert has no index on products.expiry_date -- the recorded '
       + 'deliberate decision (see compat.ts) is that this alert query is bounded by is_active '
@@ -537,6 +549,15 @@ function main() {
   check(
     'a functional leading index (e.g. lower(name)) is NOT recorded as a plain leading column',
     !(tableIndexLeadingCols.get('products') && tableIndexLeadingCols.get('products').has('name')),
+  )
+
+  const legacySubtotalRepairSource = fs.readFileSync(path.join(SRC_DIR, 'lib', 'legacySubtotalRepair.ts'), 'utf8')
+  check(
+    'legacy subtotal date validation remains one exact-22 primary-key-bounded check',
+    (legacySubtotalRepairSource.match(/date\(datetime\(s\.created_at\s*,\s*'\+7 hours'\)\)/g) || []).length === 1
+      && /EXPECTED_IDS\s*=\s*Object\.freeze\(Array\.from\(\{\s*length:\s*22\s*\},\s*\(_\s*,\s*index\)\s*=>\s*16842\s*\+\s*index\)\)/.test(legacySubtotalRepairSource)
+      && /FROM json_each\(@rows\)/.test(legacySubtotalRepairSource)
+      && /FROM expected e JOIN sales s ON s\.id=e\.id WHERE/.test(legacySubtotalRepairSource),
   )
 
   const files = walkTsFiles(SRC_DIR)
