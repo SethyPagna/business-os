@@ -80,6 +80,7 @@ let backupTables = null
 let backupCalls = 0
 let batchCalls = 0
 let eventLog = []
+let refreshLog = []
 
 db.batch = async (statements) => {
   batchCalls += 1
@@ -124,8 +125,8 @@ const systemRoute = loadReal('routes/system.ts', {
     },
   },
   '../lib/media': media,
-  '../durable-objects/broadcastHub': { broadcast: async () => {} },
-  '../lib/cache': { bumpVersion: async () => {} },
+  '../durable-objects/broadcastHub': { broadcast: async (_env, entity) => { refreshLog.push(`broadcast:${entity}`) } },
+  '../lib/cache': { bumpVersion: async (_env, entity) => { refreshLog.push(`version:${entity}`) } },
 })
 
 const legacyRepair = require('../src/lib/legacySubtotalRepair.ts')
@@ -265,6 +266,7 @@ function resetHarness() {
   backupCalls = 0
   batchCalls = 0
   eventLog = []
+  refreshLog = []
 }
 
 function protectedSnapshot() {
@@ -305,15 +307,18 @@ async function main() {
       assert.deepStrictEqual(preview.request.manifest.sales, planner.canonicalizeManifest(fixtureManifest()).sales)
       assert.strictEqual(backupCalls, 0)
       assert.strictEqual(batchCalls, 0)
+      assert.deepStrictEqual(refreshLog, [])
       assert.deepStrictEqual(protectedSnapshot(), before)
       const applied = await request(preview.request)
       assert.strictEqual(applied.status, 200, JSON.stringify(applied))
       assert.strictEqual(applied.json.affected.sales, 22)
+      assert.deepStrictEqual(refreshLog, ['version:sales', 'broadcast:sales'])
       assert.deepStrictEqual(protectedSnapshot(), before)
       const retried = await request(preview.request)
       assert.strictEqual(retried.status, 200)
       assert.strictEqual(retried.json.outcome, 'already_applied')
       assert.strictEqual(retried.json.affected.sales, 0)
+      assert.deepStrictEqual(refreshLog, ['version:sales', 'broadcast:sales', 'version:sales', 'broadcast:sales'])
     }
   })
 
@@ -323,6 +328,9 @@ async function main() {
       'DELETE FROM sales WHERE id=16842',
       'UPDATE sale_items SET total_usd=total_usd+1 WHERE sale_id=16842',
       "UPDATE sales SET notes=printf('%02001d',0) WHERE id=16842",
+      "UPDATE sales SET sale_status=printf('%041d',0) WHERE id=16842",
+      "UPDATE sales SET created_at=printf('%010000d',0) WHERE id=16842",
+      "UPDATE sales SET updated_at=printf('%010000d',0) WHERE id=16842",
       `INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`,
     ]) {
       resetHarness()
@@ -333,6 +341,7 @@ async function main() {
       assert.ok(!(await response.json()).request)
       assert.strictEqual(backupCalls, 0)
       assert.strictEqual(batchCalls, 0)
+      assert.deepStrictEqual(refreshLog, [])
       assert.deepStrictEqual(protectedSnapshot(), before)
     }
   })

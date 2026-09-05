@@ -1,6 +1,8 @@
 import type { Context } from 'hono'
 
 export const SMALL_BODY_BYTES = 64 * 1024
+// The manifest-bound repair permits up to 512000 bytes of rows plus envelope.
+export const MIGRATION_FINALIZE_BODY_BYTES = 768 * 1024
 export const PORTAL_SCREENSHOT_BODY_BYTES = 20 * 1024 * 1024
 
 // Exact POST endpoints only. Imports, sync/outbox, settings, bulk operations,
@@ -16,6 +18,7 @@ const STAFF_SMALL_POSTS = new Set([
   '/api/auth/otp/disable', '/api/auth/otp/recover', '/api/auth/oauth/unlink',
   '/api/auth/devices/sessions/revoke-user',
   '/api/backups', '/api/backups/maintenance/clear',
+  '/api/system/finalize-migration',
 ])
 
 export function smallBodyAccess(method: string, path: string): 'public' | 'staff' | null {

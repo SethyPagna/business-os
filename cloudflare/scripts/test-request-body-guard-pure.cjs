@@ -45,7 +45,7 @@ function streamRequest(url, bytes, length, options = {}) {
 }
 
 async function main() {
-  const { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large } = load('lib/requestBodyGuard.ts')
+  const { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit } = load('lib/requestBodyGuard.ts')
   let effects = 0
   const app = new Hono()
   app.onError((_, c) => c.json({ error: 'generic handler' }, 500))
@@ -135,7 +135,7 @@ async function main() {
     },
   }
   const permissions = { hasPermission: (_, key) => key === 'backup' ? backup : restore, isAdminControlUser: () => admin }
-  const guard = { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large }
+  const guard = { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit }
   const portal = load('routes/portal.ts', {
     '../lib/requestBodyGuard': guard, '../lib/auth': auth,
     '../lib/rateLimit': { getClientIp: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
@@ -154,6 +154,14 @@ async function main() {
     await c.req.json().catch(() => ({})); calls.effect++; return c.json({ ok: true })
   })
   const indexSource = fs.readFileSync(path.join(__dirname, '../src/index.ts'), 'utf8')
+  const system = new Hono()
+  system.use('*', auth.requireAuth)
+  system.post('/finalize-migration', async (c) => {
+    if (!restore) return c.json({ error: 'No permission' }, 403)
+    await c.req.json().catch(() => ({}))
+    calls.effect++
+    return c.json({ ok: true })
+  })
   const routes = Object.fromEntries([...indexSource.matchAll(/import \w+ from '(\.\/routes\/[^']+)'/g)].map(([, name]) => [name, { __esModule: true, default: new Hono() }]))
   const worker = load('index.ts', {
     ...routes,
@@ -161,6 +169,7 @@ async function main() {
     './routes/backups': backups,
     './routes/devices': devices,
     './routes/auth': { __esModule: true, default: authRoutes },
+    './routes/system': { __esModule: true, default: system },
     './routes/sync': { createSyncRoute: () => new Hono() },
     './lib/requestBodyGuard': guard, './lib/auth': auth, './lib/permissions': permissions,
     './lib/coreDataInvariants': { ensureCoreDataInvariantsOnce: async () => { calls.bootstrap++ } },
@@ -172,6 +181,21 @@ async function main() {
   async function send(route, size, length, extra = {}) {
     return worker.fetch(streamRequest(`https://unit.test${route}`, new Uint8Array(size).fill(32), length, extra).request, env, ctx)
   }
+  assert.equal(smallBodyAccess('POST', '/api/system/finalize-migration'), 'staff')
+  const repairPath = '/api/system/finalize-migration'
+  assert.equal((await send(repairPath, repairLimit + 1)).status, 401)
+  authenticated = true
+  assert.equal((await send(repairPath, repairLimit + 1)).status, 403)
+  restore = true
+  for (const length of [undefined, '1', String(repairLimit + 1)]) {
+    const before = calls.effect
+    assert.equal((await send(repairPath, repairLimit + 1, length)).status, 413)
+    assert.equal(calls.effect, before, 'over-limit streamed repair never reaches parser/backup/batch')
+  }
+  assert.equal((await send(repairPath, repairLimit)).status, 200)
+  assert.equal(calls.effect, 1, 'exact-limit repair reaches handler exactly once')
+  calls.effect = 0
+  authenticated = false; restore = false
   for (const route of ['/api/auth/login', '/api/auth/password-reset/complete', '/api/portal/auth/signup', '/api/portal/auth/signin', '/api/portal/auth/signout']) {
     const before = { ...calls }
     const response = await send(route, small + 1, '1')

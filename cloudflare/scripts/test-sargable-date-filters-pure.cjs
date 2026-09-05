@@ -553,11 +553,12 @@ function main() {
 
   const legacySubtotalRepairSource = fs.readFileSync(path.join(SRC_DIR, 'lib', 'legacySubtotalRepair.ts'), 'utf8')
   check(
-    'legacy subtotal date validation remains one exact-22 primary-key-bounded check',
-    (legacySubtotalRepairSource.match(/date\(datetime\(s\.created_at\s*,\s*'\+7 hours'\)\)/g) || []).length === 1
+    'legacy subtotal preview and date validation remain exact-22 primary-key-bounded checks',
+    (legacySubtotalRepairSource.match(/date\(datetime\(s\.created_at\s*,\s*'\+7 hours'\)\)/g) || []).length === 2
       && /EXPECTED_IDS\s*=\s*Object\.freeze\(Array\.from\(\{\s*length:\s*22\s*\},\s*\(_\s*,\s*index\)\s*=>\s*16842\s*\+\s*index\)\)/.test(legacySubtotalRepairSource)
       && /FROM json_each\(@rows\)/.test(legacySubtotalRepairSource)
-      && /FROM expected e JOIN sales s ON s\.id=e\.id WHERE/.test(legacySubtotalRepairSource),
+      && /FROM expected e JOIN sales s ON s\.id=e\.id WHERE/.test(legacySubtotalRepairSource)
+      && /FROM sales s WHERE s\.id IN \(SELECT value FROM json_each\(@ids\)\)/.test(legacySubtotalRepairSource),
   )
 
   const files = walkTsFiles(SRC_DIR)

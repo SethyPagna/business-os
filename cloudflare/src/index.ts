@@ -32,7 +32,7 @@ import reviewQueueRoute from './routes/reviewQueue'
 import { createSyncRoute } from './routes/sync'
 import { getSessionUser } from './lib/auth'
 import { hasPermission, isAdminControlUser } from './lib/permissions'
-import { admitRequestBody, SMALL_BODY_BYTES, smallBodyAccess } from './lib/requestBodyGuard'
+import { admitRequestBody, SMALL_BODY_BYTES, MIGRATION_FINALIZE_BODY_BYTES, smallBodyAccess } from './lib/requestBodyGuard'
 import { ensureCoreDataInvariantsOnce } from './lib/coreDataInvariants'
 import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
 import { reportError } from './lib/errorReporting'
@@ -259,7 +259,9 @@ app.use('/api/*', async (c, next) => {
     if (!hasPermission(user, 'backup')) return next()
     if (c.req.path === '/api/backups/maintenance/clear' && !hasPermission(user, 'backup_restore')) return next()
   }
-  const rejection = await admitRequestBody(c, SMALL_BODY_BYTES)
+  const finalize = c.req.path === '/api/system/finalize-migration'
+  if (finalize && !hasPermission(user, 'backup_restore')) return next()
+  const rejection = await admitRequestBody(c, finalize ? MIGRATION_FINALIZE_BODY_BYTES : SMALL_BODY_BYTES)
   if (rejection) return rejection
   return next()
 })
