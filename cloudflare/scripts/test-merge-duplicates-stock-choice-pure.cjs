@@ -138,7 +138,11 @@ function seed() {
   run(`INSERT INTO branches (id, name) VALUES (${SHOP}, 'shop'), (${WAREHOUSE}, 'warehouse')`)
   // The twin is priced HIGHER than the keeper, which is the case that makes a
   // merge quietly raise the shelf price (resolveMergedPricing takes the max).
-  run(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, special_price_usd, stock_quantity, is_active)
+  // wholesale_price_* is the LIVE discounted tier (migration 0111 moved it off
+  // special_price_* and zeroed that pair), so the fixture prices the tier that
+  // a merge can actually move: equal on both rows here, which is what makes the
+  // 'an unchanged field is still reported' assertion below mean something.
+  run(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, wholesale_price_usd, stock_quantity, is_active)
        VALUES (${KEEPER}, 'Anastasia Dipbrow Pomade Dark Brown', '689304051040', 8, 22, 20, 5, 1),
               (${DUP},    'Anastasia Dipbrow Pomade Dark Brown', '0689304051040', 8, 25, 20, 10, 1)`)
 
@@ -277,7 +281,7 @@ async function main() {
         'only the price that actually moved is reported -- unchanged wholesale prices must not be noise')
       assert.deepEqual(stats.reversal.keeperPricingBefore, {
         selling_price_usd: 22, selling_price_khr: 0,
-        wholesale_price_usd: 0, wholesale_price_khr: 0,
+        wholesale_price_usd: 20, wholesale_price_khr: 0,
         cost_price_usd: 8, cost_price_khr: 0,
       }, 'undo must restore the exact pre-merge prices')
     })
@@ -394,7 +398,11 @@ async function main() {
         'the reviewer must see the price change in the dialog, not discover it afterwards')
       assert.equal(pricing.before.selling_price_usd, 22)
       assert.equal(pricing.after.selling_price_usd, 25)
-      assert.equal(pricing.after.special_price_usd, 20, 'an unchanged field is still reported so before/after is complete')
+      assert.equal(pricing.after.wholesale_price_usd, 20, 'an unchanged field is still reported so before/after is complete')
+      // The preview named special_price_usd/khr until 2026-09-06 -- columns 0111
+      // zeroed on every row -- so it could only ever report 0 -> 0 for the tier
+      // the fold actually moves. Reporting a dead column is not a preview.
+      assert.ok(!('special_price_usd' in pricing.after), 'a column zeroed by 0111 is not a price the reviewer is shown')
     })
 
     await check('reading the impact writes nothing -- the refusal path is side-effect free', () => {

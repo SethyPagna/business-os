@@ -51,6 +51,36 @@ function errorCode(error: unknown): string {
   return String((error as { code?: unknown } | null)?.code || '')
 }
 
+// Named for the idiom the rest of the app uses (CatalogPage.replaceVars): a
+// pack value is returned verbatim by t(), so every {mark} in it has to be
+// substituted at the call site or it reaches the operator with braces intact.
+function replaceVars(template: string, values: Record<string, unknown>): string {
+  return template.replace(/\{(\w+)\}/g, (_m, key) => String(values[key] ?? ''))
+}
+
+// The two refusals that are DECISIONS, not failures: the server declines to
+// invent a cost out of two figures that cannot both be one product's cost, and
+// it declines to break a stock-in session that can still be undone. Both reach
+// the caller as an ordinary throw -- every merge surface already reports
+// error.message -- so the message has to be the translated one, not the
+// server's English. Any other error passes through untouched.
+function localizeRefusal(t: TranslateFn, error: unknown): unknown {
+  const code = errorCode(error)
+  if (code === 'cost_outlier_review') {
+    const outlier = (error as { costOutlier?: { min?: number; max?: number } } | null)?.costOutlier
+    const template = t('merge_cost_outlier_refused')
+      || 'These two costs are too far apart to be one product\u2019s cost ({min} and {max}). Averaging them would store a cost nobody paid, so nothing was merged \u2014 correct whichever figure is wrong, then merge.'
+    return new Error(replaceVars(template, { min: outlier?.min ?? '', max: outlier?.max ?? '' }))
+  }
+  if (code === 'stock_session_reversible') {
+    const operationId = String((error as { operationId?: unknown } | null)?.operationId || '')
+    const template = t('merge_stock_session_blocked')
+      || 'One of these products is still part of a stock-in session that can be undone ({id}). Merging now would break that Undo \u2014 undo it or let it settle first.'
+    return new Error(replaceVars(template, { id: operationId }))
+  }
+  return error
+}
+
 // The 400 refusal carries the same identity read the preview would have.
 function errorIdentity(error: unknown): MergeIdentityDiff | null {
   const raw = (error as { identity?: unknown } | null)?.identity as MergeIdentityDiff | undefined
@@ -111,7 +141,11 @@ export function useMergeStockChoice(t: TranslateFn) {
       // shown and confirmed rather than applied on the quiet.
       const fillsCost = Boolean(identity?.costFill?.length)
       if (!needsChoice && !wouldReprice && !crossIdentity && !fillsCost) {
-        await mergePossiblySameProducts(keeper.id, other.id)
+        try {
+          await mergePossiblySameProducts(keeper.id, other.id)
+        } catch (error) {
+          throw localizeRefusal(t, error)
+        }
         return 'merged'
       }
       setWorking(false)
@@ -121,6 +155,8 @@ export function useMergeStockChoice(t: TranslateFn) {
       try {
         await mergePossiblySameProducts(keeper.id, other.id, needsChoice ? choice : undefined)
         return 'merged'
+      } catch (error) {
+        throw localizeRefusal(t, error)
       } finally {
         setWorking(false)
         setPending(null)
@@ -132,7 +168,7 @@ export function useMergeStockChoice(t: TranslateFn) {
       await mergePossiblySameProducts(keeper.id, other.id)
       return 'merged'
     } catch (error) {
-      if (errorCode(error) !== 'stock_choice_required') throw error
+      if (errorCode(error) !== 'stock_choice_required') throw localizeRefusal(t, error)
       const choice = await ask({
         keeperName,
         discardedName,
@@ -151,7 +187,7 @@ export function useMergeStockChoice(t: TranslateFn) {
         setPending(null)
       }
     }
-  }, [ask])
+  }, [ask, t])
 
   const mergeStockChoiceDialog = pending ? (
     <MergeStockChoiceDialog

@@ -92,9 +92,14 @@ test('a merge that would raise the keeper\'s price says so, before -> after per 
   assert.match(dialog, /pricing\?\.changes/)
   assert.match(dialog, /change\.from/)
   assert.match(dialog, /change\.to/)
-  for (const field of ['selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr']) {
+  // The discounted tier is wholesale_price_*, not the special_price_* pair
+  // migration 0111 zeroed. The dialog labelled the dead pair until N15, so the
+  // one price a merge actually moves showed as a raw column name -- when it
+  // showed at all, since the server's preview named the dead pair too.
+  for (const field of ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']) {
     assert.ok(dialog.includes(field), `${field} must have a label in the price-change table`)
   }
+  assert.ok(!/special_price_usd: \[/.test(dialog), 'a column zeroed by 0111 must not be labelled as a price')
   assert.match(hook, /const wouldReprice = Boolean\(pricing\?\.changes\?\.length\)/)
   assert.match(hook, /if \(!needsChoice && !wouldReprice && !crossIdentity && !fillsCost\)/, 'a silent reprice must still stop for confirmation')
 })
@@ -129,6 +134,13 @@ test('the transport carries the answer and the server refusal keeps its breakdow
   assert.match(transport, /merge-preview/)
   assert.match(http, /error\.stockImpact = parsed\?\.stockImpact \|\| null/)
   assert.match(hook, /'stock_choice_required'/, 'the server refusal must reopen the same dialog')
+  // The two refusals that are decisions, not failures: their details must
+  // survive the transport, or the flow can only echo the server's English.
+  assert.match(http, /error\.costOutlier = parsed\?\.costOutlier \|\| null/)
+  assert.match(http, /error\.operationId = parsed\?\.operationId \|\| null/)
+  assert.match(hook, /'cost_outlier_review'/, 'an un-averageable cost pair must be reported, not merged')
+  assert.match(hook, /'stock_session_reversible'/, 'a merge must not break a stock session that can still be undone')
+  assert.match(hook, /localizeRefusal\(t, error\)/, 'and both must reach the operator translated')
 })
 
 test('every new string ships in BOTH packs', () => {
@@ -138,6 +150,10 @@ test('every new string ships in BOTH packs', () => {
     'merge_stock_choice_write_off', 'merge_stock_choice_write_off_hint',
     'merge_stock_choice_note', 'merge_price_change_title', 'merge_price_change_hint',
     'merge_duplicate_confirm_title', 'bulk_merge_cancelled_count', 'special_price_khr',
+    // N15: the cost a merge writes, and the two refusals.
+    'merge_cost_average_title', 'merge_cost_average_hint',
+    'merge_cost_outlier_refused', 'merge_stock_session_blocked',
+    'wholesale_price', 'wholesale_price_khr', 'product_dup_leading_zero',
   ]
   for (const key of keys) {
     assert.ok(en[key], `en.json is missing ${key}`)
@@ -161,13 +177,22 @@ test('a barcode or cost mismatch is NEVER auto-merged', () => {
   )
   assert.ok(guard, 'the auto-merge guard must exist')
   assert.match(guard, /normalizeProductGroupName\(a\.name\) !== normalizeProductGroupName\(b\.name\)/)
-  // Costs are judged by the SHARED cost ruling (compareCosts, both currencies
-  // inside it), never by a local equality test: a cost of 0/NULL is missing,
-  // not different, and only a genuine difference blocks the automatic path.
-  // The truth table itself is pinned in tests/productCostRuling.test.ts.
-  assert.match(guard, /compareCosts\(a, b\) === 'differs'/, 'a real cost mismatch must block the automatic path')
-  assert.match(guard, /cleanupBarcode\(a\.barcode\) === cleanupBarcode\(b\.barcode\)/,
-    'only a leading-zero-equivalent barcode may auto-merge')
+  // COST NO LONGER BLOCKS THE AUTOMATIC PATH, and this assertion is the
+  // reversal of what it pinned before. Until 2026-09-06 the guard refused any
+  // pair whose costs DISAGREED -- the pre-Sep-4 policy, when a different cost
+  // forked a child row. The Sep-4 ruling reversed that ("add different costs
+  // together and divide by the number different costs") and the Worker has
+  // averaged ever since, so the client gate was refusing exactly the case the
+  // owner asked for while POST /merge-duplicates merged the identical pair.
+  // What still refuses is a cost pair too far apart to be one cost: the server
+  // returns 409 cost_outlier_review rather than inventing a mean nobody paid,
+  // so the bulk run must not offer that pair either.
+  assert.ok(!/compareCosts\(a, b\) === 'differs'/.test(guard),
+    'a differing cost is a MERGE under the Sep-4 ruling, not a fork')
+  assert.match(guard, /resolveMergedCostDetail\(\[a, b\]\)\.outliers\.length/,
+    'only an un-averageable cost pair may block the automatic path')
+  assert.match(guard, /identityBarcodeKey\(a\.barcode\) === identityBarcodeKey\(b\.barcode\)/,
+    'only a leading-zero-equivalent barcode may auto-merge, judged by the SHARED fold')
   assert.match(duplicatesTab, /targets\.filter\(clusterIsSafeAutoMerge\)/, 'bulk merge must run through the guard')
 })
 

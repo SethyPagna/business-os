@@ -183,9 +183,36 @@ export type MergeStockDisposition = 'merge' | 'write_off'
 // applier read the SAME list and can never drift -- and so undo can validate a
 // snapshot's table/column names against it before they ever reach SQL.
 //
-// Deliberately excluded, with reasons: stock_row_moves, import_auto_merges and
-// the legacy_* tables record what a PAST operation did to a specific product id
-// -- repointing them would rewrite provenance rather than move a live link.
+// The list is COMPLETE against the schema, checked by sweeping every migration
+// for a *product_id column (test-merge-duplicates-carries-all-pure.cjs runs the
+// same sweep, so a new table with a product FK fails there rather than silently
+// orphaning rows). Everything not on the list is excluded ON PURPOSE:
+//
+//   branch_stock, product_batches.variant_product_id, product_images -- moved by
+//     the fold itself, per branch / per batch_key / de-duplicated by path,
+//     which a blind UPDATE could not do.
+//   stock_row_moves, import_auto_merges, legacy_* -- these record what a PAST
+//     operation did to a specific product id; repointing them would rewrite
+//     provenance rather than move a live link.
+//   sale_amendments.product_id -- a SNAPSHOT, not a link. 0115:73 says so in
+//     the schema itself ("product_id/product_name are snapshotted here and not
+//     looked up"), so the amendment must keep naming the row the amendment was
+//     actually made against.
+//   stock_session_members.product_id -- provenance AND the replay driver. It is
+//     not merely a record of a past stock-in: lib/stockSession.ts builds the
+//     whole undo/redo postimage from it (`WITH m AS (SELECT * FROM
+//     stock_session_members WHERE operation_id=@id)`, then products/branch_stock
+//     /movements are read through `IN (SELECT product_id FROM m)`) and asserts
+//     the live state still equals that postimage before it will reverse
+//     anything. Repointing m at the keeper would compare the KEEPER's rows
+//     against a postimage recorded for the loser -- and `members` is itself
+//     inside the postimage, so the UPDATE alone breaks the assertion. Moving
+//     this row does not fix the orphan; it inverts it onto the survivor.
+//     What DOES protect the session is the guard in routes/products.ts
+//     (mergeBlockedByReversibleStockSession): a merge is REFUSED while either
+//     row still belongs to a stock session that can be undone or redone, so no
+//     merge can silently brick a replay. Once the session is spent the members
+//     row is pure history and stays where it happened.
 export const MERGE_REPARENT_TABLES: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'sale_items', column: 'product_id' },
   { table: 'return_items', column: 'product_id' },

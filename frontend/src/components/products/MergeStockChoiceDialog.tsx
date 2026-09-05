@@ -62,22 +62,38 @@ export type MergePricingChange = {
 //                below so the operator is told which value lands on the kept row);
 //   'differs' -- BOTH carry a cost and they differ. Real money out: review only,
 //                never auto-merged, never averaged.
+//
+// costBefore/costAfter/costOutliers arrived with the same change that made
+// the server send this object at all (N15). Until then the merge preview
+// never mentioned cost: a pair with two real costs was averaged by the fold
+// and the operator saw the new figure only afterwards, on the kept row.
 export type MergeIdentityDiff = {
   same: boolean
   differs: Array<{ field: string; keeper: string; discarded: string }>
   costVerdict?: 'same' | 'missing' | 'differs'
   costFill?: Array<{ field: string; value: number }>
+  /** The kept row's cost as it stands, per currency field. */
+  costBefore?: Record<string, number>
+  /** What the fold will write -- the mean of the distinct costs. */
+  costAfter?: Record<string, number>
+  /** Fields the server refuses to average at all; the merge is blocked. */
+  costOutliers?: Array<{ field: string; min: number; max: number }>
 }
 
 export type MergeStockChoice = 'merge' | 'write_off'
 
 type TranslateFn = (key: string) => string | undefined
 
+// The discounted tier is the WHOLESALE price. It was labelled special_price_*
+// here until 2026-09-06 -- columns migration 0111 zeroed on every row -- so
+// these two entries could never match a change the server sent, while the one
+// price a merge does move had no label at all and fell back to the raw column
+// name.
 const PRICE_FIELD_LABEL: Record<string, [string, string]> = {
   selling_price_usd: ['selling_price', 'Selling price'],
   selling_price_khr: ['selling_price_khr', 'Selling price (KHR)'],
-  special_price_usd: ['special_price', 'VIP price'],
-  special_price_khr: ['special_price_khr', 'VIP price (KHR)'],
+  wholesale_price_usd: ['wholesale_price', 'Wholesale'],
+  wholesale_price_khr: ['wholesale_price_khr', 'Wholesale (KHR)'],
 }
 
 const IDENTITY_FIELD_LABEL: Record<string, [string, string]> = {
@@ -132,6 +148,17 @@ export default function MergeStockChoiceDialog({
   // difference and not a warning -- but it changes what the kept product cost,
   // so it is said out loud rather than done quietly.
   const costFill = identity?.costFill ?? []
+  // BOTH rows carry a cost and the two differ, so the merge stores the mean
+  // of the distinct costs (owner ruling, 2026-09-04). The kept row ends up
+  // costing a figure neither row recorded, which is exactly the kind of
+  // change that must be seen before it happens, not found afterwards.
+  const costAverages = (identity?.costVerdict === 'differs' ? Object.keys(identity?.costAfter ?? {}) : [])
+    .map((field) => ({
+      field,
+      from: Number(identity?.costBefore?.[field]) || 0,
+      to: Number(identity?.costAfter?.[field]) || 0,
+    }))
+    .filter((row) => row.to && Math.round(row.from * 10000) !== Math.round(row.to * 10000))
 
   const options: Array<{ value: MergeStockChoice; label: string; hint: string; tone: string }> = [
     {
@@ -216,6 +243,36 @@ export default function MergeStockChoiceDialog({
                     <span>{diff.keeper || '—'}</span>
                     {' ≠ '}
                     <span>{diff.discarded || '—'}</span>
+                  </dd>
+                </div>
+              )
+            })}
+          </dl>
+        </div>
+      ) : null}
+
+      {costAverages.length ? (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/40 dark:bg-sky-950/30">
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-sky-800 dark:text-sky-300">
+            <span>{T('merge_cost_average_title', 'The kept product\u2019s cost becomes the average')}</span>
+            <InfoHint
+              label={T('merge_cost_average_title', 'The kept product\u2019s cost becomes the average')}
+              text={T(
+                'merge_cost_average_hint',
+                'Both rows record a cost and they differ, so the kept product takes the average of the different costs. Undo restores the old cost exactly.',
+              )}
+            />
+          </div>
+          <dl className="space-y-0.5 text-xs">
+            {costAverages.map((row) => {
+              const [labelKey, labelFallback] = IDENTITY_FIELD_LABEL[row.field] || [row.field, row.field]
+              return (
+                <div key={row.field} className="flex items-center justify-between gap-3">
+                  <dt className="text-sky-700 dark:text-sky-400">{T(labelKey, labelFallback)}</dt>
+                  <dd className="font-medium text-sky-900 dark:text-sky-200">
+                    <span className="line-through opacity-60">{formatPrice(row.field, row.from)}</span>
+                    {' \u2192 '}
+                    <span>{formatPrice(row.field, row.to)}</span>
                   </dd>
                 </div>
               )
