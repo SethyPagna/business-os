@@ -266,7 +266,19 @@
   [data-reports-hub] {
     /* A reading-width cap, not just more padding: past ~1536px + the 220px
        sidebar the report body was running to 1600px wide with only 46-48px
-       either side. Capping and centering reads as real margin at 1920+. */
+       either side. Capping and centering reads as real margin at 1920+.
+
+       REPAIR (verifier, Sep 6): `[data-reports-hub]` is a flex item of the
+       page-scroll `flex min-h-0 min-w-0 flex-1 flex-col` column in
+       ReportsHub.tsx. Per CSS Flexbox 9.6, a flex item with an `auto`
+       cross-axis margin (`margin-inline: auto` sets both inline margins to
+       auto on this block axis-column layout) is NOT stretched to the
+       container's cross size -- it shrinks to fit-content instead. That
+       made `max-width: 96rem` moot (fit-content never reaches it) and the
+       whole hub floated at ~414px wide inside a 1700px column. `width: 100%`
+       gives the item an explicit basis so the auto margins only center the
+       max-width cap, restoring the intended "centered reading column". */
+    width: 100%;
     max-width: 96rem;
     margin-inline: auto;
     padding-inline: clamp(56px, 4vw, 80px);

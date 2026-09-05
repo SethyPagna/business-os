@@ -69,6 +69,14 @@ for (const lang of ['en', 'km']) {
 // rounding fix (c999e909) already on this line.
 assert.match(css, /@media \(min-width: 1280px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(40px, 4vw, 64px\);/, '1280px gets its own, larger gutter')
 assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[^}]*max-width: 96rem;[^}]*margin-inline: auto;[^}]*padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ caps the reading width and centers it, so 1920/4K keeps growing margin instead of a saturated 48px')
+// REPAIR (verifier, Sep 6): `margin-inline: auto` on a flex item does not
+// stretch it (CSS Flexbox 9.6) -- without an explicit `width: 100%` the hub
+// shrinks to fit-content and `max-width: 96rem` never binds, so the whole
+// surface floats mid-screen at >=1536px instead of centering at its cap.
+// This assertion must fail against the un-repaired declaration list (it did,
+// before `width: 100%` was added) so it actually guards the stretch
+// contract instead of freezing the flex-collapse defect.
+assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[^}]*width: 100%;[^}]*max-width: 96rem;[^}]*margin-inline: auto;[^}]*padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ hub is given an explicit width so the auto margins can stretch-then-center it against the max-width cap, instead of shrinking to fit-content')
 const gutterOrder = ['@media (min-width: 768px)', '@media (min-width: 1024px)', '@media (min-width: 1280px)', '@media (min-width: 1536px)']
 for (let i = 1; i < gutterOrder.length; i += 1) {
   assert.ok(css.indexOf(gutterOrder[i - 1]) < css.indexOf(gutterOrder[i]), `${gutterOrder[i - 1]} must precede ${gutterOrder[i]} so wider screens win the cascade`)
@@ -92,7 +100,15 @@ assert.match(overview, /<DenseTable fit>/, 'the Overview statement table hugs it
 // column keeps the value immediately after the widest label in the block on
 // every width, and the value's own track means it can never wrap into the
 // label column.
-assert.match(sheet, /grid grid-cols-\[minmax\(0,max-content\)_max-content\][^"]*gap-x-\[var\(--ui-receipt-gap,0\.75rem\)\]/, 'segment rows render through the shared label/value grid')
+// REPAIR (verifier, Sep 6): both tracks were `max-content`, which hugs the
+// label to the value instead of pinning the value to the block's right edge
+// -- measured 125px of dead space right of the value in the 420px centered
+// statement card and 780px in a 900px wide-card block. The label track must
+// be flexible (`minmax(0,1fr)`) so it absorbs the block's slack while the
+// value keeps its own `max-content` track (still never wraps into the
+// label) and lands at the right edge with only the minimum gap before it.
+assert.match(sheet, /grid grid-cols-\[minmax\(0,1fr\)_max-content\][^"]*gap-x-\[var\(--ui-receipt-gap,0\.75rem\)\]/, 'segment rows render label left / value right through a flexible-label grid, not a hugging max-content pair')
+assert.doesNotMatch(sheet, /grid-cols-\[minmax\(0,max-content\)_max-content\]/, 'the max-content/max-content pair (label hugs value, value stranded far from the right edge) must not return')
 assert.doesNotMatch(sheet, /flex items-baseline justify-between gap-\[var\(--ui-receipt-gap/, 'line rows no longer stretch label/value apart with justify-between')
 // The rule-over-totals divider must still be able to span both columns (a
 // border on just the label or value cell would show a broken half-line).

@@ -101,11 +101,23 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
               // apart on a wide statement or card (root cause of "the fields
               // and value can be closer", user Part 586, still live on
               // >=1024 screens). A grid's label column tracks the WIDEST
-              // label in the block (`max-content`) and the value column
-              // starts right after it with a fixed minimum gap -- adjacent on
-              // every width, and the value column can never wrap into the
-              // label column because it is its own track.
-              <div className="grid grid-cols-[minmax(0,max-content)_max-content] items-baseline gap-x-[var(--ui-receipt-gap,0.75rem)]">
+              // label in the block and the value column starts right after
+              // it with a fixed minimum gap -- adjacent on every width, and
+              // the value column can never wrap into the label column
+              // because it is its own track.
+              //
+              // REPAIR (verifier, Sep 6): both tracks were `max-content`, so
+              // on a block wider than label+gap+value (the 420px centered
+              // statement card, the 900px wide-card grid) the grid itself
+              // never grows past its content -- the pair sits flush left and
+              // the value ends up FAR from the block's right edge, the
+              // opposite of "label left, value right". The label track is
+              // `minmax(0,1fr)` instead: it still starts at the widest
+              // label's width but now absorbs the block's slack, so the
+              // value (still its own `max-content` track, still never wraps
+              // into the label) lands at the right edge with only the
+              // minimum gap before it.
+              <div className="grid grid-cols-[minmax(0,1fr)_max-content] items-baseline gap-x-[var(--ui-receipt-gap,0.75rem)]">
                 {block.lines.map((line, i) => {
                   const kind = line.kind
                   const cellClass = LINE_CLASS[kind || 'add']
