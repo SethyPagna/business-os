@@ -4,6 +4,7 @@ import type { SessionUser } from './auth'
 import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
 import { getActionTier } from './permissions'
+import { parseConfiguredMethodsStrict, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
 import { normalizeSearchText } from './searchMatch'
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding'
 import {
@@ -246,6 +247,18 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     return JSON.parse(String(previous.receipt_json))
   }
 
+  let expectedPaymentMethodsRaw: string | null = null
+  if (request.action.kind === 'payment_method') {
+    const setting = await db.prepare("SELECT value FROM settings WHERE key='pos_payment_methods'").get<{ value: string }>()
+    const configured = parseConfiguredMethodsStrict(setting?.value)
+    if (!setting || !configured.ok) fail('Configured payment methods are unreadable. Repair them in Settings before changing sales.', 409)
+    const targetKey = paymentMethodKey(request.action.target)
+    const target = configured.methods.find((method) => paymentMethodKey(method) === targetKey)
+    if (!target || RETIRED_PAYMENT_METHODS.has(targetKey)) fail('Choose an active configured payment method.', 400)
+    expectedPaymentMethodsRaw = setting.value
+    request.action = { ...request.action, target }
+  }
+
   const ids = request.items.map((item) => item.id)
   const sales = await rowsIn<Row>(db, ids, (marks) => `SELECT s.*,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${marks})`)
   const sourceMatches = new Map<number, boolean>()
@@ -305,6 +318,9 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
   const operationId = crypto.randomUUID()
   const members: BulkUpdateMember[] = []
   const guards: StockStatement[] = []
+  if (expectedPaymentMethodsRaw !== null) {
+    guards.push(bulkAssertion("EXISTS(SELECT 1 FROM settings WHERE key='pos_payment_methods' AND value=@expected)", { expected: expectedPaymentMethodsRaw }))
+  }
   for (const expected of request.items) {
     const sale = sales.find((row) => Number(row.id) === expected.id)
     if (!sale) fail(`Sale ${expected.id} was not found.`)

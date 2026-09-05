@@ -7,7 +7,7 @@ const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch'])
+const actual = new Set(['db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -36,6 +36,8 @@ function fixture() {
   sql.pragma('foreign_keys = OFF')
   for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql')).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
   sql.exec(`
+    INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_methods','["Cash","ABA","Card"]','settings-v1')
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at;
     INSERT INTO branches(id,name) VALUES(1,'Shop');
     INSERT INTO customers(id,name,phone,address) VALUES(1,'Old','011','Old road'),(2,'Other','022','Other road'),(3,'New','033','New road');
     INSERT INTO delivery_contacts(id,name,phone,area,address) VALUES(1,'Driver A','111','A area','A road'),(2,'Driver B','222','B area','B road');
@@ -71,7 +73,7 @@ async function replay(f,id,direction='undo',generation=0){return f.call(history,
 
 async function run(){
   let f=fixture()
-  const payment=request(f,{kind:'payment_method',source:'Cash',target:'Card'},'payment-request-1')
+  const payment=request(f,{kind:'payment_method',source:'Cash',target:'card'},'payment-request-1')
   payment.items[2].expected_updated_at='stale-but-source-mismatch'
   const paid=await f.call(sales,'/bulk-update',payment)
   assert.equal(paid.status,200,JSON.stringify(paid))
@@ -87,6 +89,19 @@ async function run(){
   assert.equal(f.sql.prepare('SELECT payment_method FROM sales WHERE id=1').get().payment_method,'Cash + ABA')
   assert.equal((await replay(f,paid.body.actionHistoryId,'redo',1)).status,200)
   console.log('PASS matching tender labels only, partial amounts/currency unchanged, stale mismatch skipped, idempotency and replay')
+
+  f=fixture()
+  const beforeUnknown=snapshot(f)
+  const unknown=await f.call(sales,'/bulk-update',request(f,{kind:'payment_method',source:'Cash',target:'Forged Pay'},'payment-unknown-1',[1]))
+  assert.equal(unknown.status,400,JSON.stringify(unknown))
+  assert.equal(snapshot(f),beforeUnknown)
+  const configRace=request(f,{kind:'payment_method',source:'Cash',target:'Card'},'payment-config-race-1',[1])
+  f.barrier(()=>f.sql.prepare("UPDATE settings SET value='[\"Cash\",\"ABA\"]',updated_at='settings-v2' WHERE key='pos_payment_methods'").run())
+  const racedConfig=await f.call(sales,'/bulk-update',configRace)
+  assert.equal(racedConfig.status,409,JSON.stringify(racedConfig))
+  assert.equal(f.sql.prepare('SELECT payment_method FROM sales WHERE id=1').get().payment_method,'Cash + ABA')
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_bulk_operations').get().n,0)
+  console.log('PASS target must be active/configured and its exact canonical setting is guarded at commit')
 
   f=fixture()
   const stale=request(f,{kind:'payment_method',source:'Cash',target:'Card'},'stale-request-1',[1,2])
