@@ -47,7 +47,7 @@ import {
   sanitizePersistedMediaPath,
 } from '../../utils/mediaUploadState.ts'
 import type { UploadAction } from '../../utils/mediaUploadState.ts'
-import { backfillPaymentMethods, getPaymentMethodImpact, getUnregisteredPaymentMethods, replacePaymentMethod } from '../../api/settingsTransport.ts'
+import { backfillPaymentMethods, getPaymentMethodImpact, getUnregisteredPaymentMethods, replacePaymentMethod, type PaymentMethodRenameScope } from '../../api/settingsTransport.ts'
 import { getTelegramStatus, sendTelegramTest, sendTelegramTodaySummary, type TelegramStatus } from '../../api/telegramTransport.ts'
 
 type TranslateFn = (key: string) => string
@@ -844,15 +844,20 @@ export default function Settings() {
 
   const renamePaymentMethod = async (from: string) => {
     const to = window.prompt(t('rename_payment_method') || 'Rename payment method', from)?.trim()
-    if (!to || to.toLocaleLowerCase() === from.toLocaleLowerCase()) return
+    if (!to || to === from) return
     try {
-      const impact = await getPaymentMethodImpact(from, to) as { linked_records?: number; target_exists?: boolean }
+      const impact = await getPaymentMethodImpact(from, to)
       const linked = Number(impact.linked_records || 0)
-      const scope = linked > 0 && window.confirm(
-        `${linked} linked sale/payment record${linked === 1 ? '' : 's'} use "${from}".${impact.target_exists ? ` "${to}" already exists, so the configured choices will merge.` : ''}\n\nOK: update those exact matches too.\nCancel: rename only the configured choice.\nAudit logs stay unchanged.`,
-      ) ? 'linked' : 'settings_only'
-      const result = await replacePaymentMethod({ from, to, scope }) as { methods?: string[] }
-      setPmList(normalizePaymentMethods(result.methods || pmList.map((method) => method.toLocaleLowerCase() === from.toLocaleLowerCase() ? to : method)))
+      const isCaseOnlyRename = to.toLocaleLowerCase() === from.toLocaleLowerCase()
+      const scope: PaymentMethodRenameScope = isCaseOnlyRename || linked > 0 ? 'linked' : 'settings_only'
+      if (scope === 'linked' && !window.confirm(
+        `${linked} current sale/payment record${linked === 1 ? '' : 's'} use "${from}".${impact.target_exists && !isCaseOnlyRename ? ` "${to}" already exists, so the configured choices will merge.` : ''}\n\nContinue to update current labels to "${to}"? Historical audit records stay unchanged.`,
+      )) return
+      const expectedUpdatedAt = typeof impact.settings_updated_at === 'string' && impact.settings_updated_at.trim()
+        ? impact.settings_updated_at
+        : undefined
+      const result = await replacePaymentMethod({ from, to, scope, expected_updated_at: expectedUpdatedAt })
+      setPmList(normalizePaymentMethods(result.methods))
       await loadSettings({ force: true })
       notify(scope === 'linked' ? 'Payment method and linked records updated.' : 'Payment method option updated; existing sales were preserved.', 'success')
     } catch (error) {
