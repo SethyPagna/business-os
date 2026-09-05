@@ -99,6 +99,10 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
     replayReturnBulkAction: async () => { throw new Error('Use the dedicated return bulk fixture') },
   }
+  if (id === './stockSession') return {
+    STOCK_SESSION_KIND: 'stock.session',
+    replayStockSession: async () => { throw new Error('Use test-stock-session-undo.cjs for real stock replay') },
+  }
   if (id === './db') return { getDb: () => wrapDb(sharedDb) }
   if (id === './audit') return { audit: async () => {} }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
@@ -321,7 +325,10 @@ await check('source lock: routes/actionHistory.ts stamps server_replayable and r
   assert.ok(/const replayable = isServerReplayable\(row, undoPayload, redoPayload\)/.test(routeSrc), 'mapRow must derive replayability from the shared helper')
   // ...ANDed with the requesting user's full tier on the applier-declared
   // permission, so the UI is never offered a button the operate gate refuses.
-  assert.ok(/server_replayable: !!\(applier && applierPermissionTier\(user, applier\) === 'full'\)/.test(routeSrc), 'mapRow must AND replayability with the user\'s tier on the applier permission')
+  assert.ok(/server_replayable: !!\(applier && canUseNamedAppliers\(user, \[undoPayload, redoPayload\]\)\)/.test(routeSrc), 'mapRow must gate BOTH directional payloads through the full-tier permission helper')
+  const permissionHelper = routeSrc.slice(routeSrc.indexOf('function canUseNamedAppliers('), routeSrc.indexOf('function canRecordHistory('))
+  assert.ok(/applierPermissionTier\(user, applier\) !== 'full'\) return false/.test(permissionHelper), 'shared helper must retain the full-tier applier gate')
+  assert.ok(/requires_product_add[\s\S]*getActionTier\(user, 'products', 'add'\) !== 'full'\) return false/.test(permissionHelper), 'mixed stock sessions must additionally require full product-add permission')
   // The require_applied refusal must come BEFORE the status-flip UPDATE inside
   // the transition handler -- refusing after the flip would record a reversal
   // that never happened.

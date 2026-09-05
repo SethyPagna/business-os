@@ -66,9 +66,10 @@ async function main() {
     const before = snap(backup.BACKUP_TABLES)
     const created = await backup.createCloudflareBackup(f.env, 'manual')
     const document = JSON.parse(f.env.ASSETS._store.get(created.key).body)
-    assert.equal(Object.keys(document.tables).length, 64)
-    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members']) {
-      assert.ok(Object.hasOwn(document.tables, table), `backup includes durable Returns replay table ${table}`)
+    assert.equal(Object.keys(document.tables).length, 67)
+    assert.deepEqual(Object.keys(document.tables), [...backup.BACKUP_TABLES], 'full backup must include every table in exact dependency order')
+    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members']) {
+      assert.ok(Object.hasOwn(document.tables, table), `backup includes durable replay table ${table}`)
     }
     assert.equal((await backup.validateCloudflareBackup(f.env, created.key)).restorable, true)
     f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
@@ -79,7 +80,7 @@ async function main() {
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
     assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
-    console.log('PASS actual FK-on streaming full 64-table roundtrip, Returns replay tables, and restored-generation undo/redo')
+    console.log('PASS actual FK-on streaming full 67-table roundtrip, Returns/stock replay tables, and restored-generation undo/redo')
 
     f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
     async function variant(label, omit) {
