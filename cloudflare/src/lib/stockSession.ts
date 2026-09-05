@@ -5,6 +5,7 @@ import { getActionTier, isAdminControlUser } from './permissions'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeProductGroupName } from './productDetailRule'
 import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
 import { normalizeMultiValue, planInsertRow, tableColumns, validateProductImageGallery } from './productWrites'
 import { sanitizeMediaPath } from './media'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
@@ -32,12 +33,12 @@ const PRODUCT_FIELDS = [
 ] as const
 const DEFAULT_FIELDS = [
   'branch_id', 'supplier_id', 'supplier_name', 'received_date', 'expiry_date', 'notes',
-  'unit_cost_usd', 'payment_status', 'credit_due_date', 'brand',
+  'unit_cost_usd', 'payment_status', 'credit_due_date', 'brand', 'free_goods',
 ] as const
 const ITEM_FIELDS = [
   'line_id', 'kind', 'product_id', 'product', 'batch_id', 'branch_id', 'quantity',
   'supplier_id', 'supplier_name', 'received_date', 'expiry_date', 'notes',
-  'unit_cost_usd', 'payment_status', 'credit_due_date',
+  'unit_cost_usd', 'payment_status', 'credit_due_date', 'free_goods',
 ] as const
 
 type Row = Record<string, unknown>
@@ -57,6 +58,7 @@ type CanonicalLine = {
   expiry_date: string | null
   notes: string | null
   unit_cost_usd: number | null
+  free_goods: boolean
   payment_status: 'paid' | 'credit' | null
   credit_due_date: string | null
 }
@@ -262,6 +264,21 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
     if (kind === 'create_receive' && batchId != null) fail('create_receive cannot reference an existing batch.', 400, 'invalid_request')
     if (kind === 'receive' && line.product != null) fail('receive cannot include a product object.', 400, 'invalid_request')
     if (kind === 'create_receive' && line.product_id != null) fail('create_receive cannot include product_id.', 400, 'invalid_request')
+    // N14-D receipt gate. Every line of a stock-in session that actually moves
+    // stock is a receipt, so it must name its supplier and carry the cost the
+    // operator typed. The old parser filled a missing cost from the product's
+    // stored cost_price_usd -- an invented receipt cost that looked entered --
+    // and a create_receive with no cost at all recorded $0.00, i.e. free
+    // goods nobody declared. A quantity-0 create_receive is catalogue work,
+    // not a receipt, and is left alone. Same kernel as POST
+    // /api/inventory/adjust (lib/stockReceiptGate.ts), so one wire cannot
+    // accept what the other refuses.
+    const supplierName = text(expanded('supplier_name'), 'supplier_name', 240)
+    const notes = text(expanded('notes'), 'notes', 1000)
+    const unitCostUsd = finite(expanded('unit_cost_usd'), 'unit_cost_usd', true)
+    const freeGoods = expanded('free_goods') === true
+    const gate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName, unitCostUsd, freeGoods })
+    if (gate) fail(stockReceiptGateMessage(gate) as string, 400, gate)
     return {
       line_id: line.line_id,
       kind,
@@ -271,11 +288,12 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
       branch_id: branchId,
       quantity,
       supplier_id: integer(expanded('supplier_id'), 'supplier_id', true),
-      supplier_name: text(expanded('supplier_name'), 'supplier_name', 240),
+      supplier_name: supplierName,
       received_date: receivedDate,
       expiry_date: date(expanded('expiry_date'), 'expiry_date'),
-      notes: text(expanded('notes'), 'notes', 1000),
-      unit_cost_usd: finite(expanded('unit_cost_usd') ?? product?.cost_price_usd, 'unit_cost_usd', true),
+      notes: freeGoods && unitCostUsd === 0 ? appendReceiptNotes(notes, [FREE_GOODS_REASON_NOTE]) : notes,
+      unit_cost_usd: unitCostUsd,
+      free_goods: freeGoods,
       payment_status: paymentStatus,
       credit_due_date: creditDueDate,
     }

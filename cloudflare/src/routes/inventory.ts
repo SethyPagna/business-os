@@ -17,6 +17,7 @@ import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/pr
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeToIsoDate } from '../lib/batchCode'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
@@ -1441,6 +1442,16 @@ app.post('/adjust', async (c) => {
   const paymentStatus = body.paymentStatus === 'paid' || body.paymentStatus === 'credit' ? body.paymentStatus : null
   const creditDueDate = body.creditDueDate != null ? String(body.creditDueDate).trim() || null : null
   const sessionId = Number.isSafeInteger(Number(body.sessionId)) && Number(body.sessionId) > 0 ? Number(body.sessionId) : null
+  // N14-D. `freeGoods` is the operator's explicit declaration that a $0.00
+  // receipt really was free; without it a zero cost is refused, because a
+  // defaulted zero and a declared zero used to look identical in the ledger.
+  // `attribution` is the ONE exemption from the receipt facts, and it is
+  // explicit: undo/redo and snapshot restores put stock back to a figure the
+  // ledger already held and have no supplier to name. Anything that is not the
+  // literal 'correction' -- absent, misspelt, a hand-written request trying its
+  // luck -- is a receipt and is gated.
+  const freeGoods = body.freeGoods === true
+  const attribution = body.attribution === 'correction' ? 'correction' : 'receipt'
   if (paymentStatus === 'credit' && !creditDueDate) return c.json({ error: 'A credit purchase needs its due date' }, 400)
   // `unlockPricing` is an explicit flag from the frontend, not inferred by
   // diffing -- see InventoryStockModals.tsx's "Lock current pricing"
@@ -1496,6 +1507,16 @@ app.post('/adjust', async (c) => {
     type = diff > 0 ? 'add' : 'remove'
     quantity = Math.abs(diff)
   }
+
+  // The receipt gate (lib/stockReceiptGate.ts), run on the CONVERTED type so a
+  // "set to 40" that raises stock is gated exactly like the add it becomes,
+  // and a "set to 2" that lowers it is not gated at all. Ahead of every write,
+  // like the mandatory-reason check above, so no path can record goods with an
+  // invented supplier or an invented cost.
+  const isReceipt = type === 'add'
+  const gate = stockReceiptGateCode({ isStockIn: isReceipt, supplierName, unitCostUsd, freeGoods, attribution })
+  if (gate) return c.json({ error: stockReceiptGateMessage(gate), code: gate }, 400)
+  const reasonNotes = isReceipt && attribution === 'receipt' && freeGoods ? [FREE_GOODS_REASON_NOTE] : []
 
   // Resolve which product row actually receives the quantity. Ordinary
   // adds (pricing locked, or type isn't 'add' at all) always target the
@@ -1701,9 +1722,9 @@ app.post('/adjust', async (c) => {
       movementType,
       quantity: Math.abs(delta),
       unitCostUsd: type === 'add' ? unitCostUsd : null,
-      reason: createdSibling
+      reason: appendReceiptNotes(createdSibling
         ? `${reason ? `${reason} - ` : ''}Auto-created row (barcode/cost differs from ${product.name})`
-        : setToNote ? `${reason} (${setToNote})` : reason,
+        : setToNote ? `${reason} (${setToNote})` : reason, reasonNotes),
       referenceId: sessionId,
       userId: user?.id ?? null,
       userName: user?.name ?? null,

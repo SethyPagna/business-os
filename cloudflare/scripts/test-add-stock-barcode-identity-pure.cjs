@@ -90,6 +90,9 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const batchCode = loadReal('lib/batchCode.ts')
+// N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
+// real module has to be in the stub map like every other real dependency.
+const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productDetailRule = loadReal('lib/productDetailRule.ts')
 // REAL, not stubbed -- see the header. This is the module that decides
@@ -118,6 +121,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/salesAnalytics': salesAnalytics,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
+  '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/sqlBinding': sqlBinding,
   '../lib/productIdentity': productIdentity,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
@@ -195,6 +199,11 @@ const addAtCost = (costUsd, barcode = BARCODE, quantity = 28) => req({
   type: 'add',
   quantity,
   reason: 'Stock received',
+  // N14-D: an add is a receipt, so it must name its supplier and the cost the
+  // operator paid. Nothing is fabricated here -- the cost IS the cost this add
+  // is testing, which is exactly what the identity rule keys on.
+  supplierName: 'Bong Long',
+  unitCostUsd: costUsd,
   branchId: 2,
   unlockPricing: true,
   pricing: { cost_usd: costUsd, barcode, selling_price_usd: 22.0 },

@@ -131,7 +131,7 @@ const user = {
 function receiveRequest(requestId = 'stock-request-001', quantity = 5) {
   return {
     client_request_id: requestId, mode: 'stock_in',
-    defaults: { branch_id: 1, received_date: '2026-09-05' },
+    defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-05' },
     items: [{ line_id: 'line-001', kind: 'receive', product_id: 1, quantity, unit_cost_usd: 2 }],
   }
 }
@@ -193,7 +193,7 @@ async function main() {
       const f = fixture()
       f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Supplier A'),(2,'Supplier B')")
       const first = receiveRequest(`first-attribution-${explicit}`, 5)
-      Object.assign(first.items[0], { supplier_id: 1, unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-09-30' })
+      Object.assign(first.items[0], { supplier_id: 1, supplier_name: 'Supplier A', unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-09-30' })
       const a = await commitStockSession(f.env, user, first)
       const history = f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(a.actionHistoryId)
       await replayStockSession(f.env, user, 'undo', a.actionHistoryId, 0, JSON.parse(history.undo_payload))
@@ -202,7 +202,7 @@ async function main() {
         .map(table => f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())
       const neutral = allState()
       const next = receiveRequest(`next-attribution-${explicit}`, 5)
-      Object.assign(next.items[0], { supplier_id: 2, unit_cost_usd: 3, payment_status: 'paid', ...(explicit ? { batch_id: a.items[0].batchId } : {}) })
+      Object.assign(next.items[0], { supplier_id: 2, supplier_name: 'Supplier B', unit_cost_usd: 3, payment_status: 'paid', ...(explicit ? { batch_id: a.items[0].batchId } : {}) })
       f.failReceiptAfterMetadata()
       await assert.rejects(commitStockSession(f.env, user, next), /injected failure/)
       assert.deepEqual(allState(), neutral, 'failed reuse rolls back metadata, stock and all replay ledgers')
@@ -387,7 +387,7 @@ async function main() {
 
   await check('mixed zero and positive lines require the permission union and share one receipt', async () => {
     const mixed = {
-      client_request_id: 'mixed-zero-positive', mode: 'stock_in', defaults: { branch_id: 1, received_date: '2026-09-05' },
+      client_request_id: 'mixed-zero-positive', mode: 'stock_in', defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-05' },
       items: [zeroCreateRequest().items[0], { line_id: 'positive-receive', kind: 'receive', product_id: 1, quantity: 2, unit_cost_usd: 2 }],
     }
     for (const actor of [
@@ -489,7 +489,7 @@ async function main() {
     const receipt = await commitStockSession(f.env, user, {
       client_request_id: 'stock-request-003', mode: 'stock_in',
       defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Counter supplier' },
-      items: [{ line_id: 'line-new', kind: 'create_receive', quantity: 3,
+      items: [{ line_id: 'line-new', kind: 'create_receive', quantity: 3, unit_cost_usd: 4,
         product: { name: 'New Cream', barcode: 'CREAM-1', cost_price_usd: 4, selling_price_usd: 7, stock_quantity: 3, branch_id: 1, tag_label: 'New' } }],
     })
     assert.equal(receipt.replayed, false)
@@ -512,14 +512,14 @@ async function main() {
     }))
     const receipt = await commitStockSession(f.env, user, {
       client_request_id: 'stock-request-025', mode: 'stock_in',
-      defaults: { branch_id: 1, received_date: '2026-09-05', unit_cost_usd: 2 }, items,
+      defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-05', unit_cost_usd: 2 }, items,
     })
     assert.equal(receipt.memberCount, 25)
     assert.equal(receipt.totalQuantity, 25)
     assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 25)
     await assert.rejects(() => commitStockSession(f.env, user, {
       client_request_id: 'stock-request-026', mode: 'stock_in',
-      defaults: { branch_id: 1, received_date: '2026-09-06' },
+      defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-06', unit_cost_usd: 2 },
       items: [...items, { line_id: 'line-26', kind: 'receive', product_id: 1, quantity: 1 }],
     }), (error) => error instanceof StockSessionError && error.code === 'line_limit')
   })
