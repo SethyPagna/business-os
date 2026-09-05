@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -10,8 +11,8 @@ import { getProductBatches } from '../../api/batchesTransport.ts'
 import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { buildProductBranchSummaryLabel } from '../products/helpers/productDisplayHelpers.ts'
 import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
+import { deriveProductSheetState, type SheetIntent } from './productSheetState.ts'
 import ProductImage from './ProductImage'
 
 type ProductGroupMeta = {
@@ -109,14 +110,10 @@ type PickerBatch = ProductBatch & { __productId?: number }
 // Human-readable label for one lot/batch pill -- lot code when the batch has
 // one, otherwise the shared "Batch n: dd/mm/yyyy" default (batchLabel.ts),
 // falling back further to a bare id so the pill is never blank.
-function formatBatchLabel(batch: ProductBatch, posCopy: PosCopy): string {
-  return batchDisplayLabel(batch, posCopy('Batch', 'បាច់'))
+function formatBatchLabel(batch: ProductBatch, batchWord: string): string {
+  return batchDisplayLabel(batch, batchWord)
 }
 
-interface BranchOption {
-  id: string
-  name: string
-}
 
 type PosCopy = (english: string, fallback?: string) => string
 
@@ -229,6 +226,22 @@ interface ProductDetailSheetProps {
   // "buy >= X" deals that only engage once the cart line's quantity
   // crosses the threshold.
   promotionRules?: readonly PromotionRule[]
+  // What this sheet is opened FOR. 'sell' is POS / add-items-to-sale / a
+  // return's replacement line: the warehouse branch is shown WITH its
+  // quantity but cannot be picked, because only the shop rings a sale.
+  // 'stock' is add/remove/set/transfer/fast-stock-in, where every branch the
+  // operation permits stays selectable. See utils/branchRoles.ts.
+  intent?: SheetIntent
+  // Non-POS surfaces hand the resolved row + branch + received date back
+  // instead of adding a cart line; the price buttons become one confirm
+  // button. See components/shared/ProductOptionSheet.tsx.
+  onPick?: (product: ProductRecord, selection: { branchId: string | null; batch?: BatchSelection }) => void
+  pickLabel?: string
+  // Render through a portal above the modal that opened it. Modal.tsx tops
+  // out at z-[1070] for a nested modal and App's toasts own z-[1100], so a
+  // sheet opened from inside a modal has to sit between the two -- the
+  // sheet's own z-50 would otherwise render UNDERNEATH its opener.
+  portal?: boolean
 }
 
 export default function ProductDetailSheet({
@@ -249,6 +262,10 @@ export default function ProductDetailSheet({
   onClose,
   onOpenImageLightbox,
   promotionRules = [],
+  intent = 'sell',
+  onPick,
+  pickLabel,
+  portal = false,
 }: ProductDetailSheetProps) {
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)
@@ -294,7 +311,11 @@ export default function ProductDetailSheet({
   const [damagedLots, setDamagedLots] = useState<DamagedLot[]>([])
   const [selectedDamagedLotId, setSelectedDamagedLotId] = useState<number | null>(null)
   const [batchPage, setBatchPage] = useState(0)
+  // Why a branch pill refused the tap, shown under the pills. A tooltip
+  // alone is unreachable on the touch screens this runs on.
+  const [branchNotice, setBranchNotice] = useState('')
   useEffect(() => {
+    setBranchNotice('')
     setSelectedBranchId(null)
     setSelectedVariantId(null)
     setBranchPage(0)
@@ -304,44 +325,35 @@ export default function ProductDetailSheet({
     setBatchPage(0)
   }, [product?.id])
 
-  // Step 1: which branches this group is actually carried at, gathered from
-  // every row's branch_stock. Catalogs/groups with no per-branch stock data
-  // at all simply produce no branch options, and the picker below falls
-  // back to a flat Barcode step across every row (its original behavior).
-  const branchOptionsMap = new Map<string, string>()
-  // Summed stock per branch across every row in the group, used only to
-  // grey out a branch pill when nothing in this product is carried there --
-  // see pillClass's `outOfStock` param.
-  const branchStockTotals = new Map<string, number>()
-  // `variants` is EMPTY for a flat product -- getVariantChoices only returns
-  // rows for a group (__groupChoices) or a parent with variant children. So
-  // iterating it alone meant a flat product produced no branch options at
-  // all, which left effectiveBranchId null, which left the lot picker with
-  // nothing to query. That is the reported "batch pick not working": a
-  // batch-tracked flat product showed "No lots available at this branch"
-  // and "Pick a lot first" refused the add, while the API had two lots for
-  // it. Falling back to the product's own row makes a flat product behave
-  // like a one-row group, which is what it is.
-  for (const variant of variants.length ? variants : [product]) {
-    for (const entry of Array.isArray(variant.branch_stock) ? variant.branch_stock : []) {
-      const id = entry?.branch_id
-      if (id == null) continue
-      const key = String(id)
-      if (!branchOptionsMap.has(key)) branchOptionsMap.set(key, String(entry.branch_name || key))
-      branchStockTotals.set(key, (branchStockTotals.get(key) || 0) + Number(entry?.quantity || 0))
-    }
-  }
-  const branchOptions: BranchOption[] = [...branchOptionsMap.entries()]
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-
-  const activeBranchKey = activeBranchId == null ? null : String(activeBranchId)
-  const fallbackBranchId = branchOptions.some((b) => b.id === activeBranchKey)
-    ? activeBranchKey
-    : (branchOptions[0]?.id ?? null)
-  const effectiveBranchId = selectedBranchId != null && branchOptions.some((b) => b.id === selectedBranchId)
-    ? selectedBranchId
-    : fallbackBranchId
+  // Everything this sheet derives -- which branches it offers and how many
+  // units each holds, which product ROW the steps resolve to, the ONE stock
+  // number the Add buttons enforce, and the received-date list -- comes from
+  // one pure function. It used to be ~120 lines of expressions inline right
+  // here, which is exactly why a flat product could read "Stock 0" (and
+  // refuse the sale) while its own branch_stock said 28 and every test in
+  // the repo stayed green: they were all regexes over this file's text.
+  const sheetState = deriveProductSheetState({
+    product,
+    variants,
+    groupProduct,
+    selectedBranchId,
+    activeBranchId,
+    selectedVariantId,
+    trackedBatchProductIds,
+    batches,
+    selectedBatchId,
+    damagedLots,
+    selectedDamagedLotId,
+    intent,
+    getDisplayStock: (row) => getDisplayStock(row as ProductRecord),
+    optionStepTitleFor: (pool) => buildVariantOptionLabels(pool as ProductRecord[], (value) => fmtUSD(value)).stepTitle,
+  })
+  const branchOptions = sheetState.branchOptions
+  const effectiveBranchId = sheetState.effectiveBranchId
+  const candidatePool = sheetState.candidatePool as ProductRecord[]
+  const effectiveVariant = sheetState.effectiveVariant as ProductRecord | null
+  const effectiveVariantStock = sheetState.effectiveVariantStock
+  const warehouseBlockedMessage = t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.'
 
   const branchPageCount = Math.max(1, Math.ceil(branchOptions.length / BRANCH_CHOICES_PAGE_SIZE))
   const clampedBranchPage = Math.min(branchPage, branchPageCount - 1)
@@ -350,20 +362,9 @@ export default function ProductDetailSheet({
     clampedBranchPage * BRANCH_CHOICES_PAGE_SIZE + BRANCH_CHOICES_PAGE_SIZE,
   )
 
-  // Step 2: narrow the group's rows down to whichever ones are actually
-  // carried at the selected branch. A row with no branch_stock entries at
-  // all is treated as branch-agnostic and stays offered under every branch.
-  const candidateVariants = branchOptions.length === 0 || effectiveBranchId == null
-    ? variants
-    : variants.filter((variant) => {
-      const branchStock = Array.isArray(variant.branch_stock) ? variant.branch_stock : []
-      if (!branchStock.length) return true
-      return branchStock.some((entry) => String(entry?.branch_id) === effectiveBranchId)
-    })
-  const candidatePool = candidateVariants.length ? candidateVariants : variants
-
-  // Shared by the barcode pills below and by effectiveVariantStock further
-  // down, so both use the exact same branch-aware stock number.
+  // Per-row stock at one branch, for the option pills. Same rule the module
+  // applies (branch_stock when the product carries any, else the
+  // cross-branch number), so the pills and the Stock row cannot disagree.
   const getVariantStockForBranch = (variant: ProductRecord | null, branchId: string | null): number => {
     if (!variant) return 0
     if (branchOptions.length && branchId != null) {
@@ -381,29 +382,11 @@ export default function ProductDetailSheet({
   // in exactly one situation: neither the barcode nor the selling price
   // differs across these rows, so it has nothing cashier-facing left to put
   // on a pill and falls back to the row's internal id ("#7321", "#7322").
-  // That is a list of database ids offered to a cashier as a choice, and it
-  // is asking the SAME question the lot list underneath asks -- "which
-  // intake of this product?" -- while its own doc-comment already hands that
-  // question to the lot picker ("which lot's COGS a sale draws from is
-  // settled by the batch picker"). So the id pills are the redundant half:
-  // the lot list states the choice as a received date and a quantity the
-  // cashier can act on, and it is the only one of the two that feeds the
-  // sale (buildBatchSelection -> BatchSelection -> the cart line's cap).
-  //
-  // Removing the pills outright would strand rows 2..n's lots, because
-  // GET /api/batches is scoped to ONE product row. So the two lists collapse
-  // into one instead: every indistinguishable row's lots are fetched and
-  // merged into a single received-date list, and picking a lot also resolves
-  // the row that owns it (see the pill onClick). Requires every candidate to
-  // be batch-tracked -- a row without lot tracking cannot be represented in
-  // a lot list, so a mixed group keeps the old two-step flow rather than
-  // silently losing a sellable row.
-  const optionStepIsIndistinguishable = groupProduct
-    && candidatePool.length > 1
-    && variantOptionLabels.stepTitle === 'Option'
-  const everyCandidateBatchTracked = candidatePool.length > 0
-    && candidatePool.every((variant) => trackedBatchProductIds?.has(Number(variant.id)) ?? false)
-  const mergeRowsIntoLotList = optionStepIsIndistinguishable && everyCandidateBatchTracked
+  // Those id pills ask the SAME question the received-date list underneath
+  // asks -- "which intake of this product?" -- so the two collapse into one:
+  // every indistinguishable row's lots are fetched into a single list, and
+  // picking one also resolves the row that owns it (see the pill onClick).
+  const mergeRowsIntoLotList = sheetState.mergeRowsIntoLotList
 
   // Step numbers are counted, not hardcoded. The option step disappears in
   // merged mode, and a lot step still labelled "3." under a lone "1. Branch"
@@ -419,12 +402,6 @@ export default function ProductDetailSheet({
     clampedBarcodePage * VARIANT_CHOICES_PAGE_SIZE,
     clampedBarcodePage * VARIANT_CHOICES_PAGE_SIZE + VARIANT_CHOICES_PAGE_SIZE,
   )
-
-  // Step 3: the price for whichever row Steps 1 + 2 resolved to -- defaults
-  // to the first candidate so a price shows immediately, but the cashier can
-  // override branch and/or barcode at any point and this recomputes.
-  const effectiveVariant = candidatePool.find((variant) => String(variant.id) === selectedVariantId) || candidatePool[0] || null
-  const effectiveVariantStock = getVariantStockForBranch(effectiveVariant, effectiveBranchId)
   const effectiveVariantInStock = effectiveVariant ? effectiveVariantStock > asNumber(effectiveVariant.out_of_stock_threshold) : false
   const effectiveVariantPromoBadge = promotionBadgeForProduct(effectiveVariant || undefined, promotionRules)
   const effectiveVariantPromoEvaluation = evaluatePromotionPricing(effectiveVariant || undefined, 1, promotionRules, exchangeRate)
@@ -462,8 +439,7 @@ export default function ProductDetailSheet({
   // using it here keeps the lot list and the branch shown on screen in
   // agreement instead of deriving the branch twice by different rules.
   const resolvedBranchId = effectiveBranchId
-  const isBatchTracked = mergeRowsIntoLotList
-    || (resolvedProduct != null && (trackedBatchProductIds?.has(Number(resolvedProduct.id)) ?? false))
+  const isBatchTracked = sheetState.isBatchTracked
   // Which product row(s) the lot list is drawn from. Normally just the
   // resolved row; in merged mode (above) every indistinguishable row, so the
   // one remaining list still reaches every lot the removed id pills used to
@@ -538,12 +514,12 @@ export default function ProductDetailSheet({
   // list is expiry-first FIFO, which interleaves empty lots among sellable
   // ones. Ordered here at render (rather than when the fetch lands) so the
   // list can never be shown in the raw transport order.
+  const batchWord = t('batch') || 'Received date'
   const orderedBatches = sortBatchesForPicker(batches)
   const batchPageCount = Math.max(1, Math.ceil(orderedBatches.length / BATCH_CHOICES_PAGE_SIZE))
   const clampedBatchPage = Math.min(batchPage, batchPageCount - 1)
   const pagedBatches = orderedBatches.slice(clampedBatchPage * BATCH_CHOICES_PAGE_SIZE, clampedBatchPage * BATCH_CHOICES_PAGE_SIZE + BATCH_CHOICES_PAGE_SIZE)
   const selectedBatch = orderedBatches.find((batch) => batch.id === selectedBatchId) || null
-  const batchStockTotal = orderedBatches.reduce((sum, batch) => sum + Number(batch.quantity || 0), 0)
   // Picking a lot in merged mode also picks the product row that owns it --
   // that is how the removed id pills' one real job survives without the
   // pills. Prices/VIP/wholesale below all re-render from the resolved row,
@@ -561,22 +537,16 @@ export default function ProductDetailSheet({
   // resolved row came from the flat flow or from the group's Branch/
   // Barcode steps.
   const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
-  const batchSelectionRequired = isBatchTracked
-  // A picked damaged lot IS the line's source -- it satisfies the lot gate
-  // the same way a sellable lot does (the units come from that lot).
-  const batchReadyToSell = selectedDamagedLot != null
-    ? Number(selectedDamagedLot.quantity_remaining || 0) > 0
-    : (!batchSelectionRequired || (selectedBatch != null && Number(selectedBatch.quantity || 0) > 0))
-
-  // The ONE stock number this sheet shows. Colour and value both read it, so
-  // they can never disagree: a picked lot's own remaining quantity, else the
-  // lot total when a lot must be picked, else the resolved row's stock at the
-  // resolved branch.
-  const displayedStock = selectedDamagedLot
-    ? Number(selectedDamagedLot.quantity_remaining || 0)
-    : selectedBatch
-      ? Number(selectedBatch.quantity || 0)
-      : (batchSelectionRequired ? batchStockTotal : effectiveVariantStock)
+  // A picked damaged lot IS the line's source -- it satisfies the received-
+  // date gate the same way a sellable lot does (the units come from it).
+  const batchSelectionRequired = sheetState.batchSelectionRequired
+  const batchReadyToSell = sheetState.batchReadyToSell
+  // The ONE stock number this sheet shows, from productSheetState.ts:
+  // on-hand comes from branch_stock (the ledger that answers "how many are
+  // at this branch"), and the lot ledger only narrows it once a specific
+  // received date is picked. Reading the lot total as on-hand is what made
+  // the sheet print "Stock: 0" beside a branch line saying 28.
+  const displayedStock = sheetState.displayedStock
 
 
   const damagedLotLabel = (lot: DamagedLot): string =>
@@ -591,7 +561,7 @@ export default function ProductDetailSheet({
     if (!batchSelectionRequired || !selectedBatch) return undefined
     return {
       batchId: selectedBatch.id,
-      batchLabel: formatBatchLabel(selectedBatch, posCopy),
+      batchLabel: formatBatchLabel(selectedBatch, batchWord),
       batchExpiryDate: selectedBatch.expiry_date ?? null,
       quantity: Number(selectedBatch.quantity || 0),
     }
@@ -602,8 +572,88 @@ export default function ProductDetailSheet({
     onClose()
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+  // Non-POS surfaces confirm a choice instead of pricing a cart line. The
+  // gate is the same one the price buttons use, so a picker can never hand
+  // back a row/branch/received-date combination the POS would refuse.
+  const confirmPick = (nextProduct: ProductRecord) => {
+    onPick?.(nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection() })
+    onClose()
+  }
+  const pickButtonLabel = pickLabel || t('select') || 'Select'
+  const renderPickButton = (row: ProductRecord, inStock: boolean) => (
+    <button
+      type="button"
+      className="btn-primary flex-1 text-xs"
+      disabled={!inStock || !batchReadyToSell}
+      onClick={() => confirmPick(row)}
+    >
+      {!inStock
+        ? (t('out_of_stock') || 'Out of stock')
+        : batchSelectionRequired && !selectedBatch
+          ? (t('pick_received_date_first') || 'Pick a received date first')
+          : pickButtonLabel}
+    </button>
+  )
+
+  // One branch step for BOTH shapes. It used to live inside the grouped-only
+  // block, so a standalone product -- the commonest card on the screen --
+  // got no branch row at all, and the pills that did render printed a name
+  // with no number beside the one total above them.
+  const branchStep = branchStepShown ? (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{`1. ${t('branch') || 'Branch'}`}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {pagedBranchOptions.map((branch) => {
+          const branchOut = branch.quantity <= 0
+          const blocked = !branch.selectable
+          return (
+            <button
+              key={branch.id}
+              type="button"
+              aria-disabled={blocked}
+              className={`${pillClass(branch.id === effectiveBranchId, branchOut || blocked)}${blocked ? ' cursor-not-allowed' : ''}`}
+              onClick={() => {
+                // Greyed, NOT hidden and NOT removed: the cashier has to be
+                // able to see that the units are sitting in the warehouse,
+                // and be told what to do about it. Admins included -- this
+                // is a business rule, not a permission.
+                if (blocked) { setBranchNotice(warehouseBlockedMessage); return }
+                setBranchNotice('')
+                setSelectedBranchId(branch.id)
+                setSelectedVariantId(null)
+                setBarcodePage(0)
+              }}
+            >
+              {branch.name}
+              <span className="ml-1 text-[10px] font-normal opacity-75">· {branch.quantity}</span>
+            </button>
+          )
+        })}
+      </div>
+      {branchNotice ? <div className="mt-1.5 text-[11px] font-medium text-amber-600">{branchNotice}</div> : null}
+      <PillPager page={clampedBranchPage} pageCount={branchPageCount} onPageChange={setBranchPage} posCopy={posCopy} />
+    </div>
+  ) : null
+
+  // A portalled sheet sits ABOVE a host modal, so Escape has to close the
+  // SHEET and go no further. Without this the one key press falls through to
+  // the modal underneath and closes it too, taking the half-filled stock
+  // line with it. Captured on the way down, for the same reason every other
+  // stacked surface in this app captures it.
+  useEffect(() => {
+    if (!portal || typeof document === 'undefined') return undefined
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      event.preventDefault()
+      onClose()
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [portal, onClose])
+
+  const sheet = (
+    <div className={`fixed inset-0 bg-black/50 ${portal ? 'z-[1080]' : 'z-50'} flex items-end sm:items-center justify-center p-0 sm:p-4`} onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-modal-80 flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3 min-w-0">
@@ -628,20 +678,26 @@ export default function ProductDetailSheet({
           {([
             [t('label_category') || 'Category', product.category],
             [t('label_supplier') || 'Supplier', product.supplier],
-            [t('label_unit') || 'Unit', product.unit],
             [t('label_barcode') || 'Barcode', product.barcode],
             [t('label_description') || 'Description', product.description],
           ] as Array<[string, string | number | undefined]>).map(([label, val]) => val ? (
             <div key={label} className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{label}</span><span className="text-sm text-gray-800 dark:text-gray-200">{String(val)}</span></div>
           ) : null)}
-          <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Selling', 'តម្លៃលក់')}</span><div><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</div></div>
-          {/* The VIP tier that used to be withheld from these read-only rows is
-              deleted (2026-09-04 ruling). Wholesale, which replaces it as the
-              one discounted tier, is shown plainly here -- it was never a
+          {/* Selling and wholesale share ONE row (owner ask, 2026-09-06):
+              two stacked rows for two numbers pushed the per-branch counts
+              and the option pills below the fold on a phone. The VIP tier
+              that used to sit beside them is deleted (2026-09-04 ruling);
+              wholesale is the one remaining discounted tier and was never a
               tap-to-reveal price. */}
-          {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
-            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Wholesale', 'បោះដុំ')}</span><div><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</div></div>
-          ) : null}
+          <div className="flex gap-3">
+            <span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('selling_price') || 'Selling'}</span>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              <span><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</span>
+              {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
+                <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale'}</span><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
+              ) : null}
+            </div>
+          </div>
           {promotion.active ? (
             <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span> : null}</div></div>
           ) : null}
@@ -652,17 +708,22 @@ export default function ProductDetailSheet({
               the one on screen, which is what "display shows different data than the
               actual stock in the options" was describing. */}
           <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${displayedStock <= 0 ? 'text-red-600' : displayedStock <= (asNumber(product.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{displayedStock} {product.unit}</span></div>
-          {/* Branch-aware zero-stock display (this session): the Stock row
-              above is the single branch-resolved number (see
-              getDisplayStock's own comment for why it's scoped to one
-              branch, not a sum), so a multi-branch product showing "0"
-              there doesn't say whether it's out everywhere or just at the
-              currently-viewed/best branch. Group products already get a
-              full per-branch picker below; for a standalone product, name
-              every tracked branch's own quantity here instead of leaving
-              the cashier to guess. */}
-          {!groupProduct && displayedStock <= 0 && Array.isArray(product.branch_stock) && product.branch_stock.length > 1 ? (
-            <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs text-gray-400">{buildProductBranchSummaryLabel(product)}</span></div>
+          {/* "Warehouse: n · Shop: n", ALWAYS -- grouped or standalone, in
+              stock or out. The Stock row above is one branch-resolved
+              number, so on its own it never said whether the rest of the
+              units were at the other branch or nowhere. This used to render
+              only for a standalone product that was already at zero, i.e.
+              it disappeared exactly when the cashier could act on it. */}
+          {branchOptions.length ? (
+            <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs text-gray-400">{sheetState.branchSummary}</span></div>
+          ) : null}
+          {/* The two ledgers disagreeing, said out loud. branch_stock holds
+              units at this branch but the received-date ledger has nothing
+              to draw them from, so the sale cannot proceed -- which is very
+              different from "there are none here", and used to render as a
+              flat "Stock: 0" beside a branch line showing the units. */}
+          {sheetState.stockWithoutReceivedDate ? (
+            <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs font-medium text-amber-600">{t('stock_without_received_date') || 'Units are at this branch but carry no received date.'}</span></div>
           ) : null}
           {/* Flat (non-batch) expiry date -- only meaningful when this
               product isn't batch-tracked (a batch-tracked product's real
@@ -678,32 +739,10 @@ export default function ProductDetailSheet({
               </span>
             </div>
           ) : null}
+          {branchStep}
           {groupProduct ? (
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{choiceLabel}</div>
-
-              {branchOptions.length ? (
-                <div className="mb-3">
-                  <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{posCopy('1. Branch', '1. សាខា')}</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {pagedBranchOptions.map((branch) => {
-                      const branchOut = (branchStockTotals.get(branch.id) || 0) <= 0
-                      return (
-                        <button
-                          key={branch.id}
-                          type="button"
-                          className={pillClass(branch.id === effectiveBranchId, branchOut)}
-                          onClick={() => { setSelectedBranchId(branch.id); setSelectedVariantId(null); setBarcodePage(0) }}
-                        >
-                          {branch.name}
-                          {branchOut ? <span className="ml-1 text-[10px] font-normal opacity-75">({posCopy('Out', 'អស់')})</span> : null}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <PillPager page={clampedBranchPage} pageCount={branchPageCount} onPageChange={setBranchPage} posCopy={posCopy} />
-                </div>
-              ) : null}
 
               {/* The option step is labelled by whatever actually DIFFERS between
                   these rows, not hardcoded to "Barcode". Under the identity rule
@@ -776,9 +815,9 @@ export default function ProductDetailSheet({
                       above for why this couldn't just reuse the flat-only gate. */}
                   {batchSelectionRequired ? (
                     <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/40">
-                      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{`${lotStepNumber}. ${posCopy('Batch', 'បាច់')}`}</div>
+                      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{`${lotStepNumber}. ${t('batches') || 'Received dates'}`}</div>
                       {batchesLoading ? (
-                        <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'កំពុងផ្ទុកបាច់…')}</div>
+                        <div className="text-xs text-gray-400">{t('loading') || 'Loading…'}</div>
                       ) : batchesError ? (
                         <div className="text-xs font-medium text-red-500">{batchesError}</div>
                       ) : orderedBatches.length === 0 ? (
@@ -793,8 +832,8 @@ export default function ProductDetailSheet({
                           >
                             <span className="min-w-0 truncate">
                               {selectedBatch
-                                ? `${formatBatchLabel(selectedBatch, posCopy)} · ${Number(selectedBatch.quantity || 0)}`
-                                : posCopy('Choose batch', 'ជ្រើសរើសបាច់')}
+                                ? `${formatBatchLabel(selectedBatch, batchWord)} · ${Number(selectedBatch.quantity || 0)}`
+                                : t('choose_received_date') || 'Choose a received date'}
                             </span>
                             <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
                           </button>
@@ -808,7 +847,7 @@ export default function ProductDetailSheet({
                                   className={pillClass(batch.id === selectedBatchId, batchOut)}
                                   onClick={() => chooseBatch(batch)}
                                 >
-                                  <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
+                                  <span className="font-mono">{formatBatchLabel(batch, batchWord)}</span>
                                   {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
                                   <span className="ml-1 text-[10px] font-normal opacity-75">({batch.quantity} {effectiveVariant.unit})</span>
                                 </button>
@@ -837,22 +876,23 @@ export default function ProductDetailSheet({
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-1.5">
-                    <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
-                      {batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'ជ្រើសរើសបាច់ជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
-                    </button>
+                    {onPick ? renderPickButton(effectiveVariant, effectiveVariantInStock) : null}
+                    {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
+                      {batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
+                    </button>}
                     {/* The variant's VIP add-to-cart button is deleted by the
                         2026-09-04 ruling; the Wholesale button beside it now
                         carries the same numbers (migration 0111 moved them). */}
-                    {asNumber(effectiveVariant.wholesale_price_usd) > 0 || asNumber(effectiveVariant.wholesale_price_khr) > 0 ? (
+                    {!onPick && (asNumber(effectiveVariant.wholesale_price_usd) > 0 || asNumber(effectiveVariant.wholesale_price_khr) > 0) ? (
                       <button
                         className="btn-secondary flex-1 text-xs border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
                         disabled={!effectiveVariantInStock || !batchReadyToSell}
                         onClick={() => closeAfterAdd(effectiveVariant, 'wholesale')}
                       >
-                        {`${posCopy('Wholesale', 'បោះដុំ')} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
+                        {`${t('wholesale_price') || 'Wholesale'} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
                       </button>
                     ) : null}
-                    {effectiveVariantPromotion.active ? (
+                    {!onPick && effectiveVariantPromotion.active ? (
                       <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
                         {effectiveVariantPromoBadge.kind === 'quantity_hint'
                           ? ((effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${effectiveVariantPromoBadge.min_quantity}+`)
@@ -870,10 +910,10 @@ export default function ProductDetailSheet({
             {batchSelectionRequired ? (
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {posCopy('Pick a lot / batch', 'ជ្រើសរើសបាច់')}
+                  {t('batches') || 'Received dates'}
                 </div>
                 {batchesLoading ? (
-                  <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'កំពុងផ្ទុកបាច់…')}</div>
+                  <div className="text-xs text-gray-400">{t('loading') || 'Loading…'}</div>
                 ) : batchesError ? (
                   <div className="text-xs font-medium text-red-500">{batchesError}</div>
                 ) : orderedBatches.length === 0 ? (
@@ -888,8 +928,8 @@ export default function ProductDetailSheet({
                     >
                       <span className="min-w-0 truncate">
                         {selectedBatch
-                          ? `${formatBatchLabel(selectedBatch, posCopy)} · ${Number(selectedBatch.quantity || 0)}`
-                          : posCopy('Choose batch', 'ជ្រើសរើសបាច់')}
+                          ? `${formatBatchLabel(selectedBatch, batchWord)} · ${Number(selectedBatch.quantity || 0)}`
+                          : t('choose_received_date') || 'Choose a received date'}
                       </span>
                       <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
                     </button>
@@ -903,7 +943,7 @@ export default function ProductDetailSheet({
                             className={pillClass(batch.id === selectedBatchId, batchOut)}
                             onClick={() => chooseBatch(batch)}
                           >
-                            <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
+                            <span className="font-mono">{formatBatchLabel(batch, batchWord)}</span>
                             {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
                             <span className="ml-1 text-[10px] font-normal opacity-75">({batch.quantity} {product.unit})</span>
                           </button>
@@ -932,10 +972,11 @@ export default function ProductDetailSheet({
               </div>
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'ជ្រើសរើសបាច់ជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
-              </button>
-              {promotion.active ? (
+              {onPick ? renderPickButton(product, displayedStock > asNumber(product.out_of_stock_threshold)) : null}
+              {onPick ? null : <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+              </button>}
+              {!onPick && promotion.active ? (
                 <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
                   {promoBadge.kind === 'quantity_hint'
                     ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
@@ -944,13 +985,13 @@ export default function ProductDetailSheet({
               ) : null}
               {/* The product's VIP add-to-cart button is deleted by the
                   2026-09-04 ruling -- same as the variant twin above. */}
-              {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
+              {!onPick && (asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0) ? (
                 <button
                   className="btn-secondary flex-1 border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
                   disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
                   onClick={() => closeAfterAdd(product, 'wholesale')}
                 >
-                  {`${posCopy('Wholesale', 'បោះដុំ')} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}
+                  {`${t('wholesale_price') || 'Wholesale'} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}
                 </button>
               ) : null}
             </div>
@@ -959,4 +1000,5 @@ export default function ProductDetailSheet({
       </div>
     </div>
   )
+  return portal && typeof document !== 'undefined' ? createPortal(sheet, document.body) : sheet
 }

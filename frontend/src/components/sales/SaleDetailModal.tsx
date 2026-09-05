@@ -23,6 +23,7 @@ import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import StatusBadge, { getStatusLabel } from './StatusBadge.tsx'
 import SaleDetailProductPicker, { type SaleDetailProductCandidate, type SaleDetailProductChoice } from './SaleDetailProductPicker.tsx'
+import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
 import SaleSettlementEditor, { MAX_SETTLEMENT_ROWS } from './SaleSettlementEditor.tsx'
@@ -341,6 +342,10 @@ export default function SaleDetailModal({
   const [addSaving, setAddSaving] = useState(false)
   const [addConfirmOpen, setAddConfirmOpen] = useState(false)
   const [addPicking, setAddPicking] = useState<AddProductCandidate | null>(null)
+  // Replace used to be a flat list that committed the swap on the first tap,
+  // with no branch quantity and no way to say WHICH option or received date.
+  // It now opens the same option sheet every other picker opens.
+  const [replacePicking, setReplacePicking] = useState<AddProductCandidate | null>(null)
   const addSearchSeqRef = useRef(0)
   const addSearchInputRef = useRef<HTMLInputElement | null>(null)
   const addCandidateGroups = useMemo(() => buildProductGroups(addCandidates, new Map(), { preserveInputOrder: true }).map((group) => {
@@ -1246,14 +1251,14 @@ export default function SaleDetailModal({
                                   <div className="mt-1 text-[11px] text-gray-400">{t('loading') || 'Loading'}</div>
                                 ) : addCandidates.length ? (
                                   <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-700">
-                                    {addCandidates.map((candidate) => (
-                                      <li key={String(candidate.id)}>
+                                    {addCandidateGroups.map((candidate) => (
+                                      <li key={String(candidate.__groupKey || candidate.id)}>
                                         <button
                                           type="button"
-                                          onClick={() => stageReplacement(candidate)}
+                                          onClick={() => setReplacePicking(candidate)}
                                           className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
                                         >
-                                          <span className="break-words">{candidate.name}</span>
+                                          <span className="break-words">{candidate.__displayName || candidate.name}</span>
                                           <span className="shrink-0 tabular-nums text-[11px] text-gray-500">{fmtUSD(toNumber(candidate.selling_price_usd))}</span>
                                         </button>
                                       </li>
@@ -1261,6 +1266,25 @@ export default function SaleDetailModal({
                                   </ul>
                                 ) : addQuery.trim().length >= 2 ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}</div>
+                                ) : null}
+                                {replacePicking ? (
+                                  <ProductOptionSheet
+                                    product={replacePicking as never}
+                                    choices={(replacePicking.__groupChoices || []) as never[]}
+                                    t={t}
+                                    fmtUSD={fmtUSD}
+                                    // A replacement is sold, so the warehouse
+                                    // shows its count and refuses the pick,
+                                    // exactly as it does in the POS.
+                                    intent="sell"
+                                    activeBranchId={sale.branch_id ?? null}
+                                    pickLabel={translateOr('amend_replace', 'Replace', 'ជំនួស')}
+                                    onClose={() => setReplacePicking(null)}
+                                    onPick={(picked) => {
+                                      setReplacePicking(null)
+                                      stageReplacement(picked as unknown as AddProductCandidate)
+                                    }}
+                                  />
                                 ) : null}
                               </div>
                             ) : null}

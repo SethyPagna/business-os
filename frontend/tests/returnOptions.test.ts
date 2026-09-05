@@ -223,9 +223,17 @@ runTest('K2/11.9: the POS damage source option is wired end to end', () => {
   assert.match(sheetSource, /getDamagedLots\(resolvedProduct\.id, resolvedBranchId\)/)
   assert.match(sheetSource, /setSelectedDamagedLotId\(lot\.id === selectedDamagedLotId \? null : lot\.id\); setSelectedBatchId\(null\)/)
   assert.match(sheetSource, /setSelectedBatchId\(batch\.id\); setSelectedDamagedLotId\(null\)/)
-  // a damaged pick satisfies the lot gate and caps the shown stock
-  assert.match(sheetSource, /const batchReadyToSell = selectedDamagedLot != null/)
-  assert.match(sheetSource, /const displayedStock = selectedDamagedLot/)
+  // A damaged pick satisfies the lot gate and caps the shown stock. Both
+  // derivations moved out of this component and into the pure module every
+  // picker now shares (components/pos/productSheetState.ts), so they are
+  // pinned where they live -- and pinned as reached from here, so the sheet
+  // cannot quietly go back to deriving its own.
+  const sheetStateSource = readFileSync(new URL('../src/components/pos/productSheetState.ts', import.meta.url), 'utf8')
+  assert.match(sheetStateSource, /const batchReadyToSell = selectedDamagedLot != null/)
+  assert.match(sheetStateSource, /const displayedStock = selectedDamagedLot/)
+  assert.match(sheetSource, /deriveProductSheetState\(/)
+  assert.match(sheetSource, /sheetState\.batchReadyToSell/)
+  assert.match(sheetSource, /sheetState\.displayedStock/)
   // the selection travels with the add
   assert.match(sheetSource, /onAddToCart\(nextProduct, priceMode, buildBatchSelection\(\), effectiveBranchId, buildDamagedSelection\(\)\)/)
   // the Damage section renders in BOTH flows (group + flat). Counted via
