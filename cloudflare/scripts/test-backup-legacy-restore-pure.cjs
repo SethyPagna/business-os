@@ -37,6 +37,14 @@ async function main() {
   globalThis.fetch = async () => { throw new Error('Network forbidden in backup fixture') }
   const f = bulk.fixture()
   try {
+    // Simulate append-only 0127 without taking ownership of its migration.
+    // The backup implementation discovers live columns, so this exercises the
+    // exact full-row stream and legacy-default restore behavior.
+    f.sql.exec(`
+      ALTER TABLE sales ADD COLUMN change_is_actual INTEGER NOT NULL DEFAULT 0
+        CHECK (change_is_actual IN (0,1));
+      ALTER TABLE sales ADD COLUMN change_exchange_rate REAL;
+    `)
     bulk.seed(f, 3)
     f.sql.exec("INSERT INTO users(id,username,name,password) VALUES(1,'synthetic-review','Synthetic','unused')")
     f.sql.pragma('foreign_keys = ON')
@@ -53,6 +61,7 @@ async function main() {
     f.env.DB = binding(f.sql, writes)
     f.env.ASSETS = makeFakeR2()
     f.env.CACHE = makeFakeKV()
+    f.sql.prepare('UPDATE sales SET change_is_actual=1,change_exchange_rate=3950 WHERE id=1').run()
     for (const id of [1, 2]) {
       const req = bulk.request(f, 'cancelled', `request-roundtrip-${id}`)
       req.items = req.items.filter(item => item.id === id)
@@ -85,12 +94,39 @@ async function main() {
     f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
     await backup.restoreCloudflareBackup(f.env, created.key)
     assert.deepEqual(snap(backup.BACKUP_TABLES), before)
+    assert.deepEqual(
+      f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get(),
+      { change_is_actual: 1, change_exchange_rate: 3950 },
+      'full backup preserves explicit native-change provenance exactly',
+    )
     assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
     f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
     assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
     console.log('PASS actual FK-on streaming full 69-table roundtrip, sale/Returns/stock replay tables, and restored-generation undo/redo')
+
+    const pre0127 = structuredClone(document)
+    const salesColumns = pre0127.tables.sales.columns
+    for (const column of ['change_is_actual', 'change_exchange_rate']) {
+      const index = salesColumns.indexOf(column)
+      assert.ok(index >= 0, `full backup records ${column}`)
+      salesColumns.splice(index, 1)
+      for (const row of pre0127.tables.sales.rows) delete row[column]
+    }
+    const pre0127Key = 'backups/cloudflare/pre-0127-sales-columns.json'
+    await f.env.ASSETS.put(pre0127Key, JSON.stringify(pre0127), { customMetadata: { format: document.format } })
+    assert.equal((await backup.validateCloudflareBackup(f.env, pre0127Key)).restorable, true)
+    f.sql.prepare('UPDATE sales SET change_is_actual=1,change_exchange_rate=4200 WHERE id=1').run()
+    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+    await backup.restoreCloudflareBackup(f.env, pre0127Key)
+    assert.deepEqual(
+      f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get(),
+      { change_is_actual: 0, change_exchange_rate: null },
+      'legacy backup omits 0127 columns so schema defaults restore 0/NULL without inference',
+    )
+    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    console.log('PASS native-change provenance roundtrips, while pre-0127 sales rows restore marker/rate defaults without inference')
 
     f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
     async function variant(label, omit) {
