@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { listTestFiles } from './runTests.ts'
 
 type TestCallback = () => void | Promise<void>
 
@@ -123,7 +124,17 @@ await runTest('UX exposes vault, conflicts, storage, security, and update states
 })
 
 await runTest('offline security hardening test is part of the utility suite', () => {
-  assert.match(packageSource, /offlineSecurityHardening\.test\.ts/)
+  // test:utils no longer lists test files by name (2026-09-06: that
+  // hand-maintained `&&` chain grew past this harness's Windows command-line
+  // launch ceiling -- see tests/runTests.ts and tests/testChainCoverage.test.ts)
+  // -- it runs tests/runTests.ts, which globs tests/*.test.ts. Check this
+  // file is still part of that glob instead of grepping package.json for its
+  // own filename.
+  assert.match(packageSource, /tests\/runTests\.ts/)
+  assert.ok(
+    listTestFiles().includes('offlineSecurityHardening.test.ts'),
+    'offlineSecurityHardening.test.ts must be discoverable by the test:utils runner glob',
+  )
 })
 
 if (failed > 0) {
