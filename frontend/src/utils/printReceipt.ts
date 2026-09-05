@@ -4,7 +4,7 @@ import {
   RECEIPT_PRINT_SETTINGS_STORAGE_KEY,
 } from './receiptAppliedConfig'
 import type { ReceiptPrintSettings } from '../types/receiptContracts'
-import { computeImagePdfLayout } from './receiptPdfLayout.ts'
+import { computeFixedSheetFit, computeImagePdfLayout } from './receiptPdfLayout.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
 const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
@@ -912,14 +912,24 @@ async function withReceiptElement<T>(
     inner.style.transform = `scale(${scaleFactor})`
     inner.style.width = `${100 / scaleFactor}%`
   }
+  const fixedSheetHeightMm = getPaperHeightMm(printSettings)
   if (isElementContent) {
     const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))
     // On continuous rolls the receipt shell's padding is the physical print
     // margin. Replace its screen-preview padding with the operator setting,
     // instead of stacking two independent margins. Fixed cards keep their
     // deliberately designed internal card padding.
-    if (cloned && getPaperHeightMm(printSettings) == null) {
+    if (cloned && fixedSheetHeightMm == null) {
       cloned.style.padding = printPadding
+    } else if (cloned) {
+      // A fixed sheet keeps that designed card padding but must NEVER keep the
+      // frozen on-screen height: cloneElementWithInlineStyles bakes the computed
+      // `height` of the export root, so a card measured on a viewport narrower
+      // than 80mm would be fitted against its taller phone-layout height and
+      // shrink further than its own content needs.
+      cloned.style.height = 'auto'
+      cloned.style.minHeight = '0'
+      cloned.style.maxHeight = 'none'
     }
     inner.innerHTML = cloned?.outerHTML || ''
   } else {
@@ -933,6 +943,35 @@ async function withReceiptElement<T>(
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
       const rect = inner.getBoundingClientRect()
       host.style.minHeight = `${Math.ceil(rect.height)}px`
+    }
+    // Fit a fixed sheet HERE, once, so Print, PDF and Image all export the same
+    // single correctly scaled page. Before this, the print document handed an
+    // over-tall 80x50 card straight to `@page` and the engine broke it across
+    // two pages, while the PDF rescued itself by shrinking the finished raster
+    // uniformly and centering it inside side gutters -- two policies, both wrong.
+    if (fixedSheetHeightMm != null) {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+      const hostWidthPx = Math.max(1, host.getBoundingClientRect().width || host.offsetWidth || 1)
+      // Derive px/mm from the host itself rather than assuming 96dpi: CSS
+      // physical units resolve consistently inside it, exactly as the page
+      // measurement below already relies on.
+      const pxPerMm = hostWidthPx / Math.max(0.01, widthMm)
+      const contentHeightMm = Math.max(1, inner.getBoundingClientRect().height) / pxPerMm
+      const fit = computeFixedSheetFit({ contentHeightMm, sheetHeightMm: fixedSheetHeightMm })
+      if (!fit.fits) {
+        // Render wider, then scale back down -- the same mechanism the operator
+        // Scale setting uses. A transform on its own would not stop pagination:
+        // it never shrinks the layout box the print engine fragments, and
+        // scaling in place would leave the card narrow inside side gutters.
+        const totalScale = scaleFactor * fit.scale
+        inner.style.transform = `scale(${totalScale})`
+        inner.style.width = `${100 / totalScale}%`
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+      }
+      host.style.height = `${fixedSheetHeightMm}mm`
+      host.style.minHeight = `${fixedSheetHeightMm}mm`
+      host.style.maxHeight = `${fixedSheetHeightMm}mm`
+      host.style.overflow = 'hidden'
     }
     return await action(host)
   } finally {
@@ -979,7 +1018,17 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
 }
 
 function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
-  const { markup, widthMm, pageHeightMm } = layout
+  const { markup, widthMm, pageHeightMm, continuousRoll } = layout
+  // Roll semantics and sheet semantics are not the same page. A roll's page
+  // grows to the measured receipt, so overflow must stay visible. A fixed sheet
+  // (80x50 label, A4, custom height) has an exact page: its content is already
+  // fitted to that height by withReceiptElement, and clipping here guarantees
+  // that sub-millimetre driver rounding can never spill a second page.
+  const pageOverflow = continuousRoll ? 'visible' : 'hidden'
+  const fixedFrameHeightCss = continuousRoll
+    ? ''
+    : `height: ${pageHeightMm.toFixed(2)}mm !important;
+          max-height: ${pageHeightMm.toFixed(2)}mm !important;`
   const title = options.title === '' ? '' : (options.title || 'Receipt')
   const toolbarTitle = title || 'Receipt Preview'
   const note = options.note ? `<div class="receipt-note">${escapeHtml(options.note)}</div>` : ''
@@ -1109,7 +1158,7 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
           height: ${pageHeightMm.toFixed(2)}mm !important;
           min-height: ${pageHeightMm.toFixed(2)}mm !important;
           background: #ffffff;
-          overflow: visible !important;
+          overflow: ${pageOverflow} !important;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
@@ -1138,7 +1187,8 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
           padding: 0 !important;
           border-radius: 0;
           box-shadow: none;
-          overflow: visible !important;
+          overflow: ${pageOverflow} !important;
+          ${fixedFrameHeightCss}
           break-inside: avoid-page;
           page-break-inside: avoid;
         }
