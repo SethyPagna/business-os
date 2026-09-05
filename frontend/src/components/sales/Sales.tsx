@@ -23,12 +23,11 @@ import type { SaleCancelPayload } from './CancelSaleModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
-import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip } from '../../api/salesTransport.ts'
+import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkStatus, type BulkSaleStatusItem } from '../../api/salesTransport.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
@@ -178,10 +177,6 @@ interface SaleMembershipPayload extends Record<string, unknown> {
   device_tz?: string
 }
 
-interface SaleStatusEntry {
-  id: number | string
-  status: string
-}
 
 interface SaleItemAddition {
   product_id: number
@@ -417,6 +412,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const statusActionRef = useRef<Set<string>>(new Set())
   const membershipActionRef = useRef<Set<string>>(new Set())
   const bulkStatusInFlightRef = useRef(false)
+  const bulkStatusSelectionRef = useRef<BulkSaleStatusItem[]>([])
   const aliveRef = useRef(true)
   const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
   // 180ms, matching Products.tsx/POS.tsx/Inventory.tsx's shared canonical
@@ -1390,37 +1386,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     openExportOptions(selectedSales, 'sales-selected')
   }, [openExportOptions, selectedSales])
 
-  const applySaleStatusEntries = useCallback(async (entries: SaleStatusEntry[] = [], notes = '', extra: SaleCancelPayload | Record<string, unknown> | null = null) => {
-    const statusRun = await runConcurrentTasks<SaleStatusEntry, number>(entries, async (entry: SaleStatusEntry) => {
-      const saleId = Number(entry?.id || 0)
-      const nextStatus = String(entry?.status || '').trim()
-      if (!saleId || !nextStatus) throw new Error('Invalid sale status entry')
-      // The cancel payload only belongs on entries that actually cancel --
-      // a mixed undo batch (back to varied previous statuses) must not
-      // send a reason with an un-cancel.
-      await runSaleStatusMutation(saleId, nextStatus, notes, nextStatus === 'cancelled' ? extra : null)
-      return saleId
-    })
-    const failedIds = statusRun.failures
-      .map((entry: { item?: SaleStatusEntry }) => Number(entry.item?.id || 0))
-      .filter((id) => Number.isFinite(id) && id > 0)
-    const updatedIds = statusRun.successes
-      .map((entry: { value?: number; item?: SaleStatusEntry }) => Number(entry.value || entry.item?.id || 0))
-      .filter((id) => Number.isFinite(id) && id > 0)
-
-    await loadSales(true)
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
-
-    return {
-      done: updatedIds.length,
-      failed: failedIds.length,
-      failedIds,
-      updatedIds,
-    }
-  }, [loadSales, runSaleStatusMutation])
 
   const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false) => {
     // View-only (Part 557): bulk status writes share sales.status with single
@@ -1430,6 +1395,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       return
     }
     if (!selectedSales.length || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
+    if (!confirmed && !extra) {
+      bulkStatusSelectionRef.current = selectedSales.map(sale => ({ id: Number(sale.id), expected_status: String(sale.sale_status || 'completed'), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }))
+    }
     // Bulk-cancel needs the shared reason first -- one dialog for the
     // whole batch (lost fees stay per-sale and are not offered here).
     if (nextStatus === 'cancelled' && !extra) {
@@ -1461,29 +1429,29 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       })
       return
     }
-    const previousStatuses = selectedSales.map((sale) => ({
-      id: Number(sale.id),
-      status: sale.sale_status || 'completed',
-    }))
     setBulkStatusSaving(nextStatus)
     try {
-      const nextEntries = previousStatuses.map((entry) => ({ id: entry.id, status: nextStatus }))
-      const { done, failed, failedIds, updatedIds } = await applySaleStatusEntries(nextEntries, '', extra)
-      setSelectedIds(new Set<number>(failedIds))
-      const undoEntries = previousStatuses.filter((entry) => updatedIds.includes(entry.id))
-      if (done > 0 && undoEntries.length) {
-        actionHistory.pushAction({
-          label: `Update ${done} sale${done === 1 ? '' : 's'} to ${getStatusLabel(nextStatus, t)}`,
-          undo: () => applySaleStatusEntries(undoEntries, 'Undo bulk sale status update'),
-          redo: () => applySaleStatusEntries(undoEntries.map((entry) => ({ id: entry.id, status: nextStatus })), 'Redo bulk sale status update', extra),
-        })
+      const body = {
+        items: bulkStatusSelectionRef.current,
+        target_status: nextStatus,
+        skip_stock: (extra as Record<string, unknown> | null)?.skip_stock === true,
+        ...(nextStatus === 'cancelled' ? { cancel_reason: String(extra?.cancel_reason || ''), cancel_note: String(extra?.cancel_note || '') } : {}),
       }
-      notify(
-        failed
-          ? `Updated ${done} sales, ${failed} failed.`
-          : `Updated ${done} sale${done === 1 ? '' : 's'} to ${getStatusLabel(nextStatus, t)}.`,
-        failed ? 'warning' : 'success',
-      )
+      // Keep a failed/lost-response request id for an explicit retry, including
+      // after reload. This is never an offline outbox or an automatic replay.
+      const signature = JSON.stringify(body)
+      let saved: { signature?: string; id?: string } = {}
+      try { saved = JSON.parse(sessionStorage.getItem('sales.bulk-status.retry') || '{}') } catch { /* unavailable storage */ }
+      const requestId = saved.signature === signature && saved.id ? saved.id : crypto.randomUUID()
+      try { sessionStorage.setItem('sales.bulk-status.retry', JSON.stringify({ signature, id: requestId })) } catch { /* request remains stable for this invocation */ }
+      const result = await updateSalesBulkStatus({ ...body, client_request_id: requestId })
+      try { sessionStorage.removeItem('sales.bulk-status.retry') } catch { /* unavailable storage */ }
+      setSelectedIds(new Set<number>())
+      await Promise.all([loadSales(true), actionHistory.refreshServerItems()])
+      for (const channel of ['inventory', 'products', 'returns']) window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel } }))
+      notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.', 'បានកែប្រែការលក់ {changed}; មិនផ្លាស់ប្តូរ {unchanged}។').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
+    } catch (error) {
+      notify(getErrorMessage(error, 'Unable to update the selected sales.'), 'error')
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
       setBulkStatusSaving('')

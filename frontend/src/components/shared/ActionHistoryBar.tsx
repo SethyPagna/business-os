@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import HistoryIcon from 'lucide-react/dist/esm/icons/history.js'
 import AppSelect from './AppSelect'
 import LazyPortalMenu from './LazyPortalMenu'
+import { fmtDateTime24 } from '../../utils/formatters'
 
 type Translate = (key: string, fallback: string) => string
 
@@ -31,6 +32,45 @@ type HistoryItem = {
   // Server-computed (K1 slice 2): this row's next transition can be replayed
   // by the Worker itself, so it is actionable even with no live closure here.
   server_replayable?: boolean
+  undo_payload?: Record<string, unknown>
+  created_by_name?: string
+  created_at?: string
+}
+
+function bulkHistoryLabel(item: HistoryItem, T: Translate): string {
+  const p = item.undo_payload
+  if (p?.applier !== 'sale.status.bulk') return item.label || ''
+  return T('sale_bulk_history_summary', '{changed} sales → {status}; {unchanged} unchanged')
+    .replace('{changed}', String(p.changed_count)).replace('{unchanged}', String(p.unchanged_count))
+    .replace('{status}', T(`status_${String(p.target_status)}`, String(p.target_status).replaceAll('_', ' ')))
+}
+
+function BulkHistoryDetails({ item, T }: { item: HistoryItem; T: Translate }) {
+  const [details, setDetails] = useState<Array<{ id: number; receipt_number: string; before: string; after: string; stock_skipped: boolean }>>([])
+  const [total, setTotal] = useState(0)
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const load = async () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const api = await import('../../api/actionHistoryTransport.ts')
+      const result = await api.getActionHistoryDetails(item.id!, details.length) as { items: typeof details; total: number }
+      setDetails(previous => [...previous, ...result.items]); setTotal(result.total); setOpen(true)
+    } catch (e) { setError(e instanceof Error ? e.message : T('error', 'Error')) }
+    finally { setBusy(false) }
+  }
+  return <div className="px-3 pb-2 text-xs text-slate-500">
+    <div>{item.created_by_name}{item.created_at ? ` · ${fmtDateTime24(item.created_at)}` : ''}</div>
+    <button type="button" className="py-1 text-blue-600 underline" disabled={busy} onClick={() => details.length ? setOpen(!open) : void load()} aria-expanded={open}>{T('sale_bulk_history_details', 'Affected sales')}</button>
+    {error && <p role="alert">{error}</p>}
+    {open && <div className="max-h-48 space-y-1 overflow-y-auto">
+      {details.map(sale => <div key={sale.id} className="break-words">{sale.receipt_number}: {T(`status_${sale.before}`, sale.before.replaceAll('_', ' '))} → {T(`status_${sale.after}`, sale.after.replaceAll('_', ' '))}{sale.stock_skipped ? ` · ${T('sale_stock_skipped', 'Stock skipped')}` : ''}</div>)}
+      {details.length < total && <button type="button" className="py-1 text-blue-600 underline" disabled={busy} onClick={() => void load()}>{T('load_more', 'Load more')}</button>}
+    </div>}
+  </div>
 }
 
 type UserOption = {
@@ -275,6 +315,8 @@ export default function ActionHistoryBar({
               </button>
             ))}
             {recordedItems.map((item) => {
+              const grouped = item.undo_payload?.applier === 'sale.status.bulk'
+              const displayLabel = bulkHistoryLabel(item, T)
               // K1 slice 2: a server row whose payload the Worker can replay
               // is a REAL Undo/Redo button even though no live closure exists
               // in this tab (the whole point -- reversibility survives the
@@ -289,14 +331,15 @@ export default function ActionHistoryBar({
               if (serverActionable) {
                 const doneLabel = (direction === 'redo' ? item.redo_label : item.undo_label) || item.label || ''
                 return (
+                  <div key={`recorded-${item.id || item.label}`}>
                   <button
                     key={`recorded-${item.id || item.label}`}
                     type="button"
                     className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
-                    disabled={!!history.busy}
+                    disabled={!!history.busy || (typeof navigator !== 'undefined' && navigator.onLine === false)}
                     onClick={() => { closeMenu(); runServer!(item.id!, doneLabel) }}
                   >
-                    <span className="min-w-0 truncate text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
+                    <span className="min-w-0 whitespace-normal break-words text-slate-700 dark:text-slate-200" title={displayLabel}>{displayLabel}</span>
                     <span className={direction === 'redo'
                       ? 'rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
                       : 'rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'}
@@ -304,9 +347,12 @@ export default function ActionHistoryBar({
                       {direction === 'redo' ? T('redo', 'Redo') : T('undo', 'Undo')}
                     </span>
                   </button>
+                  {grouped && <BulkHistoryDetails item={item} T={T} />}
+                  </div>
                 )
               }
               return (
+              <div key={`recorded-group-${item.id || item.label}`}>
               <div
                 key={`recorded-${item.id || item.label}`}
                 className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left opacity-70"
@@ -316,8 +362,10 @@ export default function ActionHistoryBar({
                     : undefined
                 }
               >
-                <span className="min-w-0 truncate text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
+                <span className="min-w-0 whitespace-normal break-words text-slate-700 dark:text-slate-200" title={displayLabel}>{displayLabel}</span>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{formatServerStatus(item, T, false)}</span>
+              </div>
+              {grouped && <BulkHistoryDetails item={item} T={T} />}
               </div>
               )
             })}

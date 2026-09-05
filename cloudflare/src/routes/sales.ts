@@ -63,6 +63,7 @@ import {
   type TaxSettings,
 } from '../lib/saleAmendments'
 import { recordSaleAddItemsUndoSnapshot } from '../lib/undoAppliers'
+import { applySaleBulkStatus, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -725,18 +726,10 @@ app.post('/', async (c) => {
       payment_details: JSON.stringify(effectivePaymentDetails),
       payment_currency: body.payment_currency || 'USD',
       exchange_rate: exchangeRate,
-      // Only an EXPLICIT false opts a sale out of earning points -- absent or
-      // any other value keeps the long-standing auto-accrual behavior, so an
-      // older cached POS build cannot silently stop customers earning points.
-      //
-      // The shop-level switch (user, Sep 4 2026) overrides that default in the
-      // other direction: with membership points off, the sale is STAMPED
-      // non-accruing at write time rather than merely hidden at read time. It
-      // has to be stored per-sale, exactly the way `loyalty_accrual` already
-      // works, or switching the programme back on later would retroactively
-      // pay points for every sale made while it was off -- the same "history
-      // must never accrue" rule that governs imports.
-      loyalty_accrual: !loyaltyPointsEnabled || body.loyalty_accrual === false ? 0 : 1,
+      // An explicit per-sale boolean wins in either direction. Missing or
+      // non-boolean values inherit the current setting. Persist that choice
+      // so a later default change cannot retroactively change this sale.
+      loyalty_accrual: (typeof body.loyalty_accrual === 'boolean' ? body.loyalty_accrual : loyaltyPointsEnabled) ? 1 : 0,
       subtotal_usd: round2(subtotalUsd),
       subtotal_khr: Math.round(subtotalUsd * exchangeRate),
       discount_usd: discountUsd,
@@ -1105,6 +1098,16 @@ type SaleItemRow = {
   batch_id: number | null
 }
 
+app.post('/bulk-status', async (c) => {
+  try {
+    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json())
+    c.executionCtx.waitUntil(notifyBulkStatus(c.env))
+    return c.json(result)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+  }
+})
+
 app.patch('/:id/status', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
@@ -1156,7 +1159,7 @@ app.patch('/:id/status', async (c) => {
     return c.json({ error: `Invalid status. Must be one of: ${VALID_SALE_STATUSES.join(', ')}` }, 400)
   }
 
-  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown> & {
+  const sale = await db.prepare('SELECT s.*, COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE id = ?').get<Record<string, unknown> & {
     id: number
     sale_status: string | null
     updated_at: string | null
@@ -1322,7 +1325,7 @@ app.patch('/:id/status', async (c) => {
     }
   }
 
-  const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
   const updates = ['sale_status = @sale_status', 'updated_at = CURRENT_TIMESTAMP']
   const updateParams: Record<string, unknown> = { sale_status: saleStatus, id }
   if (body.notes !== undefined) {
@@ -1486,11 +1489,15 @@ app.patch('/:id/status', async (c) => {
     })
   }
 
+  statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
   try {
     await db.batch(statements)
   } catch (error) {
     await reverseAppliedDamagedOps()
     const message = (error as Error).message || ''
+    if (/guard_value/i.test(message)) {
+      return c.json({ error: 'This sale changed while the status update was being prepared. Refresh and try again.', code: 'write_conflict' }, 409)
+    }
     // Same race guard as POST /: a CHECK(quantity >= 0) failure means a
     // concurrent sale consumed the stock (or the line's specific lot)
     // between the availability read above and this write. The batch rolled

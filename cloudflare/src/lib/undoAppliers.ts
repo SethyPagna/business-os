@@ -18,6 +18,7 @@ import {
 // it rather than around it. Never a rewrite -- migration 0115's triggers refuse
 // that outright.
 import { amendmentEntryStatement } from './saleAmendments'
+import { replaySaleBulkStatus } from './saleBulkStatus'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -46,6 +47,8 @@ export interface UndoApplierContext {
   env: Env
   user: SessionUser | null
   direction: 'undo' | 'redo'
+  historyId?: number
+  generation?: unknown
 }
 
 export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void>
@@ -752,6 +755,13 @@ export async function recordSaleAddItemsUndoSnapshot(
 }
 
 const APPLIERS: Record<string, UndoApplierDef> = {
+  'sale.status.bulk': {
+    permission: 'sales', action: 'status',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
+      await replaySaleBulkStatus(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
   // Payload shape: { applier: 'sale.add_items', snapshot_id }. Undo and redo
   // payloads are identical; the applier is direction-aware and the reversal
   // (the added lines, their exact lot takes, and both money snapshots) lives
