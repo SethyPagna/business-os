@@ -2,6 +2,22 @@
 
 ## Active continuation — production usability, September 5
 
+Latest10:26UTC: payment/native-change chain is integrated through882bec3d,
+including original central hooks55c85118/388fc5e7 and zero-session HTTPce4c0f78.
+Main focused settlement/payment-route/add-items/native-change/stock/central tests
+and both package typechecks pass; i18n4941keys/517sources passes. No deployment.
+Independent zero-only HTTP+history permission matrix passes both mounted and
+standalone routes, with negative controls. Shift cancellation notification and
+product-image permission fixes integrated5e99c0b7/eeafd2ed; zero-createc727e073.
+Remaining substantive gates: Herschel atomic sale-add-items undo/redo revision
+and allocation protection; Galileo proper child layers/zero session/queued edits;
+Bernoulli Branch Products retained columns/stats plus Hilbert bounded backend
+metrics; payment owner derived-KHR4dp/raw tender precision follow-up. Pauli's
+fixed22-sale subtotal repair61e5a48f is independently reviewed by Plato, not yet
+integrated/applied. Historical shift close and source repair remain unperformed.
+Final clean-head full tests/build/browser/deploy are still pending. Existing dirty
+fees files and original user checkout remain untouched. Details in usability ledger.
+
 Latest09:50UTC: main real browser at17f46b69 confirms compact desktop controls,
 320px no overflow, 09:15–23:44 preserved through1440→320→1440, and reversed-time
 edits display validation without replacing the committed report. The large local

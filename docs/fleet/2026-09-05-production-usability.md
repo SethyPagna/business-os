@@ -234,6 +234,29 @@ reportedzero writes. Sourcecost validity remains distinct from sum correctness.
 
 ## Owner decision and source-data follow-up
 
+- Checkpoint10:26UTC: main integrated payment chain091b6da4 through882bec3d,
+  preserving original central hooks (not older-baseline backport variants) and
+  existing stock receipts. Locale tail conflict retained all existing/new keys.
+  Main reran payment-settlement5groups, payment-FX10groups, payment-method-route,
+  sale-add-items13groups, native-change13, stock-atomic16, stock-undo21, central17;
+  all pass. Both package typechecks and i18n4941keys/517sources pass. A mistakenly
+  attempted test-sale-settlement-action-pure.cjs does not exist; actual settlement
+  replay coverage is test-payment-fx-pure.cjs plus central tests, not that filename.
+  Independent Aquinas combined zero-only HTTP/history matrix passes true
+  inventory:false/products:add-full across mounted/unmounted routes, denies
+  positive/mixed/other routes and review/disabled permissions, with pre-fix negative
+  controls. Main stock replay rerun passes on actual integrated source.
+  Release blockers remain explicit: new sale.add_items snapshots need atomic
+  revision/status/allocation/receipt/history replay (Herschel); product nested
+  layers/queued editing/zero atomic UI (Galileo); Branch Products rich columns,
+  grouped rows and scoped stats (Bernoulli) plus bounded per-page financial metric
+  enrichment (Hilbert, newly allocated inventory.ts only plus new test).
+  Main flagged derived-KHR integer rounding versus internal4dp and epsilon-based
+  new tender validation; payment owner is correcting with focused tests. Plato
+  independently checks subtotal runtime61e5a48f. No new production deployment or
+  financial/stock/shift data correction. Source repair and historical close need
+  fresh guarded live preflight after the verified release.
+
 - Main browser17f46b69: desktop controls now share a compact row, five presets,
   no decorative calendar icon;320px document=viewport320. Endpoints09:15/23:44
   survive1440→320→1440. End08:00 rejected with aria-invalid and visible alert;
