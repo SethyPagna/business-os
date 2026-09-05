@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { getDb } from '../lib/db'
+import { getDb, type D1Compat } from '../lib/db'
 import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
@@ -158,6 +158,131 @@ function getInitialType(key: unknown): 'latin' | 'number' | 'khmer' | 'other' | 
 }
 
 type InventoryFilterQuery = Record<string, string | undefined>
+
+type InventoryProductMetricRow = {
+  product_id: number
+  display_quantity: number
+  stock_value_usd: number
+  stock_value_khr: number
+  qty_sold: number
+  revenue_usd: number
+  revenue_khr: number
+  cogs_usd: number
+  cogs_khr: number
+}
+
+/**
+ * Enrich only the rows already admitted by family-aware pagination. The one
+ * JSON parameter avoids D1 bind-count limits even when a large product family
+ * expands beyond the requested family page size.
+ */
+export async function attachInventoryProductMetrics(
+  db: D1Compat,
+  items: Array<Record<string, unknown>>,
+  query: InventoryFilterQuery,
+): Promise<void> {
+  const productIds = [...new Set(items
+    .map((item) => Number(item.id))
+    .filter((id) => Number.isSafeInteger(id) && id > 0))]
+  if (!productIds.length) return
+
+  const params: Record<string, unknown> = { productIdsJson: JSON.stringify(productIds) }
+  const branchId = Number.parseInt(String(query.branchId || query.branch_id || ''), 10)
+  const branchScoped = Number.isFinite(branchId) && branchId > 0
+  if (branchScoped) params.branchId = branchId
+
+  const startDate = String(query.startDate || query.start_date || '').trim()
+  const endDate = String(query.endDate || query.end_date || '').trim()
+  if (startDate) params.startDate = startDate
+  if (endDate) params.endDate = endDate
+
+  const saleScope = [
+    "COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')",
+    branchScoped ? 'si.branch_id = @branchId' : '',
+    startDate ? localDateAtOrAfter('s.created_at') : '',
+    endDate ? localDateAtOrBefore('s.created_at') : '',
+  ].filter(Boolean).join(' AND ')
+  const returnScope = [
+    "COALESCE(r.status, 'completed') != 'cancelled'",
+    "COALESCE(r.return_scope, 'customer') = 'customer'",
+    branchScoped ? 'COALESCE(ri.branch_id, r.branch_id) = @branchId' : '',
+    startDate ? localDateAtOrAfter('r.created_at') : '',
+    endDate ? localDateAtOrBefore('r.created_at') : '',
+  ].filter(Boolean).join(' AND ')
+  const stockQuantitySql = branchScoped ? 'COALESCE(bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
+  const stockJoinSql = branchScoped
+    ? 'LEFT JOIN branch_stock bs ON bs.product_id = ids.product_id AND bs.branch_id = @branchId'
+    : ''
+
+  // Keep this arithmetic aligned with GET /summary: line revenue less its
+  // proportional store + membership discounts, then customer returns; COGS
+  // is reduced only when returned units actually go back to stock.
+  const rows = await db.prepare(`
+    WITH requested_ids(product_id) AS (
+      SELECT DISTINCT CAST(value AS INTEGER)
+      FROM json_each(@productIdsJson)
+    ),
+    sold AS (
+      SELECT si.product_id,
+             SUM(si.quantity) AS qty_sold,
+             SUM(si.total_usd - CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0)) ELSE 0 END) AS revenue_usd,
+             SUM(si.total_khr - CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0)) ELSE 0 END) AS revenue_khr,
+             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
+             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
+      FROM sale_items si
+      JOIN requested_ids ids ON ids.product_id = si.product_id
+      JOIN sales s ON s.id = si.sale_id
+      WHERE ${saleScope}
+      GROUP BY si.product_id
+    ),
+    returned AS (
+      SELECT ri.product_id,
+             SUM(ri.quantity) AS qty_returned,
+             SUM(ri.total_usd) AS refund_usd,
+             SUM(ri.total_khr) AS refund_khr,
+             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
+             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr
+      FROM return_items ri
+      JOIN requested_ids ids ON ids.product_id = ri.product_id
+      JOIN returns r ON r.id = ri.return_id
+      WHERE ${returnScope}
+      GROUP BY ri.product_id
+    )
+    SELECT ids.product_id,
+           ${stockQuantitySql} AS display_quantity,
+           ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0) AS stock_value_usd,
+           ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0) AS stock_value_khr,
+           COALESCE(sold.qty_sold, 0) - COALESCE(returned.qty_returned, 0) AS qty_sold,
+           COALESCE(sold.revenue_usd, 0) - COALESCE(returned.refund_usd, 0) AS revenue_usd,
+           COALESCE(sold.revenue_khr, 0) - COALESCE(returned.refund_khr, 0) AS revenue_khr,
+           COALESCE(sold.cogs_usd, 0) - COALESCE(returned.cogs_returned_usd, 0) AS cogs_usd,
+           COALESCE(sold.cogs_khr, 0) - COALESCE(returned.cogs_returned_khr, 0) AS cogs_khr
+    FROM requested_ids ids
+    JOIN products p ON p.id = ids.product_id
+    ${stockJoinSql}
+    LEFT JOIN sold ON sold.product_id = ids.product_id
+    LEFT JOIN returned ON returned.product_id = ids.product_id
+  `).all<InventoryProductMetricRow>(params)
+
+  const metricsById = new Map((rows || []).map((row) => [Number(row.product_id), row]))
+  for (const item of items) {
+    const metric = metricsById.get(Number(item.id))
+    if (!metric) throw new Error(`Inventory metrics missing for returned product ${String(item.id)}`)
+    const revenueUsd = num(metric.revenue_usd)
+    const cogsUsd = num(metric.cogs_usd)
+    Object.assign(item, {
+      display_quantity: num(metric.display_quantity),
+      stock_value_usd: num(metric.stock_value_usd),
+      stock_value_khr: num(metric.stock_value_khr),
+      qty_sold: num(metric.qty_sold),
+      revenue_usd: revenueUsd,
+      revenue_khr: num(metric.revenue_khr),
+      cogs_usd: cogsUsd,
+      cogs_khr: num(metric.cogs_khr),
+      profit_usd: revenueUsd - cogsUsd,
+    })
+  }
+}
 
 function appendInventoryProductFilters(query: InventoryFilterQuery) {
   const where = ['p.is_active = 1']
@@ -452,7 +577,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
     return next
   })
 
-  if (items.length) await attachBatchCounts(getDb(env), items)
+  if (items.length) {
+    await Promise.all([
+      attachBatchCounts(db, items),
+      attachInventoryProductMetrics(db, items, query),
+    ])
+  }
 
   return {
     items,
