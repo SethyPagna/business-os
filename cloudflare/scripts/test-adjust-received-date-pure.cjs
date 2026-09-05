@@ -99,6 +99,14 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 
 // Only the /adjust path is driven here -- the list/search/dated-count
 // endpoints' dependencies are stubbed inert (never called by these checks).
+// Sep 6 2026: the owner's low-stock alert setting reaches this module through
+// lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
+// asserted below are the ones it composes -- while the settings READ answers
+// the shipped default, there being no settings row in this harness. The rule
+// itself is proven in scripts/test-low-stock-settings-pure.cjs.
+const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
+const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
+
 const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/db': { getDb: () => db },
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
@@ -110,6 +118,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/sqlBinding': sqlBinding,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },
+  '../lib/lowStockSettings': lowStockStub,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/telegram': { sendTelegramEvent: async () => false },

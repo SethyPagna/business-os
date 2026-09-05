@@ -112,6 +112,14 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
+// Sep 6 2026: the owner's low-stock alert setting reaches this module through
+// lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
+// asserted below are the ones it composes -- while the settings READ answers
+// the shipped default, there being no settings row in this harness. The rule
+// itself is proven in scripts/test-low-stock-settings-pure.cjs.
+const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
+const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
+
 const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': businessDateWindow,
@@ -122,6 +130,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productIdentity': productIdentity,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },
+  '../lib/lowStockSettings': lowStockStub,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   // Both halves stubbed: the route calls formatStockChangeTelegramLines to

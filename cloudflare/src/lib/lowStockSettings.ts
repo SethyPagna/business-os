@@ -164,6 +164,8 @@ export const LOW_STOCK_SETTING_KEYS = [
  */
 export async function loadLowStockConfig(env: Env): Promise<LowStockConfig> {
   const db = getDb(env)
+  // sql-bound-params: bounded by construction -- this fixed three-key enum is
+  // the whole list; it cannot grow with data, so there is nothing to chunk.
   const placeholders = LOW_STOCK_SETTING_KEYS.map(() => '?').join(',')
   const rows = await db.prepare(`SELECT key, value FROM settings WHERE key IN (${placeholders})`)
     .all<{ key: string; value: string }>(LOW_STOCK_SETTING_KEYS)
