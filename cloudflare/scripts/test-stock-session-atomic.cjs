@@ -9,7 +9,7 @@ const Database = require('better-sqlite3')
 
 const root = path.join(__dirname, '..')
 
-function loadStockSession() {
+function loadStockSession(entry = 'lib/stockSession.ts') {
   const cache = new Map()
   const load = (relativeFile) => {
     const normalized = relativeFile.replaceAll('\\', '/')
@@ -21,7 +21,10 @@ function loadStockSession() {
     const mod = { exports: {} }
     cache.set(normalized, mod)
     const req = (name) => {
-      if (name === './permissions') return { getActionTier: () => 'full', isAdminControlUser: () => false }
+      if (normalized === 'routes/inventory.ts' && name === '../lib/auth') return {
+        requireAuth: async (c, next) => { c.set('user', { ...user, permissions: JSON.stringify({ inventory: true, products: true }) }); await next() },
+      }
+      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/stockSession', '../lib/permissions'].includes(name)) return {}
       if (name === './cache') return { bumpVersion: async () => {} }
       if (name === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
       if (name.startsWith('./')) return load(`lib/${name.slice(2)}.ts`)
@@ -31,7 +34,7 @@ function loadStockSession() {
     new Function('require', 'module', 'exports', output)(req, mod, mod.exports)
     return mod.exports
   }
-  return load('lib/stockSession.ts')
+  return load(entry)
 }
 
 function fixture() {
@@ -50,6 +53,7 @@ function fixture() {
   let failAfterMetadata = false
   let loseNextAcknowledgement = false
   let beforeNextBatch = null
+  let beforeRevisionRead = null
   const wrap = (text, params = []) => ({
     text, params,
     async first() { return sql.prepare(text).get(...params) || null },
@@ -69,6 +73,11 @@ function fixture() {
   }))()
   const envDb = {
     prepare(text) {
+      if (beforeRevisionRead && /^SELECT entity_type,entity_key,revision FROM stock_session_revisions/.test(text)) {
+        const mutate = beforeRevisionRead
+        beforeRevisionRead = null
+        mutate(sql)
+      }
       const bare = wrap(text)
       return {
         bind(...params) { return wrap(text, params) },
@@ -96,12 +105,13 @@ function fixture() {
     failReceiptAfterMetadata() { failAfterMetadata = true },
     loseNextCommitAcknowledgement() { loseNextAcknowledgement = true },
     beforeCommit(mutate) { beforeNextBatch = mutate },
+    beforeRevisionCapture(mutate) { beforeRevisionRead = mutate },
   }
 }
 
 const user = {
   id: 7, username: 'stock-user', name: 'Stock User', organization_id: null,
-  role_id: null, permissions: null, is_active: 1,
+  role_id: null, permissions: JSON.stringify({ inventory: true, products: true }), is_active: 1,
 }
 
 function receiveRequest(requestId = 'stock-request-001', quantity = 5) {
@@ -139,6 +149,66 @@ async function check(name, run) {
 
 async function main() {
   const { commitStockSession, StockSessionError } = loadStockSession()
+
+  await check('explicit batch return identity excludes a competing received-date lot', async () => {
+    const f = fixture()
+    const { receiveBatchStock } = loadStockSession('lib/productBatches.ts')
+    const { getDb } = loadStockSession('lib/db.ts')
+    const db = getDb(f.env)
+    const common = { productId: 1, branchId: 1, quantity: 1 }
+    const first = await receiveBatchStock(db, { ...common, receivedDate: '2026-09-05' })
+    const second = await receiveBatchStock(db, { ...common, receivedDate: '2026-09-06' })
+    const result = await receiveBatchStock(db, { ...common, quantity: 4, batchId: second.batchId, receivedDate: '2026-09-05' })
+    assert.deepEqual(result, { ...second, created: false })
+    assert.deepEqual(f.sql.prepare('SELECT batch_id,quantity FROM branch_batch_stock ORDER BY batch_id').all(), [
+      { batch_id: first.batchId, quantity: 1 }, { batch_id: second.batchId, quantity: 5 },
+    ])
+  })
+
+  for (const [label, mutation] of [
+    ['rename', "UPDATE products SET name='Concurrent name' WHERE id=1"],
+    ['stock ABA', 'UPDATE branch_stock SET quantity=1 WHERE product_id=1; UPDATE branch_stock SET quantity=0 WHERE product_id=1'],
+    ['product ABA', "UPDATE products SET name='Temporary' WHERE id=1; UPDATE products SET name='Serum' WHERE id=1"],
+  ]) {
+    await check(`${label} between snapshot and revision capture rejects without durable session rows`, async () => {
+      const f = fixture()
+      f.beforeRevisionCapture((sql) => sql.exec(mutation))
+      await assert.rejects(() => commitStockSession(f.env, user, receiveRequest()),
+        (error) => error instanceof StockSessionError && error.code === 'stale_state')
+      const state = receiptState(f.sql)
+      assert.equal(state.product.stock_quantity, 0)
+      for (const key of ['operations', 'members', 'movements', 'audits', 'history', 'snapshots']) assert.equal(state[key], 0, key)
+    })
+  }
+
+  await check('actual POST sessions rejects coerced numeric JSON shapes with no writes', async () => {
+    const app = loadStockSession('routes/inventory.ts').default
+    for (const value of [true, false, '1', [1], {}, null]) {
+      const f = fixture()
+      const before = receiptState(f.sql)
+      const response = await app.request('/sessions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(receiveRequest('stock-invalid-type', value)),
+      }, f.env, { waitUntil() {} })
+      assert.equal(response.status, 400, JSON.stringify(value))
+      assert.deepEqual(receiptState(f.sql), before)
+    }
+    for (const field of ['product_id', 'branch_id', 'batch_id', 'supplier_id', 'unit_cost_usd']) {
+      const f = fixture()
+      const request = receiveRequest('stock-invalid-field')
+      request.items[0][field] = true
+      const response = await app.request('/sessions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+      }, f.env, { waitUntil() {} })
+      assert.equal(response.status, 400, field)
+      assert.equal(receiptState(f.sql).operations, 0, field)
+    }
+    const f = fixture()
+    const response = await app.request('/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(receiveRequest('stock-valid-type', 1)),
+    }, f.env, { waitUntil(promise) { promise.catch(() => {}) } })
+    assert.equal(response.status, 200, await response.text())
+    assert.equal(receiptState(f.sql).product.stock_quantity, 1)
+  })
 
   await check('metadata failure rolls back the entire stock session', async () => {
     const f = fixture()
