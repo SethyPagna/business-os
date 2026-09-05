@@ -81,6 +81,10 @@ interface SidebarAppContext {
   settings?: SidebarSettings | null
   hasPermission: (permission: string) => boolean
   getPermissionTier: (key: string) => string
+  // Per-action grant: a page's action-gated sections (Products' Stock-in
+  // Sessions / Duplicates) are only offered in the sheet when the same
+  // action that renders them on the page is actually granted.
+  can: (permissionKey: string, actionKey: string) => boolean
   canAccessPage: (pageId: string) => boolean
   syncUrl?: string | null
   syncConnected?: boolean
@@ -204,6 +208,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     settings,
     hasPermission,
     getPermissionTier,
+    can,
     canAccessPage,
     syncUrl,
     syncConnected,
@@ -225,7 +230,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     return () => window.removeEventListener(APP_NAVIGATION_EVENT, committed)
   }, [])
   useEffect(() => { setMoreOpen(false); setExpandedGroup(null) }, [inline])
-  const destinations = (id: string) => canAccessPage(id) ? getHubDestinations(id, { getPermissionTier, hasPermission }) : []
+  const destinations = (id: string) => canAccessPage(id) ? getHubDestinations(id, { getPermissionTier, hasPermission, can }) : []
   const currentSections = destinations(page)
   let remembered = ''
   try { remembered = window.localStorage.getItem(`bos:hub:${page}:active`) || '' } catch { /* private mode */ }

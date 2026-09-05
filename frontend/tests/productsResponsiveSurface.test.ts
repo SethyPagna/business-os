@@ -21,20 +21,29 @@ const stockChanges = readFileSync(new URL('../src/components/products/StockChang
 const productList = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
 const productRowParts = readFileSync(new URL('../src/components/products/surfaces/ProductRowParts.tsx', import.meta.url), 'utf8')
 
-assert.match(
-  products,
-  /w-full min-w-0 max-w-full overflow-x-auto[\s\S]*inline-flex w-max/,
-  'the Products section switcher must scroll inside a viewport-bounded wrapper',
-)
-assert.match(products, /onWheel=\{scrollProductSectionsWithWheel\}/, 'the Products section switcher must accept wheel/trackpad scrolling without grabbing its scrollbar')
+// N7 (this contract was INVERTED before): the four section chips lived in a
+// hand-rolled horizontal scroller (`overflow-x-auto` + `inline-flex w-max`)
+// whose labels total ~440px against 296px (320) / 351px (375) of usable
+// width, so half of them sat off-screen behind a sideways swipe -- while
+// every other hub's row wraps and is explicitly forbidden from scrolling
+// (nestedUiIntegrity.test.ts, sectionNavigation.test.ts). Products was also
+// the one hub-shaped page getHubDestinations() did not know about, so the
+// compact navigation could not reach these sections at all. The row is now
+// the shared wrapping hub pill row fed by that same table, and it stands
+// aside in compact "pages" mode where the home sheet owns section switching.
+assert.match(products, /getHubDestinations\('products'/, 'the section list must come from the shared hub table, not a second hand-rolled one')
+assert.match(products, /useHubSection<'products' \| 'stock_changes' \| 'stock_in_sessions' \| 'duplicates'>/, "the active section must ride the app's guarded section navigation like every other hub")
+assert.match(products, /hub-section-pills flex max-w-full flex-wrap/, 'the Products section switcher must wrap inside the viewport')
+assert.match(products, /hub-section-pill inline-flex min-h-11/, 'section chips must meet the 44px compact touch target')
+assert.match(products, /layeredSectionNav \|\| productSectionTabs\.length <= 1 \? null :/, 'the page must not draw a second section row when the compact home sheet owns it')
+assert.doesNotMatch(products, /overflow-x-auto pb-1 \[scrollbar-width:thin\]/, 'the hand-rolled section scroller must be gone')
+assert.doesNotMatch(products, /scrollProductSectionsWithWheel/, 'the scroller-only wheel handler must not survive as dead code')
+// Positive control for the two doesNotMatch checks above: the scroll token
+// itself is still present in this file (the header-actions row), so their
+// absence is a real signal and not a search that stopped working.
+assert.match(products, /overflow-x-auto/, 'positive control: overflow-x-auto is still findable in Products.tsx')
 assert.match(products, /role="group"[\s\S]*aria-label=\{tr\('product_sections'/, 'the section switcher must have an accessible group label')
-for (const section of ['products', 'stock_changes', 'stock_in_sessions', 'duplicates']) {
-  assert.match(
-    products,
-    new RegExp(`aria-pressed=\\{activeProductSection === '${section}'\\}`),
-    `the ${section} section button must expose its selected state`,
-  )
-}
+assert.match(products, /aria-pressed=\{isActive\}/, 'each section chip must expose its selected state')
 
 // No product row may be unreachable by default: hiding a group's out-of-stock
 // child rows is an explicit FilterMenu choice, off unless the operator turns

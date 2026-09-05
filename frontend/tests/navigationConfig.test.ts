@@ -105,11 +105,33 @@ await runTest('destinations retain section permission gates and never expose uns
   assert.deepEqual(ids('promotions', { customer_portal: 'view' }), ['loyalty'])
   assert.deepEqual(ids('promotions', { products: 'review' }), ['discounts'])
   assert.deepEqual(ids('inventory', { inventory: 'full' }), [])
+
+  // Products' four sections are the compact navigation's only route into
+  // them (N7). Two are gated on a per-ACTION grant inside the page (Stock-in
+  // Sessions on inventory:adjust, Duplicates on products:merge_duplicates),
+  // so getHubDestinations must be able to see actions -- a caller that
+  // cannot answer for actions gets the two ungated sections rather than a
+  // tile the page would then refuse to render.
+  const withActions = (tiers: Record<string, string>, actions: string[]) => ({
+    ...restricted(tiers),
+    can: (permissionKey: string, actionKey: string) => actions.includes(`${permissionKey}:${actionKey}`),
+  })
+  const actionIds = (tiers: Record<string, string>, actions: string[]) => getHubDestinations('products', withActions(tiers, actions)).map((item) => item.id)
+  assert.deepEqual(ids('products', { products: 'full', inventory: 'full' }), ['products', 'stock_changes'], 'action-gated sections stay hidden from a caller with no per-action grant')
+  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['inventory:adjust', 'products:merge_duplicates']), ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'])
+  assert.deepEqual(actionIds({ products: 'full' }, ['products:merge_duplicates']), ['products', 'stock_changes', 'duplicates'])
+  assert.deepEqual(actionIds({ inventory: 'full' }, ['inventory:adjust']), ['products', 'stock_changes', 'stock_in_sessions'])
+  assert.deepEqual(actionIds({}, []), ['products', 'stock_changes'])
+  assert.deepEqual(
+    getHubDestinations('products', withActions({ products: 'full', inventory: 'full' }, ['inventory:adjust', 'products:merge_duplicates'])).map((item) => item.key),
+    ['products', 'stock_change_ledger', 'stock_in_sessions', 'product_duplicates_section'],
+    'the sheet labels the sections with the keys the page already ships in both packs',
+  )
 })
 
 await runTest('section URLs round-trip, reject hidden/foreign ids, preserve old links and unrelated anchors', () => {
-  const access = { getPermissionTier: () => 'full', hasPermission: () => true }
-  for (const page of ['branches', 'sales', 'settings', 'contacts', 'promotions', 'review']) {
+  const access = { getPermissionTier: () => 'full', hasPermission: () => true, can: () => true }
+  for (const page of ['branches', 'sales', 'settings', 'contacts', 'promotions', 'review', 'products']) {
     const sections = getHubDestinations(page, access)
     const ids = sections.map((section) => section.id)
     for (const section of sections) assert.equal(resolveHubSection(page, `/${page}`, `#${hubAnchor(page, section.id)}`, ids, ids[0]), section.id)

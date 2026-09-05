@@ -4,12 +4,19 @@ import { APP_NAVIGATION_EVENT, getAdminPageFromPath } from '../../app/pathRoutin
 export type HubAccess = {
   getPermissionTier: (key: string) => string
   hasPermission: (key: string) => boolean
+  /** Per-ACTION grant -- AppContext's `can(section, action)`. Sections whose
+   *  own page gates them on an action (Products' Stock-in Sessions and
+   *  Duplicates) are withheld from a caller that cannot answer for actions:
+   *  offering a section the page will then refuse to render is worse than
+   *  not offering it. Pages with no action-gated section never read it. */
+  can?: (permissionKey: string, actionKey: string) => boolean
 }
 export type HubDestination = { id: string; key: string; label: string }
 
 /** These are the existing host section ids, not additional page routes. */
 export function getHubDestinations(page: string, access: HubAccess): HubDestination[] {
   const can = (key: string) => access.getPermissionTier(key) !== 'none'
+  const act = (key: string, action: string) => access.can ? access.can(key, action) : false
   const rows: Array<[string, string, string, boolean]> = page === 'branches' ? [
     ['overview', 'overview', 'Overview', can('branches')],
     ['products', 'products', 'Products', can('inventory')],
@@ -33,6 +40,17 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     ['settings', 'settings', 'Settings', ['settings', 'business_identity', 'sales_policy', 'drive_credentials'].some(can)],
     ['users', 'users', 'Users', access.hasPermission('all')],
     ['backup', 'backup', 'Backup', can('backup')],
+  ] : page === 'products' ? [
+    // The Products page's own four sections (Products.tsx's
+    // activeProductSection). Products is reached through canAccessPage
+    // before this is asked, so its two always-on sections need no extra
+    // tier; the other two mirror the page's per-action gates exactly --
+    // canAdjustInventoryStock = can('inventory', 'adjust') and
+    // canMergeDuplicates = can('products', 'merge_duplicates').
+    ['products', 'products', 'Products', true],
+    ['stock_changes', 'stock_change_ledger', 'Stock Changes', true],
+    ['stock_in_sessions', 'stock_in_sessions', 'Stock-in Sessions', act('inventory', 'adjust')],
+    ['duplicates', 'product_duplicates_section', 'Duplicates', act('products', 'merge_duplicates')],
   ] : page === 'review' ? [
     ['review', 'review_queue', 'Review queue', can('review')],
     ['audit', 'audit_log', 'Audit Log', can('audit_log')],
