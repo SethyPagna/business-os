@@ -45,7 +45,30 @@ export type FixedSheetFit = {
 }
 
 /**
- * A fixed sheet -- the 80x50 sales card, A4/Letter, or a custom height -- has a
+ * The tallest fixed sheet that counts as ONE physical piece of paper.
+ *
+ * A card or label -- the 80x50 sales summary, or a small custom size the
+ * operator typed -- is a single ticket: content that does not fit is not
+ * carried onto a second page, it is a wasted label and a lost line, so it has
+ * to be scaled to fit. A document page (A4 297mm, Letter 279.4mm, or a custom
+ * size as tall as one) is the opposite: a 60-item receipt is legitimately two
+ * pages there, and squeezing it onto one would make it unreadable. The test is
+ * the sheet's own height rather than a list of paper-size names, so a custom
+ * 60mm card and a custom 297mm page each behave like what they physically are.
+ */
+export const SINGLE_SHEET_MAX_HEIGHT_MM = 150
+
+/**
+ * True when a fixed sheet has to hold the whole receipt on one page. Continuous
+ * rolls (null height) are never single sheets -- their page simply grows.
+ */
+export function isSingleSheetHeight(sheetHeightMm: number | null | undefined): boolean {
+  if (sheetHeightMm == null || !Number.isFinite(sheetHeightMm) || sheetHeightMm <= 0) return false
+  return sheetHeightMm <= SINGLE_SHEET_MAX_HEIGHT_MM
+}
+
+/**
+ * A single fixed sheet -- the 80x50 sales card, or a small custom card -- has a
  * hard height budget, unlike a continuous roll whose page simply grows. When the
  * rendered receipt is taller than that budget the printer fragments it across
  * pages (the "prints on 1/2 and 2/2" report) unless something scales the layout

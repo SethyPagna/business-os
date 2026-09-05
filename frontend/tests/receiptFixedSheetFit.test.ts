@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { computeFixedSheetFit, computeImagePdfLayout } from '../src/utils/receiptPdfLayout.ts'
+import {
+  SINGLE_SHEET_MAX_HEIGHT_MM,
+  computeFixedSheetFit,
+  computeImagePdfLayout,
+  isSingleSheetHeight,
+} from '../src/utils/receiptPdfLayout.ts'
 
 let failed = 0
 
@@ -91,7 +96,7 @@ await runTest('a fitted 80x50 raster fills the PDF page instead of sitting in si
 })
 
 await runTest('Print, PDF and Image inherit ONE shared fixed-sheet fit step', () => {
-  assert.match(printSource, /import \{ computeFixedSheetFit, computeImagePdfLayout \} from '\.\/receiptPdfLayout\.ts'/)
+  assert.match(printSource, /import \{ computeFixedSheetFit, computeImagePdfLayout, isSingleSheetHeight \} from '\.\/receiptPdfLayout\.ts'/)
   assert.match(printSource, /const fixedSheetHeightMm = getPaperHeightMm\(printSettings\)/,
     'withReceiptElement must resolve the sheet height once for every export path')
   assert.match(printSource, /const fit = computeFixedSheetFit\(\{ contentHeightMm, sheetHeightMm: fixedSheetHeightMm \}\)/)
@@ -111,15 +116,54 @@ await runTest('a fixed sheet does not inherit the frozen on-screen card height',
     'continuous rolls keep replacing the screen-shell padding with the operator margins')
 })
 
-await runTest('the print document consumes continuousRoll so a fixed sheet cannot paginate', () => {
-  assert.match(printSource, /const \{ markup, widthMm, pageHeightMm, continuousRoll \} = layout/,
+await runTest('the print document consumes the layout flags so a single sheet cannot paginate', () => {
+  assert.match(printSource, /const \{ markup, widthMm, pageHeightMm, continuousRoll, singleSheet \} = layout/,
     'continuousRoll was computed and returned but never read')
-  assert.match(printSource, /const pageOverflow = continuousRoll \? 'visible' : 'hidden'/)
+  assert.match(printSource, /const clipToOnePage = singleSheet && !continuousRoll/)
+  assert.match(printSource, /const pageOverflow = clipToOnePage \? 'hidden' : 'visible'/)
   assert.match(printSource, /overflow: \$\{pageOverflow\} !important;/)
-  assert.doesNotMatch(printSource, /overflow: visible !important;\n(\s*)-webkit-print-color-adjust/,
-    'the printed page must not force overflow visible for a fixed sheet')
-  assert.match(printSource, /const fixedFrameHeightCss = continuousRoll/,
-    'a fixed sheet pins the printed frame to the page height')
+  // The html/body print rule used to force overflow visible unconditionally,
+  // which is what let an over-tall 80x50 card spill onto page 2. Anchor on the
+  // neighbouring declarations, and tolerate this checkout's CRLF endings -- a
+  // `\n`-only pattern here silently matches nothing and asserts nothing.
+  assert.doesNotMatch(printSource, /background: #ffffff;\r?\n\s*overflow: visible !important;/,
+    'the printed page must not force overflow visible for a single sheet')
+  assert.match(printSource, /const fixedFrameHeightCss = clipToOnePage/,
+    'a single sheet pins the printed frame to the page height')
+  assert.match(printSource, /singleSheet: isSingleSheetHeight\(fixedHeightMm\)/,
+    'the layout must carry which kind of page this is')
+})
+
+await runTest('a document page keeps paginating instead of being squeezed onto one page', () => {
+  // A4 297mm / Letter 279.4mm are stacks of pages: a 60-item receipt is
+  // legitimately two pages there, and shrinking it to one would make it
+  // unreadable. Only a card/label is a single physical ticket.
+  assert.equal(isSingleSheetHeight(297), false, 'A4 must keep paginating')
+  assert.equal(isSingleSheetHeight(279.4), false, 'Letter must keep paginating')
+  assert.equal(isSingleSheetHeight(50), true, 'the 80x50 label is one physical ticket')
+  assert.equal(isSingleSheetHeight(SINGLE_SHEET_MAX_HEIGHT_MM), true)
+  assert.equal(isSingleSheetHeight(SINGLE_SHEET_MAX_HEIGHT_MM + 0.1), false)
+  // Continuous rolls (58/72/80mm) resolve to a null height: their page grows.
+  assert.equal(isSingleSheetHeight(null), false)
+  assert.equal(isSingleSheetHeight(undefined), false)
+  assert.equal(isSingleSheetHeight(0), false)
+  assert.equal(isSingleSheetHeight(Number.NaN), false)
+
+  assert.match(printSource, /const fitToOneSheet = isSingleSheetHeight\(fixedSheetHeightMm\)/)
+  assert.match(printSource, /if \(fixedSheetHeightMm != null && fitToOneSheet\) \{/,
+    'the fit step must not run for A4/Letter, or a long receipt would be shrunk to one page')
+})
+
+await runTest('the fit is measured only after the card assets have settled', () => {
+  // An unfinished web font or a still-loading QR makes the card measure short,
+  // and a short measurement decides an over-tall card needs no fit at all.
+  const fitBlock = printSource.slice(
+    printSource.indexOf('if (fixedSheetHeightMm != null && fitToOneSheet) {'),
+    printSource.indexOf('const fit = computeFixedSheetFit('),
+  )
+  assert.ok(fitBlock.length > 0, 'the fixed-sheet fit block must exist')
+  assert.match(fitBlock, /await waitForElementAssets\(host\)/,
+    'measure the card only once its fonts and images are ready')
 })
 
 if (failed > 0) {
