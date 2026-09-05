@@ -162,6 +162,9 @@ for (const prefix of CONTACT_PATH_PREFIXES) {
 // after this router for anyone without the contacts permission.
 const requireContactsAccess = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: Next) => {
   const user = c.get('user')
+  // Only this exact, authenticated read grants POS a minimal membership view.
+  if (c.req.method === 'GET' && /^\/(?:api\/)?customers\/membership\/[^/]+$/.test(c.req.path)
+    && getPermissionTier(user, 'pos') !== 'none') return next()
   if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 }
@@ -394,6 +397,20 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
   }
   return result
 }
+
+app.get('/customers/membership/:membershipNumber', async (c) => {
+  c.header('Cache-Control', 'private, no-store')
+  const number = normalizeMembershipNumber(c.req.param('membershipNumber'))
+  if (!number) return c.json({ error: 'Membership not found' }, 404)
+  const matches = await getDb(c.env).prepare(
+    'SELECT id, name, membership_number FROM customers WHERE lower(trim(membership_number)) = lower(@number) LIMIT 2',
+  ).all<{ id: number; name: string; membership_number: string }>({ number })
+  if (!matches.length) return c.json({ error: 'Membership not found' }, 404)
+  if (matches.length !== 1) return c.json({ error: 'Membership is ambiguous' }, 409)
+  const customer = matches[0]
+  const points = (await computeCustomerPointsMap(c.env, [customer.id])).get(customer.id)
+  return c.json({ customer, points: { balance: points?.balance ?? 0, redeemableUnits: points?.redeemableUnits ?? 0 } })
+})
 
 // Which of these contacts have a storefront account (§2), keyed by contact_id.
 // Lets admin Contacts badge a contact that has signed up and show the
@@ -977,17 +994,19 @@ function registerContactRoutes(config: ContactConfig) {
     if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
 
     // Customers only. A number staff typed in wins (after a reuse check);
-    // a blank one is minted from the house sequence. The mint is deferred
+    // a blank one gets a secure random eight-character ID. The mint is deferred
     // into the INSERT below so that when two walk-ins are registered at the
     // same instant, the writer that loses the UNIQUE index race is handed
-    // the NEXT free number instead of an error.
+    // a fresh random number instead of an error.
     let mintMembership = false
     if (config.table === 'customers') {
       const raw = normalizeMembershipNumber(payload.membership_number)
       if (raw) {
         const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@raw)) LIMIT 1').get({ raw })
         if (existing) return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
-        payload.membership_number = raw
+        // Supplied values also restore deleted legacy contacts via undo.
+        // Compare normalized, but preserve the identity bytes on restoration.
+        payload.membership_number = String(payload.membership_number)
       } else {
         mintMembership = true
       }
@@ -1136,7 +1155,9 @@ function registerContactRoutes(config: ContactConfig) {
 
     if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'membership_number')) {
       const raw = normalizeMembershipNumber(payload.membership_number)
-      if (raw) {
+      if (current.membership_number) {
+        payload.membership_number = current.membership_number
+      } else if (raw) {
         const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@raw)) AND id != @id LIMIT 1').get({ raw, id })
         if (existing) return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
         payload.membership_number = raw
