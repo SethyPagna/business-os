@@ -112,7 +112,10 @@ sqlite.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at
   CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,
     entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,old_value TEXT,new_value TEXT,
     device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`)
+sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0089_system_flags.sql'), 'utf8'))
 sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
+sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
+sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
 
 // ---- the route, with only auth/audit/telegram replaced ---------------------
 // businessDateWindow is passed through as the REAL module: the business-day
@@ -228,7 +231,10 @@ async function main() {
     CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,
       entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,old_value TEXT,new_value TEXT,
       device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`)
+  empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0089_system_flags.sql'), 'utf8'))
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
+  empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
+  empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
   const stranger = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': businessDateWindow,
     '../lib/db': { getDb: () => d1(empty) },

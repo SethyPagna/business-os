@@ -7,8 +7,11 @@ const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 const db = new Database(':memory:')
 db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)')
+db.exec(fs.readFileSync(path.join(root, 'migrations', '0089_system_flags.sql'), 'utf8'))
 db.exec(fs.readFileSync(path.join(root, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
 db.exec(fs.readFileSync(path.join(root, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
+db.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
+db.exec(fs.readFileSync(path.join(root, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
 
 const insert = db.prepare(`INSERT INTO shift_sessions
   (shift_code,scope_mode,user_id,branch_id,business_date,opened_at)
@@ -22,7 +25,21 @@ insert.run({ ...base, code: 'S-4', scope: 'shop_wide' })
 assert.throws(() => insert.run({ ...base, code: 'S-5', scope: 'shop_wide', user: 8 }), /UNIQUE/)
 insert.run({ ...base, code: 'S-6', scope: 'shop_wide', user: 8, branch: 2 })
 
-const shiftId = db.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-4'").get().id
+db.prepare(`UPDATE shift_sessions SET closed_at='2026-09-05T02:00:00.000Z',closing_counted_usd=0,closing_counted_khr=0
+  WHERE shift_code='S-4'`).run()
+const parentId = db.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-4'").get().id
+const child = { code: 'S-4-R1', scope: 'shop_wide', user: 7, branch: null, day: '2026-09-05',
+  opened: '2026-09-05T02:01:00.000Z', parent: parentId, reason: 'Count restarted', actor: 7 }
+db.prepare(`INSERT INTO shift_sessions
+  (shift_code,scope_mode,user_id,branch_id,business_date,opened_at,parent_shift_id,reopen_reason,reopened_by_user_id)
+  VALUES (@code,@scope,@user,@branch,@day,@opened,@parent,@reason,@actor)`).run(child)
+assert.throws(() => db.prepare(`INSERT INTO shift_sessions
+  (shift_code,scope_mode,user_id,branch_id,business_date,opened_at,parent_shift_id,reopen_reason,reopened_by_user_id)
+  VALUES (@code,@scope,@user,@branch,@day,@opened,@parent,@reason,@actor)`).run({ ...child, code: 'S-4-R2' }), /reopened|UNIQUE/)
+assert.throws(() => db.prepare('UPDATE shift_sessions SET reopen_reason=? WHERE shift_code=?').run('rewrite', child.code), /immutable/)
+assert.throws(() => db.prepare('UPDATE shift_sessions SET closed_at=? WHERE id=?').run('2026-09-05T03:00:00.000Z', parentId), /reopened child/)
+
+const shiftId = parentId
 db.prepare(`INSERT INTO shift_session_amendments
  (shift_session_id,actor_user_id,actor_name,reason,before_json,after_json) VALUES (?,?,?,?,?,?)`)
   .run(shiftId, 1, 'Manager', 'Correct count', '{"x":0}', '{"x":1}')
