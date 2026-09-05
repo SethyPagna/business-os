@@ -19,7 +19,7 @@ import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import { toggleMultiValue, isMultiActive, matchesMulti, parseMultiValues } from '../../utils/multiSelect'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import PaginationControls, { clampPage } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
@@ -28,6 +28,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 const ProductDetailModal = lazyRetry(() => import('./ProductDetailModal'), 'inventory-product-detail-modal') as any
 const InventoryImportModal = lazyRetry(() => import('./InventoryImportModal'), 'inventory-import') as any
 const InventoryMovementsSurface = lazyRetry(() => import('./InventoryMovementsSurface'), 'inventory-movements-surface') as any
+const InventoryProductsSurface = lazyRetry(() => import('./InventoryProductsSurface'), 'inventory-products-surface') as any
 const InventoryRfidSurface = lazyRetry(() => import('./InventoryRfidSurface'), 'inventory-rfid-surface') as any
 const InventoryStockModals = lazyRetry(() => import('./InventoryStockModals'), 'inventory-stock-modals') as any
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventory-fast-stock-in-modal') as any
@@ -195,6 +196,7 @@ type InventoryAppContext = {
   fmtKHR: MoneyFormatter
   usdSymbol: string
   exchangeRate?: number
+  navigateTo?: (pageId: string) => void
 }
 
 type InventorySyncContext = {
@@ -298,6 +300,7 @@ const INVENTORY_REASONS_TIMEOUT_MS = 8000
 const INVENTORY_BRANCHES_TIMEOUT_MS = 8000
 const INVENTORY_STATS_TIMEOUT_MS = 12000
 const INVENTORY_MOVEMENTS_TIMEOUT_MS = 15000
+const INVENTORY_PRODUCTS_TIMEOUT_MS = 15000
 const INVENTORY_RFID_TIMEOUT_MS = 8000
 const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000
 const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
@@ -363,7 +366,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   dateRange?: DateTimeRange
   onDateRangeChange?: (range: DateTimeRange) => void
 } = {}) {
-  const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol, exchangeRate } = useApp() as InventoryAppContext
+  const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol, exchangeRate, navigateTo } = useApp() as InventoryAppContext
   // Every stock-moving action here mutates live batch/stock state that could
   // go stale between a Review Required user's request and an admin's
   // approval, so routes/inventory.ts blocks them outright for that tier
@@ -438,6 +441,16 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     if (['sales', 'returns', 'inventory'].includes(syncChannel.channel)) void loadStatsStrip()
   }, [isActive, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
   const [branchFilter,  setBranchFilter]  = useState('all')
+  // Products has its own request lifecycle. It must remain usable even when
+  // the independently ranged statistics loaders fail or finish out of order.
+  const [productsItems, setProductsItems] = useState<InventoryProduct[]>([])
+  const [productsPage, setProductsPage] = useState(1)
+  const [productsPageSize, setProductsPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [productsTotal, setProductsTotal] = useState(0)
+  const [productsTotalPages, setProductsTotalPages] = useState(1)
+  const [productsLoading, setProductsLoading] = useState(false)
+  const [productsError, setProductsError] = useState<string | null>(null)
+  const productsRequestRef = useRef(0)
   const [adjustModal,   setAdjustModal]   = useState<InventoryProduct | null>(null)
   const [manageBatchesModal, setManageBatchesModal] = useState<InventoryProduct | null>(null)
   const [adjustForm,    setAdjustForm]    = useState<AdjustForm>({
@@ -629,8 +642,60 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }), [inventoryReasons])
 
   const needsStatsData = inventorySection === 'all' || inventorySection === 'stats'
+  const needsProductsData = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
   const needsMovementData = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
   const needsRfidData = inventorySection === 'rfid' || (inventorySection === 'all' && tab === 'rfid')
+
+  const loadProducts = useCallback(async (): Promise<void> => {
+    if (!isActive || !needsProductsData) return
+    const requestId = beginTrackedRequest(productsRequestRef)
+    setProductsLoading(true)
+    setProductsError(null)
+    try {
+      const response = await withLoaderTimeout(
+        () => getInventoryApi().searchInventoryProducts({
+          ...(branchFilter !== 'all' ? { branchId: Number.parseInt(branchFilter, 10) } : {}),
+          query: deferredSearch || undefined,
+          searchMode,
+          page: productsPage,
+          pageSize: productsPageSize,
+        }),
+        'Inventory products',
+        INVENTORY_PRODUCTS_TIMEOUT_MS,
+      )
+      if (!isTrackedRequestCurrent(productsRequestRef, requestId)) return
+      const total = Math.max(0, Number(response?.total) || 0)
+      const pageSize = Math.max(1, Number(response?.pageSize) || productsPageSize)
+      const responsePage = Math.max(1, Number(response?.page) || productsPage)
+      const totalPages = Math.max(1, Number(response?.totalPages) || Math.ceil(total / pageSize) || 1)
+      const nextPage = clampPage(responsePage, total, pageSize)
+      if (nextPage !== responsePage) {
+        setProductsPage(nextPage)
+        return
+      }
+      setProductsItems(Array.isArray(response?.items) ? response.items : [])
+      setProductsTotal(total)
+      setProductsTotalPages(totalPages)
+    } catch (error) {
+      if (!isTrackedRequestCurrent(productsRequestRef, requestId)) return
+      setProductsError(error instanceof Error ? error.message : tr('inventory_products_load_failed', 'Products could not be loaded.'))
+    } finally {
+      if (isTrackedRequestCurrent(productsRequestRef, requestId)) setProductsLoading(false)
+    }
+  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, searchMode, tr])
+
+  useEffect(() => {
+    setProductsPage(1)
+  }, [branchFilter, deferredSearch, searchMode])
+
+  useEffect(() => {
+    if (!isActive || !needsProductsData) {
+      invalidateTrackedRequest(productsRequestRef)
+      setProductsLoading(false)
+      return
+    }
+    void loadProducts()
+  }, [isActive, loadProducts, needsProductsData])
 
   const loadInventoryReasons = useCallback(async () => {
     try {
@@ -2041,8 +2106,22 @@ ${inventoryFeesFormulaText}`,
       ].filter(Boolean)
     }
 
-    // The products tab is gone (the Products PAGE owns the catalog) --
-    // there is no default facet set left.
+    if (tab === 'products') {
+      return branches.length > 1 ? [{
+        id: 'branch',
+        label: t('branch') || 'Branch',
+        options: [
+          { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
+          ...branches.map((branch) => ({
+            id: `branch-${branch.id}`,
+            label: branch.name || String(branch.id),
+            active: branchFilter === String(branch.id),
+            onClick: () => setBranchFilter(String(branch.id)),
+          })),
+        ],
+      }] : []
+    }
+
     return []
   }, [
     branchFilter,
@@ -2073,6 +2152,8 @@ ${inventoryFeesFormulaText}`,
         movementSortDirection !== 'desc',
       ])
     }
+
+    if (tab === 'products') return countActiveFlags([branchFilter !== 'all'])
 
     return 0
   }, [branchFilter, movFilter, movementGroupMode, movementSortDirection, movementUserFilter, tab])
@@ -2108,6 +2189,7 @@ ${inventoryFeesFormulaText}`,
   const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
   const showInventorySections = inventorySection === 'all' || ['products', 'movements', 'rfid'].includes(inventorySection)
   const showInventoryTabs = inventorySection === 'all'
+  const showProductsSection = showInventorySections && tab === 'products'
   const showMovementsSection = showInventorySections && tab === 'movements'
   const showRfidSection = showInventorySections && tab === 'rfid'
   const isMovementsFirstLoad = showMovementsSection && needsMovementData && !movementsLoaded
@@ -2150,8 +2232,8 @@ ${inventoryFeesFormulaText}`,
         loading={loading && !isMovementsFirstLoad}
         timeoutMs={8000}
         label={t('loading') || 'Loading...'}
-        details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : 'Loading stock stats and movement summaries.'}
-        onRetry={() => load(false)}
+        details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : tab === 'products' ? 'Loading branch product stock.' : 'Loading stock stats and movement summaries.'}
+        onRetry={() => { if (showProductsSection) void loadProducts(); else void load(false) }}
         className="mb-3"
       />
 
@@ -2294,7 +2376,9 @@ ${inventoryFeesFormulaText}`,
               onChange={handleSearchChange}
               placeholder={tab === 'rfid'
                 ? tr('search_rfid_placeholder', 'Search RFID sessions, EPC / TID, reader, or product mapping')
-                : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
+                : tab === 'products'
+                  ? `${t('search') || 'Search'} ${t('products') || 'Products'}`
+                  : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
               className="min-w-[3.5rem] flex-1"
               inputClassName="text-sm"
             />
@@ -2322,12 +2406,29 @@ ${inventoryFeesFormulaText}`,
       </p>
       ) : null}
 
-      {/* The products LIST section is gone (user, Aug 31: "the products
-          section of inventory page can then be removed") -- the Products
-          PAGE carries the catalog now. What stays here is everything the
-          Movements section still needs: the per-product detail modal (with
-          its stock-history preview), the complete adjust/transfer/batches
-          modals it opens, and the movement exports. */}
+      {showProductsSection ? (
+        <Suspense fallback={<div className="card p-8 text-center text-sm text-slate-500">{t('loading') || 'Loading'}...</div>}>
+          <InventoryProductsSurface
+            items={productsItems}
+            loading={productsLoading}
+            error={productsError}
+            page={productsPage}
+            pageSize={productsPageSize}
+            total={productsTotal}
+            totalPages={productsTotalPages}
+            branchFilter={branchFilter}
+            onPageChange={setProductsPage}
+            onPageSizeChange={(size: number) => { setProductsPageSize(size); setProductsPage(1) }}
+            onOpenDetail={setDetailProduct}
+            onOpenInCatalogue={(product: InventoryProduct) => {
+              try { window.sessionStorage.setItem('bos:dashboard:products-focus', JSON.stringify({ search: product.name || product.barcode || product.sku || '' })) } catch { /* navigation still works without storage */ }
+              navigateTo?.('products')
+            }}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
+
       {/* Movements */}
       {showMovementsSection ? (
         <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_inventory_movements', 'Loading inventory movements...', 'Loading inventory movements...')}</div>}>

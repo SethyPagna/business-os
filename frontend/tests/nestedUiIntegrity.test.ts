@@ -48,7 +48,8 @@ const branchesHub = read('components/branches/BranchesHubPage.tsx')
 assert.doesNotMatch(branchesHub, /id: 'movements'/, 'Branches hub must not restore a separate generic Movement mini-section')
 assert.doesNotMatch(branchesHub, /hostSection="movements"/, 'the redundant Inventory movement ledger must stay removed from Branches')
 assert.match(branchesHub, /active === 'transfers'[\s\S]*view="transfers"/, 'Transfer must own transfer history without a second movement ledger')
-assert.match(branchesHub, /active === 'products'[\s\S]*hostSection="stats"/, 'Products must render the ranged COGS, revenue, profit, sales and inventory statistics workspace')
+assert.match(branchesHub, /active === 'products'[\s\S]*hostSection="products"/, 'Products must render the branch-scoped product stock workspace')
+assert.doesNotMatch(branchesHub, /active === 'products'[\s\S]{0,500}hostSection="stats"/, 'Products must not regress to the stats-only workspace')
 assert.doesNotMatch(branchesHub, /active === 'inventory'/, 'Branches must not restore the redundant branch-inventory duplicate section')
 
 for (const file of ['components/branches/BranchesHubPage.tsx', 'components/review/ReviewLogsPage.tsx', 'components/utils-settings/SettingsHubPage.tsx', 'components/promotions/PromotionsPage.tsx']) {
