@@ -78,6 +78,11 @@ const batchCode = loadReal('lib/batchCode.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding })
 const permissions = loadReal('lib/permissions.ts')
+const businessDateWindow = loadReal('lib/businessDateWindow.ts')
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+  './db': { getDb: () => db },
+  './businessDateWindow': businessDateWindow,
+})
 // routes/batches.ts imports the shared optimistic-locking helpers; without
 // this override the transpiled module's './conflictControl' require resolves
 // against scripts/ and the whole test file dies at load time.
@@ -89,7 +94,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/db': { getDb: () => db },
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
-  '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+  '../lib/businessDateWindow': businessDateWindow,
+  '../lib/salesAnalytics': salesAnalytics,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/sqlBinding': sqlBinding,
