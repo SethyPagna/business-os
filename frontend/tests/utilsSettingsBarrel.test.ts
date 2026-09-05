@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import './legacySubtotalRepair.test.ts'
 
 const barrel = fs.readFileSync(new URL('../src/components/utils-settings/index.ts', import.meta.url), 'utf8')
 const jsxModulesPath = new URL('../src/types/jsx-modules.d.ts', import.meta.url)
