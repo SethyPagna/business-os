@@ -74,7 +74,7 @@ assert.deepEqual(lines, [
   'Customer: Sok Dara',
   'Tel: 012 345 678',
   'Branch: Shop',
-  '• Coca Cola 330ml 2 × $0.50 (−$0.20) = $1.00',
+  '• Coca Cola 330ml 2 × $0.60 (−$0.20) = $1.00',
   '• Rice 5kg 1 × $7.25 = $7.25',
   'Delivery service: $1.50',
   'Total: $9.75',
@@ -84,6 +84,54 @@ assert.deepEqual(lines, [
   'Change: $0.50',
   'Delivery driver: Tuk Tuk Dara · 099 111 222',
 ])
+
+// A discounted item line is a real equation: gross unit price × quantity,
+// minus the line discount, equals the authoritative net line total. The
+// applied unit price is already net, so printing it before the discount would
+// visually subtract the same discount twice.
+const equationLines = telegram.formatSaleTelegramLines({
+  status: 'completed', receiptNumber: 'EQUATIONS', exchangeRate: 4100,
+  items: [
+    { name: 'Gross 69', quantity: 1, basePriceUsd: 69, unitPriceUsd: 65, lineTotalUsd: 65 },
+    { name: 'Quantity three', quantity: 3, basePriceUsd: 25, unitPriceUsd: 21, lineTotalUsd: 63 },
+    { name: 'No discount', quantity: 1, basePriceUsd: 12, unitPriceUsd: 12, lineTotalUsd: 12 },
+    { name: 'Absent base', quantity: 2, unitPriceUsd: 5, lineTotalUsd: 10 },
+    { name: 'Null base', quantity: 1, basePriceUsd: null, unitPriceUsd: 7, lineTotalUsd: 7 },
+  ],
+  subtotalUsd: 157, discountUsd: 0, totalUsd: 157,
+}).filter(Boolean)
+assert.ok(equationLines.includes('• Gross 69 1 × $69.00 (−$4.00) = $65.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('• Quantity three 3 × $25.00 (−$12.00) = $63.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('• No discount 1 × $12.00 = $12.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('• Absent base 2 × $5.00 = $10.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('• Null base 1 × $7.00 = $7.00'), equationLines.join('\n'))
+
+// The sale subtotal is already the sum of net item totals. An order-level
+// discount remains separate and must be subtracted exactly once below Total.
+const orderDiscount = telegram.formatSaleTelegramLines({
+  status: 'completed', receiptNumber: 'ORDER-DISCOUNT', exchangeRate: 4100,
+  items: [{ name: 'Gross 69', quantity: 1, basePriceUsd: 69, unitPriceUsd: 65, lineTotalUsd: 65 }],
+  subtotalUsd: 65, discountUsd: 4, totalUsd: 61,
+}).filter(Boolean)
+assert.ok(orderDiscount.includes('• Gross 69 1 × $69.00 (−$4.00) = $65.00'), orderDiscount.join('\n'))
+assert.ok(orderDiscount.includes('Total: $65.00'), orderDiscount.join('\n'))
+assert.ok(orderDiscount.includes('Discount: −$4.00'), orderDiscount.join('\n'))
+assert.ok(orderDiscount.includes('Net Total: $61.00'), orderDiscount.join('\n'))
+
+// Only a dual-currency Change uses +: single-currency output has no dangling
+// separator, while Net Total and Paid keep their established middle dot.
+const changeLines = (changeUsd, changeKhr) => telegram.formatSaleTelegramLines({
+  status: 'completed', receiptNumber: 'CHANGE', exchangeRate: 4000,
+  items: [{ name: 'A', quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
+  subtotalUsd: 1, discountUsd: 0, totalUsd: 1, totalKhr: 4000,
+  paidUsd: 1, paidKhr: 4000, changeUsd, changeKhr,
+}).filter(Boolean)
+assert.ok(changeLines(1, 0).includes('Change: $1.00'))
+assert.ok(changeLines(0, 4000).includes('Change: 4,000៛'))
+const dualChange = changeLines(1, 4000)
+assert.ok(dualChange.includes('Change: $1.00 + 4,000៛'), dualChange.join('\n'))
+assert.ok(dualChange.includes('Net Total: $1.00 · 4,000៛'), dualChange.join('\n'))
+assert.ok(dualChange.includes('Paid: $1.00 · 4,000៛'), dualChange.join('\n'))
 
 // unpaid credit sale, shop-paid delivery, no customer: optional lines drop out,
 // the shop-paid fee is shown but NOT added to Total
