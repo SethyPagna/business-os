@@ -5,6 +5,7 @@ import {
   buildMobileHomeLayout,
   mobileHomeSectionsPanelId,
 } from '../src/utils/mobileHomeTiles.ts'
+import { DEFAULT_MOBILE_SECTION_NAV_MODE } from '../src/utils/sectionNavPreference.ts'
 
 let failed = 0
 const runTest = (name: string, fn: () => void): void => {
@@ -118,6 +119,26 @@ runTest('the reshape keeps the guarded navigation hooks the lineage ships', () =
   assert.match(sidebar, /resolveHubSection\(page, location\.pathname, location\.hash/, 'the header title still resolves the committed section from the URL')
   assert.match(sidebar, /id="section-export-action-host"/, 'the mobile title bar keeps its export host')
   assert.match(sidebar, /<QuickPreferenceToggles \/>/, 'the header quick preferences stay in place')
+})
+
+// The default compact mode ('pages') removes the bottom bar, so the
+// Navigation Layout copy must not describe the four pinned items as
+// something the phone always has. Judged by a pure rule, with the sentence
+// as it shipped kept inline as the negative control.
+export const bottomBarCopyIsConditional = (sentence: string): boolean =>
+  !/bottom bar/i.test(sentence) || /\bSections\b/.test(sentence)
+
+runTest('the navigation copy does not promise a bottom bar the default mode never renders', () => {
+  assert.equal(DEFAULT_MOBILE_SECTION_NAV_MODE, 'pages', 'the small-screen default is still the bottom-bar-less pages mode')
+  assert.match(sidebar, /const inline = compact && mode === 'pages'/, 'inline is still the compact pages mode')
+  assert.match(sidebar, /\{!inline \? \(/, 'the bottom bar renders only when that mode is NOT in effect')
+  assert.equal(bottomBarCopyIsConditional('Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.'), false, 'negative control: the sentence as it shipped')
+  const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  assert.equal(bottomBarCopyIsConditional(en.navigationHint), true, en.navigationHint)
+  assert.match(km.navigationHint, /\u1795\u17d2\u1793\u17c2\u1780/, 'the Khmer copy names the mode that has the bar')
+  const settings = readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(settings, /stay pinned in the mobile bottom bar/, 'the inline English fallbacks must move with the packs')
 })
 
 if (failed > 0) process.exitCode = 1

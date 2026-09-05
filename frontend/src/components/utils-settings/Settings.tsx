@@ -172,7 +172,7 @@ const FALLBACK_COPY: Record<'en' | 'km', Record<string, string>> = {
     customColor: 'Custom color',
     autoLabel: 'auto',
     navigationTitle: 'Navigation Layout',
-    navigationHint: 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.',
+    navigationHint: 'Sidebar order, landing page and mobile navigation mode. The 4 pinned items show only in the Sections mode bottom bar.',
     desktopOrder: 'Sidebar order',
     mobilePinned: 'Pinned on mobile',
     moveUp: 'Up',
@@ -1615,7 +1615,7 @@ export default function Settings() {
         ) : null}
 
         {isAdmin && showSettingsSection('appearance') ? (
-        <SettingsSection title={copy('navigationTitle', 'Navigation Layout')} description={copy('navigationHint', 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.')}>
+        <SettingsSection title={copy('navigationTitle', 'Navigation Layout')} description={copy('navigationHint', 'Sidebar order, landing page and mobile navigation mode. The 4 pinned items show only in the Sections mode bottom bar.')}>
 
           <div className="mb-4">
             <label htmlFor="settings-default-landing-page" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
