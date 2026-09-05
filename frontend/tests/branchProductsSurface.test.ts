@@ -189,6 +189,12 @@ test('product stats lifecycle uses existing filtered server endpoint and scope t
   assert.match(inventory, /serverStats=\{stockStatsScope === inventoryStatsScope \? stockStats : null\}/)
   assert.match(inventory, /items=\{productsResultScope === productsScope \? productsItems : \[\]\}/)
   assert.match(inventory, /onAdjust=\{canAdjustStock \? openAdjust : undefined\}/)
+  // Sharing the hub range with the Products section made the stats strip's
+  // three range-scoped requests reachable from a section that never draws
+  // the strip; both of its loaders are gated on the strip being visible.
+  assert.match(inventory, /useEffect\(\(\) => \{ if \(showInventoryStats\) void loadStatsStrip\(\) \}, \[loadStatsStrip, showInventoryStats\]\)/)
+  assert.match(inventory, /if \(!isActive \|\| !syncChannel\?\.channel \|\| !showInventoryStats\) return/)
+  assert.equal((inventory.match(/const showInventoryStats = /g) || []).length, 1, 'one definition, declared before its loaders')
 })
 
 test('loading, error, empty, data and pagination are separate product states', () => {

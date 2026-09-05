@@ -437,11 +437,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       if (stripRequestRef.current === requestId) setStripLoading(false)
     }
   }, [isActive, stripRange.endDate, stripRange.startDate])
-  useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
-  useEffect(() => {
-    if (!isActive || !syncChannel?.channel) return
-    if (['sales', 'returns', 'inventory'].includes(syncChannel.channel)) void loadStatsStrip()
-  }, [isActive, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
+  // The two effects that actually run loadStatsStrip live further down, right
+  // after showInventoryStats is known -- see the note there.
   const [branchFilter,  setBranchFilter]  = useState('all')
   // Products has its own request lifecycle. It must remain usable even when
   // the independently ranged statistics loaders fail or finish out of order.
@@ -498,6 +495,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     if (hostSection === 'all') setTab('products')
     else if (hostSection !== 'stats') setTab(hostSection)
   }, [hostSection])
+  // Declared here rather than beside the other show* flags further down
+  // because the stats-strip loaders below need it: the strip's three
+  // range-scoped requests (sales kernel + both returns reports) must not fire
+  // for a section that never draws the strip. That became reachable when the
+  // Products section gained its own range row (N10) -- before that, this
+  // component only ever had a range when the strip was on screen.
+  const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
+  useEffect(() => { if (showInventoryStats) void loadStatsStrip() }, [loadStatsStrip, showInventoryStats])
+  useEffect(() => {
+    if (!isActive || !syncChannel?.channel || !showInventoryStats) return
+    if (['sales', 'returns', 'inventory'].includes(syncChannel.channel)) void loadStatsStrip()
+  }, [isActive, loadStatsStrip, showInventoryStats, syncChannel?.channel, syncChannel?.ts])
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
@@ -2209,7 +2218,7 @@ ${inventoryFeesFormulaText}`,
   }, [movementSelectMode])
   const showMovementActionGroups = movementGroupMode === 'time+action'
   const sectionStorageKey = 'business-os:inventory:section:v2'
-  const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
+  // showInventoryStats is declared near the top, with the strip's loaders.
   const showInventorySections = inventorySection === 'all' || ['products', 'movements', 'rfid'].includes(inventorySection)
   const showInventoryTabs = inventorySection === 'all'
   const showProductsSection = showInventorySections && tab === 'products'
