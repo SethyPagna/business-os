@@ -2,6 +2,21 @@
 
 ## Active continuation — production usability, September 5
 
+Latest11:48UTC — release candidate3f675e84, NOT YET deployed. Both real runtime
+blockers are resolved: Files picker60cd4f98 (main + independent browser PASS),
+native D1 stock-session compound limitd6be072c (main retained Retry creates exactly
+one zero-stock product/history; independent native commit/undo/redo/retry/bounds
+matrix PASS). Full clean backend223/223 PASS atd6be (backend unchanged at3f).
+Frontend211/211 individual tests PASS; actual Windows wrapper rerunning at3f
+after command-length fix. Main final clean typechecks, i18n4943/517, build1046
+and stamped dry-run all PASS. Hilbert migration compatibility review qualified
+PASS: no restore during old/new-code gap and valid/absent maintenance flag.
+Main is sole deployment owner; exact pending main-DB migrations0123–0127 only.
+Browser can read live runtime provenance; shell health/version is challenged.
+Historical Sep4 close and fixed22 subtotal repair remain unapplied. No barcode
+merge/stock rewrite is part of this checkpoint. Current acceptance/status matrix
+in docs/fleet/2026-09-05-production-usability.md supersedes older entries below.
+
 Latest11:22UTC: candidate4e18e98b includes all four clean-backend fixture fixes
 (three actual analytics-module loaders and a query-plan-proven exact22/PK date
 guard exception), canonical Add products entry, and frontend assertion fixes.

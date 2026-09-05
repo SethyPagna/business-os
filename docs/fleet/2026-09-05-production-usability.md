@@ -2,6 +2,45 @@
 
 ## Objective and boundaries
 
+### Current checkpoint — 11:48UTC (supersedes historical snapshots below)
+
+Candidate `3f675e84`, deployment pending. Main final clean typechecks, i18n
+4943 keys/517 sources, Vite1046 modules and clean stamped dry-run PASS. Backend
+223/223 suites PASS at`d6be072c`; backend tree identical at candidate. Frontend
+211/211 individual files PASS at`33828c06`; only test registration changed, and
+Ohm is running actual Windows `npm run test:utils` at candidate. No waived failures.
+
+Files picker`60cd4f98`: main desktop/320px open-search-close and independent
+three-layer queued-product flow PASS. Stock-session native D1 fix`d6be072c`:
+main held Retry creates exactly one product/member/operation/history, quantity0
+and no batch/movement. Independent native zero/positive/mixed/25-line commit,
+undo/redo, retry, stale generation, metadata ABA, permissions and size bounds PASS;
+rejections/retries preserve all rows across106 tables. Full live-money/offline
+system audit is not implied by this bounded verification.
+
+| State | Requirement IDs and outcome |
+|---|---|
+| Locally ready for this release | P1/P2/P3: persistent product fields, canonical New/Have Already Add products, shared defaults and overrides, barcode/name duplicate indication, atomic grouped stock-in history/replay. |
+| Locally ready for this release | S1/S2/S4/S5/S6: owner/admin edits, view permission, audited amendments/cancellation, manual close and reasoned reopen segments, shift entry/popups/history/report cash breakdowns. |
+| Locally ready for this release | U1/U3/U4/U5/D1: compact navigation/header, sale grouped options/layers/stock errors, compact 24h report controls and presets. Main responsive report/branch/product observations recorded below. |
+| Locally ready for this release | T1/T2/F2 bounded: Telegram line-discount operands, slash-equivalents vs plus-native tender/change, single report conversion and revenue inclusion. Configured split payment methods/casing/latest-rate and immutable replay included. |
+| Locally ready for this release | B1: real branch-scoped rows/statistics, retained grouped columns, financial metrics/detail/permission-gated adjustment. Main1440px/320px Khmer PASS, no overflow or console errors. |
+| Partial / deferred | P4 broader transfer/adjustment whole-session parity; U2 minimize capability is consumer-specific, not universal; D2 full section pagination matrix; F1 whole-system4dp migration/audit; full VIS1 cashier visibility routes/settings (helperc82abf64 not integrated); security/optimization and remaining sibling/legacy visual matrix. |
+| Non-blocking polish deferred | B1 desktop action cells remain tall (about157px); remaining compactness and full14-reference/role/EN-KM visual matrix are not certified complete. |
+| Runtime ready, live operation pending | S3 Roune Rath user4/shift1 close Sep4 at23:44 Cambodia (16:44Z), USD0/KHR133700. Preserve Sep5 shift3 and six existing fees4268–4273 totaling150000KHR. |
+| Runtime ready, live operation pending | Fixed22 sales16842–16863 net-subtotal repair3462USD. Preserve stock/payments; exact manifest/revision guards and backup before audited application. |
+| Investigated, no consolidation applied | M1 leading-zero barcode merge. Do not auto-merge or average live costs without guarded candidate rehearsal. |
+
+Prior production remains `0ffc4bfcc4fd` / `be276770-359d-4002-9d26-560fa5656d33`.
+Prior membership/default/IDs and historical89-sale/100-receivable settlement are
+already deployed/applied; never repeat historical settlement. No new schema or
+historical mutation at this snapshot. Main alone holds production coordination.
+Migration review:0123–0127 additive, old runtime compatible; require no restore
+in migration/deploy gap and maintenance flag absent or valid JSON/not restoring.
+Rollback retains additive schema and replay provenance; do not restore whole
+database over concurrent business. Live browser version endpoint works; shell
+403 is an edge challenge, not evidence of application failure or logged-in access.
+
 ### ASAP checkpoint status — 11:05UTC
 
 Update11:22UTC: candidate`4e18e98b`. Four backend fixture failures resolved and
@@ -89,7 +128,8 @@ September5 owner checkpoint additions (all earlier rows remain in scope):
   3–5/14 lined reports and filters;6–13 grouped breakdowns. Visual certification
   must compare against them, not merely pass source tests.
 
-Release checkpoints are proposed, not deployed: A draft/navigation/date/report
+Historical initial plan (current statuses are in the table above):
+Release checkpoints were proposed: A draft/navigation/date/report
 display fixes; B shift lifecycle/pickers/payment workflows; C atomic stock sessions
 and broader precision. Each fix remains a separate commit, with explicit dependent
 commits, focused tests, integrated gates and deployment provenance. Historical
