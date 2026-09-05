@@ -157,6 +157,7 @@ function seed() {
   // Wipe every table this test touches so each check() starts clean,
   // regardless of run order.
   const wipe = [
+    'stock_session_members', 'stock_session_operations', 'stock_session_guards',
     'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns',
     'sale_items', 'sales', 'inventory_movements', 'stock_transfers', 'stock_row_moves',
     'rfid_tags', 'product_images', 'branch_batch_stock', 'product_batches', 'branch_stock',
@@ -182,6 +183,9 @@ function seed() {
   rawDbHandle.prepare("INSERT INTO return_items (id, return_id, sale_item_id, product_id, product_name, quantity) VALUES (1, 1, 1, 1, 'Eye Shadow Palette', 1)").run()
   rawDbHandle.prepare("INSERT INTO sale_item_batch_allocations (id, sale_item_id, batch_id, branch_id, quantity, lot_code) VALUES (1, 1, 1, 1, 2, 'LOT-A')").run()
   rawDbHandle.prepare("INSERT INTO inventory_movements (id, product_id, product_name, branch_id, movement_type, quantity) VALUES (1, 1, 'Eye Shadow Palette', 1, 'sale', -2)").run()
+  rawDbHandle.prepare("INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json) VALUES ('reset-fixture', 1, 'reset-fixture', 'stock_in', '{}')").run()
+  rawDbHandle.prepare("INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, product_created, branch_id, batch_id, movement_id, quantity, unit_cost_usd) VALUES ('reset-fixture', 'line-1', 'receive', 1, 0, 1, 1, 1, 10, 2)").run()
+  rawDbHandle.prepare('INSERT INTO stock_session_guards (id, guard_value) VALUES (1, 1)').run()
 
   // Untouched-by-products-reset control rows, to prove the "keep
   // everything else" half of the spec, not just the "delete products"
@@ -217,6 +221,7 @@ async function main() {
     assert.strictEqual(json.success, true, JSON.stringify(json))
 
     for (const table of PRODUCTS_RESET_TABLES) assert.strictEqual(count(table), 0, `${table} should be empty after mode='products'`)
+    assert.ok(count('stock_session_revisions') > 0, 'reset retains ABA revision tombstones')
   })
 
   await check('mode=products keeps sales, returns, movements, and batch allocations (dangling ids are fine, rows are not)', async () => {
