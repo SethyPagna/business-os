@@ -59,11 +59,13 @@ const productBatches = compile('productBatches.ts', {
 })
 const saleTransitions = compile('saleTransitions.ts', { './salesStatus': salesStatus, './productBatches': productBatches })
 const saleTotals = compile('saleTotals.ts')
+const financialPrecision = compile('financialPrecision.ts')
 const subject = compile('saleLineAddition.ts', {
   './salesStatus': salesStatus,
   './saleTransitions': saleTransitions,
   './productBatches': productBatches,
   './saleTotals': saleTotals,
+  './financialPrecision': financialPrecision,
 })
 
 const {
@@ -98,11 +100,13 @@ function setup() {
     CREATE TABLE sale_items (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER, product_id INTEGER, product_name TEXT,
       quantity REAL, applied_price_usd REAL, applied_price_khr REAL, cost_price_usd REAL, cost_price_khr REAL,
       total_usd REAL, total_khr REAL, branch_id INTEGER, price_mode TEXT,
-      base_price_usd REAL, base_price_khr REAL, batch_id INTEGER, batch_label TEXT, batch_expiry_date TEXT);
+      base_price_usd REAL, base_price_khr REAL, product_discount_usd REAL, product_discount_khr REAL,
+      manual_discount_usd REAL, manual_discount_khr REAL, batch_id INTEGER, batch_label TEXT, batch_expiry_date TEXT);
     CREATE TABLE sales (id INTEGER PRIMARY KEY, receipt_number TEXT, sale_status TEXT, branch_id INTEGER,
       exchange_rate REAL DEFAULT 4100, subtotal_usd REAL, subtotal_khr REAL, discount_usd REAL DEFAULT 0,
-      membership_discount_usd REAL DEFAULT 0, tax_usd REAL DEFAULT 0, is_delivery INTEGER DEFAULT 0,
-      delivery_fee_usd REAL DEFAULT 0, delivery_fee_paid_by TEXT DEFAULT 'customer',
+      discount_khr REAL, membership_discount_usd REAL DEFAULT 0, membership_discount_khr REAL,
+      tax_usd REAL DEFAULT 0, tax_khr REAL, is_delivery INTEGER DEFAULT 0,
+      delivery_fee_usd REAL DEFAULT 0, delivery_fee_khr REAL, delivery_fee_paid_by TEXT DEFAULT 'customer',
       total_usd REAL, total_khr REAL, amount_paid_usd REAL DEFAULT 0, amount_paid_khr REAL DEFAULT 0,
       change_usd REAL DEFAULT 0, change_khr REAL DEFAULT 0, updated_at TEXT);
   `)
@@ -576,6 +580,14 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
       './returnBulkAction': {
         RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
         replayReturnBulkAction: () => { throw new Error('Unexpected return bulk replay in test-sale-add-items-pure.cjs') },
+      },
+      './stockSession': {
+        STOCK_SESSION_ACTION_KIND: 'stock.session',
+        replayStockSessionAction: () => { throw new Error('Unexpected stock session replay in test-sale-add-items-pure.cjs') },
+      },
+      './saleSettlementAction': {
+        SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement',
+        replaySaleSettlementAction: () => { throw new Error('Unexpected sale settlement replay in test-sale-add-items-pure.cjs') },
       },
       './db': { getDb: () => ({}) },
       './audit': { audit: async () => {} },
