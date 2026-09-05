@@ -169,6 +169,23 @@ assert.ok(cancelledReport.includes('04/09/2026 09:30'), cancelledReport)
 assert.ok(!cancelledReport.includes('still open'), cancelledReport)
 assert.ok(!cancelledReport.includes('Cash counted'), cancelledReport)
 assert.equal(telegram.shiftFilters(cancelledShift, Date.parse('2026-09-04T12:00:00.000Z')).createdTo, cancelledShift.cancelled_at)
+
+// Soft-cancelling an already closed shift must not reopen or extend its money
+// window. Keep the original close/counts and show later cancellation metadata
+// separately.
+const closedThenCancelled = {
+  ...cancelledShift,
+  closed_at: '2026-09-04T10:02:00.000Z',
+  closing_counted_usd: 75,
+  closing_counted_khr: 100000,
+  cancelled_at: '2026-09-05T02:30:00.000Z',
+}
+const closedCancelledReport = telegram.formatShiftReport('Shop', closedThenCancelled, cancelledFigures, Date.parse('2026-09-05T12:00:00.000Z'))
+assert.equal(telegram.shiftFilters(closedThenCancelled, Date.parse('2026-09-05T12:00:00.000Z')).createdTo, closedThenCancelled.closed_at)
+assert.ok(closedCancelledReport.includes('To / ទៅ: 04/09/2026 17:02'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('Cancelled at / បោះបង់នៅ: 05/09/2026 09:30'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('Cash counted / សាច់ប្រាក់ដែលបានរាប់: $75.00 · 100,000៛'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('Invoices / វិក្កយបត្រ: 3'), closedCancelledReport)
 const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 assert.match(telegramSource, /WHERE business_date = @date\s+ORDER BY/, 'dated /shift history must retain cancelled shifts')
 
