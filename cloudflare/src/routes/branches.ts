@@ -4,6 +4,7 @@ import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBindin
 import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
+import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -136,6 +137,7 @@ app.get('/summary', async (c) => {
   // family-grouped pagination total Products/Inventory's listings show.
   const familyStats = await getFamilyStockStats({
     db,
+    lowStock: await loadLowStockConfig(c.env),
     joinSql: '',
     whereSql: 'WHERE p.is_active = 1',
     params: {},
@@ -843,7 +845,7 @@ function normalizePositiveInt(value: unknown, fallback: number, { min = 1, max =
 // dropped brand/category as free-text dims (see that constant's own
 // comment -- both are already reachable via this page's own filter
 // dropdowns, and stay out of the same-shaped noise problem here too).
-function buildBranchStockWhere(c: any, branchId: number, { includeStockState = true } = {}) {
+function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfig, { includeStockState = true } = {}) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = { branchId }
   // `search` accepted as a third alias alongside query/q, same as
@@ -873,9 +875,11 @@ function buildBranchStockWhere(c: any, branchId: number, { includeStockState = t
     // 'healthy' is the stricter subset of 'positive'/'in_stock' -- above the
     // low stock threshold, not just above zero/out threshold. See matching
     // comment in inventory.ts/products.ts.
-    if (stockState === 'healthy') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.low_stock_threshold, 10)')
+    // See products.ts's matching clause: the out-of-stock term is explicit
+    // because 'low >= out' stops being guaranteed once the alert can be off.
+    if (stockState === 'healthy') where.push(`COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) > ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
     if (stockState === 'zero') where.push('COALESCE(bs.quantity, 0) = 0')
-    if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
+    if (stockState === 'low') where.push(`COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
   }
   return { where, params, stockState, matchRankSql, matchTierSql }
@@ -913,9 +917,10 @@ app.get('/:id/stock', async (c) => {
   const branchId = Number.parseInt(id, 10)
   const page = normalizePositiveInt(c.req.query('page'), 1, { min: 1, max: 100000 })
   const pageSize = normalizePositiveInt(c.req.query('pageSize') || c.req.query('page_size'), 20, { min: 1, max: 100 })
-  const { where, params, stockState, matchRankSql, matchTierSql } = buildBranchStockWhere(c, branchId)
+  const lowStock = await loadLowStockConfig(c.env)
+  const { where, params, stockState, matchRankSql, matchTierSql } = buildBranchStockWhere(c, branchId, lowStock)
   const whereSql = `WHERE ${where.join(' AND ')}`
-  const summaryWhere = buildBranchStockWhere(c, branchId, { includeStockState: false })
+  const summaryWhere = buildBranchStockWhere(c, branchId, lowStock, { includeStockState: false })
   const summaryWhereSql = `WHERE ${summaryWhere.where.join(' AND ')}`
   // INNER JOIN, not LEFT: a product only "belongs" to this branch's stats/
   // listing once it actually has a branch_stock row here (created by a
@@ -938,6 +943,7 @@ app.get('/:id/stock', async (c) => {
   const [familyStats, positiveRow] = await Promise.all([
     getFamilyStockStats({
       db,
+      lowStock,
       joinSql: branchStockJoinSql,
       whereSql: summaryWhereSql,
       params: summaryWhere.params,

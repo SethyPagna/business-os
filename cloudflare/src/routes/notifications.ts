@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
+import { loadLowStockConfig, lowStockThresholdSql } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
@@ -142,13 +143,20 @@ async function loadPreferences(env: Env) {
 
 async function buildInventorySection(env: Env): Promise<NotificationSection | null> {
   const db = getDb(env)
+  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
+  // The OR is what keeps OUT-OF-STOCK alive when the owner switches the
+  // low-quantity alert off. With the alert off the low fragment is -1, and
+  // this one query fetches BOTH tiers -- so a single `qty <= low` filter
+  // would have silently taken the out-of-stock rows down with the low ones,
+  // which is not what a low-QUANTITY switch means.
   const rows = await db.prepare(`
     SELECT id, name, stock_quantity,
       COALESCE(out_of_stock_threshold, 0) AS out_threshold,
-      COALESCE(low_stock_threshold, 10) AS low_threshold
+      ${lowThresholdSql} AS low_threshold
     FROM products
     WHERE is_active = 1
-      AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10)
+      AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql}
+           OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))
     ORDER BY stock_quantity ASC
     LIMIT 5000
   `).all<{ id: number; name: string; stock_quantity: number; out_threshold: number; low_threshold: number }>()

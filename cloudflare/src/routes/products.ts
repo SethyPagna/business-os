@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
+import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback, bumpVersion } from '../lib/cache'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -264,15 +265,15 @@ function restrictListPayloadForImageOnly<T extends { items?: unknown }>(payload:
 // (so the A-Z bar doesn't collapse to one letter); this just extends the
 // same "exclude only the field this query is FOR" rule to brand/category/
 // unit/supplier instead of blanket-excluding none of them.
-function buildFilterVariants(query: Record<string, string>) {
+function buildFilterVariants(query: Record<string, string>, lowStock: LowStockConfig) {
   const base = { ...query, initial: 'all' }
   return {
-    brands: buildSearchFilters({ ...base, brand: '' }),
-    categories: buildSearchFilters({ ...base, category: '' }),
-    units: buildSearchFilters({ ...base, unit: '' }),
-    suppliers: buildSearchFilters({ ...base, supplier: '' }),
-    tags: buildSearchFilters({ ...base, tag_label: '' }),
-    initials: buildSearchFilters(base),
+    brands: buildSearchFilters({ ...base, brand: '' }, lowStock),
+    categories: buildSearchFilters({ ...base, category: '' }, lowStock),
+    units: buildSearchFilters({ ...base, unit: '' }, lowStock),
+    suppliers: buildSearchFilters({ ...base, supplier: '' }, lowStock),
+    tags: buildSearchFilters({ ...base, tag_label: '' }, lowStock),
+    initials: buildSearchFilters(base, lowStock),
   }
 }
 
@@ -302,7 +303,7 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   // left in, this facet-metadata call would silently start narrowing by a
   // free-text term again, the exact staleness this strip exists to prevent.
   const { query: _searchTerm, q: _searchTermAlt, search: _searchTermAlias, ...structuralQuery } = query
-  const variants = buildFilterVariants(structuralQuery)
+  const variants = buildFilterVariants(structuralQuery, await loadLowStockConfig(env))
   const sql = (f: ReturnType<typeof buildSearchFilters>) => `WHERE ${f.where.join(' AND ')}`
   const joinSql = (f: ReturnType<typeof buildSearchFilters>) => f.joins.join('\n')
 
@@ -574,7 +575,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     : 'lower(name) ASC, id ASC'
 
   const db = getDb(env)
-  const filters = buildSearchFilters(query, options)
+  const filters = buildSearchFilters(query, await loadLowStockConfig(env), options)
   const { where, joins, params, matchRankSql, matchTierSql, hasSearchTerm } = filters
 
   // G1: promoted/discounted products occupy the block ABOVE the
@@ -721,7 +722,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 // with no stock filter actively selected -- fixed client-side; an empty
 // stockState here means no stock-based filtering at all, same as with no
 // branch selected.
-function buildSearchFilters(query: Record<string, string>, options: ProductSearchOptions = {}) {
+function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
   const where: string[] = ['p.is_active = 1']
   const params: Record<string, unknown> = {}
   const joins: string[] = []
@@ -851,14 +852,18 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
   }
 
   const stockState = String(query.stockState || query.stock_state || '').toLowerCase()
-  if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)
+  if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
   if (stockState === 'out') where.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)
   if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
   // 'healthy' is a stricter subset of 'in_stock'/'positive' -- above the
   // low stock threshold specifically, not just above zero/out threshold.
   // Lets the stock-status filter isolate the same "healthy" bucket the
   // stats tiles already report separately from low/out.
-  if (stockState === 'healthy') where.push(`${stockExpr} > COALESCE(p.low_stock_threshold, 10)`)
+  // The out-of-stock half of this clause is not redundant: it used to be
+  // carried implicitly by the low threshold always being >= the out one, an
+  // assumption the owner's switch breaks (alerts off makes the low fragment
+  // -1, and every out-of-stock row is above -1). Stated, it holds either way.
+  if (stockState === 'healthy') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} > ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
 
   // "Issues" quick filter -- see buildIssueStateClauses' own comment in
   // lib/searchMatch.ts for the exact scoped set and why each candidate

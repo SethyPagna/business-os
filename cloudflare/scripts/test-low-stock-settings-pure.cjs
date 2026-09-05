@@ -220,6 +220,185 @@ async function main() {
     assert.doesNotMatch(route, /validateTheme|invalid_theme_setting/)
   })
 
+
+  // ---- against real SQLite ---------------------------------------------
+  //
+  // The fragment builder is only useful if the SQL it composes into actually
+  // selects the rows it claims to. These run the SAME shapes the routes build
+  // against a real SQLite catalog, on a fixture chosen so the old hardcoded 10
+  // and each new mode DISAGREE about it.
+  await check('the composed SQL selects different rows per mode, on real SQLite', () => {
+    const Database = require('better-sqlite3')
+    const db = new Database(':memory:')
+    db.exec(`
+      CREATE TABLE products (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        is_active INTEGER DEFAULT 1,
+        stock_quantity REAL,
+        low_stock_threshold REAL DEFAULT 10,
+        out_of_stock_threshold REAL DEFAULT 0
+      );
+      INSERT INTO products (id, name, stock_quantity, low_stock_threshold, out_of_stock_threshold) VALUES
+        (1, 'low-today',  5,  10, 0),
+        (2, 'out',        0,  10, 0),
+        (3, 'healthy',   20,  10, 0),
+        (4, 'no-limit',   5, NULL, 0);
+    `)
+    const names = (sql) => db.prepare(sql).all().map((row) => row.name).sort()
+
+    // routes/products.ts + inventory.ts stockState=low
+    const lowFilter = (config) => names(`
+      SELECT name FROM products p WHERE p.is_active = 1
+        AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)
+        AND COALESCE(p.stock_quantity, 0) <= ${lowStockThresholdSql(config, 'p.low_stock_threshold')}
+    `)
+    assert.deepStrictEqual(lowFilter(DEFAULT_LOW_STOCK_CONFIG), ['low-today', 'no-limit'])
+    // 'product' mode with a global of 3: the row storing its own 10 keeps it
+    // and stays low; the row with no limit of its own drops out. The old
+    // literal could not tell these two apart at all.
+    assert.deepStrictEqual(lowFilter(PRODUCT_MODE), ['low-today'])
+    // 'global' mode: both fall out, because 3 replaces every row's own limit.
+    assert.deepStrictEqual(lowFilter(GLOBAL_MODE), [])
+    assert.deepStrictEqual(lowFilter(ALERTS_OFF), [])
+
+    // routes/products.ts stockState=healthy -- the complement, and the reason
+    // 'off' is -1 rather than 0: the low tier has to fold back INTO healthy,
+    // not leave a hole where those products used to be counted. The
+    // out-of-stock term is stated rather than implied by "low >= out", an
+    // assumption alerts-off breaks (every out row is above -1).
+    const healthyFilter = (config) => names(`
+      SELECT name FROM products p WHERE p.is_active = 1
+        AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)
+        AND COALESCE(p.stock_quantity, 0) > ${lowStockThresholdSql(config, 'p.low_stock_threshold')}
+    `)
+    assert.deepStrictEqual(healthyFilter(DEFAULT_LOW_STOCK_CONFIG), ['healthy'])
+    assert.deepStrictEqual(healthyFilter(GLOBAL_MODE), ['healthy', 'low-today', 'no-limit'].sort())
+    assert.deepStrictEqual(healthyFilter(ALERTS_OFF), ['healthy', 'low-today', 'no-limit'].sort())
+    // Nothing moved into or out of the out-of-stock tier in any of them.
+    for (const config of [DEFAULT_LOW_STOCK_CONFIG, PRODUCT_MODE, GLOBAL_MODE, ALERTS_OFF]) {
+      assert.ok(!lowFilter(config).includes('out'), 'out-of-stock must never be counted as low')
+      assert.ok(!healthyFilter(config).includes('out'), 'out-of-stock must never be counted as healthy')
+    }
+
+    // The bell / Telegram list, which fetches BOTH tiers in one query. This is
+    // the case that made the OR necessary: without it, switching the
+    // low-QUANTITY alert off would have silently deleted the out-of-stock
+    // warnings too.
+    const bothTiers = (config) => names(`
+      SELECT name FROM products WHERE is_active = 1
+        AND (COALESCE(stock_quantity, 0) <= ${lowStockThresholdSql(config, 'low_stock_threshold')}
+             OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))
+    `)
+    assert.deepStrictEqual(bothTiers(DEFAULT_LOW_STOCK_CONFIG), ['low-today', 'no-limit', 'out'].sort())
+    assert.deepStrictEqual(bothTiers(ALERTS_OFF), ['out'])
+    // Discriminating control: the shape WITHOUT the OR -- what these queries
+    // carried before -- loses the out-of-stock row entirely.
+    const withoutOr = names(`
+      SELECT name FROM products WHERE is_active = 1
+        AND COALESCE(stock_quantity, 0) <= ${lowStockThresholdSql(ALERTS_OFF, 'low_stock_threshold')}
+    `)
+    assert.deepStrictEqual(withoutOr, [])
+
+    // familyStockStats' per-row tiering, same fixture.
+    const tiers = (config) => db.prepare(`
+      SELECT
+        SUM(CASE WHEN qty > out_threshold AND qty > low_threshold THEN 1 ELSE 0 END) AS healthy,
+        SUM(CASE WHEN qty > out_threshold AND qty <= low_threshold THEN 1 ELSE 0 END) AS low,
+        SUM(CASE WHEN qty <= out_threshold THEN 1 ELSE 0 END) AS out
+      FROM (
+        SELECT COALESCE(p.stock_quantity, 0) AS qty,
+               COALESCE(p.out_of_stock_threshold, 0) AS out_threshold,
+               ${lowStockThresholdSql(config, 'p.low_stock_threshold')} AS low_threshold
+        FROM products p WHERE p.is_active = 1
+      )
+    `).get()
+    assert.deepStrictEqual(tiers(DEFAULT_LOW_STOCK_CONFIG), { healthy: 1, low: 2, out: 1 })
+    assert.deepStrictEqual(tiers(GLOBAL_MODE), { healthy: 3, low: 0, out: 1 })
+    // Alerts off: the low bucket empties into healthy and the out count is
+    // byte-for-byte what it was -- the invariant the whole -1 trick exists for.
+    assert.deepStrictEqual(tiers(ALERTS_OFF), { healthy: 3, low: 0, out: 1 })
+    db.close()
+  })
+  // ---- consumer parity -------------------------------------------------
+  //
+  // The rule is only ONE rule if every reader actually goes through it. Every
+  // server surface that decides "is this row low" is named here with the
+  // expression it used to carry, so a new consumer copying the old literal
+  // (or an old one being reverted to it) fails this file rather than shipping
+  // a Dashboard card that disagrees with the list under it.
+  const SERVER_LOW_STOCK_CONSUMERS = [
+    ['lib/familyStockStats.ts', 'Dashboard tile, Inventory stats, Branches stats'],
+    ['lib/telegram.ts', '/stock, /lowstock and /inventory bot replies'],
+    ['routes/compat.ts', "Dashboard's low-stock card and drill list"],
+    ['routes/inventory.ts', "Inventory's stockState=low filter"],
+    ['routes/products.ts', "Products' stockState=low/healthy filters"],
+    ['routes/branches.ts', "Branches' per-branch stockState filter"],
+    ['routes/notifications.ts', 'the notification bell'],
+  ]
+
+  await check('every server low-stock reader goes through the shared rule', () => {
+    for (const [relPath, surface] of SERVER_LOW_STOCK_CONSUMERS) {
+      const text = readCf(relPath)
+      assert.match(
+        text,
+        /from '(\.\.\/lib\/lowStockSettings|\.\/lowStockSettings)'/,
+        `${relPath} (${surface}) must import the shared low-stock rule`,
+      )
+      assert.ok(
+        /lowStockThresholdSql\(/.test(text) || /lowThresholdSql/.test(text),
+        `${relPath} (${surface}) must build its threshold with lowStockThresholdSql`,
+      )
+      // ...and must no longer re-type the literal it replaced. This is the
+      // discriminating half: before this lane every one of these files
+      // matched, and each match was a surface the owner's setting could not
+      // reach.
+      assert.doesNotMatch(
+        text,
+        /low_stock_threshold,\s*10\)/,
+        `${relPath} (${surface}) still hardcodes the old fallback of 10`,
+      )
+    }
+  })
+
+  await check('the two shapes that alerts-off would otherwise break stay stated', () => {
+    // Both proved above on real SQLite; pinned here as source shape so a later
+    // edit cannot quietly drop either term back to what it was.
+    for (const relPath of ['routes/products.ts', 'routes/branches.ts']) {
+      const healthy = readCf(relPath)
+        .split(/\r?\n/)
+        .filter((line) => line.includes("stockState === 'healthy'") && line.includes('where.push'))
+      assert.strictEqual(healthy.length, 1, `${relPath} must have exactly one healthy clause`)
+      assert.match(
+        healthy[0],
+        /out_of_stock_threshold, 0\) AND /,
+        `${relPath}'s healthy clause must state the out-of-stock term, not imply it from low >= out`,
+      )
+    }
+    // The bell and the bot fetch BOTH tiers in one query, so each needs the OR
+    // that keeps out-of-stock alive when the low-quantity alert is off.
+    for (const relPath of ['routes/notifications.ts', 'lib/telegram.ts']) {
+      assert.match(
+        readCf(relPath),
+        /OR COALESCE\(stock_quantity, 0\) <= COALESCE\(out_of_stock_threshold, 0\)/,
+        `${relPath} must keep out-of-stock rows when the low alert is off`,
+      )
+    }
+  })
+
+  await check('the parity sweep can tell a threaded file from an unthreaded one', () => {
+    // Positive control. routes/portal.ts is the STOREFRONT, which ships its
+    // own documented customer_portal_* threshold triple and is deliberately
+    // NOT wired to the admin setting (frontend/src/lang/en.json's hint says
+    // the portal values apply "on the customer portal only"). It therefore
+    // still carries exactly the pattern the sweep above rejects -- proving
+    // the sweep is capable of failing, and pinning the storefront's
+    // independence as a decision rather than an oversight.
+    const portal = readCf('routes/portal.ts')
+    assert.match(portal, /low_stock_threshold,\s*10\)/, 'the storefront is expected to keep its own rule')
+    assert.doesNotMatch(portal, /lowStockThresholdSql/)
+  })
+
   console.log(`\n${passed} checks passed`)
 }
 
