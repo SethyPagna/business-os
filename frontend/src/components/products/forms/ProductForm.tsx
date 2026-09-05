@@ -15,7 +15,7 @@ import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
-import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
+import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { useMergeStockChoice } from '../useMergeStockChoice.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
@@ -177,6 +177,7 @@ interface FilePickerModalProps {
   // reads "Add product — Dior 999", not a bare generic.
   onMinimize?: (label: string) => void
   onSelect: (publicPath: string) => void
+  layer?: 'default' | 'nested'
 }
 
 interface ProductFormProps {
@@ -620,6 +621,7 @@ export default function ProductForm({
   const supplierRequestRef = useRef(0)
   const restoredLegacyDraftKeyRef = useRef<string | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const productFormContentRef = useRef<HTMLDivElement>(null)
   // Locked-name-of-a-grouped-product feature (this session). isGroupedProduct
   // is computed off the SAVED name this form loaded with (initialForm.name),
   // not the live-edited form.name -- the lock question is "does this
@@ -1270,23 +1272,24 @@ export default function ProductForm({
     const typedName = String(form.name || '').trim()
     onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
   } : undefined
-  // ProductForm can itself be a nested z-[1070] surface. Several older child
-  // prompts still own fixed/default layers (ConfirmDialog/FilePicker z-[1050],
-  // rename z-[1060]). While one is open, lower only this form back to the
-  // default layer; portal insertion order then keeps session -> form -> child
-  // stacked in interaction order without changing shared components we do not
-  // own. Direct ProductForm child Modals use the same choreography as well.
-  const nestedChildSurfaceOpen = modalLayer === 'nested' && Boolean(
-    filePickerOpen || renameRequest || mergeStockChoiceDialog || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
+  const childSurfaceOpen = Boolean(
+    filePickerOpen || scannerField || renameRequest || mergeStockChoiceDialog || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
   )
-  const effectiveModalLayer = nestedChildSurfaceOpen ? 'default' : modalLayer
+  useEffect(() => {
+    const dialog = productFormContentRef.current?.closest('[role="dialog"]')
+    if (!dialog || !childSurfaceOpen) return
+    dialog.setAttribute('inert', '')
+    dialog.setAttribute('aria-hidden', 'true')
+    return () => { dialog.removeAttribute('inert'); dialog.removeAttribute('aria-hidden') }
+  }, [childSurfaceOpen])
 
   return (
+    <ConfirmDialogLayerContext.Provider value={modalLayer}>
     <Modal
       title={isEditMode ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product?.name || ''}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
       onClose={onClose}
       onMinimize={preserveAndMinimize}
-      layer={effectiveModalLayer}
+      layer={modalLayer}
       wide
       headerExtra={(
         <>
@@ -1309,7 +1312,7 @@ export default function ProductForm({
         </>
       )}
       unsavedChanges={{ workKey: dirtyWorkKey }}>
-      <div className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
+      <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => (
             <button
@@ -1944,6 +1947,7 @@ export default function ProductForm({
               open={filePickerOpen}
               mediaType="image"
               title={tr('choose_product_image', 'Choose product image', 'ជ្រើសរើសរូបភាពផលិតផល')}
+              layer={modalLayer}
               onClose={() => setFilePickerOpen(false)}
               onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= imageLimit ? current : [...current, publicPath])}
             />
@@ -1967,7 +1971,7 @@ export default function ProductForm({
           the form root, independent of activeTab, next to the other
           root-level dialog (create verdict). Locked by
           tests/productFormContract.test.ts. */}
-      <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      <RenameCascadeModal request={renameRequest} busy={saving} layer={modalLayer} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
       {/* Saving into an existing twin offers the merge here; a twin that still
           holds stock is asked merge-or-write-off before anything is written. */}
       {mergeStockChoiceDialog}
@@ -1979,6 +1983,7 @@ export default function ProductForm({
           items={saveReviewItems()}
           confirmLabel={isCreateMode ? tr('add_product', 'Create Products') : tr('save', 'Save')}
           working={saving}
+          layer={modalLayer}
           workingLabel={tr('saving', 'Saving...')}
           onConfirm={() => resolveSaveConfirm(true)}
           onClose={() => resolveSaveConfirm(false)}
@@ -1993,7 +1998,7 @@ export default function ProductForm({
               : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
           onClose={() => resolveCreateVerdict('back')}
           size="sm"
-        
+          layer={modalLayer}
           unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className={`flex items-start gap-3 rounded-lg border p-3 ${createVerdict.kind === 'exact_twin'
@@ -2056,7 +2061,7 @@ export default function ProductForm({
         </Modal>
       ) : null}
       {nameUnlockConfirmOpen ? (
-        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm" unsavedChanges="read-only">
+        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm" layer={modalLayer} unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
               <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -2094,5 +2099,6 @@ export default function ProductForm({
         </Modal>
       ) : null}
     </Modal>
+    </ConfirmDialogLayerContext.Provider>
   )
 }

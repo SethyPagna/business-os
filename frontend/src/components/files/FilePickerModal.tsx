@@ -47,6 +47,7 @@ type FilePickerModalProps = {
   title?: ReactNode
   multiple?: boolean
   initialSelected?: string[]
+  layer?: 'default' | 'nested'
 }
 
 type AppContextValue = {
@@ -55,7 +56,7 @@ type AppContextValue = {
   t?: TranslateFunction
 }
 
-const Modal = ModalBase as ComponentType<{ title: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode }>
+const Modal = ModalBase as ComponentType<{ title: ReactNode; onClose: () => void; wide?: boolean; layer?: 'default' | 'nested'; children: ReactNode }>
 const useApp = useAppHook as () => AppContextValue
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -106,6 +107,7 @@ export default function FilePickerModal({
   title = 'Choose file',
   multiple = false,
   initialSelected = EMPTY_INITIAL_SELECTED,
+  layer = 'default',
 }: FilePickerModalProps) {
   const { notify, user, t } = useApp()
   const normalizedInitialSelectedKey = Array.isArray(initialSelected) ? initialSelected.filter(Boolean).join('\u0000') : ''
@@ -287,7 +289,7 @@ export default function FilePickerModal({
   const selectedAssets = files.filter((asset) => selectedPathSet.has(asset.public_path || ''))
 
   return (
-    <Modal title={title} onClose={onClose} wide>
+    <Modal title={title} onClose={onClose} wide layer={layer}>
       <div className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row">
           <input className="input flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('search_files', 'Search files')} />

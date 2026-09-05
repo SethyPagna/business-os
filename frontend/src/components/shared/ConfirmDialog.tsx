@@ -1,5 +1,5 @@
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
-import type { ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 import Modal from './Modal'
 
 // Shared compact "review before you commit" confirmation dialog (Part 563).
@@ -20,6 +20,8 @@ import Modal from './Modal'
 // not here -- this component only renders and reports the click.
 
 type Translate = (key: string, fallback?: string) => string | undefined
+export type ConfirmDialogLayer = 'default' | 'nested'
+export const ConfirmDialogLayerContext = createContext<ConfirmDialogLayer>('default')
 
 export type ConfirmReviewItem = {
   label: ReactNode
@@ -45,6 +47,8 @@ type ConfirmDialogProps = {
   workingLabel?: ReactNode
   /** Independently disables Confirm (e.g. a required reason not yet filled). */
   confirmDisabled?: boolean
+  /** Explicit stacking for prompts opened from another modal. */
+  layer?: ConfirmDialogLayer
   onConfirm: () => void
   onClose: () => void
   t?: Translate
@@ -62,10 +66,13 @@ export default function ConfirmDialog({
   working = false,
   workingLabel,
   confirmDisabled = false,
+  layer,
   onConfirm,
   onClose,
   t,
 }: ConfirmDialogProps) {
+  const inheritedLayer = useContext(ConfirmDialogLayerContext)
+  const resolvedLayer = layer || inheritedLayer
   const T = (key: string, fallback: string): string => {
     const value = t?.(key)
     return value && value !== key ? value : fallback
@@ -80,6 +87,7 @@ export default function ConfirmDialog({
       title={title}
       onClose={onClose}
       size="sm"
+      layer={resolvedLayer}
       unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         {danger ? (
