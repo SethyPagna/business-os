@@ -8,6 +8,7 @@ const hub = read('components/sales/ReportsHub.tsx')
 const picker = read('components/shared/DateTimeRangePicker.tsx')
 const css = read('components/sales/reports/reports-surface.css')
 const overview = read('components/sales/reports/OverviewReport.tsx')
+const sheet = read('components/sales/reports/ReceiptSheet.tsx')
 
 // Throw on failure so this suite can also be statically imported by reportsHub.test.ts.
 assert.match(hub, /reports-mobile-primary[\s\S]*?\{viewPicker\}\{rangePicker\}/)
@@ -56,4 +57,50 @@ for (const lang of ['en', 'km']) {
   const pack = JSON.parse(read(`lang/${lang}.json`))
   for (const key of ['start_date', 'end_date', 'start_time', 'end_time']) assert.ok(pack[key], `${lang} validation label ${key}`)
 }
-console.log('PASS report responsive layout, preset parity and unchanged 24-hour capability contracts')
+
+// --- O9 (owner, Sep 6): more side margin on large screens, label/value
+// adjacent -----------------------------------------------------------------
+//
+// The 1024 clamp above saturates at 48px from 1600px, which read as almost
+// no margin on a >=1280 monitor. These two tiers only ADD gutter/width-cap
+// rules at wider breakpoints -- they must never come before the 768/1024
+// blocks (that would let a wide-screen rule lose to a narrower one at equal
+// specificity) and must never touch the tablet gutter (61237948) or the
+// rounding fix (c999e909) already on this line.
+assert.match(css, /@media \(min-width: 1280px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(40px, 4vw, 64px\);/, '1280px gets its own, larger gutter')
+assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[^}]*max-width: 96rem;[^}]*margin-inline: auto;[^}]*padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ caps the reading width and centers it, so 1920/4K keeps growing margin instead of a saturated 48px')
+const gutterOrder = ['@media (min-width: 768px)', '@media (min-width: 1024px)', '@media (min-width: 1280px)', '@media (min-width: 1536px)']
+for (let i = 1; i < gutterOrder.length; i += 1) {
+  assert.ok(css.indexOf(gutterOrder[i - 1]) < css.indexOf(gutterOrder[i]), `${gutterOrder[i - 1]} must precede ${gutterOrder[i]} so wider screens win the cascade`)
+}
+// The 1024 desktop floor and the tablet gutter must survive untouched.
+assert.match(css, /@media \(min-width: 1024px\)[\s\S]*?padding-inline: clamp\(20px, 3vw, 48px\);/, '1024px floor is unchanged')
+assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(12px, 2vw, 24px\);/, 'tablet gutter (61237948) is unchanged')
+
+// The excel-style income statement must hug its own columns like every other
+// report table (ReportTable already asks DenseTable for `fit`); without it,
+// the Line/Amount columns stretch across the whole (34rem, or uncapped on
+// tablet) statement box and land far apart.
+assert.match(overview, /<DenseTable fit>/, 'the Overview statement table hugs its columns')
+
+// The receipt style's "segment" (one block = one till-receipt-like ledger)
+// renders every label/value pair through ONE grid per block instead of a
+// `justify-between` flex row per line -- `justify-between` hands each line
+// all the box's free space, so the label and its value land at opposite
+// edges of whatever box the block sits in (300-450px apart at >=1024 on the
+// desktop card grid or the centered statement box). A max-content grid
+// column keeps the value immediately after the widest label in the block on
+// every width, and the value's own track means it can never wrap into the
+// label column.
+assert.match(sheet, /grid grid-cols-\[minmax\(0,max-content\)_max-content\][^"]*gap-x-\[var\(--ui-receipt-gap,0\.75rem\)\]/, 'segment rows render through the shared label/value grid')
+assert.doesNotMatch(sheet, /flex items-baseline justify-between gap-\[var\(--ui-receipt-gap/, 'line rows no longer stretch label/value apart with justify-between')
+// The rule-over-totals divider must still be able to span both columns (a
+// border on just the label or value cell would show a broken half-line).
+assert.match(sheet, /col-span-2[^"]*border-t border-\[var\(--ui-ink-3\)\]/, 'the total divider spans both grid columns')
+
+// Print/PDF is a standalone document with its own inline CSS (exportOptions
+// builds it via window.open + document.write) and never loads this file --
+// it must stay that way, one column, untouched by the gutter/grid changes.
+assert.ok(!/@media print/.test(css), 'reports-surface.css still owns no print rules; the print path is the isolated exportOptions document')
+
+console.log('PASS report responsive layout, preset parity, unchanged 24-hour capability contracts and O9 wide-screen gutter/label-value adjacency')
