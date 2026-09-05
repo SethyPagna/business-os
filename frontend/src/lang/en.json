@@ -5606,5 +5606,13 @@
   "shift_save_amendment": "Save amendment",
   "shift_amendments": "Amendment record",
   "shift_amend_saved": "Shift amendment saved with an audit record.",
-  "shift_amend_failed": "Could not amend shift."
+  "shift_amend_failed": "Could not amend shift.",
+  "bulk_from": "From",
+  "bulk_to": "To",
+  "bulk_matching_count": "{n} matching",
+  "bulk_skipped_count": "{n} selected with another source value will be skipped.",
+  "bulk_cancel_review_hint": "Review every sale before cancelling.",
+  "choose": "Choose",
+  "ready": "Ready",
+  "required": "Required"
 }

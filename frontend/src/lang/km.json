@@ -5606,5 +5606,13 @@
   "shift_save_amendment": "រក្សាទុកការកែប្រែ",
   "shift_amendments": "កំណត់ត្រាការកែប្រែ",
   "shift_amend_saved": "បានរក្សាទុកការកែប្រែវេនជាមួយកំណត់ត្រាត្រួតពិនិត្យ។",
-  "shift_amend_failed": "មិនអាចកែប្រែវេនបានទេ។"
+  "shift_amend_failed": "មិនអាចកែប្រែវេនបានទេ។",
+  "bulk_from": "ពី",
+  "bulk_to": "ទៅជា",
+  "bulk_matching_count": "ត្រូវគ្នា {n}",
+  "bulk_skipped_count": "ជួរដែលបានជ្រើស {n} មានតម្លៃដើមផ្សេង ហើយនឹងមិនត្រូវបានកែប្រែទេ។",
+  "bulk_cancel_review_hint": "ពិនិត្យការលក់នីមួយៗមុនពេលបោះបង់។",
+  "choose": "ជ្រើសរើស",
+  "ready": "រួចរាល់",
+  "required": "ចាំបាច់"
 }
