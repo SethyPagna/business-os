@@ -82,14 +82,14 @@ const RETIRED_PAYMENT_METHODS = new Set(['pi pay', 'transfer'])
 const PAYMENT_METHOD_FALLBACK = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR']
 const SEARCH_DEBOUNCE_MS = 250
 
-type MobileRangePreset = 'all' | 'today' | '7d' | '30d' | 'month'
+type MobileRangePreset = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month'
 
 export function mobilePresetRange(preset: MobileRangePreset, now?: Date): DateTimeRange {
   return statsPresetRange(preset, now)
 }
 
 export function activeMobilePreset(range: DateTimeRange, now?: Date): MobileRangePreset | null {
-  for (const preset of ['all', 'today', '7d', '30d', 'month'] as const) {
+  for (const preset of ['all', 'today', 'yesterday', '7d', '30d', 'month'] as const) {
     const candidate = mobilePresetRange(preset, now)
     if (range.startDate === candidate.startDate && range.endDate === candidate.endDate) return preset
   }
@@ -346,6 +346,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   const mobilePresets: Array<{ id: MobileRangePreset; label: string }> = [
     { id: 'all', label: trh('all_time', 'All time') },
     { id: 'today', label: trh('today', 'Today') },
+    { id: 'yesterday', label: trh('yesterday', 'Yesterday') },
     { id: '7d', label: trh('last_7_days', 'Last 7 Days') },
     { id: '30d', label: trh('last_30_days', 'Last 30 Days') },
     { id: 'month', label: trh('this_month', 'This month') },
