@@ -673,7 +673,12 @@ assert.match(pos, /function getProductReadTransport\(\): Promise<typeof import\(
 assert.match(pos, /function getLookupTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/lookupTransport\.ts'\)> \{[\s\S]*import\('\.\.\/\.\.\/api\/lookupTransport\.ts'\)[\s\S]*const \{ getCategories \} = await getLookupTransport\(\)/, 'POS category options should use the narrow lookup transport instead of the full window.api registry')
 assert.match(pos, /let contactReadTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \| null = null[\s\S]*function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)>/, 'POS contact reads should lazy-load the narrow contact read transport after the delayed option gate')
 assert.match(pos, /let contactWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)> \| null = null[\s\S]*function getContactWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)>/, 'POS quick contact creates should lazy-load the narrow contact write transport on add intent')
-assert.match(pos, /let portalTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)> \| null = null[\s\S]*function getPortalTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)>/, 'POS membership lookup should lazy-load the narrow portal transport on membership intent')
+assert.match(pos, /async function lookupPosMembership\(membershipNumber: string\): Promise<MembershipInfo \| null> \{\s*const \{ lookupCustomerMembership \} = await getContactReadTransport\(\)\s*return lookupCustomerMembership\(membershipNumber\)/, 'POS membership intent should lazy-load the focused authenticated contact read transport')
+assert.match(pos, /function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \{\s*if \(!contactReadTransportPromise\) contactReadTransportPromise = import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)/, 'membership reads should share the lazy contact transport promise without an eager import')
+assert.doesNotMatch(pos, /portalTransport\.ts|lookupPortalMembership|from ['"]\.\.\/\.\.\/api\/contactReadTransport\.ts['"]/, 'POS membership lookup must not load the public portal transport or eagerly import contact reads')
+const membershipLookupTransport = contactReadTransport.match(/export function lookupCustomerMembership\(membershipNumber: string\): Promise<unknown> \{[\s\S]*?\n\}/)?.[0] || ''
+assert.match(membershipLookupTransport, /return apiFetch\('GET', `\/api\/customers\/membership\/\$\{encodeURIComponent\(membershipNumber\.trim\(\)\)\}`\)/, 'membership lookup must use authenticated apiFetch and encode the exact membership ID path segment')
+assert.doesNotMatch(membershipLookupTransport, /readContacts|readLocalContacts|mirror|[Cc]ache|\.catch\(|try\s*\{/, 'membership balances must not use contact-list caches, local mirrors, or swallow authorization and network failures')
 assert.match(pos, /let saleWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/saleWriteTransport\.ts'\)> \| null = null[\s\S]*function getSaleWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/saleWriteTransport\.ts'\)>/, 'POS checkout should lazy-load the narrow sale write transport only on Done intent')
 assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories|api\.getCustomers|api\.getDeliveryContacts|api\.lookupPortalMembership|api\.createCustomer|api\.createDeliveryContact|api\.createSale|getPosApi|missingPosApiMethod/, 'POS product, category, customer, delivery, membership reads, quick contact creates, and sale checkout should not wake app-api-methods during catalog, option, add, or checkout flows')
 assert.doesNotMatch(contactReadTransport, /import .*['"]\.\/(?:localMirrors|lazyLocalDb)\.ts['"]/, 'POS contact reads should not statically import mirror or IndexedDB helpers')
@@ -994,15 +999,15 @@ assert.match(
 assert.match(contactsShared, /LoadingWatchdog/, 'shared contact table should use retryable loading watchdog UI')
 assert.match(customers, /CustomerFormModal/, 'customer list should lazy-load the customer form modal')
 // Membership numbers are minted by the SERVER (cloudflare/src/lib/
-// membershipNumber.ts): the house format is LC-#####, and the sequence
-// gap-fills, so the next number is only knowable from the database. The form
+// membershipNumber.ts): new IDs are secure random eight-character values,
+// checked for collisions against the database. The form
 // used to pre-fill a browser-invented random LCMN- number, which -- because
 // the create route only mints when the submitted field is blank -- always won
-// over the real sequence. It must never compose one again.
+// over the server allocator. It must never compose one again.
 assert.doesNotMatch(customerFormModal, /generateCustomerMembershipNumber/, 'the customer form must not compose a membership number in the browser')
 assert.doesNotMatch(customerMembershipNumber, /export function generateCustomerMembershipNumber/, 'the membership helper must not mint numbers -- display and validation only')
-assert.match(customerMembershipNumber, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/, 'customer membership helper should carry the LC- house prefix')
-assert.match(customerFormModal, /CUSTOMER_MEMBERSHIP_PLACEHOLDER/, 'customer form should show the house format as a placeholder')
+assert.match(customerMembershipNumber, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/, 'customer membership helper should retain legacy LC- display compatibility')
+assert.match(customerFormModal, /CUSTOMER_MEMBERSHIP_PLACEHOLDER/, 'customer form should show a display-only membership placeholder')
 assert.match(customerFormModal, /membership_number_auto_hint/, 'the add-customer form should say the number is assigned on save')
 assert.match(loaders, /const DEFAULT_LOADER_TIMEOUT_MS = 20_000/, 'loader timeout should give slow pages enough time before failing first render')
 assert.match(appContext, /RUNTIME_RECOVERY_SESSION_KEY/, 'runtime mismatch recovery should guard against reload loops')
@@ -3318,7 +3323,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => lookupPosPortalMembership\(membershipNumber\),\s*label,\s*POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => lookupPosMembership\(membershipNumber\),\s*label,\s*POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
   'POS membership lookup should timeout slow membership reads',
 )
 assert.match(
@@ -3339,11 +3344,9 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => createPosSale\(saleData\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
   'POS checkout should timeout slow sale creation',
 )
-assert.match(
-  pos,
-  /membershipInfoRef\.current\?\.customer\?\.membership_number[\s\S]{0,260}return membershipInfoRef\.current/,
-  'POS membership lookup should keep the last confirmed membership panel visible through a transient same-member refresh failure',
-)
+const membershipLoadHandler = pos.match(/const loadMembershipInfo = useCallback\(async \([\s\S]*?\}, \[posCopy\]\)/)?.[0] || ''
+assert.match(membershipLoadHandler, /catch \(error\) \{\s*if \(!isTrackedRequestCurrent\(membershipRequestRef, requestId\)\) return null\s*setMembershipInfo\(null\)\s*setMembershipError\(getErrorMessage\(error, posCopy\('Membership lookup failed'\)\)\)\s*return null/, 'failed authenticated membership lookup must clear the stale balance, show the error, and return no member while ignoring superseded requests')
+assert.doesNotMatch(membershipLoadHandler, /membershipInfoRef|return membershipInfo\b|setMembershipError\(''\)[\s\S]*catch[\s\S]*setMembershipError\(''\)/, 'authorization and network failures must not reuse an earlier membership balance or report success')
 assert.match(
   pos,
   /withLoaderTimeout\(\s*\(\) => searchPosCustomers\(search\),\s*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
