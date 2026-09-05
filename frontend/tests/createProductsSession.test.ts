@@ -310,7 +310,8 @@ runTest('Add products exposes New and Have Already without exposing unfinished a
   assert.match(modalSource, /tr\('add_product'/)
   assert.match(modalSource, /tr\('existing_product'/)
   assert.match(productsSource, /initialMode=\{createSessionInitialMode\}/)
-  assert.match(productsSource, /onAddStock=.*setCreateSessionInitialMode\('existing'\)/s)
+  assert.match(productsSource, /onAdd=\{\(canAddProduct \|\| canAdjustInventoryStock\)[\s\S]*?setCreateSessionInitialMode\(canAddProduct \? 'new' : 'existing'\)/)
+  assert.doesNotMatch(productsSource, /onAddStock=/)
   assert.doesNotMatch(modalSource, />\s*(?:Transfer|Remove|Set quantity)\s*</i)
 })
 
