@@ -523,8 +523,9 @@ app.patch('/:id', async (c) => {
     revision: before.revision + 1 }
   if (before.parent_shift_id != null) {
     const parent = await readShiftById(db, before.parent_shift_id)
-    if (!parent?.closed_at || new Date(openedAt).getTime() < new Date(parent.closed_at).getTime()) {
-      return c.json({ error: 'Opening time cannot be before the parent shift closed.' }, 400)
+    const parentTerminatedAt = parent?.cancelled_at ?? parent?.closed_at
+    if (!parentTerminatedAt || new Date(openedAt).getTime() < new Date(parentTerminatedAt).getTime()) {
+      return c.json({ error: 'Opening time cannot be before the parent shift ended.' }, 400)
     }
   }
   if (before.has_reopened_child) {

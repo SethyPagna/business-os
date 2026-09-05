@@ -241,6 +241,18 @@ async function main() {
   assert.deepEqual(sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(grandchild.id), cancelledBeforeReplacement,
     'replacement opening leaves cancelled history unchanged')
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.open_after_cancel'").get().n, 1)
+  const replacementAmendResponse = await call('PATCH', `/${replacement.id}`, {
+    expected_revision: replacement.revision,
+    reason: 'Correct replacement opening note',
+    opening_note: 'Replacement float verified',
+  })
+  assert.equal(replacementAmendResponse.status, 200,
+    'a child opened after a cancelled parent remains amendable')
+  const replacementAmended = (await replacementAmendResponse.json()).shift
+  assert.equal(replacementAmended.opening_note, 'Replacement float verified')
+  assert.equal(replacementAmended.revision, replacement.revision + 1)
+  assert.deepEqual(sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(grandchild.id), cancelledBeforeReplacement,
+    'amending the replacement leaves its cancelled parent unchanged')
 
   user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: '{}' }
   assert.equal((await call('POST', `/${grandchild.id}/cancel`, {
