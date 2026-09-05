@@ -72,6 +72,18 @@ const analytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
 })
+// The drawer arithmetic now lives in lib/shiftReconciliation.ts and is shared
+// with the close routes and the app. Loaded REAL: this file's whole point is
+// that the message's numbers are the same numbers, so a stub would test the
+// stub. scripts/test-shift-reconciliation-pure.cjs drives it against SQLite.
+const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
+const reconciliationFor = (getDb, salesAnalytics) => loadReal('lib/shiftReconciliation.ts', {
+  './db': { getDb },
+  './nativeSaleChange': nativeSaleChange,
+  './salesAnalytics': salesAnalytics,
+  './paymentMethodRegistry': paymentMethodRegistry,
+})
+const shiftReconciliation = reconciliationFor(() => { throw new Error('no DB in this test') }, analytics)
 const telegram = loadReal('lib/telegram.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
@@ -79,6 +91,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': analytics,
+  './shiftReconciliation': shiftReconciliation,
 })
 
 const KHMER = /[ក-៿]/
@@ -154,7 +167,10 @@ const ORDER = [
   'Shop', 'Cashier', 'Branch', 'Shift', 'From', 'To',
   'Invoices', 'Cancelled', 'Edited',
   'Revenue', 'Item discount', 'Invoice discount', 'Gross sale',
-  'Other expense', 'Registered cash', 'Final amount', 'Unpaid credit',
+  // The eight drawer rows the owner asked for, in his order. Refunds and
+  // Courier are new: the message used to have no line for either, and
+  // silently blanked its own total whenever the window contained one.
+  'Opening', 'Cash sales', 'Refunds', 'Expenses', 'Courier', 'Expected', 'Unpaid credit',
 ]
 let cursor = -1
 for (const english of ORDER) {
@@ -186,11 +202,11 @@ assert.equal(valueOf('Item discount'), '$5.00')
 assert.equal(valueOf('Invoice discount'), '$3.00')
 assert.equal(valueOf('Gross sale'), '$218.00')
 assert.equal(valueOf('Unpaid credit'), '$18.00')
-assert.equal(valueOf('Other expense'), '$4.00')
+assert.equal(valueOf('Expenses'), '$4.00')
 // Both currencies, never folded together -- the drawer holds dollars and riel
 // side by side and merging them would invent an exchange rate.
-assert.ok(valueOf('Registered cash').includes('$50.00'), 'registered cash lost its dollars')
-assert.ok(/100,?000\s?៛/.test(valueOf('Registered cash')), `registered cash lost its riel: ${valueOf('Registered cash')}`)
+assert.ok(valueOf('Opening').includes('$50.00'), 'the opening float lost its dollars')
+assert.ok(/100,?000\s?៛/.test(valueOf('Opening')), `the opening float lost its riel: ${valueOf('Opening')}`)
 
 // From/To are the shift's own moments in the project's dd/mm/yyyy 24-hour
 // convention, rendered in business local time (UTC+7): 01:15Z is 08:15 local.
@@ -275,28 +291,28 @@ console.log('PASS breakdown: tax, refund, avg order, cost, profit, the discount 
 
 // --- 4. the final amount is what the lines under it say it is ---------------
 
-const finalLine = lineWith('Final amount')
+const finalLine = lineWith('Expected')
 const finalIndex = lines.indexOf(finalLine)
 const components = lines[finalIndex + 1].trim()
-// registered cash + collected - other expense = 50 + 210 - 4
-assert.equal(components, '$50.00 + $210.00 − $4.00')
-assert.equal(valueOf('Final amount'), '$256.00 · 100,000៛')
+// opening + cash sales - refunds - expenses - courier = 50 + 210 - 0 - 4 - 0
+assert.equal(components, '$50.00 + $210.00 − $0.00 − $4.00 − $0.00')
+assert.equal(valueOf('Expected'), '$256.00 · 100,000៛')
 // The caption is a phrase, so it gets a LINE EACH rather than a ` / ` pair --
 // joined, it is wider than a phone bubble and wraps into a mush.
-assert.equal(lines[finalIndex + 2].trim(), '100,000៛ + 0៛ − 0៛')
+assert.equal(lines[finalIndex + 2].trim(), '100,000៛ + 0៛ − 0៛ − 0៛ − 0៛')
 assert.ok(KHMER.test(lines[finalIndex + 3]), 'the formula caption has no Khmer line')
-assert.ok(lines[finalIndex + 3].includes('Recorded cash estimate'), 'drawer assumptions remain visible')
+assert.ok(lines[finalIndex + 3].includes('Expected drawer cash'), 'drawer assumptions remain visible')
 
 // THE ASSERTION THAT MATTERS: credit is not subtracted. Unpaid credit is
 // excluded from the collected figure already (it is awaiting_payment, so the
 // kernel never recognised it), and subtracting it again would remove $18 that
 // was never in the drawer to begin with. The owner's arithmetic ruling kept
 // this unchanged -- only the LINE'S PLACEMENT moved (checked next).
-assert.notEqual(valueOf('Final amount'), '$238.00', 'credit was subtracted from the final amount -- it was never collected, so it is not in the total to remove')
+assert.notEqual(valueOf('Expected'), '$238.00', 'credit was subtracted from the expected drawer -- it was never collected, so it is not in the total to remove')
 assert.equal(50 + 210 - 4, 256)
 
 // Counted vs expected, once the shift is closed.
-assert.equal(valueOf('Cash counted').includes('$256.00'), true)
+assert.equal(valueOf('Counted').includes('$256.00'), true)
 assert.equal(valueOf('Difference'), '$0.00 · 0៛')
 console.log('PASS arithmetic: final amount equals its own printed components; credit is not double-counted')
 
@@ -308,8 +324,8 @@ console.log('PASS arithmetic: final amount equals its own printed components; cr
 // diff of the rendered message.
 const unpaidIndex = lines.findIndex((line) => line.startsWith(`Unpaid credit${SEP}`))
 assert.ok(unpaidIndex >= 0, `the report has no "Unpaid credit" line:\n${report}`)
-assert.ok(unpaidIndex > finalIndex, `"Unpaid credit" (line index ${unpaidIndex}) must print AFTER "Final amount" (line index ${finalIndex}), not above it:\n${report}`)
-console.log('PASS placement: "Unpaid credit" prints below "Final amount", per the owner\'s review ruling')
+assert.ok(unpaidIndex > finalIndex, `"Unpaid credit" (line index ${unpaidIndex}) must print AFTER "Expected" (line index ${finalIndex}), not above it:\n${report}`)
+console.log('PASS placement: "Unpaid credit" prints below "Expected", per the owner\'s review ruling')
 
 // A short drawer shows the sign in front of the currency symbol.
 const short = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 251 }, FIGURES, NOW)
@@ -330,7 +346,7 @@ const rielReport = telegram.formatShiftReport('Shop', {
 }, NOW)
 assert.ok(rielReport.includes(`${lang.labeled('finalAmount', '133,700៛')}`))
 assert.ok(rielReport.includes(`${lang.labeled('difference', '$0.00 · 0៛')}`))
-assert.ok(rielReport.includes('283,700៛ + 0៛ − 150,000៛'))
+assert.ok(rielReport.includes('283,700៛ + 0៛ − 0៛ − 150,000៛ − 0៛'))
 assert.ok(rielReport.includes('Expense 6 — 6,000៛'))
 const cashOnly = telegram.summarizeShiftCash([
   { payment_method: 'Cash', amount_paid_usd: 10, amount_paid_khr: 2000, exchange_rate: 4000 },
@@ -376,6 +392,59 @@ const unknownCash = telegram.formatShiftReport('Shop', CLOSED, { ...FIGURES, cas
 assert.ok(unknownCash.includes(lang.labeled('finalAmount', '—')))
 assert.ok(unknownCash.includes(lang.labeled('difference', '—')))
 console.log('PASS cash: user riel example, separate tender currencies, bank exclusion, split payment and ambiguity guards')
+
+// --- 4b. refunds and courier payouts are components, not blanks ------------
+// The old formula was `opening + cash - expenses`, and it printed a dash for
+// Expected and Difference the moment the window held a refund or a delivery.
+// Both are now subtracted, and the two-line arithmetic under Expected has to
+// spell out all five parts -- otherwise the printed explanation stops adding
+// up to the printed total, which is the failure mode this file exists for.
+const RECONCILED = {
+  opening: { usd: 50, khr: 100000 },
+  cash_sales: { usd: 210, khr: 0 },
+  refunds: { usd: 12, khr: 0 },
+  expenses: { usd: 4, khr: 20000 },
+  courier: { usd: 3.5, khr: 0 },
+  expected: { usd: 240.5, khr: 80000 },
+  counted: { usd: 256, khr: 100000 },
+  difference: { usd: 15.5, khr: 20000 },
+  needs_review: false,
+  review_codes: [],
+}
+const full = telegram.formatShiftReport('Shop', CLOSED, { ...FIGURES, reconciliation: RECONCILED }, NOW)
+const fullLines = full.split('\n')
+const fullValue = (english) => {
+  const line = fullLines.find((row) => row.startsWith(`${english}${SEP}`))
+  assert.ok(line, `no "${english}" line:\n${full}`)
+  return line.slice(line.indexOf(': ') + 2)
+}
+assert.equal(fullValue('Refunds'), '$12.00')
+assert.equal(fullValue('Courier'), '$3.50')
+assert.equal(fullValue('Expected'), '$240.50 · 80,000៛')
+assert.notEqual(fullValue('Expected'), '$256.00 · 100,000៛', 'refunds and courier payouts are still missing from the expected drawer')
+assert.notEqual(fullValue('Expected'), '—', 'a shift with a refund must still get a number, not a dash')
+assert.equal(fullValue('Difference'), '+$15.50 · +20,000៛')
+const expectedAt = fullLines.findIndex((row) => row.startsWith(`Expected${SEP}`))
+assert.equal(fullLines[expectedAt + 1].trim(), '$50.00 + $210.00 − $12.00 − $4.00 − $3.50')
+assert.equal(fullLines[expectedAt + 2].trim(), '100,000៛ + 0៛ − 0៛ − 20,000៛ − 0៛')
+assert.equal(50 + 210 - 12 - 4 - 3.5, 240.5)
+// A review code blanks the two derived figures and says why, but the
+// components a cashier can still verify by hand keep printing.
+const flagged = telegram.formatShiftReport('Shop', CLOSED, {
+  ...FIGURES,
+  reconciliation: { ...RECONCILED, needs_review: true, review_codes: ['cash_method_unresolved'] },
+}, NOW)
+assert.ok(flagged.includes(lang.labeled('finalAmount', '—')))
+assert.ok(flagged.includes(lang.labeled('difference', '—')))
+assert.ok(flagged.includes(lang.labeled('shiftRefunds', '$12.00')), 'a flagged shift still shows what IS known')
+assert.ok(flagged.includes('Cash review needed'), 'and says a review is needed')
+// Cash recognition is the shared module's, by KIND: renaming the method must
+// not empty the drawer (the old code compared against two exact spellings).
+assert.deepEqual(telegram.summarizeShiftCash([{ payment_method: 'Cash USD', amount_paid_usd: 30, total_usd: 30 }]),
+  { usd: 30, khr: 0, needsReview: false }, 'a renamed cash method is still cash')
+assert.deepEqual(telegram.summarizeShiftCash([{ payment_method: 'Drawer', amount_paid_usd: 30, total_usd: 30 }],
+  { kinds: { drawer: 'cash' } }), { usd: 30, khr: 0, needsReview: false }, 'an explicit kind map settles any name')
+console.log('PASS reconciliation: refunds and courier payouts are printed components of Expected, the two arithmetic lines spell out all five parts, and a review code blanks only what it must')
 const longMessage = 'Cash សាច់ប្រាក់ 🍋‍🟩\n'.repeat(400)
 const parts = telegram.splitTelegramMessage(longMessage)
 assert.ok(parts.length > 1 && parts.every((part) => part.length <= 3900))
@@ -399,7 +468,7 @@ assert.ok(openTo.includes('still open'), 'an open shift must say so')
 assert.ok(KHMER.test(openTo), 'the "still open" note is English-only')
 // No closing count exists yet, so neither line may appear -- a "Difference" of
 // -$256.00 on every open till would read as an alarm.
-assert.ok(!openReport.includes('Cash counted'), 'an open shift must not print a closing count that has not been taken')
+assert.ok(!openLines.some((line) => line.startsWith(`Counted${SEP}`)), 'an open shift must not print a closing count that has not been taken')
 assert.ok(!openReport.includes('Difference'), 'an open shift must not print a difference against a count that does not exist')
 // Everything else still renders: this is a real report, not a placeholder.
 for (const english of ORDER) {
@@ -441,11 +510,11 @@ const empty = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_us
   paymentMethods: [], deliveryServices: [],
 }, NOW)
 assert.ok(!/NaN|undefined|null/.test(empty), `an empty shift produced a broken value:\n${empty}`)
-const emptyFinal = empty.split('\n').find((line) => line.startsWith(`Final amount${SEP}`))
+const emptyFinal = empty.split('\n').find((line) => line.startsWith(`Expected${SEP}`))
 // The float is still in the drawer and nothing was taken out of it.
 assert.ok(emptyFinal.endsWith(': $50.00 · 100,000៛'), `an untraded shift should still hold its float, got: ${emptyFinal}`)
 assert.ok(empty.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
-console.log('PASS empty shift: zeroes throughout, the float is still the final amount')
+console.log('PASS empty shift: zeroes throughout, the float is still the expected drawer')
 
 // --- 8. the command is wired and documented ----------------------------------
 
@@ -483,15 +552,17 @@ const stubDb = {
     }
   },
 }
+const stubAnalytics = loadReal('lib/salesAnalytics.ts', {
+  './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow,
+})
 const wired = loadReal('lib/telegram.ts', {
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
-  './salesAnalytics': loadReal('lib/salesAnalytics.ts', {
-    './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow,
-  }),
+  './salesAnalytics': stubAnalytics,
+  './shiftReconciliation': reconciliationFor(() => stubDb, stubAnalytics),
 })
 
 wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
@@ -521,8 +592,13 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
 
   const shopWide = { ...CLOSED, scope_mode: 'shop_wide' }
   assert.equal(telegram.shiftFilters(shopWide, NOW).cashierId, null, 'shop-wide reports do not narrow sales to the opener')
-  const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
-  assert.match(telegramSource, /if \(shift\.scope_mode !== 'shop_wide'\)[\s\S]{0,180}fees\.created_by = @createdBy/, 'shop-wide expenses do not narrow to the opener')
+  // The policy lives with the query that enforces it, which is now the shared
+  // reconciliation module rather than this message builder.
+  const reconSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'shiftReconciliation.ts'), 'utf8')
+  assert.match(reconSource, /if \(shift\.scope_mode !== 'shop_wide'\)[\s\S]{0,180}fees\.created_by = @createdBy/, 'shop-wide expenses do not narrow to the opener')
+  assert.match(reconSource, /fees\.branch_id = @branchId OR fees\.branch_id IS NULL/, 'a NULL-branch expense must count against the open drawer')
+  assert.ok(!/=== 'cash'/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')),
+    'the report must not compare a payment method against a literal name again')
 
   // An unknown day answers, rather than rendering an empty skeleton.
   statements.length = 0
@@ -534,6 +610,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow }),
+    './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow })),
   })
   return wiredEmpty.telegramCommandReply({}, '/shift 03/09/2026', NOW)
 }).then((reply) => {
@@ -582,7 +659,10 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
         if (/AS returned_cost_usd/.test(sql)) return { returned_cost_usd: 0 }
         if (/AS item_discount_usd/.test(sql)) return { item_discount_usd: 5 }
         if (/AS cancelled/.test(sql)) return { invoices: 12, cancelled: 1, edited: 2 }
-        if (/SELECT id FROM returns/.test(sql)) return undefined
+        // Refunds issued in the window, and courier payouts, each from its own
+        // query -- distinct values so a crossed source shows on the line.
+        if (/FROM returns/.test(sql)) return { usd: 12, khr: 0 }
+        if (/delivery_actual_cost_khr/.test(sql)) return { usd: 3.5, khr: 0 }
         throw new Error(`unexpected .get in the mapping stub:\n${sql}`)
       }
       return {
@@ -612,6 +692,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => mappingDb }, './businessDateWindow': businessDateWindow }),
+    './shiftReconciliation': reconciliationFor(() => mappingDb, loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => mappingDb }, './businessDateWindow': businessDateWindow })),
   })
   return wiredMapping.telegramCommandReply({}, '/shift 04/09/2026', NOW)
 }).then((reply) => {
@@ -624,7 +705,11 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // Each of these is a DIFFERENT number, so a line reading from the wrong
   // kernel column cannot coincidentally match.
   assert.equal(mappedValue('Revenue'), '$210.00', 'revenue is recognized net sales minus refunds')
-  assert.equal(mappedValue('Other expense'), '$4.00', 'expense total comes from the grouped query')
+  assert.equal(mappedValue('Expenses'), '$4.00', 'expense total comes from the grouped query')
+  assert.equal(mappedValue('Refunds'), '$12.00', 'refunds issued in the window come from the returns query, not from the kernel refund figure')
+  assert.equal(mappedValue('Courier'), '$3.50', 'courier payouts come from the guarded delivery-cost query')
+  // opening 50 + cash 0 - refunds 12 - expenses 4 - courier 3.50
+  assert.equal(mappedValue('Expected'), '$30.50 · 100,000៛', 'the expected drawer is the five components this stub supplied, and nothing else')
   assert.equal(mappedValue('Tax'), '$7.00', 'the tax line must read tax_usd')
   assert.equal(mappedValue('Refund'), '$12.00', 'the refund line must read refund_usd, not the unpaid credit')
   assert.equal(mappedValue('Unpaid credit'), '$18.00', 'and unpaid credit must still read pending_revenue_usd')
@@ -650,6 +735,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
       {key:'telegram_chat_id',value:'123'}, {key:'telegram_automation_enabled',value:'1'},
     ]})}) },
     './businessDateWindow':businessDateWindow,'./telegramLang':lang,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,'./salesAnalytics':analytics,
+    './shiftReconciliation': shiftReconciliation,
   })
   const originalFetch=global.fetch; const sent=[]
   try {

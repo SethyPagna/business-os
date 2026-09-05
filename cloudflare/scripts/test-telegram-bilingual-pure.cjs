@@ -188,6 +188,15 @@ console.log(`PASS coverage: all ${new Set(scanned.map(([, name]) => name)).size}
 
 // lib/telegram.ts reads the sales kernel for the shift report (S4-7).
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow })
+// The drawer arithmetic and its labels are shared with the close routes and
+// the app, in lib/shiftReconciliation.ts. Bound to the SAME stub db as the
+// kernel so the report goes down its real path here too.
+const reconciliationFor = (getDb, analytics) => loadReal('lib/shiftReconciliation.ts', {
+  './db': { getDb },
+  './nativeSaleChange': nativeSaleChange,
+  './salesAnalytics': analytics,
+  './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
+})
 const telegram = loadReal('lib/telegram.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
@@ -195,6 +204,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': salesAnalytics,
+  './shiftReconciliation': reconciliationFor(() => { throw new Error('no DB in this test') }, salesAnalytics),
 })
 
 const bilingualOk = (line) => {
@@ -358,6 +368,7 @@ const stubDb = {
     }
   },
 }
+const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow })
 const wired = loadReal('lib/telegram.ts', {
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
@@ -366,7 +377,8 @@ const wired = loadReal('lib/telegram.ts', {
   './nativeSaleChange': nativeSaleChange,
   // The real kernel over the same stub db, so `/shift` goes down its actual
   // query path here rather than a hand-written imitation of it.
-  './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow }),
+  './salesAnalytics': stubAnalytics,
+  './shiftReconciliation': reconciliationFor(() => stubDb, stubAnalytics),
 })
 const env = { TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-secret' }
 const lastSent = () => sent[sent.length - 1].body.text

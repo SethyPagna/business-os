@@ -10,6 +10,14 @@ import {
   getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesTotals,
   shiftWindowWhere, type SalesFilters,
 } from './salesAnalytics'
+// The drawer arithmetic is NOT defined here any more. lib/shiftReconciliation.ts
+// owns it, and the close routes, the current/history reads and this message all
+// call the same function -- see the header note there for what changed and why.
+import {
+  computeShiftReconciliation, loadShiftReconciliation, shiftExpenses, shiftFilters, summarizeShiftCash,
+  type ShiftReconciliation,
+} from './shiftReconciliation'
+export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
 
 export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stock_out'
@@ -41,6 +49,7 @@ function cleanLine(value: unknown, max = 300): string {
 // grow a third way of printing a dollar amount.
 const round2 = (value: number) => Math.round(value * 100) / 100
 const usd = (value: unknown) => `$${round2(Number(value) || 0).toFixed(2)}`
+const riel = (value: unknown) => `${Math.round(Number(value) || 0).toLocaleString('en-US')}៛`
 function money(usd: unknown, khr: unknown, separator = ' · '): string {
   const usdValue = Number(usd) || 0; const khrValue = Number(khr) || 0; const parts: string[] = []
   if (usdValue) parts.push(`$${usdValue.toFixed(2)}`)
@@ -373,60 +382,14 @@ export type ShiftReportFigures = {
   // Native tender currencies, never USD-equivalent sales totals. Null/absent
   // means the source cannot establish a drawer balance, not zero cash.
   cash?: { usd: number; khr: number; needsReview: boolean }
+  // The drawer reconciliation, from lib/shiftReconciliation.ts. Optional only
+  // so a caller with figures but no database (the pure test) still renders:
+  // when it is absent the SAME pure function derives one from the fields
+  // above, so there is still exactly one formula in the codebase.
+  reconciliation?: ShiftReconciliation
   expenseDetails?: { label: string; usd: number; khr: number }[]
   paymentMethods: { method: string; count: number; collectedUsd: number }[]
   deliveryServices: { name: string; deliveries: number; chargedUsd: number; costUsd: number; marginUsd: number; costRecorded: number }[]
-}
-
-type ShiftTenderRow = {
-  payment_method?: unknown; payment_details?: unknown; amount_paid_usd?: unknown; amount_paid_khr?: unknown
-  change_usd?: unknown; change_khr?: unknown; change_is_actual?: unknown; change_exchange_rate?: unknown
-  sale_status?: unknown; total_usd?: unknown; exchange_rate?: unknown
-}
-
-/** Recorded tender only. Old change columns contain equivalent currencies,
- * not the actual currency handed back. Only server-marked, revalidated native
- * change is subtracted; historical/invalid change keeps the review guard. */
-export function summarizeShiftCash(rows: ShiftTenderRow[]) {
-  let usd = 0; let khr = 0; let needsReview = false
-  const amount = (value: unknown) => {
-    const n = Number(value ?? 0)
-    if (!Number.isFinite(n) || n < 0) { needsReview = true; return 0 }
-    return n
-  }
-  for (const row of rows) {
-    const paidUsd = amount(row.amount_paid_usd); const paidKhr = amount(row.amount_paid_khr)
-    if (!(paidUsd || paidKhr) && row.sale_status !== 'awaiting_payment' && Number(row.total_usd) > 0) needsReview = true
-    let details: { method?: unknown; amount_usd?: unknown; amount_khr?: unknown }[]
-    try {
-      const parsed = typeof row.payment_details === 'string' ? JSON.parse(row.payment_details) : row.payment_details
-      if (parsed != null && !Array.isArray(parsed)) throw new Error('Invalid payment details')
-      details = parsed?.length ? parsed : [{ method: row.payment_method, amount_usd: paidUsd, amount_khr: paidKhr }]
-      if (details.length > 12 || details.some((entry) => !entry || typeof entry !== 'object')) throw new Error('Invalid payment details')
-    } catch { needsReview = true; continue }
-    let detailUsd = 0; let detailKhr = 0
-    for (const detail of details) {
-      const method = String(detail.method ?? '').trim().toLowerCase()
-      const partUsd = amount(detail.amount_usd); const partKhr = amount(detail.amount_khr)
-      detailUsd += partUsd; detailKhr += partKhr
-      if ((partUsd || partKhr) && (!method || method.includes(' + '))) { needsReview = true; continue }
-      if (method === 'cash' || method === 'សាច់ប្រាក់') { usd += partUsd; khr += partKhr }
-    }
-    if (Math.abs(detailUsd - paidUsd) > 0.011 || Math.abs(detailKhr - paidKhr) > 1) needsReview = true
-    const rate = Number(row.exchange_rate)
-    if (paidKhr && !(Number.isFinite(rate) && rate > 0)) needsReview = true
-    const change = resolveStoredNativeSaleChange({
-      changeIsActual: row.change_is_actual,
-      changeUsd: row.change_usd,
-      changeKhr: row.change_khr,
-      changeExchangeRate: row.change_exchange_rate,
-    })
-    if (change.kind === 'actual') { usd -= change.usd; khr -= change.khr }
-    else if (change.kind === 'unknown') needsReview = true
-    if (row.total_usd != null && paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) > Number(row.total_usd) + 0.011
-      && change.kind !== 'actual') needsReview = true
-  }
-  return { usd: round2(usd), khr: Math.round(khr), needsReview }
 }
 
 /**
@@ -503,34 +466,44 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     )
   }
 
+  // What should be in the drawer, and the five moving parts under it, so the
+  // number can be checked against the lines above without arithmetic in the
+  // reader's head and a disagreement points at a component rather than at
+  // "the report is wrong". ONE definition, shared with the close routes and
+  // the shift screen: see lib/shiftReconciliation.ts.
+  const recon = figures.reconciliation ?? computeShiftReconciliation({
+    opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
+    cashSales: figures.cash ?? { usd: 0, khr: 0 },
+    refunds: { usd: 0, khr: 0 },
+    expenses: { usd: figures.otherExpenseUsd, khr: figures.otherExpenseKhr },
+    courier: { usd: 0, khr: 0 },
+    counted: { usd: shift.closing_counted_usd, khr: shift.closing_counted_khr },
+    reviewCodes: !figures.cash || figures.cash.needsReview ? ['tender_incomplete'] : [],
+  })
+  const cashKnown = !recon.needs_review
   lines.push(
     '━━━━━━━━━━━━━━━━━━',
-    labeled('otherExpense', money(figures.otherExpenseUsd, figures.otherExpenseKhr)),
-    labeled('registeredCash', money(shift.opening_float_usd, shift.opening_float_khr)),
+    labeled('registeredCash', money(recon.opening.usd, recon.opening.khr)),
+    labeled('recordedCashReceipts', cashKnown ? money(recon.cash_sales.usd, recon.cash_sales.khr) : '—'),
+    labeled('shiftRefunds', money(recon.refunds.usd, recon.refunds.khr)),
+    labeled('otherExpense', money(recon.expenses.usd, recon.expenses.khr)),
+    labeled('courierPaid', money(recon.courier.usd, recon.courier.khr)),
+    labeled('finalAmount', cashKnown ? money(recon.expected.usd, recon.expected.khr) : '—'),
   )
-
-  // What should be in the drawer. Printed with its two moving parts under it,
-  // so the number can be checked against the lines above without arithmetic
-  // in the reader's head, and so a disagreement points at a component rather
-  // than at "the report is wrong".
-  const cash = figures.cash
-  const finalUsd = round2((Number(shift.opening_float_usd) || 0) + (cash?.usd || 0) - figures.otherExpenseUsd)
-  const finalKhr = Math.round((Number(shift.opening_float_khr) || 0) + (cash?.khr || 0) - figures.otherExpenseKhr)
-  const cashKnown = !!cash && !cash.needsReview
-  lines.push(labeled('recordedCashReceipts', cashKnown ? money(cash.usd, cash.khr) : '—'))
-  lines.push(labeled('finalAmount', cashKnown ? money(finalUsd, finalKhr) : '—'))
   if (cashKnown) {
-    lines.push(`     ${usd(shift.opening_float_usd)} + ${usd(cash.usd)} − ${usd(figures.otherExpenseUsd)}`,
-      `     ${Math.round(shift.opening_float_khr).toLocaleString('en-US')}៛ + ${cash.khr.toLocaleString('en-US')}៛ − ${Math.round(figures.otherExpenseKhr).toLocaleString('en-US')}៛`)
+    lines.push(
+      `     ${usd(recon.opening.usd)} + ${usd(recon.cash_sales.usd)} − ${usd(recon.refunds.usd)} − ${usd(recon.expenses.usd)} − ${usd(recon.courier.usd)}`,
+      `     ${riel(recon.opening.khr)} + ${riel(recon.cash_sales.khr)} − ${riel(recon.refunds.khr)} − ${riel(recon.expenses.khr)} − ${riel(recon.courier.khr)}`,
+    )
   }
-  lines.push(bi('Recorded cash estimate; expenses assumed paid from drawer.', 'សាច់ប្រាក់ប៉ាន់ស្មានតាមកំណត់ត្រា ដោយចាត់ចំណាយថាបានបង់ពីថតសាច់ប្រាក់។'))
+  lines.push(bi('Expected drawer cash; expenses, refunds and courier payouts assumed paid from the drawer.', 'សាច់ប្រាក់ត្រូវមានក្នុងថត ដោយចាត់ចំណាយ ការសងប្រាក់ និងថ្លៃអ្នកដឹកជញ្ជូនថាបានបង់ពីថត។'))
   lines.push(bi('Sale-time window; later settlements are not a cash-flow ledger.', 'តាមពេលកត់ត្រាការលក់ មិនមែនបញ្ជីលំហូរសាច់ប្រាក់នៃការទូទាត់នៅពេលក្រោយទេ។'))
-  if (!cashKnown) lines.push(bi('Cash review needed: incomplete tender, change, refunds, courier costs or report limit.', 'ត្រូវពិនិត្យសាច់ប្រាក់៖ កំណត់ត្រាទូទាត់ ប្រាក់អាប់ ប្រាក់សង ថ្លៃដឹក ឬដែនកំណត់របាយការណ៍។'))
+  if (!cashKnown) lines.push(bi('Cash review needed: incomplete tender, change, or an unrecognised cash payment method.', 'ត្រូវពិនិត្យសាច់ប្រាក់៖ កំណត់ត្រាទូទាត់ ប្រាក់អាប់ ឬវិធីទូទាត់សាច់ប្រាក់ដែលមិនស្គាល់។'))
 
-  // Printed AFTER Final amount, deliberately: the owner's ruling was that a
-  // line above a total reads as an input to it, and unpaid credit is not one
-  // (see the section comment above). Below the total it reads as what it
-  // is -- money owed, not money that belongs in tonight's drawer count.
+  // Printed AFTER Expected, deliberately: the owner's ruling was that a line
+  // above a total reads as an input to it, and unpaid credit is not one (see
+  // the section comment above). Below the total it reads as what it is --
+  // money owed, not money that belongs in tonight's drawer count.
   lines.push(labeled('unpaidCredit', usd(figures.creditUsd)))
 
   // The closing count only exists once the employee has ended the shift by
@@ -538,10 +511,10 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // printing "Difference: -$256.00" for a shift still in progress would read
   // as a missing-cash alarm on every open till.
   if (shift.closed_at) {
-    lines.push(labeled('cashCounted', money(shift.closing_counted_usd, shift.closing_counted_khr)))
+    lines.push(labeled('cashCounted', money(recon.counted.usd, recon.counted.khr)))
     const signed = (n: number, format: (value: number) => string) => `${n < 0 ? '−' : n > 0 ? '+' : ''}${format(Math.abs(n))}`
-    lines.push(labeled('difference', cashKnown
-      ? `${signed(round2((Number(shift.closing_counted_usd) || 0) - finalUsd), usd)} · ${signed(Math.round((Number(shift.closing_counted_khr) || 0) - finalKhr), (n) => `${n.toLocaleString('en-US')}៛`)}`
+    lines.push(labeled('difference', cashKnown && recon.difference.usd != null && recon.difference.khr != null
+      ? `${signed(recon.difference.usd, usd)} · ${signed(recon.difference.khr, riel)}`
       : '—'))
   }
 
@@ -577,20 +550,6 @@ const SHIFT_COLUMNS = `shift_code, scope_mode, user_id, user_name, branch_id, br
   closed_at, closing_counted_usd, closing_counted_khr,
   cancelled_at, cancelled_by_user_name, cancel_reason`
 
-/** The filter that turns "this shift" into a query the sales kernel accepts. */
-export function shiftFilters(shift: ShiftReportSession, nowMs: number): SalesFilters {
-  return {
-    createdFrom: shift.opened_at,
-    // An open shift is reported up to now. shiftWindowBound normalises both.
-    createdTo: shift.closed_at || shift.cancelled_at || new Date(nowMs).toISOString(),
-    // A shop-wide shift belongs to the branch, not only to the employee who
-    // opened it. Per-account retains the original cashier boundary.
-    cashierId: shift.scope_mode === 'shop_wide' ? null : shift.user_id,
-    // Falsy (null) branch is not a filter -- see the section comment.
-    branchId: shift.branch_id ?? null,
-  }
-}
-
 /**
  * Invoice counts. Deliberately NOT through getSalesTotals: the kernel's
  * default guard hides cancelled sales, and "how many receipts were voided" is
@@ -619,70 +578,16 @@ async function shiftInvoiceCounts(env: Env, shift: ShiftReportSession, nowMs: nu
   return { invoices: Number(row?.invoices || 0), cancelled: Number(row?.cancelled || 0), edited: Number(row?.edited || 0) }
 }
 
-/**
- * Expenses paid out of THIS drawer: recorded inside the window, and by the
- * same employee only under per-account policy. `created_at` shares
- * sales' timestamp shape; `fee_date` is a bare day and could not tell two
- * shifts on one date apart.
- */
-export async function shiftExpenses(env: Env, shift: ShiftReportSession, nowMs: number) {
-  const { clauses, params } = shiftWindowWhere('fees', shiftFilters(shift, nowMs))
-  // fees has no cashier_id -- the equivalent column is created_by. Drop the
-  // clause the sales table owns and add the fees one.
-  const feeClauses = clauses.filter((clause) => !clause.includes('cashier_id'))
-  delete params.cashierId
-  if (shift.scope_mode !== 'shop_wide') {
-    feeClauses.push('fees.created_by = @createdBy')
-    params.createdBy = shift.user_id
-  }
-  if (shift.branch_id) {
-    feeClauses.push('fees.branch_id = @branchId')
-    params.branchId = shift.branch_id
-  }
-  const rows = await getDb(env).prepare(`
-    SELECT COALESCE(NULLIF(TRIM(label), ''), fee_type, 'Expense') AS label,
-      COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr,
-      SUM(SUM(amount_usd)) OVER () AS overall_usd, SUM(SUM(amount_khr)) OVER () AS overall_khr
-    FROM fees
-    WHERE ${feeClauses.join(' AND ')}
-    GROUP BY 1 ORDER BY usd DESC, khr DESC, label LIMIT 9
-  `).all<{ label: string; usd: number; khr: number; overall_usd: number; overall_khr: number }>(params)
-  const total = { usd: round2(Number(rows[0]?.overall_usd || 0)), khr: Math.round(Number(rows[0]?.overall_khr || 0)) }
-  const details = rows.slice(0, 8).map(({ label, usd, khr }) => ({ label, usd: Number(usd), khr: Number(khr) }))
-  if (rows.length > 8) details.push({ label: bi('Other expenses', 'ចំណាយផ្សេងទៀត'),
-    usd: round2(total.usd - details.reduce((n, r) => n + r.usd, 0)), khr: Math.round(total.khr - details.reduce((n, r) => n + r.khr, 0)) })
-  return { ...total, details }
-}
-
-async function shiftCash(env: Env, shift: ShiftReportSession, nowMs: number) {
-  const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
-  if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
-  clauses.push("COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'")
-  const rows = await getDb(env).prepare(`SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr,
-      change_usd, change_khr, change_is_actual, change_exchange_rate, sale_status, total_usd, exchange_rate
-    FROM sales WHERE ${clauses.join(' AND ')} ORDER BY id LIMIT 5001`).all<ShiftTenderRow>(params)
-  const cash = summarizeShiftCash(rows.slice(0, 5000))
-  // Bound memory and refuse a partial drawer total. Refund tender currency and
-  // later settlement timing are not represented by this sale-window estimate.
-  if (rows.length > 5000) cash.needsReview = true
-  const refunds = shiftWindowWhere('returns', shiftFilters(shift, nowMs))
-  if (shift.branch_id) { refunds.clauses.push('returns.branch_id = @branchId'); refunds.params.branchId = shift.branch_id }
-  const refund = await getDb(env).prepare(`SELECT id FROM returns WHERE ${refunds.clauses.join(' AND ')}
-    AND COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-    AND (COALESCE(total_refund_usd, 0) > 0 OR COALESCE(total_refund_khr, 0) > 0) LIMIT 1`).get<{ id: number }>(refunds.params)
-  if (refund?.id) cash.needsReview = true
-  return cash
-}
-
 async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number): Promise<ShiftReportFigures> {
   const filters = shiftFilters(shift, nowMs)
-  const [totals, counts, expenses, paymentMethods, deliveries, cash] = await Promise.all([
+  const overflowLabel = bi('Other expenses', 'ចំណាយផ្សេងទៀត')
+  const [totals, counts, expenses, paymentMethods, deliveries, reconciliation] = await Promise.all([
     getSalesTotals(env, filters),
     shiftInvoiceCounts(env, shift, nowMs),
-    shiftExpenses(env, shift, nowMs),
+    shiftExpenses(env, shift, nowMs, { overflowLabel }),
     getPaymentMethodBreakdown(env, filters),
     getDeliveryContactTotals(env, filters),
-    shiftCash(env, shift, nowMs),
+    loadShiftReconciliation(env, shift, nowMs, { overflowLabel }),
   ])
   return {
     invoices: counts.invoices,
@@ -725,7 +630,11 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     otherExpenseUsd: expenses.usd,
     otherExpenseKhr: expenses.khr,
     collectedUsd: totals.collected_total_usd,
-    cash: { ...cash, needsReview: cash.needsReview || totals.refund_usd !== 0 || totals.delivery_sale_count > 0 },
+    // Refunds and courier payouts no longer suppress the estimate: they are
+    // subtracted components of it now (lib/shiftReconciliation.ts), so a shop
+    // that takes one return a day stops seeing a permanent dash.
+    cash: { ...reconciliation.cash_sales, needsReview: reconciliation.needs_review },
+    reconciliation,
     expenseDetails: expenses.details,
     paymentMethods: paymentMethods.map((row) => ({ method: row.payment_method, count: row.tx_count, collectedUsd: row.collected_usd })),
     deliveryServices: deliveries.map((row) => ({

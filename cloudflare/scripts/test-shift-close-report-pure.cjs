@@ -302,6 +302,9 @@ async function main() {
   const settingsOnly = {
     prepare: () => ({ async get() { return undefined }, async all() { return [] } }),
   }
+  const closeAnalytics = loadReal('lib/salesAnalytics.ts', {
+    './db': { getDb: () => settingsOnly }, './businessDateWindow': businessDateWindow,
+  })
   const telegram = loadReal('lib/telegram.ts', {
     './db': { getDb: () => settingsOnly },
     './businessDateWindow': businessDateWindow,
@@ -311,8 +314,15 @@ async function main() {
     // stub of that rule would test the stub. Without the key loadReal throws.
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
-    './salesAnalytics': loadReal('lib/salesAnalytics.ts', {
-      './db': { getDb: () => settingsOnly }, './businessDateWindow': businessDateWindow,
+    './salesAnalytics': closeAnalytics,
+    // The drawer arithmetic the report prints is the SAME module the close
+    // route reconciles with (lib/shiftReconciliation.ts), bound to the same
+    // handle -- a stub here would let the message and the close disagree.
+    './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', {
+      './db': { getDb: () => settingsOnly },
+      './nativeSaleChange': nativeSaleChange,
+      './salesAnalytics': closeAnalytics,
+      './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
     }),
   })
   const realFetch = globalThis.fetch

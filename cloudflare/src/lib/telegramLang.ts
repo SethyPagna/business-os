@@ -167,12 +167,22 @@ const LABELS = {
   itemDiscount: { en: 'Item discount', km: 'បញ្ចុះតម្លៃលើមុខទំនិញ' },
   invoiceDiscount: { en: 'Invoice discount', km: 'បញ្ចុះតម្លៃលើវិក្កយបត្រ' },
   grossSale: { en: 'Gross sale', km: 'ការលក់សរុប' },
-  otherExpense: { en: 'Other expense', km: 'ចំណាយផ្សេងៗ' },
-  registeredCash: { en: 'Registered cash', km: 'សាច់ប្រាក់ដែលបានចុះបញ្ជី' },
-  cashCounted: { en: 'Cash counted', km: 'សាច់ប្រាក់ដែលបានរាប់' },
-  recordedCashReceipts: { en: 'Recorded cash received', km: 'សាច់ប្រាក់ទទួលបានតាមកំណត់ត្រា' },
+  // The eight drawer-reconciliation rows, in the order the owner reads them:
+  // Opening, Cash sales, Refunds, Expenses, Courier, Expected, Counted,
+  // Difference. They are computed by lib/shiftReconciliation.ts -- ONE
+  // definition shared with the close routes and the shift screen -- and the
+  // labels are deliberately identical to the app's own
+  // (shift_recon_* / refunds / fees / courier / shift_difference in
+  // en.json), because a cashier compares this message against that screen.
+  registeredCash: { en: 'Opening', km: 'ដើមវេន' },
+  recordedCashReceipts: { en: 'Cash sales', km: 'ការលក់ជាសាច់ប្រាក់' },
+  shiftRefunds: { en: 'Refunds', km: 'ការសងប្រាក់' },
+  otherExpense: { en: 'Expenses', km: 'ចំណាយ' },
+  // What couriers were actually paid out of the drawer in the window.
+  courierPaid: { en: 'Courier', km: 'អ្នកដឹកជញ្ជូន' },
+  finalAmount: { en: 'Expected', km: 'ត្រូវមាន' },
+  cashCounted: { en: 'Counted', km: 'បានរាប់' },
   difference: { en: 'Difference', km: 'ភាពខុសគ្នា' },
-  finalAmount: { en: 'Final amount', km: 'ចំនួនទឹកប្រាក់ចុងក្រោយ' },
   // Reuses the app's own term for pending revenue -- copied verbatim from
   // en.json/km.json's `rpt_pending_credit` (the Sales reports' "Unpaid
   // credit" column) rather than inventing new wording for the same figure.
