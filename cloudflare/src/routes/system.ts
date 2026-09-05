@@ -693,6 +693,12 @@ app.post('/finalize-migration', async (c) => {
 
     try {
       const result = await repair.applyLegacySubtotalRepair(db, plan)
+      // A verified replay also heals a lost post-commit refresh. This repair
+      // changes sales only; do not invalidate inventory or announce stock work.
+      c.executionCtx.waitUntil(Promise.all([
+        bumpVersion(c.env, 'sales'),
+        broadcast(c.env, 'sales', { action: 'update', repair: LEGACY_SUBTOTAL_REPAIR_STEP }),
+      ]))
       return c.json({
         success: true,
         outcome: result.outcome,

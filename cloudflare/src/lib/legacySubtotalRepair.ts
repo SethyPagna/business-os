@@ -258,8 +258,9 @@ async function sha256(value: string): Promise<string> {
 // them rather than silently signing a truncated snapshot.
 export const LEGACY_SUBTOTAL_PREVIEW_SQL = `SELECT
   s.id, substr(s.receipt_number,1,161) AS receipt_number,
-  s.created_at, s.updated_at, date(datetime(s.created_at,'+7 hours')) AS business_date,
-  substr(s.notes,1,2001) AS notes, COALESCE(s.sale_status,'completed') AS sale_status,
+  substr(s.created_at,1,25) AS created_at, substr(s.updated_at,1,25) AS updated_at,
+  date(datetime(s.created_at,'+7 hours')) AS business_date,
+  substr(s.notes,1,2001) AS notes, substr(COALESCE(s.sale_status,'completed'),1,41) AS sale_status,
   ${MONEY_FIELDS.filter((field) => !field.startsWith('item_')).map((field) => {
     const column = field === 'target_subtotal_usd' ? 'total_usd' : field.replace(/^expected_/, '')
     return `printf('%.4f',COALESCE(s.${column},0)) AS ${field}`
