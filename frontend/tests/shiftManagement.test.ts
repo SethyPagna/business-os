@@ -4,14 +4,15 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   amendShift,
+  closeShift,
   closeShiftById,
   orderShiftRows,
   parseShiftCount,
   reopenShift,
-  shiftCashDifference,
   shiftLocalDateTimeToIso,
   type AmendShiftInput,
   type Shift,
+  type ShiftReconciliation,
 } from '../src/api/shiftTransport.ts'
 import {
   __resetApiHealthForTests,
@@ -29,11 +30,13 @@ const profile = read('src/components/users/UserProfileModal.tsx')
 const panel = read('src/components/shifts/ShiftHistoryPanel.tsx')
 const modal = read('src/components/shifts/ShiftHistoryModal.tsx')
 const summary = read('src/components/shifts/ShiftSummary.tsx')
+const breakdown = read('src/components/shifts/ShiftCashBreakdown.tsx')
 const currentSummary = read('src/components/shifts/CurrentShiftSummary.tsx')
 const sales = read('src/components/sales/Sales.tsx')
 const fees = read('src/components/fees/FeesPage.tsx')
 const reports = read('src/components/sales/ReportsHub.tsx')
 const pos = read('src/components/pos/POS.tsx')
+const gate = read('src/components/pos/ShiftGate.tsx')
 
 let checks = 0
 const ok = (value: unknown, message: string) => { assert.ok(value, message); checks += 1 }
@@ -78,8 +81,37 @@ const ordered = orderShiftRows([
 ])
 assert.deepEqual(ordered.map((row) => row.id), [1, 3, 2])
 checks += 1
-assert.deepEqual(shiftCashDifference(fixture(2, '2026-09-05', '2026-09-05T03:00:00.000Z', '2026-09-05T09:00:00.000Z')), { usd: 3.25, khr: 35_000 })
-checks += 1
+// N5. The drawer difference is counted MINUS EXPECTED, and expected is the
+// server's one reconciliation (opening + cash sales − refunds − expenses −
+// courier). "counted − opening float" was never the shortage a cashier is
+// asked about: on a normal trading day with $40 of cash sales it reports a
+// $3.25 surplus for a drawer that is $28 short. The client reads the server
+// figure and never recomputes it -- a second implementation here is exactly
+// how the app and the Telegram report would come to disagree about one drawer.
+const reconciled: ShiftReconciliation = {
+  opening: { usd: 10.25, khr: 100_000 },
+  cash_sales: { usd: 40, khr: 0 },
+  refunds: { usd: 5, khr: 0 },
+  expenses: { usd: 1.75, khr: 20_000 },
+  courier: { usd: 2, khr: 0 },
+  expected: { usd: 41.5, khr: 80_000 },
+  counted: { usd: 13.5, khr: 135_000 },
+  difference: { usd: -28, khr: 55_000 },
+  needs_review: false,
+  review_codes: [],
+}
+const closedRow = fixture(2, '2026-09-05', '2026-09-05T03:00:00.000Z', '2026-09-05T09:00:00.000Z')
+// The old formula, run on this very row: 13.50 counted minus a 10.25 float
+// is a $3.25 SURPLUS, where the reconciled drawer is $28 SHORT. Both cannot
+// be put in front of a cashier, so the client-side subtraction was deleted
+// rather than repointed -- nothing here recomputes what the server settled.
+const openingFloatFormula = Number((closedRow.closing_counted_usd! - closedRow.opening_float_usd).toFixed(2))
+assert.equal(openingFloatFormula, 3.25)
+assert.notEqual(openingFloatFormula, reconciled.difference.usd)
+assert.deepEqual(reconciled.difference, { usd: -28, khr: 55_000 })
+ok(!/shiftCashDifference\(/.test(transport),
+  'the transport reads the server difference and computes no drawer figure of its own')
+checks += 3
 assert.equal(shiftLocalDateTimeToIso('2026-09-04T22:30'), '2026-09-04T15:30:00.000Z')
 checks += 1
 assert.throws(() => shiftLocalDateTimeToIso(''), /required/i)
@@ -120,8 +152,12 @@ ok(dateIndex >= 0 && idIndex > dateIndex, 'every row leads with date and appends
 for (const token of ['fmtClock24(shift.opened_at)', "fmtClock24(shift.closed_at)", 'shift.user_name', 'opening_float_usd', 'opening_float_khr', 'closing_counted_usd', 'closing_counted_khr']) {
   ok(summary.includes(token), `default row renders ${token}`)
 }
-ok(/shiftCashDifference\(shift\)/.test(summary), 'detail computes native drawer difference from close minus open')
-ok(/shift_difference_hint/.test(summary) && /not profit/.test(summary), 'detail explicitly says the drawer difference is not profit')
+ok(/<ShiftCashBreakdown/.test(summary) && /shift\.reconciliation/.test(summary), 'detail renders the server reconciliation, never a locally recomputed difference')
+ok(!/shiftCashDifference/.test(summary), 'the summary no longer subtracts the opening float to invent a difference')
+for (const key of ['shift_recon_opening', 'shift_recon_cash_sales', 'refunds', 'fees', 'courier', 'shift_recon_expected', 'shift_recon_counted', 'shift_difference']) {
+  ok(breakdown.includes(`'${key}'`), `the breakdown carries the ${key} row`)
+}
+ok(/shift_difference_hint/.test(breakdown) && /shift_recon_review/.test(breakdown), 'the breakdown explains expected and surfaces the server review flag')
 ok(/detail \? \(/.test(summary) && /shift_duration/.test(summary) && /shift_cash_breakdown/.test(summary), 'duration and cash breakdown stay in detail rather than the default row')
 
 for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) {
@@ -152,11 +188,36 @@ ok(!/ShiftHistoryPanel|Shift history/.test(settings), 'Settings contains no shif
 ok(/<ShiftHistoryPanel userId=\{user\.id\}/.test(users), 'each Users row/card opens that user’s own shift history')
 ok(/<CurrentShiftSummary showHistory=\{false\}/.test(reports) && /<ShiftHistoryPanel compact limit=\{50\}/.test(reports), 'Reports has one dedicated shift-history section without a duplicate launcher')
 
+// O8. The POS End shift chain: the button calls the transport, the transport
+// posts to the close route, and the dialog shows the server's breakdown. The
+// route half is proved against a real database in
+// cloudflare/scripts/test-shift-close-chain-pure.cjs.
+ok(/onClick=\{\(\) => void submitClose\(\)\}/.test(gate) && /await closeShift\(\{/.test(gate),
+  'the End shift button submits through the close transport, not a local state flip')
+ok(/POST', '\/api\/shifts\/close'/.test(transport), 'the close transport posts to the shift close route')
+ok(/publish\(next\)/.test(gate) && /if \(next\.shift\) setClosed\(next\.shift\)/.test(gate),
+  'the closed row the server returned is what the summary renders')
+ok(/<ShiftCashBreakdown reconciliation=\{shift\.reconciliation\}/.test(gate),
+  'the close dialog shows the server drawer breakdown before and after the close')
+// One close affordance: the Modal header X. "Back" and "Done" were a second
+// and a third control doing exactly what it already does.
+ok(!/t\('back'\)/.test(gate) && !/t\('done'\)/.test(gate),
+  'the end-shift modal has one close affordance, and its footer only writes')
+ok(!/onClick=\{dismiss\}/.test(gate) && /onClose=\{dismiss\}/.test(gate),
+  'dismissal happens through the modal header alone')
+
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
 const usedShiftKeys = [...new Set([...`${modal}\n${summary}`.matchAll(/\bt\('([^']+)'\)/g)].map((match) => match[1]).filter((key) => key.startsWith('shift_')))]
 ok(usedShiftKeys.every((key) => key in en), 'every popup shift key exists in English')
 ok(usedShiftKeys.every((key) => key in km), 'every popup shift key exists in Khmer')
+const breakdownKeys = [...new Set([...breakdown.matchAll(/\bt\('([^']+)'\)/g)].map((match) => match[1]))]
+  .concat([...breakdown.matchAll(/: '([a-z_]+)',$/gm)].map((match) => match[1]))
+ok(breakdownKeys.length >= 12, `expected the breakdown to name its rows through the pack, found ${breakdownKeys.length}`)
+ok(breakdownKeys.every((key) => key in en), `breakdown keys missing from English: ${breakdownKeys.filter((key) => !(key in en)).join(', ')}`)
+ok(breakdownKeys.every((key) => key in km), `breakdown keys missing from Khmer: ${breakdownKeys.filter((key) => !(key in km)).join(', ')}`)
+ok(/expected drawer/i.test(en.shift_difference_hint) && !/opening cash\./i.test(en.shift_difference_hint),
+  'the difference hint explains the expected drawer, not the old opening-float subtraction')
 
 // Execute the real transport against a deterministic fetch boundary. The
 // server revision advances only on successful writes, so the middle request
@@ -169,6 +230,13 @@ let serverRevision = 4
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const body = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>
   transportCalls.push({ url: String(input), body })
+  if (String(input).endsWith('/api/shifts/close')) {
+    return new Response(JSON.stringify({
+      shift: { ...fixture(17, '2026-09-05', '2026-09-05T01:00:00.000Z', '2026-09-05T09:00:00.000Z'), reconciliation: reconciled },
+      policy: { scope_mode: 'per_account', admin_exempt: true },
+      exempt: false, needs_registration: false, is_open: false, can_end: false, already_closed: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
   if (body.expected_revision !== serverRevision) {
     return new Response(JSON.stringify({ error: 'Shift changed concurrently. Reload and try again.', code: 'write_conflict', entity: 'shift_session' }), {
       status: 409,
@@ -205,6 +273,18 @@ try {
   const latestAmend = await amendShift(17, { ...amendInput, expectedRevision: 5, reason: 'Second correction' })
   assert.equal(latestAmend.shift.revision, 6)
   assert.deepEqual(transportCalls.map((call) => call.body.expected_revision), [4, 4, 5])
+  checks += 4
+
+  // The close transport, driven for real: it must POST to the shift close
+  // route and hand back the server's reconciliation untouched.
+  const closeState = await closeShift({ branchId: 2, closingCountedUsd: 13.5, closingCountedKhr: 135_000 })
+  const closeCall = transportCalls[transportCalls.length - 1]
+  assert.ok(closeCall.url.endsWith('/api/shifts/close'), `close posted to ${closeCall.url}`)
+  assert.deepEqual(closeCall.body, {
+    branch_id: 2, closing_counted_usd: 13.5, closing_counted_khr: 135_000, closing_note: null,
+  })
+  assert.deepEqual(closeState.shift?.reconciliation, reconciled)
+  assert.deepEqual(closeState.shift?.reconciliation?.difference, { usd: -28, khr: 55_000 })
   checks += 4
 
   const callsBeforeInvalidCounts = transportCalls.length
