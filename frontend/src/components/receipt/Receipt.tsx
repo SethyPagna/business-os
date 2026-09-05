@@ -17,7 +17,9 @@ import InfoHint from '../shared/InfoHint.tsx'
 import { RECEIPT_CONTRAST_ATTR, normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
-type ReceiptExportMode = 'print' | 'open' | 'image'
+// N4 (owner, Sep 6 2026): "Open PDF" is removed -- it opened the same document
+// Print already produces -- so the receipt exports in exactly two modes.
+type ReceiptExportMode = 'print' | 'image'
 type ReceiptLabelKey = keyof typeof LABELS.en
 type ReceiptPrintModule = typeof import('../../utils/printReceipt')
 type TranslateFn = (key: string) => string | undefined
@@ -796,8 +798,8 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // Which rendition an action targets. Export must mirror the detailed
   // receipt the cashier is looking at, even when the optional 80x50 summary
   // card is enabled. The compact card remains an explicit Print-menu choice;
-  // silently exporting it made Open PDF / Image show different data and a
-  // fixed 80x50 page instead of the complete continuous receipt.
+  // silently exporting it made Image show different data and a fixed 80x50
+  // page instead of the complete continuous receipt.
   type ReceiptVariant = 'full' | 'compact'
   const defaultVariant: ReceiptVariant = 'full'
   const variantTitle = (variant: ReceiptVariant) => `${receiptTitle} - ${variant === 'compact' ? '80x50mm' : `${fullReceiptWidthMm}mm`}`
@@ -818,18 +820,10 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         // is set.
         textColor: contrastTextColor,
       })
-    } else if (mode === 'print') {
+    } else {
       await printTools.printReceipt(target, {
         title,
         printSettings: variantSettings,
-      })
-    } else {
-      await printTools.openReceiptPdf(target, {
-        title,
-        fileName: title,
-        printSettings: variantSettings,
-        previewFallback: true,
-        previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
       })
     }
   }
@@ -909,119 +903,42 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-gray-100 dark:bg-zinc-900">
       {/* ONE compact toolbar row (user, Aug 30: the buttons stacked into
-          multiple rows here, "not compact one row"). On phones the
-          secondary actions (Open PDF / Image / Back) collapse to icon-only
-          buttons -- same treatment as the Branches toolbar -- so
-          Print + PDF + Image + language + Back all fit a single row;
-          labels return from sm up. */}
+          multiple rows here, "not compact one row"). N9(b) + N4 (owner, Sep 6
+          2026) MIRRORED it -- Back on the LEFT, Print and Image on the RIGHT --
+          and dropped "Open PDF": it opened the very document Print already
+          produces, so it was a second name for one action. Below sm every
+          label collapses to its icon so the row stays a single line on a
+          320px phone; btn-primary/btn-secondary keep the 40px hit target. */}
       <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto border-b border-gray-200 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800 sm:gap-2 sm:py-3">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
-        {compactSalesReceipt ? (
-          // The 80x50 card and the full receipt are two print FORMATS. Rather
-          // than two dimension-labeled Print buttons (the old B5 layout),
-          // Print is ONE menu offering All / 80×50 / Default (user, Aug 29:
-          // "it should mention two options ... all, 80x50 and default").
-          // "All" opens the two as SEPARATE print files, never one combined
-          // print (printBothSeparately fires both windows together).
-          <LazyPortalMenu
-            align="auto"
-            compact
-            triggerWrapperClassName="min-w-0"
-            menuClassName="min-w-[11rem]"
-            trigger={(
-              <button
-                type="button"
-                className="btn-primary w-full min-w-0 justify-center px-3 py-2 text-sm"
-                disabled={pdfBusy !== ''}
-                aria-haspopup="true"
-              >
-                <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
-                  <Printer className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" />
-                </span>
-              </button>
-            )}
-            items={[
-              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('print') } },
-              { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('print', 'compact') } },
-              { label: `${t?.('print_default') || 'Default'} · ${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('print', 'full') } },
-            ]}
-          />
-        ) : (
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <button
           type="button"
-          className="btn-primary min-w-0 justify-center px-3 py-2 text-sm"
-          onClick={() => exportReceiptPdf('print')}
-          disabled={pdfBusy !== ''}
+          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+          onClick={onClose}
+          title={t?.('back') || 'Back'}
+          aria-label={t?.('back') || 'Back'}
         >
           <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
-            <Printer className="h-4 w-4 shrink-0" />
-            <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
+            <ArrowLeft className="h-4 w-4 shrink-0" />
+            <span className="hidden truncate sm:inline">{t?.('back') || 'Back'}</span>
           </span>
         </button>
-        )}
-        {compactSalesReceipt ? (
-          <>
-            <LazyPortalMenu
-              align="auto"
-              compact
-              triggerWrapperClassName="min-w-0"
-              menuClassName="min-w-[11rem]"
-              trigger={(
-                <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('open_pdf') || 'Open PDF'} title={t?.('open_pdf') || 'Open PDF'}>
-                  <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
-                </button>
-              )}
-              items={[
-                { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('open', 'full') } },
-                { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('open', 'compact') } },
-                { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('open') } },
-              ]}
-            />
-            <LazyPortalMenu
-              align="auto"
-              compact
-              triggerWrapperClassName="min-w-0"
-              menuClassName="min-w-[11rem]"
-              trigger={(
-                <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('receipt_image_short') || 'Image'} title={t?.('receipt_image_short') || 'Image'}>
-                  <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
-                </button>
-              )}
-              items={[
-                { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'full') } },
-                { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'compact') } },
-                { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('image') } },
-              ]}
-            />
-          </>
-        ) : (
-          <>
+        <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">
+          {([
+            ['en', 'EN'],
+            ['km', 'KH'],
+            ['both', 'KH/EN'],
+          ] as Array<[LanguageMode, string]>).map(([code, text]) => (
             <button
+              key={code}
               type="button"
-              className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
-              onClick={() => exportReceiptPdf('open')}
-              disabled={pdfBusy !== ''}
-              title={t?.('open_pdf') || 'Open PDF'}
-              aria-label={t?.('open_pdf') || 'Open PDF'}
+              onClick={() => setLang(code)}
+              className={`whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium transition-colors sm:px-2.5 ${lang === code ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-600'}`}
             >
-              <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span></span>
+              {text}
             </button>
-            <button
-              type="button"
-              className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
-              onClick={() => exportReceiptPdf('image')}
-              disabled={pdfBusy !== ''}
-              title={t?.('receipt_image_short') || 'Image'}
-              aria-label={t?.('receipt_image_short') || 'Image'}
-            >
-              <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span></span>
-            </button>
-          </>
-        )}
+          ))}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         {onReturn ? (
           <span className="inline-flex shrink-0 items-center gap-1">
             <button
@@ -1042,34 +959,86 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             ) : null}
           </span>
         ) : null}
-        <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">
-          {([
-            ['en', 'EN'],
-            ['km', 'KH'],
-            ['both', 'KH/EN'],
-          ] as Array<[LanguageMode, string]>).map(([code, text]) => (
-            <button
-              key={code}
-              type="button"
-              onClick={() => setLang(code)}
-              className={`whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium transition-colors sm:px-2.5 ${lang === code ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-600'}`}
-            >
-              {text}
-            </button>
-          ))}
         </div>
+        <div className="ml-auto flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
+        {compactSalesReceipt ? (
+          // The 80x50 card and the full receipt are two print FORMATS. Rather
+          // than two dimension-labeled Print buttons (the old B5 layout),
+          // Print is ONE menu offering All / 80×50 / Default (user, Aug 29:
+          // "it should mention two options ... all, 80x50 and default").
+          // "All" opens the two as SEPARATE print files, never one combined
+          // print (printBothSeparately fires both windows together).
+          <LazyPortalMenu
+            align="auto"
+            compact
+            triggerWrapperClassName="min-w-0"
+            menuClassName="min-w-[11rem]"
+            trigger={(
+              <button
+                type="button"
+                className="btn-primary w-full min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+                disabled={pdfBusy !== ''}
+                aria-haspopup="true"
+                aria-label={t?.('print') || 'Print'}
+                title={t?.('print') || 'Print'}
+              >
+                <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+                  <Printer className="h-4 w-4 shrink-0" />
+                  <span className="hidden truncate sm:inline">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                </span>
+              </button>
+            )}
+            items={[
+              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('print') } },
+              { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('print', 'compact') } },
+              { label: `${t?.('print_default') || 'Default'} · ${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('print', 'full') } },
+            ]}
+          />
+        ) : (
         <button
           type="button"
-          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
-          onClick={onClose}
-          title={t?.('back') || 'Back'}
-          aria-label={t?.('back') || 'Back'}
+          className="btn-primary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+          onClick={() => exportReceiptPdf('print')}
+          disabled={pdfBusy !== ''}
+          title={t?.('print') || 'Print'}
+          aria-label={t?.('print') || 'Print'}
         >
           <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
-            <ArrowLeft className="h-4 w-4 shrink-0" />
-            <span className="hidden truncate sm:inline">{t?.('back') || 'Back'}</span>
+            <Printer className="h-4 w-4 shrink-0" />
+            <span className="hidden truncate sm:inline">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
           </span>
         </button>
+        )}
+        {compactSalesReceipt ? (
+          <LazyPortalMenu
+            align="auto"
+            compact
+            triggerWrapperClassName="min-w-0"
+            menuClassName="min-w-[11rem]"
+            trigger={(
+              <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('receipt_image_short') || 'Image'} title={t?.('receipt_image_short') || 'Image'}>
+                <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
+              </button>
+            )}
+            items={[
+              { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'full') } },
+              { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'compact') } },
+              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('image') } },
+            ]}
+          />
+        ) : (
+          <button
+            type="button"
+            className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+            onClick={() => exportReceiptPdf('image')}
+            disabled={pdfBusy !== ''}
+            title={t?.('receipt_image_short') || 'Image'}
+            aria-label={t?.('receipt_image_short') || 'Image'}
+          >
+            <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span></span>
+          </button>
+        )}
         </div>
       </div>
 
