@@ -2,7 +2,67 @@
 
 ## Objective and boundaries
 
-### Current deployed checkpoint — subtotal repair applied, 15:03UTC
+### Current deployed checkpoint — ROUND1, September5 15:35:48UTC
+
+Source `c999e909f4fe91533df84365f1f8eda4015bef76`, Worker
+`cfdba0a4-c857-45b1-83ed-af7d1ddade2c`,100% traffic, deployment created
+`2026-09-05T15:35:48.077Z`. Stamped deployment exited0; read-only Wrangler
+deployment listing independently confirms the version/traffic/time. Cloudflare
+MCP transport was unavailable on the final check, so CLI control-plane evidence
+was used. Worker stamp hash`3d7c089de946795f`,builtAt`2026-09-05T15:34:10.074Z`;
+frontend stamp hash`351e948d3e413299`,builtAt`2026-09-05T15:25:35.741Z`.
+Clean detached release used retained real npm-ci dependencies; tracked tree
+remained clean. Temporary release auth copy removed; original untouched.
+
+Two separately committed/pushed slices: `61237948` adds report-only768–1023px
+side gutters; `c999e909` integrates Archimedes'`6a2e6536` report rounding.
+USD summary now folds nativeUSD+convertedKHR once, then uses canonical decimal
+half-up cent quantization before the existing display formatter. Table model
+uses the same helper for positive/negative ties. KHR/BOTH and the global upward
+price formatter remain unchanged. No backend runtime diff from previousa127e37a;
+no production data write, migration, secret sync, payment or stock change.
+
+Root cause proven against live read-only data: fees4274–4278 are nativeUSD0,
+KHR7000+40000+6000+6000+10000=69000; currentrate4065 yields16.974169741697418USD.
+Before: overview summary16.98 vs row16.97. After authenticated live reload:
+17sales,revenue1026,refund39,summaryexpenses16.97,row16.97,totalprofit208.15,
+finalprofit191.18 unchanged. At840px report gutter16.8px; body scrollwidth840.
+No financial data was altered to achieve display parity.
+
+Verification: Noether clean224/224 backend suites including native subtotal
+runtime and actual frontend npm test:utils212/212 files PASS at exactc999e909.
+Main typechecks,i18n4976keys/519sources,Vite1049modules,stamped dry-run PASS.
+Halley independently verified production fixture, mixed-pair single rounding,
+positive/negative1.005 ties, unchanged global/KHR/BOTH behavior and tabletCSS.
+Main actual release-artifact browser screenshots at320/839/1440 in EN and KM:
+no body overflow, gutters0/16.78/43.2px. Local synthetic report summary/row16.97,
+finalprofit1444.53 unchanged. Screenshots in output/playwright/rounding-after-*
+(local QA artifacts, not production records). Three console failures belonged
+to the deliberate local-server restart; no further entries during after-build QA.
+Existing circular/large-chunk build warnings remain; no blanket perf certificate.
+
+VIS1 status: PARTIAL / NOT INTEGRATED / NOT DEPLOYED. Ramanujan's isolated
+`389244dc4253e5e14a0e821d4e25dc303032f7f3` on
+`codex/cashier-foundation-20260905b` is pushed; four unused policy/helper test
+files only, focused backend/frontend tests and both typechecks pass. Sagan's
+independent adversarial review found P2: SQLite json_extract uses first duplicate
+key while canonical JavaScript JSON parsing uses last; {"all":false,"all":true}
+can wrongly admit an admin into staff mode. Foundation is not activation-ready.
+Required next slice: fix classifier with parity test, then viewer-partitioned
+cache, server-authoritative cashier identity, validated server settings, scoped
+list/detail/export/aggregate/report queries before pagination, deleted-owner
+policy and offline identity/policy cache invalidation. No access policy changed
+in this release. Review message0dd70ddd-f5f3-4b0d-b460-3c77f7b6467c retained.
+
+Still partial/not started as previously tracked: broader transfer/adjustment
+sessions, universal minimize, full pagination/4dp/security/optimization and
+14-reference role/language visual matrices, leading-zero barcode consolidation.
+Roune Rath historical close and exact22 subtotal repair are already done; do not
+repeat. Telegram destination ACK remains unobserved. Goal remains incomplete.
+Recovery for this display-only release is a verified prior application version,
+not a DB restore. Historical financial recovery retains its separate safeguards.
+
+### Previous deployed checkpoint — subtotal repair applied, 15:03UTC
 
 Source `a127e37aded0ec7c88a3d0fa06d92bc3b5bda822` deployed14:50:29UTC at100%:
 Worker `ac5c708d-2ac6-4e76-b801-4497b38ab4d8`, deployment

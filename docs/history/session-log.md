@@ -19278,3 +19278,32 @@ Telegram actual destination ACK and direct client/edge-blocked health/version
 not certified. Native goal remains paused/incomplete. No repeat settlement,
 historical shift close,or subtotal operation; guarded forward recovery only,
 never full DB restore over newer business data without separate authority.
+
+## Part 610 — report rounding/tablet checkpoint deployed (2026-09-05)
+
+Ask: continue quickly with scoped Sol agents, verified checkpoints, durable status,
+and no harm to the working business. Main re-read objective and live ledger.
+Archimedes implemented report-only decimal cent rounding; Halley independently
+verified the arithmetic and main tablet CSS. Noether verified clean224 backend
+suites and actual212-file frontend wrapper. Ramanujan independently implemented
+inactive VIS1 helpers; Sagan's adversarial review found a classifier edge case.
+
+Deployed clean c999e909f4fe91533df84365f1f8eda4015bef76 at15:35:48.077UTC,
+Worker cfdba0a4-c857-45b1-83ed-af7d1ddade2c at100%, CLI control-plane verified.
+Slices61237948 andc999e909 separately committed/pushed. Both typechecks,
+i18n4976/519,Vite1049,dry-run and main EN/KM320/839/1440 screenshots pass.
+Authenticated live report now summaryexpenses16.97=row16.97 for69000KHR/4065,
+finalprofit191.18 unchanged. Tablet840px padding16.8px/body840. Global upward
+price policy/KHR/BOTH unchanged; broader four-decimal migration remains partial.
+No production DB writes, migrations, secret sync, stock/payment changes, repeat
+settlement/subtotal repair/historical shift close. Temporary release auth removed.
+Original dirty checkout and unrelated integration fee files preserved.
+
+VIS1 foundation389244dc is pushed separately, NOT integrated/deployed. P2 SQL
+first duplicateJSON key vs JS last-key administrator classification needs a fix
+and parity regression before activation. Viewer cache partitioning, authoritative
+cashier ownership, validated mode, complete query scope/offline invalidation are
+also explicit gates. Other transfer/adjustment/minimize/pagination/security/4dp/
+barcode/full-reference tasks remain tracked, not complete. No whole-goal success
+claim; native goal stays paused/incomplete. Full evidence and recovery notes in
+docs/fleet/2026-09-05-production-usability.md.

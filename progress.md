@@ -2,6 +2,30 @@
 
 ## Active continuation — production usability, September 5
 
+DEPLOYED September5 15:35:48UTC — ROUND1 c999e909f4fe91533df84365f1f8eda4015bef76.
+Worker cfdba0a4-c857-45b1-83ed-af7d1ddade2c at100%, independently confirmed by
+Wrangler deployment listing and authenticated live browser. Report summary and
+table now both show16.97USD for69000KHR/4065; finalprofit191.18 unchanged.
+Tablet840px gutter16.8px, no body overflow. Main EN/KM320/839/1440 screenshots,
+focused independent Sol review, clean224 backend suites, full212 frontend files,
+both typechecks,i18n4976/519,build1049 and stamped dry-run PASS. No DB writes,
+migrations,secret sync,stock/payment changes or repeated historical operations.
+Code slices61237948 tablet gutter andc999e909 report-only nearest-cent boundary.
+The global price formatter and KHR/BOTH behavior remain unchanged; this is NOT
+a whole-system4dp certificate. Details and provenance are in usability ledger.
+
+VIS1 PARTIAL, NOT DEPLOYED: isolated foundation389244dc pushed on
+codex/cashier-foundation-20260905b. Ramanujan focused tests/typechecks pass;
+Sagan independently found P2 duplicate-JSON-key admin classification mismatch
+(SQL first value vs canonical JavaScript last value). Do not activate until fixed,
+plus viewer-safe caches, authoritative cashier ownership, validated server mode,
+all query/export/detail scopes and offline invalidation. No VIS1 route is active.
+Remaining queue: broader transfer/adjustment sessions, universal minimize,
+pagination/precision/security/full14-reference visual matrices, barcode merges,
+and further compactness. Native goal remains paused/incomplete. No task dropped.
+
+PREVIOUS CHECKPOINT (historical; current ROUND1 status above supersedes follow-ups):
+
 DEPLOYED September5 14:50UTC — checkpoint a127e37aded0ec7c88a3d0fa06d92bc3b5bda822.
 Worker ac5c708d-2ac6-4e76-b801-4497b38ab4d8, deployment
 6ed0346f-32a4-4f45-b4e7-a0ce87a09533 at100%. Clean224/224 backend suites and
