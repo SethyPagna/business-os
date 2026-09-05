@@ -357,12 +357,19 @@ async function snapshotFence(db: D1Compat, request: StockSessionRequest): Promis
       SELECT pb.id,pb.variant_product_id,pb.batch_key,t.branch FROM targets t JOIN product_batches pb
       ON pb.variant_product_id=t.product AND ((t.batch IS NOT NULL AND pb.id=t.batch)
         OR (t.batch IS NULL AND pb.batch_key=t.batch_key))
+    ), revision_sources(groups_json) AS (
+      SELECT json_object(
+        'requested',json(@pairs),
+        'batches',json((SELECT json_group_array(json_array('batch',CAST(id AS TEXT))) FROM lots)),
+        'batchIdentities',json((SELECT json_group_array(json_array('batch_identity',CAST(variant_product_id AS TEXT)||':'||batch_key)) FROM lots)),
+        'batchStock',json((SELECT json_group_array(json_array('branch_batch_stock',CAST(id AS TEXT)||':'||CAST(branch AS TEXT))) FROM lots)),
+        'assets',json((SELECT json_group_array(json_array('asset',CAST(a.id AS TEXT))) FROM file_assets a JOIN json_each(@paths) p ON a.public_path=p.value))
+      )
     ), wanted(entity_type,entity_key) AS (
-      SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]') FROM json_each(@pairs)
-      UNION SELECT 'batch',CAST(id AS TEXT) FROM lots
-      UNION SELECT 'batch_identity',CAST(variant_product_id AS TEXT)||':'||batch_key FROM lots
-      UNION SELECT 'branch_batch_stock',CAST(id AS TEXT)||':'||CAST(branch AS TEXT) FROM lots
-      UNION SELECT 'asset',CAST(a.id AS TEXT) FROM file_assets a JOIN json_each(@paths) p ON a.public_path=p.value
+      SELECT DISTINCT json_extract(item.value,'$[0]'),json_extract(item.value,'$[1]')
+      FROM revision_sources sources
+      JOIN json_each(sources.groups_json) source
+      JOIN json_each(source.value) item
     ) SELECT w.entity_type,w.entity_key,COALESCE(r.revision,0) revision FROM wanted w
       LEFT JOIN stock_session_revisions r ON r.entity_type=w.entity_type AND r.entity_key=w.entity_key
       ORDER BY w.entity_type,w.entity_key`).all<Row>({ targets: JSON.stringify(targets), pairs: JSON.stringify(pairs), paths: JSON.stringify([...paths]) })
@@ -707,20 +714,27 @@ async function stockReplayStateSql(env: Env): Promise<string> {
       (SELECT ${row} r FROM ${table} t WHERE ${where} ORDER BY ${key === 'members' ? 'line_id' : 'id'} LIMIT 101)))`)
   }
   return `(WITH m AS (SELECT * FROM stock_session_members WHERE operation_id=@id),
-    wanted(entity_type,entity_key) AS (
-      SELECT 'product',CAST(product_id AS TEXT) FROM m
-      UNION SELECT 'batch',CAST(batch_id AS TEXT) FROM m WHERE batch_id IS NOT NULL
-      UNION SELECT 'branch',CAST(branch_id AS TEXT) FROM m
-      UNION SELECT 'supplier',CAST(supplier_id AS TEXT) FROM product_batches WHERE id IN (SELECT batch_id FROM m) AND supplier_id IS NOT NULL
-      UNION SELECT 'branch_stock',CAST(product_id AS TEXT)||':'||branch_id FROM branch_stock WHERE product_id IN (SELECT product_id FROM m)
-      UNION SELECT 'branch_batch_stock',CAST(batch_id AS TEXT)||':'||branch_id FROM branch_batch_stock WHERE batch_id IN (SELECT batch_id FROM m)
-      UNION SELECT 'batch_identity',CAST(variant_product_id AS TEXT)||':'||batch_key FROM product_batches WHERE id IN (SELECT batch_id FROM m)
-      UNION SELECT 'product_image',CAST(id AS TEXT) FROM product_images WHERE product_id IN (SELECT product_id FROM m WHERE product_created=1)
-      UNION SELECT 'asset',CAST(id AS TEXT) FROM file_assets WHERE public_path IN (
-        SELECT image_path FROM product_images WHERE product_id IN (SELECT product_id FROM m WHERE product_created=1)
-        UNION SELECT image_path FROM products WHERE id IN (SELECT product_id FROM m WHERE product_created=1))
-      UNION SELECT json_extract(value,'$.entity_type'),json_extract(value,'$.entity_key') FROM json_each(
-        (SELECT payload_json FROM undo_snapshots WHERE id=(SELECT snapshot_id FROM stock_session_operations WHERE id=@id)), '$.after.revisions')
+    revision_sources(groups_json) AS (
+      SELECT json_object(
+        'products',json((SELECT json_group_array(json_object('entity_type','product','entity_key',CAST(product_id AS TEXT))) FROM m)),
+        'batches',json((SELECT json_group_array(json_object('entity_type','batch','entity_key',CAST(batch_id AS TEXT))) FROM m WHERE batch_id IS NOT NULL)),
+        'branches',json((SELECT json_group_array(json_object('entity_type','branch','entity_key',CAST(branch_id AS TEXT))) FROM m)),
+        'suppliers',json((SELECT json_group_array(json_object('entity_type','supplier','entity_key',CAST(supplier_id AS TEXT))) FROM product_batches WHERE id IN (SELECT batch_id FROM m) AND supplier_id IS NOT NULL)),
+        'branchStock',json((SELECT json_group_array(json_object('entity_type','branch_stock','entity_key',CAST(product_id AS TEXT)||':'||branch_id)) FROM branch_stock WHERE product_id IN (SELECT product_id FROM m))),
+        'branchBatchStock',json((SELECT json_group_array(json_object('entity_type','branch_batch_stock','entity_key',CAST(batch_id AS TEXT)||':'||branch_id)) FROM branch_batch_stock WHERE batch_id IN (SELECT batch_id FROM m))),
+        'batchIdentities',json((SELECT json_group_array(json_object('entity_type','batch_identity','entity_key',CAST(variant_product_id AS TEXT)||':'||batch_key)) FROM product_batches WHERE id IN (SELECT batch_id FROM m))),
+        'productImages',json((SELECT json_group_array(json_object('entity_type','product_image','entity_key',CAST(id AS TEXT))) FROM product_images WHERE product_id IN (SELECT product_id FROM m WHERE product_created=1))),
+        'assets',json((SELECT json_group_array(json_object('entity_type','asset','entity_key',CAST(id AS TEXT))) FROM file_assets WHERE
+          public_path IN (SELECT image_path FROM product_images WHERE product_id IN (SELECT product_id FROM m WHERE product_created=1))
+          OR public_path IN (SELECT image_path FROM products WHERE id IN (SELECT product_id FROM m WHERE product_created=1)))),
+        'prior',json(COALESCE(CAST((SELECT json_extract(payload_json,'$.after.revisions') FROM undo_snapshots
+          WHERE id=(SELECT snapshot_id FROM stock_session_operations WHERE id=@id)) AS TEXT),'[]'))
+      )
+    ), wanted(entity_type,entity_key) AS (
+      SELECT DISTINCT json_extract(item.value,'$.entity_type'),json_extract(item.value,'$.entity_key')
+      FROM revision_sources sources
+      JOIN json_each(sources.groups_json) source
+      JOIN json_each(source.value) item
     ) SELECT json_object(${fields.join(',')},
       'revisions',json((SELECT json_group_array(json_object('entity_type',entity_type,'entity_key',entity_key,'revision',revision)) FROM
         (SELECT w.entity_type,w.entity_key,COALESCE(r.revision,0) revision FROM wanted w LEFT JOIN stock_session_revisions r

@@ -173,6 +173,14 @@ async function check(name, run) {
 async function main() {
   const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
 
+  await check('snapshot SQL stays below native workerd compound-select ceiling', async () => {
+    const source = fs.readFileSync(path.join(root, 'src/lib/stockSession.ts'), 'utf8')
+    assert.equal((source.match(/revision_sources\(groups_json\)/g) || []).length, 2,
+      'both the preimage fence and replay-state capture must use bounded JSON source flattening')
+    assert.doesNotMatch(source, /\bUNION(?:\s+ALL)?\s+SELECT\b/i,
+      'native workerd permits only five compound SELECT terms; stock-session SQL must not depend on that ceiling')
+  })
+
   await check('reused neutral lot receipt rolls back attribution on failure and applies once on lost acknowledgement', async () => {
     for (const explicit of [false, true]) {
       const f = fixture()
