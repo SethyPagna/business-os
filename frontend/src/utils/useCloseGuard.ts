@@ -1,12 +1,14 @@
 import { useCallback, useRef, useState } from 'react'
 import {
   applyCloseGuardEvent,
+  applyPreserveAndMinimize,
   applySaveAndClose,
   declaredWorkCanSave,
   declaredWorkLabel,
   isDeclarationDirty,
   unsavedCloseOptions,
   type UnsavedChangesDeclaration,
+  type DraftPreservingMinimize,
   type UnsavedCloseOption,
 } from './closeGuard.ts'
 
@@ -36,6 +38,8 @@ export type CloseGuard = {
   options: UnsavedCloseOption[]
   /** "Back" -- returns to the modal with every edit intact. */
   dismissPrompt: () => void
+  /** Present only when the flow supplied a real draft-preserving action. */
+  preserveAndMinimize?: () => void
   /** "Discard changes" -- runs the registry's discard hook, then closes. */
   discardAndClose: () => void
   /** "Save" -- only rendered when the option set includes it. */
@@ -46,11 +50,15 @@ export type CloseGuard = {
   workLabel: string | null
 }
 
-export function useCloseGuard(declaration: UnsavedChangesDeclaration, onClose: () => void): CloseGuard {
+export function useCloseGuard(
+  declaration: UnsavedChangesDeclaration,
+  onClose: () => void,
+  onMinimize?: DraftPreservingMinimize,
+): CloseGuard {
   const [promptOpen, setPromptOpen] = useState(false)
   const [saving, setSaving] = useState(false)
-  const latest = useRef({ declaration, onClose })
-  latest.current = { declaration, onClose }
+  const latest = useRef({ declaration, onClose, onMinimize })
+  latest.current = { declaration, onClose, onMinimize }
 
   const requestClose = useCallback(() => {
     applyCloseGuardEvent({ event: 'close-requested', declaration: latest.current.declaration, setPromptOpen, onClose: () => latest.current.onClose() })
@@ -58,6 +66,12 @@ export function useCloseGuard(declaration: UnsavedChangesDeclaration, onClose: (
 
   const dismissPrompt = useCallback(() => {
     applyCloseGuardEvent({ event: 'back', declaration: latest.current.declaration, setPromptOpen, onClose: () => latest.current.onClose() })
+  }, [])
+
+  const preserveAndMinimize = useCallback(() => {
+    const preserve = latest.current.onMinimize
+    if (!preserve) return
+    applyPreserveAndMinimize({ setPromptOpen, onMinimize: preserve })
   }, [])
 
   const discardAndClose = useCallback(() => {
@@ -75,6 +89,7 @@ export function useCloseGuard(declaration: UnsavedChangesDeclaration, onClose: (
     promptOpen,
     options: unsavedCloseOptions(declaredWorkCanSave(declaration)),
     dismissPrompt,
+    preserveAndMinimize: onMinimize ? preserveAndMinimize : undefined,
     discardAndClose,
     saveAndClose,
     saving,

@@ -9,6 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 
 const {
   applyCloseGuardEvent,
+  applyPreserveAndMinimize,
   applySaveAndClose,
   declaredWorkLabel,
   isDeclarationDirty,
@@ -72,6 +73,24 @@ await runTest('Back returns to the form with nothing closed; Discard then closes
   assert.equal(modal.dismiss('discard-confirmed'), 'closed')
   assert.equal(modal.state.closed, 1)
   assert.equal(modal.state.promptOpen, false)
+})
+
+await runTest('Minimize closes only the prompt and runs the explicit draft-preserving callback', () => {
+  let promptOpen = true
+  let minimized = 0
+  assert.equal(applyPreserveAndMinimize({
+    setPromptOpen: (open: boolean) => { promptOpen = open },
+    onMinimize: () => { minimized += 1 },
+  }), 'minimized')
+  assert.equal(promptOpen, false)
+  assert.equal(minimized, 1)
+
+  promptOpen = true
+  assert.equal(applyPreserveAndMinimize({
+    setPromptOpen: (open: boolean) => { promptOpen = open },
+    onMinimize: () => { throw new Error('draft persistence failed') },
+  }), 'prompted', 'a failed preservation callback must keep the decision visible')
+  assert.equal(promptOpen, true)
 })
 
 await runTest('a registry-backed modal asks utils/dirtyWork.ts, and Discard runs ITS discard hook', () => {
@@ -227,6 +246,18 @@ await runTest('every shared-Modal call site declares unsavedChanges -- no silent
   // \r tolerated: this repo checks out CRLF (see progress.md's 1755bd6b note).
   assert.match(modal, /\n[ \t]*unsavedChanges: UnsavedChangesDeclaration\r?\n/, 'Modal.unsavedChanges must stay REQUIRED (no `?`)')
   assert.match(modal, /onClick=\{closeGuard\.requestClose\}/, 'the ✕ must go through the guard, not straight to onClose')
+})
+
+await runTest('prompt minimize is capability-gated and never inferred from dirty work', () => {
+  const modal = readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
+  const prompt = readFileSync(new URL('../src/components/shared/UnsavedChangesPrompt.tsx', import.meta.url), 'utf8')
+  const hook = readFileSync(new URL('../src/utils/useCloseGuard.ts', import.meta.url), 'utf8')
+
+  assert.match(modal, /onMinimize\?: DraftPreservingMinimize/, 'Modal must accept an explicitly optional preservation callback')
+  assert.match(modal, /useCloseGuard\(unsavedChanges, onClose, onMinimize\)/, 'Modal must hand that capability to the shared guard')
+  assert.match(hook, /preserveAndMinimize: onMinimize \? preserveAndMinimize : undefined/, 'the guard must expose no minimize action when no callback exists')
+  assert.match(prompt, /guard\.preserveAndMinimize \? \([\s\S]*?<MinimizeButton/, 'the minus must render only from the explicit guard capability')
+  assert.doesNotMatch(prompt, /isDeclarationDirty|workKey/, 'the prompt must not invent persistence from dirtiness or registry membership')
 })
 
 // ---------------------------------------------------------------------------
