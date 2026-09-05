@@ -27,7 +27,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkStatus, type BulkSaleStatusItem } from '../../api/salesTransport.ts'
+import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload } from '../../api/salesTransport.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
@@ -413,6 +413,25 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const membershipActionRef = useRef<Set<string>>(new Set())
   const bulkStatusInFlightRef = useRef(false)
   const bulkStatusSelectionRef = useRef<BulkSaleStatusItem[]>([])
+  const bulkRetryKey = `sales.bulk-status.retry:${user?.id || 'anonymous'}`
+  const [bulkRetryRevision, setBulkRetryRevision] = useState(0)
+  const bulkRetryMemory = useRef<{ key: string; request: BulkSaleStatusPayload | null } | null>(null)
+  const pendingBulkRequest = useMemo(() => {
+    if (bulkRetryMemory.current?.key === bulkRetryKey) return bulkRetryMemory.current.request
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(bulkRetryKey) || 'null') as BulkSaleStatusPayload | null
+      if (saved && typeof saved.client_request_id === 'string' && Array.isArray(saved.items) && saved.items.length > 0 && saved.items.length <= 25 && typeof saved.target_status === 'string') return saved
+    } catch { /* unavailable or invalid storage: no automatic replay */ }
+    return null
+  }, [bulkRetryKey, bulkRetryRevision])
+  const savePendingBulkRequest = (request: BulkSaleStatusPayload | null) => {
+    bulkRetryMemory.current = { key: bulkRetryKey, request }
+    try {
+      if (request) sessionStorage.setItem(bulkRetryKey, JSON.stringify(request))
+      else sessionStorage.removeItem(bulkRetryKey)
+    } catch { /* retain in memory when storage is unavailable */ }
+    setBulkRetryRevision(value => value + 1)
+  }
   const aliveRef = useRef(true)
   const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
   // 180ms, matching Products.tsx/POS.tsx/Inventory.tsx's shared canonical
@@ -1387,20 +1406,32 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   }, [openExportOptions, selectedSales])
 
 
-  const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false) => {
+  const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false, retryOriginal = false) => {
     // View-only (Part 557): bulk status writes share sales.status with single
     // status changes, including the per-action override.
     if (!canChangeSaleStatus) {
       notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
       return
     }
-    if (!selectedSales.length || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
+    const retryRequest = retryOriginal ? pendingBulkRequest : null
+    if (retryOriginal && !retryRequest) return
+    // Retry is an explicit continuation of the already-confirmed frozen body.
+    if (retryRequest) confirmed = true
+    if (pendingBulkRequest && !retryOriginal) {
+      notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
+      return
+    }
+    if (!retryRequest && selectedSales.length > 25) {
+      notify(translateOr('sale_bulk_limit', 'Select at most 25 sales for one status change.'), 'error')
+      return
+    }
+    if ((!retryRequest && !selectedSales.length) || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
     if (!confirmed && !extra) {
       bulkStatusSelectionRef.current = selectedSales.map(sale => ({ id: Number(sale.id), expected_status: String(sale.sale_status || 'completed'), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }))
     }
     // Bulk-cancel needs the shared reason first -- one dialog for the
     // whole batch (lost fees stay per-sale and are not offered here).
-    if (nextStatus === 'cancelled' && !extra) {
+    if (!retryRequest && nextStatus === 'cancelled' && !extra) {
       finishSingleAction(bulkStatusInFlightRef)
       setCancelPrompt({ mode: 'bulk', count: selectedSales.length })
       return
@@ -1431,21 +1462,18 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     setBulkStatusSaving(nextStatus)
     try {
-      const body = {
+      const request: BulkSaleStatusPayload = retryRequest || {
+        client_request_id: crypto.randomUUID(),
         items: bulkStatusSelectionRef.current,
         target_status: nextStatus,
         skip_stock: (extra as Record<string, unknown> | null)?.skip_stock === true,
         ...(nextStatus === 'cancelled' ? { cancel_reason: String(extra?.cancel_reason || ''), cancel_note: String(extra?.cancel_note || '') } : {}),
       }
-      // Keep a failed/lost-response request id for an explicit retry, including
-      // after reload. This is never an offline outbox or an automatic replay.
-      const signature = JSON.stringify(body)
-      let saved: { signature?: string; id?: string } = {}
-      try { saved = JSON.parse(sessionStorage.getItem('sales.bulk-status.retry') || '{}') } catch { /* unavailable storage */ }
-      const requestId = saved.signature === signature && saved.id ? saved.id : crypto.randomUUID()
-      try { sessionStorage.setItem('sales.bulk-status.retry', JSON.stringify({ signature, id: requestId })) } catch { /* request remains stable for this invocation */ }
-      const result = await updateSalesBulkStatus({ ...body, client_request_id: requestId })
-      try { sessionStorage.removeItem('sales.bulk-status.retry') } catch { /* unavailable storage */ }
+      // Preserve the entire frozen body before sending. A retry must not use
+      // refreshed sales/selection, even when the first response was lost.
+      savePendingBulkRequest(request)
+      const result = await updateSalesBulkStatus(request)
+      savePendingBulkRequest(null)
       setSelectedIds(new Set<number>())
       await Promise.all([loadSales(true), actionHistory.refreshServerItems()])
       for (const channel of ['inventory', 'products', 'returns']) window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel } }))
@@ -1689,6 +1717,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
       </div>
 
+      {pendingBulkRequest ? (
+        <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border p-3 text-sm">
+          <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
+          <button type="button" className="btn-secondary" disabled={!!bulkStatusSaving || !canChangeSaleStatus} onClick={() => handleBulkStatusUpdate(pendingBulkRequest.target_status, null, true, true)}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
+          <button type="button" className="btn-secondary" disabled={!!bulkStatusSaving} onClick={() => {
+            if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkRequest(null)
+          }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
+        </div>
+      ) : null}
+      {selectedSales.length > 25 && canChangeSaleStatus ? <p role="status" className="mb-2 text-sm">{translateOr('sale_bulk_limit', 'Select at most 25 sales for one status change.')}</p> : null}
       {selectedSales.length > 0 ? (
           <div className="bulk-toolbar mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm shadow-sm">
             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedSales.length}</span>
