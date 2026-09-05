@@ -67,6 +67,18 @@ export function flushPendingWorkDrafts(): void {
   }
 }
 
+// Flush exactly one form's pending debounce. Components use this from their
+// unmount/key-change cleanup so a minimize/close cannot lose the last edit,
+// without turning the ordinary per-change cleanup into a synchronous write.
+export function flushPendingWorkDraft(key: string): boolean {
+  const pending = pendingWorkDrafts.get(key)
+  if (!pending) return false
+  window.clearTimeout(pending.timer)
+  pendingWorkDrafts.delete(key)
+  persistWorkDraft(key, pending.data)
+  return true
+}
+
 export function readWorkDraft<T>(key: string, options?: { notOlderThanMs?: number }): WorkDraft<T> | null {
   try {
     const raw = localStorage.getItem(key)
