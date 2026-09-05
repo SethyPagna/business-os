@@ -313,6 +313,38 @@ async function main() {
     }
   })
 
+  await check('product-only permission admits only zero session POST in standalone and mounted routes', async () => {
+    const { Hono } = require('hono')
+    const productOnly = { ...user, permissions: JSON.stringify({ inventory: false, products: true }) }
+    for (const prefix of ['', '/api/inventory']) {
+      const route = loadStockSession('routes/inventory.ts', productOnly).default
+      const app = prefix ? new Hono().route(prefix, route) : route
+      const f = fixture()
+      const call = (suffix, method, body) => app.request(`${prefix}${suffix}`, {
+        method, headers: { 'Content-Type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }, f.env, { waitUntil(promise) { promise.catch(() => {}) } })
+      const response = await call('/sessions', 'POST', zeroCreateRequest('zero-product-only'))
+      assert.equal(response.status, 200, await response.clone().text())
+      const before = f.sql.serialize()
+      const mixed = receiveRequest('zero-mixed-denied')
+      mixed.items.push(zeroCreateRequest('zero-mixed-child').items[0])
+      for (const body of [receiveRequest('zero-positive-denied'), mixed]) {
+        const denied = await call('/sessions', 'POST', body)
+        assert.equal(denied.status, 403, `${prefix} positive/mixed`)
+        assert.deepEqual(f.sql.serialize(), before, 'denied mutation leaves every persisted row unchanged')
+      }
+      for (const [suffix, method] of [
+        ['/sessions', 'GET'], ['/search', 'GET'], ['/movements', 'GET'],
+        ['/adjust', 'POST'], ['/transfer', 'POST'], ['/sessions/anything', 'POST'],
+      ]) {
+        const denied = await call(suffix, method)
+        assert.equal(denied.status, 403, `${method} ${prefix}${suffix}`)
+        assert.deepEqual(f.sql.serialize(), before)
+      }
+    }
+  })
+
   await check('zero catalog commit is atomic and lost acknowledgements replay one nullable receipt', async () => {
     const failed = fixture()
     const before = receiptState(failed.sql)
