@@ -19152,3 +19152,28 @@ The 133,700 KHR example is a test, not a live entry. No deployment, live Telegra
 send or remote D1 operation occurred. Historical completion still needs an owner
 payment ruling and authorized exact target/stock-provenance manifest. Original
 two-layer navigation and the full authenticated matrix are not declared complete.
+
+## Part 607 — historical settlement, membership and grouped history (2026-09-05)
+
+Ask: owner confirmed all reconciliation-linked historical balances are paid,
+including the live-added $370, without touching stock; requested grouped bulk
+history/undo, membership per-sale defaults, longer IDs, security and deployment.
+
+Changed: integrated isolated membership, atomic bulk status/replay and bounded
+request/security lanes. Added finance/replay backup coverage, lookup index and
+restore guards. Preserved the original shared dirty checkout and prior release.
+
+Found: a concurrent damaged-stock compensation race and an older-backup partial
+delete failure; both were fixed and independently reproduced as closed. Stale
+history caching, selection limits and lost-response retry were corrected too.
+
+Verified: 89 sales / 100 receivables settled with one history and 192 audit rows;
+218 relational items matched, including two source-restored lines. Concurrent
+shop stock activity was independently reconciled with zero unexplained residual.
+All 200 frontend files and the full chain, typechecks, i18n, build, focused
+concurrency/restore suites passed; final complete backend sweep/deploy continues.
+
+Not done at this entry: final code deployment/provenance (recorded subsequently
+in the release note), complete authenticated live role/page matrix, actual
+Telegram delivery receipt and the existing malformed-secret-name cleanup.
+No future auto-payment completion rule and no live shift-cash example were added.

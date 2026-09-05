@@ -1,5 +1,22 @@
 # progress.md — business-os
 
+## Current checkpoint — September 5, membership/bulk continuation
+
+Historical reconciliation is applied: 89 sales fully paid/Completed, 100 exact
+receivables settled, two missing source lines restored, including the owner's
+confirmation of the newly added $370. No settlement stock movement; independent
+postflight reconciled concurrent shop receipts/transfers/new sale with zero
+unexplained residual. See `docs/fleet/2026-09-05-settlement-result.md`.
+
+Membership default/per-sale override, authenticated POS lookup, eight-character
+new IDs, grouped atomic bulk status/reload undo, security bounds and indexed
+lookup are integrated. Full frontend chain and 200 individual files pass;
+Worker typecheck and 208 suites pass across the full sweep plus the corrected
+bounded-query contract. The legacy-backup dependency guard and independent review
+also pass: incomplete older backups refuse before any deletion. Final 209-suite
+run and release are in progress. Production code is still `9d13ca94ed4e` until the explicit
+deployment record below is updated; historical D1 settlement is already live.
+
 The control document for this project. **Read this file top-to-bottom at the start of
 every session**; it is deliberately kept short enough that this is realistic.
 
