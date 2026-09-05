@@ -1,4 +1,4 @@
-import { useEffect, type ComponentType, type ReactNode, type SVGProps } from 'react'
+import { Fragment, useEffect, type ComponentType, type ReactNode, type SVGProps } from 'react'
 import { useApp as useAppCore } from '../../app/AppContextCore.tsx'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
@@ -76,8 +76,11 @@ export default function HubSectionNav({
     if (pageId && visible.some((section) => section.id === active)) sealRootHubSection(pageId, active, page)
   }, [pageId, page, active, visible.map((section) => section.id).join('|')])
 
-  if (layered || visible.length <= 1) return <>{children}</>
-  if (!isCompact && desktopNavigation) return <>{desktopNavigation}{children}</>
+  // Inserting desktop chrome must not move an unkeyed report/form from index
+  // 0 to 1 and remount it. Keep its React identity without a new DOM wrapper.
+  const content = <Fragment key="hub-content">{children}</Fragment>
+  if (layered || visible.length <= 1) return <>{content}</>
+  if (!isCompact && desktopNavigation) return <>{desktopNavigation}{content}</>
 
   if (!layered) {
     // Desktop/tablet always, and compact + "sections" preference: the chip
@@ -111,10 +114,10 @@ export default function HubSectionNav({
           </div>
           <div className="mt-2 hidden border-b-2 border-gray-200 dark:border-gray-700 md:block" aria-hidden="true" />
         </div>
-        {children}
+        {content}
       </>
     )
   }
 
-  return <>{children}</>
+  return <>{content}</>
 }
