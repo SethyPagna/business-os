@@ -108,7 +108,8 @@ function setup() {
       tax_usd REAL DEFAULT 0, tax_khr REAL, is_delivery INTEGER DEFAULT 0,
       delivery_fee_usd REAL DEFAULT 0, delivery_fee_khr REAL, delivery_fee_paid_by TEXT DEFAULT 'customer',
       total_usd REAL, total_khr REAL, amount_paid_usd REAL DEFAULT 0, amount_paid_khr REAL DEFAULT 0,
-      change_usd REAL DEFAULT 0, change_khr REAL DEFAULT 0, updated_at TEXT);
+      change_usd REAL DEFAULT 0, change_khr REAL DEFAULT 0, change_is_actual INTEGER DEFAULT 0,
+      change_exchange_rate REAL, updated_at TEXT);
   `)
   const apply = (statements) => {
     const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))

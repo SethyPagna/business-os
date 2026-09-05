@@ -36,6 +36,8 @@ export type SaleSettlementState = {
   amount_paid_khr: number | null
   change_usd: number | null
   change_khr: number | null
+  change_is_actual: number
+  change_exchange_rate: number | null
   search_normalized: string | null
   lines: SaleSettlementLineMoney[]
 }
@@ -61,7 +63,8 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
   const sale = await db.prepare(`
     SELECT sale_status,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
            delivery_fee_khr,membership_discount_khr,payment_method,payment_details,
-           payment_currency,amount_paid_usd,amount_paid_khr,change_usd,change_khr,search_normalized
+           payment_currency,amount_paid_usd,amount_paid_khr,change_usd,change_khr,
+           change_is_actual,change_exchange_rate,search_normalized
     FROM sales WHERE id=@id
   `).get<Record<string, unknown>>({ id: saleId })
   if (!sale) return null
@@ -86,6 +89,8 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
     amount_paid_khr: nullableNumber(sale.amount_paid_khr),
     change_usd: nullableNumber(sale.change_usd),
     change_khr: nullableNumber(sale.change_khr),
+    change_is_actual: Number(sale.change_is_actual) === 1 ? 1 : 0,
+    change_exchange_rate: nullableNumber(sale.change_exchange_rate),
     search_normalized: sale.search_normalized == null ? null : String(sale.search_normalized),
     lines: lines.map((line) => ({
       id: Number(line.id),
@@ -98,7 +103,8 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
   }
 }
 
-function khr(usd: unknown, rate: number): number {
+function khr(usd: unknown, rate: number): number | null {
+  if (usd == null) return null
   return actualKhrValue(financialCalculationValue(usd as number) * rate)
 }
 
@@ -126,6 +132,8 @@ export function buildSaleSettlementAfterState(
     amount_paid_khr: plan.amountPaidKhr,
     change_usd: plan.changeUsd,
     change_khr: plan.changeKhr,
+    change_is_actual: 0,
+    change_exchange_rate: null,
     search_normalized: normalizeSearchText([
       sale.receipt_number,
       sale.cashier_name,
@@ -153,7 +161,8 @@ export function saleSettlementStateStatements(saleId: number, state: SaleSettlem
           membership_discount_khr=@membership_discount_khr,payment_method=@payment_method,
           payment_details=@payment_details,payment_currency=@payment_currency,
           amount_paid_usd=@amount_paid_usd,amount_paid_khr=@amount_paid_khr,
-          change_usd=@change_usd,change_khr=@change_khr,search_normalized=@search_normalized,
+          change_usd=@change_usd,change_khr=@change_khr,change_is_actual=@change_is_actual,
+          change_exchange_rate=@change_exchange_rate,search_normalized=@search_normalized,
           updated_at=@stamp WHERE id=@id`,
     params: { id: saleId, stamp, ...state, lines: undefined },
   }, ...state.lines.map((line) => ({

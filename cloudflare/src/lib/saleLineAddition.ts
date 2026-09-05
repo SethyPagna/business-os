@@ -498,6 +498,8 @@ export type SaleMoneySnapshot = {
   total_khr: number | null
   change_usd: number
   change_khr: number | null
+  change_is_actual?: number
+  change_exchange_rate?: number | null
   discount_khr?: number | null
   tax_khr?: number | null
   delivery_fee_khr?: number | null
@@ -531,6 +533,8 @@ export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMon
             subtotal_usd = @subtotal_usd, subtotal_khr = @subtotal_khr,
             total_usd = @total_usd, total_khr = @total_khr,
             change_usd = @change_usd, change_khr = @change_khr,
+            change_is_actual = CASE WHEN @has_change_is_actual=1 THEN @change_is_actual ELSE change_is_actual END,
+            change_exchange_rate = CASE WHEN @has_change_exchange_rate=1 THEN @change_exchange_rate ELSE change_exchange_rate END,
             discount_khr = CASE WHEN @has_discount_khr=1 THEN @discount_khr ELSE discount_khr END,
             tax_khr = CASE WHEN @has_tax_khr=1 THEN @tax_khr ELSE tax_khr END,
             delivery_fee_khr = CASE WHEN @has_delivery_fee_khr=1 THEN @delivery_fee_khr ELSE delivery_fee_khr END,
@@ -548,6 +552,10 @@ export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMon
       total_khr: money.total_khr,
       change_usd: money.change_usd,
       change_khr: money.change_khr,
+      has_change_is_actual: Object.prototype.hasOwnProperty.call(money, 'change_is_actual') ? 1 : 0,
+      change_is_actual: money.change_is_actual ?? null,
+      has_change_exchange_rate: Object.prototype.hasOwnProperty.call(money, 'change_exchange_rate') ? 1 : 0,
+      change_exchange_rate: money.change_exchange_rate ?? null,
       has_discount_khr: Object.prototype.hasOwnProperty.call(money, 'discount_khr') ? 1 : 0,
       discount_khr: money.discount_khr ?? null,
       has_tax_khr: Object.prototype.hasOwnProperty.call(money, 'tax_khr') ? 1 : 0,

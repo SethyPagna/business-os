@@ -93,6 +93,7 @@ import {
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
 import { actualKhrValue, financialCalculationValue } from '../lib/financialPrecision'
+import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
@@ -280,6 +281,9 @@ app.post('/', async (c) => {
     tax_usd?: number
     amount_paid_usd?: number
     amount_paid_khr?: number
+    change_usd?: number | string
+    change_khr?: number | string
+    change_is_actual?: boolean
     receipt_number?: string
     client_request_id?: string
     sale_status?: string
@@ -629,7 +633,10 @@ app.post('/', async (c) => {
 
   // Membership discount reduces the recorded total (previously dropped, so a
   // points-redeemed sale recorded more than the customer actually paid).
-  const { totalUsd, totalKhr, amountPaidUsd, amountPaidKhr, changeUsd, changeKhr } = computeSaleTotals({
+  const {
+    totalUsd, totalKhr, amountPaidUsd, amountPaidKhr,
+    changeUsd: fallbackChangeUsd, changeKhr: fallbackChangeKhr,
+  } = computeSaleTotals({
     subtotalUsd,
     discountUsd,
     membershipDiscountUsd,
@@ -642,6 +649,26 @@ app.post('/', async (c) => {
     rawAmountPaidUsd: body.amount_paid_usd,
     rawAmountPaidKhr: body.amount_paid_khr,
   })
+  let nativeChange
+  try {
+    nativeChange = planNativeSaleChange({
+      actualIntent: body.change_is_actual,
+      rawChangeUsd: body.change_usd,
+      rawChangeKhr: body.change_khr,
+      amountPaidUsd,
+      amountPaidKhr,
+      totalUsd,
+      exchangeRate,
+      changeExchangeRate: changeExchangeRateSetting,
+      fallbackChangeUsd,
+      fallbackChangeKhr,
+    })
+  } catch (error) {
+    if (error instanceof NativeSaleChangeValidationError) {
+      return c.json({ error: error.message, code: error.code }, error.statusCode)
+    }
+    throw error
+  }
   const paymentDetails = Array.isArray(body.payment_details)
     ? body.payment_details
       .slice(0, 12)
@@ -702,7 +729,7 @@ app.post('/', async (c) => {
         customer_id, customer_name, customer_phone, customer_address,
         payment_method, payment_details, payment_currency, exchange_rate,
         subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr, total_usd, total_khr,
-        amount_paid_usd, amount_paid_khr, change_usd, change_khr,
+        amount_paid_usd, amount_paid_khr, change_usd, change_khr, change_is_actual, change_exchange_rate,
         membership_discount_usd, membership_discount_khr, membership_points_redeemed,
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
@@ -712,7 +739,7 @@ app.post('/', async (c) => {
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
         @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr, @total_usd, @total_khr,
-        @amount_paid_usd, @amount_paid_khr, @change_usd, @change_khr,
+        @amount_paid_usd, @amount_paid_khr, @change_usd, @change_khr, @change_is_actual, @change_exchange_rate,
         @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
@@ -759,8 +786,10 @@ app.post('/', async (c) => {
       total_khr: totalKhr,
       amount_paid_usd: amountPaidUsd,
       amount_paid_khr: amountPaidKhr,
-      change_usd: changeUsd,
-      change_khr: changeKhr,
+      change_usd: nativeChange.changeUsd,
+      change_khr: nativeChange.changeKhr,
+      change_is_actual: nativeChange.changeIsActual,
+      change_exchange_rate: nativeChange.changeExchangeRate,
       membership_discount_usd: membershipDiscountUsd,
       membership_discount_khr: membershipDiscountKhr,
       membership_points_redeemed: membershipPointsRedeemed,
@@ -1064,8 +1093,8 @@ app.post('/', async (c) => {
       totalKhr,
       paidUsd: amountPaidUsd,
       paidKhr: amountPaidKhr,
-      changeUsd,
-      changeKhr,
+      changeUsd: nativeChange.changeUsd,
+      changeKhr: nativeChange.changeKhr,
       paymentMethod,
     }),
   }).catch((error) => console.error('[telegram] sale notification failed', error)))
@@ -1081,8 +1110,10 @@ app.post('/', async (c) => {
     taxUsd,
     totalUsd,
     totalKhr,
-    changeUsd,
-    changeKhr,
+    changeUsd: nativeChange.changeUsd,
+    changeKhr: nativeChange.changeKhr,
+    changeIsActual: nativeChange.changeIsActual,
+    changeExchangeRate: nativeChange.changeExchangeRate,
     saleStatus,
     itemCount: priced.length,
   })
@@ -1463,8 +1494,7 @@ app.patch('/:id/status', async (c) => {
     if (!before) return c.json({ error: 'Sale not found' }, 404)
     const lineMoneyRows = await db.prepare(`
       SELECT id,applied_price_usd,total_usd,product_discount_usd,
-             COALESCE(base_price_usd,0) AS base_price_usd,
-             COALESCE(manual_discount_usd,0) AS manual_discount_usd
+             base_price_usd,manual_discount_usd
       FROM sale_items WHERE sale_id=@id ORDER BY id
     `).all<Record<string, unknown>>({ id: Number(id) })
     const after = buildSaleSettlementAfterState(before, sale, lineMoneyRows, saleStatus, settlementPlan)
@@ -1483,6 +1513,8 @@ app.patch('/:id/status', async (c) => {
       'amount_paid_khr = @amount_paid_khr',
       'change_usd = @change_usd',
       'change_khr = @change_khr',
+      'change_is_actual = @change_is_actual',
+      'change_exchange_rate = @change_exchange_rate',
       'search_normalized = @search_normalized',
     )
     Object.assign(updateParams, { ...after, lines: undefined })
@@ -1501,6 +1533,8 @@ app.patch('/:id/status', async (c) => {
       amount_paid_khr: after.amount_paid_khr,
       change_usd: after.change_usd,
       change_khr: after.change_khr,
+      change_is_actual: after.change_is_actual,
+      change_exchange_rate: after.change_exchange_rate,
       actionKind: SALE_SETTLEMENT_ACTION_KIND,
       operationId: settlementOperationId,
       currentReplayGeneration: 0,
@@ -2929,6 +2963,8 @@ function amendmentMoneyBefore(sale: Record<string, unknown>) {
     total_khr: nullableNumber(sale.total_khr),
     change_usd: Number(sale.change_usd) || 0,
     change_khr: nullableNumber(sale.change_khr),
+    change_is_actual: Number(sale.change_is_actual) === 1 ? 1 : 0,
+    change_exchange_rate: nullableNumber(sale.change_exchange_rate),
     discount_khr: nullableNumber(sale.discount_khr),
     tax_khr: nullableNumber(sale.tax_khr),
     delivery_fee_khr: nullableNumber(sale.delivery_fee_khr),
@@ -2951,8 +2987,10 @@ function amendmentMoneyAfter(
     subtotal_khr: money.subtotalKhr,
     total_usd: money.totalUsd,
     total_khr: money.totalKhr,
-    change_usd: money.changeUsd,
-    change_khr: money.changeKhr,
+    change_usd: Number(sale.change_is_actual) === 1 ? Number(sale.change_usd) || 0 : money.changeUsd,
+    change_khr: Number(sale.change_is_actual) === 1 ? nullableNumber(sale.change_khr) : money.changeKhr,
+    change_is_actual: Number(sale.change_is_actual) === 1 ? 1 : 0,
+    change_exchange_rate: Number(sale.change_is_actual) === 1 ? nullableNumber(sale.change_exchange_rate) : null,
     discount_khr: receiptKhrFromUsd(sale.discount_usd, exchangeRate),
     tax_khr: receiptKhrFromUsd(taxUsd, exchangeRate),
     delivery_fee_khr: receiptKhrFromUsd(deliveryFeeUsd, exchangeRate),
