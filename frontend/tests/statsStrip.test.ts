@@ -115,7 +115,8 @@ test('date/time picker owns all-time/today presets and exposes time only where e
   assert.ok(reports.includes('showTime={supportsTime}'), 'the Reports hub exposes time only for views whose endpoints honor a clock window')
   assert.ok(reports.includes('const supportsTime = !!view?.supportsTime'), 'the Reports hub derives the clock affordance from the active view definition')
   const model = read('src/components/sales/reports/reportModel.ts')
-  assert.ok(/id: 'returns'[^}]*supportsTime: false/.test(model) && /id: 'expenses'[^}]*supportsTime: false/.test(model), 'date-only ledgers (Returns, Expenses) never expose a time window')
+  assert.ok(/id: 'returns'[^}]*supportsTime: true/.test(model) && /id: 'expenses'[^}]*supportsTime: true/.test(model), 'Returns and Expenses expose their implemented continuous entry-time window')
+  assert.ok(model.includes('q.createdFrom = createdFrom') && model.includes('q.createdTo = createdTo'), 'time-capable reports serialize the server endpoint bounds')
   assert.ok(/id: 'sales'[^}]*supportsTime: true/.test(model), 'the per-receipt Sales list keeps the 24-hour window')
 })
 
