@@ -129,6 +129,8 @@ function parseRequest(raw: Row): BulkStatusRequest {
     return { client_request_id: raw.client_request_id, items: raw.items.map(i => ({ id: i.id, expected_status: i.expected_status, expected_updated_at: i.expected_updated_at })).sort((a, b) => a.id - b.id), target_status: String(raw.target_status), ...(raw.notes !== undefined ? { notes: raw.notes as string } : {}), ...(raw.cancel_reason !== undefined ? { cancel_reason: raw.cancel_reason as string } : {}), ...(raw.cancel_note !== undefined ? { cancel_note: raw.cancel_note as string } : {}), skip_stock: raw.skip_stock === true };
 }
 async function rowsIn<T>(db: D1Compat, ids: number[], sql: (marks: string) => string): Promise<T[]> {
+    // sql-bound-params: bounded by construction -- both the 25-ID ceiling and
+    // D1's parameter ceiling are enforced below before constructing placeholders.
     if (!ids.length) return [];
     // Every caller uses <=25 sale ids (or linked fee ids), including the
     // allocation query's join. Never split a global LIMIT into per-chunk caps.
