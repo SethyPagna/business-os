@@ -3678,7 +3678,11 @@ const MAX_PRODUCT_IMAGE_UPLOAD_BYTES = 12 * 1024 * 1024
 // route at all, so every product image upload from that screen 404ed.
 app.post('/upload-image', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products') && !hasPermission(user, 'products_image_only')) {
+  // Product editors must retain Full access to the specific image action.
+  // A Review Required tier cannot queue a multipart/R2 write, and applying it
+  // here would bypass the product review flow before any product is updated.
+  // products_image_only remains a separate, deliberately image-scoped role.
+  if (getActionTier(user, 'products', 'image') !== 'full' && !hasPermission(user, 'products_image_only')) {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products' }, 403)
   }
   const rlKey = user?.id ? `user:${user.id}` : getClientIp(c.req.raw)
