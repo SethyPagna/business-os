@@ -93,25 +93,25 @@ async function main() {
   assert.equal(visibleBody.scope, 'all')
   assert.equal(visibleBody.shifts.some((shift) => shift.id === foreignId), true, 'POS user can view another cashier in active branch context')
   assert.equal((await call('GET', `/${foreignId}/history`)).status, 200, 'POS user can view another shift detail')
-  assert.equal((await call('PATCH', `/${foreignId}`, { reason: 'not mine', opening_float_usd: 6 })).status, 403,
+  assert.equal((await call('PATCH', `/${foreignId}`, { expected_revision: 0, reason: 'not mine', opening_float_usd: 6 })).status, 403,
     'POS user cannot amend another cashier shift')
 
   user = { id: 9, name: 'Settings only', permissions: JSON.stringify({ settings: true }) }
   assert.equal((await call('GET', '/?branch_id=1')).status, 403, 'Settings permission does not grant shift list access')
   assert.equal((await call('GET', `/${foreignId}/history`)).status, 403, 'Settings permission does not grant shift detail access')
-  assert.equal((await call('PATCH', `/${foreignId}`, { reason: 'settings elevation', opening_float_usd: 7 })).status, 403,
+  assert.equal((await call('PATCH', `/${foreignId}`, { expected_revision: 0, reason: 'settings elevation', opening_float_usd: 7 })).status, 403,
     'Settings permission does not grant foreign amendment')
 
   user = { id: 1, username: 'admin', role_code: 'admin' }
   const id = openedBody.shift.id
-  const crossDay = await call('PATCH', `/${id}`, { reason: 'wrong day', opened_at: '2000-01-01T00:00:00.000Z' })
+  const crossDay = await call('PATCH', `/${id}`, { expected_revision: openedBody.shift.revision, reason: 'wrong day', opened_at: '2000-01-01T00:00:00.000Z' })
   assert.equal(crossDay.status, 400, 'amendment cannot desynchronise business_date')
-  const lifecycle = await call('PATCH', `/${id}`, { reason: 'close indirectly', closed_at: new Date().toISOString() })
+  const lifecycle = await call('PATCH', `/${id}`, { expected_revision: openedBody.shift.revision, reason: 'close indirectly', closed_at: new Date().toISOString() })
   assert.equal(lifecycle.status, 400, 'amendment cannot close an open shift')
 
   const [a, b] = await Promise.all([
-    call('PATCH', `/${id}`, { reason: 'race A', opening_float_usd: 11 }),
-    call('PATCH', `/${id}`, { reason: 'race B', opening_float_usd: 12 }),
+    call('PATCH', `/${id}`, { expected_revision: openedBody.shift.revision, reason: 'race A', opening_float_usd: 11 }),
+    call('PATCH', `/${id}`, { expected_revision: openedBody.shift.revision, reason: 'race B', opening_float_usd: 12 }),
   ])
   assert.deepEqual([a.status, b.status].sort(), [200, 409], 'only one concurrent amendment reports success')
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM shift_session_amendments').get().n, 1, 'loser writes no false amendment')
@@ -119,7 +119,8 @@ async function main() {
     'only the winning amendment is audited')
 
   user = { id: 7, name: 'Cashier', permissions: JSON.stringify({ pos: true }) }
-  const ownAmendment = await call('PATCH', `/${id}`, { reason: 'owner correction', opening_float_khr: 2500 })
+  const revisionAfterRace = sqlite.prepare('SELECT revision FROM shift_sessions WHERE id=?').get(id).revision
+  const ownAmendment = await call('PATCH', `/${id}`, { expected_revision: revisionAfterRace, reason: 'owner correction', opening_float_khr: 2500 })
   assert.equal(ownAmendment.status, 200, 'owner can amend own shift without Settings permission')
   assert.equal((await call('POST', `/${foreignId}/close`, { expected_revision: 0,
     closed_at: new Date().toISOString(), closing_counted_usd: 1, closing_counted_khr: 1 })).status, 403,
