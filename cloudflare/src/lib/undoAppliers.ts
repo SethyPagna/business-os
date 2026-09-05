@@ -10,6 +10,7 @@ import {
   planSaleLineAddition,
   planSaleLineRemoval,
   plannedLineFromRecord,
+  saleLineKhrSnapshotStatement,
   saleMoneyUpdateStatement,
   type SaleAddItemsReversal,
 } from './saleLineAddition'
@@ -21,6 +22,7 @@ import { amendmentEntryStatement } from './saleAmendments'
 import { replaySaleBulkStatus } from './saleBulkStatus'
 import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAction'
+import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
@@ -794,6 +796,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       await replayReturnBulkAction(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
     },
   },
+  [SALE_SETTLEMENT_ACTION_KIND]: {
+    permission: 'sales', action: 'status',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative settlement history identity is required.')
+      await replaySaleSettlementAction(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
   // Payload shape: { applier: 'sale.add_items', snapshot_id }. Undo and redo
   // payloads are identical; the applier is direction-aware and the reversal
   // (the added lines, their exact lot takes, and both money snapshots) lives
@@ -858,6 +867,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         await db.batch([
           ...removal.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
+          ...(reversal.lineMoneyBefore
+            ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)]
+            : []),
           ...(reversal.lines || []).map((line) => amendmentEntryStatement({
             saleId,
             kind: 'line_removed',
@@ -889,7 +901,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           saleId,
           saleStatus: reversal.saleStatus,
           lines,
-          exchangeRate: Number(reversal.exchangeRate) || 4100,
+          exchangeRate: Number(reversal.moneyAfter.exchange_rate ?? reversal.exchangeRate) || 4100,
           userId: ctx.user?.id ?? null,
           userName: ctx.user?.name ?? null,
         })
@@ -901,6 +913,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         const results = await db.batch([
           ...plan.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
+          ...(reversal.lineMoneyAfter
+            ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)]
+            : []),
           ...plan.lines.map((line) => amendmentEntryStatement({
             saleId,
             kind: 'line_added',

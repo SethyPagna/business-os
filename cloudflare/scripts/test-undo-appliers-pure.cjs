@@ -62,6 +62,7 @@ const { branchUpdateStatements } = branchWrites
 // no-ops (the applier composes them; the test asserts the DB effect, not the
 // side channels, which have their own coverage).
 let sharedDb = null
+let settlementReplayCalls = 0
 function wrapDb(sqlite) {
   return {
     prepare(sql) {
@@ -103,6 +104,16 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     STOCK_SESSION_KIND: 'stock.session',
     replayStockSession: async () => { throw new Error('Use test-stock-session-undo.cjs for real stock replay') },
   }
+  if (id === './saleSettlementAction') return {
+    SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement',
+    replaySaleSettlementAction: async (_env, _user, direction, historyId, generation, payload) => {
+      settlementReplayCalls += 1
+      assert.strictEqual(direction, 'undo')
+      assert.strictEqual(historyId, 41)
+      assert.strictEqual(generation, 0)
+      assert.strictEqual(payload.operation_id, 'settlement-op-1')
+    },
+  }
   if (id === './db') return { getDb: () => wrapDb(sharedDb) }
   if (id === './audit') return { audit: async () => {} }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
@@ -122,6 +133,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     planSaleLineRemoval: () => ({ statements: [], restoredUnits: 0 }),
     plannedLineFromRecord: (record) => record,
     saleMoneyUpdateStatement: () => ({ sql: 'SELECT 1', params: {} }),
+    saleLineKhrSnapshotStatement: () => ({ sql: 'SELECT 1', params: {} }),
   }
   // S4-30: the same applier now also appends an amendment-ledger entry, so an
   // undone addition leaves a visible trail instead of a hole. Stubbed for the
@@ -298,6 +310,38 @@ await check('the supplier.backfill applier is registered and gated on the produc
   // Attributing a lot's supplier is a product edit, so the replay demands the
   // SAME granular products/edit action (full tier) the live route gates on.
   assert.strictEqual(resolved?.action, 'edit')
+})
+
+await check('sale.settlement is a real server applier and invokes the authoritative replay helper', async () => {
+  assert.ok(registeredUndoAppliers().includes('sale.settlement'), 'sale.settlement must be a registered applier')
+  const resolved = resolveUndoApplier({ applier: 'sale.settlement', operation_id: 'settlement-op-1' })
+  assert.strictEqual(resolved?.permission, 'sales')
+  assert.strictEqual(resolved?.action, 'status')
+  settlementReplayCalls = 0
+  await resolved.run(
+    { applier: 'sale.settlement', operation_id: 'settlement-op-1' },
+    { env: {}, user: { id: 7, name: 'Verifier' }, direction: 'undo', historyId: 41, generation: 0 },
+  )
+  assert.strictEqual(settlementReplayCalls, 1, 'the registered applier must execute the settlement replay helper exactly once')
+})
+
+await check('source lock: sale settlement history is server-managed and never takes the generic status-only path', () => {
+  const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
+  assert.ok(/SALE_SETTLEMENT_ACTION_KIND/.test(routeSrc), 'action history must import the settlement kind')
+  assert.ok(/SERVER_BULK_KINDS[^\n]*SALE_SETTLEMENT_ACTION_KIND/.test(routeSrc), 'settlement must be a server-managed history kind')
+  assert.ok(/applier\.name === SALE_SETTLEMENT_ACTION_KIND[\s\S]*notifySaleSettlementAction/.test(routeSrc), 'successful settlement replay must notify through its helper')
+  assert.ok(/SALE_SETTLEMENT_ACTION_KIND[\s\S]*sale_mutation_receipts/.test(routeSrc), 'settlement details must load its durable receipt table')
+  assert.ok(/response_json/.test(routeSrc), 'settlement details must read the saved settlement response')
+  const serverBranchAt = routeSrc.indexOf('applier && SERVER_BULK_KINDS.has(applier.name)')
+  const genericFlipAt = routeSrc.indexOf('UPDATE action_history SET status = @status, last_error = NULL', serverBranchAt)
+  assert.ok(serverBranchAt > -1 && genericFlipAt > serverBranchAt, 'server-managed settlement must return before the generic status-only flip')
+})
+
+await check('source lock: add-items replay restores optional exact KHR snapshots and preserves legacy snapshots', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'undoAppliers.ts'), 'utf8')
+  assert.ok(/reversal\.lineMoneyBefore\s*\?\s*\[saleLineKhrSnapshotStatement\(saleId, reversal\.lineMoneyBefore\)\]\s*:\s*\[\]/.test(source), 'undo must restore the optional before-line snapshot')
+  assert.ok(/reversal\.lineMoneyAfter\s*\?\s*\[saleLineKhrSnapshotStatement\(saleId, reversal\.lineMoneyAfter\)\]\s*:\s*\[\]/.test(source), 'redo must restore the optional after-line snapshot')
+  assert.ok(/Number\(reversal\.moneyAfter\.exchange_rate \?\? reversal\.exchangeRate\) \|\| 4100/.test(source), 'redo must prefer the frozen after-snapshot rate and retain the legacy fallback')
 })
 
 await check('source lock: the applier permission gate (full tier) guards BOTH record and operate, before any status flip or replay', () => {

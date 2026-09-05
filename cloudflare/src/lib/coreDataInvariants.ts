@@ -369,6 +369,11 @@ export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvarian
 // by it. Confirmed with an in-memory D1-equivalent test seeded with a
 // non-default org/branch/admin before wiping these tables too.
 export const FACTORY_RESET_TABLES = [
+  // Durable monetary-mutation members reference their receipts, whose history
+  // parent is cleared below. Guards are transient but must not survive reset.
+  'sale_mutation_members',
+  'sale_mutation_receipts',
+  'sale_mutation_guards',
   // Receipt children must go before their product/lot/movement/history parents.
   // Keep revision tombstones: reused identities must never resurrect old guards.
   'stock_session_members',

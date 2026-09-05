@@ -182,6 +182,10 @@ export const BACKUP_TABLES = [
   'undo_snapshots',
   'sale_amendments',
   'sale_write_revisions',
+  // Durable monetary-mutation receipts reference action_history above; their
+  // members are children of the receipt. sale_mutation_guards is transient.
+  'sale_mutation_receipts',
+  'sale_mutation_members',
   'sale_bulk_operations',
   'sale_bulk_members',
   'return_write_revisions',
@@ -1063,6 +1067,7 @@ const SALE_REPLAY_RESTORE_BUNDLE = [
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
   'return_item_batch_allocations', 'fees', 'inventory_movements', 'action_history',
   'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
+  'sale_mutation_receipts', 'sale_mutation_members',
   'return_write_revisions', 'return_bulk_operations', 'return_bulk_members',
   'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
 ] as const
