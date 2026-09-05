@@ -15,6 +15,7 @@ import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
+import SectionExportAction from '../shared/SectionExportAction.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
@@ -44,11 +45,13 @@ import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import ReturnsListSurface from './ReturnsListSurface'
+import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
 const EditReturnModal = lazyRetry(() => import('./EditReturnModal'), 'returns-edit-modal')
 const NewReturnModal = lazyRetry(() => import('./NewReturnModal'), 'returns-new-modal')
 const NewSupplierReturnModal = lazyRetry(() => import('./NewSupplierReturnModal'), 'returns-new-supplier-modal')
 const ReturnReasonManagerModal = lazyRetry(() => import('./ReturnReasonManagerModal'), 'returns-reason-manager-modal')
+const ReturnsBulkActionModal = lazyRetry(() => import('./ReturnsBulkActionModal'), 'returns-bulk-action-modal')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'returns-export-options')
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -348,6 +351,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const [showCustomerForm, setShowCustomerForm] = useState(false)
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [showReasonManager, setShowReasonManager] = useState(false)
+  const [bulkActionSnapshot, setBulkActionSnapshot] = useState<{ rows: ReturnRow[]; scope: ReturnScope } | null>(null)
   const [editRet, setEditRet] = useState<ReturnRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -370,10 +374,35 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const editRequestRef = useRef(0)
   const detailRequestRef = useRef(0)
   const historyRestoreInFlightRef = useRef(false)
+  const bulkActionInFlightRef = useRef(false)
+  const bulkRetryMemory = useRef<{ key: string; request: ReturnBulkPayload | null } | null>(null)
+  const [bulkActionSaving, setBulkActionSaving] = useState(false)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const loadWatchdogRef = useRef<number | null>(null)
   const selectAllRef = useRef<HTMLInputElement | null>(null)
   const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns', enabled: historyReady, user })
+  const bulkRetryKey = `returns.bulk.retry:${user?.id || 'anonymous'}`
+  const [bulkRetryRevision, setBulkRetryRevision] = useState(0)
+  const pendingBulkRequest = useMemo(() => {
+    if (bulkRetryMemory.current?.key === bulkRetryKey) return bulkRetryMemory.current.request
+    void bulkRetryRevision
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(bulkRetryKey) || 'null') as ReturnBulkPayload | null
+      bulkRetryMemory.current = { key: bulkRetryKey, request: saved }
+      return saved
+    } catch { return null }
+  }, [bulkRetryKey, bulkRetryRevision])
+  const savePendingBulkRequest = useCallback((request: ReturnBulkPayload | null) => {
+    bulkRetryMemory.current = { key: bulkRetryKey, request }
+    try {
+      if (request) sessionStorage.setItem(bulkRetryKey, JSON.stringify(request))
+      else sessionStorage.removeItem(bulkRetryKey)
+    } catch {
+      // Privacy modes can disable sessionStorage. The in-flight request is
+      // still guarded server-side; only cross-refresh retry recovery is lost.
+    }
+    setBulkRetryRevision((current) => current + 1)
+  }, [bulkRetryKey])
   // Same fix as Sales.tsx's debouncedSearch (see that file's comment for
   // the full "two different cadences" bug this replaces) -- found here
   // while rewriting routes/returns.ts's search in this same session, same
@@ -914,6 +943,37 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     [selectedIds, visibleReturns],
   )
 
+  const applyBulkAction = useCallback(async (request: ReturnBulkPayload): Promise<ReturnBulkResult> => {
+    if (!beginSingleAction(bulkActionInFlightRef)) throw new Error(tr('return_bulk_in_progress', 'A return bulk action is already running.'))
+    setBulkActionSaving(true)
+    savePendingBulkRequest(request)
+    try {
+      const { bulkUpdateReturns } = await loadReturnsWriteTransport()
+      const result = await withLoaderTimeout(
+        () => bulkUpdateReturns(request),
+        'Bulk return action',
+        RETURNS_HISTORY_RESTORE_TIMEOUT_MS,
+      )
+      savePendingBulkRequest(null)
+      setSelectedIds(new Set())
+      await loadReturns(true)
+      await actionHistory.refreshServerItems()
+      notify(tr('return_bulk_result', 'Updated {changed} returns; {unchanged} unchanged.', 'បានកែប្រែការត្រឡប់ {changed}; មិនផ្លាស់ប្តូរ {unchanged}។')
+        .replace('{changed}', String(result.changedCount))
+        .replace('{unchanged}', String(result.unchangedCount)), 'success')
+      return result
+    } catch (error) {
+      // The same stable request stays in session storage when the outcome is
+      // unknown. A retry therefore receives the server's original receipt
+      // instead of applying stock/refund effects twice.
+      notify(error instanceof Error ? error.message : String(error || ''), 'error')
+      throw error
+    } finally {
+      finishSingleAction(bulkActionInFlightRef)
+      setBulkActionSaving(false)
+    }
+  }, [actionHistory, loadReturns, notify, savePendingBulkRequest, tr])
+
   useEffect(() => {
     if (!selectAllRef.current) return
     selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
@@ -1079,10 +1139,30 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
+      <div className="mb-3 flex justify-end max-md:contents">
+        <SectionExportAction>
+          <ExportMenu
+            label={tr('export', 'Export')}
+            items={exportItems}
+            mobileIconOnly
+            triggerClassName="!h-11 !w-11 !min-w-0 !px-0 md:!h-8 md:!w-auto md:!min-w-[5.75rem] md:!px-3 [&>span]:!hidden md:[&>span]:!inline"
+          />
+        </SectionExportAction>
+      </div>
+      {pendingBulkRequest ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{tr('return_bulk_pending', 'A previous bulk action has an unknown outcome. Retry that exact request or discard it after checking Returns and History.', 'សកម្មភាពជាក្រុមមុនមានលទ្ធផលមិនទាន់ច្បាស់។ សូមសាកល្បងសំណើដដែលឡើងវិញ ឬបោះបង់បន្ទាប់ពីពិនិត្យការត្រឡប់ និងប្រវត្តិ។')}</span>
+          <button type="button" className="btn-secondary" disabled={bulkActionSaving} onClick={() => { void applyBulkAction(pendingBulkRequest).catch(() => {}) }}>{tr('retry_original_request', 'Retry original request', 'សាកល្បងសំណើដើមឡើងវិញ')}</button>
+          <button type="button" className="btn-secondary" onClick={() => {
+            if (window.confirm(tr('discard_bulk_retry_warning', 'Discard this retry? The previous action may already have succeeded. Check Returns and History first.', 'បោះបង់ការសាកល្បងនេះ? សកម្មភាពមុនអាចបានជោគជ័យរួចហើយ។'))) savePendingBulkRequest(null)
+          }} disabled={bulkActionSaving}>{tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង')}</button>
+        </div>
+      ) : null}
       {selectedReturns.length > 0 ? (
         <div className="bulk-toolbar mb-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm">
           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedReturns.length} {tr('selected', 'Selected')}</span>
-          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={exportSelected}>{tr('export_selected', 'Export selected')}</button>
+          {canEditReturn ? <button type="button" className="btn-secondary px-3 py-1 text-xs" disabled={!!pendingBulkRequest || selectedReturns.length > RETURN_BULK_LIMIT} onClick={() => setBulkActionSnapshot({ rows: selectedReturns.map((row) => ({ ...row })), scope })}>{tr('change_selected', 'Change selected', 'កែប្រែការជ្រើសរើស')}</button> : null}
+          {selectedReturns.length > RETURN_BULK_LIMIT ? <span className="text-xs font-medium text-red-600 dark:text-red-300">{tr('return_bulk_limit', `Select at most ${RETURN_BULK_LIMIT} returns.`, `ជ្រើសរើសការត្រឡប់មិនលើស ${RETURN_BULK_LIMIT}។`)}</span> : null}
           <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
             {tr('clear', 'Clear')}
           </button>
@@ -1105,7 +1185,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         // are not many like only two ... just merge with the stats").
         rangeActions={(
           <>
-            <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
             {canEditReturn ? (
               <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
                 <Settings2 className="h-3.5 w-3.5" />
@@ -1320,6 +1399,17 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             onChanged={() => { void loadReturns(true) }}
             notify={notify}
             t={t}
+          />
+        </Suspense>
+      ) : null}
+      {bulkActionSnapshot?.rows.length ? (
+        <Suspense fallback={null}>
+          <ReturnsBulkActionModal
+            rows={bulkActionSnapshot.rows}
+            scope={bulkActionSnapshot.scope}
+            tr={tr}
+            onClose={() => setBulkActionSnapshot(null)}
+            onApply={applyBulkAction}
           />
         </Suspense>
       ) : null}

@@ -43,6 +43,7 @@ import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
+import SectionExportAction from '../shared/SectionExportAction.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
@@ -493,6 +494,16 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
       <CurrentShiftSummary className="mb-3" />
+      <div className="mb-3 flex justify-end max-md:contents">
+        <SectionExportAction>
+          <ExportMenu
+            label={tr('export', 'Export')}
+            items={exportItems}
+            mobileIconOnly
+            triggerClassName="!h-11 !w-11 !min-w-0 !px-0 md:!h-8 md:!w-auto md:!min-w-[5.75rem] md:!px-3 [&>span]:!hidden md:[&>span]:!inline"
+          />
+        </SectionExportAction>
+      </div>
       {/* Page title removed (Aug 19 2026 UI request): no other page in the
           app repeats its own name in an h1 here -- the sidebar nav item
           already names the page -- so Fees having one was the odd one out,
@@ -510,7 +521,6 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         t={t}
         rangeActions={(
           <>
-            <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
             <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowLabelManager(true)} title={tr('manage_expense_labels', 'Manage expense labels')}>
               <Tags className="h-3.5 w-3.5" />
               <span>{tr('labels', 'Labels')}</span>

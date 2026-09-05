@@ -369,6 +369,9 @@ export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvarian
 // by it. Confirmed with an in-memory D1-equivalent test seeded with a
 // non-default org/branch/admin before wiping these tables too.
 export const FACTORY_RESET_TABLES = [
+  'return_bulk_members',
+  'return_bulk_operations',
+  'return_write_revisions',
   'return_item_batch_allocations',
   'sale_item_batch_allocations',
   'return_items',
