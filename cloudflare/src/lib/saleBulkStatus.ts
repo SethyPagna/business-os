@@ -2,13 +2,14 @@ import { getDb, type D1Compat } from './db';
 import type { Env } from '../index';
 import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
-import { selectInChunks } from './sqlBinding';
+import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
 import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
+export const BULK_STATUS_MOVEMENT_LIMIT = 256;
 type Row = Record<string, unknown>;
 type Item = TransitionItem & {
     sale_id: number;
@@ -84,7 +85,11 @@ const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancell
 // reference_id is polymorphic: use a conservative read guard, never revision
 // triggers that would write to an unrelated sale with the same numeric id.
 function movementFingerprint(idSql: string) {
-    return `(SELECT json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr)) FROM (SELECT * FROM inventory_movements WHERE reference_id=${idSql} AND movement_type IN ('sale','return','damage_in','damage_out') ORDER BY id))`;
+    // Read at most one sentinel past the cap, including inside commit/replay
+    // guards. NULL means overflow, never a fingerprint of a truncated history.
+    // The NOT NULL member column also rolls back a transition whose appended
+    // movements cross this bound, keeping its saved precondition usable.
+    return `(SELECT CASE WHEN COUNT(*)>${BULK_STATUS_MOVEMENT_LIMIT} THEN NULL ELSE json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr)) END FROM (SELECT id,product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr FROM inventory_movements WHERE reference_id=${idSql} AND movement_type IN ('sale','return','damage_in','damage_out') ORDER BY id LIMIT ${BULK_STATUS_MOVEMENT_LIMIT + 1}))`;
 }
 function fail(message: string): never { throw new SaleBulkError(message); }
 function permission(user: SessionUser) { if (getActionTier(user, 'sales', 'status') !== 'full')
@@ -124,7 +129,12 @@ function parseRequest(raw: Row): BulkStatusRequest {
     return { client_request_id: raw.client_request_id, items: raw.items.map(i => ({ id: i.id, expected_status: i.expected_status, expected_updated_at: i.expected_updated_at })).sort((a, b) => a.id - b.id), target_status: String(raw.target_status), ...(raw.notes !== undefined ? { notes: raw.notes as string } : {}), ...(raw.cancel_reason !== undefined ? { cancel_reason: raw.cancel_reason as string } : {}), ...(raw.cancel_note !== undefined ? { cancel_note: raw.cancel_note as string } : {}), skip_stock: raw.skip_stock === true };
 }
 async function rowsIn<T>(db: D1Compat, ids: number[], sql: (marks: string) => string): Promise<T[]> {
-    return selectInChunks(ids, 0, chunk => db.prepare(sql(chunk.map(() => '?').join(','))).all<T>(chunk));
+    if (!ids.length) return [];
+    // Every caller uses <=25 sale ids (or linked fee ids), including the
+    // allocation query's join. Never split a global LIMIT into per-chunk caps.
+    if (ids.length > BULK_STATUS_LIMIT || ids.length > D1_MAX_BOUND_PARAMS)
+        throw new SaleBulkError('Selection exceeds the single-query bound.', 400);
+    return db.prepare(sql(ids.map(() => '?').join(','))).all<T>(ids);
 }
 function scalar(row: Row): Row { return Object.fromEntries(fields.map(k => [k, row[k] ?? null])); }
 function bounded(statements: StockStatement[], snapshot: Snapshot) {
@@ -200,11 +210,13 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         return JSON.parse(String(previous.receipt_json));
     }
     const ids = request.items.map(i => i.id);
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
-    const items = await rowsIn<Item>(db, ids, m => `SELECT * FROM sale_items WHERE sale_id IN (${m}) ORDER BY id`);
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    if (sales.some(s => s.movement_fingerprint === null))
+        throw new SaleBulkError(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400);
+    const items = await rowsIn<Item>(db, ids, m => `SELECT * FROM sale_items WHERE sale_id IN (${m}) ORDER BY id LIMIT 151`);
     if (items.length > 150)
         throw new SaleBulkError('Select fewer sale lines (maximum 150).', 400);
-    const allocations = await rowsIn<Allocation>(db, items.map(i => i.id), m => `SELECT * FROM sale_item_batch_allocations WHERE sale_item_id IN (${m}) ORDER BY id`);
+    const allocations = await rowsIn<Allocation>(db, ids, m => `SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items si ON si.id=a.sale_item_id WHERE si.sale_id IN (${m}) ORDER BY a.id LIMIT 301`);
     if (allocations.length > 300)
         throw new SaleBulkError('Select fewer batch allocations (maximum 300).', 400);
     const returns = await rowsIn<{
@@ -212,7 +224,11 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         sale_item_id: number | null;
         product_id: number | null;
         quantity: number;
-    }>(db, ids, m => `SELECT r.sale_id,ri.sale_item_id,ri.product_id,SUM(ri.quantity) quantity FROM returns r JOIN return_items ri ON ri.return_id=r.id WHERE r.sale_id IN (${m}) AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer' GROUP BY r.sale_id,ri.sale_item_id,ri.product_id`);
+    }>(db, ids, m => `SELECT r.sale_id,ri.sale_item_id,ri.product_id,ri.quantity FROM returns r JOIN return_items ri ON ri.return_id=r.id WHERE r.sale_id IN (${m}) AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer' ORDER BY ri.id LIMIT 301`);
+    // Bound raw return rows before aggregation; even millions of rows sharing
+    // one group must not be materialized or aggregated for this request.
+    if (returns.length > 300)
+        throw new SaleBulkError('Select fewer return records (maximum 300).', 400);
     const fees = await rowsIn<Row>(db, sales.map(s => Number(s.cancel_fee_id)).filter(Boolean), m => `SELECT * FROM fees WHERE id IN (${m})`);
     const stamp = new Date().toISOString(), operationId = crypto.randomUUID(), members: Member[] = [], guards: StockStatement[] = [];
     for (const expected of request.items) {
@@ -284,6 +300,10 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                         fail('Sale batch allocations cannot cover the transition.');
                 }
             }
+        // Do not create an undoable action already at the fingerprint ceiling:
+        // reserve room for its forward movements AND its first full undo.
+        if (JSON.parse(String(sale.movement_fingerprint)).length + 2 * member.stock.length > BULK_STATUS_MOVEMENT_LIMIT)
+            throw new SaleBulkError('This sale has too much stock history for a bulk action and its undo.', 400);
         members.push(member);
     }
     const snapshot: Snapshot = { version: 1, operationId, members };
