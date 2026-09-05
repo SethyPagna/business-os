@@ -183,7 +183,17 @@ assert.match(pageActivity, /from '\.\.\/\.\.\/app\/AppContextCore\.tsx'/, 'page 
 assert.doesNotMatch(appContextCore, /api\/http|websocket|lang\/en\.json|lang\/km\.json|AppProvider|startHealthCheck/, 'context core should remain provider-only and avoid admin startup imports')
 assert.match(quickPreferenceToggles, /from '\.\.\/\.\.\/app\/AppContextCore\.tsx'/, 'quick preference controls should read the tiny context core instead of importing the full admin AppContext graph')
 assert.doesNotMatch(quickPreferenceToggles, /from '\.\.\/\.\.\/AppContext\.tsx'/, 'quick preference controls should not drag full AppContext into the route startup graph')
-assert.match(appContext, /export \{ isBrokenLocalizedString, useApp, useSync, useT \}/, 'admin AppContext should re-export context hooks for existing route imports while the public route uses the core directly')
+// The names, not the exact list: a hook added to the core (Sep 6 2026:
+// useLowStockConfig) has to be re-exported here too, and pinning the list
+// verbatim made that addition read as a regression in the startup graph,
+// which is what this file is actually about.
+for (const hook of ['isBrokenLocalizedString', 'useApp', 'useSync', 'useT']) {
+  assert.match(
+    appContext,
+    new RegExp('export \\{[^}]*\\b' + hook + '\\b[^}]*\\}'),
+    `admin AppContext should re-export ${hook} for existing route imports while the public route uses the core directly`,
+  )
+}
 assert.match(appContext, /function getInitialAdminPage\(publicMode: boolean\): string \{[\s\S]*getAdminPageFromPath\(window\.location\.pathname\) \|\| 'dashboard'[\s\S]*\}/, 'direct admin URLs should initialize the active page without briefly mounting Dashboard first')
 assert.match(appContext, /const \[page,\s+setPage\]\s+= useState\(\(\) => getInitialAdminPage\(publicMode\)\)/, 'initial active page state should come from the current URL')
 assert.match(appContext, /const \[authReady, setAuthReady\] = useState\(\(\) => \{[\s\S]*if \(hasStoredSession && canProbeServerSession\) return false[\s\S]*if \(canProbeServerSession\) return false[\s\S]*\}\)/, 'cookie-only authenticated startup should wait for bootstrap instead of briefly mounting the login route')
