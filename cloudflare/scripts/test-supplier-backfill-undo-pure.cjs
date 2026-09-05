@@ -54,6 +54,10 @@ function loadUndoAppliers(d1) {
       RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
       replayReturnBulkAction: () => { throw new Error('Unexpected return bulk replay in test-supplier-backfill-undo-pure.cjs') },
     },
+    './saleSettlementAction': {
+      SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement',
+      replaySaleSettlementAction: () => { throw new Error('Unexpected settlement replay in supplier fixture; use test-payment-fx-pure.cjs') },
+    },
     './stockSession': {
       STOCK_SESSION_KIND: 'stock.session',
       replayStockSession: () => { throw new Error('Unexpected stock replay in supplier fixture; use test-stock-session-undo.cjs') },
