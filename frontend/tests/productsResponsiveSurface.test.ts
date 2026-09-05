@@ -88,8 +88,14 @@ assert.match(
   'batch edit actions must remain reachable while the modal body scrolls',
 )
 
-assert.match(detail, /btn-secondary flex min-w-0 flex-1/, 'detail footer actions must be allowed to shrink on narrow screens')
-assert.match(detail, /btn-primary flex min-w-0 flex-1/, 'the primary detail action must be allowed to shrink on narrow screens')
+// Detail footer actions must be allowed to shrink AND to wrap: three
+// icon+label buttons across a 320px row leave ~47px of label, so below sm
+// each takes a half-width cell instead. The width arithmetic and the 44px
+// tap target are judged in compactActionRows.test.ts; the shrink tokens are
+// pinned here so a later edit cannot quietly make the cells rigid again.
+assert.match(detail, /btn-secondary flex[^"]*min-w-0[^"]*flex-1/, 'detail footer actions must be allowed to shrink on narrow screens')
+assert.match(detail, /flex flex-wrap items-center gap-2 border-t border-gray-200 p-3/, 'detail footer row must wrap instead of squeezing its labels away')
+assert.match(detail, /btn-primary flex[^"]*min-w-0[^"]*flex-1/, 'the primary detail action must be allowed to shrink on narrow screens')
 assert.match(detail, /import \{ createPortal \} from 'react-dom'/, 'the product detail sheet must render outside the Products page stacking context')
 assert.match(detail, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*overflow-y-auto/, 'the product detail overlay must sit above fixed app bars and remain scrollable')
 assert.match(detail, /modal-panel-safe flex w-full flex-col/, 'the product detail panel must remain within the usable viewport and safe areas')

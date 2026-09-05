@@ -593,7 +593,10 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
         </div>
       ) : null}
 
-      <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
+      {/* N4: Back facing a long step label ("Apply Decisions & Preview") in a
+          no-wrap row overflowed at 320 in English and in Khmer at 375. The
+          row wraps and both buttons may shrink. */}
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
         <button
           type="button"
           onClick={() => {
@@ -602,31 +605,31 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
             else if (step === 'plan') setStep('review')
           }}
           disabled={working || step === 'resolving' || step === 'applying_decisions' || step === 'applying'}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="inline-flex min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           {step === 'upload' || step === 'done' ? T('cancel', 'Cancel') : T('back', 'Back')}
         </button>
         {step === 'mapping' ? (
-          <button type="button" onClick={() => void runResolve()} disabled={!mappingComplete} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={() => void runResolve()} disabled={!mappingComplete} className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">
             {T('continue', 'Continue')}
             <ArrowRight className="h-3.5 w-3.5" />
           </button>
         ) : null}
         {step === 'review' ? (
-          <button type="button" onClick={() => void runApplyDecisions()} disabled={!reviewComplete} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={() => void runApplyDecisions()} disabled={!reviewComplete} className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">
             {T('dated_count_build_preview', 'Apply Decisions & Preview')}
             <ArrowRight className="h-3.5 w-3.5" />
           </button>
         ) : null}
         {step === 'plan' ? (
-          <button type="button" onClick={() => void runApply()} disabled={working} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40">
+          <button type="button" onClick={() => void runApply()} disabled={working} className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40">
             {T('dated_count_confirm_import', 'Confirm Import')}
             <ArrowRight className="h-3.5 w-3.5" />
           </button>
         ) : null}
         {step === 'done' ? (
-          <button type="button" onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700">
+          <button type="button" onClick={onClose} className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700">
             {T('done', 'Done')}
           </button>
         ) : null}

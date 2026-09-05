@@ -3299,8 +3299,15 @@ export default function POS() {
           style={isDesktopViewport ? { width: `${cartWidthPx}px`, minWidth: `${cartWidthPx}px` } : undefined}
         >
 
-          {/* Order tabs */}
-          <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 overflow-x-auto bg-gray-50 dark:bg-gray-900 scroll-x">
+          {/* Order tabs. N4: the Shift-history / End-Shift group used to sit
+              INSIDE this scroller with `ml-auto`. From the third order tab on,
+              the row overflows, `ml-auto` stops pushing anything, and that
+              group is carried off the right edge -- on a phone the controls
+              were reachable only by swiping the tab strip sideways. The
+              scroller now holds only the order tabs; the group is its own
+              non-scrolling cell pinned beside it. */}
+          <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+          <div className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x">
             {orders.map(order => (
               <div key={order.id} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer
                 ${resolvedActiveId === order.id ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
@@ -3325,14 +3332,15 @@ export default function POS() {
             {orders.length < LAYOUT.MAX_CONCURRENT_ORDERS && (
               <button onClick={addNewOrder} className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 text-gray-400 hover:text-blue-600 text-sm font-bold transition-colors" title="New order">+</button>
             )}
-            {/* Shift history remains visible before opening, while open, after
-                close, and for shift-exempt administrators. End Shift remains
-                the current-day compatible action and appears only while the
-                current row can actually be closed. */}
-            <div className="ml-auto flex flex-shrink-0 items-center gap-1 pl-2">
-              <ShiftHistoryPanel branchId={primaryBranchFilterId} compact label={t('shift_code')} />
-              <EndShiftButton branchId={primaryBranchFilterId} />
-            </div>
+          </div>
+          {/* Shift history remains visible before opening, while open, after
+              close, and for shift-exempt administrators. End Shift remains
+              the current-day compatible action and appears only while the
+              current row can actually be closed. */}
+          <div className="flex shrink-0 items-center gap-1 px-2 py-1.5 pl-0">
+            <ShiftHistoryPanel branchId={primaryBranchFilterId} compact label={t('shift_code')} />
+            <EndShiftButton branchId={primaryBranchFilterId} />
+          </div>
           </div>
 
           {/* Cart panel view toggle -- lets the person collapse to just the

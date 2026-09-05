@@ -449,14 +449,16 @@ export default function ProductDetailModal({
               bottom, sharing the width equally (flex-1). Replaces the old
               right-hand slate-filled actions column; only a thin top border
               separates them from the data now, no slate fill. Labels stay
-              visible at every width since a full-width row has room for them.
+              visible at every width: below sm the row WRAPS (N4) so each
+              action keeps a half-width cell and a 44px tap target instead of
+              three cells squeezed past their labels and past the modal edge.
               Delete is not here -- it lives inside the Edit flow (ProductForm's
               own footer, see Products.tsx). */}
-          <div className="flex items-center gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
+          <div className="flex flex-wrap items-center gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
             {onAddVariant ? (
               <button
                 type="button"
-                className="btn-secondary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+                className="btn-secondary flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:min-h-0 sm:basis-0 sm:text-sm"
                 onClick={onAddVariant}
                 aria-label={T('add_variant', 'Add variant')}
                 title={T('add_variant', 'Add variant')}
@@ -468,7 +470,7 @@ export default function ProductDetailModal({
             {onAdjustStock ? (
               <button
                 type="button"
-                className="btn-secondary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+                className="btn-secondary flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:min-h-0 sm:basis-0 sm:text-sm"
                 onClick={onAdjustStock}
                 aria-label={T('adjust_stock', 'Adjust stock')}
                 title={T('adjust_stock', 'Adjust stock')}
@@ -479,7 +481,7 @@ export default function ProductDetailModal({
             ) : null}
             <button
               type="button"
-              className="btn-primary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+              className="btn-primary flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:min-h-0 sm:basis-0 sm:text-sm"
               onClick={onEdit}
               aria-label={T('edit', 'Edit')}
               title={T('edit', 'Edit')}
