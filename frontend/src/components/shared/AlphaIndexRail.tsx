@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent } from 'react'
-import { compareInitialKeys } from '../../utils/initials.ts'
+import { createPortal } from 'react-dom'
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
+import {
+  RAIL_SPECIAL_KEY,
+  nearestRailKey,
+  nextRailFocusKey,
+  railFocusKey,
+  railIndexAtOffset,
+  sortRailKeys,
+} from '../../utils/alphaRail.ts'
+import type { RailFocusMove } from '../../utils/alphaRail.ts'
 
 export interface AlphaIndexRailProps {
   /** Letters/section keys that actually have data right now -- the rail only
@@ -10,140 +19,197 @@ export interface AlphaIndexRailProps {
    * full-A-Z decision, which made rails on smaller catalogs look mostly
    * empty/disabled). */
   letters: string[]
-  /** Called with the letter the user tapped or scrubbed to. Always one of
-   * the letters actually present in `letters` -- see nearestAvailableLetter. */
+  /** Called with the letter the user tapped, scrubbed to, or activated from
+   * the keyboard. Always one of `letters` (or `resetOption.key`) -- see
+   * nearestRailKey. */
   onJump: (letter: string) => void
-  /** Accessible label for the rail (also used as the tap-scrub instruction). */
+  /** Accessible label for the rail; also the prefix of every letter button's
+   * own accessible name ("Jump to brand" -> "Jump to brand A"). */
   label?: string
   className?: string
+  /** Where the rail pins itself.
+   *  - 'sidebar' (default): just right of the admin's fixed 220px sidebar on
+   *    md+, right screen edge below it. Products and POS rely on this.
+   *  - 'screen': the right screen edge at EVERY breakpoint, clear of a
+   *    notch. Used by the public storefront, which has no sidebar. */
+  edge?: 'sidebar' | 'screen'
+  /** Controlled highlight. Pass the caller's own selection (e.g. the active
+   * brand-initial filter) so the chosen key stays marked after the rail
+   * collapses. Omit to let the rail track its own last jump. */
+  activeKey?: string | null
+  /** Optional leading entry that clears the caller's selection -- rendered as
+   * a dot so it stays as narrow as the letters. The storefront uses it for
+   * "All brands"; the admin rails (which scroll rather than filter) do not
+   * pass one. */
+  resetOption?: { key: string; ariaLabel: string } | null
 }
-
-// "#" is the existing catch-all bucket (see utils/initials.ts's
-// getInitialKey) for anything that isn't a letter/digit/Khmer character --
-// kept as a recognized special key so it still sorts last when present, but
-// (like every other letter) only actually renders if it's in `letters`.
-const SPECIAL_LETTER = '#'
 
 // Vertical A-Z jump-rail. Replaces the old horizontal per-page filter bars
 // (see the removal note above this component's call sites in Products.tsx /
-// Inventory.tsx): instead of narrowing the list to one letter, it scrolls to
-// that letter's section while leaving the rest of the list visible.
+// Inventory.tsx) and, since Sep 6 2026, the public storefront's "Jump to
+// brand" letter GRID -- which was a `max-h-[...] overflow-y-auto` box sitting
+// directly over the product list, so a wheel/touch gesture aimed at the page
+// landed inside it instead of scrolling the page.
 //
-// Desktop: fixed just to the right of the sidebar (which is a fixed 220px --
-// see Sidebar.tsx -- so this rail sits at that same edge rather than
-// floating disconnected from it). Mobile: sidebar is hidden (replaced by the
-// bottom tab bar), so the rail moves to the right edge instead, clear of the
-// bottom nav via safe-area padding.
+// Collapsed it is a column of dashes so it doesn't compete with the page for
+// attention. Hovering it (mouse) or pressing it (touch) opens it to full
+// letter labels for accurate targeting, and it then STAYS open until the
+// mouse leaves the rail or the person clicks/taps somewhere else -- a
+// deliberate multi-glance use (pick a letter, read the results, come back)
+// must not feel like the rail keeps closing on its own.
 //
-// Supports both a single tap on a letter and a press-and-drag scrub across
-// the whole rail (like iOS's contacts index) -- pointer events cover mouse,
-// touch, and pen with one handler set, and pointer capture keeps the drag
-// live even once the finger/cursor moves off the (intentionally narrow) hit
-// area.
-//
-// Collapsed by default (a slim row of dots) so it doesn't compete with the
-// page for attention; clicking/tapping/dragging it expands it to full
-// letter labels for accurate targeting, and it now STAYS expanded -- no
-// auto-collapse timer -- until the pointer actually leaves the rail (mouse
-// hover-out) or the person clicks/taps anywhere else on the page. Previously
-// this collapsed on a fixed 500ms timer after release regardless of whether
-// the person was still looking at it or had moved on, which made a
-// deliberate multi-glance use of the rail (tap a letter, read the section,
-// come back to it) feel like it kept closing on its own.
-export default function AlphaIndexRail({ letters, onJump, label, className = '' }: AlphaIndexRailProps) {
+// Pointer events cover mouse, touch and pen with one handler set, and pointer
+// capture keeps a scrub live once the finger leaves the (intentionally
+// narrow) hit area. The letters are real <button>s with a roving tab stop on
+// top of that, so the rail is reachable and operable from the keyboard -- the
+// plain buttons it replaced on the storefront were, and losing that would
+// have been a regression.
+export default function AlphaIndexRail({
+  letters,
+  onJump,
+  label,
+  className = '',
+  edge = 'sidebar',
+  activeKey,
+  resetOption = null,
+}: AlphaIndexRailProps) {
   const railRef = useRef<HTMLDivElement | null>(null)
-  const [activeLetter, setActiveLetter] = useState<string | null>(null)
+  const buttonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const [internalActive, setInternalActive] = useState<string | null>(null)
+  const [focusKey, setFocusKey] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   // Separate from `dragging`/`activeLetter` -- this is the "stays big" state:
-  // true from the moment the rail is first interacted with, false only once
-  // the pointer leaves the rail or an outside click/tap closes it.
+  // true from the moment the rail is opened, false only once the mouse leaves
+  // it or an outside click/tap closes it.
   const [stickyOpen, setStickyOpen] = useState(false)
+  // Which key the CURRENT gesture last emitted. A scrub crosses the same key
+  // on consecutive pointermove events, and a mouse press fires pointerdown and
+  // then click; re-emitting would re-run the caller's jump (and, for a
+  // toggling filter, immediately undo it). Cleared at the start and end of
+  // every gesture, so re-picking the same key later always emits.
+  const lastEmittedRef = useRef<string | null>(null)
+  const lastPointerTypeRef = useRef<string>('mouse')
 
-  const availableSet = useMemo(
-    () => new Set(Array.isArray(letters) ? letters.filter((letter) => typeof letter === 'string' && letter.length > 0) : []),
-    [letters],
+  const items = useMemo(() => sortRailKeys(letters), [letters])
+  // The reset entry takes part in hit-testing and keyboard movement, but
+  // never in the nearest-letter fallback (it isn't a letter).
+  const navKeys = useMemo(
+    () => (resetOption ? [resetOption.key, ...items] : items),
+    [items, resetOption],
   )
 
-  // Only the letters/keys that actually have data -- sorted the same way
-  // the rest of the app orders initials, with "#" (if present) pinned last.
-  const items = useMemo(() => {
-    const rest = [...availableSet]
-      .filter((letter) => letter !== SPECIAL_LETTER)
-      .sort(compareInitialKeys)
-    return availableSet.has(SPECIAL_LETTER) ? [...rest, SPECIAL_LETTER] : rest
-  }, [availableSet])
-
   const expanded = dragging || stickyOpen
+  const activeLetter = activeKey !== undefined ? activeKey : internalActive
+  const tabStopKey = railFocusKey(navKeys, focusKey ?? activeLetter)
 
-  // A tapped/dragged-to letter may not have any products today (that's the
-  // whole point of always showing the full alphabet) -- fall back to the
-  // closest letter on either side that does, so the rail is always
-  // actionable even when the exact letter is empty.
-  const nearestAvailableLetter = useCallback((letter: string | null): string | null => {
-    if (!letter) return null
-    if (availableSet.has(letter)) return letter
-    const idx = items.indexOf(letter)
-    if (idx === -1) return null
-    for (let offset = 1; offset < items.length; offset++) {
-      const before = items[idx - offset]
-      const after = items[idx + offset]
-      if (before && availableSet.has(before)) return before
-      if (after && availableSet.has(after)) return after
-    }
-    return null
-  }, [availableSet, items])
-
-  const letterAtPoint = useCallback((clientY: number): string | null => {
+  const keyAtPoint = useCallback((clientY: number): string | null => {
     const node = railRef.current
-    if (!node || items.length === 0) return null
+    if (!node) return null
     const rect = node.getBoundingClientRect()
-    if (rect.height <= 0) return null
-    const relative = Math.min(Math.max(clientY - rect.top, 0), rect.height - 1)
-    const index = Math.floor((relative / rect.height) * items.length)
-    return items[Math.min(Math.max(index, 0), items.length - 1)] ?? null
-  }, [items])
+    const index = railIndexAtOffset(navKeys.length, clientY - rect.top, rect.height)
+    return index === -1 ? null : navKeys[index] ?? null
+  }, [navKeys])
 
-  const jumpTo = useCallback((rawLetter: string | null) => {
-    if (!rawLetter) return
+  const jumpTo = useCallback((rawKey: string | null) => {
+    if (!rawKey) return
     setStickyOpen(true)
-    setActiveLetter(rawLetter)
-    const target = nearestAvailableLetter(rawLetter)
-    if (target) onJump(target)
-  }, [nearestAvailableLetter, onJump])
+    const target = resetOption && rawKey === resetOption.key ? rawKey : nearestRailKey(items, rawKey)
+    if (!target) return
+    setFocusKey(target)
+    if (activeKey === undefined) setInternalActive(target)
+    if (lastEmittedRef.current === target) return
+    lastEmittedRef.current = target
+    onJump(target)
+  }, [activeKey, items, onJump, resetOption])
 
-  // Closes the rail immediately -- no fade timer -- used by both the
-  // pointer-leave and click-outside paths below.
+  // Closes the rail immediately -- no fade timer -- used by the pointer-leave,
+  // click-outside and Escape paths below.
   const closeRail = useCallback(() => {
     setStickyOpen(false)
-    setActiveLetter(null)
-  }, [])
+    setFocusKey(null)
+    if (activeKey === undefined) setInternalActive(null)
+  }, [activeKey])
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    lastPointerTypeRef.current = event.pointerType || 'mouse'
+    lastEmittedRef.current = null
     setDragging(true)
-    jumpTo(letterAtPoint(event.clientY))
+    jumpTo(keyAtPoint(event.clientY))
     event.currentTarget.setPointerCapture?.(event.pointerId)
-  }, [jumpTo, letterAtPoint])
+  }, [jumpTo, keyAtPoint])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragging) return
-    jumpTo(letterAtPoint(event.clientY))
-  }, [dragging, jumpTo, letterAtPoint])
+    jumpTo(keyAtPoint(event.clientY))
+  }, [dragging, jumpTo, keyAtPoint])
 
-  // Release just ends the drag gesture -- it no longer collapses the rail
-  // (that's now closeRail(), triggered only by pointer-leave/outside-click).
+  // Release just ends the drag gesture -- it does not collapse the rail
+  // (that's closeRail(), triggered only by pointer-leave/outside-click/Esc).
   const releaseDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.currentTarget.releasePointerCapture?.(event.pointerId)
+    lastEmittedRef.current = null
     setDragging(false)
   }, [])
 
-  // "Moving elsewhere" -- the mouse actually leaving the rail's own hit
-  // area. Only wired up while not mid-drag (a drag already has its own
-  // pointer-capture-driven move/up handling regardless of where the pointer
-  // physically is).
+  // Hover-to-open, mouse only. A tap emits a pointerenter with pointerType
+  // 'touch' immediately before pointerdown; opening on that would make the
+  // touch path indistinguishable from the mouse path, and touch has no
+  // "leave" to close it again.
+  const handlePointerEnter = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    lastPointerTypeRef.current = event.pointerType || 'mouse'
+    if (event.pointerType !== 'mouse') return
+    setStickyOpen(true)
+  }, [])
+
+  // "Moving elsewhere" -- the mouse actually leaving the rail's own hit area.
+  // Touch/pen keep the rail open (they have no hover state to lose) and close
+  // on the outside pointerdown below, which is what the owner asked for.
+  // Never while mid-drag, and never while the rail holds keyboard focus.
   const handlePointerLeave = useCallback(() => {
     if (dragging) return
+    if (lastPointerTypeRef.current !== 'mouse') return
+    const node = railRef.current
+    if (node && node.contains(document.activeElement)) return
     closeRail()
-  }, [dragging, closeRail])
+  }, [closeRail, dragging])
+
+  const moveFocus = useCallback((move: RailFocusMove) => {
+    const next = nextRailFocusKey(navKeys, tabStopKey, move)
+    if (!next) return
+    setStickyOpen(true)
+    setFocusKey(next)
+    buttonRefs.current.get(next)?.focus()
+  }, [navKeys, tabStopKey])
+
+  const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const moves: Record<string, RailFocusMove> = {
+      ArrowDown: 'down',
+      ArrowRight: 'down',
+      ArrowUp: 'up',
+      ArrowLeft: 'up',
+      Home: 'first',
+      End: 'last',
+    }
+    const move = moves[event.key]
+    if (move) {
+      event.preventDefault()
+      moveFocus(move)
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeRail()
+    }
+  }, [closeRail, moveFocus])
+
+  // Keyboard activation only. Mouse and touch already went through
+  // pointerdown; a browser reports a keyboard-synthesised click with
+  // detail === 0, which is the one case pointerdown never covers.
+  const handleClick = useCallback((key: string) => (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (event.detail !== 0) return
+    lastEmittedRef.current = null
+    jumpTo(key)
+  }, [jumpTo])
 
   // "Click elsewhere" -- a pointerdown anywhere outside the rail's own DOM
   // node. Only listens while the rail is actually open, so this never adds
@@ -162,52 +228,76 @@ export default function AlphaIndexRail({ letters, onJump, label, className = '' 
 
   if (items.length === 0) return null
 
-  return (
-    <>
-      <div
-        ref={railRef}
-        role="listbox"
-        aria-label={label || 'Jump to letter'}
-        aria-orientation="vertical"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={releaseDrag}
-        onPointerCancel={releaseDrag}
-        onPointerLeave={handlePointerLeave}
-        className={`fixed right-2 top-1/2 z-30 flex max-h-[70vh] -translate-y-1/2 touch-none select-none flex-col items-center justify-center rounded-full border border-gray-200 bg-white/90 shadow-md backdrop-blur-sm transition-[gap,padding] duration-150 dark:border-slate-700 dark:bg-slate-900/90 md:left-[228px] md:right-auto ${
-          expanded ? 'gap-[1px] px-1 py-2' : 'gap-0 px-0.5 py-1.5'
-        } ${className}`}
-      >
-        {items.map((letter) => {
-          const isAvailable = availableSet.has(letter)
-          const isActive = activeLetter === letter
-          return (
-            <span
-              key={letter}
-              role="option"
-              aria-selected={isActive}
-              aria-disabled={!isAvailable}
-              // "Bigger" meant this rail's own letters, slightly larger --
-              // not a separate floating duplicate of the current letter (the
-              // bubble this replaced). Feedback for where the finger/cursor
-              // landed now comes from the active letter itself growing in
-              // place (scale) instead of a second element elsewhere on
-              // screen showing the same character twice.
-              className={`flex shrink-0 cursor-pointer items-center justify-center rounded-full font-semibold leading-none transition-all duration-150 ${
-                expanded ? 'h-5 w-6 text-xs' : 'h-1 w-1 text-[0px]'
-              } ${isActive ? 'scale-125' : ''} ${
-                isActive
-                  ? 'bg-blue-600 text-white'
-                  : isAvailable
-                    ? 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-800'
-                    : 'text-gray-300 dark:text-slate-700'
-              }`}
-            >
-              {expanded ? letter : ''}
-            </span>
-          )
-        })}
-      </div>
-    </>
+  const railLabel = label || 'Jump to letter'
+  // 'screen' clears a notched right edge at every breakpoint and keeps a
+  // shorter column so the rail cannot reach the storefront's bottom-right
+  // list FAB (z-50); 'sidebar' keeps the admin's 220px offset on md+.
+  const edgeClass = edge === 'screen'
+    ? 'right-[calc(0.5rem+env(safe-area-inset-right))] max-h-[60vh]'
+    : 'right-2 max-h-[70vh] md:left-[228px] md:right-auto'
+
+  // Rendered through a portal, like every other float in the app. The rail is
+  // viewport-`fixed`, and on the storefront it is mounted inside a shell that
+  // carries `overflow-y: auto` + `-webkit-overflow-scrolling: touch` -- the
+  // combination iOS Safari has historically clipped and mis-positioned fixed
+  // descendants inside. Going straight to <body> removes the whole question,
+  // and keeps the rail out of any future ancestor's stacking context.
+  const railNode = (
+    <div
+      ref={railRef}
+      role="toolbar"
+      aria-label={railLabel}
+      aria-orientation="vertical"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={releaseDrag}
+      onPointerCancel={releaseDrag}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+      onKeyDown={handleKeyDown}
+      className={`fixed top-1/2 z-30 flex -translate-y-1/2 touch-none select-none flex-col items-center justify-center rounded-full border border-gray-200 bg-white/90 shadow-md backdrop-blur-sm transition-[gap,padding] duration-150 dark:border-slate-700 dark:bg-slate-900/90 ${edgeClass} ${
+        expanded ? 'gap-[1px] px-1 py-2' : 'gap-0 px-0.5 py-1.5'
+      } ${className}`}
+    >
+      {navKeys.map((key) => {
+        const isReset = Boolean(resetOption) && key === resetOption?.key
+        const isActive = activeLetter === key
+        return (
+          <button
+            key={key}
+            type="button"
+            ref={(node) => {
+              if (node) buttonRefs.current.set(key, node)
+              else buttonRefs.current.delete(key)
+            }}
+            // One tab stop for the whole rail (roving): 26+ stops on a
+            // decorative index would bury the page's real controls.
+            tabIndex={key === tabStopKey ? 0 : -1}
+            aria-label={isReset ? (resetOption?.ariaLabel || railLabel) : `${railLabel} ${key === RAIL_SPECIAL_KEY ? '#' : key}`}
+            aria-pressed={isActive}
+            onFocus={() => {
+              setStickyOpen(true)
+              setFocusKey(key)
+            }}
+            onClick={handleClick(key)}
+            // Feedback for where the finger/cursor landed comes from the
+            // active letter itself growing in place (scale) -- not a second
+            // floating bubble elsewhere on screen showing the same character
+            // twice (the thing this replaced).
+            className={`flex shrink-0 cursor-pointer items-center justify-center rounded-full font-semibold leading-none outline-none transition-all duration-150 focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              expanded ? 'h-5 w-6 text-xs' : 'h-1 w-1 text-[0px]'
+            } ${isActive ? 'scale-125' : ''} ${
+              isActive
+                ? 'bg-blue-600 text-white'
+                : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-800'
+            }`}
+          >
+            {expanded ? (isReset ? '•' : key) : ''}
+          </button>
+        )
+      })}
+    </div>
   )
+
+  return typeof document === 'undefined' ? railNode : createPortal(railNode, document.body)
 }

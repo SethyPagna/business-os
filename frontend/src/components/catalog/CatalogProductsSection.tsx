@@ -20,6 +20,8 @@ import { SectionShell, StatusPill } from './catalogUi'
 import PortalFilterCombobox from './PortalFilterCombobox'
 import PortalPromoStrip from './PortalPromoStrip.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import AlphaIndexRail from '../shared/AlphaIndexRail.tsx'
+import { RAIL_ALL_KEY, resolveBrandJump } from '../../utils/alphaRail.ts'
 import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
@@ -486,33 +488,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             </div>
             {renderFilterFields()}
           </div>
-          {initialOptions.length > 1 ? (
-            <div className="mt-3 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
-              <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-neutral-400">
-                {copy('jumpToBrand', 'Jump to brand')}
-              </div>
-              <div className="grid max-h-[min(18rem,calc(100vh-32rem))] grid-cols-4 gap-1 overflow-y-auto overscroll-contain pr-1">
-                <button
-                  type="button"
-                  className={`h-8 rounded-lg text-xs font-semibold transition ${effectiveInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
-                  onClick={() => updateInitialFilter?.('all')}
-                >
-                  {copy('all', 'All')}
-                </button>
-                {initialOptions.map((item) => (
-                  <button
-                    key={`rail-${item.key}`}
-                    type="button"
-                    className={`h-8 rounded-lg text-xs font-semibold transition ${effectiveInitialFilter === item.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
-                    onClick={() => updateInitialFilter?.(effectiveInitialFilter === item.key ? 'all' : item.key)}
-                    title={`${item.label} (${item.count})`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          {/* The brand index used to be a second card here: a 4-column letter
+              GRID inside its own `max-h-[...] overflow-y-auto` box. That box
+              sat over the product list and swallowed wheel/touch gestures
+              aimed at the page, and it duplicated a `lg:hidden` chip row
+              below the search field. Both are now the single screen-edge
+              AlphaIndexRail mounted at the end of this section. */}
         </aside>
 
         <div className="min-w-0">
@@ -601,28 +582,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
           </div>
 
-        {initialOptions.length > 1 ? (
-          <div className="flex gap-1 overflow-x-auto overscroll-x-contain rounded-xl border border-slate-100 bg-slate-50/80 p-1 [scrollbar-width:thin] dark:border-neutral-800 dark:bg-neutral-950/60 lg:hidden">
-            <button
-              type="button"
-              className={`h-8 min-w-9 shrink-0 rounded-lg px-2 text-xs font-semibold transition ${effectiveInitialFilter === 'all' ? 'bg-blue-600 text-white shadow-sm dark:bg-amber-400 dark:text-neutral-950' : 'text-slate-600 hover:bg-white hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
-              onClick={() => updateInitialFilter?.('all')}
-            >
-              {copy('all', 'All')}
-            </button>
-            {initialOptions.map((item) => (
-              <button
-                key={`row-${item.key}`}
-                type="button"
-                className={`h-8 min-w-9 shrink-0 rounded-lg px-2 text-xs font-semibold transition ${effectiveInitialFilter === item.key ? 'bg-blue-600 text-white shadow-sm dark:bg-amber-400 dark:text-neutral-950' : 'text-slate-600 hover:bg-white hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
-                onClick={() => updateInitialFilter?.(effectiveInitialFilter === item.key ? 'all' : item.key)}
-                title={`${item.label} (${item.count})`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        {/* The `lg:hidden` letter chip row lived here: an `overflow-x-auto`
+            strip of `h-8 min-w-9` buttons pinned under the search field. On a
+            375px screen it was a full-width horizontal scroller directly
+            above the grid, and it was the phone half of a control the
+            screen-edge rail now provides at every breakpoint. */}
 
         <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-1 pt-2 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
           <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : copy('filterCompactHint', 'Use quick filters to narrow products faster.')}</span>
@@ -967,6 +931,27 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       ) : null}
         </div>
       </div>
+
+      {/* One vertical brand index for every breakpoint, pinned to the right
+          screen edge: collapsed it is a column of dashes, hover (mouse) or
+          touch opens it, a letter selects that brand group and the same
+          letter again clears back to All. It replaces BOTH letter lists this
+          section used to carry, and being `fixed` it adds nothing to the page
+          flow -- no inner scroller over the grid, no width at 320/375.
+
+          publicView only: the admin portal editor renders this same section
+          inside a `.page-scroll` preview panel, where a viewport-fixed rail
+          would float outside the preview and over the admin chrome. */}
+      {publicView && initialOptions.length > 1 ? (
+        <AlphaIndexRail
+          edge="screen"
+          letters={initialOptions.map((item) => item.key)}
+          activeKey={effectiveInitialFilter === RAIL_ALL_KEY ? null : effectiveInitialFilter}
+          resetOption={{ key: RAIL_ALL_KEY, ariaLabel: copy('all', 'All') }}
+          label={copy('jumpToBrand', 'Jump to brand')}
+          onJump={(key) => updateInitialFilter?.(resolveBrandJump(effectiveInitialFilter, key))}
+        />
+      ) : null}
     </SectionShell>
   )
 }

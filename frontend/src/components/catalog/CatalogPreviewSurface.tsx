@@ -263,9 +263,20 @@ export default function CatalogPreviewSurface({
       // containers each fighting for wheel/touch events is what produced the frozen
       // scroll + duplicate scrollbar bug mid-page. Just fill width and let the parent
       // scroller handle scrolling.
-      className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
+      //
+      // The publicView branch used to say `overflow-visible` next to the
+      // inline `overflowY: 'auto'` below, which is a contradiction the browser
+      // resolves against us: CSS turns a `visible` axis into `auto` whenever
+      // the other axis is not visible, so this shell quietly became a TWO-axis
+      // scroll container and any over-wide descendant produced a horizontal
+      // scroller INSIDE it -- somewhere html/body's own `overflow-x: hidden`
+      // could never reach. `clip` is the one value that contains the
+      // horizontal axis without making the shell a scrollport; `hidden` would
+      // make it one and break every sticky descendant, and the pinned section
+      // nav lives in here.
+      className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-x-clip' : 'w-full'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowX: 'clip', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
         background: portalBackground,
       }}
     >
