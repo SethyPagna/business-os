@@ -564,6 +564,10 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   // told not to repeat.
   {
     const undoModule = compile('undoAppliers.ts', {
+      // Bulk status replay is outside this suite; fail if it is invoked.
+      './saleBulkStatus': {
+        replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-sale-add-items-pure.cjs') },
+      },
       './db': { getDb: () => ({}) },
       './audit': { audit: async () => {} },
       '../durable-objects/broadcastHub': { broadcast: async () => {} },
