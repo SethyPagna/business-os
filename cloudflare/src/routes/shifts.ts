@@ -1,9 +1,8 @@
 import { Hono } from 'hono'
 import { getDb, type D1Compat } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
-import { hasAnyPermission, hasPermission, isAdminControlUser } from '../lib/permissions'
+import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { sendTelegramShiftReport } from '../lib/telegram'
 import type { Env } from '../index'
 
@@ -19,6 +18,8 @@ export type ShiftRow = {
   closing_counted_usd: number | null; closing_counted_khr: number | null; closing_note: string | null
   closed_by_user_id: number | null; closed_by_user_name: string | null; revision: number
 }
+export type ShiftCapabilities = { can_edit: boolean; can_close: boolean; can_reopen: boolean }
+export type ShiftResponseRow = ShiftRow & { capabilities: ShiftCapabilities }
 
 const SHIFT_COLUMNS = `id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
   opened_at, opening_float_usd, opening_float_khr, opening_note,
@@ -39,6 +40,10 @@ function bodyBranchId(body: Record<string, unknown>, fallback: number | null): n
 function money(value: unknown): number {
   const n = Number(value)
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0
+}
+function requiredMoney(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null
 }
 function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -62,7 +67,31 @@ function shiftCode(nowIso: string): string {
 }
 
 export function canManageShifts(user: SessionUser): boolean {
-  return isAdminControlUser(user) || hasPermission(user, 'settings')
+  return isAdminControlUser(user)
+}
+function canMutateShift(user: SessionUser, shift: ShiftRow): boolean {
+  return canManageShifts(user) || shift.user_id === user.id
+}
+function responseShift(user: SessionUser, shift: ShiftRow, canReopen = false): ShiftResponseRow {
+  const canMutate = canMutateShift(user, shift)
+  return { ...shift, capabilities: {
+    can_edit: canMutate,
+    can_close: canMutate && !shift.closed_at,
+    can_reopen: canMutate && canReopen,
+  } }
+}
+function batchChanges(value: unknown): number {
+  return Number((value as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0)
+}
+function transitionAuditSql(): string {
+  return `INSERT INTO audit_logs (user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value,device_name)
+    SELECT @actorId,@actorName,@action,'shift_session',CAST(@shiftId AS TEXT),@details,'shift_session',CAST(@shiftId AS TEXT),@oldValue,@newValue,@deviceName
+    WHERE changes()=1`
+}
+function openAuditSql(): string {
+  return `INSERT INTO audit_logs (user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value,device_name)
+    SELECT @actorId,@actorName,'shift.open','shift_session',CAST(id AS TEXT),@details,'shift_session',CAST(id AS TEXT),NULL,@newValue,@deviceName
+    FROM shift_sessions WHERE changes()=1 AND shift_code=@shiftCode`
 }
 export async function readShiftPolicy(db: D1Compat): Promise<ShiftPolicy> {
   const rows = await db.prepare("SELECT key, value FROM settings WHERE key IN ('shift_scope_mode', 'shift_admin_exempt')").all<{ key: string; value: string }>()
@@ -83,9 +112,10 @@ async function readCurrent(db: D1Compat, policy: ShiftPolicy, userId: number, br
 async function readShiftById(db: D1Compat, id: number) {
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftRow>({ id })
 }
-function currentResponse(shift: ShiftRow | undefined, policy: ShiftPolicy, exempt: boolean) {
-  return { shift: shift ?? null, policy, exempt, needs_registration: !exempt && !shift,
-    is_open: !!shift && !shift.closed_at, can_end: !!shift && !shift.closed_at }
+function currentResponse(user: SessionUser, shift: ShiftRow | undefined, policy: ShiftPolicy, exempt: boolean) {
+  const presented = shift ? responseShift(user, shift) : null
+  return { shift: presented, policy, exempt, needs_registration: !exempt && !shift,
+    is_open: !!shift && !shift.closed_at, can_end: !!presented?.capabilities.can_close }
 }
 
 app.get('/policy', async (c) => c.json(await readShiftPolicy(getDb(c.env))))
@@ -99,35 +129,45 @@ app.get('/current', async (c) => {
   const policy = await readShiftPolicy(db)
   const exempt = policy.admin_exempt && isAdminControlUser(user)
   const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
-  return c.json(currentResponse(shift, policy, exempt))
+  return c.json(currentResponse(user, shift, policy, exempt))
 })
 
 app.get('/', async (c) => {
-  const user = c.get('user'); const manager = canManageShifts(user); const branchId = branchIdFrom(c)
-  const rawUserId = Number(c.req.query('user_id'))
-  const requestedUserId = manager && Number.isInteger(rawUserId) && rawUserId > 0 ? rawUserId : null
+  const user = c.get('user'); const denied = shiftPermissionError(c, user); if (denied) return denied
+  const db = getDb(c.env); const branchId = branchIdFrom(c)
+  const rawBranchId = c.req.query('branch_id') ?? c.req.header('X-Branch-Id')
+  if (rawBranchId != null && String(rawBranchId).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
+  if (branchId != null && !(await resolveBranch(db, branchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  const rawUserId = c.req.query('user_id')
+  const parsedUserId = rawUserId == null || rawUserId.trim() === '' ? null : Number(rawUserId)
+  if (parsedUserId != null && (!Number.isInteger(parsedUserId) || parsedUserId <= 0)) return c.json({ error: 'Invalid user id.' }, 400)
+  const requestedUserId = parsedUserId
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit')) || 50))
-  const shifts = await getDb(c.env).prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
-    WHERE (@manager = 1 OR user_id = @selfId) AND (@requestedUserId IS NULL OR user_id = @requestedUserId)
-      AND (@branchId IS NULL OR branch_id = @branchId) AND (@from IS NULL OR business_date >= @from)
-      AND (@to IS NULL OR business_date <= @to)
-    ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT @limit`).all<ShiftRow>({
-      manager: manager ? 1 : 0, selfId: user.id, requestedUserId, branchId,
-      from: c.req.query('from') || null, to: c.req.query('to') || null, limit,
-    })
-  return c.json({ shifts, scope: manager ? 'all' : 'own' })
+  const filters = `(@requestedUserId IS NULL OR user_id = @requestedUserId)
+      AND (@branchId IS NULL OR branch_id = @branchId)
+      AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
+      AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)`
+  const params = { requestedUserId, branchId, from: c.req.query('from') || null, to: c.req.query('to') || null, limit }
+  const [openShifts, closedShifts] = await Promise.all([
+    db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters} AND closed_at IS NULL
+      ORDER BY business_date DESC, opened_at DESC, id DESC`).all<ShiftRow>(params),
+    db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters} AND closed_at IS NOT NULL
+      ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT @limit`).all<ShiftRow>(params),
+  ])
+  return c.json({ shifts: [...openShifts, ...closedShifts].map((shift) => responseShift(user, shift)), scope: 'all' })
 })
 
 app.get('/:id/history', async (c) => {
-  const user = c.get('user'); const id = Number(c.req.param('id'))
+  const user = c.get('user'); const denied = shiftPermissionError(c, user); if (denied) return denied
+  const id = Number(c.req.param('id'))
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid shift id.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
-  if (!canManageShifts(user) && shift.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403)
+  if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
   const amendments = await db.prepare(`SELECT id, shift_session_id, actor_user_id, actor_name, reason,
     before_json, after_json, created_at FROM shift_session_amendments
     WHERE shift_session_id = @id ORDER BY created_at ASC, id ASC`).all({ id })
-  return c.json({ shift, amendments })
+  return c.json({ shift: responseShift(user, shift), amendments })
 })
 
 app.post('/open', async (c) => {
@@ -140,28 +180,64 @@ app.post('/open', async (c) => {
   const policy = await readShiftPolicy(db)
   if (policy.admin_exempt && isAdminControlUser(user)) return c.json({ error: 'This account is exempt from shifts.', exempt: true }, 403)
   const existing = await readCurrent(db, policy, user.id, branchId)
-  if (existing) return c.json({ ...currentResponse(existing, policy, false), already_registered: true }, 200)
+  if (existing) return c.json({ ...currentResponse(user, existing, policy, false), already_registered: true }, 200)
   const nowIso = new Date().toISOString()
   const row = { shiftCode: shiftCode(nowIso), scopeMode: policy.scope_mode, userId: user.id,
     userName: displayName(user), branchId, branchName: branch?.name ?? null, openedAt: nowIso,
     floatUsd: money(body.opening_float_usd), floatKhr: money(body.opening_float_khr),
     note: optionalText(body.opening_note), deviceName: c.req.header('X-Device-Name') || null }
   try {
-    await db.prepare(`INSERT INTO shift_sessions (shift_code, scope_mode, user_id, user_name, branch_id,
+    const results = await db.batch([
+      { sql: `INSERT INTO shift_sessions (shift_code, scope_mode, user_id, user_name, branch_id,
       branch_name, business_date, opened_at, opening_float_usd, opening_float_khr, opening_note, opened_device_name)
       VALUES (@shiftCode,@scopeMode,@userId,@userName,@branchId,@branchName,date(@openedAt,'${BUSINESS_TZ_FORWARD}'),
-      @openedAt,@floatUsd,@floatKhr,@note,@deviceName)`).run(row)
+      @openedAt,@floatUsd,@floatKhr,@note,@deviceName)`, params: row },
+      { sql: openAuditSql(), params: { actorId: user.id, actorName: row.userName, shiftCode: row.shiftCode,
+        details: JSON.stringify({ shift_code: row.shiftCode, scope_mode: row.scopeMode, branch_id: row.branchId,
+          opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), oldValue: null,
+        newValue: JSON.stringify({ shift_code: row.shiftCode, opened_at: row.openedAt,
+          opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), deviceName: row.deviceName } },
+    ])
+    if (batchChanges(results[0]) !== 1) throw new Error('Shift open did not write a row.')
   } catch (error) {
     const raced = await readCurrent(db, policy, user.id, branchId)
-    if (raced) return c.json({ ...currentResponse(raced, policy, false), already_registered: true }, 200)
+    if (raced) return c.json({ ...currentResponse(user, raced, policy, false), already_registered: true }, 200)
     throw error
   }
   const shift = await readCurrent(db, policy, user.id, branchId)
-  await audit(c.env, user.id, row.userName, 'shift.open', 'shift_session', shift?.id ?? null,
-    { shift_code: row.shiftCode, scope_mode: row.scopeMode, branch_id: row.branchId,
-      opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr })
-  return c.json({ ...currentResponse(shift, policy, false), already_registered: false }, 201)
+  if (!shift) return c.json({ error: 'Shift registration could not be read back.' }, 500)
+  const report = sendTelegramShiftReport(c.env, shift.id)
+  try { c.executionCtx.waitUntil(report) } catch { void report }
+  return c.json({ ...currentResponse(user, shift, policy, false), already_registered: false }, 201)
 })
+
+async function writeClose(db: D1Compat, user: SessionUser, shift: ShiftRow, input: {
+  closedAt: string; countedUsd: number; countedKhr: number; note: string | null; deviceName: string | null; reason: string
+}): Promise<{ changed: boolean; shift: ShiftRow | undefined }> {
+  const after = { ...shift, closed_at: input.closedAt, closing_counted_usd: input.countedUsd,
+    closing_counted_khr: input.countedKhr, closing_note: input.note, closed_by_user_id: user.id,
+    closed_by_user_name: displayName(user), revision: shift.revision + 1 }
+  const actorName = displayName(user)
+  const results = await db.batch([
+    { sql: `UPDATE shift_sessions SET closed_at=@closedAt, closing_counted_usd=@countedUsd,
+        closing_counted_khr=@countedKhr, closing_note=@note, closed_device_name=@deviceName,
+        closed_by_user_id=@closerId, closed_by_user_name=@closerName, revision=revision+1, updated_at=@closedAt
+        WHERE id=@id AND revision=@revision AND closed_at IS NULL`,
+      params: { id: shift.id, revision: shift.revision, closedAt: input.closedAt, countedUsd: input.countedUsd,
+        countedKhr: input.countedKhr, note: input.note, deviceName: input.deviceName,
+        closerId: user.id, closerName: actorName } },
+    { sql: `INSERT INTO shift_session_amendments (shift_session_id,actor_user_id,actor_name,reason,before_json,after_json,created_at)
+        SELECT @id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions
+        WHERE changes()=1 AND id=@id AND revision=@newRevision`,
+      params: { id: shift.id, actorId: user.id, actorName, reason: input.reason, beforeJson: JSON.stringify(shift),
+        afterJson: JSON.stringify(after), createdAt: input.closedAt, newRevision: after.revision } },
+    { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.close', shiftId: shift.id,
+        details: JSON.stringify({ reason: input.reason, revision: after.revision }), oldValue: JSON.stringify(shift),
+        newValue: JSON.stringify(after), deviceName: input.deviceName } },
+  ])
+  const changed = batchChanges(results[0]) === 1
+  return { changed, shift: await readShiftById(db, shift.id) }
+}
 
 app.post('/close', async (c) => {
   const user = c.get('user'); const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
@@ -171,36 +247,56 @@ app.post('/close', async (c) => {
   const db = getDb(c.env)
   if (branchId != null && !(await resolveBranch(db, branchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
   const policy = await readShiftPolicy(db)
-  if (policy.admin_exempt && isAdminControlUser(user)) return c.json({ error: 'This account is exempt from shifts.', exempt: true }, 403)
   const shift = await readCurrent(db, policy, user.id, branchId)
   if (!shift) return c.json({ error: 'No shift is registered for today. Register the opening float first.' }, 404)
-  if (shift.closed_at) return c.json({ shift, already_closed: true, is_open: false }, 200)
-  const patch = { id: shift.id, closedAt: new Date().toISOString(), countedUsd: money(body.closing_counted_usd),
-    countedKhr: money(body.closing_counted_khr), note: optionalText(body.closing_note),
-    deviceName: c.req.header('X-Device-Name') || null, closerId: user.id, closerName: displayName(user) }
-  const result = await db.prepare(`UPDATE shift_sessions SET closed_at=@closedAt, closing_counted_usd=@countedUsd,
-    closing_counted_khr=@countedKhr, closing_note=@note, closed_device_name=@deviceName,
-    closed_by_user_id=@closerId, closed_by_user_name=@closerName, revision=revision+1, updated_at=@closedAt
-    WHERE id=@id AND closed_at IS NULL`).run(patch)
-  const after = await readShiftById(db, shift.id)
-  if (result.changes > 0) {
-    await audit(c.env, user.id, patch.closerName, 'shift.close', 'shift_session', shift.id,
-      { shift_code: shift.shift_code, scope_mode: shift.scope_mode,
-        closing_counted_usd: patch.countedUsd, closing_counted_khr: patch.countedKhr })
+  if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
+  if (shift.closed_at) return c.json({ shift: responseShift(user, shift), already_closed: true, is_open: false }, 200)
+  const result = await writeClose(db, user, shift, { closedAt: new Date().toISOString(),
+    countedUsd: money(body.closing_counted_usd), countedKhr: money(body.closing_counted_khr),
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close' })
+  if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
     try { c.executionCtx.waitUntil(report) } catch { void report }
   }
-  return c.json({ shift: after, already_closed: result.changes === 0, is_open: false }, 200)
+  return c.json({ shift: result.shift ? responseShift(user, result.shift) : null, already_closed: !result.changed, is_open: false }, 200)
+})
+
+app.post('/:id/close', async (c) => {
+  const user = c.get('user'); const denied = shiftPermissionError(c, user); if (denied) return denied
+  const id = Number(c.req.param('id')); if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid shift id.' }, 400)
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const expectedRevision = Number(body.expected_revision)
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return c.json({ error: 'A valid expected revision is required.' }, 400)
+  const parsedClosedAt = typeof body.closed_at === 'string' ? new Date(body.closed_at) : new Date(Number.NaN)
+  if (Number.isNaN(parsedClosedAt.getTime())) return c.json({ error: 'A valid closing time is required.' }, 400)
+  const closedAt = parsedClosedAt.toISOString(); const now = Date.now()
+  if (parsedClosedAt.getTime() > now) return c.json({ error: 'Closing time cannot be in the future.' }, 400)
+  const countedUsd = requiredMoney(body.closing_counted_usd); const countedKhr = requiredMoney(body.closing_counted_khr)
+  if (countedUsd == null || countedKhr == null) return c.json({ error: 'Valid USD and KHR closing counts are required.' }, 400)
+  const db = getDb(c.env); const shift = await readShiftById(db, id)
+  if (!shift) return c.json({ error: 'Shift not found.' }, 404)
+  if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
+  if (shift.closed_at) return c.json({ error: 'Shift is already closed.' }, 409)
+  if (expectedRevision !== shift.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
+  if (parsedClosedAt.getTime() < new Date(shift.opened_at).getTime()) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  const result = await writeClose(db, user, shift, { closedAt, countedUsd, countedKhr,
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close' })
+  if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
+  const report = sendTelegramShiftReport(c.env, shift.id)
+  try { c.executionCtx.waitUntil(report) } catch { void report }
+  return c.json({ shift: responseShift(user, result.shift), already_closed: false, is_open: false }, 200)
 })
 
 app.patch('/:id', async (c) => {
-  const user = c.get('user')
-  if (!canManageShifts(user)) return c.json({ error: 'Manager permission required.' }, 403)
+  const user = c.get('user'); const denied = shiftPermissionError(c, user); if (denied) return denied
   const id = Number(c.req.param('id')); if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid shift id.' }, 400)
   const body = await c.req.json().catch(() => ({})) as Record<string, unknown>; const reason = optionalText(body.reason)
   if (!reason) return c.json({ error: 'A reason is required.' }, 400)
   const db = getDb(c.env); const before = await readShiftById(db, id)
   if (!before) return c.json({ error: 'Shift not found.' }, 404)
+  if (before.branch_id != null && !(await resolveBranch(db, before.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canMutateShift(user, before)) return c.json({ error: 'Only the shift owner or an administrator can amend this shift.' }, 403)
   const iso = (key: string, fallback: string | null) => {
     if (!(key in body)) return fallback
     if (body[key] == null || body[key] === '') return null
@@ -237,13 +333,15 @@ app.patch('/:id', async (c) => {
         WHERE changes()=1 AND id=@id AND revision=@newRevision`,
       params: { id, actorId: user.id, actorName, reason, beforeJson: JSON.stringify(before),
         afterJson: JSON.stringify(after), createdAt: nowIso, newRevision: after.revision } },
+    { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.amend', shiftId: id,
+        details: JSON.stringify({ reason, revision: after.revision }), oldValue: JSON.stringify(before),
+        newValue: JSON.stringify(after), deviceName: c.req.header('X-Device-Name') || null } },
   ])
-  const changed = Number((results[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0)
+  const changed = batchChanges(results[0])
   if (changed !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const saved = await readShiftById(db, id)
   if (!saved || saved.revision !== after.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  await audit(c.env, user.id, actorName, 'shift.amend', 'shift_session', id, { reason, revision: saved.revision })
-  return c.json({ shift: saved }, 200)
+  return c.json({ shift: responseShift(user, saved) }, 200)
 })
 
 export default app
