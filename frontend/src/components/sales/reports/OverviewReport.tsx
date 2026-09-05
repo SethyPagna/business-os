@@ -274,19 +274,8 @@ export default function OverviewReport(p: ReportViewProps) {
                           <span className="w-3 text-[var(--ui-ink-3)]">{statementOperator(l.kind)}</span>
                           {lineLabel(l)}
                           {l.hintKey ? <InfoHint text={tr(l.hintKey, l.hintFallback || '')} label={lineLabel(l)} /> : null}
+                          {note ? <span className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">({note})</span> : null}
                         </span>
-                        {note ? (
-                          // The data note ("no courier cost recorded on 11,834
-                          // deliveries") is a sentence, not a label. Kept inline
-                          // it becomes the Line column's max-content and, under
-                          // DenseTable `fit` (min-w-max), pushes the Amount column
-                          // past the 34rem statement box into its own horizontal
-                          // scroller -- every value hidden. As a capped block it
-                          // wraps under the label (a block's max-width also caps
-                          // its max-content contribution), so the column stays as
-                          // wide as the widest label and the value stays adjacent.
-                          <div className="max-w-[16rem] whitespace-normal pl-4 pb-1 text-[length:var(--ui-size-meta)] leading-snug text-[var(--ui-ink-3)]">({note})</div>
-                        ) : null}
                       </td>
                       <td className="text-right whitespace-nowrap">{fmtMoney(l.usd, l.khr)}</td>
                       {compare ? (
