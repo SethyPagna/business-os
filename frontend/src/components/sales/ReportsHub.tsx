@@ -357,9 +357,22 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
       onChange={setRange}
       t={t}
       showTime={supportsTime}
-      showCalendarIcon={!compact}
+      continuous
+      showCalendarIcon={false}
       triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2' : undefined}
     />
+  )
+
+  const presetControls = (
+    <div className="reports-mobile-presets" aria-label={trh('quick_range', 'Quick range')}>
+      {mobilePresets.map((preset) => (
+        <button key={preset.id} type="button" className="reports-mobile-preset"
+          aria-pressed={selectedMobilePreset === preset.id}
+          onClick={() => setRange(mobilePresetRange(preset.id))}>
+          {preset.label}
+        </button>
+      ))}
+    </div>
   )
 
   const body = !viewProps || !view ? (
@@ -385,19 +398,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
         <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
           {searchInput}
           <div className="reports-mobile-primary">{viewPicker}{rangePicker}</div>
-          <div className="reports-mobile-presets" aria-label={trh('quick_range', 'Quick range')}>
-            {mobilePresets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className="reports-mobile-preset"
-                aria-pressed={selectedMobilePreset === preset.id}
-                onClick={() => setRange(mobilePresetRange(preset.id))}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
+          {presetControls}
           <div className="reports-mobile-actions">
             {filtersButton}
             <Button className="reports-mobile-show" onClick={() => { setSearch(searchText.trim()); setOptionsOpen(false) }}>
@@ -406,7 +407,10 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
           </div>
         </section>
       ) : (
-        <ControlRow sticky search={searchSlot} range={rangePicker} filters={null} actions={collapsedTail} overflow={collapsedTail} />
+        <div className="reports-desktop-controls">
+          <ControlRow className="reports-desktop-primary" sticky search={searchSlot} range={rangePicker} filters={null} actions={collapsedTail} overflow={collapsedTail} />
+          {presetControls}
+        </div>
       )}
 
       {body}
