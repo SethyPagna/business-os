@@ -35,9 +35,11 @@ function loadTs(relativePath, exactStubs = {}) {
 
 const localDateAtOrAfter = (column) => `date(${column}, '+7 hours') >= @startDate AND ${column} >= date(@startDate, '-1 day')`
 const localDateAtOrBefore = (column) => `date(${column}, '+7 hours') <= @endDate AND ${column} < date(@endDate, '+1 day')`
+const recognizedExpr = (prefix) => `COALESCE(NULLIF(${prefix}sale_status, ''), 'completed') <> 'cancelled'`
 const inventory = loadTs('routes/inventory.ts', {
   hono: { Hono },
   '../lib/businessDateWindow': { localDateAtOrAfter, localDateAtOrBefore },
+  '../lib/salesAnalytics': { recognizedExpr },
   '../index': {},
 })
 const familyPagination = loadTs('lib/familyPagination.ts')
@@ -148,9 +150,9 @@ async function main() {
   assert.deepEqual(firstPage.items[0], {
     id: 1, name: 'Serum', display_quantity: 5,
     stock_value_usd: 10, stock_value_khr: 40000,
-    qty_sold: 1, revenue_usd: 10, revenue_khr: 40000,
-    cogs_usd: 3, cogs_khr: 12000, profit_usd: 7,
-  }, 'Branch A includes completed sales and customer returns, excluding awaiting/cancelled/other-branch rows')
+    qty_sold: 6, revenue_usd: 60, revenue_khr: 240000,
+    cogs_usd: 18, cogs_khr: 72000, profit_usd: 42,
+  }, 'Branch A recognizes awaiting-payment revenue and cost, subtracts customer returns, and excludes cancelled/other-branch rows')
   assert.deepEqual(firstPage.items[1], {
     id: 2, name: 'Serum', display_quantity: 3,
     stock_value_usd: 12, stock_value_khr: 48000,
@@ -165,6 +167,14 @@ async function main() {
   assert.match(metricQueries[0].sql, /JOIN products p ON p\.id = ids\.product_id/)
   assert.match(metricQueries[0].sql, /si\.branch_id = @branchId/)
   assert.match(metricQueries[0].sql, /date\(s\.created_at, '\+7 hours'\)/)
+  assert.match(metricQueries[0].sql, /sale_status, ''\), 'completed'\) <> 'cancelled'/)
+  assert.doesNotMatch(metricQueries[0].sql, /NOT IN \('awaiting_payment', 'cancelled'\)/)
+
+  const inventorySource = fs.readFileSync(path.join(srcRoot, 'routes/inventory.ts'), 'utf8')
+  assert.doesNotMatch(inventorySource, /NOT IN \('awaiting_payment', 'cancelled'\)/,
+    'inventory row and sibling summary calculations must not exclude awaiting-payment sales')
+  assert.equal((inventorySource.match(/recognizedExpr\('s\.'\)/g) || []).length, 4,
+    'all inventory product revenue/COGS queries share the canonical recognition predicate')
 
   const secondPage = await familyPagination.paginateProductFamilies({
     db, selectColumns: 'p.id, p.name', joinSql: '', whereSql: 'WHERE p.is_active = 1', params: {},

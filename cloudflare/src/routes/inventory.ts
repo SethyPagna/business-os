@@ -3,6 +3,7 @@ import { getDb, type D1Compat } from '../lib/db'
 import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
+import { recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -197,7 +198,7 @@ export async function attachInventoryProductMetrics(
   if (endDate) params.endDate = endDate
 
   const saleScope = [
-    "COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')",
+    recognizedExpr('s.'),
     branchScoped ? 'si.branch_id = @branchId' : '',
     startDate ? localDateAtOrAfter('s.created_at') : '',
     endDate ? localDateAtOrBefore('s.created_at') : '',
@@ -712,7 +713,7 @@ app.get('/summary', async (c) => {
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
         WHERE si.branch_id = @branchId
-          AND COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')
+          AND ${recognizedExpr('s.')}
         GROUP BY si.product_id, si.branch_id
       ) si ON si.product_id = p.id
       LEFT JOIN (
@@ -792,7 +793,7 @@ app.get('/summary', async (c) => {
              SUM(si.cost_price_khr * si.quantity) AS cogs_khr
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
-      WHERE COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')
+      WHERE ${recognizedExpr('s.')}
       GROUP BY si.product_id
     ) si ON si.product_id = p.id
     LEFT JOIN (
@@ -846,7 +847,7 @@ function buildInventoryFinancialJoinSql(branchScoped: boolean): string {
              SUM(si.cost_price_khr * si.quantity) AS cogs_khr
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
-      WHERE COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')
+      WHERE ${recognizedExpr('s.')}
         ${saleBranchClause}
       GROUP BY si.product_id
     ) si ON si.product_id = p.id
