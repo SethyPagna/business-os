@@ -21,6 +21,14 @@ assert.match(productFormSource, /clearAfterSuccessfulProductSave/, 'draft cleari
 assert.match(productFormSource, /const legacyDraft = !draft && legacyDraftKey/, 'legacy fallback must run only when the new scoped draft is absent')
 assert.match(productFormSource, /restoredLegacyDraftKeyRef\.current = legacyDraft\?\.data \? legacyDraftKey : null/, 'legacy clearing must be armed only by an actual fallback restore')
 assert.match(productFormSource, /useEffect\(\(\) => \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?\}, \[draftKey\]\)/, 'unmount/key change must flush only this form pending draft')
+assert.match(productFormSource, /const preserveAndMinimize = isCreateMode && onMinimize \? \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?onMinimize\(/, 'standalone prompt minimize must synchronously finish its own draft before parking')
+assert.match(productFormSource, /<Modal[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'ProductForm must expose its proven preservation capability to the shared close prompt')
+assert.match(productFormSource, /<MinimizeButton[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'header and close-prompt minimize must use the same preservation path')
+assert.match(productsSource, /onMinimize=\{!modalProduct \?/, 'only standalone create receives the minimized-chip callback')
+const sessionProductForm = createSessionSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
+const stockInProductForm = fastStockInSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
+assert.doesNotMatch(sessionProductForm, /onMinimize=/, 'create session must not fake a restorable minimized item')
+assert.doesNotMatch(stockInProductForm, /onMinimize=/, 'scanner-created stock-in item must not fake a separate minimized form')
 
 console.log('PASS product draft lifecycle source contracts')
 
