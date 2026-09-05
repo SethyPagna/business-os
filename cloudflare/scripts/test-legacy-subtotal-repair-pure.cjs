@@ -289,6 +289,61 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('live preview is read-only, permission-gated, uncached and yields a canonical immutable request', async () => {
+    resetHarness()
+    const before = protectedSnapshot()
+    for (const [access, expected] of [['unauthenticated', 401], ['export-only', 403], ['restore', 200]]) {
+      const response = await app.request('/legacy-subtotal-repair/preview', { headers: { 'x-test-access': access } }, fakeEnv, fakeExecutionCtx)
+      assert.strictEqual(response.status, expected)
+      if (expected !== 401) assert.strictEqual(response.headers.get('cache-control'), 'no-store')
+      const preview = await response.json()
+      if (expected !== 200) { assert.ok(!preview.request); continue }
+      assert.strictEqual(preview.state, 'ready')
+      assert.deepStrictEqual(preview.summary, { sale_count: 22, subtotal_usd: '3462.0000', item_discount_usd: '66.0000' })
+      assert.strictEqual(preview.request.manifest_sha256, planner.manifestDigest(preview.request.manifest))
+      assert.strictEqual(preview.request.manifest.operator_name, RESTORE_USER.name)
+      assert.deepStrictEqual(preview.request.manifest.sales, planner.canonicalizeManifest(fixtureManifest()).sales)
+      assert.strictEqual(backupCalls, 0)
+      assert.strictEqual(batchCalls, 0)
+      assert.deepStrictEqual(protectedSnapshot(), before)
+      const applied = await request(preview.request)
+      assert.strictEqual(applied.status, 200, JSON.stringify(applied))
+      assert.strictEqual(applied.json.affected.sales, 22)
+      assert.deepStrictEqual(protectedSnapshot(), before)
+      const retried = await request(preview.request)
+      assert.strictEqual(retried.status, 200)
+      assert.strictEqual(retried.json.outcome, 'already_applied')
+      assert.strictEqual(retried.json.affected.sales, 0)
+    }
+  })
+
+  await check('preview refuses mixed, changed, overlong and maintenance snapshots without mutations', async () => {
+    for (const change of [
+      'UPDATE sales SET subtotal_usd=1 WHERE id=16842',
+      'DELETE FROM sales WHERE id=16842',
+      'UPDATE sale_items SET total_usd=total_usd+1 WHERE sale_id=16842',
+      "UPDATE sales SET notes=printf('%02001d',0) WHERE id=16842",
+      `INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`,
+    ]) {
+      resetHarness()
+      exec(change)
+      const before = protectedSnapshot()
+      const response = await app.request('/legacy-subtotal-repair/preview', {}, fakeEnv, fakeExecutionCtx)
+      assert.strictEqual(response.status, 409, change)
+      assert.ok(!(await response.json()).request)
+      assert.strictEqual(backupCalls, 0)
+      assert.strictEqual(batchCalls, 0)
+      assert.deepStrictEqual(protectedSnapshot(), before)
+    }
+  })
+
+  await check('preview cohort lookup uses primary keys and never scans unrelated sales', async () => {
+    resetHarness()
+    const plan = rawDbHandle.prepare(`EXPLAIN QUERY PLAN ${legacyRepair.LEGACY_SUBTOTAL_PREVIEW_SQL}`).all({ ids: JSON.stringify(planner.EXPECTED_IDS) })
+    assert.ok(plan.some((entry) => /SEARCH s USING INTEGER PRIMARY KEY/.test(entry.detail)), JSON.stringify(plan))
+    assert.ok(!plan.some((entry) => /SCAN s$/.test(entry.detail)), JSON.stringify(plan))
+  })
+
   await check('runtime canonical digest and guarded SQL stay in parity with the local planner', async () => {
     resetHarness()
     const body = requestFor()

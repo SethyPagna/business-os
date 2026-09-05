@@ -633,6 +633,25 @@ const LEGACY_SUBTOTAL_REPAIR_STEP = 'repair_sep23_subtotals'
 const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots', LEGACY_SUBTOTAL_REPAIR_STEP] as const
 type MigrationFinalizeStep = typeof MIGRATION_FINALIZE_STEPS[number]
 
+app.get('/legacy-subtotal-repair/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'subtotal_repair_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many previews. Wait a few minutes and try again.' }, 429)
+  }
+  const repair = await import('../lib/legacySubtotalRepair')
+  const user = c.get('user')
+  try {
+    return c.json(await repair.previewLegacySubtotalRepair(getDb(c.env), { id: user?.id, name: user?.name }))
+  } catch (error) {
+    if (error instanceof repair.LegacySubtotalRepairValidationError || error instanceof repair.LegacySubtotalRepairConflictError) {
+      return c.json({ success: false, error: 'The fixed 22-sale cohort is not in the expected unrepaired state. No data was changed; inspect the recorded repair and current sale data.' }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the subtotal repair. No data was changed.' }, 500)
+  }
+})
+
 app.post('/finalize-migration', async (c) => {
   const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
