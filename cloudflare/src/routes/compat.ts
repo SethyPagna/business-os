@@ -259,10 +259,22 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
       FROM sales
       WHERE ${localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
     `).get(params),
+    // RETURN-DATE ACTIVITY, customer scope only: "how many refunds were
+    // processed in this window, and for how much". It is NOT the kernel
+    // reversal of this window's revenue -- a refund belongs to its SALE's
+    // bucket -- so nothing may subtract it from a revenue figure.
+    //
+    // FIXED Sep 6 2026 (owner ask N6): the scope predicate was missing, so a
+    // SUPPLIER return (goods sent back to a supplier, no customer money
+    // involved) was counted and its total_refund_usd added to what the
+    // Dashboard labels customer refunds. Every sibling returns query in this
+    // file already carries this predicate; this one did not.
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd
       FROM returns
-      WHERE ${localDateRangeClause('created_at')} AND COALESCE(status, 'completed') <> 'cancelled'${saleBranchClause('returns')}
+      WHERE ${localDateRangeClause('created_at')}
+        AND COALESCE(return_scope, 'customer') = 'customer'
+        AND COALESCE(status, 'completed') <> 'cancelled'${saleBranchClause('returns')}
     `).get(params),
     getFamilyStockStats({
       db,
@@ -341,11 +353,16 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
   const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
   const activeSalesClause = (alias: string) => `${localDateRangeClause(`${alias}.created_at`)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
   // Apportions a sale's net revenue across its lines by each line's share of
-  // subtotal_usd. The > 0 guard avoids a divide-by-zero, but note what it costs:
-  // a sale whose subtotal was never written contributes 0 to every by-product
-  // and by-category figure while still appearing in the by-payment-method and
-  // by-branch ones above, which read the sale row directly. That asymmetry is
-  // how the Sep 2-3 import's 22 zero-subtotal sales stayed invisible here.
+  // subtotal_usd. The > 0 guard avoids a divide-by-zero.
+  //
+  // It used to cost an asymmetry: a sale whose subtotal was never written
+  // contributed 0 to every by-product figure while still appearing in the
+  // by-payment-method and by-branch ones, which read the sale row directly --
+  // which is how the Sep 2-3 import's 22 zero-subtotal receipts hid here. As
+  // of Sep 6 2026 the kernel's valuedSaleExpr holds those receipts out of the
+  // sale-level figures too (netSaleExpr floors at 0 and netRefundExpr caps at
+  // that 0), so both populations now agree at zero and the same 22 receipts
+  // are reported as unvalued_tx_count instead of silently split.
   const attributedLineRevenue = `CASE
     WHEN COALESCE(s.subtotal_usd, 0) > 0
       THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
