@@ -4504,6 +4504,8 @@
   "shared_device_security_note": "On shared devices, choose \"Until I close the browser\" for better security.",
   "sharp": "Sharp",
   "show": "Show",
+
+  "show_filters": "Show filters",
   "showAbout": "Show about section",
   "showAddress": "Show address",
   "showCatalog": "Show product catalog",

@@ -17,6 +17,7 @@
 // arrange and present. Cost / profit never reach a non-admin (server-gated).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Filter from 'lucide-react/dist/esm/icons/filter.js'
 import SearchIcon from 'lucide-react/dist/esm/icons/search.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -32,6 +33,7 @@ import { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 // plus this surface's density numbers and its Khmer line-box floor. See the
 // long header in that file.
 import './reports/reports-surface.css'
+import { rangeSubtitle } from './reports/reportTypes.ts'
 import ExpensesReport from './reports/ExpensesReport.tsx'
 import GroupedReport from './reports/GroupedReport.tsx'
 import OverviewReport from './reports/OverviewReport.tsx'
@@ -252,6 +254,12 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   // so the row is just: search · view · range · Filters. That is what freed
   // the width the search box had been losing.
   const [optionsOpen, setOptionsOpen] = useState(false)
+  // Compact tier only: after Show, the filter card folds to one line (view ·
+  // range · Filters) with a handle, so the results start at the top of the
+  // screen -- the old-POS reference (owner, Sep 5 2026, screenshots #3/#4:
+  // the panel collapses behind a handle once SHOW is pressed). It opens
+  // again from the handle, and stays open until the next Show.
+  const [controlsFolded, setControlsFolded] = useState(false)
   const optionsAnchor = useRef<HTMLElement | null>(null)
   const branchId = branchFilter || undefined
 
@@ -385,8 +393,53 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
           : view.id === 'expenses' ? <ExpensesReport {...viewProps} />
             : <GroupedReport key={view.id} {...viewProps} />
 
+  // One line standing in for the folded card: what is showing, for which
+  // range, and the Filters button (which also keeps the options fold's
+  // anchor mounted). The whole line is the handle.
+  const foldedControls = (
+    <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          aria-expanded={false}
+          aria-label={trh('show_filters', 'Show filters')}
+          onClick={() => setControlsFolded(false)}
+        >
+          <ChevronDown className="h-4 w-4 shrink-0 text-[var(--ui-ink-3)]" />
+          <span className="min-w-0 truncate text-[length:var(--ui-size-body)] font-medium">{view ? trh(view.labelKey, view.fallback) : trh('reports', 'Reports')}</span>
+          <span className="min-w-0 truncate text-[length:var(--ui-size-meta)] text-[var(--ui-ink-2)]">{rangeSubtitle(filters, trh)}</span>
+        </button>
+        {filtersButton}
+      </div>
+    </section>
+  )
+
   return (
     <div className={embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'} data-reports-hub>
+      {compact ? (controlsFolded ? foldedControls : (
+        <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
+          {searchInput}
+          <div className="reports-mobile-primary">{viewPicker}{rangePicker}</div>
+          {presetControls}
+          <div className="reports-mobile-actions">
+            {filtersButton}
+            <Button className="reports-mobile-show" onClick={() => { setSearch(searchText.trim()); setOptionsOpen(false); setControlsFolded(true) }}>
+              {trh('show', 'Show')}
+            </Button>
+          </div>
+        </section>
+      )) : (
+        <div className="reports-desktop-controls">
+          <ControlRow className="reports-desktop-primary" sticky search={searchSlot} range={rangePicker} filters={null} actions={collapsedTail} overflow={collapsedTail} />
+          {presetControls}
+        </div>
+      )}
+
+      {body}
+
+      {/* Shift blocks sit BELOW the report (reference: filters first, results
+          second, nothing above the filters). Same two components as before. */}
       <CurrentShiftSummary showHistory={false} />
       <section className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900" aria-label={trh('shift_history', 'Shift history')}>
         <div className="min-w-0">
@@ -395,26 +448,6 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
         </div>
         <ShiftHistoryPanel compact limit={50} />
       </section>
-      {compact ? (
-        <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
-          {searchInput}
-          <div className="reports-mobile-primary">{viewPicker}{rangePicker}</div>
-          {presetControls}
-          <div className="reports-mobile-actions">
-            {filtersButton}
-            <Button className="reports-mobile-show" onClick={() => { setSearch(searchText.trim()); setOptionsOpen(false) }}>
-              {trh('show', 'Show')}
-            </Button>
-          </div>
-        </section>
-      ) : (
-        <div className="reports-desktop-controls">
-          <ControlRow className="reports-desktop-primary" sticky search={searchSlot} range={rangePicker} filters={null} actions={collapsedTail} overflow={collapsedTail} />
-          {presetControls}
-        </div>
-      )}
-
-      {body}
 
       <ReportOptionsFold
         open={optionsOpen}
