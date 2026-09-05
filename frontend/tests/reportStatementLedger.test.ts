@@ -41,6 +41,14 @@ assert.match(excel, /\{captioned\(g\) \? \(\s*<tr[^>]*data-statement-group=\{g\}
 // row must still carry data-statement-group.
 assert.match(excel, /<tr\s+key=\{l\.key\}[\s\S]*?data-statement-group=\{g\}[\s\S]*?data-statement-kind=\{l\.kind\}/)
 assert.doesNotMatch(excel, /bg-\[var\(--ui-warn-soft\)\]/, 'no inline warn tint duplicates the CSS rule')
+
+// With `fit` the table hugs max-content, so the data note must be a block
+// with a capped width under the label, never an inline span in the label
+// row (a2 measured the inline form pushing Amount behind the scroller at
+// 1280 on All time, Sep 6 2026).
+assert.match(excel, /\{note \? <div className="max-w-\[16rem\] whitespace-normal[^"]*">\(\{note\}\)<\/div> : null\}/, 'the note is a width-capped block')
+assert.doesNotMatch(excel, /\{note \? <span/, 'and never an inline span')
+assert.match(overview, /<DenseTable fit>/, 'fit is kept')
 const css = read('src/components/sales/reports/reports-surface.css')
 assert.ok(css.includes("tr[data-statement-group='pending'] > td"), 'the CSS still tints the Not Paid rows by attribute')
 

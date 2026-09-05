@@ -294,8 +294,14 @@ export default function OverviewReport(p: ReportViewProps) {
                           {total ? null : <span className="w-3 text-[var(--ui-ink-3)]">{statementOperator(l.kind)}</span>}
                           {lineLabel(l)}
                           {l.hintKey ? <InfoHint text={tr(l.hintKey, l.hintFallback || '')} label={lineLabel(l)} /> : null}
-                          {note ? <span className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">({note})</span> : null}
                         </span>
+                        {/* The data note is a BLOCK under the label, never inline: with
+                            `fit` the table hugs max-content, and an inline note ("no
+                            courier cost recorded on 11,834 deliveries") widened the Line
+                            column past the 34rem statement box and pushed Amount behind
+                            the scroller (a2, Sep 6 2026, measured at 1280 on All time).
+                            A block's max-width caps what it contributes. */}
+                        {note ? <div className="max-w-[16rem] whitespace-normal text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">({note})</div> : null}
                       </td>
                       <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{total ? '' : amount}</td>
                       <td className="text-right whitespace-nowrap">
