@@ -8,10 +8,14 @@ import { consumeLongPressClick, createLongPressHandlers, type LongPressState } f
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
+import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 
 const SALES_OPTIONAL_COLUMNS: TableColumnDef[] = [
   { key: 'cashier', label: 'Cashier' },
   { key: 'branch', label: 'Branch' },
+  // N9: default-visible (the owner's "must show DRIVER" wording), still
+  // chooser-toggleable/persisted like every other optional column here.
+  { key: 'driver', label: 'Driver' },
   { key: 'items', label: 'Items' },
 ]
 
@@ -39,6 +43,10 @@ interface SaleRecord {
   // membership/address detail opens in SaleDetailModal on row click.
   customer_name?: string
   customer_phone?: string
+  // N9: resolved server-side (delivery_contact_name falls back to the
+  // linked driver's live name in GET /sales) -- see utils/salesDriverLabel.ts.
+  linked_driver_name?: string | null
+  delivery_contact_name?: string | null
 }
 
 interface SalesGroup {
@@ -161,6 +169,7 @@ export default function SalesListSurface({
                 {cols.isVisible('cashier') ? <th className="hidden px-3 py-2 text-left font-semibold lg:table-cell">{t('cashier')}</th> : null}
                 <th className="px-3 py-2 text-left font-semibold">{t('payment_method')}</th>
                 {cols.isVisible('branch') ? <th className="hidden px-3 py-2 text-left font-semibold md:table-cell">{t('branch')}</th> : null}
+                {cols.isVisible('driver') ? <th className="hidden px-3 py-2 text-left font-semibold lg:table-cell">{t('driver')}</th> : null}
                 <th className="px-3 py-2 text-right font-semibold">{t('total')}</th>
                 {cols.isVisible('items') ? <th className="hidden px-3 py-2 text-center font-semibold md:table-cell">{t('items')}</th> : null}
                 <th className="px-3 py-2 text-right font-semibold">{t('actions') || 'Actions'}</th>
@@ -181,6 +190,7 @@ export default function SalesListSurface({
                     {cols.isVisible('cashier') ? <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
                     {cols.isVisible('branch') ? <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
+                    {cols.isVisible('driver') ? <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="ml-auto h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     {cols.isVisible('items') ? <td className="hidden px-4 py-3 md:table-cell"><div className="mx-auto h-4 w-8 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="mx-auto h-6 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
@@ -306,6 +316,7 @@ export default function SalesListSurface({
                               {cols.isVisible('cashier') ? <td className="hidden px-3 py-1.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td> : null}
                               <td className="px-3 py-1.5"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method || 'N/A'}</span></td>
                               {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel || 'N/A'}</td> : null}
+                              {cols.isVisible('driver') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 lg:table-cell">{resolveDriverLabel(sale) || 'N/A'}</td> : null}
                               <td className="px-3 py-1.5 text-right">
                                 <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
                                 {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
@@ -474,6 +485,7 @@ export default function SalesListSurface({
                               {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
                               {sale.cashier_name ? <span>| {sale.cashier_name}</span> : null}
                               {branchLabel ? <span>| {branchLabel}</span> : null}
+                              {resolveDriverLabel(sale) ? <span>| {resolveDriverLabel(sale)}</span> : null}
                             </div>
                             {/* Third row on small screens (user, Aug 30):
                                 status + payment get their OWN line, and the

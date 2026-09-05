@@ -12,6 +12,9 @@ import type { TableColumnDef } from '../shared/columnPreferences.ts'
 // audit gap where the returns list had no status column.
 const RETURN_OPTIONAL_COLUMNS: TableColumnDef[] = [
   { key: 'status', label: 'Status' },
+  // N13: branch shown consistently with the sales list's branch column
+  // (default-visible), closing the gap where returns had no branch at all.
+  { key: 'branch', label: 'Branch' },
   { key: 'cashier', label: 'Cashier', defaultVisible: false },
 ]
 
@@ -41,6 +44,7 @@ interface ReturnRecord {
   reason?: string
   status?: string
   cashier_name?: string
+  branch_name?: string | null
   // Counted by the list read itself (routes/returns.ts DAMAGED_ITEM_COUNT_SQL)
   // so a damaged line is visible on the row -- the list shows one row per
   // return and never its items, so this used to require opening the return.
@@ -218,6 +222,7 @@ export default function ReturnsListSurface({
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reason', 'Reason')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('type', 'Type')}</th>
                 {cols.isVisible('status') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('status', 'Status')}</th> : null}
+                {cols.isVisible('branch') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('branch', 'Branch')}</th> : null}
                 {cols.isVisible('cashier') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('cashier', 'Cashier')}</th> : null}
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{tr('amount', 'Amount')}</th>
                 <th className="w-10 px-2 py-2 text-right"><ColumnChooser columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={tr('columns', 'Columns')} resetLabel={tr('reset', 'Reset')} /></th>
@@ -364,6 +369,9 @@ export default function ReturnsListSurface({
                                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${(ret.status || 'completed') === 'cancelled' ? 'bg-gray-100 text-gray-500 dark:bg-zinc-700 dark:text-gray-400' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>{tr(`status_${ret.status || 'completed'}`, ret.status || 'completed')}</span>
                                 </td>
                               ) : null}
+                              {cols.isVisible('branch') ? (
+                                <td className="text-gray-500 dark:text-gray-400"><span className="dense-cell-truncate" title={ret.branch_name || '-'}>{ret.branch_name || '-'}</span></td>
+                              ) : null}
                               {cols.isVisible('cashier') ? (
                                 <td className="text-gray-500 dark:text-gray-400"><span className="dense-cell-truncate" title={ret.cashier_name || '-'}>{ret.cashier_name || '-'}</span></td>
                               ) : null}
@@ -493,6 +501,14 @@ export default function ReturnsListSurface({
                             <div className="text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
                             <div className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-400">{ret.reason}</div>
                             <div className="mt-0.5 text-xs text-gray-400">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</div>
+                            {/* N13: branch + cashier shown consistently with
+                                the sales phone card's meta line. */}
+                            {ret.branch_name || ret.cashier_name ? (
+                              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-gray-400">
+                                {ret.branch_name ? <span>{ret.branch_name}</span> : null}
+                                {ret.cashier_name ? <span>{ret.branch_name ? '| ' : ''}{ret.cashier_name}</span> : null}
+                              </div>
+                            ) : null}
                           </div>
                           <div className="flex-shrink-0 text-right">
                             {renderAmount(ret)}
