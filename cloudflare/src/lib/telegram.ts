@@ -324,6 +324,9 @@ export type ShiftReportSession = {
   closed_at: string | null
   closing_counted_usd: number | null
   closing_counted_khr: number | null
+  cancelled_at?: string | null
+  cancelled_by_user_name?: string | null
+  cancel_reason?: string | null
 }
 
 export type ShiftReportFigures = {
@@ -423,7 +426,9 @@ export function summarizeShiftCash(rows: ShiftTenderRow[]) {
  * directly, so the shape and the arithmetic are pinned without a database.
  */
 export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now()): string {
-  const open = !shift.closed_at
+  const cancelled = !!shift.cancelled_at
+  const open = !shift.closed_at && !cancelled
+  const endedAt = shift.cancelled_at || shift.closed_at
   const lines = [
     reportTitle('🧑‍💼', 'Shift', 'វេន', shift.business_date),
     labeled('shop', cleanLine(shopName || 'Business OS', 80)),
@@ -432,6 +437,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   if (shift.branch_name) lines.push(labeled('branch', cleanLine(shift.branch_name, 60)))
   lines.push(
     labeled('shift', cleanLine(shift.shift_code, 40)),
+    ...(cancelled ? [bi('cancelled', 'បានបោះបង់')] : []),
     labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
     // An open shift reports up to NOW and says so, rather than printing a
     // closing time that has not happened. A shift left running overnight is
@@ -439,7 +445,11 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     // so the report has to be able to render one.
     open
       ? `${label('to')}: ${formatBusinessDateTime(new Date(nowMs).toISOString(), nowMs)} — ${bi('still open', 'នៅបើកនៅឡើយ')}`
-      : labeled('to', formatBusinessDateTime(shift.closed_at, nowMs)),
+      : `${labeled('to', formatBusinessDateTime(endedAt, nowMs))}${cancelled ? ` — ${bi('cancelled', 'បានបោះបង់')}` : ''}`,
+    ...(cancelled ? [
+      `${bi('Cancelled by', 'បោះបង់ដោយ')}: ${cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)}`,
+      `${bi('Reason', 'មូលហេតុ')}: ${cleanLine(shift.cancel_reason || 'Not recorded', 500)}`,
+    ] : []),
     '',
     // Bare numbers, not `counted(...)`: the label IS the noun here, so
     // "Invoices / វិក្កយបត្រ: 12 receipt(s) / វិក្កយបត្រ" would print the same
@@ -514,7 +524,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // hand, so an open shift shows neither it nor a difference against it --
   // printing "Difference: -$256.00" for a shift still in progress would read
   // as a missing-cash alarm on every open till.
-  if (!open) {
+  if (shift.closed_at) {
     lines.push(labeled('cashCounted', money(shift.closing_counted_usd, shift.closing_counted_khr)))
     const signed = (n: number, format: (value: number) => string) => `${n < 0 ? '−' : n > 0 ? '+' : ''}${format(Math.abs(n))}`
     lines.push(labeled('difference', cashKnown
@@ -551,14 +561,15 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
 
 const SHIFT_COLUMNS = `shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
   opened_at, opening_float_usd, opening_float_khr,
-  closed_at, closing_counted_usd, closing_counted_khr`
+  closed_at, closing_counted_usd, closing_counted_khr,
+  cancelled_at, cancelled_by_user_name, cancel_reason`
 
 /** The filter that turns "this shift" into a query the sales kernel accepts. */
 export function shiftFilters(shift: ShiftReportSession, nowMs: number): SalesFilters {
   return {
     createdFrom: shift.opened_at,
     // An open shift is reported up to now. shiftWindowBound normalises both.
-    createdTo: shift.closed_at || new Date(nowMs).toISOString(),
+    createdTo: shift.cancelled_at || shift.closed_at || new Date(nowMs).toISOString(),
     // A shop-wide shift belongs to the branch, not only to the employee who
     // opened it. Per-account retains the original cashier boundary.
     cashierId: shift.scope_mode === 'shop_wide' ? null : shift.user_id,
@@ -876,6 +887,7 @@ export type TelegramSaleSummary = {
   driver?: { name?: string | null; phone?: string | null } | null
   subtotalUsd: number; discountUsd: number; taxUsd?: number; totalUsd: number; totalKhr?: number
   paidUsd?: number; paidKhr?: number; changeUsd?: number; changeKhr?: number; paymentMethod?: string | null
+  changeIsActualDual?: boolean
 }
 export type TelegramStockChange = {
   product: string; type: 'add' | 'remove'; quantity: number; branch?: string | null; reason?: string | null
@@ -933,9 +945,13 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     `Total: ${usd(round2((Number(sale.subtotalUsd) || 0) + customerDelivery))}`,
     sale.discountUsd ? `Discount: −${usd(sale.discountUsd)}` : '',
     sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',
-    `Net Total: ${money(sale.totalUsd, sale.totalKhr)}`,
-    paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr)}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : 'Paid: unpaid',
-    change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, ' + ')}` : '',
+    // totalKhr is the converted equivalent of totalUsd, while paidUsd and
+    // paidKhr are native tender amounts. Change from saleTotals is likewise
+    // an equivalent pair unless a caller can explicitly establish that both
+    // currencies were physically returned.
+    `Net Total: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
+    paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : 'Paid: unpaid',
+    change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : ' / ')}` : '',
     sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
   ]
 }
