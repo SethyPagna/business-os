@@ -110,6 +110,8 @@ this lane owns the report VIEW layout files, `statsStripPresets.ts` and `ReportT
 | `b4c15107` | Yesterday chip on `DateTimeRangePicker` and the hub's `mobilePresets` row, in one commit (the two lists are pinned equal); a2 released `ReportsHub.tsx` | 8 |
 | `580d0c5f` | shift summary + shift history move BELOW the report; on compact, Show folds the sticky card to one line (chevron handle · view · range · Filters) that unfolds on tap; key `show_filters` | 7 |
 | `5d4423aa` | Overview data note is a `max-w-[16rem]` block under the label (a2 measured the inline span pushing Amount behind the scroller at 1280 on All time with `fit`) | 2 |
+| `3194ebb5` | cherry-pick of a2's `f8461e46` taking only its two test assertions (the two note fixes crossed; a2 reverted its copy as `63624543`) | — |
+| `36f4f2ff` + `08b64956` | folded compact row keeps 44px tap targets (a2 measured 18–20px on the first cut at 375); pinned, positive-controlled | 7 |
 
 Each commit is green on its own: tsc 0, `verify:i18n` OK, build OK, every `tests/*.test.ts`
 file run individually (216 files, no red through `580d0c5f`). New tests: `reportYesterdayPreset`,
@@ -120,7 +122,7 @@ New/Return + gender header, courier paid-vs-AR) wait on a2's stats lane adding t
 the section chip row vs the dropdown is the owner's call (recommendation above: keep the
 dropdown). **Not browser-verified from this session**: a preview launched from this worktree
 serves the main checkout, so a2 was asked to re-measure the Overview at 1280 on All time and
-the compact fold after Show when it folds the branch into its reconciliation.
+the compact fold after Show when it folds the branch into its reconciliation. a2 folded `5d4423aa` as `a067e5f7` with tsc/i18n/report tests green and measured 1280 · Last 30 days (statement 431px in the 544px box, no inner scroller) and 375 after Show (folds to view · range · Filters, handle unfolds); All time at 1280 is still unconfirmed on its rig (the local worker exceeded the client's 12s under lane load).
 
 The sibling statement folds in `PeriodReport` and `GroupedReport` already render through
 `ReceiptSheet` blocks, which is the #13 shape, so they needed no change for parity.
