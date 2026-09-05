@@ -64,6 +64,8 @@ assert.deepEqual(buildSettlementPayload(repeated, ['Cash']), {
 assert.equal(settlementRowsIssue([{ id: 'x', method: 'Cash', usd: '-1', khr: '' }], ['Cash']), 'amount')
 assert.equal(settlementRowsIssue([{ id: 'x', method: 'Cash', usd: '1.005', khr: '' }], ['Cash']), 'amount', 'new USD tender must use cents')
 assert.equal(settlementRowsIssue([{ id: 'recorded-x', method: 'Retired', usd: '1.005', khr: '' }], ['Cash']), null, 'an existing legacy 4dp inactive tender remains unchanged')
+assert.equal(settlementRowsIssue([{ id: 'recorded-khr', method: 'Retired', usd: '', khr: '4100.1234' }], ['Cash']), null, 'an existing legacy 4dp KHR tender remains unchanged')
+assert.equal(settlementRowsIssue([{ id: 'recorded-khr', method: 'Retired', usd: '', khr: '4100.12345' }], ['Cash']), 'amount', 'recorded KHR beyond legacy 4dp is invalid')
 assert.equal(settlementRowsIssue([{ id: 'x', method: 'Cash', usd: '', khr: '1.5' }], ['Cash']), 'amount')
 assert.equal(settlementRowsIssue([{ id: 'x', method: 'Unknown', usd: '1', khr: '' }], ['Cash']), 'method')
 
@@ -72,7 +74,36 @@ assert.equal(recordedSettlementIssue({ paymentDetails: [{ method: 'Cash', amount
 assert.equal(recordedSettlementIssue({ paymentDetails: [{ method: 'Cash', amount_usd: 3 }], amountPaidUsd: 2, amountPaidKhr: 0 }), 'mismatch')
 assert.equal(recordedSettlementIssue({ paymentDetails: [{ method: 'Cash', amount_usd: 3 }], amountPaidUsd: 3, amountPaidKhr: 0 }), null)
 assert.equal(recordedSettlementIssue({ paymentDetails: [{ method: 'Cash', amount_usd: 1.2349 }], amountPaidUsd: 1.23, amountPaidKhr: 0 }), 'mismatch', 'header and lines compare at exact 4dp precision')
+assert.equal(recordedSettlementIssue({ paymentDetails: [{ method: 'Cash', amount_usd: 2.1234, amount_khr: 4100.1234 }], amountPaidUsd: 2.1234, amountPaidKhr: 4100.1234 }), null, 'legacy USD and KHR components compare at exact 4dp precision')
+assert.equal(recordedSettlementIssue({ paymentDetails: [{ method: 'Cash', amount_khr: 4100.12345 }], amountPaidUsd: 0, amountPaidKhr: 4100.12345 }), 'malformed', 'recorded KHR beyond legacy 4dp requires repair')
 assert.equal(recordedSettlementIssue({ paymentDetails: null, paymentMethod: 'Cash + ABA Bank', amountPaidUsd: 3, amountPaidKhr: 0 }), 'allocation')
+
+const legacyNative = initialSettlementRows({
+  paymentDetails: [{ method: 'Retired', amount_usd: 2.1234, amount_khr: 4100.1234 }],
+  paymentMethod: 'Retired',
+  amountPaidUsd: 2.1234,
+  amountPaidKhr: 4100.1234,
+  totalUsd: 5,
+  exchangeRate: 4100,
+  configuredMethods: ['Cash'],
+})
+assert.deepEqual(legacyNative[0], { id: 'recorded-0', method: 'Retired', usd: '2.1234', khr: '4100.1234' })
+assert.deepEqual(settlementTotals([legacyNative[0]], 4100), {
+  amountPaidUsd: 2.1234,
+  amountPaidKhr: 4100.1234,
+  paidEquivalentUsd: 2.1234 + 4100.1234 / 4100,
+})
+assert.deepEqual(buildSettlementPayload([
+  legacyNative[0],
+  { id: 'new-usd', method: 'Cash', usd: '1.88', khr: '' },
+  { id: 'new-khr', method: 'Cash', usd: '', khr: '25' },
+], ['Cash']), {
+  payment_details: [
+    { method: 'Retired', amount_usd: 2.1234, amount_khr: 4100.1234 },
+    { method: 'Cash', amount_usd: 1.88, amount_khr: 0 },
+    { method: 'Cash', amount_usd: 0, amount_khr: 25 },
+  ],
+}, 'recorded native precision survives while new components keep 2/0 precision')
 
 assert.doesNotMatch(editorSource, /<select[\s>]/, 'settlement editor must not add a native select')
 assert.match(editorSource, /min-h-11/, 'method targets remain at least 44px tall')
@@ -91,6 +122,9 @@ assert.match(modalSource, /client_request_id:\s*settlementRequestIdRef\.current/
 assert.match(modalSource, /expected_exchange_rate:\s*settlementSession\.exchangeRate/, 'the server guards the reviewed exchange-rate quote')
 assert.match(modalSource, /expected_updated_at:\s*settlementSession\.expectedUpdatedAt/, 'the reviewed sale revision is frozen with the tender')
 assert.match(modalSource, /exchangeRateChanged[\s\S]*?sale_settlement_rate_changed/, 'a stale quote refreshes the preview and requires another confirmation')
+assert.match(modalSource, /showNotes=\{!needsPaymentEntry\}/, 'settlement hides the unsupported notes control while normal status reviews retain it')
+assert.match(workflowSource, /showNotes \? <div>[\s\S]*?sale-status-notes/, 'the workflow conditionally renders its existing notes draft')
+assert.match(modalSource, /settlementError[\s\S]*?setPayError\(settlementError\)/, 'a failed settlement remains visible inside its review')
 assert.match(modalSource, /settlementSession\.exchangeRate/, 'the editor and coverage preview use the frozen settings rate')
 assert.match(modalSource, /useCloseGuard\(\{ dirty: settlementDirty \}/, 'edited tender rows are protected by the standard close guard')
 assert.match(modalSource, /setStatusReviewRequestId\(\(requestId\) => requestId \+ 1\)/, 'Record payment explicitly opens the status review step')
@@ -98,6 +132,8 @@ assert.match(workflowSource, /reviewRequestId > 0\) setStep\('review'\)/, 'the w
 assert.doesNotMatch(modalSource, /payment_method:\s*method[\s\S]{0,120}amount_paid_usd/, 'settlement no longer sends derived payment aggregates')
 assert.match(salesSource, /hasServerSettlementHistory[\s\S]*?refreshServerItems/, 'server settlement history replaces the local status-only history entry')
 assert.match(salesSource, /code\?: unknown \}\)\.code === 'exchange_rate_changed'[\s\S]*?exchangeRateChanged/, 'Sales returns the server current rate to the open review')
+assert.match(salesSource, /isSettlementRequest \? undefined : notes/, 'settlement payloads omit the empty notes field required by the server contract')
+assert.match(salesSource, /isSettlementRequest[\s\S]*?settlementError: getErrorMessage/, 'settlement request failures return to the open modal')
 assert.match(historySource, /applier === 'sale\.settlement'/, 'settlement undo and redo include optimistic generation checks')
 
 console.log('PASS awaiting-payment multi-tender settlement UI contract')
