@@ -2,7 +2,23 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { orderShiftRows, shiftCashDifference, shiftLocalDateTimeToIso, type Shift } from '../src/api/shiftTransport.ts'
+import {
+  amendShift,
+  closeShiftById,
+  orderShiftRows,
+  parseShiftCount,
+  reopenShift,
+  shiftCashDifference,
+  shiftLocalDateTimeToIso,
+  type AmendShiftInput,
+  type Shift,
+} from '../src/api/shiftTransport.ts'
+import {
+  __resetApiHealthForTests,
+  __resetApiWriteDedupeForTests,
+  getSyncServerUrl,
+  setSyncServerUrl,
+} from '../src/api/http.ts'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8')
@@ -68,12 +84,22 @@ assert.equal(shiftLocalDateTimeToIso('2026-09-04T22:30'), '2026-09-04T15:30:00.0
 checks += 1
 assert.throws(() => shiftLocalDateTimeToIso(''), /required/i)
 checks += 1
+assert.equal(parseShiftCount('0'), 0)
+assert.equal(parseShiftCount('12.50'), 12.5)
+assert.equal(parseShiftCount(''), null)
+assert.equal(parseShiftCount('not-a-count'), null)
+assert.equal(parseShiftCount(Number.POSITIVE_INFINITY), null)
+assert.equal(parseShiftCount(-1), null)
+assert.equal(parseShiftCount(false), null)
+checks += 7
 
 for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) {
   ok(new RegExp(`${capability}: boolean`).test(transport), `Shift consumes server ${capability}`)
 }
 ok(/POST', `\/api\/shifts\/\$\{id\}\/close`/.test(transport), 'transport closes a selected historical shift by exact id')
 ok(/expected_revision: input\.expectedRevision/.test(transport), 'selected close/reopen writes send the loaded revision')
+const amendTransport = transport.slice(transport.indexOf('export async function amendShift'), transport.indexOf('export type CloseShiftByIdInput'))
+ok(/expected_revision: input\.expectedRevision/.test(amendTransport), 'actual amend transport sends the caller-captured revision')
 ok(/closed_at: input\.closedAt/.test(transport), 'historical close sends an explicit ISO timestamp')
 ok(/POST', `\/api\/shifts\/\$\{id\}\/reopen`/.test(transport), 'transport reopens through the linked-segment endpoint')
 ok(/reason: input\.reason/.test(transport.slice(transport.indexOf('export async function reopenShift'))), 'reopen sends a mandatory reason')
@@ -102,13 +128,17 @@ for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) 
   ok(modal.includes(`selected.capabilities.${capability}`), `detail action visibility comes from ${capability}`)
 }
 ok(!/hasPermission|canManage/.test(modal), 'the shift popup never derives actions from Settings permission')
+ok(/expectedRevision: shift\.revision/.test(modal) && /expectedRevision: edit\.expectedRevision/.test(modal), 'the amend draft captures and submits the row revision without a pre-submit refresh')
+ok(/parseShiftCount\(edit\.openingUsd\)/.test(modal) && !/Number\((?:edit|close|reopen)\.[^)]+\) \|\| 0/.test(modal), 'amend/close/reopen forms never coerce blank or invalid counts to zero')
 ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /required value=\{close\.closedAt\}/.test(modal), 'historic close starts without a guessed timestamp and requires user entry')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
 ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')
+ok((modal.match(/await refreshDetails\(result\.shift\)/g) || []).length >= 4 && !/setAmendments\(\[\]\)[\s\S]{0,180}shift_reopen_saved/.test(modal), 'all lifecycle saves reload amendments, including close and reopen')
 ok(/amendmentFields\.filter/.test(modal) && /before\[field\].*after\[field\]/.test(modal), 'amendment detail renders whitelisted before-to-after field changes')
 ok(/selected\.capabilities\.can_cancel/.test(modal) && /maxLength=\{500\}/.test(modal), 'only the server can_cancel capability reveals the bounded reason form')
 ok(/cancelShift\(selected\.id, selected\.revision, cancelReason\.trim\(\)\)/.test(modal), 'cancel submits the selected revision and required reason without replacement values')
 ok(/refreshMountedShiftState\(\)/.test(modal) && /SHIFT_STATE_CHANGED_EVENT/.test(modal), 'popup lifecycle writes refresh mounted current-shift consumers')
+ok(/status\?\: unknown[\s\S]{0,160}=== 409/.test(modal) && /detailsError[\s\S]{0,500}t\('refresh'\)/.test(modal), 'a stale write exposes an explicit detail reload path')
 ok(/shift\.cancelled_at/.test(summary) && /shift_cancel_preserved_hint/.test(summary), 'cancelled detail is labelled closed out and keeps recorded facts visible')
 
 ok(/branchId=\{branchId\}/.test(currentSummary) && !/setShowHistory|aria-expanded/.test(currentSummary), 'transaction pages launch floating history with their operational branch and never expand inline')
@@ -127,5 +157,80 @@ const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
 const usedShiftKeys = [...new Set([...`${modal}\n${summary}`.matchAll(/\bt\('([^']+)'\)/g)].map((match) => match[1]).filter((key) => key.startsWith('shift_')))]
 ok(usedShiftKeys.every((key) => key in en), 'every popup shift key exists in English')
 ok(usedShiftKeys.every((key) => key in km), 'every popup shift key exists in Khmer')
+
+// Execute the real transport against a deterministic fetch boundary. The
+// server revision advances only on successful writes, so the middle request
+// proves a stale draft reaches the server with its original revision and is
+// rejected instead of silently overwriting the first change.
+const originalFetch = globalThis.fetch
+const originalServerUrl = getSyncServerUrl()
+const transportCalls: Array<{ url: string; body: Record<string, unknown> }> = []
+let serverRevision = 4
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const body = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>
+  transportCalls.push({ url: String(input), body })
+  if (body.expected_revision !== serverRevision) {
+    return new Response(JSON.stringify({ error: 'Shift changed concurrently. Reload and try again.', code: 'write_conflict', entity: 'shift_session' }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  serverRevision += 1
+  return new Response(JSON.stringify({
+    shift: { ...fixture(17, '2026-09-05', '2026-09-05T01:00:00.000Z', '2026-09-05T09:00:00.000Z'), revision: serverRevision },
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}) as typeof fetch
+
+const amendInput: AmendShiftInput = {
+  expectedRevision: 4,
+  reason: 'Correct count',
+  openedAt: '2026-09-05T01:00:00.000Z',
+  openingFloatUsd: 10,
+  openingFloatKhr: 40_000,
+  openingNote: null,
+  closedAt: '2026-09-05T09:00:00.000Z',
+  closingCountedUsd: 15,
+  closingCountedKhr: 60_000,
+  closingNote: null,
+}
+
+try {
+  __resetApiHealthForTests()
+  __resetApiWriteDedupeForTests()
+  setSyncServerUrl('https://sync.example.test')
+
+  const firstAmend = await amendShift(17, amendInput)
+  assert.equal(firstAmend.shift.revision, 5)
+  await assert.rejects(() => amendShift(17, amendInput), /changed concurrently/i)
+  const latestAmend = await amendShift(17, { ...amendInput, expectedRevision: 5, reason: 'Second correction' })
+  assert.equal(latestAmend.shift.revision, 6)
+  assert.deepEqual(transportCalls.map((call) => call.body.expected_revision), [4, 4, 5])
+  checks += 4
+
+  const callsBeforeInvalidCounts = transportCalls.length
+  await assert.rejects(
+    () => amendShift(17, { ...amendInput, expectedRevision: 6, openingFloatUsd: '' as unknown as number }),
+    /Opening USD count must be an explicit non-negative number/,
+  )
+  await assert.rejects(
+    () => closeShiftById(17, { expectedRevision: 6, closedAt: amendInput.closedAt!, closingCountedUsd: '' as unknown as number, closingCountedKhr: 1 }),
+    /Closing USD count must be an explicit non-negative number/,
+  )
+  await assert.rejects(
+    () => closeShiftById(17, { expectedRevision: 6, closedAt: amendInput.closedAt!, closingCountedUsd: 1, closingCountedKhr: Number.NaN }),
+    /Closing KHR count must be an explicit non-negative number/,
+  )
+  await assert.rejects(
+    () => reopenShift(17, { expectedRevision: 6, reason: 'Try again', openingFloatUsd: -1, openingFloatKhr: 0 }),
+    /Opening USD count must be an explicit non-negative number/,
+  )
+  assert.equal(transportCalls.length, callsBeforeInvalidCounts, 'invalid counts must fail before fetch')
+  checks += 5
+} finally {
+  globalThis.fetch = originalFetch
+  setSyncServerUrl(originalServerUrl)
+  __resetApiWriteDedupeForTests()
+  __resetApiHealthForTests()
+}
 
 console.log(`shiftManagement: all ${checks} checks passed`)

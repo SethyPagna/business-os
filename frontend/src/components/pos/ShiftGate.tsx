@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { closeShift, fetchCurrentShift, openShift, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { closeShift, fetchCurrentShift, openShift, parseShiftCount, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 
 /**
  * S4R4-5 -- the cash-drawer shift gate for POS.
@@ -206,14 +206,17 @@ export default function ShiftGate({ children, branchId = null, branchName = null
 
 
   const submitOpen = async () => {
-    if (busy || floatUsd.trim() === '' || floatKhr.trim() === '') return
+    if (busy) return
+    const openingFloatUsd = parseShiftCount(floatUsd)
+    const openingFloatKhr = parseShiftCount(floatKhr)
+    if (openingFloatUsd == null || openingFloatKhr == null) return
     setBusy(true)
     try {
       const next = await openShift({
         branchId,
         branchName,
-        openingFloatUsd: Number(floatUsd) || 0,
-        openingFloatKhr: Number(floatKhr) || 0,
+        openingFloatUsd,
+        openingFloatKhr,
         openingNote: note.trim() || null,
       })
       // Publish, not setState: this is what makes End Shift appear the moment
@@ -297,7 +300,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
                 not dismissible. */}
             <div className="flex justify-end pt-1">
               <button
-                type="button" disabled={busy || floatUsd.trim() === '' || floatKhr.trim() === ''} onClick={() => void submitOpen()}
+                type="button" disabled={busy || parseShiftCount(floatUsd) == null || parseShiftCount(floatKhr) == null} onClick={() => void submitOpen()}
                 className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
                 {busy ? t('saving_label') : t('shift_start')}
@@ -348,13 +351,16 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
 
   const submitClose = async () => {
-    if (busy || countedUsd.trim() === '' || countedKhr.trim() === '') return
+    if (busy) return
+    const closingCountedUsd = parseShiftCount(countedUsd)
+    const closingCountedKhr = parseShiftCount(countedKhr)
+    if (closingCountedUsd == null || closingCountedKhr == null) return
     setBusy(true)
     try {
       const next = await closeShift({
         branchId,
-        closingCountedUsd: Number(countedUsd) || 0,
-        closingCountedKhr: Number(countedKhr) || 0,
+        closingCountedUsd,
+        closingCountedKhr,
         closingNote: note.trim() || null,
       })
       publish(next)
@@ -492,7 +498,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                     {t('back')}
                   </button>
                   <button
-                    type="button" disabled={busy || countedUsd.trim() === '' || countedKhr.trim() === ''} onClick={() => void submitClose()}
+                    type="button" disabled={busy || parseShiftCount(countedUsd) == null || parseShiftCount(countedKhr) == null} onClick={() => void submitClose()}
                     className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   >
                     {busy ? t('saving_label') : t('shift_end')}

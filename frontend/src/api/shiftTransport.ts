@@ -104,11 +104,23 @@ export function shiftCashDifference(shift: Pick<Shift,
 >): { usd: number | null; khr: number | null } {
   const difference = (closing: number | null, opening: number) => closing == null
     ? null
-    : Number((Number(closing) - Number(opening || 0)).toFixed(2))
+    : Number((Number(closing) - Number(opening)).toFixed(2))
   return {
     usd: difference(shift.closing_counted_usd, shift.opening_float_usd),
     khr: difference(shift.closing_counted_khr, shift.opening_float_khr),
   }
+}
+
+export function parseShiftCount(value: unknown): number | null {
+  if ((typeof value !== 'string' && typeof value !== 'number') || (typeof value === 'string' && value.trim() === '')) return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function requiredShiftCount(value: unknown, label: string): number {
+  const parsed = parseShiftCount(value)
+  if (parsed == null) throw new Error(`${label} must be an explicit non-negative number`)
+  return parsed
 }
 
 // Shift timestamps are entered in the shop's canonical Phnom Penh wall clock.
@@ -157,6 +169,8 @@ export type OpenShiftInput = {
 }
 
 export async function openShift(input: OpenShiftInput): Promise<ShiftState> {
+  const openingFloatUsd = requiredShiftCount(input.openingFloatUsd, 'Opening USD count')
+  const openingFloatKhr = requiredShiftCount(input.openingFloatKhr, 'Opening KHR count')
   // isWrite = true: no local race, no cached answer. The server's UNIQUE index
   // is the arbiter of "once a day", so this call must actually reach it.
   const state = await route<ShiftState>(
@@ -164,8 +178,8 @@ export async function openShift(input: OpenShiftInput): Promise<ShiftState> {
     () => apiFetch('POST', '/api/shifts/open', {
       branch_id: input.branchId ?? null,
       branch_name: input.branchName ?? null,
-      opening_float_usd: input.openingFloatUsd,
-      opening_float_khr: input.openingFloatKhr,
+      opening_float_usd: openingFloatUsd,
+      opening_float_khr: openingFloatKhr,
       opening_note: input.openingNote ?? null,
     }),
     null,
@@ -186,12 +200,14 @@ export type CloseShiftInput = {
 }
 
 export async function closeShift(input: CloseShiftInput): Promise<ShiftState> {
+  const closingCountedUsd = requiredShiftCount(input.closingCountedUsd, 'Closing USD count')
+  const closingCountedKhr = requiredShiftCount(input.closingCountedKhr, 'Closing KHR count')
   const state = await route<ShiftState>(
     'shifts:close',
     () => apiFetch('POST', '/api/shifts/close', {
       branch_id: input.branchId ?? null,
-      closing_counted_usd: input.closingCountedUsd,
-      closing_counted_khr: input.closingCountedKhr,
+      closing_counted_usd: closingCountedUsd,
+      closing_counted_khr: closingCountedKhr,
       closing_note: input.closingNote ?? null,
     }),
     null,
@@ -235,6 +251,7 @@ export async function fetchShiftHistory(id: number): Promise<ShiftHistoryResult>
 }
 
 export type AmendShiftInput = {
+  expectedRevision: number
   reason: string
   openedAt: string
   openingFloatUsd: number
@@ -247,17 +264,26 @@ export type AmendShiftInput = {
 }
 
 export async function amendShift(id: number, input: AmendShiftInput): Promise<{ shift: Shift }> {
+  const openingFloatUsd = requiredShiftCount(input.openingFloatUsd, 'Opening USD count')
+  const openingFloatKhr = requiredShiftCount(input.openingFloatKhr, 'Opening KHR count')
+  const closingCountedUsd = input.closedAt == null
+    ? null
+    : requiredShiftCount(input.closingCountedUsd, 'Closing USD count')
+  const closingCountedKhr = input.closedAt == null
+    ? null
+    : requiredShiftCount(input.closingCountedKhr, 'Closing KHR count')
   const result = await route<{ shift: Shift }>(
     `shifts:amend:${id}`,
     () => apiFetch('PATCH', `/api/shifts/${id}`, {
+      expected_revision: input.expectedRevision,
       reason: input.reason,
       opened_at: input.openedAt,
-      opening_float_usd: input.openingFloatUsd,
-      opening_float_khr: input.openingFloatKhr,
+      opening_float_usd: openingFloatUsd,
+      opening_float_khr: openingFloatKhr,
       opening_note: input.openingNote ?? null,
       closed_at: input.closedAt ?? null,
-      closing_counted_usd: input.closingCountedUsd ?? null,
-      closing_counted_khr: input.closingCountedKhr ?? null,
+      closing_counted_usd: closingCountedUsd,
+      closing_counted_khr: closingCountedKhr,
       closing_note: input.closingNote ?? null,
     }),
     null,
@@ -282,13 +308,15 @@ export type CloseShiftByIdResult = {
 }
 
 export async function closeShiftById(id: number, input: CloseShiftByIdInput): Promise<CloseShiftByIdResult> {
+  const closingCountedUsd = requiredShiftCount(input.closingCountedUsd, 'Closing USD count')
+  const closingCountedKhr = requiredShiftCount(input.closingCountedKhr, 'Closing KHR count')
   const result = await route<CloseShiftByIdResult>(
     `shifts:close:${id}`,
     () => apiFetch('POST', `/api/shifts/${id}/close`, {
       expected_revision: input.expectedRevision,
       closed_at: input.closedAt,
-      closing_counted_usd: input.closingCountedUsd,
-      closing_counted_khr: input.closingCountedKhr,
+      closing_counted_usd: closingCountedUsd,
+      closing_counted_khr: closingCountedKhr,
       closing_note: input.closingNote ?? null,
     }),
     null,
@@ -312,13 +340,15 @@ export type ReopenShiftResult = {
 }
 
 export async function reopenShift(id: number, input: ReopenShiftInput): Promise<ReopenShiftResult> {
+  const openingFloatUsd = requiredShiftCount(input.openingFloatUsd, 'Opening USD count')
+  const openingFloatKhr = requiredShiftCount(input.openingFloatKhr, 'Opening KHR count')
   const result = await route<ReopenShiftResult>(
     `shifts:reopen:${id}`,
     () => apiFetch('POST', `/api/shifts/${id}/reopen`, {
       expected_revision: input.expectedRevision,
       reason: input.reason,
-      opening_float_usd: input.openingFloatUsd,
-      opening_float_khr: input.openingFloatKhr,
+      opening_float_usd: openingFloatUsd,
+      opening_float_khr: openingFloatKhr,
       opening_note: input.openingNote ?? null,
     }),
     null,

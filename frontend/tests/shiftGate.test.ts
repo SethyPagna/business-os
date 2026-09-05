@@ -123,12 +123,14 @@ ok(/t\('shift_starts_at'\)/.test(registerBlock) && /fmtDateTime24\(now\)/.test(r
   'the registration prompt shows the moment the shift will be opened at')
 ok(/function useWallClock\(/.test(gate) && /window\.setInterval/.test(gate),
   'the not-yet-stamped moment is a live clock, not a value frozen when the panel opened')
-ok(/if \(busy \|\| floatUsd\.trim\(\) === '' \|\| floatKhr\.trim\(\) === ''\) return/.test(gate),
-  'a new day cannot silently turn two blank opening counts into fake zeros')
-ok(/disabled=\{busy \|\| floatUsd\.trim\(\) === '' \|\| floatKhr\.trim\(\) === ''\}/.test(registerBlock),
-  'the Start Shift control requires both native opening counts to be entered')
-ok(/if \(busy \|\| countedUsd\.trim\(\) === '' \|\| countedKhr\.trim\(\) === ''\) return/.test(endBody),
-  'current-day close also refuses blank native counts')
+ok(/parseShiftCount\(floatUsd\)/.test(gate) && /openingFloatUsd == null \|\| openingFloatKhr == null/.test(gate),
+  'a new day rejects blank, invalid, infinite, and negative opening counts')
+ok(/disabled=\{busy \|\| parseShiftCount\(floatUsd\) == null \|\| parseShiftCount\(floatKhr\) == null\}/.test(registerBlock),
+  'the Start Shift control enables only for two finite non-negative native counts')
+ok(/parseShiftCount\(countedUsd\)/.test(endBody) && /closingCountedUsd == null \|\| closingCountedKhr == null/.test(endBody),
+  'current-day close also rejects blank, invalid, infinite, and negative counts')
+ok(!/Number\((?:float|counted)[^)]+\) \|\| 0/.test(gate),
+  'POS shift forms never coerce an invalid or blank count to zero')
 
 // ---- 4. No offline mirror for a physical cash count ------------------------
 for (const method of ['openShift', 'closeShift', 'amendShift', 'closeShiftById', 'reopenShift', 'cancelShift']) {
