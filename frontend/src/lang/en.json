@@ -5614,5 +5614,17 @@
   "bulk_cancel_review_hint": "Review every sale before cancelling.",
   "choose": "Choose",
   "ready": "Ready",
-  "required": "Required"
+  "required": "Required",
+  "return_bulk_action": "Change selected returns",
+  "return_bulk_in_progress": "A return bulk action is already running.",
+  "return_bulk_result": "Updated {changed} returns; {unchanged} unchanged.",
+  "return_bulk_pending": "A previous bulk action has an unknown outcome. Retry that exact request or discard it after checking Returns and History.",
+  "retry_original_request": "Retry original request",
+  "discard_bulk_retry_warning": "Discard this retry? The previous action may already have succeeded. Check Returns and History first.",
+  "discard_retry": "Discard retry",
+  "change_selected": "Change selected",
+  "return_bulk_method_preserves_values": "Recorded amounts and item stock actions stay unchanged.",
+  "search_customers": "Search customers",
+  "search_delivery_contacts": "Search delivery contacts",
+  "fee_note": "Fee note"
 }
