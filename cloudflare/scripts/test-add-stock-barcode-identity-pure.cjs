@@ -104,12 +104,18 @@ const productBatches = loadReal('lib/productBatches.ts', {
   './sqlBinding': sqlBinding,
 })
 const permissions = loadReal('lib/permissions.ts')
+const businessDateWindow = loadReal('lib/businessDateWindow.ts')
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+  './db': { getDb: () => db },
+  './businessDateWindow': businessDateWindow,
+})
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/db': { getDb: () => db },
-  '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+  '../lib/businessDateWindow': businessDateWindow,
+  '../lib/salesAnalytics': salesAnalytics,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/sqlBinding': sqlBinding,
