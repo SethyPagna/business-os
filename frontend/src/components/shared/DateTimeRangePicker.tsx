@@ -8,8 +8,6 @@ import AppSelect from './AppSelect'
 import DateEntryInput from './DateEntryInput.tsx'
 import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './statsStripPresets.ts'
 
-type PickerPresetKey = StatsPresetKey | '30d'
-
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
 // trigger pill, and a panel laid out as two ENDPOINT BOXES
 // (Start | → | End), each holding a large editable DD/MM/YYYY date with its
@@ -132,19 +130,6 @@ function normalizeTime(raw: string): string | null {
 
 function todayIso(): string {
   return statsPresetRange('today').startDate
-}
-
-function pickerPresetRange(preset: PickerPresetKey, today: string): DateTimeRange {
-  if (preset !== '30d') return statsPresetRange(preset)
-  const [year, month, day] = today.split('-').map(Number)
-  const start = new Date(Date.UTC(year, month - 1, day))
-  start.setUTCDate(start.getUTCDate() - 29)
-  return {
-    startDate: isoOf(start.getUTCFullYear(), start.getUTCMonth() + 1, start.getUTCDate()),
-    endDate: today,
-    startTime: '00:00',
-    endTime: '23:59',
-  }
 }
 
 function lastDayOfMonth(year: number, month1: number): number {
@@ -307,23 +292,20 @@ export default function DateTimeRangePicker({
   const isEdge = (iso: string) => iso === value.startDate || iso === value.endDate
 
   const hasSelection = isDateTimeRangeActive(value) || Boolean(value.startTime || value.endTime)
-  const thirtyDayRange = pickerPresetRange('30d', today)
-  const activePreset: PickerPresetKey | null = value.startDate === thirtyDayRange.startDate && value.endDate === thirtyDayRange.endDate
-    ? '30d'
-    : activeStatsPreset(value)
+  const activePreset = activeStatsPreset(value)
   const quickRangeLabel = (key: string, fallback: string) => {
     const label = t(key)
     return label && label !== key ? label : fallback
   }
-  const quickRanges: Array<{ id: PickerPresetKey; label: string }> = [
+  const quickRanges: Array<{ id: StatsPresetKey; label: string }> = [
     { id: 'all', label: quickRangeLabel('all_time', 'All time') },
     { id: 'today', label: quickRangeLabel('today', 'Today') },
     { id: '7d', label: quickRangeLabel('last_7_days', 'Last 7 days') },
     { id: '30d', label: quickRangeLabel('last_30_days', 'Last 30 days') },
     { id: 'month', label: quickRangeLabel('this_month', 'This month') },
   ]
-  const applyQuickRange = (preset: PickerPresetKey) => {
-    const next = pickerPresetRange(preset, today)
+  const applyQuickRange = (preset: StatsPresetKey) => {
+    const next = statsPresetRange(preset)
     onChange(showTime ? next : { ...next, startTime: '', endTime: '' })
     const anchor = next.startDate || today
     setViewYear(Number(anchor.slice(0, 4)))

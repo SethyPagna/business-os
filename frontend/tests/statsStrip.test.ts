@@ -35,6 +35,21 @@ test('statsPresetRange: 7d spans exactly seven calendar days ending today', () =
   assert.equal(range.endDate, '2026-08-30')
 })
 
+test('statsPresetRange: 30d spans 30 inclusive calendar days across boundaries', () => {
+  const cases: Array<[string, Date, string]> = [
+    ['month', new Date(2026, 4, 1), '2026-04-02'],
+    ['year', new Date(2026, 0, 15), '2025-12-17'],
+    ['leap February', new Date(2024, 2, 1), '2024-02-01'],
+  ]
+  for (const [boundary, now, expectedStart] of cases) {
+    const range = statsPresetRange('30d', now)
+    assert.equal(range.startDate, expectedStart, `30d start survives the ${boundary} boundary`)
+    assert.equal(range.endDate, `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`)
+    assert.equal(range.startTime, '00:00')
+    assert.equal(range.endTime, '23:59')
+  }
+})
+
 test('statsPresetRange: month/year anchor to the 1st, and survive month rollovers', () => {
   const now = new Date(2026, 0, 3) // Jan 3 -- 7d crosses a year boundary
   assert.equal(statsPresetRange('month', now).startDate, '2026-01-01')
@@ -54,10 +69,24 @@ test('activeStatsPreset round-trips every preset and rejects a custom range', ()
   // Wednesday avoids the inherent Sunday overlap between "This week" and
   // "Last 7 days"; the active state is derived from dates alone.
   const now = new Date(2026, 7, 26)
-  for (const preset of ['all', 'today', '7d', 'week', 'month', 'year'] as const) {
+  for (const preset of ['all', 'today', '7d', '30d', 'week', 'month', 'year'] as const) {
     assert.equal(activeStatsPreset(statsPresetRange(preset, now), now), preset)
   }
   assert.equal(activeStatsPreset({ startDate: '2026-08-01', endDate: '2026-08-15', startTime: '', endTime: '' }, now), null)
+})
+
+test('activeStatsPreset: 30d follows common precedence and ignores custom times', () => {
+  const ordinaryNow = new Date(2026, 7, 26)
+  const thirtyDays = statsPresetRange('30d', ordinaryNow)
+  assert.equal(
+    activeStatsPreset({ ...thirtyDays, startTime: '08:15', endTime: '17:45' }, ordinaryNow),
+    '30d',
+    'custom times do not suppress the active preset, matching every existing preset',
+  )
+
+  const monthCollision = new Date(2026, 3, 30)
+  assert.deepEqual(statsPresetRange('30d', monthCollision), statsPresetRange('month', monthCollision))
+  assert.equal(activeStatsPreset(statsPresetRange('month', monthCollision), monthCollision), '30d', 'first visible matching preset owns the highlight')
 })
 
 const REPORT_VIEW_FILES = [

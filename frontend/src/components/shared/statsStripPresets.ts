@@ -16,7 +16,7 @@ export interface DateTimeRange {
 
 const FULL_DAY_TIMES = { startTime: '00:00', endTime: '23:59' }
 
-export type StatsPresetKey = 'all' | 'today' | '7d' | 'week' | 'month' | 'year'
+export type StatsPresetKey = 'all' | 'today' | '7d' | '30d' | 'week' | 'month' | 'year'
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
@@ -45,6 +45,11 @@ export function statsPresetRange(preset: StatsPresetKey, now?: Date): DateTimeRa
     start.setDate(start.getDate() - 6)
     return { ...FULL_DAY_TIMES, startDate: isoDay(start), endDate: end }
   }
+  if (preset === '30d') {
+    const start = new Date(current)
+    start.setDate(start.getDate() - 29)
+    return { ...FULL_DAY_TIMES, startDate: isoDay(start), endDate: end }
+  }
   if (preset === 'week') {
     const start = new Date(current)
     // The picker calendar is Monday-first, so "This week" uses that same
@@ -60,7 +65,9 @@ export function statsPresetRange(preset: StatsPresetKey, now?: Date): DateTimeRa
 
 /** Which legacy preset (if any) the current range equals. */
 export function activeStatsPreset(range: DateTimeRange, now?: Date): StatsPresetKey | null {
-  const presets: StatsPresetKey[] = ['all', 'today', '7d', 'week', 'month', 'year']
+  // Match the common picker order. On dates such as April 30, 30d and month
+  // are the same range; the first visible matching choice owns the highlight.
+  const presets: StatsPresetKey[] = ['all', 'today', '7d', '30d', 'week', 'month', 'year']
   for (const preset of presets) {
     const candidate = statsPresetRange(preset, now)
     if (candidate.startDate === range.startDate && candidate.endDate === range.endDate) return preset
