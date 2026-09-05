@@ -11,6 +11,8 @@ const actual = new Set([
   'db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
   'productBatches','batchCode','salesStatus','conflictControl','searchMatch','financialPrecision',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
+  'nativeSaleChange',
+  'receiptNumber','clientTimestamp',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
@@ -108,7 +110,36 @@ function request(key = 'settle-request-1') {
 }
 
 async function run() {
+  const native = fixture(); seed(native)
+  const nativeCreate = await native.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    payment_details: [{ method: 'ABA Bank', amount_usd: 6, amount_khr: 0 }],
+    payment_currency: 'USD',
+    amount_paid_usd: 6,
+    amount_paid_khr: 0,
+    exchange_rate: 4200,
+    change_is_actual: true,
+    change_usd: 1,
+    change_khr: 0,
+    client_request_id: 'native-change-create-1',
+  }, 'POST')
+  assert.equal(nativeCreate.status, 200, JSON.stringify(nativeCreate))
+  const nativeStored = native.sql.prepare('SELECT change_usd,change_khr,change_is_actual,change_exchange_rate FROM sales WHERE id=?').get(nativeCreate.body.id)
+  assert.deepEqual(nativeStored, { change_usd: 1, change_khr: 0, change_is_actual: 1, change_exchange_rate: 4000 })
+  const saleCountBeforeInvalid = native.sql.prepare('SELECT COUNT(*) n FROM sales').get().n
+  const invalidNative = await native.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1, amount_paid_usd: 6, exchange_rate: 4200,
+    change_is_actual: true, change_usd: 0, change_khr: 0,
+    client_request_id: 'native-change-invalid-1',
+  }, 'POST')
+  assert.equal(invalidNative.status, 400, JSON.stringify(invalidNative))
+  assert.equal(native.sql.prepare('SELECT COUNT(*) n FROM sales').get().n, saleCountBeforeInvalid)
+  console.log('PASS create validates explicit native change before writes and persists its captured server change rate')
+
   const f = fixture(); seed(f)
+  f.sql.prepare('UPDATE sales SET change_is_actual=1,change_exchange_rate=4000 WHERE id=1').run()
   assert.equal((await f.call('/1/status', { ...request('unsupported-aggregate'), amount_paid_usd: 99 })).body.code, 'unsupported_payment_aggregate')
   console.log('PASS client aggregate payment fields are rejected in favor of server-derived tender totals')
   const stockBefore = f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
@@ -130,6 +161,7 @@ async function run() {
   assert.equal(line.base_price_khr, 21000)
   assert.equal(line.manual_discount_khr, 0)
   assert.match(sale.search_normalized, /aba bank/)
+  assert.deepEqual([sale.change_is_actual,sale.change_exchange_rate],[0,null])
   assert.ok(applied.body.actionHistoryId > 0)
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 1)
   console.log('PASS settlement canonicalizes active methods, preserves inactive legacy tender, uses latest rate once, and moves no stock')
@@ -153,10 +185,12 @@ async function run() {
   const undoneLine = f.sql.prepare('SELECT * FROM sale_items WHERE id=1').get()
   assert.deepEqual([undoneSale.sale_status,undoneSale.exchange_rate,undoneSale.payment_method,undoneSale.amount_paid_usd],['awaiting_payment',4100,'Legacy Cash',1.2346])
   assert.equal(undoneSale.discount_khr, null)
+  assert.deepEqual([undoneSale.change_is_actual,undoneSale.change_exchange_rate],[1,4000])
   assert.equal(undoneLine.base_price_khr, null)
   assert.equal(undoneLine.manual_discount_khr, null)
   await settlementAction.replaySaleSettlementAction(f.env, user, 'redo', applied.body.actionHistoryId, 1, { operation_id: receipt.id })
   assert.equal(f.sql.prepare('SELECT exchange_rate FROM sales WHERE id=1').get().exchange_rate, 4200)
+  assert.deepEqual(Object.values(f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get()), [0,null])
   assert.equal(f.sql.prepare('SELECT value FROM settings WHERE key=\'exchange_rate\'').get().value, '4300')
   console.log('PASS undo restores exact nullable 4100 snapshot and redo restores captured 4200 without current settings recomputation')
 
@@ -170,7 +204,8 @@ async function run() {
 
   const amended = fixture(); seed(amended)
   amended.sql.prepare(`UPDATE sales SET sale_status='completed',is_delivery=1,delivery_fee_usd=1,
-    delivery_fee_khr=4100,total_usd=6,total_khr=24600 WHERE id=1`).run()
+    delivery_fee_khr=4100,total_usd=6,total_khr=24600,change_usd=1,change_khr=0,
+    change_is_actual=1,change_exchange_rate=4000 WHERE id=1`).run()
   amended.sql.prepare("UPDATE sales SET updated_at='amend-v1' WHERE id=1").run()
   const amendmentRequest = {
     kind: 'delivery_fee_changed',
@@ -187,6 +222,7 @@ async function run() {
   const amendedSale = amended.sql.prepare('SELECT * FROM sales WHERE id=1').get()
   const amendedLine = amended.sql.prepare('SELECT * FROM sale_items WHERE id=1').get()
   assert.deepEqual([amendedSale.exchange_rate,amendedSale.delivery_fee_khr,amendedSale.total_khr,amendedLine.total_khr],[4200,8400,29400,21000])
+  assert.deepEqual([amendedSale.change_usd,amendedSale.change_khr,amendedSale.change_is_actual,amendedSale.change_exchange_rate],[1,0,1,4000])
   assert.equal(amended.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='amendment'").get().n, 1)
   amended.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
   assert.deepEqual(await amended.call('/1/amendments', amendmentRequest, 'POST'), amendmentApplied)
@@ -204,6 +240,7 @@ async function run() {
   console.log('PASS amendment settings race rolls back fee, rate rebase, ledger, and receipt together')
 
   const addition = fixture(); seed(addition)
+  addition.sql.prepare('UPDATE sales SET change_usd=1,change_khr=0,change_is_actual=1,change_exchange_rate=4000 WHERE id=1').run()
   addition.sql.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_number,batch_key,is_active,received_at,lot_code)
     VALUES(501,1,1,'lot-501',1,'2026-01-01','LOT-501')`).run()
   addition.sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,8)').run()
@@ -220,6 +257,7 @@ async function run() {
   assert.equal(additionApplied.body.undoActionId, additionApplied.body.actionHistoryId)
   const addedSale = addition.sql.prepare('SELECT * FROM sales WHERE id=1').get()
   assert.deepEqual([addedSale.exchange_rate,addedSale.subtotal_usd,addedSale.total_usd,addedSale.total_khr],[4200,7,7,29400])
+  assert.deepEqual([addedSale.change_usd,addedSale.change_khr,addedSale.change_is_actual,addedSale.change_exchange_rate],[1,0,1,4000])
   assert.deepEqual(addition.sql.prepare('SELECT total_khr FROM sale_items WHERE sale_id=1 ORDER BY id').all().map((r) => r.total_khr), [21000,8400])
   assert.equal(addition.sql.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 1)
   assert.equal(addition.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_members WHERE entity_kind='sale_item'").get().n, 1)
