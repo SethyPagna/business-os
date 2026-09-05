@@ -28,12 +28,13 @@ import {
   SyncContext,
   isBrokenLocalizedString,
   useApp,
+  useLowStockConfig,
   useSync,
   useT,
   type AppContextCoreValue,
 } from './app/AppContextCore.tsx'
 
-export { isBrokenLocalizedString, useApp, useSync, useT }
+export { isBrokenLocalizedString, useApp, useLowStockConfig, useSync, useT }
 
 /**
  * Global application context.

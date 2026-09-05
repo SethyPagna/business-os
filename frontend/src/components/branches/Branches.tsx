@@ -11,7 +11,8 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
-import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import { useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import type { QueryParams } from '../../api/query.ts'
 import Modal from '../shared/Modal'
 import InfoHint from '../shared/InfoHint.tsx'
@@ -319,6 +320,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   showDateRange?: boolean
 } = {}) {
   const { can, t, user, notify, fmtUSD } = useApp()
+  // Settings > Stock Alerts -- the per-branch product cards use the same
+  // number the Branches stats above them are counted by.
+  const lowStockConfig = useLowStockConfig()
   // Transferring stock moves real quantities against live state, so
   // routes/branches.ts blocks it outright for the Review Required tier
   // (POST /transfer and /transfer-bulk) instead of queueing it -- see
@@ -1537,7 +1541,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                     const cardQty = Number(product.branch_quantity || 0)
                                     const stockTone = cardQty <= Number(product.out_of_stock_threshold || 0)
                                       ? 'out'
-                                      : cardQty <= Number(product.low_stock_threshold || 10) ? 'low' : 'ok'
+                                      : cardQty <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'low' : 'ok'
                                     return (
                                     <div
                                       key={product.id}

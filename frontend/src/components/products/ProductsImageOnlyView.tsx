@@ -20,7 +20,8 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
-import { useApp } from '../../AppContext'
+import { useApp, useLowStockConfig } from '../../AppContext'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import FilterMenu from '../shared/FilterMenu'
@@ -143,6 +144,9 @@ function pickImageFile(options: { capture?: 'environment' } = {}): Promise<File 
 
 export default function ProductsImageOnlyView() {
   const { t, notify, hasPermission, fmtUSD, fmtKHR } = useImageOnlyApp()
+  // Settings > Stock Alerts -- the image grid and its details flyout are
+  // coloured by the same number as the table view of the same catalog.
+  const lowStockConfig = useLowStockConfig()
   // Which optional fields this specific role has been granted (Part 243) --
   // the server already only sends the fields it's granted (see
   // productWrites.ts's computeImageOnlyVisibleFields), so these flags just
@@ -450,7 +454,7 @@ export default function ProductsImageOnlyView() {
             const stockQty = Number(product.stock_quantity || 0)
             const stockTone = stockQty <= Number(product.out_of_stock_threshold ?? 0)
               ? 'bg-red-50 text-red-700 ring-red-100 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-900/60'
-              : stockQty <= Number(product.low_stock_threshold ?? 10)
+              : stockQty <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold)
                 ? 'bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/60'
                 : 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900/60'
             return (
@@ -662,7 +666,7 @@ export default function ProductsImageOnlyView() {
                       const qty = Number(detailsProduct.stock_quantity || 0)
                       const tone = qty <= Number(detailsProduct.out_of_stock_threshold ?? 0)
                         ? 'bg-red-50 text-red-700 ring-red-100 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-900/60'
-                        : qty <= Number(detailsProduct.low_stock_threshold ?? 10)
+                        : qty <= effectiveLowStockThreshold(lowStockConfig, detailsProduct.low_stock_threshold)
                           ? 'bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/60'
                           : 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900/60'
                       return (

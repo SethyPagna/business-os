@@ -11,6 +11,8 @@ import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildProductBranchSummaryLabel } from '../products/helpers/productDisplayHelpers.ts'
+import { useLowStockConfig } from '../../AppContext'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
 import ProductImage from './ProductImage'
 
@@ -250,6 +252,9 @@ export default function ProductDetailSheet({
   onOpenImageLightbox,
   promotionRules = [],
 }: ProductDetailSheetProps) {
+  // Settings > Stock Alerts -- the same number the POS grid behind this sheet
+  // colours by, so the sheet and the card can never disagree about a product.
+  const lowStockConfig = useLowStockConfig()
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)
   const groupMeta = product.__groupMeta || null
@@ -651,7 +656,7 @@ export default function ProductDetailSheet({
               a product-level number that could be scoped to a DIFFERENT branch than
               the one on screen, which is what "display shows different data than the
               actual stock in the options" was describing. */}
-          <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${displayedStock <= 0 ? 'text-red-600' : displayedStock <= (asNumber(product.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{displayedStock} {product.unit}</span></div>
+          <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${displayedStock <= 0 ? 'text-red-600' : displayedStock <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'text-yellow-600' : 'text-green-600'}`}>{displayedStock} {product.unit}</span></div>
           {/* Branch-aware zero-stock display (this session): the Stock row
               above is the single branch-resolved number (see
               getDisplayStock's own comment for why it's scoped to one
@@ -758,7 +763,7 @@ export default function ProductDetailSheet({
                 <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div {...getKhmerTextProps(effectiveVariant.name, 'min-w-0 flex-1 break-words text-sm font-semibold text-gray-900 dark:text-white')}>{effectiveVariant.name}</div>
-                    <span className={`flex-shrink-0 text-xs font-bold ${effectiveVariantStock <= 0 ? 'text-red-600' : effectiveVariantStock <= (asNumber(effectiveVariant.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>
+                    <span className={`flex-shrink-0 text-xs font-bold ${effectiveVariantStock <= 0 ? 'text-red-600' : effectiveVariantStock <= effectiveLowStockThreshold(lowStockConfig, effectiveVariant.low_stock_threshold) ? 'text-yellow-600' : 'text-green-600'}`}>
                       {effectiveVariantStock} {effectiveVariant.unit}
                     </span>
                   </div>

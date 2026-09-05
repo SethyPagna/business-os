@@ -12,6 +12,8 @@ import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { getVisibleProductBatches } from '../../../utils/productBatches.ts'
 import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
+import { useLowStockConfig } from '../../../AppContext'
+import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
 
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
 // D3 (Part 422): the detail page's report sections (batch summary,
@@ -138,7 +140,9 @@ export default function ProductDetailModal({
   const sellingKhr = Number(p.selling_price_khr || 0)
   const stockQuantity = Number(p.stock_quantity || 0)
   const outOfStockThreshold = Number(p.out_of_stock_threshold || 0)
-  const lowStockThreshold = Number(p.low_stock_threshold || 10)
+  // Settings > Stock Alerts -- the same number the row behind this modal was
+  // coloured by, so opening a product cannot change its verdict.
+  const lowStockThreshold = effectiveLowStockThreshold(useLowStockConfig(), p.low_stock_threshold)
   const promotion = calculateProductDiscount(p)
   const marginUsd = sellingUsd - purchaseUsd
   const marginPct = sellingUsd > 0 ? (marginUsd / sellingUsd) * 100 : 0

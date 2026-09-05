@@ -8,6 +8,8 @@ import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { calculateProductDiscount } from '../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { useLowStockConfig } from '../../AppContext'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number) => string
@@ -91,7 +93,11 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const activePriceUsd = sellingPriceUsd
   const activePriceKhr = sellingPriceKhr
   const stockQuantity = Number(p.stock_quantity || 0)
-  const lowStockThreshold = Number(p.low_stock_threshold || 0)
+  // Settings > Stock Alerts. This read used to fall back to 0 where every
+  // other surface fell back to 10, so a product with no limit of its own was
+  // green here and amber on the list it was opened from; going through the
+  // shared rule removes the fork as well as honouring the owner's number.
+  const lowStockThreshold = effectiveLowStockThreshold(useLowStockConfig(), p.low_stock_threshold)
   const stockPct = lowStockThreshold > 0
     ? Math.min(100, (stockQuantity / lowStockThreshold) * 100)
     : 100

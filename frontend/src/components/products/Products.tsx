@@ -11,7 +11,7 @@ import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
-import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useLowStockConfig, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import FilterMenu from '../shared/FilterMenu'
@@ -622,6 +622,10 @@ export default function Products() {
 
 function ProductsFullEditor() {
   const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useProductsApp()
+  // Settings > Stock Alerts. One config for the badges on every row, the Low
+  // filter pill and the same-page re-filter -- so the pill and the badge can
+  // never disagree about which rows are low.
+  const lowStockConfig = useLowStockConfig()
   // Per-action gates for this page's toolbar. Resolved once here rather
   // than inline in the JSX so the header block below stays readable and
   // every control's rule is visible in one place. See
@@ -2182,7 +2186,8 @@ function ProductsFullEditor() {
     searchTerms,
     stockFilter: effectiveStockState,
     supplierFilter,
-  }), [brandFilter, branchFilter, catFilter, effectiveStockState, groupFilter, issueFilter, parentProductIds, products, searchMode, searchTerms, supplierFilter])
+    lowStock: lowStockConfig,
+  }), [brandFilter, branchFilter, catFilter, effectiveStockState, groupFilter, issueFilter, lowStockConfig, parentProductIds, products, searchMode, searchTerms, supplierFilter])
 
   // Name kept as "...Csv" for now (it's an internal identifier, not shown
   // to users -- see productMenuHelpers.ts's menu item labels, none of which
@@ -3161,6 +3166,7 @@ function ProductsFullEditor() {
       getBrandColor,
       t,
       promotionRules,
+      lowStock: lowStockConfig,
     })
     const thumbnailState = buildProductThumbnailState(p)
     // A merged row (see mergeSameDetailRows) represents multiple real
@@ -3387,6 +3393,7 @@ function ProductsFullEditor() {
       getBranchQty,
       t,
       promotionRules,
+      lowStock: lowStockConfig,
     })
     const thumbnailState = buildProductThumbnailState(p)
     const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]

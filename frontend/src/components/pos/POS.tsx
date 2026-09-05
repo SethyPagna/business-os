@@ -21,7 +21,8 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
-import { useApp, useSync } from '../../AppContext'
+import { useApp, useLowStockConfig, useSync } from '../../AppContext'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import {
   PAYMENT_METHODS,
   DELIVERY_FEE_PAYER,
@@ -649,6 +650,10 @@ function ProductDiscountBadge({
 }
 export default function POS() {
   const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp() as AppContextValue
+  // Settings > Stock Alerts. The till colours its grid and answers its stock
+  // pills by the owner's number, offline included (the config rides the
+  // settings map, which the offline snapshot already carries).
+  const lowStockConfig = useLowStockConfig()
   const { syncChannel } = useSync() as SyncContextValue
   const isActive = useIsPageActive('pos')
   const posCopy = useCallback((en: string, km = en) => ((settings.language || 'en') === 'km' ? km : en), [settings.language])
@@ -2175,8 +2180,8 @@ export default function POS() {
       if (stockStates.length) {
         return stockStates.some((state) => {
           if (state === 'out')      return qty <= asNumber(p.out_of_stock_threshold)
-          if (state === 'low')      return qty > asNumber(p.out_of_stock_threshold) && qty <= (asNumber(p.low_stock_threshold) || 10)
-          if (state === 'in_stock') return qty > (asNumber(p.low_stock_threshold) || 10)
+          if (state === 'low')      return qty > asNumber(p.out_of_stock_threshold) && qty <= effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold)
+          if (state === 'in_stock') return qty > asNumber(p.out_of_stock_threshold) && qty > effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold)
           return true
         })
       }
@@ -3195,13 +3200,13 @@ export default function POS() {
                         stock in the same red/amber/emerald convention a flat
                         product's "qty unit" uses, judged against the group's
                         total. A flat product keeps its coloured "qty unit". */}
-                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
+                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
                       {groupProduct ? (
                         <>
                           {choiceLabel}: <span className="font-semibold text-primary-600 dark:text-primary-400">{variants.length}</span>
                           {groupMeta?.stockTotal != null ? (
                             <>
-                              {' | '}{posCopy('Total', 'សរុប')}: <span className={`font-semibold ${groupMeta.stockTotal <= 0 ? 'text-red-500' : groupMeta.stockTotal <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-500' : 'text-emerald-500'}`}>{groupMeta.stockTotal}</span>
+                              {' | '}{posCopy('Total', 'សរុប')}: <span className={`font-semibold ${groupMeta.stockTotal <= 0 ? 'text-red-500' : groupMeta.stockTotal <= effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold) ? 'text-yellow-500' : 'text-emerald-500'}`}>{groupMeta.stockTotal}</span>
                             </>
                           ) : null}
                         </>
