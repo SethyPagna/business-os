@@ -90,7 +90,7 @@ interface SupplierOption {
   company?: string | null
 }
 
-interface ProductFormState extends GroupCandidate {
+export interface ProductFormState extends GroupCandidate {
   name?: string
   barcode?: string
   category?: string
@@ -112,6 +112,7 @@ interface ProductFormState extends GroupCandidate {
   cost_price_usd?: EditableNumber
   cost_price_khr?: EditableNumber
   stock_quantity?: EditableNumber
+  received_date?: string | null
   low_stock_threshold?: EditableNumber
   out_of_stock_threshold?: EditableNumber
   expiry_date?: string | null
@@ -142,6 +143,7 @@ interface ProductSavePayload extends ProductFormState {
   cost_price_usd: number
   cost_price_khr: number
   stock_quantity: number
+  received_date?: string | null
   low_stock_threshold: number
   out_of_stock_threshold: number
   expiry_date: string | null
@@ -214,6 +216,10 @@ interface ProductFormProps {
   // The shared Modal's nested layer prevents the newer surface from falling
   // behind the parent; ordinary standalone create/edit callers omit it.
   modalLayer?: 'default' | 'nested'
+  // Stock-session item forms expose the receipt date as a child override.
+  // Ordinary catalog create/edit callers omit this so receipt-only metadata
+  // never leaks into the product API payload.
+  showReceivedDate?: boolean
   t: Translate
   usdSymbol: string
   khrSymbol: string
@@ -525,6 +531,7 @@ export default function ProductForm({
   createDefaults,
   draftScope,
   modalLayer = 'default',
+  showReceivedDate = false,
   t,
   usdSymbol,
   khrSymbol,
@@ -569,6 +576,7 @@ export default function ProductForm({
       cost_price_usd: 0,
       cost_price_khr: 0,
       stock_quantity: 0,
+      ...(showReceivedDate ? { received_date: '' } : {}),
       low_stock_threshold: 10,
       out_of_stock_threshold: 0,
       expiry_date: '',
@@ -587,7 +595,7 @@ export default function ProductForm({
       // it is still CREATE mode and must retain all normal create defaults.
       ...(product || {}),
     }
-  }, [product, units, defaultBranchId, createDefaults])
+  }, [product, units, defaultBranchId, createDefaults, showReceivedDate])
 
   const hydratedInitialForm = useMemo(() => editableInitialForm(initialForm), [initialForm])
   const [form, setForm] = useStableHydratedState<ProductFormState>(hydratedInitialForm, draftKey)
@@ -1136,6 +1144,7 @@ export default function ProductForm({
       cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
       cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
       stock_quantity: parseNumericInput(form.stock_quantity),
+      ...(showReceivedDate ? { received_date: form.received_date || null } : {}),
       low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
       out_of_stock_threshold: parseNumericInput(form.out_of_stock_threshold),
       expiry_date: form.expiry_date || null,
@@ -1780,6 +1789,22 @@ export default function ProductForm({
                   ariaLabel={tr('assign_initial_branch', 'Assign Initial Stock to Branch', 'កំណត់ស្តុកដំបូងទៅសាខា')}
                   className="w-full min-w-0"
                   buttonClassName="input min-h-11 w-full min-w-0"
+                />
+              </div>
+            ) : null}
+            {isCreateMode && showReceivedDate ? (
+              <div className="min-w-0">
+                <label htmlFor="product-received-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {tr('received_date', 'Received date', 'កាលបរិច្ឆេទទទួល')}
+                </label>
+                <DateEntryInput
+                  id="product-received-date"
+                  name="product_received_date"
+                  className="min-h-11 min-w-0"
+                  t={t}
+                  ariaLabel={tr('received_date', 'Received date', 'កាលបរិច្ឆេទទទួល')}
+                  value={form.received_date || ''}
+                  onChange={(iso) => setField('received_date', iso)}
                 />
               </div>
             ) : null}

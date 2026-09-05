@@ -33,6 +33,7 @@ import type {
   CategoryOption,
   GroupCandidate,
   ProductUser,
+  ProductFormState,
   UnitOption,
 } from './forms/ProductForm'
 
@@ -82,6 +83,7 @@ type UnifiedSessionDraft = Omit<CreateProductsSessionDraft, 'rows'> & {
   query?: string
   clientRequestId?: string
   submittedItems?: InventoryStockSessionLine[] | null
+  submissionErrorCode?: string
 }
 
 type CreateProductsSessionModalProps = {
@@ -153,6 +155,10 @@ function isDefinitiveNoWriteStockSessionError(error: unknown): boolean {
   return status === 409 && !!code && code !== 'idempotency_conflict'
 }
 
+function stockSessionErrorCode(error: unknown): string {
+  return String((error as { code?: unknown } | null)?.code || '')
+}
+
 function quantityAtBranch(product: ProductCandidate, branchId: string): number {
   const entry = (product.branch_stock || []).find((row) => String(row.branch_id ?? '') === String(branchId))
   const value = Number(entry?.quantity ?? product.stock_quantity ?? 0)
@@ -220,6 +226,7 @@ export default function CreateProductsSessionModal({
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const searchSeqRef = useRef(0)
   const batchLoadKeyRef = useRef('')
+  const batchChoiceSeedRef = useRef<number | null>(null)
 
   const [header, setHeader] = useState<CreateProductsHeader>(() => draft?.header
     ? { ...draft.header, branchId: draft.header.branchId || resolvedDefaultBranchId }
@@ -227,6 +234,7 @@ export default function CreateProductsSessionModal({
   const [receivedDate, setReceivedDate] = useState(draft?.receivedDate || todayStr())
   const [rows, setRows] = useState<SessionLine[]>(() => draft?.lines || legacyLines(draft?.rows))
   const [submittedItems, setSubmittedItems] = useState<InventoryStockSessionLine[] | null>(() => draft?.submittedItems || null)
+  const [submissionErrorCode, setSubmissionErrorCode] = useState(draft?.submissionErrorCode || '')
   const [step, setStep] = useState<'header' | 'items'>(draft?.step === 'items' ? 'items' : 'header')
   const firstAvailableMode: AddProductsMode = allowNew ? 'new' : 'existing'
   const restoredMode = draft?.mode === 'new' || draft?.mode === 'existing' ? draft.mode : initialMode
@@ -235,6 +243,7 @@ export default function CreateProductsSessionModal({
   )
   const [itemFormOpen, setItemFormOpen] = useState(false)
   const [itemFormSeq, setItemFormSeq] = useState(() => rows.length)
+  const [editingLineId, setEditingLineId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [commitError, setCommitError] = useState('')
   const [query, setQuery] = useState(draft?.query || '')
@@ -255,10 +264,15 @@ export default function CreateProductsSessionModal({
   const [batchFailed, setBatchFailed] = useState(false)
   const [exactBatchLoadKey, setExactBatchLoadKey] = useState('')
   const submissionLocked = submittedItems !== null
+  const idempotencyConflict = submissionLocked && submissionErrorCode === 'idempotency_conflict'
 
   const branchSelectOptions = useMemo(() => branches.map((branch) => ({ value: String(branch.id ?? ''), label: String(branch.name || branch.id || '') })), [branches])
   const itemUnits = useMemo(() => units.length ? units : [{ id: 'pcs', name: 'pcs' }], [units])
   const itemDefaults = useMemo(() => createProductsSessionDefaults(header), [header])
+  const itemCreateDefaults = useMemo(() => ({ ...itemDefaults, received_date: receivedDate }), [itemDefaults, receivedDate])
+  const editingLine = useMemo(() => rows.find((row) => row.lineId === editingLineId && row.status === 'queued') || null, [editingLineId, rows])
+  const editingNewLine = editingLine?.kind === 'create_receive' ? editingLine : null
+  const editingExistingLine = editingLine?.kind === 'receive' ? editingLine : null
   const branchNameFor = (branchId: string): string => branchSelectOptions.find((option) => option.value === String(branchId))?.label || ''
   const productsById = useMemo(() => new Map<unknown, ProductRecord>(candidates.map((product) => [product.id, product])), [candidates])
   const groups = useMemo(() => buildProductGroups(candidates, productsById, { preserveInputOrder: true }), [candidates, productsById])
@@ -285,8 +299,8 @@ export default function CreateProductsSessionModal({
 
   useEffect(() => scheduleWorkDraftWrite<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
-    step, receivedDate, mode, query, submittedItems,
-  }), [draftKey, header, rows, step, receivedDate, mode, query, submittedItems])
+    step, receivedDate, mode, query, submittedItems, submissionErrorCode,
+  }), [draftKey, header, rows, step, receivedDate, mode, query, submittedItems, submissionErrorCode])
 
   useEffect(() => {
     if (!resolvedDefaultBranchId) return
@@ -320,11 +334,11 @@ export default function CreateProductsSessionModal({
 
   useEffect(() => {
     const dialog = parentContentRef.current?.closest('[role="dialog"]')
-    if (!dialog || (!itemFormOpen && !selectedGroup)) return
+    if (!dialog || (!itemFormOpen && !selectedGroup && !editingExistingLine)) return
     dialog.setAttribute('inert', '')
     dialog.setAttribute('aria-hidden', 'true')
     return () => { dialog.removeAttribute('inert'); dialog.removeAttribute('aria-hidden') }
-  }, [itemFormOpen, selectedGroup])
+  }, [itemFormOpen, selectedGroup, editingExistingLine])
 
   useEffect(() => {
     if (!selectedGroup) return
@@ -341,20 +355,30 @@ export default function CreateProductsSessionModal({
     const branchId = Number(lineBranchId || 0)
     const loadKey = productId && branchId ? `${productId}:${branchId}` : ''
     batchLoadKeyRef.current = loadKey
+    const seededBatchId = batchChoiceSeedRef.current
     setBatchOptions([]); setBatchChoice('new'); setExactBatchLoadKey(''); setBatchFailed(false)
     if (!loadKey) { setBatchLoading(false); return }
     setBatchLoading(true)
     void getProductBatches(productId, branchId, false)
       .then((payload) => {
         if (batchLoadKeyRef.current !== loadKey) return
-        setBatchOptions(Array.isArray(payload?.batches) ? payload.batches : [])
+        const batches = Array.isArray(payload?.batches) ? payload.batches : []
+        setBatchOptions(batches)
+        setBatchChoice(seededBatchId && batches.some((batch) => Number(batch.id) === seededBatchId) ? seededBatchId : 'new')
+        batchChoiceSeedRef.current = null
         setExactBatchLoadKey(loadKey)
       })
-      .catch(() => { if (batchLoadKeyRef.current === loadKey) setBatchFailed(true) })
+      .catch(() => {
+        if (batchLoadKeyRef.current === loadKey) {
+          batchChoiceSeedRef.current = null
+          setBatchFailed(true)
+        }
+      })
       .finally(() => { if (batchLoadKeyRef.current === loadKey) setBatchLoading(false) })
   }, [selectedProduct?.id, lineBranchId])
 
   const resetExistingCandidate = () => {
+    batchChoiceSeedRef.current = null
     setSelectedProduct(null); setLineBranchId(header.branchId || resolvedDefaultBranchId)
     setLineSupplier({ supplierId: header.supplierId, supplierName: header.supplierName })
     setLineReceivedDate(receivedDate); setLineQuantity('1'); setLineUnitCost(''); setLineExpiryDate('')
@@ -369,9 +393,9 @@ export default function CreateProductsSessionModal({
     setSelectedProduct(product); setLineUnitCost(String(currentCost(product))); setLineExpiryDate(String(product.expiry_date || ''))
   }
 
-  const queueExistingLine = () => {
+  const queueExistingLine = (replaceLineId?: string) => {
     if (submissionLocked) return
-    if (rows.filter((row) => row.status === 'queued').length >= STOCK_SESSION_MAX_LINES) {
+    if (!replaceLineId && rows.filter((row) => row.status === 'queued').length >= STOCK_SESSION_MAX_LINES) {
       notify(`${tr('limit', 'Limit')}: ${STOCK_SESSION_MAX_LINES}`, 'error'); return
     }
     if (!selectedProduct) return
@@ -393,7 +417,7 @@ export default function CreateProductsSessionModal({
     const chosenBatch = typeof batchChoice === 'number' ? batchOptions.find((batch) => Number(batch.id) === batchChoice) || null : null
     const lotAttributedName = chosenBatch?.supplier_name?.trim() || ''
     const row: SessionLine = {
-      lineId: `receive_${productId}_${Date.now()}_${rows.length}`, kind: 'receive', productId, product: null,
+      lineId: replaceLineId || `receive_${productId}_${Date.now()}_${rows.length}`, kind: 'receive', productId, product: null,
       name: String(selectedProduct.name || `#${productId}`), barcode: String(selectedProduct.barcode || ''), brand: String(selectedProduct.brand || ''),
       supplierId: lotAttributedName || lineSupplier.supplierId == null
         ? null
@@ -405,14 +429,47 @@ export default function CreateProductsSessionModal({
       quantity, unitCostUsd,
       status: 'queued', detail: tr('ready_to_receive', 'Ready'),
     }
-    setRows((prev) => [row, ...prev]); setCommitError(''); setQuery(''); closeExistingOptions()
+    setRows((prev) => replaceLineId ? prev.map((entry) => entry.lineId === replaceLineId ? row : entry) : [row, ...prev])
+    setCommitError(''); setSubmissionErrorCode(''); setQuery('')
+    if (replaceLineId) { setEditingLineId(null); resetExistingCandidate() } else closeExistingOptions()
   }
 
   const writeDraft = () => writeWorkDraft<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
-    step: 'items', receivedDate, mode, query, submittedItems,
+    step: 'items', receivedDate, mode, query, submittedItems, submissionErrorCode,
   })
-  const openItemForm = () => { if (!submissionLocked) { writeDraft(); setItemFormOpen(true) } }
+  const openItemForm = () => {
+    if (submissionLocked) return
+    setEditingLineId(null); writeDraft(); setItemFormOpen(true)
+  }
+  const closeItemForm = () => { setItemFormOpen(false); setEditingLineId(null) }
+
+  const openQueuedLine = (line: SessionLine) => {
+    // submittedItems is the exact payload whose outcome may be unknown. It is
+    // immutable until the same request resolves or a definitive no-write
+    // response unlocks it; never offer an editor that can diverge from it.
+    if (submissionLocked || saving || line.status !== 'queued') return
+    setCommitError(''); setSubmissionErrorCode(''); setEditingLineId(line.lineId)
+    if (line.kind === 'create_receive') {
+      writeDraft(); setItemFormOpen(true); return
+    }
+    if (line.kind !== 'receive' || !line.productId) return
+    batchChoiceSeedRef.current = line.batchId
+    setSelectedProduct({
+      id: line.productId,
+      name: line.name,
+      barcode: line.barcode,
+      brand: line.brand,
+      cost_price_usd: line.unitCostUsd,
+      expiry_date: line.expiryDate,
+    })
+    setLineBranchId(line.branchId)
+    setLineSupplier({ supplierId: line.supplierId, supplierName: line.supplierName })
+    setLineReceivedDate(line.receivedDate)
+    setLineQuantity(String(line.quantity))
+    setLineUnitCost(String(line.unitCostUsd))
+    setLineExpiryDate(line.expiryDate)
+  }
 
   const saveNewItem = async (payload: Record<string, unknown>) => {
     if (saving) throw new Error(tr('saving_label', 'Saving…'))
@@ -441,7 +498,7 @@ export default function CreateProductsSessionModal({
           lineId: `created_${String(productId)}_${Date.now()}`, kind: 'created_zero', productId: Number(productId) || null, product: null,
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: null,
           supplierName: String(payload.supplier ?? header.supplierName ?? '').trim(), branchId: String(branchId), branchName: branchNameFor(String(branchId)),
-          receivedDate, expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: '', quantity: 0,
+          receivedDate: String(payload.received_date || receivedDate), expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: '', quantity: 0,
           unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, status: 'saved', detail: tr('product_created', 'Product created'),
         }
         setRows((prev) => [row, ...prev]); onDone()
@@ -456,13 +513,59 @@ export default function CreateProductsSessionModal({
         const row: SessionLine = {
           lineId: `create_${Date.now()}_${rows.length}`, kind: 'create_receive', productId: null, product: stockSessionProduct(prepared),
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: sameSupplier ? header.supplierId : null,
-          supplierName, branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate,
+          supplierName, branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: String(payload.received_date || receivedDate),
           expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: tr('new_batch', '+ New batch'), quantity,
           unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, status: 'queued', detail: tr('ready_to_receive', 'Ready'),
         }
         setRows((prev) => [row, ...prev])
       }
-      setCommitError(''); setItemFormOpen(false); setItemFormSeq((seq) => seq + 1)
+      setCommitError(''); setSubmissionErrorCode(''); closeItemForm(); setItemFormSeq((seq) => seq + 1)
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(tr('failed', 'Failed'))
+    } finally { setSaving(false) }
+  }
+
+  const saveEditedNewLine = async (lineId: string, payload: Record<string, unknown>) => {
+    if (saving || submissionLocked) throw new Error(tr('saving_label', 'Saving…'))
+    const current = rows.find((row) => row.lineId === lineId && row.kind === 'create_receive' && row.status === 'queued')
+    if (!current) throw new Error(tr('failed', 'Failed'))
+    const quantity = Number(payload.stock_quantity)
+    const branchId = Number(payload.branch_id)
+    const name = String(payload.name || '').trim()
+    const barcode = String(payload.barcode || '').trim()
+    const cost = Number(payload.cost_price_usd)
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) throw new Error(tr('invalid_quantity', 'Invalid quantity'))
+    if (!branchId || !name) throw new Error(tr('create_products_branch_required', 'Choose the branch this delivery goes to.'))
+    if (!Number.isFinite(cost) || cost < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
+    const queuedTwin = rows.find((row) => row.lineId !== lineId && row.kind === 'create_receive'
+      && row.name.trim().toLowerCase() === name.toLowerCase() && row.barcode.trim() === barcode
+      && Math.round(row.unitCostUsd * 10000) === Math.round(cost * 10000))
+    if (queuedTwin) throw new Error(tr('create_match_twin_title', 'Product already exists'))
+    setSaving(true)
+    try {
+      const prepared = await onPrepareProduct(payload)
+      const supplierName = String(payload.supplier ?? current.supplierName ?? header.supplierName ?? '').trim()
+      const sameSupplier = supplierName.toLowerCase() === header.supplierName.trim().toLowerCase()
+      const updated: SessionLine = {
+        ...current,
+        // Stable line identity is part of the idempotency key. Editing replaces
+        // its content in place; it never manufactures a new logical line.
+        lineId,
+        product: stockSessionProduct(prepared),
+        name,
+        barcode,
+        brand: String(payload.brand ?? current.brand ?? header.brand ?? '').trim(),
+        supplierId: sameSupplier ? header.supplierId : null,
+        supplierName,
+        branchId: String(branchId),
+        branchName: branchNameFor(String(branchId)),
+        receivedDate: String(payload.received_date || current.receivedDate || receivedDate),
+        expiryDate: String(payload.expiry_date || ''),
+        quantity,
+        unitCostUsd: cost,
+      }
+      setRows((prev) => prev.map((row) => row.lineId === lineId ? updated : row))
+      setCommitError(''); setSubmissionErrorCode(''); closeItemForm()
     } catch (error) {
       throw error instanceof Error ? error : new Error(tr('failed', 'Failed'))
     } finally { setSaving(false) }
@@ -493,7 +596,7 @@ export default function CreateProductsSessionModal({
   }
 
   const finishSession = async () => {
-    if (saving) return
+    if (saving || idempotencyConflict) return
     const pending = rows.filter((row) => row.status === 'queued')
     if (!pending.length && !submittedItems) {
       clearWorkDraft(draftKey); if (rows.length) onDone(); onClose(); return
@@ -515,24 +618,33 @@ export default function CreateProductsSessionModal({
       setSubmittedItems(attemptItems)
       writeWorkDraft<UnifiedSessionDraft>(draftKey, {
         sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
-        rows: [], lines: rows, step: 'items', receivedDate, mode, query, submittedItems: attemptItems,
+        rows: [], lines: rows, step: 'items', receivedDate, mode, query, submittedItems: attemptItems, submissionErrorCode: '',
       })
     }
-    setSaving(true); setCommitError('')
+    setSaving(true); setCommitError(''); setSubmissionErrorCode('')
     try {
       const receipt = await createInventorySession(attemptPayload)
       notify(tr('stock_session_completed', 'Received {count} stock-in line(s) successfully.').replace('{count}', String(receipt.memberCount)), 'success')
       clearWorkDraft(draftKey); onDone(); onClose()
     } catch (error) {
       const message = error instanceof Error ? error.message : tr('failed', 'Failed')
+      const errorCode = stockSessionErrorCode(error)
       if (isDefinitiveNoWriteStockSessionError(error)) {
         // The server positively rejected this request before applying stock,
         // so correction may reuse the same known-unused request identity.
         // Unknown outcomes and idempotency conflicts stay frozen for exact retry.
         setSubmittedItems(null)
+        setSubmissionErrorCode('')
         writeWorkDraft<UnifiedSessionDraft>(draftKey, {
           sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
-          rows: [], lines: rows, step: 'items', receivedDate, mode, query, submittedItems: null,
+          rows: [], lines: rows, step: 'items', receivedDate, mode, query, submittedItems: null, submissionErrorCode: '',
+        })
+      } else {
+        setSubmissionErrorCode(errorCode)
+        writeWorkDraft<UnifiedSessionDraft>(draftKey, {
+          sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
+          rows: [], lines: rows, step: 'items', receivedDate, mode, query,
+          submittedItems: attemptItems, submissionErrorCode: errorCode,
         })
       }
       setCommitError(message); notify(message, 'error')
@@ -543,6 +655,47 @@ export default function CreateProductsSessionModal({
   const canStart = canStartCreateProductsSession(header)
   const closeIsGuarded = headerDirty && rows.length === 0 && !submissionLocked
   const requestClose = () => { if (!saving) { if (!rows.length && !submissionLocked) clearWorkDraft(draftKey); onClose() } }
+
+  const editingNewProduct: ProductFormState | null = editingNewLine ? {
+    ...(editingNewLine.product || {}),
+    name: editingNewLine.name,
+    barcode: editingNewLine.barcode,
+    brand: editingNewLine.brand,
+    supplier: editingNewLine.supplierName,
+    branch_id: editingNewLine.branchId,
+    stock_quantity: editingNewLine.quantity,
+    received_date: editingNewLine.receivedDate,
+    expiry_date: editingNewLine.expiryDate,
+    cost_price_usd: editingNewLine.unitCostUsd,
+  } : null
+  const editingExistingDirty = Boolean(editingExistingLine && !batchLoading && (
+    lineBranchId !== editingExistingLine.branchId
+    || lineSupplier.supplierId !== editingExistingLine.supplierId
+    || lineSupplier.supplierName !== editingExistingLine.supplierName
+    || lineReceivedDate !== editingExistingLine.receivedDate
+    || lineQuantity !== String(editingExistingLine.quantity)
+    || lineUnitCost !== String(editingExistingLine.unitCostUsd)
+    || lineExpiryDate !== editingExistingLine.expiryDate
+    || batchChoice !== (editingExistingLine.batchId ?? 'new')
+  ))
+
+  const renderExistingLineFields = (onContinue: () => void) => selectedProduct ? (
+    <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label><span className="mb-1 block text-[11px] text-gray-500">{tr('branch', 'Branch')}</span><AppSelect value={lineBranchId} onChange={setLineBranchId} ariaLabel={tr('branch', 'Branch')} buttonClassName="h-9 w-full text-sm" options={branchSelectOptions} /></label>
+        <SupplierPickerField value={lineSupplier} onChange={setLineSupplier} tr={(key, fallback) => tr(key, fallback || key)} idPrefix="create-products-existing-line" hintDisplay="tooltip" lockedName={typeof batchChoice === 'number' ? batchOptions.find((batch) => Number(batch.id) === batchChoice)?.supplier_name?.trim() || null : null} hint={typeof batchChoice === 'number' && !batchOptions.find((batch) => Number(batch.id) === batchChoice)?.supplier_name?.trim() ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.') : null} />
+        <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={lineReceivedDate} onChange={setLineReceivedDate} /></label>
+        <label><span className="mb-1 block text-[11px] text-gray-500">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={lineExpiryDate} onChange={setLineExpiryDate} /></label>
+        <label><span className="mb-1 block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}</span><input className="input h-9 w-full text-sm" type="number" min="1" step="1" value={lineQuantity} onChange={(event) => setLineQuantity(event.target.value)} /></label>
+        <label><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost_usd', 'Unit cost (USD)')}</span><input className="input h-9 w-full text-sm" type="number" min="0" step="0.01" value={lineUnitCost} onChange={(event) => setLineUnitCost(event.target.value)} /></label>
+      </div>
+      <div className="mt-3">
+        <span className="mb-1 block text-[11px] text-gray-500">{tr('batch', 'Batch')}</span>
+        {batchLoading ? <p className="text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : batchFailed ? <p className="text-xs text-red-600">{tr('load_failed', 'Could not load stock batches.')}</p> : <div className="flex flex-wrap gap-1.5"><button type="button" className={batchChoice === 'new' ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice('new')}>{tr('new_batch', '+ New batch')}</button>{batchOptions.map((batch) => <button key={batch.id} type="button" className={batchChoice === Number(batch.id) ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice(Number(batch.id))}>{batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})</button>)}</div>}
+      </div>
+      <button type="button" className="btn-primary mt-4 h-11 w-full text-sm disabled:opacity-50" disabled={batchLoading || batchFailed || exactBatchLoadKey !== `${Number(selectedProduct.id)}:${Number(lineBranchId)}`} onClick={onContinue}>{editingExistingLine ? tr('save_changes', 'Save changes') : tr('continue', 'Continue')}</button>
+    </div>
+  ) : null
 
   return (
     <>
@@ -571,15 +724,29 @@ export default function CreateProductsSessionModal({
               {mode === 'new' && allowNew ? <button type="button" className="btn-primary flex h-11 w-full items-center justify-center gap-1.5 text-sm" disabled={saving || submissionLocked} onClick={openItemForm}><PackagePlus className="h-4 w-4" />{tr('create_products_add_item', 'Add new product')}</button> : null}
               {mode === 'existing' && allowExisting ? <div><label className="relative block"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" /><input ref={searchInputRef} className="input w-full pl-9 text-sm" value={query} disabled={submissionLocked} placeholder={tr('fast_stockin_search', 'Type a product name or barcode…')} onChange={(event) => setQuery(event.target.value)} autoFocus /></label>{searching ? <p className="mt-2 text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : null}{searchFailed ? <p className="mt-2 text-xs text-red-600">{tr('load_failed', 'Failed to load products')}</p> : null}{groups.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{groups.map((group) => <button key={group.key} type="button" disabled={submissionLocked} className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700" onClick={() => openExistingOptions(group)}><span className="min-w-0 truncate font-medium">{group.name}</span><span className="shrink-0 text-[11px] text-gray-500">{group.sellableItems.length || group.items.length} {tr('options', 'options')} · {group.stockTotal}</span></button>)}</div> : null}</div> : null}
               <div className="mt-4 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500"><span>{tr('create_products_created', 'Saved list')} ({summary.items})</span><span className="tabular-nums normal-case">{tr('total_units', 'Total units')}: {summary.units} · {usdSymbol}{summary.costUsd.toFixed(2)}</span></div>
-              {rows.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{rows.map((row) => <div key={row.lineId} className="flex items-start justify-between gap-2 rounded-lg bg-gray-50 px-2 py-2 text-sm dark:bg-gray-900/50"><span className="min-w-0"><span className="block truncate">{row.status === 'saved' ? '✅' : '•'} {row.name}{row.barcode ? ` · ${row.barcode}` : ''}</span><span className="block truncate text-[10px] text-gray-500">{row.brand || tr('none', 'None')} · {row.supplierName || tr('none', 'None')} · {row.branchName || tr('none', 'None')} · {row.receivedDate} · {row.batchLabel || tr('product_created', 'Product created')}</span></span><span className="flex shrink-0 items-center gap-1"><span className="text-[11px] tabular-nums">× {row.quantity} · {usdSymbol}{(row.quantity * row.unitCostUsd).toFixed(2)}</span>{row.status === 'queued' ? <button type="button" disabled={submissionLocked} aria-label={tr('remove', 'Remove')} className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40" onClick={() => removeLine(row.lineId)}><Trash2 className="h-4 w-4" /></button> : null}</span></div>)}</div> : <p className="mt-2 rounded-lg bg-gray-50 px-3 py-4 text-center text-xs text-gray-500 dark:bg-gray-900/50">{tr('create_products_none_yet', 'No products added yet.')}</p>}
-              {commitError ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{commitError}{submissionLocked ? ` · ${tr('retry', 'Retry')}` : ''}</p> : null}
+              {rows.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{rows.map((row) => (
+                <div key={row.lineId} className="flex items-start justify-between gap-2 rounded-lg bg-gray-50 px-2 py-2 text-sm dark:bg-gray-900/50">
+                  <button type="button" disabled={row.status !== 'queued' || submissionLocked} className="min-w-0 flex-1 text-left disabled:cursor-default" aria-label={`${tr('edit', 'Edit')} ${row.name}`} onClick={() => openQueuedLine(row)}>
+                    <span className="block truncate">{row.status === 'saved' ? '✅' : '•'} {row.name}{row.barcode ? ` · ${row.barcode}` : ''}</span>
+                    <span className="block truncate text-[10px] text-gray-500">{row.brand || tr('none', 'None')} · {row.supplierName || tr('none', 'None')} · {row.branchName || tr('none', 'None')} · {row.receivedDate} · {row.batchLabel || tr('product_created', 'Product created')}</span>
+                  </button>
+                  <span className="flex shrink-0 items-center gap-1"><span className="text-[11px] tabular-nums">× {row.quantity} · {usdSymbol}{(row.quantity * row.unitCostUsd).toFixed(2)}</span>{row.status === 'queued' ? <button type="button" disabled={submissionLocked} aria-label={tr('remove', 'Remove')} className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40" onClick={() => removeLine(row.lineId)}><Trash2 className="h-4 w-4" /></button> : null}</span>
+                </div>
+              ))}</div> : <p className="mt-2 rounded-lg bg-gray-50 px-3 py-4 text-center text-xs text-gray-500 dark:bg-gray-900/50">{tr('create_products_none_yet', 'No products added yet.')}</p>}
+              {idempotencyConflict ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{commitError ? `${commitError} · ` : ''}idempotency_conflict · {tr('resolve', 'Resolve')}</p> : commitError ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{commitError}{submissionLocked ? ` · ${tr('retry', 'Retry')}` : ''}</p> : null}
             </div>
           ) : null}
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-3 dark:border-gray-700"><button type="button" className="btn-secondary h-10 px-4 text-sm" disabled={saving} onClick={requestClose}>{tr('close', 'Close')}</button>{step === 'items' ? <button type="button" className="btn-primary h-10 px-4 text-sm disabled:opacity-50" disabled={saving || (rows.length === 0 && !submittedItems)} onClick={() => void finishSession()}>{saving ? tr('saving_label', 'Saving…') : submissionLocked ? tr('retry', 'Retry') : `✓ ${tr('create_products_finish', 'Complete session')}`}</button> : null}</div>
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-3 dark:border-gray-700"><button type="button" className="btn-secondary h-10 px-4 text-sm" disabled={saving} onClick={requestClose}>{tr('close', 'Close')}</button>{step === 'items' ? <button type="button" className="btn-primary h-10 px-4 text-sm disabled:opacity-50" disabled={saving || idempotencyConflict || (rows.length === 0 && !submittedItems)} onClick={() => void finishSession()}>{saving ? tr('saving_label', 'Saving…') : idempotencyConflict ? tr('failed', 'Failed') : submissionLocked ? tr('retry', 'Retry') : `✓ ${tr('create_products_finish', 'Complete session')}`}</button> : null}</div>
         </div>
       </Modal>
 
-      {itemFormOpen ? <Suspense fallback={null}><ProductForm key={`create-products-item-${itemFormSeq}`} product={null} createDefaults={itemDefaults} draftScope={`create-products-session-${sessionIdRef.current}-item-${itemFormSeq}`} modalLayer="nested" categories={categories} units={itemUnits} branches={branches} brandOptions={brandOptions} groupCandidates={groupCandidates} onSave={(payload) => saveNewItem((payload || {}) as unknown as Record<string, unknown>)} onClose={() => setItemFormOpen(false)} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} /></Suspense> : null}
+      {itemFormOpen ? <Suspense fallback={null}><ProductForm key={editingNewLine ? `create-products-line-${editingNewLine.lineId}` : `create-products-item-${itemFormSeq}`} product={editingNewProduct} createDefaults={itemCreateDefaults} showReceivedDate draftScope={editingNewLine ? `create-products-session-${sessionIdRef.current}-line-${editingNewLine.lineId}` : `create-products-session-${sessionIdRef.current}-item-${itemFormSeq}`} modalLayer="nested" categories={categories} units={itemUnits} branches={branches} brandOptions={brandOptions} groupCandidates={groupCandidates} onSave={(payload) => editingNewLine ? saveEditedNewLine(editingNewLine.lineId, (payload || {}) as unknown as Record<string, unknown>) : saveNewItem((payload || {}) as unknown as Record<string, unknown>)} onClose={closeItemForm} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} /></Suspense> : null}
+
+      {editingExistingLine ? (
+        <Modal title={`${tr('edit', 'Edit')}: ${editingExistingLine.name}`} onClose={() => { setEditingLineId(null); resetExistingCandidate() }} size="md" layer="nested" unsavedChanges={{ dirty: editingExistingDirty }}>
+          {renderExistingLineFields(() => queueExistingLine(editingExistingLine.lineId))}
+        </Modal>
+      ) : null}
 
       {selectedGroup ? (
         <Modal title={selectedGroup.name} onClose={closeExistingOptions} size="md" layer="nested" unsavedChanges="read-only">
@@ -589,7 +756,7 @@ export default function CreateProductsSessionModal({
               const selected = String(selectedProduct?.id || '') === String(product.id)
               return <button key={String(product.id)} type="button" aria-pressed={selected} className={`min-h-14 rounded-lg border px-3 py-2 text-left ${selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 dark:border-gray-700'}`} onClick={() => selectExistingProduct(product)}><span className="block font-medium">{String(product.name || selectedGroup.name)}</span><span className="block font-mono text-[11px] opacity-80">{String(product.barcode || tr('no_barcode', 'No barcode'))}</span><span className="block text-[11px] opacity-80">{tr('quantity', 'Quantity')}: {quantityAtBranch(product, lineBranchId)} · {tr('unit_cost_usd', 'Unit cost')}: {usdSymbol}{currentCost(product).toFixed(2)}</span></button>
             })}</div>
-            {selectedProduct ? <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700"><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-[11px] text-gray-500">{tr('branch', 'Branch')}</span><AppSelect value={lineBranchId} onChange={setLineBranchId} ariaLabel={tr('branch', 'Branch')} buttonClassName="h-9 w-full text-sm" options={branchSelectOptions} /></label><SupplierPickerField value={lineSupplier} onChange={setLineSupplier} tr={(key, fallback) => tr(key, fallback || key)} idPrefix="create-products-existing-line" hintDisplay="tooltip" lockedName={typeof batchChoice === 'number' ? batchOptions.find((batch) => Number(batch.id) === batchChoice)?.supplier_name?.trim() || null : null} hint={typeof batchChoice === 'number' && !batchOptions.find((batch) => Number(batch.id) === batchChoice)?.supplier_name?.trim() ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.') : null} /><label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={lineReceivedDate} onChange={setLineReceivedDate} /></label><label><span className="mb-1 block text-[11px] text-gray-500">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={lineExpiryDate} onChange={setLineExpiryDate} /></label><label><span className="mb-1 block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}</span><input className="input h-9 w-full text-sm" type="number" min="1" step="1" value={lineQuantity} onChange={(event) => setLineQuantity(event.target.value)} /></label><label><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost_usd', 'Unit cost (USD)')}</span><input className="input h-9 w-full text-sm" type="number" min="0" step="0.01" value={lineUnitCost} onChange={(event) => setLineUnitCost(event.target.value)} /></label></div><div className="mt-3"><span className="mb-1 block text-[11px] text-gray-500">{tr('batch', 'Batch')}</span>{batchLoading ? <p className="text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : batchFailed ? <p className="text-xs text-red-600">{tr('load_failed', 'Could not load stock batches.')}</p> : <div className="flex flex-wrap gap-1.5"><button type="button" className={batchChoice === 'new' ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice('new')}>{tr('new_batch', '+ New batch')}</button>{batchOptions.map((batch) => <button key={batch.id} type="button" className={batchChoice === Number(batch.id) ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice(Number(batch.id))}>{batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})</button>)}</div>}</div><button type="button" className="btn-primary mt-4 h-11 w-full text-sm disabled:opacity-50" disabled={batchLoading || batchFailed || exactBatchLoadKey !== `${Number(selectedProduct.id)}:${Number(lineBranchId)}`} onClick={queueExistingLine}>{tr('continue', 'Continue')}</button></div> : null}
+            {renderExistingLineFields(() => queueExistingLine())}
           </div>
         </Modal>
       ) : null}

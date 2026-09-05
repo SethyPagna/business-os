@@ -13,7 +13,7 @@ assert.match(productFormSource, /draftScope\?: string/, 'ProductForm needs an ex
 assert.match(productFormSource, /useStableHydratedState/, 'form hydration must be guarded by a stable entity/session key')
 assert.match(productFormSource, /useStableHydratedState<ProductFormState>\(hydratedInitialForm, draftKey\)/, 'unstable caller seeds must be insulated by the scoped hydration key')
 assert.match(fastStockInSource, /draftScope=\{`fast-stock-in-/, 'scanner creation needs a session/barcode-specific draft')
-assert.match(createSessionSource, /draftScope=\{`create-products-session-/, 'each create-session item needs an isolated draft')
+assert.match(createSessionSource, /draftScope=\{editingNewLine \? `create-products-session-/, 'each create-session item and queued-line editor needs an isolated draft')
 assert.match(createSessionSource, /useState\(\(\) => rows\.length\)/, 'a restored unified session must reopen the current item draft key')
 assert.match(productsSource, /draftScope="standalone-create"/, 'standalone creation needs its own draft namespace')
 assert.match(productsSource, /if \(!res\?\.success\) throw new Error/, 'failed product creates must reject back to ProductForm')
