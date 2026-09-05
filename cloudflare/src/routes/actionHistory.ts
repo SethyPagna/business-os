@@ -8,9 +8,10 @@ import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
+import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
-const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND])
+const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, SALE_SETTLEMENT_ACTION_KIND])
 
 // Ported from backend/src/routes/actionHistory.ts. This replaces the
 // read-only GET-only stub that lived in compat.ts (no create, no
@@ -183,16 +184,22 @@ app.get('/:id/details', async (c) => {
   const payload = parseJson(row.undo_payload)
   const applierKind = String(payload.applier || '')
   if (!SERVER_BULK_KINDS.has(applierKind) || !canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
-  const operationTable = applierKind === RETURN_BULK_ACTION_KIND ? 'return_bulk_operations' : 'sale_bulk_operations'
-  const operation = await db.prepare(`SELECT receipt_json FROM ${operationTable} WHERE history_id=?`).get<{ receipt_json: string }>([row.id])
+  const operationTable = applierKind === RETURN_BULK_ACTION_KIND
+      ? 'return_bulk_operations'
+      : applierKind === SALE_SETTLEMENT_ACTION_KIND
+        ? 'sale_mutation_receipts'
+        : 'sale_bulk_operations'
+  const receiptColumn = applierKind === SALE_SETTLEMENT_ACTION_KIND ? 'response_json' : 'receipt_json'
+  const operation = await db.prepare(`SELECT ${receiptColumn} AS receipt_json FROM ${operationTable} WHERE history_id=?`).get<{ receipt_json: string }>([row.id])
   if (!operation) return c.json({ error: 'Saved details unavailable.' }, 404)
   const receipt = JSON.parse(operation.receipt_json)
+  const items = Array.isArray(receipt.items) ? receipt.items : []
   const offset = Math.max(0, Math.min(25, Number.parseInt(c.req.query('offset') || '0', 10) || 0))
   const limit = Math.max(1, Math.min(10, Number.parseInt(c.req.query('limit') || '10', 10) || 10))
   const action = receipt.action || (applierKind === RETURN_BULK_ACTION_KIND
     ? { field: payload.field, source: payload.source, target: payload.target }
     : null)
-  return c.json({ action, items: receipt.items.slice(offset, offset + limit), total: receipt.items.length, changedCount: receipt.changedCount, unchangedCount: receipt.unchangedCount })
+  return c.json({ action, items: items.slice(offset, offset + limit), total: items.length, changedCount: receipt.changedCount, unchangedCount: receipt.unchangedCount })
 })
 
 app.post('/', async (c) => {
@@ -327,7 +334,9 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
 
     if (applier && SERVER_BULK_KINDS.has(applier.name)) {
-      c.executionCtx.waitUntil(applier.name === RETURN_BULK_ACTION_KIND
+      c.executionCtx.waitUntil(applier.name === SALE_SETTLEMENT_ACTION_KIND
+          ? notifySaleSettlementAction(c.env)
+        : applier.name === RETURN_BULK_ACTION_KIND
         ? notifyReturnBulkAction(c.env)
         : applier.name === BULK_STATUS_KIND
           ? notifyBulkStatus(c.env)
