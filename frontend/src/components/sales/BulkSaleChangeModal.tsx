@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import AppSelect from '../shared/AppSelect.tsx'
 
 export type BulkSaleField = 'status' | 'payment_method' | 'delivery_contact' | 'customer'
 export type BulkSaleChoice = { key: string; label: string; id?: number | null; value?: string | null }
@@ -54,6 +55,9 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
     closeButtonRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !savingRef.current) {
+        // AppSelect owns the first Escape while its portalled listbox is
+        // open; the next Escape dismisses this dialog.
+        if (document.querySelector('[data-app-select-menu="true"]')) return
         event.preventDefault()
         closeRef.current()
         return
@@ -99,15 +103,23 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
           <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2">
             <label className="min-w-0 text-xs font-medium text-gray-600 dark:text-gray-300">
               {translate('bulk_from', 'From', 'ពី')}
-              <select className="input mt-1 w-full text-sm" value={sourceKey} disabled={saving} onChange={(event) => setSourceKey(event.target.value)}>{sourceChoices.map((choice) => <option key={choice.key} value={choice.key}>{choice.label}</option>)}</select>
+              <AppSelect className="mt-1 w-full" buttonClassName="w-full" ariaLabel={translate('bulk_from', 'From', 'ពី')} value={sourceKey} disabled={saving} onChange={setSourceKey} options={sourceChoices.map((choice) => ({ value: choice.key, label: choice.label }))} />
             </label>
             <span className="pb-3 text-gray-400" aria-hidden="true">→</span>
             <label className="min-w-0 text-xs font-medium text-gray-600 dark:text-gray-300">
               {translate('bulk_to', 'To', 'ទៅ')}
-              <select className="input mt-1 w-full text-sm" value={targetKey} disabled={saving || searching} onChange={(event) => setTargetKey(event.target.value)}>
-                <option value="">{searching ? translate('loading', 'Loading…', 'កំពុងផ្ទុក…') : translate('choose', 'Choose', 'ជ្រើសរើស')}</option>
-                {targetChoices.filter((choice) => choice.key !== sourceKey).map((choice) => <option key={choice.key} value={choice.key}>{choice.label}</option>)}
-              </select>
+              <AppSelect
+                className="mt-1 w-full"
+                buttonClassName="w-full"
+                ariaLabel={translate('bulk_to', 'To', 'ទៅ')}
+                value={targetKey}
+                disabled={saving || searching}
+                onChange={setTargetKey}
+                options={[
+                  { value: '', label: searching ? translate('loading', 'Loading…', 'កំពុងផ្ទុក…') : translate('choose', 'Choose', 'ជ្រើសរើស'), disabled: true },
+                  ...targetChoices.filter((choice) => choice.key !== sourceKey).map((choice) => ({ value: choice.key, label: choice.label })),
+                ]}
+              />
             </label>
           </div>
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-800 dark:bg-blue-950/30">

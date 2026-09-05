@@ -48,5 +48,7 @@ assert.match(sales, /statusPrompt\.requestSales/, 'status confirmation retains t
 assert.match(sales, /cancel: buildBulkSaleCancelInput\(draft\)/, 'each frozen status item carries its own reviewed cancellation answers')
 assert.match(sales, /SectionExportAction/, 'Sales exports register with the section/title action host')
 assert.match(sales, /hidden md:inline/, 'the mobile title-bar export keeps an icon-only 44px trigger')
+const selectedToolbar = sales.slice(sales.indexOf('{selectedSales.length > 0 ? ('), sales.indexOf('{/* Pagination on its own row'))
+assert.doesNotMatch(selectedToolbar, /handleExportSelected|translateOr\('export'/, 'selected-sales toolbar does not duplicate the top Export menu')
 
 console.log('PASS Sales conditional bulk-action review and per-sale cancellation payloads')
