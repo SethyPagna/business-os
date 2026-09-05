@@ -239,7 +239,7 @@ await runTest('product form image upload and save keep synchronous guards', () =
 
   assert.match(source, /const imageUploadInFlightRef = useRef\(false\)/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
-  assert.match(source, /if \(imageUploading \|\| imageUploadInFlightRef\.current\) return/)
+  assert.match(source, /if \(!canManageImages \|\| imageUploading \|\| imageUploadInFlightRef\.current\) return/)
   assert.match(source, /imageUploadInFlightRef\.current = true/)
   assert.match(source, /finally \{[\s\S]*imageUploadInFlightRef\.current = false[\s\S]*setImageUploading\(false\)/)
   // Guard now also blocks while an image is still uploading (Part 241
@@ -495,7 +495,8 @@ await runTest('sales status and membership actions use shared guards and bounded
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getSalesApi\(\)\.attachSaleCustomer\(saleId, payload\),\s*'Attach sale membership',\s*SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /if \(!beginKeyedAction\(statusActionRef, actionKey\)\) return false/)
   assert.match(source, /finishKeyedAction\(statusActionRef, actionKey\)[\s\S]*return false/)
-  assert.match(source, /await runSaleStatusMutation\(saleId, newStatus, notes, extra\)/)
+  assert.match(source, /const isSettlementRequest = Array\.isArray\(\(extra as \{ payment_details\?: unknown \} \| null\)\?\.payment_details\)/)
+  assert.match(source, /await runSaleStatusMutation\(saleId, newStatus, isSettlementRequest \? undefined : notes, extra\)/)
   assert.match(source, /finally \{[\s\S]*finishKeyedAction\(statusActionRef, actionKey\)/)
   assert.match(source, /if \(!beginKeyedAction\(membershipActionRef, actionKey\)\) return false/)
   assert.match(source, /await runSaleMembershipMutation\(saleId, \{/)
