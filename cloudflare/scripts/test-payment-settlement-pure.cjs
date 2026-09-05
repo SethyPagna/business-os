@@ -25,8 +25,8 @@ const { planSaleSettlement, renameSalePaymentMethod, SettlementValidationError }
 const plan = planSaleSettlement({
   configuredMethodsRaw: '["Cash","ABA Bank"]',
   paymentDetailsRaw: [
-    { method: ' cash ', amount_usd: '1.23456', amount_khr: 0 },
-    { method: 'CASH', amount_usd: '1.00004', amount_khr: 0 },
+    { method: ' cash ', amount_usd: '1.2346', amount_khr: 0 },
+    { method: 'CASH', amount_usd: '1.00', amount_khr: 0 },
     { method: 'aba bank', amount_usd: 0, amount_khr: 12600 },
   ],
   existingPaidUsd: 1.2346,
@@ -73,6 +73,7 @@ for (const [label, patch, code] of [
   ['unknown method', { paymentDetailsRaw: [{ method: 'Wing', amount_usd: 6 }] }, 'inactive_payment_method'],
   ['negative amount', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: -1 }] }, 'invalid_payment_amount'],
   ['fractional cent', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: 0.005 }, { method: 'ABA Bank', amount_khr: 21000 }] }, 'invalid_payment_amount'],
+  ['hidden fifth-decimal cent', { existingPaidUsd: 0, existingPaymentDetailsRaw: null, paymentDetailsRaw: [{ method: 'Cash', amount_usd: '1.00001' }, { method: 'ABA Bank', amount_khr: 16800 }] }, 'invalid_payment_amount'],
   ['fractional new riel', { paymentDetailsRaw: [{ method: 'Cash', amount_usd: 1.2346 }, { method: 'ABA Bank', amount_khr: 12600.5 }] }, 'invalid_payment_amount'],
   ['partial reduction', { existingPaidUsd: 3, existingPaymentDetailsRaw: '[{"method":"Cash","amount_usd":3,"amount_khr":0}]', paymentDetailsRaw: [{ method: 'Cash', amount_usd: 2 }, { method: 'ABA Bank', amount_khr: 12600 }] }, 'partial_payment_reduced'],
   ['underpayment', { totalUsd: 99 }, 'insufficient_payment'],
@@ -91,6 +92,16 @@ for (const [label, patch, code] of [
   }), (error) => error instanceof SettlementValidationError && error.code === code, label)
 }
 console.log('PASS invalid config/method/amount, partial reduction, underpayment and bounds reject before writes')
+
+assert.throws(() => planSaleSettlement({
+  configuredMethodsRaw: '["Cash"]',
+  paymentDetailsRaw: [{ method: 'Cash', amount_khr: 19_999_999 }],
+  existingPaidUsd: 0,
+  existingPaidKhr: 0,
+  totalUsd: 1,
+  exchangeRate: 20_000_000,
+}), (error) => error instanceof SettlementValidationError && error.code === 'insufficient_payment')
+console.log('PASS exact rational coverage rejects even one riel short at a very large exchange rate')
 
 const renamed = renameSalePaymentMethod(
   'Cash + Fcb',
