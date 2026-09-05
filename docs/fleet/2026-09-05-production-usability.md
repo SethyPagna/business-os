@@ -162,3 +162,22 @@ authenticated verification; do not treat prior builds as live behavior proof.
   export placements. Exact route/UI claims coordinated; its undoAppliers.ts and
   actionHistory.ts ownership precedes stock milestone B. No duplicate writer.
   Main continues current shift/product/picker/precision/branch scope.
+
+## Independent shift review — release held
+
+Aquinas reproduced four blockers at backend99902cea/frontend737ab4e7 despite
+existing focused/typecheck/backup suites passing: concurrent amend/close could
+report closed while stored open; missing caller expected_revision permits stale
+sequential count overwrite; blank amendment counts silently become zero; Telegram
+omits cancellation and calls a cancelled record still open. Socrates owns route
+and regression corrections, Hubble caller revision/count/audit refresh, Volta
+Telegram cancellation projection/formatter alongside equivalent-currency labels.
+No migration/deployment/production shift mutation is cleared by earlier tests.
+
+Precision foundation integrateddd8d719e: main reran46backend and47frontend shared
+fixture checks plus existingPOSrounding test, allpass. This establishes the owner
+rounding rule; runtime sales/returns/import/report formulas are NOT migrated yet.
+Next financial writer slice waits for separately owned Sales/Returns bulk work;
+exact decimal arithmetic operations and replay versions remain explicit work.
+Cross-task Returns migration0125 is reserved; backup/coreDataInvariants and
+frontend actionHistory/ActionHistoryBar ownership also precedes stock milestoneB.
