@@ -187,6 +187,11 @@ export const BACKUP_TABLES = [
   'return_write_revisions',
   'return_bulk_operations',
   'return_bulk_members',
+  // Durable stock receipts reference history/snapshots, products/lots and
+  // movements above. Retained revision tombstones must round-trip unchanged.
+  'stock_session_revisions',
+  'stock_session_operations',
+  'stock_session_members',
   'audit_logs',
   'custom_tables',
   'custom_fields',
@@ -1053,11 +1058,13 @@ export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; tabl
 // SQLite FKs cannot express. Restoring their sales/stock independently can
 // leave a valid-looking undo action pointing at a different generation.
 const SALE_REPLAY_RESTORE_BUNDLE = [
+  'branches', 'suppliers', 'file_assets', 'product_images',
   'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
   'return_item_batch_allocations', 'fees', 'inventory_movements', 'action_history',
   'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
   'return_write_revisions', 'return_bulk_operations', 'return_bulk_members',
+  'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
 ] as const
 
 async function restoreDependencyError(env: Env, documentTables: ReadonlySet<string>): Promise<string | null> {
@@ -1168,6 +1175,16 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // Order by BACKUP_TABLES (the writer's dependency order) so the reverse
   // delete respects foreign keys regardless of the document's own order.
   const orderedTables: string[] = BACKUP_TABLES.filter((t) => presentTables.includes(t))
+
+  // Pass 2 streams in document order. Reject an out-of-order document BEFORE
+  // any delete, rather than discover a child-before-parent FK error mid-restore.
+  if (presentTables.some((table, index) => table !== orderedTables[index])) {
+    throw new Error('Cannot restore this backup: tables are not in dependency order. No database rows have been changed.')
+  }
+  if (orderedTables.some(table => table.startsWith('stock_session_'))) {
+    const maintenance = await env.DB.prepare("SELECT 1 ok FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").first<{ ok: number }>()
+    if (!maintenance) throw new Error('Stock replay restore requires restore maintenance mode to preserve revision counters. No database rows have been changed.')
+  }
 
   let statementCount = 0
   await onProgress?.({ phase: 'deleting' })
