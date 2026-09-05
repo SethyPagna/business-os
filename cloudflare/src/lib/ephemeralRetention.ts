@@ -24,6 +24,7 @@
 // here too so one missing/locked table cannot stop the rest).
 
 import { getDb } from './db'
+import { sqliteUtcTimestamp } from './rateLimit'
 import type { Env } from '../index'
 
 const LAST_RUN_KEY = 'ephemeral_retention_last_run'
@@ -34,6 +35,9 @@ const MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
 // Retention windows (days). Deliberately conservative for anything a person
 // might look back at; aggressive for pure telemetry.
 const RATE_LIMIT_TTL_DAYS = 1        // pure throwaway rate-limit telemetry
+// Reset issuance counts consumed/expired rows too. Keep at least one hour
+// of history (longer than its 15-minute quotas) so cleanup cannot reset them.
+const VERIFICATION_HISTORY_MS = 60 * 60 * 1000
 const AI_LOG_TTL_DAYS = 30           // operational AI-chat logs
 const TRUSTED_DEVICE_TTL_DAYS = 30   // after revocation
 const LOCKOUT_TTL_DAYS = 1           // stale (no-longer-locked) lockout rows
@@ -109,7 +113,14 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
   await step('rate_limit_events', () => batchDeleteById(db, 'rate_limit_events', 'created_at < @cutoff', { cutoff: daysAgo(RATE_LIMIT_TTL_DAYS) }))
   await step('user_sessions', () => batchDeleteById(db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
   await step('portal_sessions', () => batchDeleteById(db, 'portal_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
-  await step('verification_codes', () => batchDeleteById(db, 'verification_codes', "consumed_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
+  const verificationNow = Date.now()
+  await step('verification_codes', () => batchDeleteById(db, 'verification_codes', `
+    created_at <= @historyCutoff
+    AND (consumed_at IS NOT NULL OR julianday(expires_at) <= julianday(@now))
+  `, {
+    historyCutoff: sqliteUtcTimestamp(verificationNow - VERIFICATION_HISTORY_MS),
+    now: sqliteUtcTimestamp(verificationNow),
+  }))
   await step('trusted_devices', () => batchDeleteById(db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }))
   await step('ai_response_logs', () => batchDeleteById(db, 'ai_response_logs', 'created_at < @cutoff', { cutoff: daysAgo(AI_LOG_TTL_DAYS) }))
   await step('action_history', () => batchDeleteById(db, 'action_history', 'created_at < @cutoff', { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }))

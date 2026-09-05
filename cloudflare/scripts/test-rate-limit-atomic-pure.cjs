@@ -239,6 +239,55 @@ async function main() {
     assert.equal(count('verification_codes'), 1)
     assert.match(sqlite.prepare('SELECT expires_at FROM verification_codes').get().expires_at, /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}$/)
     console.log('PASS actual scheduled cleanup removes expired rows and preserves new active rows')
+
+    const cleanup = async () => {
+      sqlite.exec('DELETE FROM settings') // Make each independent fixture due.
+      const previousError = console.error
+      console.error = () => {}
+      try { return await helper.maybeRunScheduledEphemeralRetention(env) }
+      finally { console.error = previousError }
+    }
+    clear()
+    now = Date.parse('2026-09-05T00:30:00.500Z')
+    for (let i = 0; i < 3; i++) assert.equal((await issue()).issued, true)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM verification_codes WHERE consumed_at IS NOT NULL').get().n, 2)
+    assert.equal((await cleanup()).deleted.verification_codes, 0, 'cleanup retains consumed active quota history')
+    assert.equal(count('verification_codes'), 3)
+    assert.equal((await issue()).issued, false, 'cleanup cannot reopen per-user quota')
+    clear()
+    for (let i = 0; i < 8; i++) assert.equal((await issue(i + 1)).issued, true)
+    sqlite.exec("UPDATE verification_codes SET consumed_at = '2026-09-05 00:30:00.500'")
+    assert.equal((await cleanup()).deleted.verification_codes, 0)
+    assert.equal((await issue(99)).issued, false, 'cleanup cannot reopen per-IP quota')
+
+    clear()
+    // Cross-midnight one-hour boundary, with millisecond precision.
+    const recent = '2026-09-04 23:30:00.501'
+    const boundary = '2026-09-04 23:30:00.500'
+    const old = '2026-09-04 23:00:00'
+    await seedToken('recent-consumed', '2026-09-05T00:00:00Z', recent)
+    await seedToken('recent-expired', '2026-09-05 00:00:00', recent)
+    await seedToken('boundary-consumed', '2026-09-06 00:00:00', boundary)
+    await seedToken('old-consumed', 'not-a-date', old)
+    await seedToken('old-expired-iso', '2026-09-05T00:30:00.500Z', old)
+    await seedToken('old-expired-sqlite', '2026-09-05 00:30:00.500', old)
+    await seedToken('old-expired-offset', '2026-09-05T08:30:00.500+08:00', old)
+    await seedToken('old-valid-iso', '2026-09-05T00:30:00.501Z', old)
+    await seedToken('old-valid-sqlite', '2026-09-05 00:30:00.501', old)
+    await seedToken('old-valid-offset', '2026-09-05T08:30:00.501+08:00', old)
+    await seedToken('old-invalid-expiry', 'not-a-date', old)
+    for (const token of ['recent-consumed', 'boundary-consumed', 'old-consumed']) {
+      const hash = require('node:crypto').createHash('sha256').update(token).digest('hex')
+      sqlite.prepare('UPDATE verification_codes SET consumed_at = ? WHERE code_hash = ?').run('2026-09-05 00:30:00.500', hash)
+    }
+    const cleaned = await cleanup()
+    assert.equal(cleaned.deleted.verification_codes, 5)
+    const remaining = new Set(sqlite.prepare('SELECT code_hash FROM verification_codes').all().map((row) => row.code_hash))
+    const expected = ['recent-consumed', 'recent-expired', 'old-valid-iso', 'old-valid-sqlite', 'old-valid-offset', 'old-invalid-expiry']
+    assert.deepEqual(remaining, new Set(expected.map((token) => require('node:crypto').createHash('sha256').update(token).digest('hex'))))
+    // Throttling still applies after a completed sweep.
+    assert.deepEqual(await helper.maybeRunScheduledEphemeralRetention(env), { skipped: true, reason: 'ran-recently' })
+    console.log('PASS actual cleanup preserves one-hour quota history, user/IP denial, mixed UTC expiry and sweep throttle')
   } finally {
     Date.now = realNow
     globalThis.fetch = originalFetch
