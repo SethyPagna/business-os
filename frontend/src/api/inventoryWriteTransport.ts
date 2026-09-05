@@ -4,6 +4,60 @@ import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 
 type InventoryPayload = Record<string, unknown>
 
+export type InventoryStockSessionProduct = Record<string, unknown>
+
+export type InventoryStockSessionLine = {
+  line_id: string
+  kind: 'receive' | 'create_receive'
+  product_id?: number
+  product?: InventoryStockSessionProduct
+  batch_id?: number | null
+  branch_id: number
+  quantity: number
+  supplier_id?: number | null
+  supplier_name?: string | null
+  received_date: string
+  expiry_date?: string | null
+  notes?: string | null
+  unit_cost_usd?: number | null
+  payment_status?: 'paid' | 'credit' | null
+  credit_due_date?: string | null
+}
+
+export type InventoryStockSessionRequest = {
+  client_request_id: string
+  mode: 'stock_in'
+  items: InventoryStockSessionLine[]
+}
+
+export type InventoryStockSessionReceipt = {
+  success: true
+  replayed: boolean
+  operationId: string
+  clientRequestId: string
+  actionHistoryId: number
+  snapshotId: number
+  memberCount: number
+  createdCount: number
+  receivedCount: number
+  totalQuantity: number
+  totalCostUsd: number
+  items: Array<{
+    lineId: string
+    kind: 'receive' | 'create_receive'
+    productId: number
+    productName: string
+    createdProduct: boolean
+    branchId: number
+    batchId: number
+    batchNumber: number | null
+    lotCode: string | null
+    movementId: number
+    quantity: number
+    unitCostUsd: number | null
+  }>
+}
+
 function getDevicePayload(): InventoryPayload {
   return { ...getClientDeviceInfo() }
 }
@@ -15,6 +69,19 @@ export function adjustStock(payload: InventoryPayload = {}): Promise<unknown> {
     null,
     true,
   )
+}
+
+// Milestone A stock-session wire. The caller owns stable request/line ids:
+// retries must send the byte-equivalent logical request so the Worker can
+// return its immutable receipt instead of applying stock twice. Deliberately
+// network-only -- there is no offline/outbox replay contract for this write.
+export function createInventorySession(payload: InventoryStockSessionRequest): Promise<InventoryStockSessionReceipt> {
+  return route(
+    'inventory:session:create',
+    () => apiFetch('POST', '/api/inventory/sessions', payload),
+    null,
+    true,
+  ) as Promise<InventoryStockSessionReceipt>
 }
 
 // Part 553: the Stock Change ledger's per-row write actions (Products page

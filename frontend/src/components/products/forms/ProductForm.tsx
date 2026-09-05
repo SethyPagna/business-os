@@ -208,6 +208,10 @@ interface ProductFormProps {
   // cannot restore or clear one another's work. Existing products continue to
   // use their stable entity id regardless of caller.
   draftScope?: string
+  // Session shells keep their parent mounted while this form floats above it.
+  // The shared Modal's nested layer prevents the newer surface from falling
+  // behind the parent; ordinary standalone create/edit callers omit it.
+  modalLayer?: 'default' | 'nested'
   t: Translate
   usdSymbol: string
   khrSymbol: string
@@ -501,6 +505,7 @@ export default function ProductForm({
   onMinimize,
   createDefaults,
   draftScope,
+  modalLayer = 'default',
   t,
   usdSymbol,
   khrSymbol,
@@ -1239,6 +1244,7 @@ export default function ProductForm({
       title={isEditMode ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product?.name || ''}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
       onClose={onClose}
       onMinimize={preserveAndMinimize}
+      layer={modalLayer}
       wide
       headerExtra={(
         <>

@@ -14,6 +14,7 @@ import AppSelect from '../shared/AppSelect.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
+import Modal from '../shared/Modal.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
@@ -23,6 +24,7 @@ import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.t
 import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
+import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
 
 // Keep product creation inside this receiving flow rather than sending the
 // operator to a separate page. The standard ProductForm and create transport
@@ -32,7 +34,7 @@ const ProductForm = lazyRetry(() => import('../products/forms/ProductForm'), 'fa
 
 type TranslationWithFallback = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
-interface ProductCandidate {
+interface ProductCandidate extends ProductRecord {
   id: number | string
   name?: string | null
   barcode?: string | null
@@ -49,6 +51,9 @@ interface ProductCandidate {
   discount_type?: string | null
   discount_percent?: number | string | null
   discount_amount_usd?: number | string | null
+  parent_id?: number | string | null
+  is_group?: boolean | number | null
+  branch_stock?: Array<{ branch_id?: number | string | null; branch_name?: string | null; quantity?: number | string | null }>
 }
 
 interface ReceivedLine {
@@ -146,6 +151,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // ---- per-line entry ----
   const [query, setQuery] = useState(draft?.query || '')
   const [candidates, setCandidates] = useState<ProductCandidate[]>([])
+  const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null)
   const [picked, setPicked] = useState<ProductCandidate | null>(draft?.picked || null)
   const [quantity, setQuantity] = useState(draft?.quantity || '1')
   const [unitCost, setUnitCost] = useState(draft?.unitCost || '')
@@ -173,6 +179,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const searchSeqRef = useRef(0)
   const sessionIdRef = useRef(draft?.sessionId || Date.now())
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const parentPanelRef = useRef<HTMLDivElement | null>(null)
   const scannedCreateUnits = useMemo(
     () => (createUnits.length ? createUnits : [{ id: 'pcs', name: 'pcs' }]),
     [createUnits],
@@ -184,6 +191,14 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       is_default: String(branch.value) === String(defaultBranchId || ''),
     })),
     [branchOptions, defaultBranchId],
+  )
+  const productsById = useMemo(
+    () => new Map<unknown, ProductRecord>(candidates.map((product) => [product.id, product as ProductRecord])),
+    [candidates],
+  )
+  const candidateGroups = useMemo(
+    () => buildProductGroups(candidates, productsById, { preserveInputOrder: true }),
+    [candidates, productsById],
   )
 
   // Autosave the header + in-progress line (debounced, shared cadence).
@@ -202,7 +217,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   useEffect(() => {
     const text = query.trim()
     setSearchCompleteFor('')
-    if (picked || text.length < 2) { setCandidates([]); return }
+    if (picked || selectedGroup || text.length < 2) { setCandidates([]); return }
     const seq = ++searchSeqRef.current
     const timer = window.setTimeout(async () => {
       try {
@@ -213,7 +228,27 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       } catch { /* suggestions only -- typing again retries */ }
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [query, picked])
+  }, [query, picked, selectedGroup])
+
+  useEffect(() => {
+    const panel = parentPanelRef.current
+    if (!panel || !selectedGroup) return
+    panel.setAttribute('inert', '')
+    panel.setAttribute('aria-hidden', 'true')
+    return () => { panel.removeAttribute('inert'); panel.removeAttribute('aria-hidden') }
+  }, [selectedGroup])
+
+  useEffect(() => {
+    if (!selectedGroup) return
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      closeCandidateOptions()
+    }
+    window.addEventListener('keydown', onEscape, true)
+    return () => window.removeEventListener('keydown', onEscape, true)
+  })
 
   // The same lot list every other add-stock surface shows, scoped to the
   // picked product and this shipment's branch. Mirrors ReceiveBatchModal's
@@ -277,6 +312,16 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     if (Number.isFinite(cost) && cost > 0) setUnitCost(String(cost))
     setCreatePriceVariant(false)
     setScannedBarcode('')
+  }
+
+  function closeCandidateOptions() {
+    setSelectedGroup(null)
+    window.setTimeout(() => searchInputRef.current?.focus(), 0)
+  }
+
+  const pickFromGroup = (candidate: ProductCandidate) => {
+    pick(candidate)
+    closeCandidateOptions()
   }
 
   const resetLine = () => {
@@ -494,6 +539,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // X/backdrop keep the draft (reopen later, shipment intact); only the
   // explicit Done button completes the batch and clears it.
   const closeIfIdle = () => { if (!saving) { if (successCount > 0) onDone(); onClose() } }
+  const closeBackdropIfIdle = () => { if (!selectedGroup) closeIfIdle() }
 
   // The receiver stays mounted (and its session state stays in memory) while
   // the standard product form is open. Cancel simply returns to the exact
@@ -520,8 +566,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   }
 
   return createPortal(
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeIfIdle}>
-      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeBackdropIfIdle}>
+      <div ref={parentPanelRef} className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">⚡ {tr('fast_stockin_title', 'Fast stock-in')}</h2>
           <div className="flex shrink-0 items-center gap-1">
@@ -546,12 +592,12 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               <div className="relative min-w-0 flex-1">
                 <input ref={searchInputRef} className="input w-full text-sm" placeholder={tr('fast_stockin_search', 'Type a product name or barcode…')} value={query}
                   onChange={(event) => { setQuery(event.target.value); setPicked(null); setEditingKey(''); setScannedBarcode('') }} autoFocus />
-                {candidates.length > 0 ? (
+                {candidateGroups.length > 0 ? (
                   <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
-                    {candidates.map((candidate) => (
-                      <button key={candidate.id} type="button" onClick={() => pick(candidate)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <span className="min-w-0 truncate text-gray-800 dark:text-gray-200">{candidate.name}</span>
-                        <span className="flex-shrink-0 text-[10px] text-gray-400">{candidate.barcode || ''} · {Number(candidate.stock_quantity) || 0}</span>
+                    {candidateGroups.map((group) => (
+                      <button key={group.key} type="button" onClick={() => setSelectedGroup(group)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <span className="min-w-0 truncate text-gray-800 dark:text-gray-200">{group.name}</span>
+                        <span className="flex-shrink-0 text-[10px] text-gray-400">{group.sellableItems.length || group.items.length} {tr('options', 'options')} · {group.stockTotal}</span>
                       </button>
                     ))}
                   </div>
@@ -755,6 +801,23 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           onClose={() => { if (!saving) setPendingCommit(null) }}
           t={(key: string) => tr(key, key)}
         />
+      ) : null}
+
+      {selectedGroup ? (
+        <Modal title={selectedGroup.name} onClose={closeCandidateOptions} size="md" layer="nested" unsavedChanges="read-only">
+          <div className="space-y-3">
+            <button type="button" className="btn-secondary h-10 px-3 text-sm" onClick={closeCandidateOptions}>← {tr('back', 'Back')}</button>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {(selectedGroup.sellableItems.length ? selectedGroup.sellableItems : selectedGroup.items).map((candidate) => (
+                <button key={String(candidate.id)} type="button" onClick={() => pickFromGroup(candidate as ProductCandidate)} className="min-h-14 rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700 dark:hover:bg-blue-950/20">
+                  <span className="block font-medium text-gray-800 dark:text-gray-200">{String(candidate.name || selectedGroup.name)}</span>
+                  <span className="block font-mono text-[11px] text-gray-500">{String(candidate.barcode || tr('no_barcode', 'No barcode'))}</span>
+                  <span className="block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}: {Number(candidate.stock_quantity) || 0} · {tr('unit_cost_usd', 'Unit cost')}: ${currentCost(candidate as ProductCandidate).toFixed(2)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </Modal>
       ) : null}
     </div>,
     document.body,
