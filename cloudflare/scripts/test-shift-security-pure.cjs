@@ -51,6 +51,7 @@ function database() {
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0089_system_flags.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
+  db.exec(fs.readFileSync(path.join(root, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
   db.prepare('INSERT INTO branches(id,name,is_active) VALUES (1,?,1),(2,?,0)').run('Canonical Shop', 'Inactive')
   return db
 }
@@ -75,11 +76,11 @@ async function main() {
   user = { ...user, permissions: JSON.stringify({ pos: true }) }
   assert.equal((await call('GET', '/current?branch_id=999')).status, 400, 'current rejects an unknown branch')
   assert.equal((await call('POST', '/open', { branch_id: 2 })).status, 400, 'open rejects an inactive branch')
-  const opened = await call('POST', '/open', { branch_id: 1, branch_name: 'Spoofed', opening_float_usd: 10 })
+  const opened = await call('POST', '/open', { branch_id: 1, branch_name: 'Spoofed', opening_float_usd: 10, opening_float_khr: 0 })
   assert.equal(opened.status, 201)
   const openedBody = await opened.json()
   assert.equal(openedBody.shift.branch_name, 'Canonical Shop', 'branch name is derived from the database')
-  assert.deepEqual(openedBody.shift.capabilities, { can_edit: true, can_close: true, can_reopen: false })
+  assert.deepEqual(openedBody.shift.capabilities, { can_edit: true, can_close: true, can_reopen: false, can_cancel: false })
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.open'").get().n, 1, 'open and audit commit together')
 
   sqlite.prepare(`INSERT INTO shift_sessions
