@@ -394,6 +394,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }, [isKhmer, t])
   const [stockStats,    setStockStats]    = useState<InventoryStats>(null)
   const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
+  const [stockStatsScope, setStockStatsScope] = useState('')
   const [statsRefreshError, setStatsRefreshError] = useState('')
   const [movements,     setMovements]     = useState<InventoryMovement[]>([])
   const [movementsLoaded, setMovementsLoaded] = useState(false)
@@ -450,6 +451,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [productsTotalPages, setProductsTotalPages] = useState(1)
   const [productsLoading, setProductsLoading] = useState(false)
   const [productsError, setProductsError] = useState<string | null>(null)
+  const [productsResultScope, setProductsResultScope] = useState('')
   const productsRequestRef = useRef(0)
   const [adjustModal,   setAdjustModal]   = useState<InventoryProduct | null>(null)
   const [manageBatchesModal, setManageBatchesModal] = useState<InventoryProduct | null>(null)
@@ -641,8 +643,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     move: inventoryReasons.filter((item) => item?.type === 'move'),
   }), [inventoryReasons])
 
-  const needsStatsData = inventorySection === 'all' || inventorySection === 'stats'
+  const needsStatsData = inventorySection === 'all' || inventorySection === 'stats' || inventorySection === 'products'
   const needsProductsData = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
+  const inventoryStatsScope = JSON.stringify([branchFilter, deferredSearch, searchMode])
+  const productsScope = JSON.stringify([inventoryStatsScope, productsPage, productsPageSize])
   const needsMovementData = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
   const needsRfidData = inventorySection === 'rfid' || (inventorySection === 'all' && tab === 'rfid')
 
@@ -674,15 +678,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         return
       }
       setProductsItems(Array.isArray(response?.items) ? response.items : [])
+      setProductsResultScope(productsScope)
       setProductsTotal(total)
       setProductsTotalPages(totalPages)
     } catch (error) {
       if (!isTrackedRequestCurrent(productsRequestRef, requestId)) return
       setProductsError(error instanceof Error ? error.message : tr('inventory_products_load_failed', 'Products could not be loaded.'))
+      setProductsResultScope(productsScope)
+      setProductsItems([])
     } finally {
       if (isTrackedRequestCurrent(productsRequestRef, requestId)) setProductsLoading(false)
     }
-  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, searchMode, tr])
+  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, tr])
 
   useEffect(() => {
     setProductsPage(1)
@@ -829,10 +836,16 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         }
         if (needsStatsData && statsResult?.item) {
           setStockStats(statsResult.item)
+          setStockStatsScope(inventoryStatsScope)
           setStockStatsLoaded(true)
           setStatsRefreshError('')
-        } else if (needsStatsData && loadedOnceRef.current) {
-          setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.'))
+        } else if (needsStatsData && (needsProductsData || loadedOnceRef.current)) {
+          setStockStatsScope(inventoryStatsScope)
+          if (needsProductsData) {
+            setStockStats(null)
+            setStockStatsLoaded(false)
+          }
+          setStatsRefreshError(needsProductsData ? tr('inventory_products_load_failed', 'Products could not be loaded.') : tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.'))
         }
         if (needsMovementData && Array.isArray(movs)) {
           setMovements(movs || [])
@@ -917,6 +930,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     needsMovementData,
     needsRfidData,
     needsStatsData,
+    needsProductsData,
+    inventoryStatsScope,
     searchMode,
     tr,
   ])
@@ -2237,7 +2252,7 @@ ${inventoryFeesFormulaText}`,
         className="mb-3"
       />
 
-      {statsRefreshError ? (
+      {statsRefreshError && stockStatsScope === inventoryStatsScope && !showProductsSection ? (
         <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
           {statsRefreshError}
         </div>
@@ -2409,13 +2424,19 @@ ${inventoryFeesFormulaText}`,
       {showProductsSection ? (
         <Suspense fallback={<div className="card p-8 text-center text-sm text-slate-500">{t('loading') || 'Loading'}...</div>}>
           <InventoryProductsSurface
-            items={productsItems}
-            loading={productsLoading}
-            error={productsError}
+            items={productsResultScope === productsScope ? productsItems : []}
+            loading={productsLoading || productsResultScope !== productsScope}
+            error={productsResultScope === productsScope ? productsError : null}
+            serverStats={stockStatsScope === inventoryStatsScope ? stockStats : null}
+            statsLoading={stockStatsScope !== inventoryStatsScope}
+            statsError={stockStatsScope === inventoryStatsScope ? statsRefreshError : null}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+            onAdjust={canAdjustStock ? openAdjust : undefined}
             page={productsPage}
             pageSize={productsPageSize}
-            total={productsTotal}
-            totalPages={productsTotalPages}
+            total={productsResultScope === productsScope ? productsTotal : 0}
+            totalPages={productsResultScope === productsScope ? productsTotalPages : 1}
             branchFilter={branchFilter}
             onPageChange={setProductsPage}
             onPageSizeChange={(size: number) => { setProductsPageSize(size); setProductsPage(1) }}

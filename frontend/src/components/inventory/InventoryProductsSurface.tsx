@@ -1,6 +1,7 @@
-import { Fragment, useMemo } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import PaginationControls from '../shared/PaginationControls.tsx'
+import { buildProductGroups } from '../../utils/productGrouping.ts'
 
 export type InventoryProductRow = Record<string, any> & {
   id?: number | string
@@ -39,14 +40,35 @@ export function scopedProductQuantity(product: InventoryProductRow, branchFilter
   return Number(product.stock_quantity || 0)
 }
 
-export function groupInventoryProducts(items: InventoryProductRow[]): Array<{ key: string; label: string; items: InventoryProductRow[] }> {
-  const groups = new Map<string, InventoryProductRow[]>()
-  for (const item of items) {
-    const label = String(item.name || '').trim() || 'Unnamed product'
-    const key = label.toLocaleLowerCase()
-    groups.set(key, [...(groups.get(key) || []), item])
+export function groupInventoryProducts(items: InventoryProductRow[]) {
+  const effective = items.map((item) => ({ ...item, cost_price_usd: inventoryCost(item, 'usd'), cost_price_khr: inventoryCost(item, 'khr') }))
+  return buildProductGroups(effective, new Map(effective.map((item) => [Number(item.id), item])), { preserveInputOrder: true })
+    .map((group) => ({ ...group, label: group.name, items: group.items as InventoryProductRow[], rows: group.rows as InventoryProductRow[] }))
+}
+
+export function inventoryMoney(value: unknown): number | null {
+  return value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value)
+}
+
+export function inventoryCost(product: InventoryProductRow, currency: 'usd' | 'khr'): number | null {
+  if (product.__mergedRowCount > 1) return inventoryMoney(product[`cost_price_${currency}`])
+  const purchase = inventoryMoney(product[`purchase_price_${currency}`])
+  return purchase ? purchase : inventoryMoney(product[`cost_price_${currency}`]) ?? purchase
+}
+
+/** Value uses each real row's branch quantity/cost, never the merged display cost. */
+export function scopedProductValue(product: InventoryProductRow, items: InventoryProductRow[], branch: string): number | null {
+  const ids = new Set((product.__mergedProductIds || [product.id]).map(Number))
+  const members = items.filter((row) => ids.has(Number(row.id)))
+  let total = 0
+  for (const row of members) {
+    const quantity = Math.max(0, scopedProductQuantity(row, branch))
+    if (!quantity) continue
+    const cost = inventoryCost(row, 'usd')
+    if (cost === null) return null
+    total += quantity * cost
   }
-  return [...groups.entries()].map(([key, rows]) => ({ key, label: String(rows[0]?.name || '').trim() || 'Unnamed product', items: rows }))
+  return members.length ? total : null
 }
 
 type Props = InventoryProductsPayload & {
@@ -57,19 +79,53 @@ type Props = InventoryProductsPayload & {
   onPageSizeChange: (pageSize: number) => void
   onOpenDetail: (product: InventoryProductRow) => void
   onOpenInCatalogue: (product: InventoryProductRow) => void
+  onAdjust?: (product: InventoryProductRow) => void
+  fmtUSD: (value: number) => string
+  fmtKHR: (value: number) => string
+  serverStats: Record<string, unknown> | null
+  statsLoading: boolean
+  statsError?: string | null
   t: (key: string) => string | undefined
 }
 
 export default function InventoryProductsSurface({
   items, total, page, pageSize, loading, error, branchFilter,
-  onPageChange, onPageSizeChange, onOpenDetail, onOpenInCatalogue, t,
+  onPageChange, onPageSizeChange, onOpenDetail, onOpenInCatalogue, onAdjust, fmtUSD, fmtKHR,
+  serverStats, statsLoading, statsError, t,
 }: Props) {
   const groups = useMemo(() => groupInventoryProducts(items), [items])
-  const columnCount = 5
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  const toggle = (key: string) => setCollapsed((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next })
+  const columnCount = 9
+  const money = (usd: unknown, khr?: unknown) => {
+    const u = inventoryMoney(usd), k = inventoryMoney(khr)
+    return <span className="block whitespace-nowrap text-right tabular-nums">{u === null ? '—' : fmtUSD(u)}{k !== null && k !== 0 ? <span className="block text-[11px] text-slate-500">{fmtKHR(k)}</span> : null}</span>
+  }
+  const branchLines = (product: InventoryProductRow) => (product.branch_stock || [])
+    .filter((row) => branchFilter === 'all' || String(row.branch_id) === branchFilter)
+    .map((row) => <div key={String(row.branch_id)} className="break-words">{row.branch_name || row.branch_id}: <span className="font-semibold">{Number(row.quantity) || 0}</span></div>)
+  const actions = (product: InventoryProductRow) => {
+    const ids = new Set((product.__mergedProductIds || [product.id]).map(Number))
+    const members = items.filter((row) => ids.has(Number(row.id)))
+    const buttons = members.map((row) => <div key={String(row.id)} className="flex flex-wrap items-center gap-2">
+      {members.length > 1 ? <span className="text-[11px]">#{row.id}</span> : null}
+      <button type="button" className="min-h-11 text-primary-600 hover:underline" onClick={() => onOpenDetail(row)}>{t('view_details') || 'View details'}</button>
+      {onAdjust ? <button type="button" className="min-h-11 text-primary-600 hover:underline" onClick={() => onAdjust(row)}>{t('adjust_stock') || 'Adjust stock'}</button> : null}
+    </div>)
+    return <div className="min-w-0" onClick={(event) => event.stopPropagation()}>
+      {members.length > 1 ? <details><summary className="min-h-11 cursor-pointer py-2">{t('view_details') || 'View details'} ({members.length})</summary>{buttons}</details> : buttons}
+      <button type="button" className="inline-flex min-h-11 items-center gap-1 text-primary-600" onClick={() => onOpenInCatalogue(product)}>{t('products') || 'Products'} <ExternalLink className="h-3.5 w-3.5" /></button>
+    </div>
+  }
+  const summaryFields = [['total_products', 'products'], ['in_stock', 'in_stock'], ['low_stock', 'low_stock'], ['out_of_stock', 'out_of_stock'], ['stock_value_usd', 'stock_val']] as const
 
   return (
-    <section aria-label={t('products') || 'Products'} className="space-y-2">
-      <div className="card hidden overflow-x-auto md:block">
+    <section aria-label={t('products') || 'Products'} className="min-w-0 max-w-full space-y-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-700" aria-busy={statsLoading}>
+        {summaryFields.map(([field, label]) => <div key={field}>{t(label) || label}: <strong>{statsLoading ? '…' : inventoryMoney(serverStats?.[field]) === null ? '—' : field === 'stock_value_usd' ? fmtUSD(Number(serverStats?.[field])) : Number(serverStats?.[field])}</strong></div>)}
+      </div>
+      {statsError ? <p role="alert" className="text-xs text-red-600">{statsError}</p> : null}
+      <div className="card hidden max-w-full overflow-x-auto md:block">
         <table className="w-full border-collapse text-xs" style={{ minWidth: 680 }}>
           <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
             <tr>
@@ -77,6 +133,10 @@ export default function InventoryProductsSurface({
               <th className="px-3 py-2 text-left">{t('sku') || 'SKU'}</th>
               <th className="px-3 py-2 text-left">{t('barcode') || 'Barcode'}</th>
               <th className="px-3 py-2 text-right">{t('quantity') || 'Quantity'}</th>
+              <th className="px-3 py-2 text-left">{t('branches') || 'Branches'}</th>
+              <th className="px-3 py-2 text-right">{t('cost') || 'Cost'}</th>
+              <th className="px-3 py-2 text-right">{t('price') || 'Price'}</th>
+              <th className="px-3 py-2 text-right">{t('stock_val') || 'Stock value'}</th>
               <th className="px-3 py-2 text-right">{t('actions') || 'Actions'}</th>
             </tr>
           </thead>
@@ -91,16 +151,20 @@ export default function InventoryProductsSurface({
               <Fragment key={group.key}>
                 {group.items.length > 1 ? (
                   <tr className="border-t border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/50">
-                    <td colSpan={columnCount} className="px-3 py-1.5 font-semibold text-slate-600 dark:text-slate-300">{group.label} <span className="ml-1 font-normal text-slate-400">{group.items.length}</span></td>
+                    <td colSpan={columnCount} className="px-3 py-1.5 font-semibold text-slate-600 dark:text-slate-300"><button type="button" className="min-h-11 text-left" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} <span className="ml-1 font-normal text-slate-400">{group.items.length}</span></button></td>
                   </tr>
                 ) : null}
-                {group.items.map((product) => (
-                  <tr key={String(product.id)} className="cursor-pointer border-t border-slate-100 hover:bg-blue-50/60 dark:border-slate-800 dark:hover:bg-blue-900/10" onClick={() => onOpenDetail(product)}>
+                {!collapsed.has(group.key) && group.rows.map((product) => (
+                  <tr key={String(product.id)} className="border-t border-slate-100 hover:bg-blue-50/60 dark:border-slate-800 dark:hover:bg-blue-900/10" onClick={() => { if (product.__mergedProductIds?.length <= 1) onOpenDetail(product) }}>
                     <td className="max-w-[18rem] px-3 py-2"><div className="truncate font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></td>
                     <td className="px-3 py-2 font-mono text-slate-500">{product.sku || '—'}</td>
                     <td className="px-3 py-2 font-mono text-slate-500">{product.barcode || '—'}</td>
                     <td className="px-3 py-2 text-right font-semibold">{scopedProductQuantity(product, branchFilter)}</td>
-                    <td className="px-3 py-2 text-right" onClick={(event) => event.stopPropagation()}><button type="button" className="inline-flex items-center gap-1 text-primary-600 hover:underline" onClick={() => onOpenInCatalogue(product)}>{t('view_details') || 'View details'} <ExternalLink className="h-3.5 w-3.5" /></button></td>
+                    <td className="min-w-28 px-3 py-2 text-[11px]">{branchLines(product)}</td>
+                    <td className="px-3 py-2">{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'))}</td>
+                    <td className="px-3 py-2">{money(product.selling_price_usd, product.selling_price_khr)}</td>
+                    <td className="px-3 py-2">{money(scopedProductValue(product, group.items, branchFilter))}</td>
+                    <td className="px-3 py-2">{actions(product)}</td>
                   </tr>
                 ))}
               </Fragment>
@@ -113,12 +177,16 @@ export default function InventoryProductsSurface({
         {loading ? Array.from({ length: 4 }, (_, index) => <div key={index} className="card h-20 animate-pulse bg-slate-100 dark:bg-slate-800" />)
           : error ? <div className="card p-6 text-center text-sm text-red-600">{error}</div>
             : groups.length === 0 ? <div className="card p-6 text-center text-sm text-gray-400">{t('no_data') || 'No data'}</div>
-              : groups.flatMap((group) => group.items.map((product) => (
-                <button key={String(product.id)} type="button" className="card flex w-full items-start justify-between gap-3 p-3 text-left" onClick={() => onOpenDetail(product)}>
-                  <span className="min-w-0"><span className="block truncate font-medium">{product.name || '—'}</span><span className="block truncate text-[11px] text-slate-400">{[product.sku, product.barcode].filter(Boolean).join(' · ') || '—'}</span></span>
-                  <span className="shrink-0 rounded bg-slate-100 px-2 py-1 text-sm font-semibold dark:bg-slate-800">{scopedProductQuantity(product, branchFilter)}</span>
-                </button>
-              )))}
+              : groups.map((group) => <div key={group.key} className="min-w-0 space-y-1">
+                {group.items.length > 1 ? <button type="button" className="min-h-11 w-full break-words text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
+                {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-3 text-sm">
+                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 break-words font-medium">{product.name || '—'}</span><strong>{scopedProductQuantity(product, branchFilter)}</strong></div>
+                  <p className="break-all text-[11px] text-slate-500">{[product.sku, product.barcode].filter(Boolean).join(' · ') || '—'}</p>
+                  <div className="my-1 text-xs">{branchLines(product)}</div>
+                  <dl className="grid grid-cols-2 gap-1 text-xs"><dt>{t('cost') || 'Cost'}</dt><dd>{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'))}</dd><dt>{t('price') || 'Price'}</dt><dd>{money(product.selling_price_usd, product.selling_price_khr)}</dd><dt>{t('stock_val') || 'Stock value'}</dt><dd>{money(scopedProductValue(product, group.items, branchFilter))}</dd></dl>
+                  {actions(product)}
+                </div>)}
+              </div>)}
       </div>
 
       <div className="flex justify-center">
