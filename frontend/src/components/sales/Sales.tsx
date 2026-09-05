@@ -204,12 +204,18 @@ interface SaleAmendmentRequest {
   delivery_fee_usd?: number
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
+  client_request_id: string
+  expected_exchange_rate: number
+  expected_updated_at?: string
 }
+
+type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
+type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
 
 interface SalesApi {
   updateSaleStatus: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<unknown>
   attachSaleCustomer: (saleId: number | string, payload: SaleMembershipPayload) => Promise<unknown>
-  addSaleItems: (saleId: number | string, items: SaleItemAddition[], notes?: string) => Promise<unknown>
+  addSaleItems: (saleId: number | string, items: SaleItemAddition[], notes: string, review: SaleMutationReview) => Promise<unknown>
   // S4-30: amend a recorded sale, and read its history.
   amendSale: (saleId: number | string, request: SaleAmendmentRequest) => Promise<unknown>
   getSaleAmendments: (saleId: number | string) => Promise<unknown>
@@ -910,7 +916,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // pushAction here: a client-side entry would be a duplicate row whose undo
   // closure dies on reload, while the server row's Undo survives it. The
   // history bar is refreshed so that row appears immediately.
-  const handleAddSaleItems = async (saleId: number | string, items: SaleItemAddition[]): Promise<boolean> => {
+  const handleAddSaleItems = async (saleId: number | string, items: SaleItemAddition[], review: SaleMutationReview): Promise<SaleMutationUiResult> => {
     if (!canAddSaleItems) {
       notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
       return false
@@ -919,7 +925,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (!Number.isFinite(numericId) || !items.length) return false
     try {
       const result = await withLoaderTimeout(
-        () => getSalesApi().addSaleItems(saleId, items, ''),
+        () => getSalesApi().addSaleItems(saleId, items, '', review),
         'Add items to sale',
         SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
       ) as { addedLines?: number; stockMoved?: boolean } | null
@@ -939,15 +945,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       return true
     } catch (error) {
+      if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
+        const current = (error as { current?: unknown }).current
+        const exchangeRateChanged = current && typeof current === 'object' ? Number((current as { exchange_rate?: unknown }).exchange_rate) : NaN
+        if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
+      }
       if (isWriteConflict(error)) {
         await loadSales()
         return false
       }
-      notify(
-        `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${getErrorMessage(error, String(error || 'Unknown error'))}`,
-        'error',
-      )
-      return false
+      return { mutationError: `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${getErrorMessage(error, String(error || 'Unknown error'))}` }
     }
   }
 
@@ -956,7 +963,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // atomic batch as the change -- so there is deliberately no pushAction here:
   // a client-side history entry would be a second, weaker record of the same
   // act, and its undo closure would die on reload.
-  const handleAmendSale = async (saleId: number | string, request: SaleAmendmentRequest): Promise<boolean> => {
+  const handleAmendSale = async (saleId: number | string, request: SaleAmendmentRequest): Promise<SaleMutationUiResult> => {
     if (!canAmendSales) {
       notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
       return false
@@ -988,15 +995,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       return true
     } catch (error) {
+      if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
+        const current = (error as { current?: unknown }).current
+        const exchangeRateChanged = current && typeof current === 'object' ? Number((current as { exchange_rate?: unknown }).exchange_rate) : NaN
+        if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
+      }
       if (isWriteConflict(error)) {
         await loadSales()
         return false
       }
-      notify(
-        `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${getErrorMessage(error, String(error || 'Unknown error'))}`,
-        'error',
-      )
-      return false
+      return { mutationError: `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${getErrorMessage(error, String(error || 'Unknown error'))}` }
     }
   }
 
