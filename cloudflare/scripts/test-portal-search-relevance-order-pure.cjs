@@ -103,6 +103,7 @@ const { loadActivePromotionRules, productPromotedSql } = promotionRulesSql
 const { normalizeSearchText } = searchMatch
 
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
   '../lib/familyPagination': familyPagination,

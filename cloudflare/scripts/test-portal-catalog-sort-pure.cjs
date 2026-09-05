@@ -72,6 +72,7 @@ function loadReal(relPath, requireOverrides = {}) {
 const searchMatch = loadReal('lib/searchMatch.ts')
 
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => db },
   // Real, pure -- its chunking is what keeps these reads inside D1's
   // 100-bound-parameter limit, so a stub would test the stub.

@@ -61,6 +61,7 @@ function loadReal(relPath, requireOverrides = {}) {
 // cross-cutting infrastructure the redaction does not depend on; getDb is the
 // one that matters -- it hands the handler the real, migrated, seeded database.
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../index': {},
   '../lib/db': { getDb: () => db },
   '../lib/sqlBinding': { buildInClause: () => '', inlineIntegerIds: () => '', selectInChunks: async () => [] },

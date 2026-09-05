@@ -60,6 +60,7 @@ function loadReal(relPath, requireOverrides = {}) {
 // load; no imported function is invoked until a handler runs, and we never run
 // a handler here -- we only call the pure buildPortalConfig export).
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../index': {},
   '../lib/db': { getDb: () => null },
   '../lib/auth': { requireAuth: async (c, next) => next() },
