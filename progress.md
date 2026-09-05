@@ -11,11 +11,14 @@ unexplained residual. See `docs/fleet/2026-09-05-settlement-result.md`.
 Membership default/per-sale override, authenticated POS lookup, eight-character
 new IDs, grouped atomic bulk status/reload undo, security bounds and indexed
 lookup are integrated. Full frontend chain and 200 individual files pass;
-Worker typecheck and 208 suites pass across the full sweep plus the corrected
-bounded-query contract. The legacy-backup dependency guard and independent review
-also pass: incomplete older backups refuse before any deletion. Final 209-suite
-run and release are in progress. Production code is still `9d13ca94ed4e` until the explicit
-deployment record below is updated; historical D1 settlement is already live.
+Worker typecheck and all 209 backend suites pass. The legacy-backup dependency
+guard and independent review also pass: incomplete older backups refuse before
+any deletion. Released clean `0ffc4bfcc4fd` to Worker
+`be276770-359d-4002-9d26-560fa5656d33` at 100% traffic, September 5 05:32 UTC.
+Migrations 0120–0122 applied; all recorded money/stock controls unchanged.
+Cloudflare's browser-verification challenge blocks final live API/asset probes
+from this session; control-plane deployment is verified, live response parity
+and authenticated flows are not. See `docs/fleet/2026-09-05-membership-bulk-release.md`.
 
 The control document for this project. **Read this file top-to-bottom at the start of
 every session**; it is deliberately kept short enough that this is realistic.

@@ -35,7 +35,7 @@ suites passed (one bounded-query source-contract fix rechecked separately).
 The added legacy-restore suite and independent reproduction pass: audit rows
 remain 5→5 when an older backup is refused, before any database write. Complete
 61-table foreign-key-enabled streaming restore and restored undo/redo pass.
-Final 209-suite run and deployment are pending at this entry.
+Final full backend sweep: **209/209 passed**, with no remaining failed suite.
 
 Existing build warnings about circular/manual chunks remain. The full authenticated
 production role/page matrix and actual Telegram delivery receipt are not certified.
@@ -52,6 +52,35 @@ audit evidence and guarded recovery. No future-payment completion rule was added
 
 ## Deployment
 
-Independent bounded safety review is clear. Prepared migrations are schema-only
-0120, 0121 and 0122; none has been applied remotely for this release yet.
-Do not infer deployment from the branch tip or these preparation notes.
+Released clean source `0ffc4bfcc4fdd50a77122aa49ffc2dd85d9a3cae` from
+`business-os-v1-release-20260905`, not dirty main. Worker
+`be276770-359d-4002-9d26-560fa5656d33` is at **100% traffic**, control-plane
+deployment timestamp `2026-09-05T05:32:08.456Z`. Previous version was
+`cadfb107-3e58-4784-9fa2-2c115540e2cf`.
+
+- Worker build revision `0ffc4bfcc4fd`, hash `517a58773b87d97e`, built
+  `2026-09-05T05:30:03.016Z`.
+- Uploaded frontend metadata: revision `0ffc4bfcc4fd`, hash `f2406deafad8f544`,
+  built `2026-09-05T05:27:57.354Z`.
+- Fresh clean release build/typecheck and provenance-stamped dry run passed.
+  Deployed through the repository wrapper with `--keep-vars`; no secret sync,
+  WAF configuration, domain change, or credential rotation was performed.
+- Applied only pending schema migrations 0120, 0121, 0122. No pending primary
+  migrations remain. SQL files were confirmed LF-only in the release checkout.
+- Pre-migration Time Travel bookmark:
+  `000012d5-00000000-000050dd-67c16a8dc096e3b8fc234d09ee093f04`.
+- Pre/post controls identical: sales 15,063; total USD 1,893,911.801; recorded
+  paid USD 1,992,412.8168; product stock 23,073; branch stock 23,036; batch stock
+  23,064; amendments 7; movements 23,160 with max ID 46,282. These are existing
+  database controls, not a claim that all legacy financial/stock totals agree.
+
+Live verification limitation: both current hosts returned Cloudflare's HTML
+browser-verification challenge (403) to version/build/health probes. A normal
+browser also reached that challenge. Therefore live-response frontend/Worker
+parity and authenticated endpoint results were **not** certified. The deployment
+and 100% traffic are independently confirmed by Wrangler's deployment listing.
+No challenge bypass or security-control change was attempted.
+
+Recovery: prefer a forward fix. Retain additive replay tables, snapshots and
+revision counters if rolling back code; never drop replay data or restore a
+database bookmark over later shop activity without a fresh impact review.
