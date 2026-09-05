@@ -156,7 +156,38 @@ async function check(name, run) {
 }
 
 async function main() {
-  const { commitStockSession, StockSessionError } = loadStockSession()
+  const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
+
+  await check('reused neutral lot receipt rolls back attribution on failure and applies once on lost acknowledgement', async () => {
+    for (const explicit of [false, true]) {
+      const f = fixture()
+      f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Supplier A'),(2,'Supplier B')")
+      const first = receiveRequest(`first-attribution-${explicit}`, 5)
+      Object.assign(first.items[0], { supplier_id: 1, unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-09-30' })
+      const a = await commitStockSession(f.env, user, first)
+      const history = f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(a.actionHistoryId)
+      await replayStockSession(f.env, user, 'undo', a.actionHistoryId, 0, JSON.parse(history.undo_payload))
+      const allState = () => ['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'stock_session_operations',
+        'stock_session_members', 'stock_session_revisions', 'undo_snapshots', 'action_history', 'inventory_movements', 'audit_logs']
+        .map(table => f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())
+      const neutral = allState()
+      const next = receiveRequest(`next-attribution-${explicit}`, 5)
+      Object.assign(next.items[0], { supplier_id: 2, unit_cost_usd: 3, payment_status: 'paid', ...(explicit ? { batch_id: a.items[0].batchId } : {}) })
+      f.failReceiptAfterMetadata()
+      await assert.rejects(commitStockSession(f.env, user, next), /injected failure/)
+      assert.deepEqual(allState(), neutral, 'failed reuse rolls back metadata, stock and all replay ledgers')
+      f.loseNextCommitAcknowledgement()
+      const b = await commitStockSession(f.env, user, next)
+      assert.equal(b.replayed, true)
+      assert.equal(b.items[0].batchId, a.items[0].batchId)
+      assert.deepEqual(f.sql.prepare('SELECT supplier_id,supplier_name,unit_cost_usd,payment_status,credit_due_date,received_quantity,received_cost_usd FROM product_batches WHERE id=?').get(b.items[0].batchId), {
+        supplier_id: 2, supplier_name: 'Supplier B', unit_cost_usd: 3, payment_status: 'paid', credit_due_date: null, received_quantity: 5, received_cost_usd: 15,
+      })
+      const saved = allState()
+      assert.deepEqual(await commitStockSession(f.env, user, next), b)
+      assert.deepEqual(allState(), saved, 'retry must not duplicate reused-lot stock or rewrite attribution')
+    }
+  })
 
   await check('explicit batch return identity excludes a competing received-date lot', async () => {
     const f = fixture()

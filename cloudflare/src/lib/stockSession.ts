@@ -785,7 +785,20 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       if (key === 'products') target = direction === 'redo' ? { stock_quantity: row.stock_quantity, is_active: row.is_active, updated_at: row.updated_at }
         : original ? { stock_quantity: original.stock_quantity, updated_at: original.updated_at }
           : { stock_quantity: 0, is_active: 0 }
-      if (key === 'batches' && !target) target = { is_active: 0, received_quantity: 0, received_cost_usd: 0 }
+      if (key === 'batches' && !target) {
+        // Retain the lot identity for immutable members/receipts and exact
+        // redo, but remove attribution belonging solely to this undone
+        // receipt. A later same-date receipt reuses the row and fills NULL
+        // first-attribution fields; retaining A/credit would charge B's paid
+        // receipt to A. The saved after postimage still restores A on redo,
+        // unless reuse has advanced the retained revision guard.
+        target = {
+          is_active: 0, received_quantity: 0, received_cost_usd: 0,
+          supplier_id: null, supplier_name: null, unit_cost_usd: null,
+          payment_status: null, credit_due_date: null, received_branch_id: null,
+          expiry_date: null, notes: null,
+        }
+      }
       if (!target) statements.push({ sql: `DELETE FROM ${table} WHERE id=@rowId`, params: { rowId: row.id } })
       else if ((key === 'branchStock' || key === 'branchBatchStock') && direction === 'redo' && !original) {
         const columns = Object.keys(row)

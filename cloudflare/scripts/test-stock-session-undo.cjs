@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const { fixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
 
 function payload(f, receipt) {
@@ -20,6 +22,60 @@ async function main() {
   const api = loadStockSession()
   const replay = (f, receipt, direction, generation, actor = user) =>
     api.replayStockSession(f.env, actor, direction, receipt.actionHistoryId, generation, payload(f, receipt))
+  for (const payment of ['paid', 'credit']) {
+    const f = fixture()
+    f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Supplier A'),(2,'Supplier B'); INSERT INTO branches(id,name,is_active) VALUES(2,'Warehouse',1)")
+    // Execute the actual supplier-history AP aggregation, not a test-only
+    // balance formula. Inactive lots are intentionally not filtered there.
+    const contacts = fs.readFileSync(path.join(__dirname, '../src/routes/contacts.ts'), 'utf8')
+    const supplierWhere = contacts.match(/const supplierWhere = `([\s\S]*?)`/)[1]
+    const apSql = contacts.match(/const totalsRow = await db\.prepare\(`\s*(SELECT COUNT\(\*\) AS batches,[\s\S]*?WHERE \$\{supplierWhere\})\s*`\)/)[1].replace('${supplierWhere}', supplierWhere)
+    const ap = id => f.sql.prepare(apSql).get({ id, name: id === 1 ? 'supplier a' : 'supplier b' })
+    const aRequest = receiveRequest('supplier-a-credit', 5)
+    Object.assign(aRequest.items[0], { supplier_id: 1, supplier_name: 'Supplier A', unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-09-30', expiry_date: '2027-01-01', notes: 'A purchase' })
+    const a = await api.commitStockSession(f.env, user, aRequest)
+    const aPostimage = f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(a.items[0].batchId)
+    assert.equal(ap(1).credit_open_usd, 10)
+    await replay(f, a, 'undo', 0)
+    await replay(f, a, 'redo', 1)
+    assert.deepEqual(f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(a.items[0].batchId), aPostimage, 'redo restores A exactly before reuse')
+    await replay(f, a, 'undo', 2)
+    const aSaved = f.sql.prepare('SELECT * FROM undo_snapshots WHERE id=?').get(a.snapshotId)
+    const bRequest = receiveRequest(`supplier-b-${payment}`, 5)
+    Object.assign(bRequest.items[0], { branch_id: 2, supplier_id: 2, supplier_name: 'Supplier B', unit_cost_usd: 3, payment_status: payment,
+      credit_due_date: payment === 'credit' ? '2026-10-15' : null })
+    const b = await api.commitStockSession(f.env, user, bRequest)
+    assert.equal(b.items[0].batchId, a.items[0].batchId, 'durable lot identity is retained')
+    assert.equal(ap(1).credit_open_usd, 0, 'A must not own the new B receipt payable')
+    assert.equal(ap(1).cost_usd, 0)
+    assert.equal(ap(2).cost_usd, 15)
+    assert.equal(ap(2).credit_open_usd, payment === 'credit' ? 15 : 0)
+    const bPostimage = f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(b.items[0].batchId)
+    assert.deepEqual([bPostimage.supplier_id, bPostimage.supplier_name, bPostimage.unit_cost_usd, bPostimage.payment_status, bPostimage.credit_due_date, bPostimage.received_branch_id, bPostimage.expiry_date, bPostimage.notes],
+      [2, 'Supplier B', 3, payment, payment === 'credit' ? '2026-10-15' : null, 2, null, null])
+    const bSnapshot = JSON.parse(f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(b.snapshotId).payload_json)
+    assert.equal(bSnapshot.before.batches[0].supplier_id, null)
+    assert.equal(bSnapshot.before.batches[0].payment_status, null)
+    assert.equal(bSnapshot.after.batches[0].supplier_id, 2)
+    assert.equal(bSnapshot.after.batches[0].received_cost_usd, 15)
+    assert.deepEqual(f.sql.prepare('SELECT * FROM undo_snapshots WHERE id=?').get(a.snapshotId), aSaved, 'new receipt must not rewrite prior saved replay')
+    const beforeReplay = state(f)
+    const aRetry = await api.commitStockSession(f.env, user, aRequest)
+    assert.deepEqual(aRetry, { ...a, replayed: true })
+    assert.deepEqual(state(f), beforeReplay, 'original immutable receipt replay never reapplies stock')
+    await assert.rejects(replay(f, a, 'redo', 3), e => e.statusCode === 409)
+    assert.deepEqual(state(f), beforeReplay)
+    await replay(f, b, 'undo', 0)
+    assert.equal(ap(2).credit_open_usd, 0)
+    const undoneB = state(f)
+    await assert.rejects(replay(f, a, 'redo', 3), e => e.statusCode === 409)
+    assert.deepEqual(state(f), undoneB, 'A stays stale even after B returns the lot to neutral state (ABA)')
+    await replay(f, b, 'redo', 1)
+    assert.deepEqual(f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(b.items[0].batchId), bPostimage)
+    assert.equal(ap(2).credit_open_usd, payment === 'credit' ? 15 : 0)
+    assert.equal(f.sql.pragma('foreign_key_check').length, 0)
+    console.log(`PASS receive after new-lot undo attributes B ${payment} correctly, AP and snapshots exact, prior redo stale through ABA`)
+  }
   {
     const f = fixture()
     const r = await api.commitStockSession(f.env, user, createRequest())
@@ -76,7 +132,10 @@ async function main() {
   }
   {
     const f = fixture()
-    await api.commitStockSession(f.env, user, receiveRequest('baseline-receipt', 4))
+    f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Baseline supplier')")
+    const baselineRequest = receiveRequest('baseline-receipt', 4)
+    Object.assign(baselineRequest.items[0], { supplier_id: 1, payment_status: 'credit', credit_due_date: '2026-09-30', notes: 'Pre-existing attribution' })
+    await api.commitStockSession(f.env, user, baselineRequest)
     const baseline = f.sql.prepare('SELECT * FROM product_batches').all()
     const r = await api.commitStockSession(f.env, user, receiveRequest('next-receipt-01', 2))
     await replay(f, r, 'undo', 0)
