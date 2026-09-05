@@ -262,6 +262,22 @@ await runTest('the shaped row keeps the raw server timestamp, and the screen is 
     'and must never print head.at raw again')
 })
 
+await runTest('sale mutation reviews carry stable idempotency and exchange-rate fields', () => {
+  const modal = readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
+  const sales = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  const transport = readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
+
+  assert.match(transport, /addSaleItems\([\s\S]*?review: \{ client_request_id: string; expected_exchange_rate: number; expected_updated_at\?: string \}/)
+  assert.match(transport, /items,\s*notes,\s*\.\.\.review/, 'add-items sends the reviewed request id, rate, and revision')
+  assert.match(transport, /interface SaleAmendmentRequest[\s\S]*?client_request_id: string[\s\S]*?expected_exchange_rate: number/, 'amendments require the same mutation envelope')
+  assert.match(modal, /client_request_id: addRequestIdRef\.current[\s\S]*?expected_exchange_rate: mutationExchangeRate/, 'add-items retries the frozen review body')
+  assert.match(modal, /client_request_id: amendRequestIdRef\.current[\s\S]*?expected_exchange_rate: mutationExchangeRate/, 'amendment retries the frozen review body')
+  assert.match(modal, /setMutationExchangeRate\(changedRate\)[\s\S]*?sale_mutation_rate_changed/, 'a stale quote keeps the review open with the server rate')
+  assert.match(modal, /addMutationError[\s\S]*?t\('error'\)/, 'add-items failures remain visible in the review')
+  assert.match(modal, /amendMutationError[\s\S]*?t\('error'\)/, 'amendment failures remain visible in the review')
+  assert.match(sales, /code\?: unknown \}\)\.code === 'exchange_rate_changed'[\s\S]*?exchangeRateChanged/, 'the page returns stale-rate details instead of closing the review')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

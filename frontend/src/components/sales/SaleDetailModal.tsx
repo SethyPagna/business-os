@@ -149,6 +149,9 @@ interface SaleAmendmentRequest {
   notes?: string
 }
 
+type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
+type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
+
 type StagedAddLine = {
   productId: number
   name: string
@@ -209,13 +212,13 @@ interface SaleDetailModalProps {
   // when the signed-in user lacks `sales:add_items` -- the same
   // hide-by-omission gate as the write callbacks above, and the Worker
   // enforces the identical action server-side.
-  onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number; batch_id?: number; batch_label?: string; batch_expiry_date?: string }>) => Promise<boolean | unknown> | boolean | unknown
+  onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number; batch_id?: number; batch_label?: string; batch_expiry_date?: string }>, review: SaleMutationReview) => Promise<SaleMutationUiResult> | SaleMutationUiResult
   // S4-30: amend this already-recorded sale -- change a line's quantity,
   // remove a line, replace one product with another, or correct the delivery
   // fee. Omitted entirely when the signed-in user lacks `sales:amend`, the
   // same hide-by-omission gate as every write callback above; the Worker
   // enforces the identical action server-side.
-  onAmend?: (saleId: string | number, request: SaleAmendmentRequest) => Promise<boolean | unknown> | boolean | unknown
+  onAmend?: (saleId: string | number, request: SaleAmendmentRequest & SaleMutationReview) => Promise<SaleMutationUiResult> | SaleMutationUiResult
   // The sale's audit trail. NOT gated on the write permission: anyone who can
   // open the sale can see how it got that way -- hiding the trail from the
   // people who reconcile the books would defeat the feature. Resolves to null
@@ -305,6 +308,11 @@ export default function SaleDetailModal({
   const [settlementRows, setSettlementRows] = useState<SettlementRow[]>(settlementSession.rows)
   const settlementBaselineRef = useRef<SettlementRow[]>(settlementSession.rows)
   const settlementRequestIdRef = useRef(createSettlementRequestId())
+  const addRequestIdRef = useRef(createSettlementRequestId())
+  const amendRequestIdRef = useRef(createSettlementRequestId())
+  const [mutationExchangeRate, setMutationExchangeRate] = useState(settlementSession.exchangeRate)
+  const [addMutationError, setAddMutationError] = useState('')
+  const [amendMutationError, setAmendMutationError] = useState('')
   const modalPanelRef = useRef<HTMLDivElement | null>(null)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const [payError, setPayError] = useState('')
@@ -386,6 +394,11 @@ export default function SaleDetailModal({
     setSettlementRows(next.rows)
     settlementBaselineRef.current = next.rows
     settlementRequestIdRef.current = createSettlementRequestId()
+    addRequestIdRef.current = createSettlementRequestId()
+    amendRequestIdRef.current = createSettlementRequestId()
+    setMutationExchangeRate(next.exchangeRate)
+    setAddMutationError('')
+    setAmendMutationError('')
     setPayError('')
     // Settings changes while this sale is open deliberately do not alter the
     // reviewed rate/method snapshot. A different sale starts a new review.
@@ -516,8 +529,21 @@ export default function SaleDetailModal({
     if (!onAmend || !sale) return
     setAmendSaving(true)
     try {
-      const ok = await onAmend(sale.id, request)
-      if (ok !== false) {
+      const result = await onAmend(sale.id, {
+        ...request,
+        client_request_id: amendRequestIdRef.current,
+        expected_exchange_rate: mutationExchangeRate,
+        expected_updated_at: settlementSession.expectedUpdatedAt,
+      })
+      const changedRate = result && typeof result === 'object' ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged) : NaN
+      const mutationError = result && typeof result === 'object' ? String((result as { mutationError?: unknown }).mutationError || '') : ''
+      if (Number.isFinite(changedRate) && changedRate > 0) {
+        setMutationExchangeRate(changedRate)
+        amendRequestIdRef.current = createSettlementRequestId()
+        setAmendMutationError(translateOr('sale_mutation_rate_changed', 'The exchange rate changed. Review the updated KHR rate, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យអត្រា KHR ថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
+      } else if (mutationError) {
+        setAmendMutationError(mutationError)
+      } else if (result !== false) {
         setAmendLineId(null)
         setReplaceLineId(null)
         setFeeEditing(false)
@@ -551,6 +577,8 @@ export default function SaleDetailModal({
       return
     }
     const rising = next > currentQuantity
+    amendRequestIdRef.current = createSettlementRequestId()
+    setAmendMutationError('')
     setAmendConfirm({
       request: {
         kind: rising ? 'line_quantity_increased' : 'line_quantity_decreased',
@@ -565,6 +593,8 @@ export default function SaleDetailModal({
   }
 
   const stageRemoval = (lineId: number, currentQuantity: number, name: string): void => {
+    amendRequestIdRef.current = createSettlementRequestId()
+    setAmendMutationError('')
     setAmendConfirm({
       request: { kind: 'line_removed', sale_item_id: lineId },
       title: translateOr('amend_remove_title', 'Take this off the sale?', 'ដកចេញពីការលក់នេះ?'),
@@ -585,6 +615,8 @@ export default function SaleDetailModal({
     const quantity = toNumber(line?.quantity ?? line?.qty) || 1
     setAddQuery('')
     setAddCandidates([])
+    amendRequestIdRef.current = createSettlementRequestId()
+    setAmendMutationError('')
     setAmendConfirm({
       request: {
         kind: 'line_replaced',
@@ -600,6 +632,8 @@ export default function SaleDetailModal({
     const next = Number(feeText)
     if (!Number.isFinite(next) || next < 0) return
     if (next === currentFeeUsd) return
+    amendRequestIdRef.current = createSettlementRequestId()
+    setAmendMutationError('')
     setAmendConfirm({
       request: { kind: 'delivery_fee_changed', delivery_fee_usd: next },
       title: translateOr('amend_fee_title', 'Correct the delivery fee?', 'កែថ្លៃដឹកជញ្ជូន?'),
@@ -771,23 +805,33 @@ export default function SaleDetailModal({
     if (!onAddItems || !addLines.length || addHasStockError) return
     setAddSaving(true)
     try {
-      const ok = await onAddItems(sale.id, addLines.map((line) => ({
+      const result = await onAddItems(sale.id, addLines.map((line) => ({
         product_id: line.productId,
         quantity: line.quantity,
         applied_price_usd: line.unitPriceUsd,
         ...(line.batchId != null ? { batch_id: line.batchId } : {}),
         ...(line.batchLabel ? { batch_label: line.batchLabel } : {}),
         ...(line.batchExpiryDate ? { batch_expiry_date: line.batchExpiryDate } : {}),
-      })))
+      })), {
+        client_request_id: addRequestIdRef.current,
+        expected_exchange_rate: mutationExchangeRate,
+        expected_updated_at: settlementSession.expectedUpdatedAt,
+      })
+      const changedRate = result && typeof result === 'object' ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged) : NaN
+      const mutationError = result && typeof result === 'object' ? String((result as { mutationError?: unknown }).mutationError || '') : ''
       // The caller raises its own success/failure notice (it is the one that
       // knows whether stock actually moved), so this only clears the form and
       // steps out of the way on success.
-      if (ok !== false) {
+      if (Number.isFinite(changedRate) && changedRate > 0) {
+        setMutationExchangeRate(changedRate)
+        addRequestIdRef.current = createSettlementRequestId()
+        setAddMutationError(translateOr('sale_mutation_rate_changed', 'The exchange rate changed. Review the updated KHR rate, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យអត្រា KHR ថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
+      } else if (mutationError) {
+        setAddMutationError(mutationError)
+      } else if (result !== false) {
         setAddLines([])
         setAddConfirmOpen(false)
         onClose()
-      } else {
-        setAddConfirmOpen(false)
       }
     } finally {
       setAddSaving(false)
@@ -1580,7 +1624,11 @@ export default function SaleDetailModal({
                     type="button"
                     className="btn-primary mt-3 w-full text-xs"
                     disabled={addSaving || addLines.length === 0 || addHasStockError}
-                    onClick={() => setAddConfirmOpen(true)}
+                    onClick={() => {
+                      addRequestIdRef.current = createSettlementRequestId()
+                      setAddMutationError('')
+                      setAddConfirmOpen(true)
+                    }}
                   >
                     {addSaving ? (t('loading') || 'Saving') : (translateOr('add_items_submit', 'Add to sale', 'បន្ថែមទៅការលក់'))}
                   </button>
@@ -1862,6 +1910,11 @@ export default function SaleDetailModal({
                     ? translateOr('add_items_confirm_deducts', 'Deducted now', 'កាត់ភ្លាមៗ')
                     : translateOr('add_items_confirm_no_deduct', 'Not deducted yet', 'មិនទាន់កាត់'),
                 },
+                {
+                  label: t('exchange_rate') || 'Exchange rate',
+                  value: `1 USD = ${mutationExchangeRate.toLocaleString(undefined, { maximumFractionDigits: 4 })} KHR`,
+                },
+                ...(addMutationError ? [{ label: t('error') || 'Error', value: addMutationError }] : []),
               ]}
               note={translateOr('add_items_undo_note', 'You can undo this from the history bar right after.', 'អ្នកអាចត្រឡប់វិញភ្លាមៗបន្ទាប់ពីនេះ ពីរបារប្រវត្តិ។')}
               confirmLabel={translateOr('add_items_submit', 'Add to sale', 'បន្ថែមទៅការលក់')}
@@ -1888,6 +1941,11 @@ export default function SaleDetailModal({
                     ? translateOr('amend_confirm_moves_stock', 'Stock moves now', 'ស្តុកនឹងផ្លាស់ប្តូរភ្លាមៗ')
                     : translateOr('amend_confirm_no_stock', 'Stock is not touched', 'ស្តុកមិនត្រូវបានប៉ះពាល់'),
                 },
+                {
+                  label: t('exchange_rate') || 'Exchange rate',
+                  value: `1 USD = ${mutationExchangeRate.toLocaleString(undefined, { maximumFractionDigits: 4 })} KHR`,
+                },
+                ...(amendMutationError ? [{ label: t('error') || 'Error', value: amendMutationError }] : []),
               ]}
               note={translateOr('amend_confirm_note', 'The receipt keeps its number and prints the new total. This change stays in the sale history.', 'វិក្កយបត្ររក្សាលេខដដែល ហើយបោះពុម្ពសរុបថ្មី។ ការកែប្រែនេះនៅក្នុងប្រវត្តិការលក់។')}
               confirmLabel={translateOr('amend_confirm', 'Apply change', 'អនុវត្តការកែប្រែ')}
