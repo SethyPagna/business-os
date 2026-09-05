@@ -541,6 +541,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           </div>
         )}
         <div className="flex shrink-0 items-center gap-1 [&_button]:min-h-11 [&_button]:min-w-11">
+          <div id="section-export-action-host" className="flex shrink-0 items-center empty:hidden" />
           {notificationSlot}
           {showQuickPreferences ? (
             <Suspense fallback={<QuickPreferenceTogglesFallback />}>
