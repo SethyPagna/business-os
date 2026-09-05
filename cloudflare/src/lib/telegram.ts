@@ -1,5 +1,6 @@
 import { getDb } from './db'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
+import { resolveStoredNativeSaleChange } from './nativeSaleChange'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   bi, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue,
@@ -379,12 +380,13 @@ export type ShiftReportFigures = {
 
 type ShiftTenderRow = {
   payment_method?: unknown; payment_details?: unknown; amount_paid_usd?: unknown; amount_paid_khr?: unknown
-  change_usd?: unknown; change_khr?: unknown
+  change_usd?: unknown; change_khr?: unknown; change_is_actual?: unknown; change_exchange_rate?: unknown
   sale_status?: unknown; total_usd?: unknown; exchange_rate?: unknown
 }
 
 /** Recorded tender only. Old change columns contain equivalent currencies,
- * not the actual currency handed back, so never subtract both or invent one. */
+ * not the actual currency handed back. Only server-marked, revalidated native
+ * change is subtracted; historical/invalid change keeps the review guard. */
 export function summarizeShiftCash(rows: ShiftTenderRow[]) {
   let usd = 0; let khr = 0; let needsReview = false
   const amount = (value: unknown) => {
@@ -411,11 +413,18 @@ export function summarizeShiftCash(rows: ShiftTenderRow[]) {
       if (method === 'cash' || method === 'សាច់ប្រាក់') { usd += partUsd; khr += partKhr }
     }
     if (Math.abs(detailUsd - paidUsd) > 0.011 || Math.abs(detailKhr - paidKhr) > 1) needsReview = true
-    const changeUsd = amount(row.change_usd); const changeKhr = amount(row.change_khr)
-    if (changeUsd > 0 || changeKhr > 0) needsReview = true
     const rate = Number(row.exchange_rate)
     if (paidKhr && !(Number.isFinite(rate) && rate > 0)) needsReview = true
-    if (row.total_usd != null && paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) > Number(row.total_usd) + 0.011) needsReview = true
+    const change = resolveStoredNativeSaleChange({
+      changeIsActual: row.change_is_actual,
+      changeUsd: row.change_usd,
+      changeKhr: row.change_khr,
+      changeExchangeRate: row.change_exchange_rate,
+    })
+    if (change.kind === 'actual') { usd -= change.usd; khr -= change.khr }
+    else if (change.kind === 'unknown') needsReview = true
+    if (row.total_usd != null && paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) > Number(row.total_usd) + 0.011
+      && change.kind !== 'actual') needsReview = true
   }
   return { usd: round2(usd), khr: Math.round(khr), needsReview }
 }
@@ -649,7 +658,8 @@ async function shiftCash(env: Env, shift: ShiftReportSession, nowMs: number) {
   const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
   clauses.push("COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'")
-  const rows = await getDb(env).prepare(`SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr, change_usd, change_khr, sale_status, total_usd, exchange_rate
+  const rows = await getDb(env).prepare(`SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr,
+      change_usd, change_khr, change_is_actual, change_exchange_rate, sale_status, total_usd, exchange_rate
     FROM sales WHERE ${clauses.join(' AND ')} ORDER BY id LIMIT 5001`).all<ShiftTenderRow>(params)
   const cash = summarizeShiftCash(rows.slice(0, 5000))
   // Bound memory and refuse a partial drawer total. Refund tender currency and

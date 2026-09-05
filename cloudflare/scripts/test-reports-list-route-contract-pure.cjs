@@ -50,6 +50,9 @@ function load(file, overrides={}) {
  return m.exports
 }
 const dates=load('lib/businessDateWindow.ts')
+const saleTotals=load('lib/saleTotals.ts')
+const financialPrecision=load('lib/financialPrecision.ts')
+const nativeSaleChange=load('lib/nativeSaleChange.ts',{'./financialPrecision':financialPrecision,'./saleTotals':saleTotals})
 const analytics=load('lib/salesAnalytics.ts',{'./db':{getDb:()=>db},'./businessDateWindow':dates})
 const app=load('routes/reports.ts',{
  '../lib/db':{getDb:()=>db},'../lib/businessDateWindow':dates,'../lib/salesAnalytics':analytics,
@@ -119,7 +122,7 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  // Both SQLite and ISO timestamps belong to the same half-open shift.
  sql.exec('ALTER TABLE fees ADD COLUMN created_by INTEGER; UPDATE fees SET created_by=7')
  const telegram=load('lib/telegram.ts',{'./db':{getDb:()=>db},'./businessDateWindow':dates,
-   './salesAnalytics':analytics,'./saleTotals':load('lib/saleTotals.ts'),'./telegramLang':load('lib/telegramLang.ts')})
+   './salesAnalytics':analytics,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,'./telegramLang':load('lib/telegramLang.ts')})
  const shift={user_id:7,branch_id:2,scope_mode:'per_account',opened_at:'2026-09-04T02:00:00.000Z',closed_at:'2026-09-04T04:00:00.000Z'}
  const initial=await telegram.shiftExpenses({},shift,0)
  assert.equal(initial.khr,44100,'created_at, not fee_date, assigns shift expenses')

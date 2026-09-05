@@ -61,6 +61,11 @@ function loadReal(relPath, requireOverrides = {}) {
 // fee, so the message and the stored total_usd cannot disagree about it.
 // Both lanes added this binding independently; keep exactly ONE.
 const saleTotals = loadReal('lib/saleTotals.ts')
+const financialPrecision = loadReal('lib/financialPrecision.ts')
+const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', {
+  './financialPrecision': financialPrecision,
+  './saleTotals': saleTotals,
+})
 const lang = loadReal('lib/telegramLang.ts')
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const analytics = loadReal('lib/salesAnalytics.ts', {
@@ -72,6 +77,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
   './saleTotals': saleTotals,
+  './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': analytics,
 })
 
@@ -334,6 +340,30 @@ const cashOnly = telegram.summarizeShiftCash([
 ])
 assert.deepEqual(cashOnly, { usd: 15, khr: 2000, needsReview: false })
 assert.equal(telegram.summarizeShiftCash([{ payment_method: 'Cash', amount_paid_usd: 20, change_usd: 5, change_khr: 20000 }]).needsReview, true)
+assert.deepEqual(telegram.summarizeShiftCash([{
+  payment_method: 'Cash', amount_paid_usd: 20, amount_paid_khr: 0, total_usd: 15, exchange_rate: 4100,
+  change_usd: 5, change_khr: 0, change_is_actual: 1, change_exchange_rate: 4000,
+}]), { usd: 15, khr: 0, needsReview: false })
+assert.deepEqual(telegram.summarizeShiftCash([{
+  payment_method: 'Cash', amount_paid_usd: 0, amount_paid_khr: 82000, total_usd: 15, exchange_rate: 4100,
+  change_usd: 0, change_khr: 20000, change_is_actual: 1, change_exchange_rate: 4000,
+}]), { usd: 0, khr: 62000, needsReview: false })
+assert.deepEqual(telegram.summarizeShiftCash([{
+  payment_method: 'Cash', amount_paid_usd: 20, amount_paid_khr: 4100, total_usd: 19.5, exchange_rate: 4100,
+  change_usd: 1, change_khr: 2000, change_is_actual: 1, change_exchange_rate: 4000,
+}]), { usd: 19, khr: 2100, needsReview: false })
+assert.deepEqual(telegram.summarizeShiftCash([{
+  payment_method: 'Cash', amount_paid_usd: 20, amount_paid_khr: 0, total_usd: 22, exchange_rate: 4100,
+  change_usd: 5, change_khr: 0, change_is_actual: 1, change_exchange_rate: 4000,
+}]), { usd: 15, khr: 0, needsReview: false }, 'later mutable totals do not erase physical change')
+assert.deepEqual(telegram.summarizeShiftCash([{
+  payment_method: 'Cash', amount_paid_usd: 20, total_usd: 15, exchange_rate: 4100,
+  change_usd: 5, change_khr: 0, change_is_actual: 0, change_exchange_rate: null,
+}]), { usd: 20, khr: 0, needsReview: true }, 'legacy dual change remains review-only')
+assert.deepEqual(telegram.summarizeShiftCash([{
+  payment_method: 'Cash', amount_paid_usd: 20, total_usd: 15, exchange_rate: 4100,
+  change_usd: 5, change_khr: 0, change_is_actual: 1, change_exchange_rate: null,
+}]), { usd: 20, khr: 0, needsReview: true }, 'actual marker without its captured rate fails closed')
 for (const change of ['invalid', -1]) assert.equal(telegram.summarizeShiftCash([{ payment_method: 'Cash', amount_paid_usd: 20, change_usd: change }]).needsReview, true)
 assert.equal(telegram.summarizeShiftCash([{ payment_method: 'Cash', amount_paid_usd: 20, total_usd: 15 }]).needsReview, true)
 assert.equal(telegram.summarizeShiftCash([{ payment_method: '', amount_paid_usd: 20 }]).needsReview, true)
@@ -458,6 +488,7 @@ const wired = loadReal('lib/telegram.ts', {
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
   './saleTotals': saleTotals,
+  './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': loadReal('lib/salesAnalytics.ts', {
     './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow,
   }),
@@ -501,6 +532,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './businessDateWindow': businessDateWindow,
     './telegramLang': lang,
     './saleTotals': saleTotals,
+    './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow }),
   })
   return wiredEmpty.telegramCommandReply({}, '/shift 03/09/2026', NOW)
@@ -578,6 +610,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './businessDateWindow': businessDateWindow,
     './telegramLang': lang,
     './saleTotals': saleTotals,
+    './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => mappingDb }, './businessDateWindow': businessDateWindow }),
   })
   return wiredMapping.telegramCommandReply({}, '/shift 04/09/2026', NOW)
@@ -616,7 +649,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './db': { getDb: () => ({prepare:()=>({all:async()=>[
       {key:'telegram_chat_id',value:'123'}, {key:'telegram_automation_enabled',value:'1'},
     ]})}) },
-    './businessDateWindow':businessDateWindow,'./telegramLang':lang,'./saleTotals':saleTotals,'./salesAnalytics':analytics,
+    './businessDateWindow':businessDateWindow,'./telegramLang':lang,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,'./salesAnalytics':analytics,
   })
   const originalFetch=global.fetch; const sent=[]
   try {
