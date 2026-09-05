@@ -49,6 +49,12 @@ function calculationUnitsValue(units: bigint): number {
   return Number(units) / 10_000
 }
 
+function isExactNativeIncrement(value: unknown, multiplier: number): boolean {
+  const numeric = Number(value ?? 0)
+  return Number.isFinite(numeric)
+    && Math.abs(numeric * multiplier - Math.round(numeric * multiplier)) < 1e-9
+}
+
 export type SettlementPlan = {
   paymentDetails: NativeTenderRow[]
   paymentDetailsJson: string
@@ -179,10 +185,10 @@ export function planSaleSettlement(input: {
     } else {
       const activeMethod = canonical.get(key)
       if (!activeMethod || RETIRED_PAYMENT_METHODS.has(key)) fail(`"${suppliedMethod}" is not an active configured payment method.`, 'inactive_payment_method')
-      if (comparisonUsd % 100n !== 0n) {
+      if (!isExactNativeIncrement(detail.amount_usd, 100) || comparisonUsd % 100n !== 0n) {
         fail(`Payment row ${index + 1} must use whole USD cents.`, 'invalid_payment_amount')
       }
-      if (khrUnits % 10_000n !== 0n) {
+      if (!isExactNativeIncrement(detail.amount_khr, 1) || khrUnits % 10_000n !== 0n) {
         fail(`Payment row ${index + 1} must use whole KHR riel.`, 'invalid_payment_amount')
       }
       method = activeMethod
@@ -217,8 +223,18 @@ export function planSaleSettlement(input: {
   const amountPaidKhr = calculationUnitsValue(paidKhrUnits)
   const totalUsd = Number(input.totalUsd)
   if (!Number.isFinite(totalUsd) || totalUsd < 0) fail('The sale total is invalid.', 'invalid_payment_amount')
+  let rateUnits: bigint
+  let totalUsdUnits: bigint
+  try {
+    rateUnits = financialCalculationUnits(rate)
+    totalUsdUnits = financialCalculationUnits(totalUsd)
+  } catch {
+    fail('The sale total or current exchange rate is invalid.', 'invalid_payment_amount')
+  }
   const paidCombinedUsd = amountPaidUsd + amountPaidKhr / rate
-  if (paidCombinedUsd + 0.0000001 < totalUsd) {
+  const paidScaled = paidUsdUnits * rateUnits + paidKhrUnits * 10_000n
+  const totalScaled = totalUsdUnits * rateUnits
+  if (paidScaled < totalScaled) {
     fail('The payment does not cover the sale balance.', 'insufficient_payment')
   }
   const overpayExactUsd = Math.max(0, paidCombinedUsd - totalUsd)
