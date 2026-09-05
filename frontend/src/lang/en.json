@@ -5674,5 +5674,6 @@
   "sale_settlement_allocation_missing": "This sale has a combined payment summary without its original tender allocation. Repair the payment details before settling it.",
   "sale_settlement_rate_changed": "The exchange rate changed. Review the updated balance, then confirm again.",
   "outstanding_balance": "Outstanding balance",
-  "sale_settlement_rows_limit": "This sale has {count} recorded payment rows. Settlement supports at most {max}; no recorded rows were removed. Repair the record before completing it."
+  "sale_settlement_rows_limit": "This sale has {count} recorded payment rows. Settlement supports at most {max}; no recorded rows were removed. Repair the record before completing it.",
+  "sale_mutation_rate_changed": "The exchange rate changed. Review the updated KHR rate, then confirm again."
 }
