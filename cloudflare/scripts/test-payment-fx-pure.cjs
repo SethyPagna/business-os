@@ -13,6 +13,10 @@ const actual = new Set([
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
   'nativeSaleChange',
   'receiptNumber','clientTimestamp',
+  // The selling-branch guard and the two canonical branch roles it reads:
+  // real modules, so POST /sales here rejects a warehouse line exactly as
+  // the Worker does rather than silently resolving to an empty stub.
+  'branchRoleGuards','branchRoles',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

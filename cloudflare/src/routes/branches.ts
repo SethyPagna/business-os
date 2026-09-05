@@ -15,6 +15,9 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
+// Transfers run warehouse -> shop. The direction rule lives with the two
+// canonical branch roles rather than being restated at each call site.
+import { transferDirectionError } from '../lib/branchRoleGuards'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
 
@@ -371,6 +374,13 @@ app.post('/transfer', async (c) => {
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
     findIdentityMatch(db, product),
   ])
+  // Direction, on the same shared predicate the TransferModal's two selects
+  // grey out with (lib/branchRoles.ts). Same-branch is rejected above; this
+  // is the other half of the rule -- the shop never sends stock away and the
+  // warehouse never receives it.
+  const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+  if (directionError) return c.json({ error: directionError }, 400)
+
   const destProductId = mergeTarget?.id ?? productId
   const destProductName = mergeTarget?.name ?? product.name
   const mergedNote = mergeTarget ? `Added to existing product "${destProductName}" (#${destProductId}) at ${toBranch?.name || 'destination'}` : null
@@ -602,6 +612,9 @@ app.post('/transfer-bulk', async (c) => {
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
   ])
+
+  const bulkDirectionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+  if (bulkDirectionError) return c.json({ error: bulkDirectionError }, 400)
 
   const productById = new Map(products.map((product) => [product.id, product]))
   const stockByProductId = new Map(stockRows.map((row) => [row.product_id, Number(row.quantity) || 0]))

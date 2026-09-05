@@ -20,6 +20,10 @@ import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/
 // every sale writer rather than done in the POS component.
 import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '../lib/paymentMethodRegistry'
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
+// The warehouse holds stock and never sells. Every sale-side picker refuses
+// it in the UI; these are the same rule where it cannot be bypassed -- an
+// offline queue replayed later, a direct API caller, or a stale client.
+import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
 import {
   SALE_SETTLEMENT_ACTION_KIND,
   buildSaleSettlementAfterState,
@@ -357,6 +361,19 @@ app.post('/', async (c) => {
       quantity,
       branch_id: Number(item.branch_id || body.branch_id) || null,
     })
+  }
+
+  // ---- 1b. The selling branch ----
+  // A line may name its own branch, so this checks the DISTINCT set the cart
+  // actually resolved to rather than trusting body.branch_id alone.
+  const saleBranchIds = [...new Set(normalized.map((item) => item.branch_id).filter((id): id is number => !!id))]
+  if (saleBranchIds.length) {
+    const saleBranchRows = await selectInChunks(saleBranchIds, 0, (chunk) => db
+      .prepare(`SELECT id, name FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ id: number; name: string }>(chunk))
+    if (firstUnsellableBranch(saleBranchRows)) {
+      return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
+    }
   }
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
@@ -2060,6 +2077,18 @@ app.post('/:id/items', async (c) => {
     })
   }
 
+  // Added lines are sold exactly like checkout lines, so they answer to the
+  // same selling-branch rule.
+  const addedBranchIds = [...new Set(requested.map((item) => item.branchId).filter((id): id is number => !!id))]
+  if (addedBranchIds.length) {
+    const addedBranchRows = await selectInChunks(addedBranchIds, 0, (chunk) => db
+      .prepare(`SELECT id, name FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ id: number; name: string }>(chunk))
+    if (firstUnsellableBranch(addedBranchRows)) {
+      return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
+    }
+  }
+
   // ---- Current prices/costs, chunked for D1's parameter ceiling ----
   const productIds = [...new Set(requested.map((item) => item.productId))]
   const products = await selectInChunks(productIds, 0, (chunk) => db
@@ -2787,6 +2816,13 @@ app.post('/:id/amendments', async (c) => {
     if (!product) return c.json({ error: `Product #${productId} no longer exists.` }, 400)
 
     const branchId = Number(replacement.branch_id || line.branch_id || sale.branch_id) || null
+    if (branchId) {
+      const replacementBranch = await db.prepare('SELECT id, name FROM branches WHERE id = ?')
+        .get<{ id: number; name: string }>([branchId])
+      if (replacementBranch && firstUnsellableBranch([replacementBranch])) {
+        return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
+      }
+    }
     const rawPrice = Number(replacement.applied_price_usd)
     const unitPriceUsd = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : Number(product.selling_price_usd) || 0
 

@@ -93,6 +93,7 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 let activeUser = FAKE_USER
 
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/db': { getDb: () => db },
   // routes/returns.ts buckets return dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.

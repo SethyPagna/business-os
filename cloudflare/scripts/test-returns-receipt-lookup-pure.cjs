@@ -81,6 +81,7 @@ const permissions = loadReal('lib/permissions.ts')
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true }) }
 
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   '../lib/sqlBinding': sqlBinding,
