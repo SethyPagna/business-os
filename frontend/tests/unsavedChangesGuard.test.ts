@@ -303,6 +303,8 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   'components/products/surfaces/ProductDetailReport.tsx': 'read-only report',
   'components/receipt-settings/ReceiptSettings.tsx': 'the overlay is the phone-sized PREVIEW of the settings; the settings form itself is the page',
   'components/returns/ReturnDetailModal.tsx': 'read-only viewer',
+  'components/returns/ReturnsBulkActionModal.tsx': 'source/target confirmation only; closing abandons the choice without a write or editable record draft',
+  'components/sales/BulkSaleChangeModal.tsx': 'source/target confirmation and target lookup only; per-sale cancellation data is collected separately in guarded BulkSaleCancelModal',
   'components/shared/ImageGalleryLightbox.tsx': 'an image lightbox',
   'components/shared/kit/Fold.tsx': 'a layout primitive',
   'components/users/UserDetailSheet.tsx': 'read-only viewer',
