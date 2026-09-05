@@ -15,6 +15,7 @@ import {
   fetchShiftHistory,
   listShifts,
   orderShiftRows,
+  parseShiftCount,
   reopenShift,
   shiftLocalDateTimeToIso,
   type Shift,
@@ -32,6 +33,7 @@ type Props = {
 }
 
 type EditDraft = {
+  expectedRevision: number
   reason: string
   openedAt: string
   closedAt: string
@@ -73,6 +75,7 @@ function dateTimeLocal(value: string | null): string {
 }
 
 const editDraft = (shift: Shift): EditDraft => ({
+  expectedRevision: shift.revision,
   reason: '',
   openedAt: dateTimeLocal(shift.opened_at),
   closedAt: dateTimeLocal(shift.closed_at),
@@ -242,6 +245,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
 
   const refreshDetails = async (shift: Shift) => {
     const requestId = ++detailsRequest.current
+    setDetailsLoading(true)
     try {
       const history = await fetchShiftHistory(shift.id)
       if (requestId === detailsRequest.current) {
@@ -251,22 +255,37 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
       }
     } catch (cause) {
       if (requestId === detailsRequest.current) setDetailsError(cause instanceof Error ? cause.message : t('shift_history_failed'))
+    } finally {
+      if (requestId === detailsRequest.current) setDetailsLoading(false)
     }
   }
 
+  const reportSaveError = (cause: unknown, fallbackKey: string) => {
+    const message = cause instanceof Error ? cause.message : t(fallbackKey)
+    if (Number((cause as { status?: unknown } | null)?.status) === 409) setDetailsError(message)
+    sendNotice?.(message, 'error')
+  }
+
   const saveEdit = async () => {
-    if (!selected || !edit || !edit.reason.trim() || saving) return
+    if (!selected || !edit || !edit.reason.trim() || !edit.openedAt || saving) return
+    const openingFloatUsd = parseShiftCount(edit.openingUsd)
+    const openingFloatKhr = parseShiftCount(edit.openingKhr)
+    const closingCountedUsd = edit.closedAt ? parseShiftCount(edit.closingUsd) : null
+    const closingCountedKhr = edit.closedAt ? parseShiftCount(edit.closingKhr) : null
+    if (openingFloatUsd == null || openingFloatKhr == null
+      || (edit.closedAt && (closingCountedUsd == null || closingCountedKhr == null))) return
     setSaving(true)
     try {
       const result = await amendShift(selected.id, {
+        expectedRevision: edit.expectedRevision,
         reason: edit.reason.trim(),
         openedAt: shiftLocalDateTimeToIso(edit.openedAt),
-        openingFloatUsd: Number(edit.openingUsd) || 0,
-        openingFloatKhr: Number(edit.openingKhr) || 0,
+        openingFloatUsd,
+        openingFloatKhr,
         openingNote: edit.openingNote.trim() || null,
         closedAt: edit.closedAt ? shiftLocalDateTimeToIso(edit.closedAt) : null,
-        closingCountedUsd: edit.closedAt ? Number(edit.closingUsd) || 0 : null,
-        closingCountedKhr: edit.closedAt ? Number(edit.closingKhr) || 0 : null,
+        closingCountedUsd,
+        closingCountedKhr,
         closingNote: edit.closedAt ? edit.closingNote.trim() || null : null,
       })
       replaceRow(result.shift)
@@ -275,50 +294,57 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
       sendNotice?.(t('shift_amend_saved'), 'success')
       await refreshDetails(result.shift)
     } catch (cause) {
-      sendNotice?.(cause instanceof Error ? cause.message : t('shift_amend_failed'), 'error')
+      reportSaveError(cause, 'shift_amend_failed')
     } finally { setSaving(false) }
   }
 
   const saveClose = async () => {
-    if (!selected || !close.closedAt || close.closingUsd.trim() === '' || close.closingKhr.trim() === '' || saving) return
+    if (!selected || !close.closedAt || saving) return
+    const closingCountedUsd = parseShiftCount(close.closingUsd)
+    const closingCountedKhr = parseShiftCount(close.closingKhr)
+    if (closingCountedUsd == null || closingCountedKhr == null) return
     setSaving(true)
     try {
       const result = await closeShiftById(selected.id, {
         expectedRevision: selected.revision,
         closedAt: shiftLocalDateTimeToIso(close.closedAt),
-        closingCountedUsd: Number(close.closingUsd) || 0,
-        closingCountedKhr: Number(close.closingKhr) || 0,
+        closingCountedUsd,
+        closingCountedKhr,
         closingNote: close.closingNote.trim() || null,
       })
       if (result.shift) replaceRow(result.shift)
       resetAction()
       refreshMountedShiftState()
       sendNotice?.(t('shift_close_saved'), 'success')
+      await refreshDetails(result.shift)
     } catch (cause) {
-      sendNotice?.(cause instanceof Error ? cause.message : t('shift_end_failed'), 'error')
+      reportSaveError(cause, 'shift_end_failed')
     } finally { setSaving(false) }
   }
 
   const saveReopen = async () => {
-    if (!selected || !reopen.reason.trim() || reopen.openingUsd.trim() === '' || reopen.openingKhr.trim() === '' || saving) return
+    if (!selected || !reopen.reason.trim() || saving) return
+    const openingFloatUsd = parseShiftCount(reopen.openingUsd)
+    const openingFloatKhr = parseShiftCount(reopen.openingKhr)
+    if (openingFloatUsd == null || openingFloatKhr == null) return
     setSaving(true)
     try {
       const result = await reopenShift(selected.id, {
         expectedRevision: selected.revision,
         reason: reopen.reason.trim(),
-        openingFloatUsd: Number(reopen.openingUsd) || 0,
-        openingFloatKhr: Number(reopen.openingKhr) || 0,
+        openingFloatUsd,
+        openingFloatKhr,
         openingNote: reopen.openingNote.trim() || null,
       })
       setRows((current) => orderShiftRows([...current.filter((row) => row.id !== result.shift.id), result.shift]))
       setSelected(result.shift)
       setEdit(editDraft(result.shift))
-      setAmendments([])
       resetAction()
       refreshMountedShiftState()
       sendNotice?.(t('shift_reopen_saved'), 'success')
+      await refreshDetails(result.shift)
     } catch (cause) {
-      sendNotice?.(cause instanceof Error ? cause.message : t('shift_reopen_failed'), 'error')
+      reportSaveError(cause, 'shift_reopen_failed')
     } finally { setSaving(false) }
   }
 
@@ -333,7 +359,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
       sendNotice?.(t('shift_cancel_saved'), 'success')
       await refreshDetails(result.shift)
     } catch (cause) {
-      sendNotice?.(cause instanceof Error ? cause.message : t('shift_cancel_failed'), 'error')
+      reportSaveError(cause, 'shift_cancel_failed')
     } finally { setSaving(false) }
   }
 
@@ -368,7 +394,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
               </button>
               <ShiftSummary shift={selected} detail />
               {detailsLoading ? <p role="status" className="text-sm text-gray-500">{t('shift_current_loading')}</p> : null}
-              {detailsError ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{detailsError}</p> : null}
+              {detailsError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300"><span>{detailsError}</span><button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving} onClick={() => { if (selected) void openDetails(selected) }}>{t('refresh')}</button></div> : null}
 
               {!detailsLoading && !detailsError && (selected.capabilities.can_edit || selected.capabilities.can_close || selected.capabilities.can_reopen || selected.capabilities.can_cancel) ? (
                 <section className="space-y-3" aria-label={t('shift_actions')}>
@@ -393,7 +419,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={edit.closingNote} disabled={!edit.closedAt} onChange={(event) => setEdit({ ...edit, closingNote: event.target.value })} /></label>
                         <label className="text-xs font-semibold sm:col-span-2">{t('shift_reason_required')}<textarea className="input mt-1 min-h-20" required value={edit.reason} onChange={(event) => setEdit({ ...edit, reason: event.target.value })} /></label>
                       </fieldset>
-                      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={resetAction} disabled={saving}>{t('shift_action_cancel')}</button><button type="button" className="btn-primary" disabled={saving || !edit.reason.trim() || !edit.openedAt} onClick={() => void saveEdit()}>{saving ? t('saving_label') : t('shift_save_amendment')}</button></div>
+                      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={resetAction} disabled={saving}>{t('shift_action_cancel')}</button><button type="button" className="btn-primary" disabled={saving || !edit.reason.trim() || !edit.openedAt || parseShiftCount(edit.openingUsd) == null || parseShiftCount(edit.openingKhr) == null || (!!edit.closedAt && (parseShiftCount(edit.closingUsd) == null || parseShiftCount(edit.closingKhr) == null))} onClick={() => void saveEdit()}>{saving ? t('saving_label') : t('shift_save_amendment')}</button></div>
                     </div>
                   ) : null}
 
@@ -406,7 +432,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                         <label className="text-xs">{t('shift_counted_khr')}<input className="input mt-1" type="number" min="0" step="100" required value={close.closingKhr} onChange={(event) => setClose({ ...close, closingKhr: event.target.value })} /></label>
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>
                       </fieldset>
-                      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={resetAction} disabled={saving}>{t('shift_action_cancel')}</button><button type="button" className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={saving || !close.closedAt || close.closingUsd.trim() === '' || close.closingKhr.trim() === ''} onClick={() => void saveClose()}>{saving ? t('saving_label') : t('shift_action_close')}</button></div>
+                      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={resetAction} disabled={saving}>{t('shift_action_cancel')}</button><button type="button" className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={saving || !close.closedAt || parseShiftCount(close.closingUsd) == null || parseShiftCount(close.closingKhr) == null} onClick={() => void saveClose()}>{saving ? t('saving_label') : t('shift_action_close')}</button></div>
                     </div>
                   ) : null}
 
@@ -419,7 +445,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                         <label className="text-xs">{t('shift_float_khr')}<input className="input mt-1" type="number" min="0" step="100" required value={reopen.openingKhr} onChange={(event) => setReopen({ ...reopen, openingKhr: event.target.value })} /></label>
                         <label className="text-xs sm:col-span-2">{t('shift_opening_note')}<input className="input mt-1" value={reopen.openingNote} onChange={(event) => setReopen({ ...reopen, openingNote: event.target.value })} /></label>
                       </fieldset>
-                      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={resetAction} disabled={saving}>{t('shift_action_cancel')}</button><button type="button" className="btn-primary" disabled={saving || !reopen.reason.trim() || reopen.openingUsd.trim() === '' || reopen.openingKhr.trim() === ''} onClick={() => void saveReopen()}>{saving ? t('saving_label') : t('shift_action_reopen')}</button></div>
+                      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={resetAction} disabled={saving}>{t('shift_action_cancel')}</button><button type="button" className="btn-primary" disabled={saving || !reopen.reason.trim() || parseShiftCount(reopen.openingUsd) == null || parseShiftCount(reopen.openingKhr) == null} onClick={() => void saveReopen()}>{saving ? t('saving_label') : t('shift_action_reopen')}</button></div>
                     </div>
                   ) : null}
 
