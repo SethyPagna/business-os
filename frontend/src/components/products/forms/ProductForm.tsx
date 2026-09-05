@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentType, DragEvent } from 'react'
+import type { ComponentType, Dispatch, DragEvent, SetStateAction } from 'react'
 import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
@@ -203,6 +203,11 @@ interface ProductFormProps {
   // once and hands them to every item entered afterwards. Ignored in edit
   // mode -- an existing product's own row always wins.
   createDefaults?: Partial<ProductFormState>
+  // Create forms are not one global draft. Callers name the workflow/session
+  // item so a scanner miss, a create-products item, and standalone Add Product
+  // cannot restore or clear one another's work. Existing products continue to
+  // use their stable entity id regardless of caller.
+  draftScope?: string
   t: Translate
   usdSymbol: string
   khrSymbol: string
@@ -369,6 +374,60 @@ function editablePrice(value: unknown, fallback = 0): string {
   return formatPriceNumber(value)
 }
 
+export function productFormDraftBaseKey(productId: unknown, draftScope = 'standalone-create'): string {
+  const id = String(productId ?? '').trim()
+  if (id) return `product_${id}`
+  const scope = String(draftScope || 'standalone-create').trim() || 'standalone-create'
+  return `product_new_${scope}`
+}
+
+// ProductForm receives reference data and mapped product objects from a busy
+// catalog page. Those references may change during background refreshes even
+// though the operator is still editing the same entity/session item. React
+// state therefore hydrates only when the caller's stable key changes.
+export function useStableHydratedState<T>(initialState: T, hydrationKey: string): [T, Dispatch<SetStateAction<T>>] {
+  const [state, setState] = useState<T>(initialState)
+  const hydratedKeyRef = useRef(hydrationKey)
+  useEffect(() => {
+    if (hydratedKeyRef.current === hydrationKey) return
+    hydratedKeyRef.current = hydrationKey
+    setState(initialState)
+  }, [hydrationKey, initialState])
+  return [state, setState]
+}
+
+export async function clearAfterSuccessfulProductSave(
+  save: () => unknown | Promise<unknown>,
+  clear: () => void,
+): Promise<void> {
+  await Promise.resolve(save())
+  clear()
+}
+
+function editableInitialForm(initialForm: ProductFormState): ProductFormState {
+  return {
+    ...initialForm,
+    selling_price_usd: editablePrice(initialForm.selling_price_usd),
+    selling_price_khr: editablePrice(initialForm.selling_price_khr),
+    // Wholesale is independent from selling price; never borrow its value.
+    wholesale_price_usd: editablePrice(initialForm.wholesale_price_usd),
+    wholesale_price_khr: editablePrice(initialForm.wholesale_price_khr),
+    discount_enabled: Number(initialForm.discount_enabled || 0),
+    discount_type: initialForm.discount_type || 'percent',
+    discount_percent: editablePrice(initialForm.discount_percent || 0),
+    discount_amount_usd: editablePrice(initialForm.discount_amount_usd || 0),
+    discount_amount_khr: editablePrice(initialForm.discount_amount_khr || 0),
+    discount_label: initialForm.discount_label || '',
+    discount_badge_color: initialForm.discount_badge_color || '#e11d48',
+    discount_starts_at: initialForm.discount_starts_at || '',
+    discount_ends_at: initialForm.discount_ends_at || '',
+    expiry_date: initialForm.expiry_date || '',
+    expiry_alert_days: editablePrice(initialForm.expiry_alert_days ?? 30),
+    cost_price_usd: editablePrice(initialForm.cost_price_usd),
+    cost_price_khr: editablePrice(initialForm.cost_price_khr),
+  }
+}
+
 function pickImageFiles(maxCount = 1, options: PickImageFilesOptions = {}): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
@@ -432,6 +491,7 @@ export default function ProductForm({
   onClose,
   onMinimize,
   createDefaults,
+  draftScope,
   t,
   usdSymbol,
   khrSymbol,
@@ -443,10 +503,13 @@ export default function ProductForm({
     || branches[0]?.id?.toString()
     || ''
   const currentProductId = Number(product?.id || 0)
+  const isCreateMode = !product?.id
+  const isEditMode = !isCreateMode
   const imageLimit = isAdminProductUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
+  const draftKey = scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope))
 
   const initialForm = useMemo<ProductFormState>(() => {
-    if (product) {
+    if (product?.id) {
       return { ...product }
     }
     return {
@@ -485,16 +548,21 @@ export default function ProductForm({
       // branch override the blanks above, while every other field keeps the
       // one set of defaults defined here.
       ...(createDefaults || {}),
+      // Backward-compatible support for a caller that supplies a no-id seed:
+      // it is still CREATE mode and must retain all normal create defaults.
+      ...(product || {}),
     }
   }, [product, units, defaultBranchId, createDefaults])
 
-  const [form, setForm] = useState<ProductFormState>(initialForm)
+  const hydratedInitialForm = useMemo(() => editableInitialForm(initialForm), [initialForm])
+  const [form, setForm] = useStableHydratedState<ProductFormState>(hydratedInitialForm, draftKey)
   // Always retain/display a pre-existing admin gallery. The ordinary-user
   // limit controls additions; it must not truncate positions 4-5 merely
   // because someone edited an unrelated product field.
   const [imageList, setImageList] = useState(() => normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
+  const imageHydrationKeyRef = useRef(draftKey)
   const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
-  const lastTabResetKeyRef = useRef<string>(`${currentProductId}:${initialTab || 'basic'}`)
+  const lastTabResetKeyRef = useRef<string>(`${draftKey}:${initialTab || 'basic'}`)
   const [supplierList, setSupplierList] = useState<SupplierOption[]>([])
   const [supplierReferenceVersion, setSupplierReferenceVersion] = useState(0)
   const [supplierDrop, setSupplierDrop] = useState(false)
@@ -604,49 +672,18 @@ export default function ProductForm({
   }, [branches, form.branch_id])
 
   useEffect(() => {
-    setForm({
-      ...initialForm,
-      selling_price_usd: editablePrice(initialForm.selling_price_usd),
-      selling_price_khr: editablePrice(initialForm.selling_price_khr),
-      // Wholesale price is its OWN optional field. It must NOT default to
-      // the selling price. This bug already happened once on the tier this
-      // one replaced: the API was omitting the columns, so a `?? selling`
-      // fallback silently loaded the selling price into the tier field and
-      // the save below wrote it back -- overwriting a real 8 with the
-      // selling 12 on every edit. Loads blank/0 when unset and stays that
-      // way, never borrowing the selling price.
-      wholesale_price_usd: editablePrice(initialForm.wholesale_price_usd),
-      wholesale_price_khr: editablePrice(initialForm.wholesale_price_khr),
-      discount_enabled: Number(initialForm.discount_enabled || 0),
-      discount_type: initialForm.discount_type || 'percent',
-      discount_percent: editablePrice(initialForm.discount_percent || 0),
-      discount_amount_usd: editablePrice(initialForm.discount_amount_usd || 0),
-      discount_amount_khr: editablePrice(initialForm.discount_amount_khr || 0),
-      discount_label: initialForm.discount_label || '',
-      discount_badge_color: initialForm.discount_badge_color || '#e11d48',
-      discount_starts_at: initialForm.discount_starts_at || '',
-      discount_ends_at: initialForm.discount_ends_at || '',
-      expiry_date: initialForm.expiry_date || '',
-      expiry_alert_days: editablePrice(initialForm.expiry_alert_days ?? 30),
-      cost_price_usd: editablePrice(initialForm.cost_price_usd),
-      cost_price_khr: editablePrice(initialForm.cost_price_khr),
-    })
-    setImageList(normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
-    // Defense-in-depth on top of the Products.tsx memoization fix (see
-    // that file's comment on `modalProduct`): only reset the active tab
-    // when this is genuinely a different product (or the caller asked
-    // for a specific initialTab again), not on every re-run of this
-    // effect. Without this guard, any future caller that passes an
-    // unstable `product`/`initialForm` reference would reintroduce the
-    // same "silently snaps back to Basic Info" bug this session fixed.
-    const resetKey = `${currentProductId}:${initialTab || 'basic'}`
+    if (imageHydrationKeyRef.current !== draftKey) {
+      imageHydrationKeyRef.current = draftKey
+      setImageList(normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
+    }
+    const resetKey = `${draftKey}:${initialTab || 'basic'}`
     if (lastTabResetKeyRef.current !== resetKey) {
       lastTabResetKeyRef.current = resetKey
       setActiveTab(initialTab || 'basic')
       setNameUnlocked(false)
       setNameUnlockConfirmOpen(false)
     }
-  }, [initialForm, initialTab, currentProductId, imageLimit])
+  }, [draftKey, initialForm, initialTab])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -689,10 +726,10 @@ export default function ProductForm({
   }, [supplierReferenceVersion])
 
   useEffect(() => {
-    if (!product && !form.branch_id && defaultBranchId) {
+    if (!isEditMode && !form.branch_id && defaultBranchId) {
       setForm((current) => ({ ...current, branch_id: defaultBranchId }))
     }
-  }, [product, form.branch_id, defaultBranchId])
+  }, [isEditMode, form.branch_id, defaultBranchId, setForm])
 
   // N2: any field edit marks this open form dirty; the registration below
   // makes page navigation stop and ask instead of silently dropping it.
@@ -708,8 +745,6 @@ export default function ProductForm({
   // explicit Discard & Leave; a draft older than the product's own
   // updated_at is dropped rather than resurrecting stale edits over newer
   // server data.
-  const draftKey = scopedWorkDraftKey(`product_${product?.id ?? 'new'}`)
-
   // D6 rename gate: a promise the save flow awaits while the shared
   // before->after dialog asks what happens to attached rows.
   const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
@@ -760,7 +795,6 @@ export default function ProductForm({
   // structured verdict modal offers go-back / group-by-name / separate-name
   // choices where they actually differ. Same-name rows always wrap together
   // under the virtual group title; there is no stored parent/child link.
-  const isCreateMode = !product?.id
   const [createMatches, setCreateMatches] = useState<CreateMatchCandidate[]>([])
   const [createVerdictOpen, setCreateVerdictOpen] = useState(false)
   const createVerdictResolveRef = useRef<((choice: 'back' | 'group' | 'new') => void) | null>(null)
@@ -806,7 +840,7 @@ export default function ProductForm({
   // S4-21: ONE key, used both to register this form's dirtiness and to tell
   // the modal chrome which registry entry its ✕ must consult. Two literals
   // would drift and the ✕ would silently stop guarding.
-  const dirtyWorkKey = `product-form-${product?.id ?? 'new'}`
+  const dirtyWorkKey = `product-form-${draftKey}`
 
   const askCreateVerdict = () => new Promise<'back' | 'group' | 'new'>((resolve) => {
     createVerdictResolveRef.current = resolve
@@ -845,7 +879,7 @@ export default function ProductForm({
       discard: () => clearWorkDraft(draftKey),
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [product?.id])
+  }, [draftKey])
 
   useEffect(() => {
     if (!formDirtyRef.current) return
@@ -998,7 +1032,7 @@ export default function ProductForm({
         createMatchAckRef.current = ackKey
       }
     }
-    if (!product && branches.length > 0 && !form.branch_id) {
+    if (isCreateMode && branches.length > 0 && !form.branch_id) {
       alert(tr('branch_required_alert', 'Please choose a branch for this product.', 'សូមជ្រើសរើសសាខាសម្រាប់ផលិតផលនេះ។'))
       return
     }
@@ -1087,10 +1121,14 @@ export default function ProductForm({
     if (!confirmedSave) { saveInFlightRef.current = false; return }
     setSaving(true)
     try {
-      await Promise.resolve(onSave(payload))
-      // Saved for real -- the autosaved draft is now history (Part 388).
-      formDirtyRef.current = false
-      clearWorkDraft(draftKey)
+      await clearAfterSuccessfulProductSave(
+        () => onSave(payload),
+        () => {
+          // Saved for real -- the autosaved draft is now history (Part 388).
+          formDirtyRef.current = false
+          clearWorkDraft(draftKey)
+        },
+      )
     } catch (error) {
       // "Merge into it instead of creating a twin" used to be a dead end: the
       // server's 409 arrived as a bare alert and the operator was left to find
@@ -1155,7 +1193,7 @@ export default function ProductForm({
 
   return (
     <Modal
-      title={product ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product.name}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
+      title={isEditMode ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product?.name || ''}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
       onClose={onClose}
       wide
       headerExtra={(
@@ -1627,16 +1665,16 @@ export default function ProductForm({
               <input
                 id="product-stock-quantity"
                 name="product_stock_quantity"
-                className={`input min-h-11 min-w-0${product ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
+                className={`input min-h-11 min-w-0${isEditMode ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
-                readOnly={!!product}
-                aria-readonly={!!product}
+                readOnly={isEditMode}
+                aria-readonly={isEditMode}
                 value={form.stock_quantity ?? ''}
-                onChange={(event) => { if (!product) setNumericField('stock_quantity', event.target.value) }}
+                onChange={(event) => { if (isCreateMode) setNumericField('stock_quantity', event.target.value) }}
               />
-              {product ? (
+              {isEditMode ? (
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {tr(
                     'product_stock_quantity_locked_hint',
@@ -1646,7 +1684,7 @@ export default function ProductForm({
                 </p>
               ) : null}
             </div>
-            {!product && branches.length > 0 ? (
+            {isCreateMode && branches.length > 0 ? (
               <div className="min-w-0 lg:col-span-2">
                 <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
                 <AppSelect
@@ -1723,7 +1761,7 @@ export default function ProductForm({
             </> : null}
           </div>
 
-          {activeTab === 'stock' && product && branches.length > 0 ? (
+          {activeTab === 'stock' && isEditMode && branches.length > 0 ? (
             <div>
               <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">{tr('branch', 'Branch', 'សាខា')}</p>
               <div className="space-y-2">
@@ -1777,7 +1815,7 @@ export default function ProductForm({
             DeleteConfirmModal (impact summary + explicit confirm), so no
             second confirmation is added here -- this button only opens
             that flow, it never deletes directly itself. */}
-        {product && onDelete ? (
+        {isEditMode && onDelete ? (
           <button
             type="button"
             className="btn-danger min-h-11 shrink-0 px-2.5"

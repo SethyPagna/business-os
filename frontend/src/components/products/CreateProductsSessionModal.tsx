@@ -127,7 +127,10 @@ export default function CreateProductsSessionModal({
   // keys its restore/reset effects on product?.id, which stays undefined for
   // every create, so without a fresh key item two would inherit item one's
   // in-memory state.
-  const [itemFormSeq, setItemFormSeq] = useState(0)
+  // Completed rows and item sequence advance together. Deriving the initial
+  // sequence from restored rows means a reload while typing item N reopens
+  // that same item's draft instead of falling back to item 0.
+  const [itemFormSeq, setItemFormSeq] = useState(() => draft?.rows?.length || 0)
   const [saving, setSaving] = useState(false)
   const sessionIdRef = useRef(draft?.sessionId || Date.now())
   // One lot date for the whole delivery, captured when the session starts.
@@ -139,6 +142,7 @@ export default function CreateProductsSessionModal({
     () => branches.map((branch) => ({ value: String(branch.id ?? ''), label: String(branch.name || branch.id || '') })),
     [branches],
   )
+  const itemUnits = useMemo(() => (units.length ? units : [{ id: 'pcs', name: 'pcs' }]), [units])
   const branchNameFor = (branchId: string): string =>
     branchSelectOptions.find((option) => option.value === String(branchId))?.label || ''
 
@@ -289,8 +293,9 @@ export default function CreateProductsSessionModal({
           key={`create-products-item-${itemFormSeq}`}
           product={null}
           createDefaults={itemDefaults}
+          draftScope={`create-products-session-${sessionIdRef.current}-item-${itemFormSeq}`}
           categories={categories}
-          units={units.length ? units : [{ id: 'pcs', name: 'pcs' }]}
+          units={itemUnits}
           branches={branches}
           brandOptions={brandOptions}
           groupCandidates={groupCandidates}
