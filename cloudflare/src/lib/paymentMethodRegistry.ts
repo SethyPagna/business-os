@@ -50,6 +50,33 @@ export function parseConfiguredMethods(raw: unknown): string[] {
   }
 }
 
+export type StrictConfiguredMethodsResult =
+  | { ok: true; methods: string[] }
+  | { ok: false; methods: []; error: 'invalid_payment_methods_setting' }
+
+/**
+ * Strict mutation-time parser. Reads may tolerate a damaged setting, but a
+ * money write must never reinterpret malformed JSON as an empty active list.
+ */
+export function parseConfiguredMethodsStrict(raw: unknown): StrictConfiguredMethodsResult {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    const text = raw.trim()
+    if (!text) return { ok: false, methods: [], error: 'invalid_payment_methods_setting' }
+    try { parsed = JSON.parse(text) } catch {
+      return { ok: false, methods: [], error: 'invalid_payment_methods_setting' }
+    }
+  }
+  if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string' || !String(value).trim())) {
+    return { ok: false, methods: [], error: 'invalid_payment_methods_setting' }
+  }
+  const methods = normalizeMethodList(parsed)
+  if (!methods.length || methods.length > MAX_CONFIGURED_METHODS) {
+    return { ok: false, methods: [], error: 'invalid_payment_methods_setting' }
+  }
+  return { ok: true, methods }
+}
+
 function normalizeMethodList(values: unknown[]): string[] {
   const out: string[] = []
   const seen = new Set<string>()
