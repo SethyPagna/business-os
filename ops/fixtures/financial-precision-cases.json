@@ -1,0 +1,60 @@
+{
+  "policy": {
+    "calculationDecimals": 4,
+    "actualUsdDecimals": 2,
+    "actualKhrDecimals": 0,
+    "rounding": "nearest-half-up-by-magnitude",
+    "negativeTies": "away-from-zero"
+  },
+  "calculation": [
+    { "name": "positive below half", "input": "1.23444", "units": "12344", "decimal": "1.2344" },
+    { "name": "positive exact half", "input": "1.23445", "units": "12345", "decimal": "1.2345" },
+    { "name": "positive above half", "input": "1.23449", "units": "12345", "decimal": "1.2345" },
+    { "name": "negative below half", "input": "-1.23444", "units": "-12344", "decimal": "-1.2344" },
+    { "name": "negative exact half", "input": "-1.23445", "units": "-12345", "decimal": "-1.2345" },
+    { "name": "negative above half", "input": "-1.23449", "units": "-12345", "decimal": "-1.2345" },
+    { "name": "positive sub-unit below half", "input": "0.00004", "units": "0", "decimal": "0.0000" },
+    { "name": "positive sub-unit exact half", "input": "0.00005", "units": "1", "decimal": "0.0001" },
+    { "name": "negative sub-unit below half", "input": "-0.00004", "units": "0", "decimal": "0.0000" },
+    { "name": "negative sub-unit exact half", "input": "-0.00005", "units": "-1", "decimal": "-0.0001" },
+    { "name": "positive exponent tie", "input": "5e-5", "units": "1", "decimal": "0.0001" },
+    { "name": "positive exponent below tie", "input": "4e-5", "units": "0", "decimal": "0.0000" },
+    { "name": "expanded exponent tie", "input": "123445e-5", "units": "12345", "decimal": "1.2345" },
+    { "name": "negative exponent tie", "input": "-5e-5", "units": "-1", "decimal": "-0.0001" },
+    { "name": "very small exponent", "input": "1e-999", "units": "0", "decimal": "0.0000" },
+    { "name": "positive exponent", "input": "1e3", "units": "10000000", "decimal": "1000.0000" },
+    { "name": "leading and trailing zeroes", "input": "+001.2300", "units": "12300", "decimal": "1.2300" },
+    { "name": "canonical zero", "input": "-0.00000", "units": "0", "decimal": "0.0000" },
+    { "name": "maximum safe calculation units", "input": "900719925474.0991", "units": "9007199254740991", "decimal": "900719925474.0991" }
+  ],
+  "actualUsd": [
+    { "name": "USD below half cent", "input": "1.004", "units": "100", "decimal": "1.00" },
+    { "name": "USD positive half cent", "input": "1.005", "units": "101", "decimal": "1.01" },
+    { "name": "USD negative half cent", "input": "-1.005", "units": "-101", "decimal": "-1.01" },
+    { "name": "USD exponent half cent", "input": "1005e-3", "units": "101", "decimal": "1.01" }
+  ],
+  "actualKhr": [
+    { "name": "KHR below half riel", "input": "4100.4", "units": "4100", "decimal": "4100" },
+    { "name": "KHR positive half riel", "input": "4100.5", "units": "4101", "decimal": "4101" },
+    { "name": "KHR negative half riel", "input": "-4100.5", "units": "-4101", "decimal": "-4101" },
+    { "name": "KHR exponent exact", "input": "8.82e3", "units": "8820", "decimal": "8820" }
+  ],
+  "invalid": [
+    { "input": "", "code": "INVALID_DECIMAL" },
+    { "input": "   ", "code": "INVALID_DECIMAL" },
+    { "input": "abc", "code": "INVALID_DECIMAL" },
+    { "input": "NaN", "code": "INVALID_DECIMAL" },
+    { "input": "Infinity", "code": "INVALID_DECIMAL" },
+    { "input": "1,000.00", "code": "INVALID_DECIMAL" },
+    { "input": "0x10", "code": "INVALID_DECIMAL" },
+    { "input": "1_000", "code": "INVALID_DECIMAL" },
+    { "input": "1e", "code": "INVALID_DECIMAL" }
+  ],
+  "overflow": [
+    { "kind": "calculation", "input": "900719925474.0992", "code": "OUT_OF_RANGE" },
+    { "kind": "calculation", "input": "1e999", "code": "OUT_OF_RANGE" },
+    { "kind": "calculation", "input": "1e100001", "code": "OUT_OF_RANGE" },
+    { "kind": "actualUsd", "input": "90071992547409.92", "code": "OUT_OF_RANGE" },
+    { "kind": "actualKhr", "input": "9007199254740992", "code": "OUT_OF_RANGE" }
+  ]
+}
