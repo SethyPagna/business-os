@@ -78,8 +78,8 @@ export const REPORT_VIEWS: readonly ReportViewDef[] = [
   { id: 'weekdays', area: 'sales', group: 'sales', labelKey: 'rpt_weekdays', fallback: 'Days of week', groupedBy: 'weekday', supportsTime: true, supportsSearch: false, supportsSaleFilters: true },
   { id: 'branches', area: 'sales', group: 'sales', labelKey: 'rpt_branches', fallback: 'Branches', groupedBy: 'branch', supportsTime: true, supportsSearch: true, supportsSaleFilters: true },
   { id: 'couriers', area: 'sales', group: 'sales', labelKey: 'rpt_couriers', fallback: 'Couriers', groupedBy: 'courier', supportsTime: true, supportsSearch: true, supportsSaleFilters: true },
-  { id: 'returns', area: 'returns', group: 'other', labelKey: 'returns', fallback: 'Returns', supportsTime: false, supportsSearch: true, supportsSaleFilters: false },
-  { id: 'expenses', area: 'fees', group: 'other', labelKey: 'fees', fallback: 'Expenses', supportsTime: false, supportsSearch: true, supportsSaleFilters: false },
+  { id: 'returns', area: 'returns', group: 'other', labelKey: 'returns', fallback: 'Returns', supportsTime: true, supportsSearch: true, supportsSaleFilters: false },
+  { id: 'expenses', area: 'fees', group: 'other', labelKey: 'fees', fallback: 'Expenses', supportsTime: true, supportsSearch: true, supportsSaleFilters: false },
 ]
 
 export interface ReportPermissions {
@@ -128,21 +128,47 @@ export interface ReportFilters {
 
 export const EMPTY_REPORT_FILTERS: ReportFilters = { startDate: '', endDate: '', startTime: '', endTime: '', branchId: '', status: '', paymentMethod: '' }
 
-const CLOCK_RE = /^\d{2}:\d{2}$/
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+const CLOCK_RE = /^([01]\d|2[0-3]):([0-5]\d)$/
+const BUSINESS_UTC_OFFSET_HOURS = 7
 
 /**
- * Query parameters for one view: dates + branch always; the time window
- * only for timestamp-backed sales views (returns/expenses are date-only);
- * status / payment method only where the view understands them.
+ * Convert one Cambodia wall-clock minute to the canonical UTC timestamp shape
+ * accepted by SalesFilters.createdFrom/createdTo. The conversion is fixed at
+ * UTC+07 and never depends on the browser/device timezone.
+ */
+export function reportUtcBound(date: string, time: string, plusMinutes = 0): string | null {
+  const dateMatch = DATE_RE.exec(date)
+  const timeMatch = CLOCK_RE.exec(time)
+  if (!dateMatch || !timeMatch || !Number.isInteger(plusMinutes)) return null
+  const year = Number(dateMatch[1])
+  const month = Number(dateMatch[2])
+  const day = Number(dateMatch[3])
+  const hour = Number(timeMatch[1])
+  const minute = Number(timeMatch[2])
+  const dateProbe = new Date(Date.UTC(year, month - 1, day))
+  if (dateProbe.getUTCFullYear() !== year || dateProbe.getUTCMonth() !== month - 1 || dateProbe.getUTCDate() !== day) return null
+  const utc = new Date(Date.UTC(year, month - 1, day, hour - BUSINESS_UTC_OFFSET_HOURS, minute + plusMinutes, 0))
+  return utc.toISOString().slice(0, 19).replace('T', ' ')
+}
+
+/**
+ * Query parameters for one view: dates + branch always; endpoint times become
+ * one continuous half-open UTC range. The selected end minute is inclusive,
+ * so createdTo is the following minute. A full-day selection deliberately
+ * omits exact bounds and preserves each reader's historical date-only basis.
  */
 export function reportQueryParams(f: ReportFilters, view: ReportViewDef): Record<string, string> {
   const q: Record<string, string> = {}
   if (f.startDate) q.startDate = f.startDate
   if (f.endDate) q.endDate = f.endDate
   if (f.branchId) q.branchId = f.branchId
-  if (view.supportsTime && CLOCK_RE.test(f.startTime) && CLOCK_RE.test(f.endTime) && !(f.startTime === '00:00' && f.endTime === '23:59')) {
-    q.startTime = f.startTime
-    q.endTime = f.endTime
+  if (view.supportsTime && f.startDate && f.endDate && CLOCK_RE.test(f.startTime) && CLOCK_RE.test(f.endTime) && !(f.startTime === '00:00' && f.endTime === '23:59')) {
+    const createdFrom = reportUtcBound(f.startDate, f.startTime)
+    const createdTo = reportUtcBound(f.endDate, f.endTime, 1)
+    if (!createdFrom || !createdTo || createdFrom >= createdTo) throw new RangeError('Report end date/time must be after the start date/time')
+    q.createdFrom = createdFrom
+    q.createdTo = createdTo
   }
   if (view.supportsSaleFilters) {
     if (f.status) q.status = f.status

@@ -984,18 +984,27 @@ export async function getDeliveryContactTotals(
     GROUP BY delivery_contact_id, LOWER(TRIM(COALESCE(delivery_contact_name, '')))
   `).all<Record<string, unknown>>(params)
 
-  // Standalone courier payments are expense rows, not sale rows.  Keep the
+  // Standalone courier payments are expense rows, not sale rows. Keep the
   // accounting amounts separate from charged/absorbed sale fees so reports
   // never double-count or silently reinterpret an Expense-classified label.
-  // fee_date owns the calendar-day filter; an optional time-of-day filter is
-  // evaluated against the source-preserved created_at timestamp in UTC+7.
+  // Exact report moments use system-entry created_at. Date-only callers retain
+  // the historical fee_date basis; the legacy recurring time mask remains for
+  // direct callers that have not migrated to createdFrom/createdTo.
   const feeClauses: string[] = ['fees.delivery_contact_id IS NOT NULL']
   const feeParams: Record<string, unknown> = {}
-  if (f.startDate) { feeClauses.push('fees.fee_date >= @feeStartDate'); feeParams.feeStartDate = f.startDate }
-  if (f.endDate) { feeClauses.push('fees.fee_date <= @feeEndDate'); feeParams.feeEndDate = f.endDate }
+  const feeCreatedFrom = shiftWindowBound(f.createdFrom)
+  const feeCreatedTo = shiftWindowBound(f.createdTo)
+  if (feeCreatedFrom && feeCreatedTo) {
+    feeClauses.push('datetime(fees.created_at) >= @feeCreatedFrom', 'datetime(fees.created_at) < @feeCreatedTo')
+    feeParams.feeCreatedFrom = feeCreatedFrom
+    feeParams.feeCreatedTo = feeCreatedTo
+  } else {
+    if (f.startDate) { feeClauses.push('fees.fee_date >= @feeStartDate'); feeParams.feeStartDate = f.startDate }
+    if (f.endDate) { feeClauses.push('fees.fee_date <= @feeEndDate'); feeParams.feeEndDate = f.endDate }
+  }
   if (f.branchId) { feeClauses.push('fees.branch_id = @feeBranchId'); feeParams.feeBranchId = f.branchId }
   const validTime = (value: unknown): value is string => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
-  if (validTime(f.startTime) && validTime(f.endTime)) {
+  if (!feeCreatedFrom && !feeCreatedTo && validTime(f.startTime) && validTime(f.endTime)) {
     feeClauses.push(localTimeRangeClause('fees.created_at').replaceAll('@startTime', '@feeStartTime').replaceAll('@endTime', '@feeEndTime'))
     feeParams.feeStartTime = f.startTime
     feeParams.feeEndTime = f.endTime
@@ -1220,14 +1229,23 @@ export async function getSalesDayReport(
 export function previousPeriodFilters(f: SalesFilters): SalesFilters {
   const start = new Date(`${f.startDate}T00:00:00Z`)
   const end = new Date(`${f.endDate}T00:00:00Z`)
-  const spanMs = Math.max(0, end.getTime() - start.getTime()) + 24 * 60 * 60 * 1000
-  const prevEnd = new Date(start.getTime() - 24 * 60 * 60 * 1000)
-  const prevStart = new Date(prevEnd.getTime() - spanMs + 24 * 60 * 60 * 1000)
-  return {
+  const dayMs = 24 * 60 * 60 * 1000
+  const spanMs = Math.max(0, end.getTime() - start.getTime()) + dayMs
+  const prevEnd = new Date(start.getTime() - dayMs)
+  const prevStart = new Date(prevEnd.getTime() - spanMs + dayMs)
+  const previous: SalesFilters = {
     startDate: prevStart.toISOString().slice(0, 10),
     endDate: prevEnd.toISOString().slice(0, 10),
     branchId: f.branchId,
   }
+  const createdFrom = shiftWindowBound(f.createdFrom)
+  const createdTo = shiftWindowBound(f.createdTo)
+  if (createdFrom && createdTo) {
+    const shift = (value: string) => new Date(`${value.replace(' ', 'T')}Z`).getTime() - spanMs
+    previous.createdFrom = new Date(shift(createdFrom)).toISOString().slice(0, 19).replace('T', ' ')
+    previous.createdTo = new Date(shift(createdTo)).toISOString().slice(0, 19).replace('T', ' ')
+  }
+  return previous
 }
 
 // D3 (Part 422): the product detail page's sales breakdown -- how much of
