@@ -23,6 +23,12 @@ assert.match(productFormSource, /restoredLegacyDraftKeyRef\.current = legacyDraf
 assert.match(productFormSource, /useEffect\(\(\) => \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?\}, \[draftKey\]\)/, 'unmount/key change must flush only this form pending draft')
 assert.match(productFormSource, /const preserveAndMinimize = isCreateMode && onMinimize \? \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?onMinimize\(/, 'standalone prompt minimize must synchronously finish its own draft before parking')
 assert.match(productFormSource, /<Modal[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'ProductForm must expose its proven preservation capability to the shared close prompt')
+assert.match(productFormSource, /const nestedChildSurfaceOpen = modalLayer === 'nested'/, 'nested ProductForm must explicitly account for its own child surfaces')
+assert.match(productFormSource, /const effectiveModalLayer = nestedChildSurfaceOpen \? 'default' : modalLayer/, 'a fixed-layer child must be raised above a nested ProductForm without shared-file edits')
+assert.match(productFormSource, /layer=\{effectiveModalLayer\}/, 'ProductForm must apply the child-aware layer')
+assert.match(productFormSource, /function canManageProductImages/, 'product image controls need the products:image action gate')
+assert.match(productFormSource, /actionAllowed\([\s\S]*?'products',[\s\S]*?'image'/, 'the image gate must use the same action contract as the permission editor/backend')
+assert.match(productFormSource, /canManageImages \? \([\s\S]*?onClick=\{addImages\}/, 'upload controls must stay hidden when products:image is blocked')
 assert.match(productFormSource, /<MinimizeButton[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'header and close-prompt minimize must use the same preservation path')
 assert.match(productsSource, /onMinimize=\{!modalProduct \?/, 'only standalone create receives the minimized-chip callback')
 const sessionProductForm = createSessionSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''

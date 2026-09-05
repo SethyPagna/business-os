@@ -29,6 +29,8 @@ import {
   withLoaderTimeout,
 } from '../../../utils/loaders.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
+import { getPermissionTierFromMap, parsePermissionMap } from '../../../utils/permissions.ts'
+import { actionAllowed, isActionOverriddenOff } from '../../../utils/permissionActions.ts'
 
 // The server's "same name + barcode + cost is the same product -- merge into it
 // instead of creating a twin" 409, unpacked into the row it is pointing at.
@@ -335,6 +337,23 @@ function isAdminProductUser(user?: ProductUser | null): boolean {
     || String(user?.role_code || '').trim().toLowerCase() === 'admin'
     || hasAllPermission(user?.permissions)
     || hasAllPermission(user?.role_permissions)
+}
+
+function canManageProductImages(user?: ProductUser | null): boolean {
+  if (!user) return false
+  const merged = {
+    ...parsePermissionMap(user.role_permissions),
+    ...parsePermissionMap(user.permissions),
+  }
+  const admin = isAdminProductUser(user)
+  const hasKey = (key: string): boolean => getPermissionTierFromMap(merged, key, admin) === 'full'
+  return actionAllowed(
+    'products',
+    'image',
+    getPermissionTierFromMap(merged, 'products', admin),
+    hasKey,
+    (section, action) => isActionOverriddenOff(merged, section, action),
+  )
 }
 
 function normalizeGallery(product?: ProductFormState | null, limit = MAX_PRODUCT_GALLERY_IMAGES): string[] {
@@ -661,6 +680,7 @@ export default function ProductForm({
   const [nameUnlocked, setNameUnlocked] = useState(false)
   const [nameUnlockConfirmOpen, setNameUnlockConfirmOpen] = useState(false)
   const nameLocked = isGroupedProduct && !nameUnlocked
+  const canManageImages = canManageProductImages(user)
   const aliveRef = useRef(true)
   const imageUploadInFlightRef = useRef(false)
   const saveInFlightRef = useRef(false)
@@ -934,17 +954,17 @@ export default function ProductForm({
   }
 
   async function addImages(): Promise<void> {
-    if (saving || imageUploading) return
+    if (!canManageImages || saving || imageUploading) return
     await uploadPickedImages({})
   }
 
   async function addPhoto(): Promise<void> {
-    if (saving || imageUploading) return
+    if (!canManageImages || saving || imageUploading) return
     await uploadPickedImages({ capture: 'environment' })
   }
 
   async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
-    if (imageUploading || imageUploadInFlightRef.current) return
+    if (!canManageImages || imageUploading || imageUploadInFlightRef.current) return
     imageUploadInFlightRef.current = true
     try {
       const remaining = Math.max(0, imageLimit - imageList.length)
@@ -998,6 +1018,7 @@ export default function ProductForm({
   }
 
   function removeImage(index: number): void {
+    if (!canManageImages) return
     setImageList((current) => current.filter((_, idx) => idx !== index))
   }
 
@@ -1009,6 +1030,7 @@ export default function ProductForm({
   // most mobile touchscreens) an equivalent left/right-arrow way to do the
   // same reorder without a mouse.
   function reorderImage(fromIndex: number, toIndex: number): void {
+    if (!canManageImages) return
     setImageList((current) => {
       if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= current.length || toIndex < 0 || toIndex >= current.length) return current
       const next = [...current]
@@ -1023,6 +1045,7 @@ export default function ProductForm({
   }
 
   function setPrimaryImage(index: number): void {
+    if (!canManageImages) return
     setImageList((current) => {
       if (index < 0 || index >= current.length) return current
       const next = [...current]
@@ -1238,13 +1261,23 @@ export default function ProductForm({
     const typedName = String(form.name || '').trim()
     onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
   } : undefined
+  // ProductForm can itself be a nested z-[1070] surface. Several older child
+  // prompts still own fixed/default layers (ConfirmDialog/FilePicker z-[1050],
+  // rename z-[1060]). While one is open, lower only this form back to the
+  // default layer; portal insertion order then keeps session -> form -> child
+  // stacked in interaction order without changing shared components we do not
+  // own. Direct ProductForm child Modals use the same choreography as well.
+  const nestedChildSurfaceOpen = modalLayer === 'nested' && Boolean(
+    filePickerOpen || renameRequest || mergeStockChoiceDialog || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
+  )
+  const effectiveModalLayer = nestedChildSurfaceOpen ? 'default' : modalLayer
 
   return (
     <Modal
       title={isEditMode ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product?.name || ''}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
       onClose={onClose}
       onMinimize={preserveAndMinimize}
-      layer={modalLayer}
+      layer={effectiveModalLayer}
       wide
       headerExtra={(
         <>
@@ -1311,7 +1344,7 @@ export default function ProductForm({
                   'រូបភាពជាកម្មសិទ្ធិរបស់ក្រុមទាំងមូល មិនមែនជួរនេះទេ។ សូមបន្ថែម ឬប្តូរពីចំណងជើងក្រុមខាងលើ។ ដាក់ឈ្មោះផ្សេងឲ្យជួរនេះ ដើម្បីធ្វើឲ្យវាក្លាយជាផលិតផលដាច់ដោយឡែក ដែលមានរូបភាពផ្ទាល់ខ្លួន។',
                 )}
               </p>
-            ) : (
+            ) : canManageImages ? (
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary min-h-11 text-sm" onClick={addImages} disabled={saving || imageUploading}>
                 {imageUploading ? tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...') : tr('choose_file', 'Choose File', 'ជ្រើសរើសឯកសារ')}
@@ -1323,6 +1356,10 @@ export default function ProductForm({
                 {tr('open_files', 'Open Files', 'បើកឯកសារ') || tr('files', 'Files', 'ឯកសារ')}
               </button>
             </div>
+            ) : (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                {tr('no_permission', 'You do not have permission to manage product images.', 'អ្នកមិនមានសិទ្ធិគ្រប់គ្រងរូបភាពផលិតផលទេ។')}
+              </p>
             )}
             {imageList.length && !imagesOwnedByGroupLead ? (
               <>
@@ -1336,7 +1373,7 @@ export default function ProductForm({
                     <div
                       key={`${image}-${index}`}
                       className={`group relative overflow-hidden rounded-xl border bg-slate-50 ${dragImageIndex === index ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}`}
-                      draggable={imageList.length > 1}
+                      draggable={canManageImages && imageList.length > 1}
                       onDragStart={(event: DragEvent<HTMLDivElement>) => {
                         setDragImageIndex(index)
                         event.dataTransfer.effectAllowed = 'move'
@@ -1355,7 +1392,7 @@ export default function ProductForm({
                           {tr('primary', 'Primary', 'រូបសំខាន់')}
                         </span>
                       ) : null}
-                      {imageList.length > 1 ? (
+                      {canManageImages && imageList.length > 1 ? (
                         <div className="absolute right-1 top-1 flex gap-0.5">
                           <button
                             type="button"
@@ -1377,14 +1414,14 @@ export default function ProductForm({
                           </button>
                         </div>
                       ) : null}
-                      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/55 px-1.5 py-1 text-[10px] text-white">
+                      {canManageImages ? <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/55 px-1.5 py-1 text-[10px] text-white">
                         <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => setPrimaryImage(index)}>
                           {index === 0 ? tr('primary', 'Primary', 'រូបសំខាន់') : tr('set_primary', 'Set primary', 'កំណត់ជារូបសំខាន់')}
                         </button>
                         <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => removeImage(index)}>
                           {tr('remove', 'Remove', 'លុប')}
                         </button>
-                      </div>
+                      </div> : null}
                     </div>
                   ))}
                 </div>
@@ -1875,9 +1912,9 @@ export default function ProductForm({
           </button>
         ) : null}
       </div>
-      {(filePickerOpen || scannerField) ? (
+      {((filePickerOpen && canManageImages) || scannerField) ? (
         <Suspense fallback={null}>
-          {filePickerOpen ? (
+          {filePickerOpen && canManageImages ? (
             <FilePickerModal
               open={filePickerOpen}
               mediaType="image"
