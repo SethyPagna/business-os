@@ -10,6 +10,7 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Maximize2 from 'lucide-react/dist/esm/icons/maximize-2.js'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
+import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { noteDisplayTitle } from '../notes/useNotesController.ts'
 import { useNotes } from '../notes/NotesContext.tsx'
 import type { NoteRecord } from '../../api/notesTransport.ts'
@@ -17,6 +18,7 @@ import type { NoteRecord } from '../../api/notesTransport.ts'
 type AppContextValue = {
   page: string
   navigateTo: (pageId: string) => void
+  settings?: { ui_mobile_section_nav?: unknown }
 }
 
 const useApp = useAppHook as () => AppContextValue
@@ -209,7 +211,8 @@ function defaultDragPos(width: number, height: number): DragPos {
 }
 
 export default function NotesWidget() {
-  const { page, navigateTo } = useApp()
+  const { page, navigateTo, settings } = useApp()
+  const pagesNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
   const {
     t,
     loading,
@@ -498,10 +501,12 @@ export default function NotesWidget() {
     // e.g. Branches' per-branch checkbox/edit buttons once a card's stock
     // list pushed the card tall enough (reported via screenshot: the tab
     // sat directly on top of the branch row's controls). Anchoring to the
-    // bottom instead, just above the mobile bottom nav (`Sidebar.tsx`'s
-    // `fixed bottom-0 h-14` bar, `md:hidden`), keeps it out of the
-    // vertical band where scrollable content actually lives. Desktop has
-    // no bottom nav to clear and reports haven't flagged it there, so
+    // bottom instead, just above the legacy mobile bottom nav
+    // (`Sidebar.tsx`'s fixed bottom bar), keeps it out of the vertical band
+    // where scrollable content actually lives. Pages mode has no bottom
+    // bar and uses the viewport safe area instead. Both read the same
+    // navigation-mode provider as Sidebar; there is no parallel state.
+    // Desktop has no bottom nav to clear and reports haven't flagged it, so
     // `md:` keeps the original vertical-center dock.
     // A dragged chip renders at its remembered top (vertical drag only --
     // it stays docked to the left edge by design); otherwise the CSS
@@ -510,7 +515,7 @@ export default function NotesWidget() {
     // handlers instead of scrolling the page.
     return (
       <div
-        className={`pointer-events-none fixed left-0 z-[1001] ${launcherDisplayTop == null ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-auto md:top-1/2 md:-translate-y-1/2' : ''}`}
+        className={`pointer-events-none fixed left-0 z-[1001] ${launcherDisplayTop == null ? `${pagesNavigation ? 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))]'} md:bottom-auto md:top-1/2 md:-translate-y-1/2` : ''}`}
         style={launcherDisplayTop != null ? { top: `${launcherDisplayTop}px` } : undefined}
       >
         <button

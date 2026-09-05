@@ -1281,7 +1281,7 @@ function useMobileHeaderAutoHide(page: string): boolean {
   return visible
 }
 
-function GlobalScrollControls() {
+function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisible: boolean }) {
   const scrollTo = (direction: ScrollDirection) => {
     const target = getScrollTarget(window)
     const top = getScrollToPosition(target, direction)
@@ -1296,7 +1296,7 @@ function GlobalScrollControls() {
   }
 
   return (
-    <div className="pointer-events-none fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]">
+    <div className={`pointer-events-none fixed right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 ${mobileBottomNavVisible ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]'} md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]`}>
       <button
         type="button"
         className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
@@ -1940,7 +1940,7 @@ export default function App() {
 
           <main
             ref={mainRef}
-            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? (inlineMobileNavigation ? (appUpdate ? 'pt-28' : 'pt-[calc(7rem+env(safe-area-inset-top))]') : (appUpdate ? 'pt-16' : 'pt-[calc(4rem+env(safe-area-inset-top))]')) : (appUpdate ? 'pt-0' : 'pt-[env(safe-area-inset-top)]')}`}
+            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${inlineMobileNavigation ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(3.55rem+env(safe-area-inset-bottom))]'} pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? (appUpdate ? 'pt-16' : 'pt-[calc(4rem+env(safe-area-inset-top))]') : (appUpdate ? 'pt-0' : 'pt-[env(safe-area-inset-top)]')}`}
           >
             <PullToRefreshIndicator pullDistance={pullDistance} refreshing={pullRefreshing} />
             <div className="flex min-w-0 items-center gap-3">
@@ -1975,7 +1975,7 @@ export default function App() {
       </NotesProvider>
 
       <Notification notification={notification} onDismiss={dismissNotification} />
-      <GlobalScrollControls />
+      <GlobalScrollControls mobileBottomNavVisible={!inlineMobileNavigation} />
       {writeConflict ? (
         <Suspense fallback={null}>
           <WriteConflictModal

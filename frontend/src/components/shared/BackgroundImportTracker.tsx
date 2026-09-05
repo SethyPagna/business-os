@@ -18,6 +18,7 @@ import { dispatchImportCompletionRefresh, onImportTrackerPoke, shouldDispatchImp
 import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { shouldPromptConflictReviewBeforeApprove } from './importJobApproveGate.ts'
 
 // This widget is the ONE place import jobs surface across every page
@@ -54,6 +55,7 @@ type TranslateFn = (key: string) => string
 type AppContextValue = {
   notify: NotifyFn
   t: TranslateFn
+  settings?: { ui_mobile_section_nav?: unknown }
 }
 
 type ImportJobSummary = {
@@ -757,7 +759,8 @@ function buildJobsSignature(jobs: ImportJob[] = []): string {
 }
 
 export default function BackgroundImportTracker() {
-  const { notify, t } = useApp()
+  const { notify, t, settings } = useApp()
+  const pagesNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
   const [jobs, setJobs] = useState<ImportJob[]>([])
   const [expanded, setExpanded] = useState(false)
   const [reportJobId, setReportJobId] = useState<string | null>(null)
@@ -1353,8 +1356,11 @@ export default function BackgroundImportTracker() {
 
   if (minimized) {
     // Docked flush to the right edge. Desktop keeps the original vertical-
-    // center dock (no bottom nav there, unreported). Mobile anchors above
-    // the bottom nav instead of the viewport's vertical center -- same bug
+    // center dock. Legacy mobile navigation still anchors above its bottom
+    // bar; pages mode has no bottom bar, so it uses the viewport safe area.
+    // This consumes the same preference hook as Sidebar/HubSectionNav rather
+    // than keeping a second shell-mode flag. The original move away from
+    // viewport center fixed the same bug
     // and same fix as NotesWidget's collapsed launcher tab (progress.md):
     // `top-1/2` centers on the *viewport*, not the page, so on any page
     // tall enough to scroll, the docked tab parks on top of whatever
@@ -1365,7 +1371,7 @@ export default function BackgroundImportTracker() {
     // now that the root cause is already known rather than waiting for a
     // second report of the same bug class).
     return (
-      <div className="pointer-events-none fixed right-0 z-[1000] bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-auto md:top-1/2 md:-translate-y-1/2">
+      <div className={`pointer-events-none fixed right-0 z-[1000] ${pagesNavigation ? 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))]'} md:bottom-auto md:top-1/2 md:-translate-y-1/2`}>
         <button
           type="button"
           onClick={() => setMinimized(false)}

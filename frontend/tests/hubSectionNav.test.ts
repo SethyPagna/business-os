@@ -135,6 +135,29 @@ await runTest('mobile body has no intermediate picker or extra history, legacy p
   assert.match(sidebar, /grid min-w-0 grid-cols-2/)
 })
 
+await runTest('pages mode uses one compact header and its inline group drawer without legacy bottom chrome', () => {
+  const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const imports = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
+  const notes = fs.readFileSync(new URL('../src/components/shared/NotesWidget.tsx', import.meta.url), 'utf8')
+
+  assert.match(sidebar, /\{!inline \? \(\s*<nav className="safe-area-inset-bottom fixed bottom-0/, 'legacy bottom navigation should render only outside pages mode')
+  assert.match(sidebar, /inline \? 'bottom-0 pb-\[env\(safe-area-inset-bottom\)\]' : 'bottom-\[calc\(3\.55rem\+env\(safe-area-inset-bottom\)\)\]'/, 'pages drawer should reclaim the bottom safe area while legacy keeps its nav offset')
+  assert.doesNotMatch(sidebar, /h-28|7rem|flex-wrap content-center gap-y-1/, 'pages mode should not force a second header row')
+  assert.match(sidebar, /mobileTitle[\s\S]*?truncate text-sm font-semibold/, 'one-row pages title should stay readable without overflowing')
+  assert.match(sidebar, /inline \? null : \([\s\S]*?<MinimizedWorkTray variant="mobile"/, 'wide minimized-work chips should leave the one-row pages header')
+  assert.match(sidebar, /\{accountOpen \? \([\s\S]*?\{inline \? \([\s\S]*?<MinimizedWorkTray variant="mobile"[\s\S]*?<QuickPreferenceToggles/, 'pages-mode tray and secondary preferences should remain reachable in the account utility panel')
+
+  assert.match(app, /inlineMobileNavigation \? 'pb-\[env\(safe-area-inset-bottom\)\]' : 'pb-\[calc\(3\.55rem\+env\(safe-area-inset-bottom\)\)\]'/, 'pages mode should not reserve phantom bottom-nav space')
+  assert.doesNotMatch(app, /pt-28|7rem/, 'main content should reserve only the one-row header height')
+  assert.match(app, /<GlobalScrollControls mobileBottomNavVisible=\{!inlineMobileNavigation\} \/>/, 'global floating scroll controls should share the existing mode decision')
+
+  for (const [name, source] of [['import tracker', imports], ['notes widget', notes]] as const) {
+    assert.match(source, /useMobileSectionNavMode\(settings\?\.ui_mobile_section_nav\)/, `${name} should consume the shared mode provider`)
+    assert.match(source, /pagesNavigation \? 'bottom-\[calc\(0\.75rem\+env\(safe-area-inset-bottom\)\)\]' : 'bottom-\[calc\(4\.5rem\+env\(safe-area-inset-bottom\)\)\]'/, `${name} should clear only the pages-mode bottom-nav offset`)
+  }
+})
+
 await runTest('Review & Logs participates in shared section navigation', () => {
   const source = fs.readFileSync(new URL('../src/components/review/ReviewLogsPage.tsx', import.meta.url), 'utf8')
   assert.match(source, /<HubSectionNav/)
