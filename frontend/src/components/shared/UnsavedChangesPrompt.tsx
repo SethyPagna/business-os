@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import type { CloseGuard } from '../../utils/useCloseGuard.ts'
+import MinimizeButton from './MinimizeButton.tsx'
 
 // S4-21: the one prompt raised when a modal with unsaved changes is closed.
 //
@@ -49,7 +50,7 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
       <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl dark:bg-gray-800">
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             {/* leading-relaxed, not the default tight line box: Khmer
                 ascenders/descenders (ុ ់ ៍) are clipped by a line box sized
                 to Latin text. */}
@@ -66,6 +67,13 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
               </p>
             ) : null}
           </div>
+          {guard.preserveAndMinimize ? (
+            <MinimizeButton
+              disabled={guard.saving}
+              onMinimize={guard.preserveAndMinimize}
+              tr={(key, fallbackEn) => tr(key, fallbackEn)}
+            />
+          ) : null}
         </div>
         {items && items.length ? (
           <dl className="mt-3 space-y-1 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-900/40">

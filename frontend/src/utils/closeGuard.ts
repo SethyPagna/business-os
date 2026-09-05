@@ -95,6 +95,14 @@ export const UNSAVED_CLOSE_OPTION_SET: UnsavedCloseOptionSet = 'discard-or-back'
 export type UnsavedCloseOption = 'save' | 'discard' | 'back'
 
 /**
+ * An explicit capability supplied by a flow that has already persisted its
+ * draft and knows how to park/reopen that work. The guard never manufactures
+ * this from a work key, dirty state, or navigation state: those facts say
+ * that work exists, not that minimizing can preserve it.
+ */
+export type DraftPreservingMinimize = () => void
+
+/**
  * The buttons the prompt shows, in render order. Derived, never hand-listed
  * at a call site -- that is what keeps the ruling a one-line change.
  */
@@ -130,7 +138,7 @@ export function declaredWorkCanSave(declaration: UnsavedChangesDeclaration): boo
 }
 
 export type CloseGuardEvent = 'close-requested' | 'discard-confirmed' | 'back'
-export type CloseGuardVerdict = 'closed' | 'prompted' | 'dismissed'
+export type CloseGuardVerdict = 'closed' | 'prompted' | 'dismissed' | 'minimized'
 
 export type CloseGuardParams = {
   event: CloseGuardEvent
@@ -170,6 +178,32 @@ export function applyCloseGuardEvent({ event, declaration, setPromptOpen, onClos
   setPromptOpen(false)
   onClose()
   return 'closed'
+}
+
+export type PreserveAndMinimizeParams = {
+  /** Opens/closes the prompt. React: a useState setter. Test: a variable. */
+  setPromptOpen: (open: boolean) => void
+  /**
+   * The flow-owned preservation action. It must persist the draft and park
+   * the flow; it is deliberately not the modal's ordinary onClose callback.
+   */
+  onMinimize: DraftPreservingMinimize
+}
+
+/**
+ * Run the explicit preservation capability without entering either close or
+ * discard paths. A failed callback keeps the prompt visible: disappearing the
+ * decision after preservation failed would look exactly like lost work.
+ */
+export function applyPreserveAndMinimize({ setPromptOpen, onMinimize }: PreserveAndMinimizeParams): CloseGuardVerdict {
+  try {
+    onMinimize()
+  } catch {
+    setPromptOpen(true)
+    return 'prompted'
+  }
+  setPromptOpen(false)
+  return 'minimized'
 }
 
 /**

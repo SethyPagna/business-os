@@ -2,7 +2,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
-import type { UnsavedChangesDeclaration } from '../../utils/closeGuard.ts'
+import type { DraftPreservingMinimize, UnsavedChangesDeclaration } from '../../utils/closeGuard.ts'
 import { ModalCloseContext } from './modalCloseContext.ts'
 import UnsavedChangesPrompt from './UnsavedChangesPrompt.tsx'
 
@@ -16,6 +16,11 @@ type ModalProps = {
   // (e.g. a flow's − minimize button). Interactive children are already
   // drag-exempt via handlePointerDown's closest('button...') guard.
   headerExtra?: ReactNode
+  // Capability, not decoration: supply only when this callback synchronously
+  // preserves the current draft and parks a restorable flow. Its presence is
+  // what allows the unsaved prompt to show a minimize control; dirty/workKey
+  // declarations alone never imply that navigation can preserve a draft.
+  onMinimize?: DraftPreservingMinimize
   wide?: boolean
   size?: ModalSize
   // Lets the operator drag the modal window around by its header -- added
@@ -43,8 +48,8 @@ type ModalProps = {
   unsavedChanges: UnsavedChangesDeclaration
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, layer = 'default', unsavedChanges }: ModalProps) {
-  const closeGuard = useCloseGuard(unsavedChanges, onClose)
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, layer = 'default', unsavedChanges }: ModalProps) {
+  const closeGuard = useCloseGuard(unsavedChanges, onClose, onMinimize)
   const widthClass =
     size === 'sm' ? 'max-w-lg' :
     size === 'lg' ? 'max-w-3xl' :
