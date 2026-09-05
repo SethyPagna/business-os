@@ -110,6 +110,11 @@ export default function CreateProductsSessionModal({
     const value = t(key)
     return value && value !== key ? value : fallback
   }
+  const resolvedDefaultBranchId = String(
+    defaultBranchId
+      || (branches.find((branch) => branch.is_default) || branches[0])?.id
+      || '',
+  )
 
   const draftKey = scopedWorkDraftKey('create_products_session')
   const draftRef = useRef<CreateProductsSessionDraft | null>(
@@ -117,9 +122,11 @@ export default function CreateProductsSessionModal({
   )
   const draft = draftRef.current
 
-  const [header, setHeader] = useState<CreateProductsHeader>(
-    draft?.header || emptyCreateProductsHeader(defaultBranchId),
-  )
+  const [header, setHeader] = useState<CreateProductsHeader>(() => (
+    draft?.header
+      ? { ...draft.header, branchId: draft.header.branchId || resolvedDefaultBranchId }
+      : emptyCreateProductsHeader(resolvedDefaultBranchId)
+  ))
   const [rows, setRows] = useState<CreateProductsSessionRow[]>(draft?.rows || [])
   const [step, setStep] = useState<'header' | 'items'>(draft?.step === 'items' ? 'items' : 'header')
   const [itemFormOpen, setItemFormOpen] = useState(false)
@@ -150,13 +157,21 @@ export default function CreateProductsSessionModal({
   // fresh object every render would recompute it on every keystroke.
   const itemDefaults = useMemo(() => createProductsSessionDefaults(header), [header])
 
-  const summary = useMemo(() => summarizeCreateProductsSession(rows, header, {
-    multipleBrands: tr('multiple_brands', 'Multiple brands'),
-    multipleSuppliers: tr('mixed_suppliers', 'Multiple suppliers'),
-    multipleBranches: tr('multiple_branches', 'Multiple branches'),
-    none: tr('none', 'None'),
+  const summary = useMemo(() => {
+    const baseSummary = summarizeCreateProductsSession(rows, header, {
+      multipleBrands: tr('multiple_brands', 'Multiple brands'),
+      multipleSuppliers: tr('mixed_suppliers', 'Multiple suppliers'),
+      multipleBranches: tr('multiple_branches', 'Multiple branches'),
+      none: tr('none', 'None'),
+    })
+    // With no saved rows yet, the pure summary has no row-level branch name.
+    // Show the header's actual selected value instead of "None" while the
+    // AppSelect button displays that branch.
+    return rows.length
+      ? baseSummary
+      : { ...baseSummary, branch: branchNameFor(header.branchId) || baseSummary.branch }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [rows, header, t])
+  }, [rows, header, branchSelectOptions, t])
 
   // Autosave, same cadence and reasoning as the stock-in session draft: the
   // header and the created rows survive a reload, so reopening Add Product
@@ -171,11 +186,11 @@ export default function CreateProductsSessionModal({
   // default the moment it arrives rather than leaving the operator staring
   // at a disabled "Add items" button with no way to know why.
   useEffect(() => {
-    if (!defaultBranchId) return
-    setHeader((prev) => (prev.branchId ? prev : { ...prev, branchId: defaultBranchId }))
-  }, [defaultBranchId])
+    if (!resolvedDefaultBranchId) return
+    setHeader((prev) => (prev.branchId ? prev : { ...prev, branchId: resolvedDefaultBranchId }))
+  }, [resolvedDefaultBranchId])
 
-  const headerDirty = isCreateProductsHeaderDirty(header, defaultBranchId)
+  const headerDirty = isCreateProductsHeaderDirty(header, resolvedDefaultBranchId)
   const canStart = canStartCreateProductsSession(header)
 
   const startItems = () => {

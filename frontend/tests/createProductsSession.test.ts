@@ -282,6 +282,14 @@ runTest('the session shows the header it captured', () => {
   assert.match(modalSource, /\{row\.branchName \|\| tr\('none', 'None'\)\}/)
 })
 
+runTest('the displayed default branch is the session value and empty-session summary', () => {
+  assert.match(modalSource, /const resolvedDefaultBranchId = String\([\s\S]*?branches\.find\(\(branch\) => branch\.is_default\) \|\| branches\[0\]/)
+  assert.match(modalSource, /branchId: draft\.header\.branchId \|\| resolvedDefaultBranchId/, 'a legacy blank-header draft adopts the visible default')
+  assert.match(modalSource, /emptyCreateProductsHeader\(resolvedDefaultBranchId\)/)
+  assert.match(modalSource, /branch: branchNameFor\(header\.branchId\) \|\| baseSummary\.branch/, 'before the first row, summary must name the selected header branch')
+  assert.match(modalSource, /isCreateProductsHeaderDirty\(header, resolvedDefaultBranchId\)/, 'the adopted default must not look manually typed')
+})
+
 runTest('Close on a dirty header offers Discard / Back', () => {
   // S4-21 RE-POINTED this assertion; it did not weaken it. The behaviour
   // is unchanged -- dismissing with a typed-but-unused header still asks
