@@ -2,6 +2,34 @@
 
 ## Objective and boundaries
 
+### ASAP checkpoint status — 11:05UTC
+
+Integrated candidate: `ebf5e027`; last pushed checkpoint: `cc43019b`.
+Production remains `0ffc4bfcc4fd`, Worker `be276770-359d-4002-9d26-560fa5656d33`.
+This snapshot supersedes older in-progress implementation claims below.
+
+| State | Work |
+|---|---|
+| Integrated, locally verified | Draft persistence, compact header/navigation/date/report fixes; Telegram arithmetic; shift lifecycle/popups; sale picker; bulk Sales/Returns; payment methods/split settlement/latest-rate/native change; atomic stock sessions and replay; Branch Products rich scoped metrics. |
+| Final certification in progress | Clean combined frontend/backend full gates; final canonical Add products toolbar; main product/branch browser checks; independent central replay and nested-layer review. |
+| Ready runtime, production operation pending | Fixed22-sale subtotal repair; Roune Rath Sep4 close23:44 Cambodia, USD0/KHR133700. Fresh live guards/backup/pre-post checks required; preserve Sep5 shift and existing150000KHR expenses. |
+| Partial/deferred, not released as complete | VIS1 visibility modes across all cashier surfaces; broader precision/security/optimization audit; remaining compactness and sibling-surface polish. |
+| Not applied | Leading-zero barcode data consolidation. No broad merge or stock rewrite is bundled into this release. |
+
+Galileo owns final product entry/test assertions, Bernoulli B1 test contract,
+Hilbert Inventory fixture loaders, Aquinas central read-only review, Socrates
+product read-only review, Ohm independent clean release gates. Main alone integrates,
+pushes and deploys. No new feature scope enters this checkpoint unless it fixes a
+demonstrated release blocker.
+
+Main verified real nested confirmation screenshot at1440px: child above form,
+both parent dialogs inert/hidden, child Cancel restores form. The old build was
+then replaced locally for final zero-stock-session checks. Screenshot evidence:
+`output/playwright/product-nested-confirm-23e53016.png` (local artifact).
+Clean backend sweep at`ebf5e027` exposed two Inventory fixture dependency loaders;
+fixes are assigned, not waived. Latest clean frontend sweep at`3ee9b84f` was208/210,
+with actionStability and productDiscountUx assertions pending reconciliation.
+
 Make the live Business OS workflows reliable and compact before broader optimization.
 Continue from integration `d3e95fb3` / deployed runtime `0ffc4bfc`, not dirty main.
 The native Codex goal remains paused; available goal tools cannot edit/resume it.

@@ -2,6 +2,23 @@
 
 ## Active continuation — production usability, September 5
 
+Latest11:05UTC checkpoint freeze: integrated through ebf5e027. Payment/native-change
+and atomic sale-add-items replay are complete locally (central19 race/replay checks,
+FK-on69-table backup roundtrip, coordinator live positive/stale409 probes pass).
+Branch Products grouped columns/scoped statistics and atomic zero-stock product
+sessions are integrated. Guarded22-sale subtotal repair is independently reviewed
+and integrated, NOT applied. Derived internal KHR now retains four decimals.
+Final clean backend full sweep is running; two newly exposed Inventory fixture
+loaders are assigned Hilbert. Galileo finishes canonical Add products entry and
+actionStability assertions; Bernoulli owns the B1 partial-refresh test assertion.
+Ohm's latest clean frontend run:208/210 individual files pass, typecheck/i18n/build
+pass; final combined rerun pending those fixes. Aquinas/Socrates independently
+review central replay and product layering. Main owns real-browser confirmation
+and the single deployment. No new production deployment or historical close yet.
+Deferred beyond this checkpoint: complete VIS1 cashier-visibility integration,
+barcode-leading-zero data merges, broader optimization/security and remaining
+non-blocking polish. Existing requirements remain tracked, not silently dropped.
+
 Latest10:26UTC: payment/native-change chain is integrated through882bec3d,
 including original central hooks55c85118/388fc5e7 and zero-session HTTPce4c0f78.
 Main focused settlement/payment-route/add-items/native-change/stock/central tests
