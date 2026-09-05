@@ -428,7 +428,10 @@ export function summarizeShiftCash(rows: ShiftTenderRow[]) {
 export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now()): string {
   const cancelled = !!shift.cancelled_at
   const open = !shift.closed_at && !cancelled
-  const endedAt = shift.cancelled_at || shift.closed_at
+  // A later soft cancellation must not extend an already closed shift's
+  // financial window. The original close remains the operational end; only
+  // an open-cancelled row uses cancellation as its terminal bound.
+  const endedAt = shift.closed_at || shift.cancelled_at
   const lines = [
     reportTitle('🧑‍💼', 'Shift', 'វេន', shift.business_date),
     labeled('shop', cleanLine(shopName || 'Business OS', 80)),
@@ -447,6 +450,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
       ? `${label('to')}: ${formatBusinessDateTime(new Date(nowMs).toISOString(), nowMs)} — ${bi('still open', 'នៅបើកនៅឡើយ')}`
       : `${labeled('to', formatBusinessDateTime(endedAt, nowMs))}${cancelled ? ` — ${bi('cancelled', 'បានបោះបង់')}` : ''}`,
     ...(cancelled ? [
+      ...(shift.closed_at ? [`${bi('Cancelled at', 'បោះបង់នៅ')}: ${formatBusinessDateTime(shift.cancelled_at, nowMs)}`] : []),
       `${bi('Cancelled by', 'បោះបង់ដោយ')}: ${cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)}`,
       `${bi('Reason', 'មូលហេតុ')}: ${cleanLine(shift.cancel_reason || 'Not recorded', 500)}`,
     ] : []),
@@ -569,7 +573,7 @@ export function shiftFilters(shift: ShiftReportSession, nowMs: number): SalesFil
   return {
     createdFrom: shift.opened_at,
     // An open shift is reported up to now. shiftWindowBound normalises both.
-    createdTo: shift.cancelled_at || shift.closed_at || new Date(nowMs).toISOString(),
+    createdTo: shift.closed_at || shift.cancelled_at || new Date(nowMs).toISOString(),
     // A shop-wide shift belongs to the branch, not only to the employee who
     // opened it. Per-account retains the original cashier boundary.
     cashierId: shift.scope_mode === 'shop_wide' ? null : shift.user_id,
