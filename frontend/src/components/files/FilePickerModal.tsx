@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ComponentType, ReactNode } from 'react'
-import ModalBase from '../shared/Modal'
+import type { ChangeEvent, ReactNode } from 'react'
+import Modal from '../shared/Modal'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
   beginTrackedRequest,
@@ -56,7 +56,6 @@ type AppContextValue = {
   t?: TranslateFunction
 }
 
-const Modal = ModalBase as ComponentType<{ title: ReactNode; onClose: () => void; wide?: boolean; layer?: 'default' | 'nested'; children: ReactNode }>
 const useApp = useAppHook as () => AppContextValue
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -289,7 +288,10 @@ export default function FilePickerModal({
   const selectedAssets = files.filter((asset) => selectedPathSet.has(asset.public_path || ''))
 
   return (
-    <Modal title={title} onClose={onClose} wide layer={layer}>
+    // Library uploads/deletes commit immediately; selectedPaths is only the
+    // picker choice that Cancel intentionally discards. Closing cannot lose
+    // an uncommitted library write, so this modal is explicitly read-only.
+    <Modal title={title} onClose={onClose} wide layer={layer} unsavedChanges="read-only">
       <div className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row">
           <input className="input flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('search_files', 'Search files')} />
