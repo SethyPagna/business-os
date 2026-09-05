@@ -199,11 +199,13 @@ export async function addSaleItems(
   id: number | string,
   items: SaleItemAddition[] = [],
   notes = '',
+  review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string },
 ): Promise<unknown> {
   const body = await withExpectedUpdatedAt('sales', id, {
     ...getDevicePayload(),
     items,
     notes,
+    ...review,
   })
   try {
     const result = await route(
@@ -232,6 +234,9 @@ export interface SaleAmendmentRequest {
   delivery_fee_usd?: number
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
+  client_request_id: string
+  expected_exchange_rate: number
+  expected_updated_at?: string
 }
 
 /**
