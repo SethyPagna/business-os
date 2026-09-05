@@ -2,7 +2,32 @@
 
 ## Active continuation — production usability, September 5
 
-DEPLOYED CHECKPOINT — verified September5 14:03UTC. Clean source3f675e840266
+DEPLOYED September5 14:50UTC — checkpoint a127e37aded0ec7c88a3d0fa06d92bc3b5bda822.
+Worker ac5c708d-2ac6-4e76-b801-4497b38ab4d8, deployment
+6ed0346f-32a4-4f45-b4e7-a0ce87a09533 at100%. Clean224/224 backend suites and
+actual frontend wrapper212/212 PASS; both typechecks,i18n4976/519,build1048,
+stamped dry-run and native D1 apply/replay/stale rollback passed. Sol UI/native/
+independent-review lanes integrated; main actual browser EN/KM320px +1440px QA.
+DONE14:54:47UTC:22 legacy sales16842–16863 subtotal0->3462USD through authenticated
+Admin UI with fresh52MB R2 backup, one history245/audit3799, eachrevision1.
+Sep2 five sales1992USD,Sep3 seventeen1470USD; existing itemdiscounts66 retained.
+ALL protected pre/post hashes identical: stock/costs/batches/movements/allocations,
+items,original sale/payment fields,receivables,six shift expenses. Evidence JSON
+and release/recovery detail in docs/fleet/2026-09-05-production-usability.md.
+Live Sep2 report20sales,revenue3877,COGS3326.98,finalprofit539.79. No stock or
+payment settlement rerun, no migrations/secret sync; Sep4 shift stillclosed23:44,
+133700KHR. Native D1 trigger-inflated changes bug fixed before live operation.
+Live Sep3 gross1531,discount61,net1470,COGS1236.54,totalprofit233.46 agree with
+reference14; expense timing follows system-entry-time policy, not old screenshot.
+Authenticated report/repair browser errors0. Remaining desktop spacing is partial.
+Remaining: VIS1 cashier visibility, broader transfer/adjustment sessions, universal
+minimize, pagination/precision/security/full14-reference visual matrices, barcode
+consolidation, nonblocking compactness. New tracked precision follow-up: Today
+summaryexpenses16.98 vs table16.97; Halley read-only investigation assigned.
+Do not repeat historical settlement, this subtotal repair, or Sep4 shift close.
+The whole goal remains incomplete; native goal is paused, not marked complete.
+
+PREVIOUS CHECKPOINT — verified September5 14:03UTC (historical). Clean source3f675e840266
 deployed11:59UTC to Workereab56650-5660-4e09-8d26-2a873f24ad05,100% traffic;
 deploymentf2f3ac90-d7ab-4ed3-afbb-586a6862816d. MainDB migrations0123–0127
 applied; wrangler list reports none pending.223backend suites,211frontend

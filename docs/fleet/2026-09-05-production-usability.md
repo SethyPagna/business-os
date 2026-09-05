@@ -2,6 +2,82 @@
 
 ## Objective and boundaries
 
+### Current deployed checkpoint — subtotal repair applied, 15:03UTC
+
+Source `a127e37aded0ec7c88a3d0fa06d92bc3b5bda822` deployed14:50:29UTC at100%:
+Worker `ac5c708d-2ac6-4e76-b801-4497b38ab4d8`, deployment
+`6ed0346f-32a4-4f45-b4e7-a0ce87a09533`. Worker stamp hash
+`397201a9685ca15e`,builtAt`2026-09-05T14:48:25.364Z`; frontend stamp hash
+`cc35fd9b2d043ede`,builtAt`2026-09-05T14:43:32.631Z`. Control-plane verified.
+Clean release preserved both real npm-ci installs; no migration or secret sync.
+Temporary release auth copy removed; original credential file untouched.
+
+Verification: final224/224 backend suites (Noether), actual frontend212-file
+Windows wrapper (Archimedes), main both typechecks, i18n4976keys/519sources,
+build1048modules and stamped dry-run PASS. Sagan independent security/accounting
+review closed all P0–P2 findings; source/native/browser evidence reconciled by main.
+Local full app preview/cancel/apply proved22 changes and byte-identical protected
+data; native Workerd/D1 proves apply22/replay0/stale rollback. EN/mobile320 and
+KM/dark/mobile320 body/root width320; desktop1440 and production839px inspected.
+Bounded table scroll is intentional; no body overflow. Existing circular chunks
+and large-bundle warnings remain, not new errors or a full performance certificate.
+
+Code slices:92fb38a2 exact22 server preview;16eeea7d sales-only cache/broadcast
+refresh and bounded finalize body/preview text;a6ccb792 safe operator UI;
+b302f159 actual native D1 regression;27a4f3e4 trigger-inclusive change accounting;
+99ef9408 shared confirmation/date/navigation guards;a127e37a canonical Khmer label.
+Native metadata counts both row and revision-trigger writes; counting changed
+primary-key statement slots fixes a false post-commit failure (44 vs22). Atomic
+final-state/revision/audit assertions remain authoritative. No production repair
+was run before discovering/fixing/retesting that bug.
+
+DONE live14:54:47UTC: Admin1 applied only22 subtotals via normal authenticated UI.
+Plan `sep23-subtotal-46e9e6ed-fade-45e8-9ba8-8396c761e17c`, manifest SHA256
+`d3a2f99631df1f347820430f2417629a67e2f4a619170a1c6a02e7006caaceb4`.
+One grouped non-undoable history245 and audit3799; every revision is1. No duplicate
+client history. Backup `backups/cloudflare/business-os-cloudflare-20260905-145420Z.json`
+created14:54:20.560Z, finalized object written14:54:46.862Z,52,002,774bytes.
+R2 metadata confirms stored object before commit; sidecar raw-GET adapter returns
+an envelope error atHTTP200, so no separate sidecar-state claim is made.
+
+| Cohort | Sales | Before subtotal | After / paid USD | Existing item discounts |
+|---|---:|---:|---:|---:|
+| September2 |5|0|1,992|5|
+| September3 |17|0|1,470|61|
+
+Both groups were already paid/completed and remain so; discount data was present,
+not discarded. This corrects zero net subtotals, not COGS or gross-price history.
+Pre14:50:31/post14:55:09 all protected hashes match:10,273 product stock/cost rows,
+20,438 branch-stock rows,47,129 branch-batch rows,35,969 product batches,
+23,191 inventory movements,105 allocations,56 cohort items,22 sales excluding
+onlysubtotal_usd,13,304receivables,and six shift expense rows. See
+`2026-09-05-subtotal-repair-evidence.json` for exact scopes/hashes/provenance.
+Live Sep2 report20sales,revenue3,877,COGS3,326.98,totalprofit559.02,expenses19.23,
+finalprofit539.79: revenue is no longer incorrectly depressed by zero subtotals.
+Live Sep3 report17sales,gross1,531,itemdiscount61,net1,470,COGS1,236.54,
+totalprofit233.46 matches reference14 for those figures. Full-day timed filter
+shows operatingexpenses0 (legacy expenses use system-entry time per owner), not
+the old screenshot's23.70. No expense date/amount was rewritten to force a match.
+Browser error log empty; production report screenshot inspected. This does not
+certify all responsive variants; remaining edge-spacing/typography work stays open.
+Sep4 shift1 remains closed23:44Cambodia/133700KHR/revision1; Sep5 shifts3/4 unchanged.
+
+Recovery: retain backup+immutable manifest/audit; no blanket DB restore over live
+business and no generic undo. Any reverse repair requires fresh exact-row/revision
+guards and separate authorization. Do not repeat historical settlement/shift close.
+UI retry was disabled after success; immutable native replay certified0 updates.
+
+Remaining work is NOT complete: VIS1 full cashier modes/routes/settings (Halley
+plan ready); P4 broader transfer/adjustment whole sessions; U2 universal minimize;
+D2 full pagination; F1 whole-system4dp audit; barcode consolidation; security/
+optimization and full14-reference role/language visual matrix. A separate Today
+overview inconsistency (summary expenses16.98 vs row16.97) is assigned Halley
+read-only before next slice. Existing P3 backup same-second naming collision and
+strict client apply-response validation remain defense-in-depth follow-ups.
+Telegram close invocation verified previously, destination delivery ACK still
+unobserved. Direct health/version probes remain client/edge-blocked; authenticated
+app/report/repair work, but no blanket endpoint or whole-goal certification.
+
 ### Deployed checkpoint and historical close — 14:03UTC
 
 Source `3f675e84026663b6048ebf6c8cb654410414ec5a` deployed at11:59:26UTC:

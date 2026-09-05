@@ -19226,3 +19226,55 @@ nonblocking compactness. Direct public health/version probes blocked by client/
 edge; authenticated POS/popup works with empty browser error/warning log. Native
 goal remains paused and incomplete; this is a deployed checkpoint, not whole-goal
 completion. See docs/fleet/2026-09-05-production-usability.md for current matrix.
+
+## Part 609 — guarded subtotal repair deployed and applied (2026-09-05)
+
+Ask: continue toward a verified deployed checkpoint, use appropriately scoped Sol
+agents, preserve live business/stock, keep status and incomplete work visible.
+
+Main directed Archimedes UI, Noether native D1 verification, Sagan independent
+financial/security review and Halley VIS1 planning. Isolated commits integrated
+on codex/business-os-reconcile; original user dirty checkout/fees edits preserved.
+Read-only exact22 preview and immutable permission-gated UI now expose the prior
+guarded repair without SQL uploads or bypasses. Backup first, one audited atomic
+operation, stale revision rejection, shared confirmation, date display, bounded
+body/text and sales-cache refresh on apply/replay included.
+
+Important caught defect: native D1 reported changes2 per sale because of the
+revision trigger. Summing metadata produced44 and a false failure after22 actual
+updates. Fixed27a4f3e4 before production; native apply22/retry0/full rollback and
+protected fixtures passed independently. Main actual local UI preview/cancel/apply
+also preserved every protected hash. Frontend Khmer shared-label collision fixed
+a127e37a. No known P0-P2 repair blocker waived.
+
+Final gates at cleana127e37aded0ec7c88a3d0fa06d92bc3b5bda822:224/224backend suites,
+actual212-file frontend Windows wrapper, both typechecks,i18n4976/519,Vite1048,
+stamped dry-run. Main mobile320 EN/KMdark/desktop1440 plus live839px inspected.
+Worker ac5c708d-2ac6-4e76-b801-4497b38ab4d8 deployed14:50:29UTC at100%,
+deployment6ed0346f-32a4-4f45-b4e7-a0ce87a09533; source stamp and control-plane
+agree. No migration,secret sync,or baseline replacement. Release auth copy removed.
+
+Live14:54:47 Admin1 used normal authenticated preview/confirmation to repair only
+sales16842–16863 subtotal0->3462USD. Plan sep23-subtotal-46e9e6ed-fade-45e8-9ba8-8396c761e17c,
+one grouped non-undoable history245/audit3799,everyrevision1. Fresh52,002,774byte
+R2 backup business-os-cloudflare-20260905-145420Z.json exists before commit.
+All protected pre/post SHA256s identical: stock/costs/batches/movements/allocations,
+sale items,all other cohort sale/payment fields,receivables,six shift fees.
+Sep2 fivepaid/completed sales1992;Sep3 seventeen1470;discounts5+61 already existed.
+Full evidence/scope is docs/fleet/2026-09-05-subtotal-repair-evidence.json.
+
+Live reports: Sep2 revenue3877,COGS3326.98,finalprofit539.79. Sep3gross1531,
+discount61,net1470,COGS1236.54,totalprofit233.46 match supplied reference14.
+Timed expenses follow owner-selected system-entry time; no forced screenshot
+matching by changing expense data. Browser error log empty. Sep4shift1 remains
+closed23:44Cambodia/133700KHR; Sep5 shifts3/4 and original expenses unchanged.
+
+Remaining: VIS1 integration, broader transfer/adjustment sessions, universal
+minimize,full pagination/precision/security/reference/role matrix,barcode merges,
+nonblocking spacing. Today report summary16.98 vs expense row16.97 was observed
+and assigned Halley for next rounding slice; not hidden or marked solved. P3
+backup naming/client response validation and migration runner follow-ups retained.
+Telegram actual destination ACK and direct client/edge-blocked health/version
+not certified. Native goal remains paused/incomplete. No repeat settlement,
+historical shift close,or subtotal operation; guarded forward recovery only,
+never full DB restore over newer business data without separate authority.
