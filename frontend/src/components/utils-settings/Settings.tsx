@@ -49,7 +49,6 @@ import {
 import type { UploadAction } from '../../utils/mediaUploadState.ts'
 import { backfillPaymentMethods, getPaymentMethodImpact, getUnregisteredPaymentMethods, replacePaymentMethod } from '../../api/settingsTransport.ts'
 import { getTelegramStatus, sendTelegramTest, sendTelegramTodaySummary, type TelegramStatus } from '../../api/telegramTransport.ts'
-import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
@@ -1301,12 +1300,6 @@ export default function Settings() {
             </div>
           ) : null}
         </SettingsSection>
-        ) : null}
-
-        {canEditSettings && showSettingsSection('business') ? (
-          <SettingsSection title="Shift history" description="Review every authorized shift and amend mistakes without deleting the original record.">
-            <ShiftHistoryPanel canManage notify={notify} limit={50} />
-          </SettingsSection>
         ) : null}
 
         {showSettingsSection('appearance') ? (

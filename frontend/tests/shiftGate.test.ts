@@ -30,6 +30,7 @@ const read = (p: string) => fs.readFileSync(path.join(here, '..', p), 'utf8')
 const gate = read('src/components/pos/ShiftGate.tsx')
 const transport = read('src/api/shiftTransport.ts')
 const pos = read('src/components/pos/POS.tsx')
+const shiftModal = read('src/components/shifts/ShiftHistoryModal.tsx')
 
 let checks = 0
 const ok = (cond: unknown, label: string) => {
@@ -76,13 +77,17 @@ ok(/if \(!state\) throw new Error/.test(transport),
 // close -- see section 3b. So the early return has to survive a shift that has
 // just been closed while its summary is still on screen, and the button
 // itself has to be gated separately.
-ok(/if \(!state\?\.can_end && !closed\) return null/.test(gate),
+ok(/const canCloseCurrent = state\?\.is_open === true && state\.shift\?\.capabilities\.can_close === true/.test(gate),
+  'the current close action consumes the server can_close capability')
+ok(/SHIFT_STATE_CHANGED_EVENT/.test(gate) && /addEventListener\(SHIFT_STATE_CHANGED_EVENT/.test(gate),
+  'mounted current-shift consumers refresh after popup lifecycle writes')
+ok(/if \(!canCloseCurrent && !closed\) return null/.test(gate),
   'EndShiftButton renders nothing when there is neither an open shift nor a summary to show')
-const endIdx = gate.indexOf('if (!state?.can_end && !closed) return null')
+const endIdx = gate.indexOf('if (!canCloseCurrent && !closed) return null')
 ok(endIdx > 0 && gate.indexOf('<button', endIdx) > endIdx,
   'and the early return sits BEFORE the button markup, not after it')
-ok(/\{state\?\.can_end && \(\s*\n\s*<button/.test(gate),
-  'the End Shift button itself is still gated on can_end -- a closed shift offers no second press')
+ok(/\{canCloseCurrent && \(\s*\n\s*<button/.test(gate),
+  'the End Shift button itself is gated on can_close -- a closed or foreign shift offers no press')
 
 // ---- 3b. The shift's two moments are rendered, not implied -----------------
 //
@@ -118,11 +123,20 @@ ok(/t\('shift_starts_at'\)/.test(registerBlock) && /fmtDateTime24\(now\)/.test(r
   'the registration prompt shows the moment the shift will be opened at')
 ok(/function useWallClock\(/.test(gate) && /window\.setInterval/.test(gate),
   'the not-yet-stamped moment is a live clock, not a value frozen when the panel opened')
+ok(/if \(busy \|\| floatUsd\.trim\(\) === '' \|\| floatKhr\.trim\(\) === ''\) return/.test(gate),
+  'a new day cannot silently turn two blank opening counts into fake zeros')
+ok(/disabled=\{busy \|\| floatUsd\.trim\(\) === '' \|\| floatKhr\.trim\(\) === ''\}/.test(registerBlock),
+  'the Start Shift control requires both native opening counts to be entered')
+ok(/if \(busy \|\| countedUsd\.trim\(\) === '' \|\| countedKhr\.trim\(\) === ''\) return/.test(endBody),
+  'current-day close also refuses blank native counts')
 
 // ---- 4. No offline mirror for a physical cash count ------------------------
-const routeCalls = [...transport.matchAll(/route<ShiftState>\(\s*[\s\S]*?\n\s{4}null,/g)]
-ok(routeCalls.length === 3,
-  `all three shift calls pass null as the local fallback (found ${routeCalls.length})`)
+for (const method of ['openShift', 'closeShift', 'amendShift', 'closeShiftById', 'reopenShift', 'cancelShift']) {
+  const start = transport.indexOf(`export async function ${method}`)
+  const end = transport.indexOf('\nexport ', start + 1)
+  const body = transport.slice(start, end > start ? end : undefined)
+  ok(start >= 0 && /null,\s*\n\s*true,/.test(body), `${method} is an online-only write with no offline fallback`)
+}
 // Comments stripped first: this file's own prose explains WHY there is no
 // local fallback, and matching that prose would make the check pass or fail
 // on the documentation rather than on the code.
@@ -132,15 +146,15 @@ const transportCode = transport
 ok(/route<ShiftState>/.test(transportCode), 'comment stripping left the transport code intact')
 ok(!/localFn|readLocal|offlineQueue|enqueue|localStorage/.test(transportCode),
   'the shift transport never queues or answers a shift from local storage')
-const writes = [...transport.matchAll(/route<ShiftState>\([\s\S]*?null,\s*\n\s*true,/g)]
-ok(writes.length === 2,
-  `open and close are both marked isWrite so they must reach the server (found ${writes.length})`)
-
-// ---- 5. POS actually mounts both ------------------------------------------
+// ---- 5. POS mounts the gate, current close, and persistent history --------
 ok(/import ShiftGate, \{ EndShiftButton \} from '\.\/ShiftGate'/.test(pos),
   'POS imports the gate and the end-shift control')
 ok(/<ShiftGate\b/.test(pos), 'POS mounts the registration prompt')
 ok(/<EndShiftButton\b/.test(pos), 'POS mounts the End Shift control')
+ok(/import ShiftHistoryPanel from '\.\.\/shifts\/ShiftHistoryPanel\.tsx'/.test(pos), 'POS imports the shared shift popup launcher')
+ok(/<ShiftHistoryPanel branchId=\{primaryBranchFilterId\} compact label=\{t\('shift_code'\)\}/.test(pos),
+  'POS keeps a Shift button visible independently of the current close capability')
+ok(!/canCloseCurrent[\s\S]{0,300}<ShiftHistoryPanel/.test(pos), 'the persistent Shift button is not hidden behind the current-close condition')
 
 // ---- 6. Every key the gate asks for exists in BOTH packs -------------------
 // verify:i18n covers this repo-wide, but a shift key missing from km would
@@ -148,7 +162,7 @@ ok(/<EndShiftButton\b/.test(pos), 'POS mounts the End Shift control')
 // cannot dismiss the dialog, so it is worth failing here too.
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
-const used = [...new Set([...gate.matchAll(/\bt\('([^']+)'\)/g)].map((m) => m[1]))]
+const used = [...new Set([...`${gate}\n${shiftModal}`.matchAll(/\bt\('([^']+)'\)/g)].map((m) => m[1]))]
 ok(used.length >= 14, `the gate's translation keys were found (${used.length})`)
 const missingEn = used.filter((k) => !(k in en))
 const missingKm = used.filter((k) => !(k in km))
