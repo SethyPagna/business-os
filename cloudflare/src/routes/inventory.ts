@@ -68,6 +68,10 @@ app.use('*', requireAuth)
 // this middleware only decides "in the door or not".
 app.use('*', async (c, next) => {
   const user = c.get('user')
+  const productOnlySessionEntry = c.req.method === 'POST'
+    && ['/sessions', '/api/inventory/sessions'].includes(c.req.path)
+    && getActionTier(user, 'products', 'add') === 'full'
+  if (productOnlySessionEntry) return next()
   if (getPermissionTier(user, 'inventory') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 })
