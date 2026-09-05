@@ -366,6 +366,7 @@ type PosOrder = Record<string, unknown> & {
   // Y12: actual change handed back per currency (see constants.ts PosOrder).
   changeGivenUsd: string
   changeGivenKhr: string
+  changeIsActual?: boolean
   paymentDetails: PaymentDetail[]
   paymentMethod: string
   selectedDelivery: DeliveryContactRecord | null
@@ -2896,11 +2897,16 @@ export default function POS() {
       payment_currency: (paidUsdNum > 0 && paidKhrNum > 0) ? 'MIXED' : paidKhrNum > 0 ? 'KHR' : 'USD',
       amount_paid_usd: paidUsdNum,
       amount_paid_khr: paidKhrNum,
-      // Y12: when the cashier entered the actual change handed back (either
-      // currency non-empty), record THOSE per-currency amounts additively;
-      // otherwise fall back to the computed dual representation, unchanged.
-      change_usd: (active.changeGivenUsd !== '' || active.changeGivenKhr !== '') ? Math.max(0, parseFloat(active.changeGivenUsd) || 0) : Math.max(0, changeUsd),
-      change_khr: (active.changeGivenUsd !== '' || active.changeGivenKhr !== '') ? Math.max(0, Math.round(parseFloat(active.changeGivenKhr) || 0)) : Math.max(0, changeKhr),
+      // Only a direct edit marks these as the actual native amounts handed
+      // back. Explicit zero counts; the computed-fill shortcut keeps the
+      // canonical dual fallback and deliberately sends no intent marker.
+      change_usd: active.changeIsActual === true
+        ? Math.max(0, Math.round((parseFloat(active.changeGivenUsd) || 0) * 100) / 100)
+        : Math.max(0, changeUsd),
+      change_khr: active.changeIsActual === true
+        ? Math.max(0, cashierChangeKhr(parseFloat(active.changeGivenKhr) || 0))
+        : Math.max(0, changeKhr),
+      ...(active.changeIsActual === true ? { change_is_actual: true } : {}),
       exchange_rate: exchangeRate,
       is_delivery:               active.isDelivery ? 1 : 0,
       delivery_contact_id:       active.selectedDelivery?.id      || null,
@@ -3787,7 +3793,7 @@ export default function POS() {
                           <button
                             type="button"
                             className="text-[11px] text-blue-500 hover:underline"
-                            onClick={() => patchActive({ changeGivenUsd: changeUsd > 0 ? changeUsd.toFixed(2) : '', changeGivenKhr: '' })}
+                            onClick={() => patchActive({ changeGivenUsd: changeUsd > 0 ? changeUsd.toFixed(2) : '', changeGivenKhr: '', changeIsActual: false })}
                             title={t('use_computed_change_hint') || 'Fill USD with the full computed change'}
                           >
                             {t('use_computed') || 'Use computed'}: {fmtUSD(changeUsd)}{changeKhr > 1 ? ` / ${fmtKHR(changeKhr)}` : ''}
@@ -3816,7 +3822,7 @@ export default function POS() {
                               inputMode="decimal"
                               placeholder={changeUsd > 0 ? changeUsd.toFixed(2) : '0.00'}
                               value={active.changeGivenUsd}
-                              onChange={e => patchActive({ changeGivenUsd: e.target.value })}
+                              onChange={e => patchActive({ changeGivenUsd: e.target.value, changeIsActual: true })}
                               autoComplete="off"
                             />
                           </div>
@@ -3829,7 +3835,8 @@ export default function POS() {
                               inputMode="numeric"
                               placeholder="0"
                               value={active.changeGivenKhr}
-                              onChange={e => patchActive({ changeGivenKhr: e.target.value })}
+                              onChange={e => patchActive({ changeGivenKhr: e.target.value, changeIsActual: true })}
+                              onBlur={() => patchActive({ changeGivenKhr: String(cashierChangeKhr(parseFloat(active.changeGivenKhr) || 0)), changeIsActual: true })}
                               autoComplete="off"
                             />
                           </div>
