@@ -16,6 +16,7 @@
 //     views whose endpoints honor them.
 //   - every 'rpt_*' key the hub and views look up exists in BOTH packs.
 import assert from 'node:assert/strict'
+import './reportResponsiveLayout.test.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -527,7 +528,7 @@ test('the control row keeps every control at each width: nothing is dropped, not
   // mutually exclusive responsive branch renders it once.
   assert.ok(!tail.includes('viewPicker'), 'the picker is not in the tail any more (it would double up with the search slot)')
   assert.ok(/const searchSlot = \([\s\S]*?\{viewPicker\}/.test(hub), 'the search slot carries the view picker at every tier')
-  assert.ok(/reports-mobile-primary[\s\S]*?\{searchInput\}\{viewPicker\}/.test(hub), 'the compact tier keeps search and view together')
+  assert.ok(/reports-mobile-primary[\s\S]*?\{viewPicker\}\{rangePicker\}/.test(hub), 'the compact tier pairs view and range, wrapping when needed')
   assert.equal((hub.match(/\{viewPicker\}/g) || []).length, 2, 'one picker reference exists in each responsive branch')
 
   // The four controls Part 586 folded into the one menu must not come back as
@@ -574,7 +575,7 @@ const SURFACE_CSS = 'src/components/sales/reports/reports-surface.css'
 test('compact report filters match the stacked mobile control contract', () => {
   const hub = read(HUB)
   const css = read(SURFACE_CSS)
-  for (const preset of ['today', 'yesterday', '7d', '30d']) {
+  for (const preset of ['all', 'today', '7d', '30d', 'month']) {
     assert.ok(hub.includes(`id: '${preset}'`), `${preset} is offered as a compact quick range`)
   }
   assert.ok(hub.includes('aria-pressed={selectedMobilePreset === preset.id}'), 'quick ranges expose their selected state')

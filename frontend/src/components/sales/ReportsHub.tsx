@@ -24,6 +24,7 @@ import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import { statsPresetRange } from '../shared/statsStripPresets.ts'
 import { Button, ControlRow, EmptyState, IconButton } from '../shared/kit'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 // Declares the `--ui-*` tokens the kit primitives read (they were ported onto
@@ -81,29 +82,14 @@ const RETIRED_PAYMENT_METHODS = new Set(['pi pay', 'transfer'])
 const PAYMENT_METHOD_FALLBACK = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR']
 const SEARCH_DEBOUNCE_MS = 250
 
-type MobileRangePreset = 'today' | 'yesterday' | '7d' | '30d'
+type MobileRangePreset = 'all' | 'today' | '7d' | '30d' | 'month'
 
-function localIso(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+export function mobilePresetRange(preset: MobileRangePreset, now?: Date): DateTimeRange {
+  return statsPresetRange(preset, now)
 }
 
-export function mobilePresetRange(preset: MobileRangePreset, now = new Date()): DateTimeRange {
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const start = new Date(end)
-  if (preset === 'yesterday') {
-    start.setDate(start.getDate() - 1)
-    end.setDate(end.getDate() - 1)
-  } else if (preset === '7d') {
-    start.setDate(start.getDate() - 6)
-  } else if (preset === '30d') {
-    start.setDate(start.getDate() - 29)
-  }
-  return { startDate: localIso(start), endDate: localIso(end), startTime: '00:00', endTime: '23:59' }
-}
-
-export function activeMobilePreset(range: DateTimeRange, now = new Date()): MobileRangePreset | null {
-  for (const preset of ['today', 'yesterday', '7d', '30d'] as const) {
+export function activeMobilePreset(range: DateTimeRange, now?: Date): MobileRangePreset | null {
+  for (const preset of ['all', 'today', '7d', '30d', 'month'] as const) {
     const candidate = mobilePresetRange(preset, now)
     if (range.startDate === candidate.startDate && range.endDate === candidate.endDate) return preset
   }
@@ -289,7 +275,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
       options={views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))}
       onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
       ariaLabel={trh('view', 'View')}
-      buttonClassName={compact ? 'h-7 min-w-0 max-w-[10rem] py-0 px-2 text-[11px]' : 'h-7 min-w-[10rem] py-0 px-2 text-[11px]'}
+      buttonClassName={compact ? 'h-7 min-w-0 max-w-[10rem] py-0 px-2 text-[11px]' : 'min-h-10 min-w-[10rem] py-1 px-2 text-sm'}
       showChevron
     />
   )
@@ -358,10 +344,11 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   const collapsedTail = <>{filtersButton}</>
 
   const mobilePresets: Array<{ id: MobileRangePreset; label: string }> = [
+    { id: 'all', label: trh('all_time', 'All time') },
     { id: 'today', label: trh('today', 'Today') },
-    { id: 'yesterday', label: trh('yesterday', 'Yesterday') },
     { id: '7d', label: trh('last_7_days', 'Last 7 Days') },
     { id: '30d', label: trh('last_30_days', 'Last 30 Days') },
+    { id: 'month', label: trh('this_month', 'This month') },
   ]
   const selectedMobilePreset = activeMobilePreset(range)
   const rangePicker = (
@@ -370,6 +357,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
       onChange={setRange}
       t={t}
       showTime={supportsTime}
+      showCalendarIcon={!compact}
       triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2' : undefined}
     />
   )
@@ -395,8 +383,8 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
       </section>
       {compact ? (
         <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
-          <div className="reports-mobile-primary">{searchInput}{viewPicker}</div>
-          {rangePicker}
+          {searchInput}
+          <div className="reports-mobile-primary">{viewPicker}{rangePicker}</div>
           <div className="reports-mobile-presets" aria-label={trh('quick_range', 'Quick range')}>
             {mobilePresets.map((preset) => (
               <button

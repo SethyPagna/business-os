@@ -308,7 +308,7 @@ export default function OverviewReport(p: ReportViewProps) {
       onRetry={state.reload}
       retryLabel={tr('retry', 'Retry')}
     >
-      {statementBody}
+      <div className="reports-overview-statement">{statementBody}</div>
       {!state.loading && !state.error && !sales && !returns && !expenses ? <p className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{labels.empty}</p> : null}
       {chips.length ? (
         <div className="flex flex-wrap gap-1 pt-1">
