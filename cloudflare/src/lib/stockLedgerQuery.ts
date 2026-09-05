@@ -19,6 +19,7 @@
 // `row_move_out` and `write_off` are kept for any legacy rows even though
 // current code writes `move_out` / `return_reversal` instead.
 import { localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from './businessDateWindow'
+import { STOCK_RECEIPT_MOVEMENT_TYPES } from './stockInSessionsQuery'
 
 export const LEDGER_OUT_TYPES = [
   'remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
@@ -71,6 +72,12 @@ export type StockLedgerQuery = {
 }
 
 const OUT_LIST = LEDGER_OUT_TYPES.map((t) => `'${t}'`).join(', ')
+// The receipt types a shared-lot count must see -- 'add' plus the legacy
+// 'stock_in' string the unified session used to write (see
+// stockInSessionsQuery.ts). Counting only 'add' under-reported the number of
+// receipts into a lot, which is exactly the number the header-edit guard
+// trusts to decide whether an edit could spill into another session.
+const RECEIPT_LIST = STOCK_RECEIPT_MOVEMENT_TYPES.map((t) => `'${t}'`).join(', ')
 
 // One join clause, shared by every statement below so the row list, the
 // count and the summary can never join differently (the supplier filter and
@@ -172,7 +179,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       b.expiry_date AS batch_expiry_date, b.updated_at AS batch_updated_at,
       (SELECT COUNT(DISTINCT COALESCE(mx.reference_id, -mx.id))
        FROM inventory_movements mx
-       WHERE mx.batch_id = m.batch_id AND mx.movement_type = 'add') AS batch_receipt_session_count,
+       WHERE mx.batch_id = m.batch_id AND mx.movement_type IN (${RECEIPT_LIST})) AS batch_receipt_session_count,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,
       COALESCE(p.stock_quantity, 0) - COALESCE((
         SELECT SUM(CASE WHEN mn.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(mn.quantity, 0)) ELSE ABS(COALESCE(mn.quantity, 0)) END)

@@ -11,7 +11,7 @@ import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '.
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { attachBeforeQty, buildStockLedgerQuery, type StockLedgerView } from '../lib/stockLedgerQuery'
-import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql } from '../lib/stockInSessionsQuery'
+import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
@@ -1334,7 +1334,7 @@ app.get('/stock-in-session-lines', async (c) => {
                END) AS receipt_session_count
         FROM inventory_movements m
         JOIN product_batches b ON b.id = m.batch_id
-        WHERE m.movement_type = 'add' AND m.batch_id IN (${clause.sql})
+        WHERE ${STOCK_RECEIPT_TYPE_SQL} AND m.batch_id IN (${clause.sql})
         GROUP BY m.batch_id
       `).all<{ batch_id: number; receipt_session_count: number }>({ ...clause.params })
       for (const row of counts) receiptCounts.set(Number(row.batch_id), Number(row.receipt_session_count) || 0)

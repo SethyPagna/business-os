@@ -153,7 +153,14 @@ function receiptState(sql) {
     lots: sql.prepare('SELECT batch_id, branch_id, quantity FROM branch_batch_stock ORDER BY id').all(),
     operations: sql.prepare('SELECT COUNT(*) count FROM stock_session_operations').get().count,
     members: sql.prepare('SELECT COUNT(*) count FROM stock_session_members').get().count,
-    movements: sql.prepare("SELECT COUNT(*) count FROM inventory_movements WHERE movement_type='stock_in'").get().count,
+    // The session's receipt rows carry the ledger's canonical receipt type
+    // 'add' -- the same string POST /adjust and POST /batches write, and the
+    // one every "a receipt happened" reader filters on. `legacyTypeMovements`
+    // is the positive control: it must stay 0, because writing the session
+    // MODE ('stock_in') here is exactly what hid these receipts from the
+    // Stock-in Sessions list, the shared-lot counter and the daily digest.
+    movements: sql.prepare("SELECT COUNT(*) count FROM inventory_movements WHERE movement_type='add'").get().count,
+    legacyTypeMovements: sql.prepare("SELECT COUNT(*) count FROM inventory_movements WHERE movement_type='stock_in'").get().count,
     audits: sql.prepare("SELECT COUNT(*) count FROM audit_logs WHERE action='stock_session_create'").get().count,
     history: sql.prepare("SELECT COUNT(*) count FROM action_history WHERE entity='stock_session'").get().count,
     snapshots: sql.prepare("SELECT COUNT(*) count FROM undo_snapshots WHERE kind='stock.session'").get().count,
@@ -278,7 +285,7 @@ async function main() {
     assert.equal(zeroResponse.status, 400)
     assert.deepEqual(receiptState(zeroReceive.sql), {
       product: { stock_quantity: 0 }, branch: { quantity: 0 }, batches: [], lots: [],
-      operations: 0, members: 0, movements: 0, audits: 0, history: 0, snapshots: 0,
+      operations: 0, members: 0, movements: 0, legacyTypeMovements: 0, audits: 0, history: 0, snapshots: 0,
     })
   })
 
@@ -430,7 +437,7 @@ async function main() {
       product: { stock_quantity: 5 }, branch: { quantity: 5 },
       batches: [{ id: 1, received_quantity: 5, received_cost_usd: 10 }],
       lots: [{ batch_id: 1, branch_id: 1, quantity: 5 }],
-      operations: 1, members: 1, movements: 1, audits: 1, history: 1, snapshots: 1,
+      operations: 1, members: 1, movements: 1, legacyTypeMovements: 0, audits: 1, history: 1, snapshots: 1,
     })
   })
 

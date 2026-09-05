@@ -637,8 +637,17 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     statements.push(...plan.statements)
     statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,quantity,unit_cost_usd)
       VALUES(@operationId,@lineId,@kind,${plan.productIdSql},@created,@branchId,${plan.batchIdSql},@quantity,@unitCostUsd)`, params: { ...plan.params, operationId, lineId: line.line_id, kind: line.kind, created: line.kind === 'create_receive' ? 1 : 0 } })
+    // 'add' -- the ledger's canonical receipt type, the same string POST
+    // /api/inventory/adjust and POST /api/batches write, and the one this
+    // file's own redo path already emits below. This used to write the
+    // session MODE ('stock_in') instead, so every session committed through
+    // the Products page's "Add products" entry was invisible to the Stock-in
+    // Sessions list, the shared-lot receipt counter and the Telegram stock-in
+    // digest, all of which filter on 'add'. Rows already written under the
+    // old string are covered by STOCK_RECEIPT_MOVEMENT_TYPES until migration
+    // 0128 normalises them.
     statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-      SELECT m.product_id,p.name,m.branch_id,b.name,'stock_in',m.quantity,COALESCE(m.unit_cost_usd,0),0,COALESCE(m.unit_cost_usd,0)*m.quantity,0,@reason,o.rowid,@actor,@actorName,m.batch_id
+      SELECT m.product_id,p.name,m.branch_id,b.name,'add',m.quantity,COALESCE(m.unit_cost_usd,0),0,COALESCE(m.unit_cost_usd,0)*m.quantity,0,@reason,o.rowid,@actor,@actorName,m.batch_id
       FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
       WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: `Stock-in session ${operationId}`, actor: user.id, actorName: user.name, operationId, lineId: line.line_id } })
     statements.push({ sql: 'UPDATE stock_session_members SET movement_id=last_insert_rowid() WHERE operation_id=@operationId AND line_id=@lineId', params: { operationId, lineId: line.line_id } })

@@ -1,3 +1,19 @@
+// The movement types that mean "goods were received". 'add' is the canonical
+// one -- POST /api/inventory/adjust, POST /api/batches and (since this change)
+// the unified stock-in session all write it, and it is the only receipt string
+// movementGroups.ts's translateMovementType() actually knows by name.
+//
+// 'stock_in' is here for HISTORY only. lib/stockSession.ts used to write its
+// session `mode` ('stock_in') into movement_type, so every session committed
+// through the Products page's "Add products" entry landed under a string no
+// reader filtered for and vanished from this list. The writer now emits 'add';
+// rows already committed under the old string stay readable through here until
+// migration 0128 normalises them. It is a legacy alias of 'add', nothing more
+// -- do not give it display or sign semantics of its own.
+export const STOCK_RECEIPT_MOVEMENT_TYPES = ['add', 'stock_in'] as const
+
+export const STOCK_RECEIPT_TYPE_SQL = `m.movement_type IN (${STOCK_RECEIPT_MOVEMENT_TYPES.map((type) => `'${type}'`).join(', ')})`
+
 export const STOCK_IN_SESSION_KEY_SQL = `CASE
   WHEN m.reference_id IS NOT NULL AND CAST(m.reference_id AS TEXT) NOT LIKE 'revert:%'
     THEN 'session:' || CAST(m.reference_id AS TEXT)
@@ -10,7 +26,7 @@ export const STOCK_IN_SESSION_FROM_SQL = `
   FROM inventory_movements m
   JOIN product_batches b ON b.id = m.batch_id
   LEFT JOIN products p ON p.id = m.product_id
-  WHERE m.movement_type = 'add'
+  WHERE ${STOCK_RECEIPT_TYPE_SQL}
     AND NOT EXISTS (
       SELECT 1 FROM inventory_movements rx
       WHERE rx.reference_id = 'revert:' || CAST(m.id AS TEXT)
@@ -90,7 +106,7 @@ export function stockInSessionLinesSql(locator: StockInSessionLocator): string {
     FROM inventory_movements m
     JOIN product_batches b ON b.id = m.batch_id
     LEFT JOIN products p ON p.id = m.product_id
-    WHERE m.movement_type = 'add' AND ${where}
+    WHERE ${STOCK_RECEIPT_TYPE_SQL} AND ${where}
     ORDER BY m.created_at ASC, m.id ASC
     LIMIT 2001`
 }
