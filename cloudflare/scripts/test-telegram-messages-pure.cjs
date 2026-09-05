@@ -79,7 +79,7 @@ assert.deepEqual(lines, [
   'Delivery service: $1.50',
   'Total: $9.75',
   'Discount: −$0.25',
-  'Net Total: $9.50 · 38,950៛',
+  'Net Total: $9.50 / 38,950៛',
   'Paid: $10.00 (Cash)',
   'Change: $0.50',
   'Delivery driver: Tuk Tuk Dara · 099 111 222',
@@ -118,8 +118,9 @@ assert.ok(orderDiscount.includes('Total: $65.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Discount: −$4.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Net Total: $61.00'), orderDiscount.join('\n'))
 
-// Only a dual-currency Change uses +: single-currency output has no dangling
-// separator, while Net Total and Paid keep their established middle dot.
+// Equivalent currencies use /; actual tender currencies use +. Change values
+// from saleTotals are equivalents unless the caller explicitly knows both
+// currencies were physically returned.
 const changeLines = (changeUsd, changeKhr) => telegram.formatSaleTelegramLines({
   status: 'completed', receiptNumber: 'CHANGE', exchangeRate: 4000,
   items: [{ name: 'A', quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
@@ -129,9 +130,47 @@ const changeLines = (changeUsd, changeKhr) => telegram.formatSaleTelegramLines({
 assert.ok(changeLines(1, 0).includes('Change: $1.00'))
 assert.ok(changeLines(0, 4000).includes('Change: 4,000៛'))
 const dualChange = changeLines(1, 4000)
-assert.ok(dualChange.includes('Change: $1.00 + 4,000៛'), dualChange.join('\n'))
-assert.ok(dualChange.includes('Net Total: $1.00 · 4,000៛'), dualChange.join('\n'))
-assert.ok(dualChange.includes('Paid: $1.00 · 4,000៛'), dualChange.join('\n'))
+assert.ok(dualChange.includes('Change: $1.00 / 4,000៛'), dualChange.join('\n'))
+assert.ok(dualChange.includes('Net Total: $1.00 / 4,000៛'), dualChange.join('\n'))
+assert.ok(dualChange.includes('Paid: $1.00 + 4,000៛'), dualChange.join('\n'))
+const actualDualChange = telegram.formatSaleTelegramLines({
+  status: 'completed', receiptNumber: 'ACTUAL-CHANGE', exchangeRate: 4000,
+  items: [{ name: 'A', quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
+  subtotalUsd: 1, discountUsd: 0, totalUsd: 1, totalKhr: 4000,
+  paidUsd: 2, paidKhr: 4000, changeUsd: 1, changeKhr: 4000,
+  changeIsActualDual: true,
+}).filter(Boolean)
+assert.ok(actualDualChange.includes('Change: $1.00 + 4,000៛'), actualDualChange.join('\n'))
+
+// A cancelled shift is terminal at cancelled_at, not open and not falsely
+// closed. Preserve its native report figures and cancellation provenance.
+const cancelledShift = {
+  shift_code: 'S-CANCELLED', scope_mode: 'per_account', user_id: 7, user_name: 'Za',
+  branch_id: 2, branch_name: 'Shop', business_date: '2026-09-04',
+  opened_at: '2026-09-04T01:15:00.000Z', opening_float_usd: 50, opening_float_khr: 100000,
+  closed_at: null, closing_counted_usd: null, closing_counted_khr: null,
+  cancelled_at: '2026-09-04T02:30:00.000Z', cancelled_by_user_name: 'Manager', cancel_reason: 'Duplicate opening',
+}
+const cancelledFigures = {
+  invoices: 3, cancelled: 1, edited: 0, revenueUsd: 25, itemDiscountUsd: 0,
+  invoiceDiscountUsd: 0, storeDiscountUsd: 0, membershipDiscountUsd: 0,
+  grossSaleUsd: 25, taxUsd: 0, refundUsd: 0, avgOrderUsd: 8.33, costUsd: 10,
+  profitUsd: 15, deliveryFeeUsd: 0, deliveryCostUsd: 0, deliveryMarginUsd: 0,
+  deliveryCostRecorded: 0, creditUsd: 0, otherExpenseUsd: 0, otherExpenseKhr: 0,
+  collectedUsd: 25, cash: { usd: 25, khr: 0, needsReview: false },
+  paymentMethods: [], deliveryServices: [],
+}
+const cancelledReport = telegram.formatShiftReport('Shop', cancelledShift, cancelledFigures, Date.parse('2026-09-04T12:00:00.000Z'))
+assert.ok(cancelledReport.includes('cancelled / បានបោះបង់'), cancelledReport)
+assert.ok(cancelledReport.includes('Cancelled by / បោះបង់ដោយ: Manager'), cancelledReport)
+assert.ok(cancelledReport.includes('Reason / មូលហេតុ: Duplicate opening'), cancelledReport)
+assert.ok(cancelledReport.includes('Invoices / វិក្កយបត្រ: 3'), cancelledReport)
+assert.ok(cancelledReport.includes('04/09/2026 09:30'), cancelledReport)
+assert.ok(!cancelledReport.includes('still open'), cancelledReport)
+assert.ok(!cancelledReport.includes('Cash counted'), cancelledReport)
+assert.equal(telegram.shiftFilters(cancelledShift, Date.parse('2026-09-04T12:00:00.000Z')).createdTo, cancelledShift.cancelled_at)
+const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
+assert.match(telegramSource, /WHERE business_date = @date\s+ORDER BY/, 'dated /shift history must retain cancelled shifts')
 
 // unpaid credit sale, shop-paid delivery, no customer: optional lines drop out,
 // the shop-paid fee is shown but NOT added to Total
@@ -159,7 +198,7 @@ const absorbed = telegram.formatSaleTelegramLines({
 }).filter(Boolean)
 assert.ok(absorbed.includes('Delivery service: $2.00 (shop paid)'), absorbed.join('\n'))
 assert.ok(absorbed.includes('Total: $20.00'), absorbed.join('\n'))
-assert.ok(absorbed.includes('Net Total: $20.00 · 82,000៛'), absorbed.join('\n'))
+assert.ok(absorbed.includes('Net Total: $20.00 / 82,000៛'), absorbed.join('\n'))
 
 // The message FOOTS: Total - Discount + Tax must equal Net Total, which is
 // the stored total_usd. A shop-absorbed fee added to Total would break this
