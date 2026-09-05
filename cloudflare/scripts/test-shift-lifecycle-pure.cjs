@@ -155,20 +155,35 @@ async function main() {
   const rootDetail = await call('GET', `/${rootShift.id}/history`)
   assert.equal((await rootDetail.json()).shift.capabilities.can_reopen, false, 'parent loses reopen capability after a child exists')
   assert.equal((await call('PATCH', `/${child.id}`, {
-    reason: 'Invalid money', opening_float_usd: 'NaN',
+    expected_revision: child.revision, reason: 'Invalid money', opening_float_usd: 'NaN',
   })).status, 400, 'amendment never converts invalid money to zero')
   assert.equal((await call('PATCH', `/${child.id}`, {
-    reason: 'x'.repeat(501), opening_float_usd: 4,
+    expected_revision: child.revision, reason: 'x'.repeat(501), opening_float_usd: 4,
   })).status, 400, 'amendment reason is bounded')
   assert.equal((await call('PATCH', `/${child.id}`, {
-    reason: 'Overlap parent', opened_at: new Date(new Date(closedRoot.closed_at).getTime() - 1).toISOString(),
+    expected_revision: child.revision, reason: 'Overlap parent', opened_at: new Date(new Date(closedRoot.closed_at).getTime() - 1).toISOString(),
   })).status, 400, 'child amendment cannot overlap its parent')
   assert.equal((await call('PATCH', `/${rootShift.id}`, {
-    reason: 'Overlap child', closed_at: new Date(new Date(child.opened_at).getTime() + 1).toISOString(),
+    expected_revision: closedRoot.revision, reason: 'Overlap child', closed_at: new Date(new Date(child.opened_at).getTime() + 1).toISOString(),
   })).status, 400, 'parent amendment cannot overlap its child')
 
+  assert.equal((await call('PATCH', `/${child.id}`, {
+    reason: 'Missing revision', opening_note: 'must not save',
+  })).status, 400, 'amendment requires a caller-supplied expected revision')
+  const firstAmendResponse = await call('PATCH', `/${child.id}`, {
+    expected_revision: child.revision, reason: 'Verified opening note', opening_note: 'First accepted value',
+  })
+  assert.equal(firstAmendResponse.status, 200)
+  const amendedChild = (await firstAmendResponse.json()).shift
+  const staleAmendResponse = await call('PATCH', `/${child.id}`, {
+    expected_revision: child.revision, reason: 'Stale overwrite', opening_note: 'Stale second value',
+  })
+  assert.equal(staleAmendResponse.status, 409, 'sequential stale amendment is rejected')
+  assert.equal(sqlite.prepare('SELECT opening_note FROM shift_sessions WHERE id=?').get(child.id).opening_note, 'First accepted value',
+    'stale amendment cannot overwrite the accepted value')
+
   const childClose = await call('POST', `/${child.id}/close`, {
-    expected_revision: child.revision, closed_at: new Date().toISOString(),
+    expected_revision: amendedChild.revision, closed_at: new Date().toISOString(),
     closing_counted_usd: 4, closing_counted_khr: 4000,
   })
   assert.equal(childClose.status, 200)

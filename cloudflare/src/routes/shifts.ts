@@ -379,8 +379,12 @@ app.post('/close', async (c) => {
   if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
     try { c.executionCtx.waitUntil(report) } catch { void report }
+    return c.json({ shift: result.shift ? responseShift(user, result.shift) : null, already_closed: false, is_open: false }, 200)
   }
-  return c.json({ shift: result.shift ? responseShift(user, result.shift) : null, already_closed: !result.changed, is_open: false }, 200)
+  if (result.shift?.closed_at) {
+    return c.json({ shift: responseShift(user, result.shift), already_closed: true, is_open: false }, 200)
+  }
+  return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
 })
 
 app.post('/:id/close', async (c) => {
@@ -488,12 +492,17 @@ app.patch('/:id', async (c) => {
   const user = c.get('user'); const denied = shiftPermissionError(c, user); if (denied) return denied
   const id = Number(c.req.param('id')); if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid shift id.' }, 400)
   const body = await c.req.json().catch(() => ({})) as Record<string, unknown>; const reason = requiredReason(body.reason)
+  const expectedRevision = Number(body.expected_revision)
+  if (body.expected_revision == null || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
+    return c.json({ error: 'A valid expected revision is required.' }, 400)
+  }
   if (!reason) return c.json({ error: 'A reason is required.' }, 400)
   const db = getDb(c.env); const before = await readShiftById(db, id)
   if (!before) return c.json({ error: 'Shift not found.' }, 404)
   if (before.branch_id != null && !(await resolveBranch(db, before.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
   if (before.cancelled_at) return c.json({ error: 'A cancelled shift cannot be amended.' }, 409)
   if (!canMutateShift(user, before)) return c.json({ error: 'Only the shift owner or an administrator can amend this shift.' }, 403)
+  if (before.revision !== expectedRevision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const iso = (key: string, fallback: string | null) => {
     if (!(key in body)) return fallback
     if (body[key] == null || body[key] === '') return null
@@ -546,7 +555,7 @@ app.patch('/:id', async (c) => {
     { sql: `UPDATE shift_sessions SET opened_at=@openedAt, opening_float_usd=@openingUsd, opening_float_khr=@openingKhr,
         opening_note=@openingNote, closed_at=@closedAt, closing_counted_usd=@closingUsd, closing_counted_khr=@closingKhr,
         closing_note=@closingNote, revision=revision+1, updated_at=@updatedAt WHERE id=@id AND revision=@revision`,
-      params: { id, revision: before.revision, openedAt: after.opened_at, openingUsd: after.opening_float_usd,
+      params: { id, revision: expectedRevision, openedAt: after.opened_at, openingUsd: after.opening_float_usd,
         openingKhr: after.opening_float_khr, openingNote: after.opening_note, closedAt: after.closed_at,
         closingUsd: after.closing_counted_usd, closingKhr: after.closing_counted_khr, closingNote: after.closing_note, updatedAt: nowIso } },
     { sql: `INSERT INTO shift_session_amendments (shift_session_id, actor_user_id, actor_name, reason, before_json, after_json, created_at)

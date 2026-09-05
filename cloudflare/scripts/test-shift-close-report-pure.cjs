@@ -124,9 +124,11 @@ sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0123_shift_
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const sent = []
 let currentUserId = 7
+const primaryD1 = d1(sqlite)
+let activeD1 = primaryD1
 const shiftsRoute = loadReal('routes/shifts.ts', {
   '../lib/businessDateWindow': businessDateWindow,
-  '../lib/db': { getDb: () => d1(sqlite) },
+  '../lib/db': { getDb: () => activeD1 },
   '../lib/auth': {
     requireAuth: async (c, next) => { c.set('user', { id: currentUserId, name: 'Za', username: 'za' }); await next() },
   },
@@ -150,15 +152,16 @@ ok(!/fetch\(/.test(routeSrc), 'and the route itself opens no network connection 
 const waited = []
 const ctx = { waitUntil: (promise) => { waited.push(promise) }, passThroughOnException: () => {} }
 const env = { TELEGRAM_BOT_TOKEN: '' }
-const post = (route, body) => app.fetch(
+const request = (method, route, body) => app.fetch(
   new Request(`http://till.local${route}`, {
-    method: 'POST',
+    method,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body || {}),
   }),
   env,
   ctx,
 )
+const post = (route, body) => request('POST', route, body)
 
 async function main() {
   // ---- 1. Opening sends the open-state report exactly once ------------------
@@ -221,6 +224,43 @@ async function main() {
   const winners = [bodyA, bodyB].filter((body) => body.already_closed === false)
   ok(winners.length === 1, `exactly one of the two simultaneous closes wrote (got ${winners.length})`)
   ok(sent.length === 1, `RACE SENDS ONCE: two simultaneous closes produced ${sent.length} report(s), expected exactly 1`)
+
+  // ---- 4c. A concurrent amendment must not masquerade as a close ----------
+  currentUserId = 10
+  const openForAmendRace = await post('/open', { opening_float_usd: 30, opening_float_khr: 0 })
+  const openForAmendRaceBody = await openForAmendRace.json()
+  let releaseCloseBatch
+  const closeBatchMayContinue = new Promise((resolve) => { releaseCloseBatch = resolve })
+  let signalCloseBatchReached
+  const closeBatchReached = new Promise((resolve) => { signalCloseBatchReached = resolve })
+  activeD1 = {
+    ...primaryD1,
+    async batch(items) {
+      if (items[0]?.sql.includes('UPDATE shift_sessions SET closed_at=')) {
+        signalCloseBatchReached()
+        await closeBatchMayContinue
+      }
+      return primaryD1.batch(items)
+    },
+  }
+  const losingClosePromise = post('/close', { closing_counted_usd: 30, closing_counted_khr: 0 })
+  await closeBatchReached
+  const winningAmend = await request('PATCH', `/${openForAmendRaceBody.shift.id}`, {
+    expected_revision: openForAmendRaceBody.shift.revision,
+    reason: 'Correct opening note before close',
+    opening_note: 'Count verified',
+  })
+  ok(winningAmend.status === 200, 'the concurrent amendment wins its guarded revision update')
+  releaseCloseBatch()
+  const losingClose = await losingClosePromise
+  const losingCloseBody = await losingClose.json()
+  activeD1 = primaryD1
+  const storedAfterAmendRace = sqlite.prepare('SELECT revision,closed_at,opening_note FROM shift_sessions WHERE id=?')
+    .get(openForAmendRaceBody.shift.id)
+  ok(losingClose.status === 409 && losingCloseBody.already_closed === undefined,
+    'a close that loses to an amendment returns 409, never a false already-closed response')
+  ok(storedAfterAmendRace.closed_at === null && storedAfterAmendRace.opening_note === 'Count verified',
+    'the losing close reports the actual still-open stored state')
 
   // ---- 5. A close with no shift at all sends nothing -----------------------
   // A migrated but EMPTY table, so the 404 comes from "no row for today" and
