@@ -27,10 +27,16 @@ INSERT INTO sales(id,created_at,sale_status,branch_id,branch_name,cashier_name,c
  (4,'2026-09-04 03:00:00','completed',3,'Warehouse','Other',8,'Other','','R4','ABA',500,0,500,0,NULL,0);
 INSERT INTO sale_items VALUES(1,1,60,1),(2,2,120,1),(3,3,800,1);
 INSERT INTO returns(id,sale_id,created_at,branch_id,return_number,receipt_number,customer_name,total_refund_usd) VALUES(1,1,'2026-09-04 05:00:00',2,'RET1','R1','Alice',23);
+INSERT INTO returns(id,sale_id,created_at,branch_id,return_number,receipt_number,customer_name,total_refund_usd) VALUES
+ (2,NULL,'2026-09-04T03:00:00.000Z',2,'RET2','R1','Alice',7),
+ (3,NULL,'2026-09-04 04:00:00',2,'RET3','R1','Alice',11);
 INSERT INTO return_items VALUES(1,1,10,1,'restock',1);
 INSERT INTO fees VALUES(1,'2026-09-04 03:00:00','2026-09-04',2,NULL,'expense','Limes','',0,30000),
  (2,'2026-09-04T03:00:00.000Z','2026-09-04',2,NULL,'delivery','Grab','',0,14000),
- (3,'2026-09-04 03:00:00','2026-09-03',2,NULL,'expense','Earlier','',0,100);
+ (3,'2026-09-04 03:00:00','2026-09-03',2,NULL,'expense','Older expense entered now','',0,100),
+ (4,'2026-09-04 04:00:00','2026-09-03',2,NULL,'expense','At exclusive end','',0,400),
+ (5,'2026-09-04 01:59:59','2026-09-03',2,NULL,'expense','Before start','',0,500),
+ (6,'2026-09-03T03:00:00.000Z','2020-01-01',2,NULL,'expense','Previous system entry','',0,900);
 `)
 const db = { prepare(query) {
  const bind = (params = {}) => { const values=[]; const text=query.replace(/@(\w+)/g, (_,key) => { values.push(params[key] ?? null); return '?' }); return { stmt:sql.prepare(text), values } }
@@ -53,6 +59,7 @@ const app=load('routes/reports.ts',{
 }).default
 const base='http://local/business-summary/'
 async function get(kind,query='',scope='all'){const res=await app.request(base+kind+'?startDate=2026-09-04&endDate=2026-09-04&branchId=2&'+query,{headers:{scope}},{});return {status:res.status,body:await res.json()}}
+async function overview(query='',scope='all'){const res=await app.request('http://local/overview?startDate=2026-09-04&endDate=2026-09-04&branchId=2&'+query,{headers:{scope}},{});return {status:res.status,body:await res.json()}}
 ;(async()=>{
  const sales=await get('sales','order=asc')
  // Minimal fixture columns required by the actual canonical totals query.
@@ -85,11 +92,29 @@ async function get(kind,query='',scope='all'){const res=await app.request(base+k
  const cursor=first.body.next_cursor
  const second=await get('sales',`order=desc&pageSize=1&snapshotMaxId=${first.body.snapshot_max_id}&afterCreatedAt=${encodeURIComponent(cursor.created_at)}&afterId=${cursor.id}`)
  assert.deepEqual(second.body.rows.map(r=>r.id),[1]);assert.equal(second.body.has_more,false)
- const returns=await get('returns');assert.equal(returns.status,200);assert.equal(returns.body.rows[0].refund_usd,23)
+ const returns=await get('returns');assert.equal(returns.status,200);assert.deepEqual(returns.body.rows.map(r=>r.id),[2,3,1])
  const fees=await get('expenses','order=desc&pageSize=1');assert.equal(fees.body.rows[0].id,2)
  const next=await get('expenses',`order=desc&pageSize=1&snapshotMaxId=2&afterCreatedAt=${encodeURIComponent(fees.body.next_cursor.created_at)}&afterId=2`)
  assert.deepEqual(next.body.rows.map(r=>r.id),[1]);assert.equal(next.body.rows[0].amount_khr,30000)
  assert.equal((await get('sales','snapshotMaxId=0')).body.rows.length,0)
+ // Endpoint date-times are one continuous half-open UTC range. The end minute
+ // selected in the UI was 10:59 Cambodia, hence createdTo 04:00 UTC.
+ const exact='createdFrom='+encodeURIComponent('2026-09-04 02:30:00')+'&createdTo='+encodeURIComponent('2026-09-04 04:00:00')
+ assert.deepEqual((await get('sales',exact)).body.rows.map(r=>r.id),[2],'sales use the exact interval across ISO timestamps')
+ const exactReturns=await get('returns',exact)
+ assert.deepEqual(exactReturns.body.rows.map(r=>r.id),[2],'returns use system-entry created_at and exclude the exact upper bound')
+ const exactFees=await get('expenses',exact)
+ assert.deepEqual(exactFees.body.rows.map(r=>r.id),[1,2,3],'timed expenses use created_at, including an older fee_date, across both timestamp shapes')
+ const expenseOverview=await overview(exact+'&compare=1','fees')
+ assert.equal(expenseOverview.status,200)
+ assert.deepEqual(expenseOverview.body.expenses.totals,{count:3,amount_usd:0,amount_khr:44100},'overview and detail use the same timed expense cohort')
+ assert.deepEqual(expenseOverview.body.expenses.previous,{count:1,amount_usd:0,amount_khr:900},'previous comparison shifts the exact interval by one Cambodia calendar day')
+ assert.equal(expenseOverview.body.previous_range.createdFrom,'2026-09-03 02:30:00')
+ assert.equal(expenseOverview.body.previous_range.createdTo,'2026-09-03 04:00:00')
+ const returnOverview=await overview(exact,'returns')
+ assert.deepEqual(returnOverview.body.returns.totals,{count:1,refund_usd:7,refund_khr:0},'returns overview matches the exact detail cohort')
+ assert.equal((await get('expenses','createdFrom='+encodeURIComponent('2026-09-04 02:30:00'))).status,400,'one-sided exact ranges reject')
+ assert.equal((await get('sales','createdFrom='+encodeURIComponent('2026-09-04 04:00:00')+'&createdTo='+encodeURIComponent('2026-09-04 02:30:00'))).status,400,'reversed exact ranges reject')
  // Exercise the real bounded grouped shift-expense query, not a D1 stub.
  // Both SQLite and ISO timestamps belong to the same half-open shift.
  sql.exec('ALTER TABLE fees ADD COLUMN created_by INTEGER; UPDATE fees SET created_by=7')

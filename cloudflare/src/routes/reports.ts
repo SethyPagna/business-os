@@ -19,6 +19,7 @@ import {
   saleStatusExpr,
   CUSTOMER_REFUND_JOIN,
   whereActiveSales, netRefundExpr, collectedSaleExpr, deliveryActualCostExpr, RESTOCKED_RETURN_LINE,
+  shiftWindowBound,
   type SalesFilters,
 } from '../lib/salesAnalytics'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localTimeRangeClause } from '../lib/businessDateWindow'
@@ -130,11 +131,54 @@ export function parseViewFilters(query: Record<string, string>): SalesFilters {
   if (status) f.status = status
   const paymentMethod = String(query.paymentMethod || '').trim()
   if (paymentMethod) f.paymentMethod = paymentMethod
-  if (isClock(query.startTime) && isClock(query.endTime)) {
+  const rawCreatedFrom = String(query.createdFrom || '').trim()
+  const rawCreatedTo = String(query.createdTo || '').trim()
+  if (!!rawCreatedFrom !== !!rawCreatedTo) throw new RangeError('createdFrom and createdTo must be provided together')
+  if (rawCreatedFrom && rawCreatedTo) {
+    const createdFrom = shiftWindowBound(rawCreatedFrom)
+    const createdTo = shiftWindowBound(rawCreatedTo)
+    if (!createdFrom || !createdTo) throw new RangeError('createdFrom and createdTo must be valid timestamps')
+    if (createdFrom >= createdTo) throw new RangeError('createdTo must be after createdFrom')
+    f.createdFrom = createdFrom
+    f.createdTo = createdTo
+  } else if (isClock(query.startTime) && isClock(query.endTime)) {
+    // Backward-compatible recurring daily mask for old/direct callers. The
+    // Reports UI no longer emits this shape for endpoint date-times.
     f.startTime = query.startTime
     f.endTime = query.endTime
   }
   return f
+}
+
+type ReportRecordKind = 'returns' | 'expenses'
+
+/**
+ * One cohort predicate for report totals and record pages. Exact report
+ * moments always use the row's system-entry timestamp. Without exact bounds,
+ * returns retain their local created-at date and expenses retain fee_date.
+ */
+export function reportRecordRange(kind: ReportRecordKind, alias: string, f: SalesFilters): { sql: string; params: Record<string, unknown> } {
+  const clauses: string[] = []
+  const params: Record<string, unknown> = {}
+  const createdFrom = shiftWindowBound(f.createdFrom)
+  const createdTo = shiftWindowBound(f.createdTo)
+  if (createdFrom && createdTo) {
+    clauses.push(`datetime(${alias}.created_at) >= @createdFrom`, `datetime(${alias}.created_at) < @createdTo`)
+    params.createdFrom = createdFrom
+    params.createdTo = createdTo
+  } else if (kind === 'returns') {
+    if (f.startDate) { clauses.push(localDateAtOrAfter(`${alias}.created_at`)); params.startDate = f.startDate }
+    if (f.endDate) { clauses.push(localDateAtOrBefore(`${alias}.created_at`)); params.endDate = f.endDate }
+  } else {
+    if (f.startDate) { clauses.push(`${alias}.fee_date >= @startDate`); params.startDate = f.startDate }
+    if (f.endDate) { clauses.push(`${alias}.fee_date <= @endDate`); params.endDate = f.endDate }
+  }
+  if (f.branchId) { clauses.push(`${alias}.branch_id = @branchId`); params.branchId = f.branchId }
+  return { sql: clauses.length ? clauses.join(' AND ') : '1=1', params }
+}
+
+function filterError(error: unknown): string {
+  return error instanceof RangeError ? error.message : 'Invalid report filters'
 }
 
 /**
@@ -253,14 +297,15 @@ app.get('/overview', async (c) => {
   if (!canSales && !canReturns && !canFees) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const db = getDb(c.env)
   const query = c.req.query()
-  const f = parseViewFilters(query)
+  let f: SalesFilters
+  try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
   const isAdmin = isAdminControlUser(user)
   const compare = query.compare === '1' && !!f.startDate && !!f.endDate
   const prev: SalesFilters | null = compare ? { ...f, ...previousPeriodFilters(f) } : null
   const out: Record<string, unknown> = {
     is_admin: isAdmin,
     filters: f,
-    previous_range: prev ? { startDate: prev.startDate, endDate: prev.endDate } : null,
+    previous_range: prev ? { startDate: prev.startDate, endDate: prev.endDate, createdFrom: prev.createdFrom, createdTo: prev.createdTo } : null,
   }
 
   if (canSales) {
@@ -288,33 +333,16 @@ app.get('/overview', async (c) => {
     }
   }
 
-  // Returns / expenses are date-scoped only (no time-of-day, no status): a
-  // refund or a fee has no sale status or checkout time of its own.
-  const dateClauses = (col: string) => {
-    const clauses: string[] = []
-    const params: Record<string, unknown> = {}
-    return {
-      forRange: (startDate: string | null | undefined, endDate: string | null | undefined) => {
-        const cl = [...clauses]
-        const p: Record<string, unknown> = { ...params }
-        if (startDate) { cl.push(localDateAtOrAfter(col)); p.startDate = startDate }
-        if (endDate) { cl.push(localDateAtOrBefore(col)); p.endDate = endDate }
-        if (f.branchId) { cl.push('branch_id = @branchId'); p.branchId = f.branchId }
-        return { where: cl.length ? cl.join(' AND ') : '1=1', params: p }
-      },
-    }
-  }
-
   if (canReturns) {
     const base = `COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'`
     const money = `COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr`
-    const cur = dateClauses('created_at').forRange(f.startDate, f.endDate)
+    const cur = reportRecordRange('returns', 'returns', f)
     const shape = (r: Record<string, unknown> | null | undefined) => ({ count: num(r?.count), refund_usd: num(r?.refund_usd), refund_khr: num(r?.refund_khr) })
     const [totals, byReason, previous] = await Promise.all([
-      db.prepare(`SELECT ${money} FROM returns WHERE ${base} AND ${cur.where}`).get<Record<string, unknown>>(cur.params),
-      db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '') AS reason, ${money} FROM returns WHERE ${base} AND ${cur.where} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '') ORDER BY refund_usd DESC, refund_khr DESC, count DESC LIMIT 50`).all<Record<string, unknown>>(cur.params),
+      db.prepare(`SELECT ${money} FROM returns WHERE ${base} AND ${cur.sql}`).get<Record<string, unknown>>(cur.params),
+      db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '') AS reason, ${money} FROM returns WHERE ${base} AND ${cur.sql} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '') ORDER BY refund_usd DESC, refund_khr DESC, count DESC LIMIT 50`).all<Record<string, unknown>>(cur.params),
       prev
-        ? (() => { const p = dateClauses('created_at').forRange(prev.startDate, prev.endDate); return db.prepare(`SELECT ${money} FROM returns WHERE ${base} AND ${p.where}`).get<Record<string, unknown>>(p.params) })()
+        ? (() => { const p = reportRecordRange('returns', 'returns', prev); return db.prepare(`SELECT ${money} FROM returns WHERE ${base} AND ${p.sql}`).get<Record<string, unknown>>(p.params) })()
         : Promise.resolve(null),
     ])
     out.returns = {
@@ -326,21 +354,13 @@ app.get('/overview', async (c) => {
 
   if (canFees) {
     const money = `COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr), 0), 0) AS amount_khr`
-    const feeRange = (startDate: string | null | undefined, endDate: string | null | undefined) => {
-      const cl: string[] = []
-      const p: Record<string, unknown> = {}
-      if (startDate) { cl.push('fee_date >= @startDate'); p.startDate = startDate }
-      if (endDate) { cl.push('fee_date <= @endDate'); p.endDate = endDate }
-      if (f.branchId) { cl.push('branch_id = @branchId'); p.branchId = f.branchId }
-      return { where: cl.length ? cl.join(' AND ') : '1=1', params: p }
-    }
-    const cur = feeRange(f.startDate, f.endDate)
+    const cur = reportRecordRange('expenses', 'fees', f)
     const shape = (r: Record<string, unknown> | null | undefined) => ({ count: num(r?.count), amount_usd: num(r?.amount_usd), amount_khr: num(r?.amount_khr) })
     const [totals, byType, previous] = await Promise.all([
-      db.prepare(`SELECT ${money} FROM fees WHERE ${cur.where}`).get<Record<string, unknown>>(cur.params),
-      db.prepare(`SELECT COALESCE(fee_type, '') AS fee_type, ${money} FROM fees WHERE ${cur.where} GROUP BY COALESCE(fee_type, '') ORDER BY amount_usd DESC, amount_khr DESC LIMIT 50`).all<Record<string, unknown>>(cur.params),
+      db.prepare(`SELECT ${money} FROM fees WHERE ${cur.sql}`).get<Record<string, unknown>>(cur.params),
+      db.prepare(`SELECT COALESCE(fee_type, '') AS fee_type, ${money} FROM fees WHERE ${cur.sql} GROUP BY COALESCE(fee_type, '') ORDER BY amount_usd DESC, amount_khr DESC LIMIT 50`).all<Record<string, unknown>>(cur.params),
       prev
-        ? (() => { const p = feeRange(prev.startDate, prev.endDate); return db.prepare(`SELECT ${money} FROM fees WHERE ${p.where}`).get<Record<string, unknown>>(p.params) })()
+        ? (() => { const p = reportRecordRange('expenses', 'fees', prev); return db.prepare(`SELECT ${money} FROM fees WHERE ${p.sql}`).get<Record<string, unknown>>(p.params) })()
         : Promise.resolve(null),
     ])
     out.expenses = {
@@ -361,7 +381,8 @@ app.get('/periods', async (c) => {
   const user = c.get('user')
   if (!canReadSales(user)) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const query = c.req.query()
-  const f = parseViewFilters(query)
+  let f: SalesFilters
+  try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
   const granularity = parseGranularity(query.granularity)
   const isAdmin = isAdminControlUser(user)
   const dayRows = await getBusinessSummaryDayRows(c.env, f)
@@ -377,7 +398,8 @@ app.get('/grouped', async (c) => {
   const user = c.get('user')
   if (!canReadSales(user)) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const query = c.req.query()
-  const f = parseViewFilters(query)
+  let f: SalesFilters
+  try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
   const by = String(query.by || '').trim().toLowerCase()
   const limit = clampInt(query.limit, 300, 1, 1000)
   const isAdmin = isAdminControlUser(user)
@@ -404,15 +426,17 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
     const allowed = kind === 'sales' ? canReadSales(user) : kind === 'returns' ? canReadReturns(user) : canReadFees(user)
     if (!allowed) return c.json({ error: 'Forbidden' }, 403)
     const query = c.req.query(); const db = getDb(c.env); const isAdmin = isAdminControlUser(user)
-    const f = parseViewFilters(query); const pageSize = clampInt(query.pageSize, 250, 1, 500)
+    let f: SalesFilters
+    try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
+    const pageSize = clampInt(query.pageSize, 250, 1, 500)
     const table = kind === 'expenses' ? 'fees' : kind
     const alias = kind === 'sales' ? 's' : kind === 'returns' ? 'r' : 'f'
     const active = kind === 'sales' ? whereActiveSales('s', f) : { sql: '1=1', params: {} }
     const clauses = [active.sql]; const params: Record<string, unknown> = { ...active.params }
     if (kind !== 'sales') {
-      if (f.startDate) { clauses.push(kind === 'expenses' ? 'f.fee_date >= @startDate' : localDateAtOrAfter('r.created_at')); params.startDate = f.startDate }
-      if (f.endDate) { clauses.push(kind === 'expenses' ? 'f.fee_date <= @endDate' : localDateAtOrBefore('r.created_at')); params.endDate = f.endDate }
-      if (f.branchId) { clauses.push(`${alias}.branch_id = @branchId`); params.branchId = f.branchId }
+      const range = reportRecordRange(kind, alias, f)
+      clauses.push(range.sql)
+      Object.assign(params, range.params)
       // Match the Returns overview: customer returns only, excluding cancelled.
       if (kind === 'returns') clauses.push("COALESCE(r.return_scope, 'customer') = 'customer'", "COALESCE(r.status, 'completed') <> 'cancelled'")
     }

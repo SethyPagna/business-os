@@ -73,6 +73,8 @@ db.exec(`
     delivery_fee_paid_by TEXT,
     is_delivery INTEGER,
     delivery_actual_cost_usd REAL,
+    delivery_contact_id INTEGER,
+    delivery_contact_name TEXT,
     branch_id INTEGER,
     branch_name TEXT,
     customer_id INTEGER,
@@ -104,6 +106,7 @@ db.exec(`
     amount_usd REAL,
     amount_khr REAL,
     fee_date TEXT,
+    created_at TEXT,
     sale_id INTEGER,
     branch_id INTEGER,
     delivery_contact_id INTEGER
@@ -126,6 +129,7 @@ db.exec(`
     branch_id INTEGER
   );
   CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT);
+  CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);
 `)
 
 // created_at is stored as UTC; the kernel shifts +7h to the business day.
@@ -262,6 +266,30 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   check('products: ranked by line sales desc', products.every((r, i) => i === 0 || products[i - 1].line_sales_usd >= r.line_sales_usd))
   const productsAba = await kernel.getProductSalesRanking(env, { ...filters, paymentMethod: 'ABA Bank' })
   check('products: the payment filter narrows the ranking (only S2\'s A line: qty 2, 50)', productsAba.length === 1 && productsAba[0].product_id === 101 && productsAba[0].qty === 2)
+
+  // Exact report ranges are absolute moments. Standalone courier expenses use
+  // their system-entry created_at in that mode, not the historical fee_date.
+  db.exec(`
+    INSERT INTO delivery_contacts(id,name) VALUES(9,'Courier Nine');
+    INSERT INTO fees(id,fee_type,amount_usd,amount_khr,fee_date,created_at,branch_id,delivery_contact_id)
+      VALUES(1,'delivery',0,12000,'2020-01-01','2026-08-20T05:30:00.000Z',1,9),
+            (2,'delivery',0,99000,'2026-08-20','2026-08-20 06:00:00',1,9);
+  `)
+  const timedCouriers = await kernel.getDeliveryContactTotals(env, {
+    startDate: '2026-08-20', endDate: '2026-08-20', branchId: 1,
+    createdFrom: '2026-08-20 05:00:00', createdTo: '2026-08-20 06:00:00',
+  })
+  const courierNine = timedCouriers.find((row) => row.delivery_contact_id === 9)
+  check('courier expenses: exact range uses created_at, includes mismatched fee_date and excludes the upper bound',
+    !!courierNine && courierNine.linked_expense_count === 1 && courierNine.linked_expense_khr === 12000)
+
+  const previousExact = kernel.previousPeriodFilters({
+    startDate: '2026-08-20', endDate: '2026-08-24', branchId: 1,
+    createdFrom: '2026-08-20 05:00:00', createdTo: '2026-08-24 07:01:00',
+  })
+  check('previous period shifts both exact bounds by the inclusive five-day Cambodia date span',
+    previousExact.startDate === '2026-08-15' && previousExact.endDate === '2026-08-19'
+      && previousExact.createdFrom === '2026-08-15 05:00:00' && previousExact.createdTo === '2026-08-19 07:01:00')
 
   console.log(`\nLayer 1 (kernel): ${passed} check(s) passed so far.\n`)
 
