@@ -39,6 +39,7 @@ import ReportOptionsFold from './reports/ReportOptionsFold.tsx'
 import ReturnsReport from './reports/ReturnsReport.tsx'
 import SalesListReport from './reports/SalesListReport.tsx'
 import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
+import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import {
   DEFAULT_REPORT_OPTIONS,
   REPORT_STORAGE_KEYS,
@@ -384,7 +385,14 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
 
   return (
     <div className={embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'} data-reports-hub>
-      <CurrentShiftSummary />
+      <CurrentShiftSummary showHistory={false} />
+      <section className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900" aria-label={trh('shift_history', 'Shift history')}>
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{trh('shift_history', 'Shift history')}</h2>
+          <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{trh('shift_history_all', 'Authorized shop history')}</p>
+        </div>
+        <ShiftHistoryPanel compact limit={50} />
+      </section>
       {compact ? (
         <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
           <div className="reports-mobile-primary">{searchInput}{viewPicker}</div>

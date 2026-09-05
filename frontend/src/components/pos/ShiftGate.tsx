@@ -66,6 +66,7 @@ const shiftSubscribers = new Set<(key: string, next: ShiftState | null) => void>
 // without this they would each ask the Worker for the same row.
 const shiftInflight = new Map<string, Promise<void>>()
 export const SHIFT_BRANCH_CHANGED_EVENT = 'business-os:pos-branch-changed'
+export const SHIFT_STATE_CHANGED_EVENT = 'business-os:shift-state-changed'
 
 export function shiftCacheKey(userId: unknown, branchId: number | null, scopeMode: unknown): string {
   const user = String(userId ?? 'anonymous')
@@ -119,6 +120,11 @@ export function useSharedShift(branchId: number | null, userId: unknown, scopeMo
   }, [branchId, key])
 
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    const refreshChangedShift = () => { void refresh() }
+    window.addEventListener(SHIFT_STATE_CHANGED_EVENT, refreshChangedShift)
+    return () => { window.removeEventListener(SHIFT_STATE_CHANGED_EVENT, refreshChangedShift) }
+  }, [refresh])
 
   const publish = (next: ShiftState | null) => {
     sharedShiftFailures.delete(key)
@@ -200,7 +206,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
 
 
   const submitOpen = async () => {
-    if (busy) return
+    if (busy || floatUsd.trim() === '' || floatKhr.trim() === '') return
     setBusy(true)
     try {
       const next = await openShift({
@@ -261,6 +267,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
                 <input
                   type="number" inputMode="decimal" min="0" step="0.01"
                   className="w-full rounded border px-2 py-1.5 text-sm"
+                  required
                   value={floatUsd} onChange={(e) => setFloatUsd(e.target.value)} autoFocus
                 />
               </label>
@@ -269,6 +276,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
                 <input
                   type="number" inputMode="numeric" min="0" step="100"
                   className="w-full rounded border px-2 py-1.5 text-sm"
+                  required
                   value={floatKhr} onChange={(e) => setFloatKhr(e.target.value)}
                 />
               </label>
@@ -289,7 +297,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
                 not dismissible. */}
             <div className="flex justify-end pt-1">
               <button
-                type="button" disabled={busy} onClick={() => void submitOpen()}
+                type="button" disabled={busy || floatUsd.trim() === '' || floatKhr.trim() === ''} onClick={() => void submitOpen()}
                 className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
                 {busy ? t('saving_label') : t('shift_start')}
@@ -337,9 +345,10 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
 
   const now = useWallClock(open && !closed)
   const shift = closed || state?.shift || null
+  const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
 
   const submitClose = async () => {
-    if (busy) return
+    if (busy || countedUsd.trim() === '' || countedKhr.trim() === '') return
     setBusy(true)
     try {
       const next = await closeShift({
@@ -377,11 +386,11 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const money = (usd: unknown, khr: unknown) => `${fmtUSD(usd)} · ${fmtKHR(khr)}`
 
   // No open shift AND no summary to show: this control has nothing to do.
-  if (!state?.can_end && !closed) return null
+  if (!canCloseCurrent && !closed) return null
 
   return (
     <>
-      {state?.can_end && (
+      {canCloseCurrent && (
         <button
           type="button" onClick={() => setOpen(true)}
           className="rounded border px-3 py-1.5 text-sm font-medium"
@@ -448,6 +457,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                     <input
                       type="number" inputMode="decimal" min="0" step="0.01"
                       className="w-full rounded border px-2 py-1.5 text-sm"
+                      required
                       value={countedUsd} onChange={(e) => setCountedUsd(e.target.value)} autoFocus
                     />
                   </label>
@@ -456,6 +466,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                     <input
                       type="number" inputMode="numeric" min="0" step="100"
                       className="w-full rounded border px-2 py-1.5 text-sm"
+                      required
                       value={countedKhr} onChange={(e) => setCountedKhr(e.target.value)}
                     />
                   </label>
@@ -481,7 +492,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                     {t('back')}
                   </button>
                   <button
-                    type="button" disabled={busy} onClick={() => void submitClose()}
+                    type="button" disabled={busy || countedUsd.trim() === '' || countedKhr.trim() === ''} onClick={() => void submitClose()}
                     className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   >
                     {busy ? t('saving_label') : t('shift_end')}

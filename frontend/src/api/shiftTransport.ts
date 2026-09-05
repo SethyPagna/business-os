@@ -32,6 +32,22 @@ export type Shift = {
   closed_by_user_id: number | null
   closed_by_user_name: string | null
   revision: number
+  capabilities: ShiftCapabilities
+  cancelled_at: string | null
+  cancelled_by_user_id: number | null
+  cancelled_by_user_name: string | null
+  cancel_reason: string | null
+  parent_shift_id: number | null
+  reopen_reason: string | null
+  reopened_by_user_id: number | null
+  reopened_by_user_name: string | null
+}
+
+export type ShiftCapabilities = {
+  can_edit: boolean
+  can_close: boolean
+  can_reopen: boolean
+  can_cancel: boolean
 }
 
 export type ShiftScopeMode = 'per_account' | 'shop_wide'
@@ -69,6 +85,42 @@ export type ShiftAmendment = {
 
 export type ShiftListResult = { shifts: Shift[]; scope: 'all' | 'own' }
 export type ShiftHistoryResult = { shift: Shift; amendments: ShiftAmendment[] }
+
+export function orderShiftRows(rows: Shift[]): Shift[] {
+  return [...rows].sort((left, right) => {
+    const leftOpen = left.closed_at == null && left.cancelled_at == null
+    const rightOpen = right.closed_at == null && right.cancelled_at == null
+    const openOrder = Number(!leftOpen) - Number(!rightOpen)
+    if (openOrder !== 0) return openOrder
+    const dateOrder = right.business_date.localeCompare(left.business_date)
+    if (dateOrder !== 0) return dateOrder
+    const openedOrder = right.opened_at.localeCompare(left.opened_at)
+    return openedOrder || right.id - left.id
+  })
+}
+
+export function shiftCashDifference(shift: Pick<Shift,
+  'opening_float_usd' | 'opening_float_khr' | 'closing_counted_usd' | 'closing_counted_khr'
+>): { usd: number | null; khr: number | null } {
+  const difference = (closing: number | null, opening: number) => closing == null
+    ? null
+    : Number((Number(closing) - Number(opening || 0)).toFixed(2))
+  return {
+    usd: difference(shift.closing_counted_usd, shift.opening_float_usd),
+    khr: difference(shift.closing_counted_khr, shift.opening_float_khr),
+  }
+}
+
+// Shift timestamps are entered in the shop's canonical Phnom Penh wall clock.
+// Cambodia is UTC+07 year-round, so attaching the offset prevents a cashier's
+// device timezone from silently moving a historical close by an hour or a day.
+export function shiftLocalDateTimeToIso(value: string): string {
+  const normalized = value.trim()
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) throw new Error('A shift date and time is required')
+  const parsed = new Date(`${normalized}:00+07:00`)
+  if (Number.isNaN(parsed.getTime())) throw new Error('Invalid shift date and time')
+  return parsed.toISOString()
+}
 
 function queryString(values: Record<string, string | number | null | undefined>): string {
   const query = new URLSearchParams()
@@ -212,5 +264,85 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
     true,
   )
   if (!result?.shift) throw new Error('Could not amend shift')
+  return result
+}
+
+export type CloseShiftByIdInput = {
+  expectedRevision: number
+  closedAt: string
+  closingCountedUsd: number
+  closingCountedKhr: number
+  closingNote?: string | null
+}
+
+export type CloseShiftByIdResult = {
+  shift: Shift
+  already_closed: boolean
+  is_open: false
+}
+
+export async function closeShiftById(id: number, input: CloseShiftByIdInput): Promise<CloseShiftByIdResult> {
+  const result = await route<CloseShiftByIdResult>(
+    `shifts:close:${id}`,
+    () => apiFetch('POST', `/api/shifts/${id}/close`, {
+      expected_revision: input.expectedRevision,
+      closed_at: input.closedAt,
+      closing_counted_usd: input.closingCountedUsd,
+      closing_counted_khr: input.closingCountedKhr,
+      closing_note: input.closingNote ?? null,
+    }),
+    null,
+    true,
+  )
+  if (!result?.shift) throw new Error('Could not close shift')
+  return result
+}
+
+export type ReopenShiftInput = {
+  expectedRevision: number
+  reason: string
+  openingFloatUsd: number
+  openingFloatKhr: number
+  openingNote?: string | null
+}
+
+export type ReopenShiftResult = {
+  shift: Shift
+  reopened_from_shift_id: number
+}
+
+export async function reopenShift(id: number, input: ReopenShiftInput): Promise<ReopenShiftResult> {
+  const result = await route<ReopenShiftResult>(
+    `shifts:reopen:${id}`,
+    () => apiFetch('POST', `/api/shifts/${id}/reopen`, {
+      expected_revision: input.expectedRevision,
+      reason: input.reason,
+      opening_float_usd: input.openingFloatUsd,
+      opening_float_khr: input.openingFloatKhr,
+      opening_note: input.openingNote ?? null,
+    }),
+    null,
+    true,
+  )
+  if (!result?.shift) throw new Error('Could not reopen shift')
+  return result
+}
+
+export type CancelShiftResult = {
+  shift: Shift
+  cancelled: true
+}
+
+export async function cancelShift(id: number, expectedRevision: number, reason: string): Promise<CancelShiftResult> {
+  const result = await route<CancelShiftResult>(
+    `shifts:cancel:${id}`,
+    () => apiFetch('POST', `/api/shifts/${id}/cancel`, {
+      expected_revision: expectedRevision,
+      reason,
+    }),
+    null,
+    true,
+  )
+  if (!result?.shift) throw new Error('Could not cancel shift')
   return result
 }

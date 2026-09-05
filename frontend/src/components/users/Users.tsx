@@ -31,6 +31,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import DeviceApprovals from './DeviceApprovals.tsx'
+import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -328,6 +329,7 @@ function UsersDesktopSkeletonRows() {
       <td className="px-4 py-3"><div className="mx-auto h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
       <td className="px-4 py-3"><div className="mx-auto h-5 w-14 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
       <td className="px-4 py-3"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-3 py-3"><div className="mx-auto h-9 w-16 rounded-lg bg-slate-100 dark:bg-slate-800" /></td>
       <td className="px-2 py-3"><div className="ml-auto h-8 w-8 rounded-lg bg-slate-100 dark:bg-slate-800" /></td>
     </tr>
   ))
@@ -1192,7 +1194,7 @@ export default function Users() {
         <>
           <div className="card hidden flex-col overflow-hidden sm:flex">
             <div className="overflow-auto">
-              <table className="w-full min-w-[980px] text-sm table-bordered">
+              <table className="w-full min-w-[1080px] text-sm table-bordered">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('full_name', 'Name')}</th>
@@ -1203,6 +1205,7 @@ export default function Users() {
                     <th className="px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">{tr('status', 'Status')}</th>
                     <th className="px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">2FA</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('added_on', 'Added')}</th>
+                    <th className="px-3 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">{tr('shift_history', 'Shift history')}</th>
                     <th className="w-10 px-2 py-3" />
                   </tr>
                 </thead>
@@ -1211,7 +1214,7 @@ export default function Users() {
                     <UsersDesktopSkeletonRows />
                   ) : filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-8 text-center text-gray-400">{t('no_data') || 'No data'}</td>
+                      <td colSpan={10} className="py-8 text-center text-gray-400">{t('no_data') || 'No data'}</td>
                     </tr>
                   ) : filteredUsers.map((user) => (
                     <tr key={user.id} className="table-row cursor-pointer" onClick={() => { setSelectedUser(user); setModal('userDetail') }}>
@@ -1233,6 +1236,9 @@ export default function Users() {
                       <td className="px-4 py-3 text-center"><span className={user.is_active ? 'badge-green' : 'badge-red'}>{user.is_active ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}</span></td>
                       <td className="px-4 py-3 text-center">{user.otp_enabled ? <span className="badge-green text-xs">{tr('enabled', 'Enabled')}</span> : <span className="text-xs text-gray-400">{tr('off', 'Off')}</span>}</td>
                       <td className="px-4 py-3 text-xs text-gray-400">{fmtDate(user.created_at)}</td>
+                      <td className="px-3 py-2 text-center" onClick={(event) => event.stopPropagation()}>
+                        <ShiftHistoryPanel userId={user.id} compact label={tr('shift_code', 'Shift')} />
+                      </td>
                       <td className="px-2 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                         <ThreeDot
                           canManage={canManageTargetUser(user)}
@@ -1267,7 +1273,8 @@ export default function Users() {
                     <span className={user.is_active ? 'badge-green text-xs' : 'badge-red text-xs'}>{user.is_active ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}</span>
                   </div>
                 </div>
-                <div onClick={(e) => e.stopPropagation()}>
+                <div className="flex shrink-0 flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
+                  <ShiftHistoryPanel userId={user.id} compact label={tr('shift_code', 'Shift')} />
                   <ThreeDot
                     canManage={canManageTargetUser(user)}
                     onDetails={() => { setSelectedUser(user); setModal('userDetail') }}

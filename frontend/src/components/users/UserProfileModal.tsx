@@ -1197,8 +1197,8 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
               <section className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
                 <ShiftHistoryPanel
                   userId={currentUserId}
-                  canManage={hasPermission('settings') || hasPermission('all')}
                   compact
+                  layer="nested"
                   notify={notify}
                 />
               </section>
