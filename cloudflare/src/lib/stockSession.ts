@@ -524,7 +524,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const operationId = crypto.randomUUID()
   const stamp = new Date().toISOString()
   const snapshot: Row = {
-    version: 1,
+    version: 2,
     operationId,
     request,
     before: { products, batches: relevantBatches, branchStock: branchStocks, branchBatchStock: batchStocks, activeBranches },
@@ -582,8 +582,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: STOCK_SESSION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: user.name } })
   statements.push({ sql: 'UPDATE stock_session_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
-    SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0),@actor,@name
-    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: user.name } })
+    SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'snapshot_version',2),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'snapshot_version',2),@actor,@name
+    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: user.name, creates: createLines.length ? 1 : 0 } })
   statements.push({ sql: 'UPDATE stock_session_operations SET history_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
 
   for (const line of request.items) {
@@ -634,6 +634,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     SELECT @actor,@name,'stock_session_create','stock_session',id,receipt_json,'stock_session_operations',id,receipt_json
     FROM stock_session_operations WHERE id=@id`, params: { actor: user.id, name: user.name, id: operationId } })
   statements.push({ sql: 'DELETE FROM stock_session_guards', params: {} })
+  const replayStateSql = await stockReplayStateSql(env)
+  statements.push(...captureReplayState(operationId, replayStateSql, true))
   checkBounds(statements, snapshot)
   try {
     await db.batch(statements)
@@ -652,10 +654,164 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   return parseStoredReceipt(saved, false)
 }
 
-export async function notifyStockSession(env: Env, receipt: StockSessionReceipt) {
+export async function notifyStockSession(env: Env, receipt: Pick<StockSessionReceipt, 'operationId'>) {
   await Promise.allSettled([
     bumpVersion(env, 'products'),
     broadcast(env, 'products', { action: 'update' }),
     broadcast(env, 'inventory', { action: 'stock_session', id: receipt.operationId }),
   ])
+}
+
+// Postimages and retained revisions are captured by ONE statement INSIDE the
+// transaction, after all receipt writes and triggers. Never infer revision
+// increments, or read a postimage after the receipt has already committed.
+const REPLAY_TABLES = {
+  products: ['products', 'id IN (SELECT product_id FROM m)'],
+  batches: ['product_batches', 'id IN (SELECT batch_id FROM m)'],
+  branchStock: ['branch_stock', 'product_id IN (SELECT product_id FROM m)'],
+  branchBatchStock: ['branch_batch_stock', 'batch_id IN (SELECT batch_id FROM m)'],
+  images: ['product_images', 'product_id IN (SELECT product_id FROM m WHERE product_created=1)'],
+  members: ['stock_session_members', 'operation_id=@id'],
+  movements: ['inventory_movements', 'id IN (SELECT movement_id FROM m)'],
+} as const
+
+async function stockReplayStateSql(env: Env): Promise<string> {
+  const fields: string[] = []
+  for (const [key, [table, where]] of Object.entries(REPLAY_TABLES)) {
+    const columns = [...await tableColumns(env, table)].sort()
+    // Keep each json_object below SQLite's older function-argument ceiling.
+    let row = "json('{}')"
+    for (let i = 0; i < columns.length; i += 40) row = `json_set(${row},${columns.slice(i, i + 40).map(c => `'$.${c}',t."${c}"`).join(',')})`
+    fields.push(`'${key}',json((SELECT json_group_array(json(r)) FROM
+      (SELECT ${row} r FROM ${table} t WHERE ${where} ORDER BY ${key === 'members' ? 'line_id' : 'id'} LIMIT 101)))`)
+  }
+  return `(WITH m AS (SELECT * FROM stock_session_members WHERE operation_id=@id),
+    wanted(entity_type,entity_key) AS (
+      SELECT 'product',CAST(product_id AS TEXT) FROM m
+      UNION SELECT 'batch',CAST(batch_id AS TEXT) FROM m
+      UNION SELECT 'branch',CAST(branch_id AS TEXT) FROM m
+      UNION SELECT 'supplier',CAST(supplier_id AS TEXT) FROM product_batches WHERE id IN (SELECT batch_id FROM m) AND supplier_id IS NOT NULL
+      UNION SELECT 'branch_stock',CAST(product_id AS TEXT)||':'||branch_id FROM branch_stock WHERE product_id IN (SELECT product_id FROM m)
+      UNION SELECT 'branch_batch_stock',CAST(batch_id AS TEXT)||':'||branch_id FROM branch_batch_stock WHERE batch_id IN (SELECT batch_id FROM m)
+      UNION SELECT 'batch_identity',CAST(variant_product_id AS TEXT)||':'||batch_key FROM product_batches WHERE id IN (SELECT batch_id FROM m)
+      UNION SELECT 'product_image',CAST(id AS TEXT) FROM product_images WHERE product_id IN (SELECT product_id FROM m WHERE product_created=1)
+      UNION SELECT 'asset',CAST(id AS TEXT) FROM file_assets WHERE public_path IN (
+        SELECT image_path FROM product_images WHERE product_id IN (SELECT product_id FROM m WHERE product_created=1)
+        UNION SELECT image_path FROM products WHERE id IN (SELECT product_id FROM m WHERE product_created=1))
+      UNION SELECT json_extract(value,'$.entity_type'),json_extract(value,'$.entity_key') FROM json_each(
+        (SELECT payload_json FROM undo_snapshots WHERE id=(SELECT snapshot_id FROM stock_session_operations WHERE id=@id)), '$.after.revisions')
+    ) SELECT json_object(${fields.join(',')},
+      'revisions',json((SELECT json_group_array(json_object('entity_type',entity_type,'entity_key',entity_key,'revision',revision)) FROM
+        (SELECT w.entity_type,w.entity_key,COALESCE(r.revision,0) revision FROM wanted w LEFT JOIN stock_session_revisions r
+         ON r.entity_type=w.entity_type AND r.entity_key=w.entity_key ORDER BY w.entity_type,w.entity_key LIMIT 501))),
+      'references',json_object(
+        'sales',(SELECT COUNT(*) FROM sale_items WHERE product_id IN (SELECT product_id FROM m)),
+        'returns',(SELECT COUNT(*) FROM return_items WHERE product_id IN (SELECT product_id FROM m)),
+        'movements',(SELECT COUNT(*) FROM inventory_movements WHERE product_id IN (SELECT product_id FROM m)),
+        'lots',(SELECT COUNT(*) FROM product_batches WHERE variant_product_id IN (SELECT product_id FROM m)),
+        'allocations',(SELECT COUNT(*) FROM sale_item_batch_allocations WHERE batch_id IN (SELECT batch_id FROM m)),
+        'returnAllocations',(SELECT COUNT(*) FROM return_item_batch_allocations WHERE batch_id IN (SELECT batch_id FROM m)),
+        'damaged',(SELECT COUNT(*) FROM damaged_stock_lots WHERE product_id IN (SELECT product_id FROM m)),
+        'rfid',(SELECT COUNT(*) FROM rfid_tags WHERE product_id IN (SELECT product_id FROM m)),
+        'rfidEvents',(SELECT COUNT(*) FROM rfid_events WHERE product_id IN (SELECT product_id FROM m)),
+        'rfidSessionItems',(SELECT COUNT(*) FROM rfid_session_items WHERE product_id IN (SELECT product_id FROM m)),
+        'replacements',(SELECT COUNT(*) FROM return_replacement_items WHERE product_id IN (SELECT product_id FROM m)),
+        'transfers',(SELECT COUNT(*) FROM stock_transfers WHERE product_id IN (SELECT product_id FROM m)),
+        'rowMoves',(SELECT COUNT(*) FROM stock_row_moves WHERE source_product_id IN (SELECT product_id FROM m) OR destination_product_id IN (SELECT product_id FROM m))
+      )))`
+}
+
+function captureReplayState(id: string, stateSql: string, initial = false): StockWriteStatement[] {
+  const field = initial ? 'after' : 'expected'
+  return [
+    { sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.${field}',json(${stateSql}))
+      WHERE id=(SELECT snapshot_id FROM stock_session_operations WHERE id=@id)`, params: { id } },
+    ...(initial ? [{ sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.expected',json_extract(payload_json,'$.after'))
+      WHERE id=(SELECT snapshot_id FROM stock_session_operations WHERE id=@id)`, params: { id } }] : []),
+    assertion(`EXISTS(SELECT 1 FROM undo_snapshots WHERE id=(SELECT snapshot_id FROM stock_session_operations WHERE id=@id)
+      AND length(CAST(payload_json AS BLOB))<=@bytes
+      AND ${Object.keys(REPLAY_TABLES).map(key => `json_array_length(payload_json,'$.${field}.${key}')<=100`).join(' AND ')}
+      AND json_array_length(payload_json,'$.${field}.revisions')<=500)`, { id, bytes: STOCK_SESSION_MAX_SNAPSHOT_BYTES }),
+    { sql: 'DELETE FROM stock_session_guards', params: {} },
+  ]
+}
+
+export async function replayStockSession(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number,
+  generation: unknown, payload: Row): Promise<void> {
+  if (getActionTier(user, 'inventory', 'adjust') !== 'full') fail('Inventory adjust permission is required.', 403)
+  if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0) fail('expected_generation must be a nonnegative JSON integer.', 400)
+  const db = getDb(env)
+  const op = await db.prepare(`SELECT o.*,s.kind,s.payload_json,h.status FROM stock_session_operations o
+    JOIN undo_snapshots s ON s.id=o.snapshot_id JOIN action_history h ON h.id=o.history_id WHERE o.history_id=@history`)
+    .get<Row>({ history: historyId })
+  if (!op || op.id !== payload.operation_id || op.snapshot_id !== payload.snapshot_id || op.kind !== STOCK_SESSION_KIND) fail('Stock session history does not match its operation.')
+  const snapshot = JSON.parse(String(op.payload_json)) as Row
+  const request = snapshot.request as StockSessionRequest
+  if (request.items.some(line => line.kind === 'create_receive') && getActionTier(user, 'products', 'add') !== 'full') fail('Product add permission is required to reverse this session.', 403)
+  const targetStatus = direction === 'undo' ? 'redoable' : 'undoable'
+  const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
+  if (Number(op.generation) === generation + 1 && op.status === targetStatus) return
+  if (Number(op.generation) !== generation || op.status !== expectedStatus || generation % 2 !== (direction === 'undo' ? 0 : 1)) fail('Stock session generation changed. Refresh history.')
+  if (snapshot.version !== 2 || !snapshot.after || !snapshot.expected) fail('This older session has no authoritative postimage and cannot be safely reversed.')
+  const members = await db.prepare('SELECT * FROM stock_session_members WHERE operation_id=@id ORDER BY line_id').all<Row>({ id: op.id })
+  if (members.length !== request.items.length || members.length > STOCK_SESSION_MAX_LINES) fail('Stock session members are incomplete.')
+  const after = snapshot.after as Record<string, Row[]>
+  const before = snapshot.before as Record<string, Row[]>
+  const stateSql = await stockReplayStateSql(env)
+  const statements: StockWriteStatement[] = [
+    assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')"),
+    assertion(`EXISTS(SELECT 1 FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id
+      JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@id AND o.history_id=@history AND o.generation=@generation
+      AND h.status=@status AND s.payload_json=@snapshot)`, { id: op.id, history: historyId, generation, status: expectedStatus, snapshot: op.payload_json }),
+    assertion(`${stateSql}=(SELECT json_extract(payload_json,'$.expected') FROM undo_snapshots WHERE id=@snapshotId)`, { id: op.id, snapshotId: op.snapshot_id }),
+  ]
+  for (const [key, [table]] of Object.entries(REPLAY_TABLES)) {
+    if (key === 'images' || key === 'members' || key === 'movements') continue // Original links/ledger rows are immutable during replay.
+    for (const row of after[key]) {
+      const original = (before[key] || []).find(r => r.id === row.id)
+      const created = members.some(m => m.product_created === 1 && m.product_id === (key === 'products' ? row.id : row.product_id))
+      if (key === 'products' && created && direction === 'redo') {
+        statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE id<>@product AND is_active=1
+          AND LOWER(TRIM(COALESCE(barcode,'')))=LOWER(@barcode)
+          AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey
+          AND ROUND(COALESCE(cost_price_usd,0)*100)=@costUsd AND ROUND(COALESCE(cost_price_khr,0)*100)=@costKhr)`, {
+          product: row.id, barcode: String(row.barcode || '').trim(), nameKey: normalizeProductGroupName(row.name),
+          costUsd: Math.round((Number(row.cost_price_usd) || 0) * 100), costKhr: Math.round((Number(row.cost_price_khr) || 0) * 100),
+        }))
+      }
+      if (key === 'branchStock' && !created && !members.some(m => m.product_id === row.product_id && m.branch_id === row.branch_id)) continue
+      if (key === 'branchBatchStock' && !members.some(m => m.batch_id === row.batch_id && m.branch_id === row.branch_id)) continue
+      let target: Row | null = direction === 'redo' ? row : original || null
+      if (key === 'products') target = direction === 'redo' ? { stock_quantity: row.stock_quantity, is_active: row.is_active, updated_at: row.updated_at }
+        : original ? { stock_quantity: original.stock_quantity, updated_at: original.updated_at }
+          : { stock_quantity: 0, is_active: 0 }
+      if (key === 'batches' && !target) target = { is_active: 0, received_quantity: 0, received_cost_usd: 0 }
+      if (!target) statements.push({ sql: `DELETE FROM ${table} WHERE id=@rowId`, params: { rowId: row.id } })
+      else if ((key === 'branchStock' || key === 'branchBatchStock') && direction === 'redo' && !original) {
+        const columns = Object.keys(row)
+        statements.push({ sql: `INSERT INTO ${table}(${columns.map(c => `"${c}"`).join(',')}) VALUES(${columns.map((_, i) => `@v${i}`).join(',')})`, params: Object.fromEntries(columns.map((c, i) => [`v${i}`, row[c]])) })
+      } else {
+        const columns = Object.keys(target).filter(c => c !== 'id')
+        statements.push({ sql: `UPDATE ${table} SET ${columns.map((c, i) => `"${c}"=@v${i}`).join(',')} WHERE id=@rowId`, params: { rowId: row.id, ...Object.fromEntries(columns.map((c, i) => [`v${i}`, target![c]])) } })
+      }
+    }
+  }
+  statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+    SELECT m.product_id,p.name,m.branch_id,b.name,@movement,m.quantity*@sign,COALESCE(m.unit_cost_usd,0),0,m.quantity*COALESCE(m.unit_cost_usd,0)*@sign,0,@reason,o.rowid,@actor,@name,m.batch_id
+    FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
+    WHERE m.operation_id=@id`, params: { id: op.id, movement: direction === 'undo' ? 'remove' : 'add', sign: direction === 'undo' ? -1 : 1, reason: `Stock session ${op.id} ${direction} generation ${generation + 1}`, actor: user.id, name: user.name } })
+  statements.push({ sql: 'UPDATE stock_session_operations SET generation=generation+1 WHERE id=@id', params: { id: op.id } })
+  statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot', params: { status: direction === 'undo' ? 'reversed' : 'applied', snapshot: op.snapshot_id } })
+  statements.push({ sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=CURRENT_TIMESTAMP,
+    undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@history`, params: { status: targetStatus, generation: generation + 1, history: historyId } })
+  statements.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details)
+    VALUES(@actor,@name,@action,'stock_session',@id,@details)`, params: { actor: user.id, name: user.name, action: `stock_session_${direction}`, id: op.id, details: JSON.stringify({ operationId: op.id, actionHistoryId: historyId, generation: generation + 1 }) } })
+  statements.push(...captureReplayState(String(op.id), stateSql))
+  checkBounds(statements, snapshot)
+  try { await db.batch(statements) } catch (error) {
+    const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
+    if (saved?.generation === generation + 1 && saved.status === targetStatus) return
+    if (/constraint/i.test(String(error))) fail('Stock, metadata, references, or revision changed. Nothing was reversed; refresh history.')
+    throw error
+  }
 }

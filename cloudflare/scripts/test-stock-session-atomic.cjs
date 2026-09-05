@@ -9,7 +9,7 @@ const Database = require('better-sqlite3')
 
 const root = path.join(__dirname, '..')
 
-function loadStockSession(entry = 'lib/stockSession.ts') {
+function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
   const cache = new Map()
   const load = (relativeFile) => {
     const normalized = relativeFile.replaceAll('\\', '/')
@@ -21,8 +21,8 @@ function loadStockSession(entry = 'lib/stockSession.ts') {
     const mod = { exports: {} }
     cache.set(normalized, mod)
     const req = (name) => {
-      if (normalized === 'routes/inventory.ts' && name === '../lib/auth') return {
-        requireAuth: async (c, next) => { c.set('user', { ...user, permissions: JSON.stringify({ inventory: true, products: true }) }); await next() },
+      if (['routes/inventory.ts', 'routes/actionHistory.ts'].includes(normalized) && name === '../lib/auth') return {
+        requireAuth: async (c, next) => { c.set('user', actor); await next() },
       }
       if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/stockSession', '../lib/permissions'].includes(name)) return {}
       if (name === './cache') return { bumpVersion: async () => {} }
@@ -54,6 +54,8 @@ function fixture() {
   let loseNextAcknowledgement = false
   let beforeNextBatch = null
   let beforeRevisionRead = null
+  let failStatement = null
+  let batchLength = 0
   const wrap = (text, params = []) => ({
     text, params,
     async first() { return sql.prepare(text).get(...params) || null },
@@ -63,12 +65,15 @@ function fixture() {
       return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
     },
   })
-  const runBatch = (statements) => sql.transaction(() => statements.map((statement) => {
+  const runBatch = (statements) => sql.transaction(() => statements.map((statement, index) => {
+    if (failStatement === index) { failStatement = null; throw new Error(`injected replay phase ${index}`) }
     if (failAfterMetadata && /INSERT INTO branch_batch_stock/i.test(statement.text)) {
       failAfterMetadata = false
       throw new Error('injected failure after batch metadata')
     }
-    const result = sql.prepare(statement.text).run(...statement.params)
+    let result
+    try { result = sql.prepare(statement.text).run(...statement.params) }
+    catch (error) { if (process.env.STOCK_TEST_DEBUG) console.error('FAILED SQL', statement.text, statement.params); throw error }
     return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
   }))()
   const envDb = {
@@ -87,6 +92,7 @@ function fixture() {
       }
     },
     async batch(statements) {
+      batchLength = statements.length
       if (beforeNextBatch) {
         const mutate = beforeNextBatch
         beforeNextBatch = null
@@ -106,6 +112,8 @@ function fixture() {
     loseNextCommitAcknowledgement() { loseNextAcknowledgement = true },
     beforeCommit(mutate) { beforeNextBatch = mutate },
     beforeRevisionCapture(mutate) { beforeRevisionRead = mutate },
+    failBatchStatement(index) { failStatement = index },
+    lastBatchLength() { return batchLength },
   }
 }
 
@@ -320,4 +328,5 @@ async function main() {
   if (failures.length) throw new Error(`${failures.length} stock-session atomic regression(s) failed`)
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1 })
+module.exports = { fixture, loadStockSession, user, receiveRequest, receiptState }
+if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1 })
