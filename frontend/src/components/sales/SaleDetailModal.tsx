@@ -6,6 +6,7 @@ import { searchProducts } from '../../api/methods.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
+import { buildProductGroups } from '../../utils/productGrouping.ts'
 // S4-30: the STAFF-facing half of an amended sale. The receipt uses none of
 // this -- it renders the net state the backend keeps in sale_items and the
 // sales row, which is the whole point of the ledger split.
@@ -141,8 +142,8 @@ type StagedAddLine = {
   // The typed text is kept beside the number so a half-typed price ("1.")
   // survives a keystroke; unitPriceUsd stays the single numeric authority.
   priceText: string
-  // What the picker last saw on hand, so the form can WARN before the server
-  // refuses. Never a substitute for the server's check: this number is
+  // What the picker last saw on hand, so the form can block an already-invalid
+  // local choice. Never a substitute for the server's check: this number is
   // seconds old and another till may already have taken the units.
   stockQuantity: number
   barcode: string
@@ -289,6 +290,24 @@ export default function SaleDetailModal({
   const [addConfirmOpen, setAddConfirmOpen] = useState(false)
   const [addPicking, setAddPicking] = useState<AddProductCandidate | null>(null)
   const addSearchSeqRef = useRef(0)
+  const addSearchInputRef = useRef<HTMLInputElement | null>(null)
+  const addCandidateGroups = useMemo(() => buildProductGroups(addCandidates, new Map(), { preserveInputOrder: true }).map((group) => {
+    const choices = (group.sellableItems.length ? group.sellableItems : [group.leadProduct]) as AddProductCandidate[]
+    const lead = choices[0] || group.leadProduct as AddProductCandidate
+    return {
+      ...lead,
+      __displayName: group.name || String(lead.name || ''),
+      __groupKey: group.key,
+      __groupChoices: choices,
+      __groupStock: choices.reduce((sum, row) => sum + toNumber(row.stock_quantity), 0),
+      __groupMinPrice: group.minSellingPriceUsd,
+      __groupMaxPrice: group.maxSellingPriceUsd,
+    } satisfies AddProductCandidate
+  }), [addCandidates])
+  const closeAddPicker = (): void => {
+    setAddPicking(null)
+    requestAnimationFrame(() => addSearchInputRef.current?.focus())
+  }
 
   // S4-30. `amendments === null` means "not loaded / could not load"; an empty
   // array means "the server says this sale was never amended". They render
@@ -339,7 +358,7 @@ export default function SaleDetailModal({
     setAddSearching(true)
     const timer = window.setTimeout(async () => {
       try {
-        const payload = await searchProducts({ query: text, pageSize: 8 }) as { items?: AddProductCandidate[] }
+        const payload = await searchProducts({ query: text, pageSize: 8, branchId: sale?.branch_id ?? undefined }) as { items?: AddProductCandidate[] }
         if (seq !== addSearchSeqRef.current) return
         setAddCandidates(Array.isArray(payload?.items) ? payload.items : [])
       } catch {
@@ -351,7 +370,7 @@ export default function SaleDetailModal({
       }
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [addQuery, onAddItems])
+  }, [addQuery, onAddItems, sale?.branch_id])
 
   const stageAddLine = (choice: SaleDetailProductChoice): void => {
     const productId = Number(choice.productId)
@@ -365,16 +384,16 @@ export default function SaleDetailModal({
       const existing = current.findIndex((line) => line.productId === productId && line.batchId === choice.batchId)
       if (existing >= 0) {
         const next = [...current]
-        next[existing] = { ...next[existing], quantity: next[existing].quantity + 1 }
+        next[existing] = { ...next[existing], quantity: next[existing].quantity + Math.max(1, Math.floor(Number(choice.quantity) || 1)) }
         return next
       }
       const price = toNumber(choice.unitPriceUsd)
       return [...current, {
         productId,
         name: String(choice.name || `#${productId}`),
-        quantity: 1,
+        quantity: Math.max(1, Math.floor(Number(choice.quantity) || 1)),
         unitPriceUsd: price,
-        priceText: price > 0 ? String(price) : '',
+        priceText: price > 0 ? String(price) : '0',
         stockQuantity: choice.batchQuantity ?? toNumber(choice.stockQuantity),
         barcode: choice.barcode,
         batchId: choice.batchId,
@@ -623,10 +642,14 @@ export default function SaleDetailModal({
   // on this screen, so the projection cannot disagree with the figure it is
   // projecting from.
   const projectedOutstandingUsd = Math.max(0, Math.round((projectedTotalUsd - totals.paidTotalUsd) * 100) / 100)
-  const addStockMoves = currentStatus !== 'awaiting_payment'
+  const addStockMoves = !Number(sale?.stock_skipped || 0)
+    && currentStatus !== 'awaiting_payment'
+  const addHasStockError = addStockMoves && addLines.some((line) => (
+    line.stockQuantity <= 0 || line.quantity > line.stockQuantity
+  ))
 
   const submitAddItems = async (): Promise<void> => {
-    if (!onAddItems || !addLines.length) return
+    if (!onAddItems || !addLines.length || addHasStockError) return
     setAddSaving(true)
     try {
       const ok = await onAddItems(sale.id, addLines.map((line) => ({
@@ -696,7 +719,12 @@ export default function SaleDetailModal({
   }
 
   return createPortal(
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onClose}>
+    <div
+      className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4"
+      onClick={addPicking ? undefined : onClose}
+      inert={addPicking ? true : undefined}
+      aria-hidden={addPicking ? true : undefined}
+    >
       <div
         className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
@@ -1239,6 +1267,7 @@ export default function SaleDetailModal({
               </label>
               <input
                 id="sale-add-item-search"
+                ref={addSearchInputRef}
                 className="input h-10 text-sm"
                 value={addQuery}
                 onChange={(event) => setAddQuery(event.target.value)}
@@ -1254,7 +1283,7 @@ export default function SaleDetailModal({
               ) : null}
               {addCandidates.length > 0 ? (
                 <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
-                  {addCandidates.map((candidate) => (
+                  {addCandidateGroups.map((candidate) => (
                     <li key={String(candidate.id)}>
                       <button
                         type="button"
@@ -1262,15 +1291,15 @@ export default function SaleDetailModal({
                         onClick={() => setAddPicking(candidate)}
                       >
                         <span className="min-w-0">
-                          <span className="block break-words font-medium text-gray-900 dark:text-white">{candidate.name}</span>
+                          <span className="block break-words font-medium text-gray-900 dark:text-white">{candidate.__displayName || candidate.name}</span>
                           <span className="block text-[11px] text-gray-400">
-                            {candidate.barcode ? <span className="font-mono">{candidate.barcode}</span> : null}
-                            {candidate.barcode ? ' · ' : ''}
-                            {`${t('current_stock') || 'Stock'}: ${toNumber(candidate.stock_quantity)}`}
+                            {`${candidate.__groupChoices?.length || 1} ${t('options') || 'options'} · ${t('current_stock') || 'Stock'}: ${toNumber(candidate.__groupStock)}`}
                           </span>
                         </span>
                         <span className="whitespace-nowrap tabular-nums text-gray-700 dark:text-gray-200">
-                          {fmtUSD(toNumber(candidate.selling_price_usd))}
+                          {toNumber(candidate.__groupMinPrice) !== toNumber(candidate.__groupMaxPrice)
+                            ? `${fmtUSD(toNumber(candidate.__groupMinPrice))}–${fmtUSD(toNumber(candidate.__groupMaxPrice))}`
+                            : fmtUSD(toNumber(candidate.__groupMinPrice))}
                         </span>
                       </button>
                     </li>
@@ -1284,7 +1313,9 @@ export default function SaleDetailModal({
                   branchId={sale.branch_id ?? null}
                   fmtUSD={fmtUSD}
                   t={t}
-                  onCancel={() => setAddPicking(null)}
+                  stockMoves={addStockMoves}
+                  stagedLines={addLines}
+                  onCancel={closeAddPicker}
                   onChoose={stageAddLine}
                 />
               ) : null}
@@ -1351,9 +1382,9 @@ export default function SaleDetailModal({
                             <Trash2 size={16} />
                           </button>
                         </div>
-                        {addStockMoves && line.quantity > line.stockQuantity ? (
-                          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-                            {translateOr('add_items_over_stock', 'More than the stock this product had a moment ago — the server will refuse if the units are not there.', 'លើសពីស្តុកដែលផលិតផលនេះមានមុននេះបន្តិច — ម៉ាស៊ីនមេនឹងបដិសេធ បើគ្មានចំនួននោះ។')}
+                        {addStockMoves && (line.stockQuantity <= 0 || line.quantity > line.stockQuantity) ? (
+                          <p role="alert" className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">
+                            {`${t('error') || 'Error'}: ${line.stockQuantity <= 0 ? 'No Stock' : (t('not_enough_stock') || 'Not Enough Stock')}`}
                           </p>
                         ) : null}
                       </li>
@@ -1389,7 +1420,7 @@ export default function SaleDetailModal({
                   <button
                     type="button"
                     className="btn-primary mt-3 w-full text-xs"
-                    disabled={addSaving || addLines.length === 0}
+                    disabled={addSaving || addLines.length === 0 || addHasStockError}
                     onClick={() => setAddConfirmOpen(true)}
                   >
                     {addSaving ? (t('loading') || 'Saving') : (translateOr('add_items_submit', 'Add to sale', 'បន្ថែមទៅការលក់'))}
