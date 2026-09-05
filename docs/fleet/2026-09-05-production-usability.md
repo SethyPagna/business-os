@@ -234,6 +234,19 @@ reportedzero writes. Sourcecost validity remains distinct from sum correctness.
 
 ## Owner decision and source-data follow-up
 
+- Checkpoint September5 09:00UTC: integrated stock undo/backup e6c34712/a87af5a9
+  and test alignment b490c47c. Main local atomic12/undo15/backup4 passed, but
+  independent review95f222b7 found a P1: receive A/credit, undo, then receive
+  B/paid on the same date may reuse zero lot with A/credit metadata and false AP.
+  Herschel owns correction and receive-after-undo regression; not certified.
+  Clean release baseline4df2ecfa passed214 backend suites, frontend205/206;
+  sole stale stats entry-time expectation fixed c676d4fe and retested. Final
+  clean gates must repeat after all ready commits. Report desktop67d08f8c removes
+  icon, groups controls/presets, narrows value distance and rejects reversed
+  same-day times; main responsive/report/stats suites pass. Bernoulli owns the
+  separate HubSectionNav remount issue which resets times on viewport resize.
+  Product unified session and payment/FX not yet ready. No new production write.
+
 - Independent re-certification75bdd89a at8799589b clears all four original shift
   blockers with actual route probes and faulty in-memory negative controls;
   close-report25, frontend78/60, lifecycle/security/report/window/Telegram pass.

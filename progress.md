@@ -2,6 +2,15 @@
 
 ## Active continuation — production usability, September 5
 
+Verification checkpoint: clean release baseline4df2ecfa passed214 backend suites;
+frontend205/206 passed, with the stale entry-time assertion corrected and retested
+in c676d4fe. Integrated stock undo/backup e6c34712/a87af5a9 and report desktop
+67d08f8c; focused report/time/stats tests pass. Independent stock review found
+receive-after-undo can retain the old supplier/credit attribution: Herschel owns
+the release-blocking fix. Bernoulli owns responsive report-state preservation in
+HubSectionNav. Unified Add products and payment/FX remain in implementation.
+These are local checkpoints, not final certification or deployment.
+
 Owner now supplies historical close time: Roune Rath Sep4 at23:44 Cambodia
 (2026-09-04T16:44:00.000Z), closing cash133700KHR/0USD. S3 time ambiguity
 resolved; fresh guarded live preflight and audited closure still pending. Preserve
