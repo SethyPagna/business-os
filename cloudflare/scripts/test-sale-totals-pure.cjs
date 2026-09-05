@@ -33,9 +33,13 @@ const srcPath = path.join(cloudflareRoot, 'src', 'lib', 'saleTotals.ts')
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sale-totals-'))
 const tsPath = path.join(tmpDir, 'saleTotals.ts')
 fs.writeFileSync(tsPath, fs.readFileSync(srcPath, 'utf8'))
+for (const file of ['financialPrecision.ts', 'paymentMethodRegistry.ts', 'paymentSettlement.ts']) {
+  fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', file), 'utf8'))
+}
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} financialPrecision.ts paymentMethodRegistry.ts paymentSettlement.ts`, { cwd: tmpDir, stdio: 'inherit' })
 const { computeSaleTotals, round2 } = require(path.join(tmpDir, 'saleTotals.js'))
+const { planSaleSettlement } = require(path.join(tmpDir, 'paymentSettlement.js'))
 
 const RATE = 4100
 
@@ -217,7 +221,20 @@ check('blank/absent/zero change rate falls back to the main rate (pre-534 behavi
 
 check('routes/sales.ts feeds the change rate to BOTH write paths (create + deferred-payment settle)', () => {
   assert.ok(/changeExchangeRate: changeExchangeRateSetting/.test(salesSrc), 'POST / must pass the setting into computeSaleTotals')
-  assert.ok(/Math\.round\(overpayExactUsd \* resolveChangeExchangeRate\(changeRateRow\?\.value, rate\)\)/.test(salesSrc), 'PATCH /:id/status must convert the EXACT overpay at the change rate')
+  const settlement = planSaleSettlement({
+    configuredMethodsRaw: '["Cash"]',
+    paymentDetailsRaw: [{ method: 'Cash', amount_usd: 0, amount_khr: 50000 }],
+    existingPaidUsd: 0,
+    existingPaidKhr: 0,
+    totalUsd: 9.99,
+    exchangeRate: 4100,
+    changeExchangeRateRaw: 4000,
+  })
+  assert.equal(settlement.changeUsd, 2.21)
+  assert.equal(settlement.changeKhr, 8820, 'deferred settlement must convert the exact overpay at the captured change rate')
+  assert.ok(/settlementPlan = planSaleSettlement\(\{/.test(salesSrc), 'PATCH /:id/status must use the validated settlement planner')
+  assert.ok(/changeExchangeRateRaw: settingMap\.change_exchange_rate/.test(salesSrc), 'PATCH /:id/status must pass the latest server change rate into the planner')
+  assert.ok(/change_khr: after\.change_khr/.test(salesSrc), 'PATCH /:id/status must persist the planner-derived settlement change')
   assert.ok(!/updateParams\.change_khr = Math\.round\(overpayUsd \* rate\)/.test(salesSrc), 'the main-rate-only overpay conversion must be gone')
 })
 
