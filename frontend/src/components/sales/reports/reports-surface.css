@@ -216,6 +216,12 @@
 .reports-mobile-actions > span > button { width: 44px; min-width: 44px; height: 44px; }
 .reports-mobile-show { width: 100%; min-height: 44px; }
 
+.reports-desktop-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reports-desktop-primary { flex-direction: row; flex-wrap: wrap; max-width: 100%; }
+.reports-desktop-primary > :first-child { flex: 0 1 auto; }
+.reports-desktop-controls .reports-mobile-presets { flex: 0 1 auto; }
+.reports-desktop-controls .reports-mobile-preset { flex: 0 0 auto; font-size: 13px; }
+
 @media (max-width: 359px) {
   .reports-mobile-preset { flex-basis: calc(50% - 6px); }
   .reports-mobile-range { font-size: 12px; gap: 4px; padding-inline: 8px; }
@@ -231,7 +237,7 @@
     padding-inline: clamp(20px, 3vw, 48px);
   }
   [data-reports-hub] .reports-overview-statement {
-    max-width: 48rem;
+    max-width: 34rem;
     margin-inline: auto;
   }
 }

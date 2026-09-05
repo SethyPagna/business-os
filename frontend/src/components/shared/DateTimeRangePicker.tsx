@@ -67,6 +67,8 @@ interface DateTimeRangePickerProps {
   showTime?: boolean
   /** Hide only the decorative trigger icon on space-constrained surfaces. */
   showCalendarIcon?: boolean
+  /** Reports use continuous endpoints; other callers may use recurring hours. */
+  continuous?: boolean
   align?: 'left' | 'right'
   className?: string
   // Layout/shape utilities for the trigger button. Omitted => the default
@@ -144,6 +146,7 @@ export default function DateTimeRangePicker({
   t,
   showTime = true,
   showCalendarIcon = true,
+  continuous = false,
   align = 'left',
   className = '',
   triggerClassName,
@@ -159,6 +162,7 @@ export default function DateTimeRangePicker({
   // text was readable, so the endpoint box can paint its own red border.
   const [startInvalid, setStartInvalid] = useState(false)
   const [endInvalid, setEndInvalid] = useState(false)
+  const [rangeInvalid, setRangeInvalid] = useState(false)
   // Time text mirrors the value but stays editable mid-keystroke (like the
   // date fields) so a half-typed "14" never commits before the ":30".
   const [startTimeText, setStartTimeText] = useState(() => value.startTime)
@@ -201,6 +205,12 @@ export default function DateTimeRangePicker({
       next.startDate = next.endDate
       next.endDate = swapped
     }
+    if (continuous && next.startDate && next.startDate === next.endDate &&
+      (next.endTime || '23:59') < (next.startTime || '00:00')) {
+      setRangeInvalid(true)
+      return
+    }
+    setRangeInvalid(false)
     onChange(next)
   }
 
@@ -308,6 +318,7 @@ export default function DateTimeRangePicker({
     { id: 'month', label: quickRangeLabel('this_month', 'This month') },
   ]
   const applyQuickRange = (preset: StatsPresetKey) => {
+    setRangeInvalid(false)
     const next = statsPresetRange(preset)
     onChange(showTime ? next : { ...next, startTime: '', endTime: '' })
     const anchor = next.startDate || today
@@ -477,6 +488,7 @@ export default function DateTimeRangePicker({
                 onBlur={(event) => commitTime('start', event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') commitTime('start', (event.target as HTMLInputElement).value) }}
                 aria-label={t('start_time') || 'Start time'}
+                aria-invalid={rangeInvalid || undefined}
               />
               <span className="text-slate-400">—</span>
               <input
@@ -489,10 +501,15 @@ export default function DateTimeRangePicker({
                 onBlur={(event) => commitTime('end', event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') commitTime('end', (event.target as HTMLInputElement).value) }}
                 aria-label={t('end_time') || 'End time'}
+                aria-invalid={rangeInvalid || undefined}
               />
               <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">24h</span>
             </div>
           ) : null}
+
+          {rangeInvalid ? <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">
+            {t('end_date') || 'End date'} / {t('end_time') || 'End time'} ≥ {t('start_date') || 'Start date'} / {t('start_time') || 'Start time'}
+          </p> : null}
 
           {/* Calendar range grid, Monday-first, with its own ‹ month › nav. */}
           <div className="mt-3 rounded-lg border border-slate-100 p-2 dark:border-slate-700/60">
