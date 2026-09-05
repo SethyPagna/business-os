@@ -5,8 +5,14 @@
 Owner prioritizes reliable product drafts/unified Add products sessions, grouped
 stock operations, owner/admin shift amendments and September 4 closure, floating
 shift/POS dialogs, one-row topbar/two-layer navigation, sale-picker layering and
-Telegram arithmetic. Four bounded Sol discovery lanes are active; main owns live
-data and verification. Nothing in this continuation is deployed or marked done.
+Telegram arithmetic. Bounded Sol implementation/review lanes are active; main
+owns live data and verification. Product draft/name/barcode/cost/selling-price
+browser persistence is verified locally; date/header/Telegram first fixes are
+integrated but not deployed. Owner confirmed four-place nearest rounding (fifth
+digit 5+ up, 0–4 down). Shift integration, branch product surface, stock session
+atomicity, precision migration and broader release certification remain open.
+The separate conditional bulk/export task owns its Sales/Returns paths, with
+shared history/backup ownership serialized. Nothing here is fully released.
 Acceptance, model/effort assignments and safeguards:
 `docs/fleet/2026-09-05-production-usability.md`.
 

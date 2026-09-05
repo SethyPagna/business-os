@@ -142,8 +142,14 @@ authenticated verification; do not treat prior builds as live behavior proof.
 
 - At 375px, product name/barcode and cost10/sell15 survive Basic/Pricing switching
   after 8f656861 (baseline erased them). Successful local synthetic create keeps
-  name/barcode/sell15, but DB purchase_price_usd is unexpectedly 0 despite confirm
-  displaying cost10. Galileo notified: save fidelity remains open, not certified.
+  name/barcode/cost10/sell15 in the authoritative cost_price_usd/selling_price_usd
+  columns and product card. Initial main query checked legacy purchase_price_usd
+  (0), a false-positive cost-loss finding; corrected after inspecting the full
+  cost/price fields. No cost fix is required for this verified scenario.
+- Main visually inspected 320px EN/KM header screenshots: back/title/notification/
+  theme/language/account share one row, 44px controls, document width320 matches
+  viewport. Product-section tabs remain horizontally scrollable inside their
+  own strip; full navigation/legacy-mode matrix remains pending.
 - Shared preservation-capability prompt integrated106376df; main guard and modal
   placement tests pass. Consumer hookups remain explicit, not implied by a draft.
 - Herschel (Sol high, 01a07055-2ec4-7753-a367-cb6e0cdba643) owns isolated stock
