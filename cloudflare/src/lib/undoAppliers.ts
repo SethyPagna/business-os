@@ -19,6 +19,7 @@ import {
 // that outright.
 import { amendmentEntryStatement } from './saleAmendments'
 import { replaySaleBulkStatus } from './saleBulkStatus'
+import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -760,6 +761,20 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     run: async (payload, ctx) => {
       if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
       await replaySaleBulkStatus(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
+  [BULK_UPDATE_KIND]: {
+    permission: 'sales', action: 'status',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
+      await replaySaleBulkUpdate(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
+  [BULK_CUSTOMER_UPDATE_KIND]: {
+    permission: 'sales', action: 'customer',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
+      await replaySaleBulkUpdate(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
     },
   },
   // Payload shape: { applier: 'sale.add_items', snapshot_id }. Undo and redo

@@ -59,6 +59,7 @@ type Member = {
         after: Allocation;
     }[];
     fee: Row | null;
+    createdFee: Row | null;
 };
 type Snapshot = {
     version: 1;
@@ -71,7 +72,15 @@ export type BulkStatusRequest = {
         id: number;
         expected_status: string;
         expected_updated_at: string | null;
+        cancel?: {
+            reason: string;
+            note?: string;
+            fee_usd?: number;
+            fee_khr?: number;
+            fee_note?: string;
+        };
     }[];
+    source_status?: string;
     target_status: string;
     notes?: string;
     cancel_reason?: string;
@@ -84,7 +93,7 @@ export class SaleBulkError extends Error {
 const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancelled_at', 'cancelled_by_name', 'status_before_cancel', 'cancel_fee_id'] as const;
 // reference_id is polymorphic: use a conservative read guard, never revision
 // triggers that would write to an unrelated sale with the same numeric id.
-function movementFingerprint(idSql: string) {
+export function saleMovementFingerprint(idSql: string) {
     // Read at most one sentinel past the cap, including inside commit/replay
     // guards. NULL means overflow, never a fingerprint of a truncated history.
     // The NOT NULL member column also rolls back a transition whose appended
@@ -103,7 +112,7 @@ export function saleRevisionGuard(id: number, revision: number): StockStatement 
 function parseRequest(raw: Row): BulkStatusRequest {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw))
         throw new SaleBulkError('A bulk status object is required.', 400);
-    const allowed = ['client_request_id', 'items', 'target_status', 'notes', 'cancel_reason', 'cancel_note', 'skip_stock'];
+    const allowed = ['client_request_id', 'items', 'source_status', 'target_status', 'notes', 'cancel_reason', 'cancel_note', 'skip_stock'];
     if (Object.keys(raw).some(k => !allowed.includes(k)))
         throw new SaleBulkError('Unsupported bulk status field; payment and lost fees are per-sale actions.', 400);
     if (typeof raw.client_request_id !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(raw.client_request_id))
@@ -112,10 +121,26 @@ function parseRequest(raw: Row): BulkStatusRequest {
         throw new SaleBulkError(`Select between 1 and ${BULK_STATUS_LIMIT} sales.`, 400);
     const ids = new Set<number>();
     for (const item of raw.items) {
-        if (!item || typeof item !== 'object' || Object.keys(item).some(k => !['id', 'expected_status', 'expected_updated_at'].includes(k)) || !Number.isSafeInteger(item.id) || item.id <= 0 || ids.has(item.id) || !VALID_SALE_STATUSES.includes(item.expected_status) || !(typeof item.expected_updated_at === 'string' || item.expected_updated_at === null))
+        if (!item || typeof item !== 'object' || Object.keys(item).some(k => !['id', 'expected_status', 'expected_updated_at', 'cancel'].includes(k)) || !Number.isSafeInteger(item.id) || item.id <= 0 || ids.has(item.id) || !VALID_SALE_STATUSES.includes(item.expected_status) || !(typeof item.expected_updated_at === 'string' || item.expected_updated_at === null))
             throw new SaleBulkError('Unique sale ids and expected states are required.', 400);
+        if (item.cancel !== undefined) {
+            if (!item.cancel || typeof item.cancel !== 'object' || Array.isArray(item.cancel)
+                || Object.keys(item.cancel).some(k => !['reason', 'note', 'fee_usd', 'fee_khr', 'fee_note'].includes(k)))
+                throw new SaleBulkError('Invalid per-sale cancellation details.', 400);
+            if (!normalizeCancelReason(item.cancel.reason)
+                || (item.cancel.reason === 'other' && !String(item.cancel.note || '').trim()))
+                throw new SaleBulkError('Choose a cancellation reason and supply a note for Other.', 400);
+            for (const key of ['note', 'fee_note'])
+                if (item.cancel[key] !== undefined && (typeof item.cancel[key] !== 'string' || String(item.cancel[key]).length > 1000))
+                    throw new SaleBulkError('Invalid per-sale cancellation note.', 400);
+            for (const key of ['fee_usd', 'fee_khr'])
+                if (item.cancel[key] !== undefined && (!Number.isFinite(Number(item.cancel[key])) || Number(item.cancel[key]) < 0))
+                    throw new SaleBulkError('Invalid per-sale cancellation fee.', 400);
+        }
         ids.add(item.id);
     }
+    if (raw.source_status !== undefined && !VALID_SALE_STATUSES.includes(String(raw.source_status)))
+        throw new SaleBulkError('Invalid source sale status.', 400);
     if (!VALID_SALE_STATUSES.includes(String(raw.target_status)))
         throw new SaleBulkError('Invalid sale status.', 400);
     if (raw.skip_stock !== undefined && typeof raw.skip_stock !== 'boolean')
@@ -123,10 +148,31 @@ function parseRequest(raw: Row): BulkStatusRequest {
     for (const key of ['notes', 'cancel_reason', 'cancel_note'])
         if (raw[key] !== undefined && (typeof raw[key] !== 'string' || String(raw[key]).length > 1000))
             throw new SaleBulkError('Invalid notes.', 400);
-    if (raw.target_status === 'cancelled' && (!normalizeCancelReason(raw.cancel_reason) || (raw.cancel_reason === 'other' && !String(raw.cancel_note || '').trim())))
+    const hasSharedCancel = raw.cancel_reason !== undefined || raw.cancel_note !== undefined;
+    if (raw.target_status === 'cancelled' && hasSharedCancel && (!normalizeCancelReason(raw.cancel_reason) || (raw.cancel_reason === 'other' && !String(raw.cancel_note || '').trim())))
         throw new SaleBulkError('Choose a cancellation reason and supply a note for Other.', 400);
     // Fixed key order and sorted ids make semantically identical retries identical.
-    return { client_request_id: raw.client_request_id, items: raw.items.map(i => ({ id: i.id, expected_status: i.expected_status, expected_updated_at: i.expected_updated_at })).sort((a, b) => a.id - b.id), target_status: String(raw.target_status), ...(raw.notes !== undefined ? { notes: raw.notes as string } : {}), ...(raw.cancel_reason !== undefined ? { cancel_reason: raw.cancel_reason as string } : {}), ...(raw.cancel_note !== undefined ? { cancel_note: raw.cancel_note as string } : {}), skip_stock: raw.skip_stock === true };
+    return {
+        client_request_id: raw.client_request_id,
+        items: raw.items.map(i => ({
+            id: i.id,
+            expected_status: i.expected_status,
+            expected_updated_at: i.expected_updated_at,
+            ...(i.cancel ? { cancel: {
+                reason: String(i.cancel.reason),
+                ...(i.cancel.note !== undefined ? { note: String(i.cancel.note) } : {}),
+                ...(i.cancel.fee_usd !== undefined ? { fee_usd: Number(i.cancel.fee_usd) } : {}),
+                ...(i.cancel.fee_khr !== undefined ? { fee_khr: Number(i.cancel.fee_khr) } : {}),
+                ...(i.cancel.fee_note !== undefined ? { fee_note: String(i.cancel.fee_note) } : {}),
+            } } : {}),
+        })).sort((a, b) => a.id - b.id),
+        ...(raw.source_status !== undefined ? { source_status: String(raw.source_status) } : {}),
+        target_status: String(raw.target_status),
+        ...(raw.notes !== undefined ? { notes: raw.notes as string } : {}),
+        ...(raw.cancel_reason !== undefined ? { cancel_reason: raw.cancel_reason as string } : {}),
+        ...(raw.cancel_note !== undefined ? { cancel_note: raw.cancel_note as string } : {}),
+        skip_stock: raw.skip_stock === true,
+    };
 }
 async function rowsIn<T>(db: D1Compat, ids: number[], sql: (marks: string) => string): Promise<T[]> {
     // sql-bound-params: bounded by construction -- both the 25-ID ceiling and
@@ -178,6 +224,23 @@ function memberStatements(member: Member, sign: number, user: SessionUser, stamp
         return [];
     const target = sign < 0 ? member.before : member.after;
     const out = stockStatements(member, sign, user, stamp);
+    if (member.createdFee) {
+        if (sign > 0) {
+            out.push(bulkAssertion('NOT EXISTS(SELECT 1 FROM fees WHERE id=@id)', { id: member.createdFee.id }));
+            const keys = Object.keys(member.createdFee);
+            out.push({ sql: `INSERT INTO fees(${keys.join(',')}) VALUES(${keys.map(k => `@${k}`).join(',')})`, params: member.createdFee });
+        }
+        else {
+            out.push(bulkAssertion(`EXISTS(SELECT 1 FROM fees WHERE id=@id AND sale_id=@sale AND fee_type=@type AND COALESCE(label,'')=@label AND amount_usd=@usd AND amount_khr=@khr AND fee_date=@date AND COALESCE(branch_id,0)=COALESCE(@branch,0) AND COALESCE(delivery_contact_id,0)=COALESCE(@contact,0) AND COALESCE(notes,'')=@notes AND COALESCE(created_by,0)=COALESCE(@actor,0) AND COALESCE(created_by_name,'')=@actor_name AND created_at=@created_at AND updated_at=@updated_at)`, {
+                id: member.createdFee.id, sale: member.id, type: member.createdFee.fee_type, label: member.createdFee.label,
+                usd: member.createdFee.amount_usd, khr: member.createdFee.amount_khr, date: member.createdFee.fee_date,
+                branch: member.createdFee.branch_id, contact: member.createdFee.delivery_contact_id, notes: member.createdFee.notes,
+                actor: member.createdFee.created_by, actor_name: member.createdFee.created_by_name,
+                created_at: member.createdFee.created_at, updated_at: member.createdFee.updated_at,
+            }));
+            out.push({ sql: 'DELETE FROM fees WHERE id=@id AND sale_id=@sale', params: { id: member.createdFee.id, sale: member.id } });
+        }
+    }
     if (member.fee) {
         if (sign > 0)
             out.push({ sql: 'DELETE FROM fees WHERE id=@id', params: { id: member.fee.id } });
@@ -212,13 +275,25 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         return JSON.parse(String(previous.receipt_json));
     }
     const ids = request.items.map(i => i.id);
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
-    if (sales.some(s => s.movement_fingerprint === null))
-        throw new SaleBulkError(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400);
-    const items = await rowsIn<Item>(db, ids, m => `SELECT * FROM sale_items WHERE sale_id IN (${m}) ORDER BY id LIMIT 151`);
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const sourceMatchedIds: number[] = [];
+    for (const expected of request.items) {
+        const sale = sales.find(s => s.id === expected.id);
+        if (!sale)
+            fail(`Sale ${expected.id} was not found.`);
+        const sourceMatched = request.source_status === undefined || String(sale.sale_status || 'completed') === request.source_status;
+        if (!sourceMatched)
+            continue;
+        if ((sale.sale_status || 'completed') !== expected.expected_status || (sale.updated_at ?? null) !== expected.expected_updated_at)
+            fail(`Sale ${expected.id} changed. Refresh before retrying.`);
+        if (sale.movement_fingerprint === null)
+            throw new SaleBulkError(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400);
+        sourceMatchedIds.push(expected.id);
+    }
+    const items = await rowsIn<Item>(db, sourceMatchedIds, m => `SELECT * FROM sale_items WHERE sale_id IN (${m}) ORDER BY id LIMIT 151`);
     if (items.length > 150)
         throw new SaleBulkError('Select fewer sale lines (maximum 150).', 400);
-    const allocations = await rowsIn<Allocation>(db, ids, m => `SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items si ON si.id=a.sale_item_id WHERE si.sale_id IN (${m}) ORDER BY a.id LIMIT 301`);
+    const allocations = await rowsIn<Allocation>(db, sourceMatchedIds, m => `SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items si ON si.id=a.sale_item_id WHERE si.sale_id IN (${m}) ORDER BY a.id LIMIT 301`);
     if (allocations.length > 300)
         throw new SaleBulkError('Select fewer batch allocations (maximum 300).', 400);
     const returns = await rowsIn<{
@@ -226,28 +301,38 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         sale_item_id: number | null;
         product_id: number | null;
         quantity: number;
-    }>(db, ids, m => `SELECT r.sale_id,ri.sale_item_id,ri.product_id,ri.quantity FROM returns r JOIN return_items ri ON ri.return_id=r.id WHERE r.sale_id IN (${m}) AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer' ORDER BY ri.id LIMIT 301`);
+    }>(db, sourceMatchedIds, m => `SELECT r.sale_id,ri.sale_item_id,ri.product_id,ri.quantity FROM returns r JOIN return_items ri ON ri.return_id=r.id WHERE r.sale_id IN (${m}) AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer' ORDER BY ri.id LIMIT 301`);
     // Bound raw return rows before aggregation; even millions of rows sharing
     // one group must not be materialized or aggregated for this request.
     if (returns.length > 300)
         throw new SaleBulkError('Select fewer return records (maximum 300).', 400);
-    const fees = await rowsIn<Row>(db, sales.map(s => Number(s.cancel_fee_id)).filter(Boolean), m => `SELECT * FROM fees WHERE id IN (${m})`);
+    const fees = await rowsIn<Row>(db, sales.filter(s => sourceMatchedIds.includes(Number(s.id))).map(s => Number(s.cancel_fee_id)).filter(Boolean), m => `SELECT * FROM fees WHERE id IN (${m})`);
     const stamp = new Date().toISOString(), operationId = crypto.randomUUID(), members: Member[] = [], guards: StockStatement[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
-        if (!sale || (sale.sale_status || 'completed') !== expected.expected_status || (sale.updated_at ?? null) !== expected.expected_updated_at)
-            fail(`Sale ${expected.id} changed. Refresh before retrying.`);
-        guards.push(saleRevisionGuard(expected.id, Number(sale.write_revision)));
-        guards.push(bulkAssertion(`${movementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: sale.movement_fingerprint }));
-        const old = String(sale.sale_status || 'completed'), changed = old !== request.target_status;
+        if (!sale)
+            fail(`Sale ${expected.id} was not found.`);
+        const old = String(sale.sale_status || 'completed');
+        const sourceMatched = request.source_status === undefined || old === request.source_status;
+        const changed = sourceMatched && old !== request.target_status;
+        if (sourceMatched) {
+            guards.push(saleRevisionGuard(expected.id, Number(sale.write_revision)));
+            guards.push(bulkAssertion(`${saleMovementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: sale.movement_fingerprint }));
+        }
         const guard = guardSaleStatusTransition(old, request.target_status, String(sale.status_before_cancel || '') || null);
         if (changed && !guard.ok)
             throw new SaleBulkError(guard.error || 'Invalid transition.', 400);
-        const before = scalar(sale), after: Row = { ...before, sale_status: request.target_status };
-        if (request.notes !== undefined)
+        const before = scalar(sale), after: Row = changed ? { ...before, sale_status: request.target_status } : { ...before };
+        if (changed && request.notes !== undefined)
             after.notes = request.notes;
-        if (request.target_status === 'cancelled' && changed)
-            Object.assign(after, { cancel_reason: request.cancel_reason, cancel_note: request.cancel_note?.trim() || null, cancelled_at: stamp, cancelled_by_name: user.name, status_before_cancel: old });
+        const itemCancel = expected.cancel;
+        const cancelReason = itemCancel?.reason || request.cancel_reason;
+        const cancelNote = itemCancel?.note || request.cancel_note;
+        if (request.target_status === 'cancelled' && changed) {
+            if (!normalizeCancelReason(cancelReason) || (cancelReason === 'other' && !String(cancelNote || '').trim()))
+                throw new SaleBulkError(`Sale ${expected.id} needs its cancellation answers.`, 400);
+            Object.assign(after, { cancel_reason: cancelReason, cancel_note: String(cancelNote || '').trim() || null, cancelled_at: stamp, cancelled_by_name: user.name, status_before_cancel: old });
+        }
         else if (old === 'cancelled' && changed)
             Object.assign(after, { cancel_reason: null, cancel_note: null, cancelled_at: null, cancelled_by_name: null, status_before_cancel: null, cancel_fee_id: null });
         const own = items.filter(i => i.sale_id === expected.id), itemReturned = new Map<number, number>(), productReturned = new Map<number, number>();
@@ -263,7 +348,31 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 fail('Sale allocation belongs to a different branch.');
         }
         const skipped = (changed && !!request.skip_stock) || Number(sale.stock_skipped) === 1;
-        const member: Member = { id: expected.id, receipt: String(sale.receipt_number || expected.id), before, after, changed, skipped, items: own, returned: [...returned], stock: [], batches: [], allocations: [], fee: null };
+        const member: Member = { id: expected.id, receipt: String(sale.receipt_number || expected.id), before, after, changed, skipped, items: own, returned: [...returned], stock: [], batches: [], allocations: [], fee: null, createdFee: null };
+        if (changed && request.target_status === 'cancelled' && itemCancel && (Number(itemCancel.fee_usd) > 0 || Number(itemCancel.fee_khr) > 0)) {
+            const random = crypto.getRandomValues(new Uint32Array(2));
+            // Explicit negative ids do not advance fees' AUTOINCREMENT
+            // sequence. The 52-bit random space plus the in-batch NOT EXISTS
+            // guard makes a collision an atomic refusal, never an overwrite.
+            const feeId = -Math.max(1, random[0] * 0x100000 + (random[1] & 0xfffff));
+            member.createdFee = {
+                id: feeId,
+                fee_type: 'expense',
+                label: `Cancelled sale ${member.receipt} -- lost fee`,
+                amount_usd: Math.round(Math.max(0, Number(itemCancel.fee_usd) || 0) * 100) / 100,
+                amount_khr: Math.max(0, Math.round(Number(itemCancel.fee_khr) || 0)),
+                fee_date: stamp.slice(0, 10),
+                sale_id: expected.id,
+                branch_id: sale.branch_id ?? null,
+                delivery_contact_id: null,
+                notes: String(itemCancel.fee_note || '').trim() || `Fee lost to cancellation (${cancelReason})`,
+                created_by: user.id,
+                created_by_name: user.name,
+                created_at: stamp,
+                updated_at: stamp,
+            };
+            after.cancel_fee_id = feeId;
+        }
         if (changed && old === 'cancelled' && sale.cancel_fee_id) {
             member.fee = fees.find(f => f.id === sale.cancel_fee_id) || null;
             if (!member.fee)
@@ -310,7 +419,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     }
     const snapshot: Snapshot = { version: 1, operationId, members };
     const changedIds = members.filter(m => m.changed).map(m => m.id), unchangedIds = members.filter(m => !m.changed).map(m => m.id);
-    const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, before: m.before.sale_status, after: m.after.sale_status, changed: m.changed, stock_skipped: m.skipped })) };
+    const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, before: m.before.sale_status, after: m.after.sale_status, changed: m.changed, reason: m.changed ? 'changed' : (request.source_status !== undefined && m.before.sale_status !== request.source_status ? 'source_mismatch' : 'already_target'), stock_skipped: m.skipped })) };
     const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
     for (const m of members)
         statements.push(...memberStatements(m, 1, user, stamp));
@@ -319,8 +428,8 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     const historyStatementIndex = statements.length;
     statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name) SELECT 'global','sale',id,@label,@reversible,@status,json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'changed_count',@changed,'unchanged_count',@unchanged,'target_status',@target),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'changed_count',@changed,'unchanged_count',@unchanged,'target_status',@target),@actor,@name FROM sale_bulk_operations WHERE id=@id`, params: { id: operationId, label: `${changedIds.length} sales → ${request.target_status}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: BULK_STATUS_KIND, actor: user.id, name: user.name, changed: changedIds.length, unchanged: unchangedIds.length, target: request.target_status } });
     statements.push({ sql: "UPDATE sale_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } });
-    for (const m of members)
-        statements.push({ sql: `INSERT INTO sale_bulk_members(operation_id,sale_id,revision,movement_fingerprint) VALUES(@op,@id,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),${movementFingerprint('@id')})`, params: { op: operationId, id: m.id } });
+    for (const m of members.filter(member => member.changed))
+        statements.push({ sql: `INSERT INTO sale_bulk_members(operation_id,sale_id,revision,movement_fingerprint) VALUES(@op,@id,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),${saleMovementFingerprint('@id')})`, params: { op: operationId, id: m.id } });
     statements.push(auditStatement(user, operationId, 'sale_status_bulk', changedIds.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
     bounded(statements, snapshot);
     try {
@@ -349,12 +458,12 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
         fail('Unsupported bulk snapshot.');
     const sign = direction === 'undo' ? -1 : 1, expected = direction === 'undo' ? 'undoable' : 'redoable', next = direction === 'undo' ? 'redoable' : 'undoable', stamp = new Date().toISOString();
     const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })];
-    for (const m of snapshot.members)
-        statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${movementFingerprint('s.id')})`, { op: op.id, id: m.id }));
+    for (const m of snapshot.members.filter(member => member.changed))
+        statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: m.id }));
     for (const m of snapshot.members)
         statements.push(...memberStatements(m, sign, user, stamp));
-    for (const m of snapshot.members)
-        statements.push({ sql: `UPDATE sale_bulk_members SET revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),movement_fingerprint=${movementFingerprint('@id')} WHERE operation_id=@op AND sale_id=@id`, params: { op: op.id, id: m.id } });
+    for (const m of snapshot.members.filter(member => member.changed))
+        statements.push({ sql: `UPDATE sale_bulk_members SET revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),movement_fingerprint=${saleMovementFingerprint('@id')} WHERE operation_id=@op AND sale_id=@id`, params: { op: op.id, id: m.id } });
     statements.push({ sql: 'UPDATE sale_bulk_operations SET generation=generation+1 WHERE id=@op', params: { op: op.id } });
     statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=@stamp WHERE id=@id', params: { id: op.snapshot_id, status: direction === 'undo' ? 'reversed' : 'applied', stamp } });
     statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: next, stamp, generation: Number(generation) + 1 } });
