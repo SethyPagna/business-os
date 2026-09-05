@@ -137,6 +137,13 @@ const shiftsRoute = loadReal('routes/shifts.ts', {
   },
   '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false, hasAnyPermission: () => true },
   '../lib/audit': { audit: async () => {} },
+  // This fixture carries the shift tables only -- no sales, fees or returns --
+  // so the drawer reconciliation genuinely CANNOT run here. That is the point:
+  // the close writes and reports even when the breakdown is unavailable, because
+  // a cashier who ended a shift must not be told to end it again.
+  '../lib/shiftReconciliation': {
+    loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
+  },
   '../lib/telegram': {
     // The spy stands where the real sender does. It records and returns; it
     // has no token, no chat id and no fetch, so this file cannot transmit.
@@ -181,6 +188,9 @@ async function main() {
   const closedBody = await closed.json()
   ok(closed.status === 200 && closedBody.shift.closed_at, 'the close writes closed_at')
   ok(closedBody.already_closed === false, 'and reports itself as the close that won')
+  ok('reconciliation' in closedBody.shift, 'the close answers with the drawer breakdown field')
+  ok(closedBody.shift.reconciliation === null,
+    'and when the breakdown cannot be computed the close still commits, reporting no figures rather than a 500')
   ok(sent.length === 2, `CLOSE SENDS ONCE: opening plus exactly one close report were pushed (got ${sent.length})`)
   ok(sent[1].shiftId === openedBody.shift.id,
     'and it names the shift that was just closed, by id')
@@ -284,6 +294,9 @@ async function main() {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 9, name: 'Nobody' }); await next() } },
     '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false, hasAnyPermission: () => true },
     '../lib/audit': { audit: async () => {} },
+    '../lib/shiftReconciliation': {
+      loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
+    },
     '../lib/telegram': { sendTelegramShiftReport: async () => { throw new Error('a shift that does not exist must not be reported') } },
   })
   const strangerApp = stranger.default || stranger
