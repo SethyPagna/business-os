@@ -1,4 +1,9 @@
 {
+  "sale_bulk_limit": "Select at most 25 sales for one status change.",
+  "sale_bulk_pending": "A previous request has an unknown outcome. Retry the original request or discard it before starting another.",
+  "sale_bulk_retry": "Retry original request",
+  "sale_bulk_discard": "Discard retry",
+  "sale_bulk_discard_warning": "Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.",
   "sale_stock_skipped": "Stock skipped",
   "sale_bulk_status_result": "Updated {changed} sales; {unchanged} unchanged.",
   "sale_bulk_history_summary": "{changed} sales → {status}; {unchanged} unchanged",

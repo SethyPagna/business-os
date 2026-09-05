@@ -1,7 +1,7 @@
 import { SYNC } from '../constants.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
-import { apiFetch, route } from './http.ts'
+import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
@@ -50,9 +50,13 @@ export function createSale(payload: SalePayload): Promise<unknown> {
 
 export type BulkSaleStatusItem = { id: number; expected_status: string; expected_updated_at: string | null }
 export type BulkSaleStatusResult = { actionHistoryId: number; changedCount: number; unchangedCount: number; changedIds: number[]; unchangedIds: number[] }
-export async function updateSalesBulkStatus(payload: { client_request_id: string; items: BulkSaleStatusItem[]; target_status: string; skip_stock?: boolean; cancel_reason?: string; cancel_note?: string }): Promise<BulkSaleStatusResult> {
+export type BulkSaleStatusPayload = { client_request_id: string; items: BulkSaleStatusItem[]; target_status: string; skip_stock?: boolean; cancel_reason?: string; cancel_note?: string }
+export async function updateSalesBulkStatus(payload: BulkSaleStatusPayload): Promise<BulkSaleStatusResult> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Connect to the server to change sale status.')
-  return route('sales:bulkStatus', () => apiFetch('POST', '/api/sales/bulk-status', payload), null, true) as Promise<BulkSaleStatusResult>
+  const result = await route('sales:bulkStatus', () => apiFetch('POST', '/api/sales/bulk-status', payload), null, true) as BulkSaleStatusResult
+  // This write also creates server history; its next read must see the group.
+  cacheInvalidate('actionHistory')
+  return result
 }
 
 export function createSaleWithoutWriteDedupe(payload: SalePayload): Promise<unknown> {
