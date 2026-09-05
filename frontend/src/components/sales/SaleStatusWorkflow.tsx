@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 
@@ -14,6 +14,8 @@ export default function SaleStatusWorkflow({
   onNotesChange,
   onConfirm,
   children,
+  reviewRequestId = 0,
+  confirmDisabled = false,
 }: {
   currentStatus: string
   selectedStatus: string
@@ -24,8 +26,13 @@ export default function SaleStatusWorkflow({
   onNotesChange: (notes: string) => void
   onConfirm: () => void
   children?: React.ReactNode
+  reviewRequestId?: number
+  confirmDisabled?: boolean
 }) {
   const [step, setStep] = useState<'closed' | 'destination' | 'review'>('closed')
+  useEffect(() => {
+    if (reviewRequestId > 0) setStep('review')
+  }, [reviewRequestId])
   const destinations = ALL_STATUSES
     .filter((status) => !['partial_return', 'returned', currentStatus].includes(status))
     .filter((status) => currentStatus !== 'partial_return' || status === 'cancelled')
@@ -76,7 +83,7 @@ export default function SaleStatusWorkflow({
             <textarea id="sale-status-notes" className="input min-h-[80px] resize-none text-sm" value={notes} onChange={(event) => onNotesChange(event.target.value)} placeholder={t('status_notes_placeholder') || 'Optional notes about this status change'} />
           </div>
           {children}
-          <button type="button" className="btn-primary w-full text-sm" disabled={saving || selectedStatus === currentStatus} onClick={onConfirm}>
+          <button type="button" className="btn-primary w-full text-sm" disabled={saving || confirmDisabled || selectedStatus === currentStatus} onClick={onConfirm}>
             {saving ? (t('loading') || 'Saving') : (t('confirm') || 'Confirm')}
           </button>
         </>
