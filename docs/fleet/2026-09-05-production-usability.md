@@ -15,6 +15,31 @@ recovery evidence. Never infer a closing timestamp or user from a calendar date.
 
 ## Acceptance matrix
 
+September5 owner checkpoint additions (all earlier rows remain in scope):
+
+- F3: KHR output converts source amounts exactly once. Preserve native tender
+  currencies and stored financial data; equivalents are not additional payments.
+- PAY1: awaiting-payment settlement selects configured payment methods and supports
+  multiple method/amount rows like POS. Validate methods, sums, remaining balance,
+  retries and permission on the server. Payment alone must not move stock.
+- PAY2: payment-method identity and casing are canonical: Fcb renamed FCB displays
+  FCB in current selectors/readers, with no duplicate case variant. Retain original
+  audit evidence. Separate Sales/bulk coordinator owns settlement; management
+  file ownership must be allocated before a second writer starts.
+- P4/U4 expansion: transfer, remove, set quantity and Add products (existing/new)
+  use grouped family search followed by floating POS-style options. Newest surface
+  stays above its parent, which is inactive; closing returns to the previous layer.
+  Galileo/Herschel own session UI/API; Volta supplies sale-picker reuse contract.
+- All14 reference PNG paths checked present. References1–2 guide navigation;
+  3–5/14 lined reports and filters;6–13 grouped breakdowns. Visual certification
+  must compare against them, not merely pass source tests.
+
+Release checkpoints are proposed, not deployed: A draft/navigation/date/report
+display fixes; B shift lifecycle/pickers/payment workflows; C atomic stock sessions
+and broader precision. Each fix remains a separate commit, with explicit dependent
+commits, focused tests, integrated gates and deployment provenance. Historical
+data corrections are separate guarded operations, never hidden in UI releases.
+
 | ID | Required outcome | Evidence needed | Status |
 |---|---|---|---|
 | P1 | Barcode/name and all product fields survive typing, scanning, rerenders, navigation and save | Reproduced failing case; state lifecycle regression; browser persistence | First fix integrated d2f25971; legacy draft/unmount follow-up and browser certification pending |
@@ -195,3 +220,29 @@ to rewrite historical fee/cost values. Courier row visibly29.36, COGS10185.02;
 large source values need separate provenance/unit checks, not guessed repairs.
 User requests consistent time-enabled 24h filters; backend overview currently
 date-scopes returns/expenses, so no false promise from adding time UI alone.
+
+Read-only production verification September5 ~07:15UTC: configuredmainrate4065;
+Aug30–Sep5 fees27 rows = USD5440 + KHR373700 (delivery13 USD0/KHR260200;
+expense14 USD5440/KHR113500). Single conversion yields5531.93, and
+-1219.38 -5531.93 = -6751.31 exactly matches screenshotFinalProfit. LargeUSDfees
+are explicitly storedUSD (Aug31 items including utilities/food/Boost/payroll/
+other/bags), not inferredriel. COGS263lines/467units/122noncancelledsales totals
+10185.0195; sale net8924. ThusCOGS10185.02 is sourced, not display unit inflation.
+No source financial records changed. One exploratoryquery used nonexistent
+sales.status and failed; correctedsale_status query succeeded. All queries
+reportedzero writes. Sourcecost validity remains distinct from sum correctness.
+
+## Owner decision and source-data follow-up
+
+- Owner explicitly selects system entry time for older expenses in time-filtered
+  reports. Preserve expense_date; never invent historical transaction times.
+  Pauli owns the report contract and boundary/timezone regression coverage;
+  Bernoulli consumes that contract for time-enabled controls.
+- Read-only audit found 22 zero-subtotal, positive-total paid sales, ids16842–16863,
+  totaling3462 (Sep3:1470; Sep2:1992). The Sep2–3 import record and original planner
+  identify the same cohort: its first INSERT omitted subtotal_usd. Integration's
+  planner already contains a forward correction, which does not repair live rows.
+  A separate Aug10 sale16827 total2 is outside this cohort and must not be folded
+  into a blanket repair. Prepare exact before-state and guarded recovery/audit
+  evidence before any production correction; preserve totals, received payments,
+  statuses, item rows and stock. No live repair applied in this continuation.

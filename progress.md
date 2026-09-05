@@ -2,6 +2,21 @@
 
 ## Active continuation — production usability, September 5
 
+Latest owner decision: time-filtered reports use older expenses' system entry
+timestamp, not an assumed transaction time; retain the original expense date.
+Report agent owns boundary/timezone parity tests. Financial audit also confirmed
+22 legacy-import sales (16842–16863, $3,462) with zero subtotals despite paid
+positive totals. Source provenance traced; guarded correction remains pending,
+with stock, payments and concurrent business protected. No new deployment.
+
+New checkpoint scope: canonical KHR conversion once; configured split payment
+rows for credit settlement and payment-method rename/casing consistency; grouped
+POS-style option pickers for transfer/remove/set/Add products with topmost popup
+layering. Existing agents and separate Sales coordinator notified. All14 reference
+images verified accessible. Separate commits and staged release checkpoints are
+required; see acceptance additions in the usability ledger. New requirements are
+assigned/pending, not implemented or released by this note.
+
 Owner prioritizes reliable product drafts/unified Add products sessions, grouped
 stock operations, owner/admin shift amendments and September 4 closure, floating
 shift/POS dialogs, one-row topbar/two-layer navigation, sale-picker layering and
