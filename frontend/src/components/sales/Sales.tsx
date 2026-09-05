@@ -65,6 +65,8 @@ import SectionExportAction from '../shared/SectionExportAction.tsx'
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
 const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000
+const SALES_BULK_LINKED_PAGE_SIZE = 100
+const SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS = 180
 // S4-24b: adding lines deducts stock and rewrites the sale's totals in one
 // atomic batch -- a longer ceiling than a status flip, but still bounded so a
 // stalled request cannot leave the cashier staring at a spinner.
@@ -365,6 +367,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const [bulkChangePrompt, setBulkChangePrompt] = useState<{ field: BulkSaleField; rows: BulkSaleChangeRow[]; sales: SaleRecord[]; sourceChoices: BulkSaleChoice[]; targetChoices: BulkSaleChoice[] } | null>(null)
   const [bulkFieldSaving, setBulkFieldSaving] = useState(false)
   const bulkTargetSearchVersionRef = useRef(0)
+  const bulkTargetSearchTimerRef = useRef<number | null>(null)
+  const bulkTargetSearchResolveRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => {
+    if (bulkTargetSearchTimerRef.current != null) window.clearTimeout(bulkTargetSearchTimerRef.current)
+    bulkTargetSearchResolveRef.current?.()
+  }, [])
   const bulkFieldRetryKey = `sales.bulk-update.retry:${user?.id || 'anonymous'}`
   const bulkFieldRetryMemory = useRef<{ key: string; request: BulkSaleUpdatePayload | null } | null>(null)
   const [bulkFieldRetryRevision, setBulkFieldRetryRevision] = useState(0)
@@ -1481,8 +1489,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         targetChoices = uniqueChoices([...sourceChoices, ...(Array.isArray(configured) ? configured : []).map((method) => valueChoice(method, translateOr('none', 'None')))])
       } else {
         const result = field === 'customer'
-          ? await getCustomers({ page: 1, pageSize: 100 })
-          : await getDeliveryContacts({ page: 1, pageSize: 100 })
+          ? await getCustomers({ page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
+          : await getDeliveryContacts({ page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
         const record = (result || {}) as Record<string, unknown>
         const rows = Array.isArray(result) ? result : Array.isArray(record.data) ? record.data : Array.isArray(record.items) ? record.items : []
         targetChoices = uniqueChoices([
@@ -1508,10 +1516,23 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const prompt = bulkChangePrompt
     if (!prompt || (prompt.field !== 'customer' && prompt.field !== 'delivery_contact')) return
     const searchVersion = ++bulkTargetSearchVersionRef.current
+    await new Promise<void>((resolve) => {
+      if (bulkTargetSearchTimerRef.current != null) window.clearTimeout(bulkTargetSearchTimerRef.current)
+      // Resolve the superseded wait so its caller can settle; its version
+      // check below prevents it from issuing a request.
+      bulkTargetSearchResolveRef.current?.()
+      bulkTargetSearchResolveRef.current = resolve
+      bulkTargetSearchTimerRef.current = window.setTimeout(() => {
+        bulkTargetSearchTimerRef.current = null
+        if (bulkTargetSearchResolveRef.current === resolve) bulkTargetSearchResolveRef.current = null
+        resolve()
+      }, SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS)
+    })
+    if (searchVersion !== bulkTargetSearchVersionRef.current) return
     try {
       const result = prompt.field === 'customer'
-        ? await getCustomers({ search: query, page: 1, pageSize: 100 })
-        : await getDeliveryContacts({ search: query, page: 1, pageSize: 100 })
+        ? await getCustomers({ search: query, page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
+        : await getDeliveryContacts({ search: query, page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
       const record = (result || {}) as Record<string, unknown>
       const rows = Array.isArray(result) ? result : Array.isArray(record.data) ? record.data : Array.isArray(record.items) ? record.items : []
       if (searchVersion !== bulkTargetSearchVersionRef.current) return

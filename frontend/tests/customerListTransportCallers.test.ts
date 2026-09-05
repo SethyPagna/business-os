@@ -41,6 +41,10 @@ const ALLOWED = new Map<string, string>([
     'components/pos/POS.tsx',
     'the shared customer picker/typeahead: debounced server search, capped page size, ids= by id',
   ],
+  [
+    'components/sales/Sales.tsx',
+    'the bulk customer reassignment picker: debounced server search at a bounded page size',
+  ],
 ])
 
 // The transport layer itself defines and mirrors the call; it is reviewed
@@ -228,6 +232,32 @@ check('the POS by-id read keeps only the ids it asked for', () => {
     body[1],
     /new Set\(wanted\)/,
     'the id re-check must be built from the same normalized ids that were requested',
+  )
+})
+
+check('the Sales bulk customer picker is debounced and page-capped', () => {
+  const sales = sources.get('components/sales/Sales.tsx') as string
+  const pageSize = /SALES_BULK_LINKED_PAGE_SIZE\s*=\s*(\d+)/.exec(sales)
+  assert.ok(pageSize, 'Sales.tsx should define SALES_BULK_LINKED_PAGE_SIZE')
+  assert.ok(
+    Number(pageSize[1]) > 0 && Number(pageSize[1]) <= 100,
+    `Sales bulk customer page size must stay <= 100, found ${pageSize[1]}`,
+  )
+  const debounce = /SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS\s*=\s*(\d+)/.exec(sales)
+  assert.ok(debounce, 'Sales.tsx should debounce the bulk customer search')
+  assert.ok(
+    Number(debounce[1]) >= 100 && Number(debounce[1]) <= 1000,
+    `Sales bulk customer debounce must stay between 100ms and 1000ms, found ${debounce[1]}`,
+  )
+  assert.match(
+    sales,
+    /getCustomers\(\{\s*search:\s*query,\s*page:\s*1,\s*pageSize:\s*SALES_BULK_LINKED_PAGE_SIZE\s*\}\)/,
+    'Sales bulk customer search must send the bounded page size',
+  )
+  assert.match(
+    sales,
+    /window\.setTimeout\([\s\S]*?SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS\)/,
+    'Sales bulk customer search must wait for the debounce interval before requesting',
   )
 })
 
