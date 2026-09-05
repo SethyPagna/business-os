@@ -250,6 +250,29 @@
   }
 }
 
+/* Wide desktop: the 1024 clamp saturates at 48px from 1600px, which reads as
+   almost no margin once a >=1280 monitor is the norm (user, Sep 6: "more
+   side margin on large screens"). These two tiers only ADD to the 1024 rule
+   above (later, more specific min-width wins the cascade at equal
+   specificity) -- they never touch the 768/1024 gutters or the rounding
+   fix, so tablet and the existing desktop floor are unchanged. */
+@media (min-width: 1280px) {
+  [data-reports-hub] {
+    padding-inline: clamp(40px, 4vw, 64px);
+  }
+}
+
+@media (min-width: 1536px) {
+  [data-reports-hub] {
+    /* A reading-width cap, not just more padding: past ~1536px + the 220px
+       sidebar the report body was running to 1600px wide with only 46-48px
+       either side. Capping and centering reads as real margin at 1920+. */
+    max-width: 96rem;
+    margin-inline: auto;
+    padding-inline: clamp(56px, 4vw, 80px);
+  }
+}
+
 /* ---------------------------------------------------------------------------
    KHMER: the line box must not be shorter than the cluster's ink extent.
 

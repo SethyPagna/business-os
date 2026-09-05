@@ -5,7 +5,7 @@
 // way a till receipt reads, which is what a phone user scans fastest. The
 // same data feeds ReportTable's spreadsheet style; only the arrangement
 // differs, so switching style never changes a figure.
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
 export type ReceiptLineKind = 'add' | 'sub' | 'total' | 'info' | 'muted'
 
@@ -44,7 +44,10 @@ export interface ReceiptSheetProps {
 const LINE_CLASS: Record<ReceiptLineKind, string> = {
   add: '',
   sub: 'text-[var(--ui-ink-2)]',
-  total: 'border-t border-[var(--ui-ink-3)] pt-1 mt-1 font-semibold',
+  // The rule-over-totals border/margin moved to a spanning divider cell (see
+  // the grid below) so it can cross both grid columns; this keeps only the
+  // text treatment that belongs on each cell.
+  total: 'pt-1 font-semibold',
   info: 'text-[var(--ui-ink-2)]',
   muted: 'text-[var(--ui-ink-3)]',
 }
@@ -91,15 +94,36 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
                 {block.meta != null ? <div className="shrink-0 text-[11px] text-[var(--ui-ink-3)]">{block.meta}</div> : null}
               </div>
             ) : null}
-            {block.lines.map((line, i) => (
-              <div key={line.key || i} className={['flex items-baseline justify-between gap-[var(--ui-receipt-gap,0.75rem)]', LINE_CLASS[line.kind || 'add']].join(' ').trim()}>
-                <span className="min-w-0 truncate">{signOf(line.kind === 'total' || line.kind === 'info' || line.kind === 'muted' ? undefined : line.kind)}{line.label}</span>
-                <span className="shrink-0 text-right font-mono">
-                  {line.value}
-                  {line.note != null ? <span className="ml-1 font-sans text-[10px] text-[var(--ui-ink-3)]">{line.note}</span> : null}
-                </span>
+            {block.lines.length ? (
+              // The label/value row: ONE grid per block, not one flex row per
+              // line. `justify-between` used to hand every line all the free
+              // space in the box, so a label and its value could sit 300-450px
+              // apart on a wide statement or card (root cause of "the fields
+              // and value can be closer", user Part 586, still live on
+              // >=1024 screens). A grid's label column tracks the WIDEST
+              // label in the block (`max-content`) and the value column
+              // starts right after it with a fixed minimum gap -- adjacent on
+              // every width, and the value column can never wrap into the
+              // label column because it is its own track.
+              <div className="grid grid-cols-[minmax(0,max-content)_max-content] items-baseline gap-x-[var(--ui-receipt-gap,0.75rem)]">
+                {block.lines.map((line, i) => {
+                  const kind = line.kind
+                  const cellClass = LINE_CLASS[kind || 'add']
+                  return (
+                    <Fragment key={line.key || i}>
+                      {kind === 'total' ? <div className="col-span-2 mt-1 border-t border-[var(--ui-ink-3)]" /> : null}
+                      <span className={['min-w-0 truncate', cellClass].join(' ').trim()}>
+                        {signOf(kind === 'total' || kind === 'info' || kind === 'muted' ? undefined : kind)}{line.label}
+                      </span>
+                      <span className={['shrink-0 text-right font-mono', cellClass].join(' ').trim()}>
+                        {line.value}
+                        {line.note != null ? <span className="ml-1 font-sans text-[10px] text-[var(--ui-ink-3)]">{line.note}</span> : null}
+                      </span>
+                    </Fragment>
+                  )
+                })}
               </div>
-            ))}
+            ) : null}
           </>
         )
         const cls = [

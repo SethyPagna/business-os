@@ -239,7 +239,7 @@ export default function OverviewReport(p: ReportViewProps) {
       }))}
     />
   ) : (
-    <DenseTable>
+    <DenseTable fit>
       <thead>
         <tr>
           <th>{tr('rpt_line', 'Line')}</th>
