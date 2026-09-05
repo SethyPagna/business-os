@@ -49,10 +49,10 @@ export type InventoryStockSessionReceipt = {
     productName: string
     createdProduct: boolean
     branchId: number
-    batchId: number
+    batchId: number | null
     batchNumber: number | null
     lotCode: string | null
-    movementId: number
+    movementId: number | null
     quantity: number
     unitCostUsd: number | null
   }>

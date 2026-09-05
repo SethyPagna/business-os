@@ -378,11 +378,24 @@ runTest('definitive no-write failures unlock correction under the same request i
   assert.doesNotMatch(modalSource, /sessionRequestIdRef\.current\s*=/, 'correction must reuse the known-unused identity')
 })
 
-runTest('zero-stock New remains a catalog create because milestone A cannot encode it', () => {
-  assert.match(modalSource, /if \(quantity === 0\)/)
+runTest('full-access zero-stock New queues in the atomic session while Review keeps its approval workflow', () => {
+  assert.match(modalSource, /const canCommitProductAdd = canCommitProductCreateInStockSession\(user\)/)
+  assert.match(modalSource, /if \(quantity === 0 && !canCommitProductAdd\)/)
   assert.match(modalSource, /await onCreateProduct\(\{ \.\.\.payload, stock_quantity: 0 \}\)/)
-  assert.match(modalSource, /Bounded NON-ATOMIC exception/)
-  assert.match(modalSource, /proper fix[\s\S]*create-only line in the idempotent session API/)
+  assert.match(modalSource, /Review-tier product creation must keep using the registered product[\s\S]*review workflow/)
+  assert.match(modalSource, /if \(quantity > 0 && !canReceiveStock\)/)
+  assert.match(modalSource, /kind: 'create_receive'/)
+  assert.doesNotMatch(modalSource, /Bounded NON-ATOMIC exception/)
+})
+
+runTest('catalog-only session lines omit receipt and AP fields and accept nullable receipt ids', () => {
+  const zeroWire = modalSource.slice(modalSource.indexOf("if (line.kind === 'create_receive' && Number(line.quantity) === 0)"), modalSource.indexOf('const common ='))
+  assert.match(zeroWire, /quantity: 0/)
+  assert.match(zeroWire, /received_date: line\.receivedDate/)
+  assert.match(zeroWire, /product: line\.product \|\| \{\}/)
+  assert.doesNotMatch(zeroWire, /batch_id|supplier_id|supplier_name|expiry_date|notes|unit_cost_usd|payment_status|credit_due_date/)
+  assert.match(inventoryWriteTransportSource, /batchId: number \| null/)
+  assert.match(inventoryWriteTransportSource, /movementId: number \| null/)
 })
 
 runTest('the session shows the header it captured', () => {

@@ -17,6 +17,8 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
+import { getPermissionTierFromMap, parsePermissionMap } from '../../utils/permissions.ts'
+import { isActionOverriddenOff } from '../../utils/permissionActions.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import {
   canStartCreateProductsSession,
@@ -159,6 +161,28 @@ function stockSessionErrorCode(error: unknown): string {
   return String((error as { code?: unknown } | null)?.code || '')
 }
 
+function hasAllPermission(value: unknown): boolean {
+  const parsed = parsePermissionMap(value)
+  return parsed.all === true
+}
+
+function canCommitProductCreateInStockSession(user?: ProductUser | null): boolean {
+  // Runtime callers always provide the actor. Keep the permissive fallback
+  // only for older/test callers that predate this prop; a real Review-tier
+  // actor must continue through the ordinary product review workflow.
+  if (!user) return true
+  const merged = {
+    ...parsePermissionMap(user.role_permissions),
+    ...parsePermissionMap(user.permissions),
+  }
+  const admin = String(user.username || '').trim().toLowerCase() === 'admin'
+    || String(user.role_code || '').trim().toLowerCase() === 'admin'
+    || hasAllPermission(user.role_permissions)
+    || hasAllPermission(user.permissions)
+  return getPermissionTierFromMap(merged, 'products', admin) === 'full'
+    && !isActionOverriddenOff(merged, 'products', 'add')
+}
+
 function quantityAtBranch(product: ProductCandidate, branchId: string): number {
   const entry = (product.branch_stock || []).find((row) => String(row.branch_id ?? '') === String(branchId))
   const value = Number(entry?.quantity ?? product.stock_quantity ?? 0)
@@ -227,6 +251,7 @@ export default function CreateProductsSessionModal({
   const searchSeqRef = useRef(0)
   const batchLoadKeyRef = useRef('')
   const batchChoiceSeedRef = useRef<number | null>(null)
+  const canCommitProductAdd = canCommitProductCreateInStockSession(user)
 
   const [header, setHeader] = useState<CreateProductsHeader>(() => draft?.header
     ? { ...draft.header, branchId: draft.header.branchId || resolvedDefaultBranchId }
@@ -488,11 +513,10 @@ export default function CreateProductsSessionModal({
     if (queuedTwin) throw new Error(tr('create_match_twin_title', 'Product already exists'))
     setSaving(true)
     try {
-      if (quantity === 0) {
-        // Bounded NON-ATOMIC exception: milestone A cannot encode a
-        // product-only create without a receipt quantity. Do not describe a
-        // mixed session containing this row as wholly atomic; the proper fix
-        // is a create-only line in the idempotent session API.
+      if (quantity === 0 && !canCommitProductAdd) {
+        // Review-tier product creation must keep using the registered product
+        // review workflow. The atomic session endpoint deliberately requires
+        // Full products:add and must never bypass that approval boundary.
         const productId = await onCreateProduct({ ...payload, stock_quantity: 0 })
         const row: SessionLine = {
           lineId: `created_${String(productId)}_${Date.now()}`, kind: 'created_zero', productId: Number(productId) || null, product: null,
@@ -503,7 +527,7 @@ export default function CreateProductsSessionModal({
         }
         setRows((prev) => [row, ...prev]); onDone()
       } else {
-        if (!canReceiveStock) throw new Error(tr('no_permission', 'You do not have permission to receive stock.'))
+        if (quantity > 0 && !canReceiveStock) throw new Error(tr('no_permission', 'You do not have permission to receive stock.'))
         if (rows.filter((row) => row.status === 'queued').length >= STOCK_SESSION_MAX_LINES) {
           throw new Error(`${tr('limit', 'Limit')}: ${STOCK_SESSION_MAX_LINES}`)
         }
@@ -514,7 +538,7 @@ export default function CreateProductsSessionModal({
           lineId: `create_${Date.now()}_${rows.length}`, kind: 'create_receive', productId: null, product: stockSessionProduct(prepared),
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: sameSupplier ? header.supplierId : null,
           supplierName, branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: String(payload.received_date || receivedDate),
-          expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: tr('new_batch', '+ New batch'), quantity,
+          expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: quantity > 0 ? tr('new_batch', '+ New batch') : '', quantity,
           unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, status: 'queued', detail: tr('ready_to_receive', 'Ready'),
         }
         setRows((prev) => [row, ...prev])
@@ -534,7 +558,8 @@ export default function CreateProductsSessionModal({
     const name = String(payload.name || '').trim()
     const barcode = String(payload.barcode || '').trim()
     const cost = Number(payload.cost_price_usd)
-    if (!Number.isSafeInteger(quantity) || quantity <= 0) throw new Error(tr('invalid_quantity', 'Invalid quantity'))
+    if (!Number.isSafeInteger(quantity) || quantity < 0) throw new Error(tr('invalid_quantity', 'Invalid quantity'))
+    if (quantity > 0 && !canReceiveStock) throw new Error(tr('no_permission', 'You do not have permission to receive stock.'))
     if (!branchId || !name) throw new Error(tr('create_products_branch_required', 'Choose the branch this delivery goes to.'))
     if (!Number.isFinite(cost) || cost < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
     const queuedTwin = rows.find((row) => row.lineId !== lineId && row.kind === 'create_receive'
@@ -561,6 +586,8 @@ export default function CreateProductsSessionModal({
         branchName: branchNameFor(String(branchId)),
         receivedDate: String(payload.received_date || current.receivedDate || receivedDate),
         expiryDate: String(payload.expiry_date || ''),
+        batchId: null,
+        batchLabel: quantity > 0 ? tr('new_batch', '+ New batch') : '',
         quantity,
         unitCostUsd: cost,
       }
@@ -574,6 +601,19 @@ export default function CreateProductsSessionModal({
   const removeLine = (lineId: string) => { if (!saving && !submissionLocked) setRows((prev) => prev.filter((row) => row.lineId !== lineId || row.status === 'saved')) }
 
   const sessionLine = (line: SessionLine): InventoryStockSessionLine => {
+    if (line.kind === 'create_receive' && Number(line.quantity) === 0) {
+      // Catalog-only creates intentionally carry no receipt/lot/AP fields.
+      // The server still validates branch/date identity, then returns null
+      // batch and movement ids in the immutable session receipt.
+      return {
+        line_id: line.lineId,
+        kind: 'create_receive',
+        branch_id: Number(line.branchId),
+        quantity: 0,
+        received_date: line.receivedDate,
+        product: line.product || {},
+      }
+    }
     const common = {
       line_id: line.lineId,
       branch_id: Number(line.branchId),
