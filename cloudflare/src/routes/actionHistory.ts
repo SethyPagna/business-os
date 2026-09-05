@@ -2,15 +2,16 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
+import { getActionTier, getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
 import { isServerReplayable, resolveUndoApplier, applierPermissionTier } from '../lib/undoAppliers'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
+import { STOCK_SESSION_KIND, notifyStockSession } from '../lib/stockSession'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
-const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND])
+const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND])
 
 // Ported from backend/src/routes/actionHistory.ts. This replaces the
 // read-only GET-only stub that lived in compat.ts (no create, no
@@ -98,6 +99,9 @@ function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boole
   for (const raw of payloads) {
     const applier = resolveUndoApplier(raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null)
     if (applier && applierPermissionTier(user, applier) !== 'full') return false
+    if (applier?.name === STOCK_SESSION_KIND && (raw as Record<string, unknown>).snapshot_version !== 2) return false
+    if (applier?.name === STOCK_SESSION_KIND && Number((raw as Record<string, unknown>).requires_product_add) === 1
+      && getActionTier(user, 'products', 'add') !== 'full') return false
   }
   return true
 }
@@ -135,7 +139,7 @@ function mapRow(row: ActionHistoryRow, user: SessionUser) {
     reversible: !!row.reversible,
     undo_payload: undoPayload,
     redo_payload: redoPayload,
-    server_replayable: !!(applier && applierPermissionTier(user, applier) === 'full'),
+    server_replayable: !!(applier && canUseNamedAppliers(user, [undoPayload, redoPayload])),
   }
 }
 
@@ -183,7 +187,7 @@ app.get('/:id/details', async (c) => {
   const payload = parseJson(row.undo_payload)
   const applierKind = String(payload.applier || '')
   if (!SERVER_BULK_KINDS.has(applierKind) || !canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
-  const operationTable = applierKind === RETURN_BULK_ACTION_KIND ? 'return_bulk_operations' : 'sale_bulk_operations'
+  const operationTable = applierKind === STOCK_SESSION_KIND ? 'stock_session_operations' : applierKind === RETURN_BULK_ACTION_KIND ? 'return_bulk_operations' : 'sale_bulk_operations'
   const operation = await db.prepare(`SELECT receipt_json FROM ${operationTable} WHERE history_id=?`).get<{ receipt_json: string }>([row.id])
   if (!operation) return c.json({ error: 'Saved details unavailable.' }, 404)
   const receipt = JSON.parse(operation.receipt_json)
@@ -284,7 +288,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const currentStatus = String(existing.status || '').toLowerCase()
     const expected = direction === 'undo' ? 'undoable' : 'redoable'
     const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
-    if (currentStatus !== expected) {
+    const stockReplay = parseJson(existing.undo_payload)?.applier === STOCK_SESSION_KIND
+    if (currentStatus !== expected && !stockReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now` }, 409)
     }
 
@@ -321,13 +326,16 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       } catch (error) {
         if (!SERVER_BULK_KINDS.has(applier.name)) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
-        const status = Number((error as Error & { statusCode?: number })?.statusCode) === 409 ? 409 : 500
+        const code = Number((error as Error & { statusCode?: number })?.statusCode)
+        const status = stockReplay && (code === 400 || code === 403) ? code : code === 409 ? 409 : 500
         return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action` }, status)
       }
     }
 
     if (applier && SERVER_BULK_KINDS.has(applier.name)) {
-      c.executionCtx.waitUntil(applier.name === RETURN_BULK_ACTION_KIND
+      c.executionCtx.waitUntil(applier.name === STOCK_SESSION_KIND
+        ? notifyStockSession(c.env, { operationId: String(payload.operation_id) })
+        : applier.name === RETURN_BULK_ACTION_KIND
         ? notifyReturnBulkAction(c.env)
         : applier.name === BULK_STATUS_KIND
           ? notifyBulkStatus(c.env)
