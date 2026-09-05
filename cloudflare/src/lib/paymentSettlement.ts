@@ -1,5 +1,4 @@
 import {
-  actualKhrMinorUnits,
   actualKhrValue,
   actualUsdMinorUnits,
   actualUsdValue,
@@ -90,7 +89,7 @@ export function planSaleSettlement(input: {
   let existingKhrUnits: bigint
   try {
     existingUsdUnits = financialCalculationUnits((input.existingPaidUsd ?? 0) as FinancialDecimalInput)
-    existingKhrUnits = actualKhrMinorUnits((input.existingPaidKhr ?? 0) as FinancialDecimalInput)
+    existingKhrUnits = financialCalculationUnits((input.existingPaidKhr ?? 0) as FinancialDecimalInput)
   } catch {
     fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid')
   }
@@ -116,7 +115,7 @@ export function planSaleSettlement(input: {
           key: paymentMethodKey(method),
           method,
           usdUnits: financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput),
-          khrUnits: actualKhrMinorUnits((detail.amount_khr ?? 0) as FinancialDecimalInput),
+          khrUnits: financialCalculationUnits((detail.amount_khr ?? 0) as FinancialDecimalInput),
           matched: false,
         }
         if (row.usdUnits < 0n || row.khrUnits < 0n) throw new Error('negative')
@@ -166,7 +165,7 @@ export function planSaleSettlement(input: {
     let khrUnits: bigint
     try {
       comparisonUsd = financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput)
-      khrUnits = actualKhrMinorUnits((detail.amount_khr ?? 0) as FinancialDecimalInput)
+      khrUnits = financialCalculationUnits((detail.amount_khr ?? 0) as FinancialDecimalInput)
     } catch {
       fail(`Payment row ${index + 1} has an invalid amount.`, 'invalid_payment_amount')
     }
@@ -183,6 +182,9 @@ export function planSaleSettlement(input: {
       if (comparisonUsd % 100n !== 0n) {
         fail(`Payment row ${index + 1} must use whole USD cents.`, 'invalid_payment_amount')
       }
+      if (khrUnits % 10_000n !== 0n) {
+        fail(`Payment row ${index + 1} must use whole KHR riel.`, 'invalid_payment_amount')
+      }
       method = activeMethod
       try { usdUnits = actualUsdMinorUnits((detail.amount_usd ?? 0) as FinancialDecimalInput) * 100n } catch {
         fail(`Payment row ${index + 1} has an invalid USD amount.`, 'invalid_payment_amount')
@@ -197,7 +199,7 @@ export function planSaleSettlement(input: {
     paymentDetails.push({
       method,
       amount_usd: calculationUnitsValue(usdUnits),
-      amount_khr: actualKhrValue(khrUnits),
+      amount_khr: calculationUnitsValue(khrUnits),
     })
   }
 
@@ -212,7 +214,7 @@ export function planSaleSettlement(input: {
   const rate = Number(input.exchangeRate)
   if (!Number.isFinite(rate) || rate <= 0) fail('The current exchange rate is invalid.', 'invalid_payment_amount')
   const amountPaidUsd = calculationUnitsValue(paidUsdUnits)
-  const amountPaidKhr = actualKhrValue(paidKhrUnits)
+  const amountPaidKhr = calculationUnitsValue(paidKhrUnits)
   const totalUsd = Number(input.totalUsd)
   if (!Number.isFinite(totalUsd) || totalUsd < 0) fail('The sale total is invalid.', 'invalid_payment_amount')
   const paidCombinedUsd = amountPaidUsd + amountPaidKhr / rate

@@ -63,8 +63,8 @@ function fixture() {
     },
   } }
   const executionCtx = { waitUntil() {}, passThroughOnException() {} }
-  const call = async (url, body) => {
-    const response = await sales.request(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, env, executionCtx)
+  const call = async (url, body, method = 'PATCH') => {
+    const response = await sales.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, env, executionCtx)
     return { status: response.status, body: await response.json() }
   }
   return { sql, env, call, barrier(fn) { beforeBatch = fn } }
@@ -165,6 +165,41 @@ async function run() {
   assert.equal(raced.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'awaiting_payment')
   assert.equal(raced.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 0)
   console.log('PASS stale matched sale/settings conflict is all-or-none')
+
+  const amended = fixture(); seed(amended)
+  amended.sql.prepare(`UPDATE sales SET sale_status='completed',is_delivery=1,delivery_fee_usd=1,
+    delivery_fee_khr=4100,total_usd=6,total_khr=24600 WHERE id=1`).run()
+  amended.sql.prepare("UPDATE sales SET updated_at='amend-v1' WHERE id=1").run()
+  const amendmentRequest = {
+    kind: 'delivery_fee_changed',
+    delivery_fee_usd: 2,
+    expected_updated_at: 'amend-v1',
+    expected_exchange_rate: 4200,
+    client_request_id: 'amend-fee-request-1',
+  }
+  const amendmentApplied = await amended.call('/1/amendments', amendmentRequest, 'POST')
+  assert.equal(amendmentApplied.status, 200, JSON.stringify(amendmentApplied))
+  assert.equal(amendmentApplied.body.exchangeRate, 4200)
+  assert.equal(amendmentApplied.body.totalUsd, 7)
+  assert.equal(amendmentApplied.body.totalKhr, 29400)
+  const amendedSale = amended.sql.prepare('SELECT * FROM sales WHERE id=1').get()
+  const amendedLine = amended.sql.prepare('SELECT * FROM sale_items WHERE id=1').get()
+  assert.deepEqual([amendedSale.exchange_rate,amendedSale.delivery_fee_khr,amendedSale.total_khr,amendedLine.total_khr],[4200,8400,29400,21000])
+  assert.equal(amended.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='amendment'").get().n, 1)
+  amended.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
+  assert.deepEqual(await amended.call('/1/amendments', amendmentRequest, 'POST'), amendmentApplied)
+  assert.equal((await amended.call('/1/amendments', { ...amendmentRequest, delivery_fee_usd: 3 }, 'POST')).status, 409)
+  console.log('PASS amendment applies one latest server rate to header and lines and exact retry preserves the first outcome')
+
+  const amendmentRace = fixture(); seed(amendmentRace)
+  amendmentRace.sql.prepare(`UPDATE sales SET sale_status='completed',is_delivery=1,delivery_fee_usd=1,
+    delivery_fee_khr=4100,total_usd=6,total_khr=24600,updated_at='amend-v1' WHERE id=1`).run()
+  amendmentRace.barrier(() => amendmentRace.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run())
+  const amendmentConflict = await amendmentRace.call('/1/amendments', amendmentRequest, 'POST')
+  assert.equal(amendmentConflict.status, 409, JSON.stringify(amendmentConflict))
+  assert.equal(amendmentRace.sql.prepare('SELECT delivery_fee_usd FROM sales WHERE id=1').get().delivery_fee_usd, 1)
+  assert.equal(amendmentRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='amendment'").get().n, 0)
+  console.log('PASS amendment settings race rolls back fee, rate rebase, ledger, and receipt together')
 }
 
 run().catch((error) => { console.error(error); process.exitCode = 1 })

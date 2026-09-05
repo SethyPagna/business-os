@@ -862,6 +862,7 @@ export function recomputeSaleMoneyAfterAmendment(input: {
   /** Set when resolveAmendedTaxUsd recomputed; otherwise the stored amount. */
   taxUsdOverride?: number | null
   changeExchangeRate?: unknown
+  exchangeRateOverride?: unknown
 }) {
   const overrides: Partial<AmendableSaleRow> = {}
   if (input.deliveryFeeUsdOverride !== null && input.deliveryFeeUsdOverride !== undefined) {
@@ -875,6 +876,7 @@ export function recomputeSaleMoneyAfterAmendment(input: {
     sale,
     subtotalUsd: input.subtotalUsd,
     changeExchangeRate: input.changeExchangeRate,
+    exchangeRateOverride: input.exchangeRateOverride,
   })
 }
 

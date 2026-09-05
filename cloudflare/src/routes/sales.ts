@@ -39,6 +39,9 @@ import {
   buildAllocationStatements,
   guardSaleLineAddition,
   planSaleLineAddition,
+  captureSaleLineKhrSnapshot,
+  rebaseSaleLineKhrSnapshot,
+  rebaseSaleLineKhrStatement,
   resolveExplicitSaleLineBatches,
   saleMoneyUpdateStatement,
   saleStatusDeductsStock,
@@ -90,6 +93,7 @@ import {
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
+import { actualKhrValue, financialCalculationValue } from '../lib/financialPrecision'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
@@ -2102,6 +2106,7 @@ app.post('/:id/items', async (c) => {
     subtotalUsd: subtotalAfterUsd,
     taxUsdOverride: taxPlan.taxUsdOverride,
     changeExchangeRate: moneySettings.changeExchangeRate,
+    exchangeRateOverride: moneySettings.exchangeRate,
   })
   const moneyBefore = {
     subtotal_usd: Number(sale.subtotal_usd) || 0,
@@ -2347,6 +2352,8 @@ app.post('/:id/amendments', async (c) => {
     delivery_fee_usd?: number
     replacement?: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number }
     notes?: string
+    client_request_id?: string
+    expected_exchange_rate?: number | string
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
@@ -2355,7 +2362,29 @@ app.post('/:id/amendments', async (c) => {
     return c.json({ error: `Unknown amendment "${kind}".` }, 400)
   }
 
-  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<AmendableSaleRow & {
+  const amendmentRequestId = normalizeClientRequestId(body.client_request_id)
+  if (!amendmentRequestId) return c.json({ error: 'client_request_id is required for a sale amendment.', code: 'client_request_id_required' }, 400)
+  const amendmentCanonical = JSON.stringify({
+    sale_id: Number(c.req.param('id')),
+    kind,
+    sale_item_id: body.sale_item_id ?? null,
+    quantity: body.quantity ?? null,
+    delivery_fee_usd: body.delivery_fee_usd ?? null,
+    replacement: body.replacement ?? null,
+    notes: String(body.notes || '').trim().slice(0, 500) || null,
+    expected_exchange_rate: body.expected_exchange_rate,
+  })
+  const amendmentDigest = await saleMutationDigest(JSON.parse(amendmentCanonical))
+  const priorAmendment = await db.prepare(`
+    SELECT request_digest,response_json FROM sale_mutation_receipts
+    WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request
+  `).get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+  if (priorAmendment) {
+    if (priorAmendment.request_digest !== amendmentDigest) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+    return c.json(JSON.parse(priorAmendment.response_json) as Record<string, unknown>)
+  }
+
+  const sale = await db.prepare('SELECT s.*,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE s.id = ?').get<AmendableSaleRow & {
     id: number
     sale_status: string | null
     updated_at: string | null
@@ -2365,6 +2394,7 @@ app.post('/:id/amendments', async (c) => {
     total_usd: number | null
     amount_paid_usd: number | null
     amount_paid_khr: number | null
+    write_revision: number
   }>([c.req.param('id')])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
@@ -2380,7 +2410,15 @@ app.post('/:id/amendments', async (c) => {
 
   const saleId = Number(sale.id)
   const saleStatus = String(sale.sale_status || 'completed')
-  const exchangeRate = Number(sale.exchange_rate) || 4100
+  const moneySettings = await readAmendmentMoneySettings(db)
+  const exchangeRate = moneySettings.exchangeRate
+  const reviewedRate = Number(body.expected_exchange_rate)
+  if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
+    return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed amendment.', code: 'expected_exchange_rate_required', current: { exchange_rate: exchangeRate } }, 400)
+  }
+  if (Math.abs(reviewedRate - exchangeRate) > 0.0000001) {
+    return c.json({ error: 'The exchange rate changed. Review the amendment again.', code: 'exchange_rate_changed', current_exchange_rate: exchangeRate, current: { exchange_rate: exchangeRate } }, 409)
+  }
 
   // A sale can carry real return records while its status row says something
   // else (imported/legacy rows), so the guard is given the EVIDENCE, not the
@@ -2406,12 +2444,22 @@ app.post('/:id/amendments', async (c) => {
   const movesStock = saleAmendmentMovesStock(sale)
   const stockSkipped = saleSkipsStock(sale)
   const note = String(body.notes || '').trim().slice(0, 500) || null
-  const moneySettings = await readAmendmentMoneySettings(db)
   const subtotalRow = await db
     .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
     .get<{ subtotal: number }>([saleId])
   const subtotalBeforeUsd = Number(subtotalRow?.subtotal) || 0
   const totalBeforeUsd = round2(Number(sale.total_usd) || 0)
+  const lineMoneyRowsBefore = await db.prepare(`
+    SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
+           product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
+           manual_discount_usd,manual_discount_khr
+    FROM sale_items WHERE sale_id=? ORDER BY id
+  `).all<Record<string, unknown>>([saleId])
+  const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
+  const lineMoneyAfterAtLatestRate = rebaseSaleLineKhrSnapshot(lineMoneyRowsBefore, exchangeRate)
+  const mutationStamp = new Date().toISOString()
+  const mutationOperationId = crypto.randomUUID()
+  const moneyBeforeSnapshot = amendmentMoneyBefore(sale)
 
   // ---- The delivery fee: its own short path, because it touches no line and
   // moves no stock. "$1.50, then we add another $0.50" -> the sale row holds
@@ -2441,19 +2489,29 @@ app.post('/:id/amendments', async (c) => {
       deliveryFeeUsdOverride: feePlan.feeAfterUsd,
       taxUsdOverride: feeTaxPlan.taxUsdOverride,
       changeExchangeRate: moneySettings.changeExchangeRate,
+      exchangeRateOverride: exchangeRate,
     })
+    const moneyAfterSnapshot = amendmentMoneyAfter(
+      sale,
+      money,
+      exchangeRate,
+      mutationStamp,
+      feeTaxPlan.outcome.taxUsd,
+      feePlan.feeAfterUsd,
+    )
+    const response = buildAmendmentResponsePayload({
+      saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome,
+    }, mutationStamp)
     try {
       await db.batch([
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        amendmentSettingsGuard(moneySettings),
+        saleRevisionGuard(saleId, Number(sale.write_revision)),
         ...feePlan.statements,
         ...feeTaxPlan.statements,
-        saleMoneyUpdateStatement(saleId, {
-          subtotal_usd: money.subtotalUsd,
-          subtotal_khr: money.subtotalKhr,
-          total_usd: money.totalUsd,
-          total_khr: money.totalKhr,
-          change_usd: money.changeUsd,
-          change_khr: money.changeKhr,
-        }),
+        rebaseSaleLineKhrStatement(saleId, exchangeRate),
+        saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
         amendmentEntryStatement({
           saleId,
           kind: 'delivery_fee_changed',
@@ -2465,15 +2523,38 @@ app.post('/:id/amendments', async (c) => {
           userId: user?.id ?? null,
           userName: user?.name ?? null,
         }),
+        saleMutationReceiptStatement({
+          operationId: mutationOperationId,
+          actorId: Number(user.id),
+          saleId,
+          kind: 'amendment',
+          requestId: amendmentRequestId,
+          requestDigest: amendmentDigest,
+          requestJson: amendmentCanonical,
+          before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore },
+          after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate },
+          response,
+          stamp: mutationStamp,
+        }),
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       ])
     } catch (error) {
+      const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+        WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
+        .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+      if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       return c.json({ error: `Failed to amend the delivery fee: ${(error as Error).message || ''}` }, 500)
     }
     await auditAmendment(c, user, saleId, sale, {
       kind, fee_before: feePlan.feeBeforeUsd, fee_after: feePlan.feeAfterUsd,
-      total_before: totalBeforeUsd, total_after: money.totalUsd, outside_window: guard.outsideWindow, notes: note,
+      total_before: totalBeforeUsd, total_after: money.totalUsd,
+      exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
+      outside_window: guard.outsideWindow, notes: note,
     })
-    return amendmentResponse(c, db, { saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome })
+    return c.json(response)
   }
 
   // ---- Every other kind acts on ONE existing line. ----
@@ -2650,11 +2731,24 @@ app.post('/:id/amendments', async (c) => {
     subtotalUsd: subtotalAfterUsd,
     taxUsdOverride: taxPlan.taxUsdOverride,
     changeExchangeRate: moneySettings.changeExchangeRate,
+    exchangeRateOverride: exchangeRate,
   })
+  const moneyAfterSnapshot = amendmentMoneyAfter(
+    sale,
+    money,
+    exchangeRate,
+    mutationStamp,
+    taxPlan.outcome.taxUsd,
+    Number(sale.delivery_fee_usd) || 0,
+  )
 
   // Every ledger entry in this act ends at the sale's real new total; the
   // intermediate ones would be arithmetic nobody performed.
   for (const entry of ledgerEntries) entry.totalAfterUsd = money.totalUsd
+
+  const response = buildAmendmentResponsePayload({
+    saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
+  }, mutationStamp)
 
   // ---- One atomic batch: the line change, its stock, the sale's money, and
   // the ledger entries recording all three. A committed line change whose
@@ -2662,22 +2756,40 @@ app.post('/:id/amendments', async (c) => {
   // exists to close. ----
   try {
     await db.batch([
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      amendmentSettingsGuard(moneySettings),
+      saleRevisionGuard(saleId, Number(sale.write_revision)),
       ...statements,
-      saleMoneyUpdateStatement(saleId, {
-        subtotal_usd: money.subtotalUsd,
-        subtotal_khr: money.subtotalKhr,
-        total_usd: money.totalUsd,
-        total_khr: money.totalKhr,
-        change_usd: money.changeUsd,
-        change_khr: money.changeKhr,
-      }),
       ...taxPlan.statements,
+      rebaseSaleLineKhrStatement(saleId, exchangeRate),
+      saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
       ...ledgerEntries.map(amendmentEntryStatement),
+      saleMutationReceiptStatement({
+        operationId: mutationOperationId,
+        actorId: Number(user.id),
+        saleId,
+        kind: 'amendment',
+        requestId: amendmentRequestId,
+        requestDigest: amendmentDigest,
+        requestJson: amendmentCanonical,
+        before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore },
+        after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate },
+        response,
+        stamp: mutationStamp,
+      }),
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ])
   } catch (error) {
+    const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
+      .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+    if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+    if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
     if (/CHECK constraint|constraint failed/i.test(message)) {
-      return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being amended. Refresh and try again.', code: 'stock_conflict' }, 409)
+      return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
     }
     return c.json({ error: `Failed to amend this sale: ${message}` }, 500)
   }
@@ -2696,14 +2808,120 @@ app.post('/:id/amendments', async (c) => {
     tax_after: taxPlan.outcome.taxUsd,
     tax_recomputed: taxPlan.outcome.recomputed,
     tax_reason: taxPlan.outcome.reason,
+    exchange_rate_before: sale.exchange_rate ?? null,
+    exchange_rate_after: exchangeRate,
     outside_window: guard.outsideWindow,
     notes: note,
   })
 
-  return amendmentResponse(c, db, { saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome })
+  return c.json(response)
 })
 
 type StatementList = Array<{ sql: string; params: Record<string, unknown> }>
+
+function nullableNumber(value: unknown): number | null {
+  return value == null ? null : Number(value) || 0
+}
+
+function receiptKhrFromUsd(value: unknown, exchangeRate: number): number | null {
+  if (value == null) return null
+  return actualKhrValue(financialCalculationValue(Number(value) || 0) * exchangeRate)
+}
+
+function amendmentMoneyBefore(sale: Record<string, unknown>) {
+  return {
+    exchange_rate: nullableNumber(sale.exchange_rate),
+    updated_at: sale.updated_at == null ? null : String(sale.updated_at),
+    subtotal_usd: Number(sale.subtotal_usd) || 0,
+    subtotal_khr: nullableNumber(sale.subtotal_khr),
+    total_usd: Number(sale.total_usd) || 0,
+    total_khr: nullableNumber(sale.total_khr),
+    change_usd: Number(sale.change_usd) || 0,
+    change_khr: nullableNumber(sale.change_khr),
+    discount_khr: nullableNumber(sale.discount_khr),
+    tax_khr: nullableNumber(sale.tax_khr),
+    delivery_fee_khr: nullableNumber(sale.delivery_fee_khr),
+    membership_discount_khr: nullableNumber(sale.membership_discount_khr),
+  }
+}
+
+function amendmentMoneyAfter(
+  sale: Record<string, unknown>,
+  money: { subtotalUsd: number; subtotalKhr: number; totalUsd: number; totalKhr: number; changeUsd: number; changeKhr: number },
+  exchangeRate: number,
+  stamp: string,
+  taxUsd: number,
+  deliveryFeeUsd: number,
+) {
+  return {
+    exchange_rate: exchangeRate,
+    updated_at: stamp,
+    subtotal_usd: money.subtotalUsd,
+    subtotal_khr: money.subtotalKhr,
+    total_usd: money.totalUsd,
+    total_khr: money.totalKhr,
+    change_usd: money.changeUsd,
+    change_khr: money.changeKhr,
+    discount_khr: receiptKhrFromUsd(sale.discount_usd, exchangeRate),
+    tax_khr: receiptKhrFromUsd(taxUsd, exchangeRate),
+    delivery_fee_khr: receiptKhrFromUsd(deliveryFeeUsd, exchangeRate),
+    membership_discount_khr: receiptKhrFromUsd(sale.membership_discount_usd, exchangeRate),
+  }
+}
+
+function saleMutationReceiptStatement(input: {
+  operationId: string
+  actorId: number
+  saleId: number
+  kind: 'add_items' | 'amendment'
+  requestId: string
+  requestDigest: string
+  requestJson: string
+  before: unknown
+  after: unknown
+  response: Record<string, unknown>
+  stamp: string
+}): StatementList[number] {
+  return {
+    sql: `INSERT INTO sale_mutation_receipts(
+            id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
+            before_json,after_json,response_json,generation,sale_revision,updated_at
+          ) VALUES(
+            @operation,@actor,@saleId,@kind,@request,@digest,@requestJson,
+            @beforeJson,@afterJson,@responseJson,0,
+            COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
+          )`,
+    params: {
+      operation: input.operationId,
+      actor: input.actorId,
+      saleId: input.saleId,
+      kind: input.kind,
+      request: input.requestId,
+      digest: input.requestDigest,
+      requestJson: input.requestJson,
+      beforeJson: JSON.stringify(input.before),
+      afterJson: JSON.stringify(input.after),
+      responseJson: JSON.stringify(input.response),
+      stamp: input.stamp,
+    },
+  }
+}
+
+function amendmentSettingsGuard(settings: Awaited<ReturnType<typeof readAmendmentMoneySettings>>): StatementList[number] {
+  return saleMutationGuard(`
+    COALESCE((SELECT value FROM settings WHERE key='exchange_rate'),'')=@exchangeRate
+    AND COALESCE((SELECT value FROM settings WHERE key='change_exchange_rate'),'')=@changeRate
+    AND COALESCE((SELECT value FROM settings WHERE key=@taxEnabledKey),'')=@taxEnabled
+    AND COALESCE((SELECT value FROM settings WHERE key=@taxRateKey),'')=@taxRate
+  `, {
+    exchangeRate: settings.exchangeRateRaw ?? '',
+    changeRate: settings.changeExchangeRateRaw ?? '',
+    taxEnabledKey: TAX_ENABLED_SETTING_KEY,
+    taxEnabled: settings.taxEnabledRaw ?? '',
+    taxRateKey: TAX_RATE_SETTING_KEY,
+    taxRate: settings.taxRateRaw ?? '',
+  })
+}
 
 type AmendmentContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
 
@@ -2716,7 +2934,12 @@ type AmendmentContext = Context<{ Bindings: Env; Variables: { user: SessionUser 
  * separate reads is how the three paths later disagree about whether tax moved.
  */
 async function readAmendmentMoneySettings(db: ReturnType<typeof getDb>): Promise<{
+  exchangeRate: number
+  exchangeRateRaw: string | undefined
   changeExchangeRate: string | undefined
+  changeExchangeRateRaw: string | undefined
+  taxEnabledRaw: string | undefined
+  taxRateRaw: string | undefined
   tax: TaxSettings
 }> {
   // Bound, not interpolated. These three are module constants today, but a key
@@ -2724,11 +2947,16 @@ async function readAmendmentMoneySettings(db: ReturnType<typeof getDb>): Promise
   // makes one configurable, and this file should not be the place that teaches
   // that habit.
   const rows = await db.prepare(
-    'SELECT key, value FROM settings WHERE key IN (?, ?, ?)',
-  ).all<{ key: string; value: string }>(['change_exchange_rate', TAX_ENABLED_SETTING_KEY, TAX_RATE_SETTING_KEY])
+    'SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?)',
+  ).all<{ key: string; value: string }>(['exchange_rate', 'change_exchange_rate', TAX_ENABLED_SETTING_KEY, TAX_RATE_SETTING_KEY])
   const map = Object.fromEntries(rows.map((row) => [row.key, row.value]))
   return {
+    exchangeRate: Number(map.exchange_rate) > 0 ? Number(map.exchange_rate) : 4100,
+    exchangeRateRaw: map.exchange_rate,
     changeExchangeRate: map.change_exchange_rate,
+    changeExchangeRateRaw: map.change_exchange_rate,
+    taxEnabledRaw: map[TAX_ENABLED_SETTING_KEY],
+    taxRateRaw: map[TAX_RATE_SETTING_KEY],
     tax: resolveTaxSettings(map[TAX_ENABLED_SETTING_KEY], map[TAX_RATE_SETTING_KEY]),
   }
 }
@@ -2809,7 +3037,23 @@ async function amendmentResponse(
   },
 ) {
   const updated = await db.prepare('SELECT updated_at FROM sales WHERE id = ?').get<{ updated_at: string }>([input.saleId])
-  return c.json({
+  return c.json(buildAmendmentResponsePayload(input, updated?.updated_at || null))
+}
+
+function buildAmendmentResponsePayload(
+  input: {
+    saleId: number
+    sale: { amount_paid_usd?: unknown; amount_paid_khr?: unknown; receipt_number?: unknown }
+    money: { totalUsd: number; totalKhr: number; subtotalUsd: number }
+    exchangeRate: number
+    stockMoved: boolean
+    unitsMoved: number
+    stockSkipped: boolean
+    tax: AmendedTaxResult
+  },
+  updatedAt: string | null,
+): Record<string, unknown> {
+  return {
     id: input.saleId,
     // DECISION 6: an amended sale keeps its ORIGINAL receipt number, and a
     // reprint is a reprint -- settled by the owner on 2026-09-04. One sale,
@@ -2834,8 +3078,9 @@ async function amendmentResponse(
     // Both discounts genuinely are frozen: absolute amounts with no stored
     // rate, and changing one is a money decision rather than a correction.
     discountFrozen: true,
-    updated_at: updated?.updated_at || null,
-  })
+    exchangeRate: input.exchangeRate,
+    updated_at: updatedAt,
+  }
 }
 
 type SaleRow = {
