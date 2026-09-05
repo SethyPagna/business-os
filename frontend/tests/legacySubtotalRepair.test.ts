@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
+import { isoToDisplayDate } from '../src/utils/dateEntry.ts'
 import {
   LEGACY_SUBTOTAL_REPAIR_APPLY_TIMEOUT_MS,
   LEGACY_SUBTOTAL_REPAIR_CONFIRMATION,
@@ -98,6 +99,9 @@ function loadComponentWithApp(app: Record<string, unknown>) {
     }
     if (specifier.includes('actionGuards')) return { beginSingleAction: () => true, finishSingleAction: () => {} }
     if (specifier.includes('appRefresh')) return { refreshAppData: () => {} }
+    if (specifier.includes('dateEntry')) return { isoToDisplayDate }
+    if (specifier.includes('dirtyWork')) return { registerDirtyWork: () => () => {} }
+    if (specifier.includes('ConfirmDialog')) return { __esModule: true, default: () => null }
     return require(specifier)
   }
   new Function('require', 'module', 'exports', output)(customRequire, module, module.exports)
@@ -225,6 +229,13 @@ await runTest('permission gate controls the mounted panel', () => {
   assert.doesNotMatch(html, /finalize_step_zero|Zero live stock/)
 })
 
+await runTest('business dates use the canonical DD/MM/YYYY display without mutating preview data', () => {
+  const preview = buildPreview()
+  const storedIso = preview.request.manifest.sales[0].business_date
+  assert.equal(isoToDisplayDate(storedIso), '03/09/2026')
+  assert.equal(preview.request.manifest.sales[0].business_date, '2026-09-03')
+})
+
 await runTest('source wiring preserves retry, refresh, audit, and responsive boundaries', () => {
   const component = fs.readFileSync(new URL('../src/components/utils-settings/LegacySubtotalRepair.tsx', import.meta.url), 'utf8')
   const reset = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
@@ -239,6 +250,15 @@ await runTest('source wiring preserves retry, refresh, audit, and responsive bou
   assert.doesNotMatch(component, /refreshAppData\(\[[^\]]*(?:products|inventory|payments)/)
   assert.doesNotMatch(component, /pushAction/)
   assert.match(component, /beginSingleAction\(applyInFlight/)
+  assert.match(component, /isoToDisplayDate\(sale\.business_date\)/)
+  assert.match(component, /<ConfirmDialog/)
+  assert.match(component, /onClick=\{\(\) => setConfirmOpen\(true\)\}/)
+  assert.match(component, /onConfirm=\{applyRepair\}/)
+  assert.doesNotMatch(component, /onClick=\{applyRepair\}/)
+  assert.doesNotMatch(component, /window\.confirm/)
+  assert.match(component, /registerDirtyWork\(\{/)
+  assert.match(component, /pageId: 'settings'/)
+  assert.match(component, /isDirty: \(\) => pendingConfirmationRef\.current/)
   assert.match(component, /max-h-72 overflow-auto/)
   assert.match(component, /min-w-\[720px\]/)
   assert.match(component, /flex flex-col gap-2 sm:flex-row/)
