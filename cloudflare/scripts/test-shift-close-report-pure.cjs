@@ -18,7 +18,8 @@
 //   2. An already-closed shift sends NOTHING. That request still returns 200
 //      with the existing row -- it is a deliberate no-op, not an error -- so
 //      "it returned 200" is not evidence that it should have sent.
-//   3. POST /open sends nothing. A shift report on an empty drawer is noise.
+//   3. POST /open sends the same exact-id report once. The formatter marks the
+//      row as still open, so the opening alert cannot invent a close time.
 //   4. The response does not WAIT on Telegram. The promise goes through
 //      executionCtx.waitUntil, so a slow or unreachable Telegram cannot delay
 //      the response the till is blocking on.
@@ -76,32 +77,41 @@ function d1(db) {
     const translated = sql.replace(/@(\w+)/g, (_m, name) => { values.push(map[name] ?? null); return '?' })
     return { sql: translated, values }
   }
+  const statement = (sql) => ({
+    async get(params) {
+      const q = translate(sql, params)
+      return db.prepare(q.sql).get(...q.values)
+    },
+    async all(params) {
+      const q = translate(sql, params)
+      return db.prepare(q.sql).all(...q.values)
+    },
+    async run(params) {
+      const q = translate(sql, params)
+      const info = db.prepare(q.sql).run(...q.values)
+      return { changes: info.changes, meta: { changes: info.changes } }
+    },
+  })
   return {
     prepare(sql) {
-      return {
-        async get(params) {
-          const q = translate(sql, params)
-          return db.prepare(q.sql).get(...q.values)
-        },
-        async all(params) {
-          const q = translate(sql, params)
-          return db.prepare(q.sql).all(...q.values)
-        },
-        async run(params) {
-          const q = translate(sql, params)
-          const info = db.prepare(q.sql).run(...q.values)
-          // D1 reports row counts under meta.changes, and routes/shifts.ts
-          // reads exactly that to decide whether the close won the race.
-          return { changes: info.changes, meta: { changes: info.changes } }
-        },
-      }
+      return statement(sql)
+    },
+    async batch(items) {
+      return db.transaction(() => items.map(({ sql, params }) => {
+        const q = translate(sql, params)
+        const info = db.prepare(q.sql).run(...q.values)
+        return { meta: { changes: info.changes } }
+      }))()
     },
   }
 }
 
 const sqlite = new Database(':memory:')
 sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
-sqlite.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)')
+sqlite.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
+  CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,
+    entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,old_value TEXT,new_value TEXT,
+    device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`)
 sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
 
 // ---- the route, with only auth/audit/telegram replaced ---------------------
@@ -110,11 +120,12 @@ sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_
 // it would quietly make the route look for the wrong day.
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const sent = []
+let currentUserId = 7
 const shiftsRoute = loadReal('routes/shifts.ts', {
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/db': { getDb: () => d1(sqlite) },
   '../lib/auth': {
-    requireAuth: async (c, next) => { c.set('user', { id: 7, name: 'Za', username: 'za' }); await next() },
+    requireAuth: async (c, next) => { c.set('user', { id: currentUserId, name: 'Za', username: 'za' }); await next() },
   },
   '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false, hasAnyPermission: () => true },
   '../lib/audit': { audit: async () => {} },
@@ -147,26 +158,28 @@ const post = (route, body) => app.fetch(
 )
 
 async function main() {
-  // ---- 1. Opening a shift sends nothing ------------------------------------
+  // ---- 1. Opening sends the open-state report exactly once ------------------
   const opened = await post('/open', { opening_float_usd: 50, opening_float_khr: 100000 })
   const openedBody = await opened.json()
   ok(opened.status === 201 && openedBody.shift && !openedBody.shift.closed_at,
     'a shift opens and is still open')
-  ok(sent.length === 0, 'OPEN SENDS NOTHING: a report on an empty drawer would be noise')
+  ok(sent.length === 1, 'OPEN SENDS ONCE: opening notification uses the exact-id shift report')
+  ok(sent[0].shiftId === openedBody.shift.id, 'the opening notification identifies the new shift')
+  ok(waited.length === 1, 'the opening notification is handed to executionCtx.waitUntil')
 
   // ---- 2. Closing sends the report, exactly once ---------------------------
   const closed = await post('/close', { closing_counted_usd: 412.5, closing_counted_khr: 350000 })
   const closedBody = await closed.json()
   ok(closed.status === 200 && closedBody.shift.closed_at, 'the close writes closed_at')
   ok(closedBody.already_closed === false, 'and reports itself as the close that won')
-  ok(sent.length === 1, `CLOSE SENDS ONCE: exactly one report was pushed (got ${sent.length})`)
-  ok(sent[0].shiftId === openedBody.shift.id,
+  ok(sent.length === 2, `CLOSE SENDS ONCE: opening plus exactly one close report were pushed (got ${sent.length})`)
+  ok(sent[1].shiftId === openedBody.shift.id,
     'and it names the shift that was just closed, by id')
-  ok(sent[0].env === env, 'the sender is handed the Worker env, not a copy')
+  ok(sent[1].env === env, 'the sender is handed the Worker env, not a copy')
 
   // ---- 3. The response never waits on Telegram -----------------------------
-  ok(waited.length === 1, 'the report is handed to executionCtx.waitUntil, so the till is not blocked on it')
-  ok(typeof waited[0].then === 'function', 'and what was handed over is the promise itself')
+  ok(waited.length === 2, 'both reports are handed to executionCtx.waitUntil, so the till is not blocked on them')
+  ok(waited.every((promise) => typeof promise.then === 'function'), 'and each handoff is the promise itself')
 
   // ---- 4. A second close sends NOTHING -------------------------------------
   // This request still answers 200 with the existing row (a double-tap is a
@@ -177,7 +190,7 @@ async function main() {
   const againBody = await again.json()
   ok(again.status === 200 && againBody.already_closed === true,
     'a second close is a no-op that still answers 200')
-  ok(sent.length === 1, `ALREADY CLOSED SENDS NOTHING: still exactly one report (got ${sent.length})`)
+  ok(sent.length === 2, `ALREADY CLOSED SENDS NOTHING: still exactly two reports including open (got ${sent.length})`)
   ok(againBody.shift.closing_counted_usd === 412.5,
     'and the first count survived, so the no-op really was one')
 
@@ -191,12 +204,12 @@ async function main() {
   // between the owner and two identical reports. Moving the send one line out
   // of that branch is invisible to every other check in this file.
   //
-  // A fresh day-scoped row is needed because the shift above is closed and
-  // the UNIQUE(user_id, branch_id, business_date) index refuses a second one.
-  sqlite.prepare('DELETE FROM shift_sessions').run()
-  sent.length = 0
+  // A second account supplies a fresh day-scoped row without deleting the
+  // immutable close amendment recorded for the first shift.
+  currentUserId = 8
   const reopened = await post('/open', { opening_float_usd: 20, opening_float_khr: 0 })
   ok(reopened.status === 201, 'a fresh shift is open for the race')
+  sent.length = 0
   const [raceA, raceB] = await Promise.all([
     post('/close', { closing_counted_usd: 100, closing_counted_khr: 0 }),
     post('/close', { closing_counted_usd: 100, closing_counted_khr: 0 }),
@@ -211,7 +224,10 @@ async function main() {
   // not from a missing table -- the sender here throws if it is ever reached.
   const empty = new Database(':memory:')
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
-  empty.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)')
+  empty.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
+    CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,
+      entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,old_value TEXT,new_value TEXT,
+      device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`)
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
   const stranger = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': businessDateWindow,
