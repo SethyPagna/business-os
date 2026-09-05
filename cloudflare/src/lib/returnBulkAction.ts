@@ -160,6 +160,9 @@ function movementFingerprint(idSql: string): string {
 async function rowsForIds<T>(db: D1Compat, ids: number[], sql: (marks: string) => string): Promise<T[]> {
   if (!ids.length) return []
   if (ids.length > RETURN_BULK_LIMIT) fail('Selection exceeds the single-query bound.', 400)
+  // sql-bound-params: bounded by construction -- parseRequest caps the
+  // selection at 25 and this helper rechecks every derived ID list before
+  // creating one positional placeholder per ID (well below D1's 100 limit).
   return db.prepare(sql(ids.map(() => '?').join(','))).all<T>(ids)
 }
 
