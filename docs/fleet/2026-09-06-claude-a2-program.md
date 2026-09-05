@@ -53,3 +53,12 @@ at each stage. Sonnet/Opus chosen per task; every lane verified by the lane, the
 ## Ledger
 - 2026-09-06 ~00:00 ICT: worktrees created (`bos-a2`, `bos-a2-{receipt,storefront,ledger,pickers,lowstock,shifts,reports}`), baseline gates green at `9ab9fd7a` (frontend tsc, i18n 4976 keys, cloudflare tsc). Claims posted to `team-state.mjs`. Chrome extension not connected → live ChatGPT handshake blocked; ledger message sent to `codex/main`.
 - Live storefront probe (production, read-only): Products view scrolls at 1280 and at 375 emulation before/during/after a flyout; no body lock, no overlay. "Showing 1-50 of 3,552 products", "per page" (88 px button), "Jump to brand" and 4 pager buttons present.
+
+### Ledger — 2026-09-06 16:40 UTC (a2)
+
+- Round-1 investigation `wf_a238baad-751`: 11/12 subjects returned; refuters for receipt, ledger and shifts all confirmed the mechanisms with precision corrections (no refutation). Briefs saved per subject in the a2 scratchpad (`r1/<subject>-finding.json`, `<subject>-verdict*.json`).
+- Round-2 investigation `wf_0be1601d-3f5` launched for N1–N16 (12 subjects; skeptics on shift-vs-expenses, negative stats, POS branch counts, leading-zero merge).
+- Wave-1 implementation `wf_0a0c6182-f95` launched: lanes `receipt` (O1 + N9 action row + N4 icon-only, drop Open PDF), `storefront` (O2 + scroll-root lock), `lowstock` (O7), `reports` (O9). One writer per worktree, adversarial verifier, one repair round. Writers commit on `claude/a2-<lane>-2026-09-06`; a2 reconciles.
+- Six more lane worktrees created at 9ab9fd7a with node_modules junctions: `bos-a2-{session,mobile,sales,branches,stats,identity}` on `claude/a2-<lane>-2026-09-06`. `minimize` (N2) and `copy` (N16) are sequenced AFTER the other lanes land because they touch the same render sites.
+- Codex: integration tree still at 9ab9fd7a with `cloudflare/src/routes/fees.ts` + `frontend/src/api/feesTransport.ts` dirty. Ledger message sent (16:31 UTC): a2 will not edit fees.ts; asked for the paid-from-shift field name so N5 shift math reads it. No Codex reply since its 15:43 UTC deploy note.
+- Chrome extension still not connected → ChatGPT live channel unavailable; coordination stays on `team-state.mjs`.
