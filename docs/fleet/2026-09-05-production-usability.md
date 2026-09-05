@@ -74,6 +74,12 @@ optimization and full14-reference role/language visual matrix. A separate Today
 overview inconsistency (summary expenses16.98 vs row16.97) is assigned Halley
 read-only before next slice. Existing P3 backup same-second naming collision and
 strict client apply-response validation remain defense-in-depth follow-ups.
+Halley follow-up15:08UTC: source path differs—summary passes raw USD+convertedKHR
+to the display formatter while table uses nearest-cent rounding. Final profit
+subtracts the table value. Main confirmed reportMoney.ts USD branch lacks a
+nearest-cent boundary; exact live amount/rate still needs a focused fixture.
+Next bounded implementation is reportMoney.ts and reportMoney/reportsHub tests,
+preserving KHR/BOTH and global price policy; no code change made this checkpoint.
 Telegram close invocation verified previously, destination delivery ACK still
 unobserved. Direct health/version probes remain client/edge-blocked; authenticated
 app/report/repair work, but no blanket endpoint or whole-goal certification.

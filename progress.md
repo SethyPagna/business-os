@@ -23,7 +23,10 @@ Authenticated report/repair browser errors0. Remaining desktop spacing is partia
 Remaining: VIS1 cashier visibility, broader transfer/adjustment sessions, universal
 minimize, pagination/precision/security/full14-reference visual matrices, barcode
 consolidation, nonblocking compactness. New tracked precision follow-up: Today
-summaryexpenses16.98 vs table16.97; Halley read-only investigation assigned.
+summaryexpenses16.98 vs table16.97. Halley traced raw converted summary vs
+nearest-cent table formatting; exact live native pair not captured. Next isolated
+slice: reportMoney.ts + reportMoney/reportsHub tests; no data or global pricing
+rounding change. Investigation partial, implementation NOT started.
 Do not repeat historical settlement, this subtotal repair, or Sep4 shift close.
 The whole goal remains incomplete; native goal is paused, not marked complete.
 
