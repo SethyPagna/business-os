@@ -17,6 +17,7 @@
 //   - every 'rpt_*' key the hub and views look up exists in BOTH packs.
 import assert from 'node:assert/strict'
 import './reportResponsiveLayout.test.ts'
+import './reportContinuousDateTime.test.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -385,15 +386,15 @@ test('basisValue / BASIS_LABELS: the three calculation bases read distinct kerne
 test('reportQueryParams: clock window only for timestamp-backed views; status/payment only where understood; all-day window dropped', () => {
   const f = { ...EMPTY_REPORT_FILTERS, startDate: '2026-08-01', endDate: '2026-08-31', startTime: '09:00', endTime: '17:00', branchId: '1', status: 'completed', paymentMethod: 'Cash' }
   const sales = reportQueryParams(f, getReportView('sales'))
-  assert.deepEqual(sales, { startDate: '2026-08-01', endDate: '2026-08-31', branchId: '1', startTime: '09:00', endTime: '17:00', status: 'completed', paymentMethod: 'Cash' })
+  assert.deepEqual(sales, { startDate: '2026-08-01', endDate: '2026-08-31', branchId: '1', createdFrom: '2026-08-01 02:00:00', createdTo: '2026-08-31 10:01:00', status: 'completed', paymentMethod: 'Cash' })
   const returns = reportQueryParams(f, getReportView('returns'))
-  assert.deepEqual(returns, { startDate: '2026-08-01', endDate: '2026-08-31', branchId: '1' }, 'a date-only ledger gets neither the clock nor the sale filters')
+  assert.deepEqual(returns, { startDate: '2026-08-01', endDate: '2026-08-31', branchId: '1', createdFrom: '2026-08-01 02:00:00', createdTo: '2026-08-31 10:01:00' }, 'entry-time ledgers share exact bounds, without sale-only filters')
   const expenses = reportQueryParams(f, getReportView('expenses'))
   assert.deepEqual(expenses, returns)
   const allDay = reportQueryParams({ ...f, startTime: '00:00', endTime: '23:59' }, getReportView('periods'))
-  assert.ok(!('startTime' in allDay), 'the whole-day window is the default and is not sent')
+  assert.ok(!('createdFrom' in allDay) && !('createdTo' in allDay), 'the whole-day window is the default and is not sent')
   const half = reportQueryParams({ ...f, endTime: '' }, getReportView('periods'))
-  assert.ok(!('startTime' in half) && !('endTime' in half), 'a half-set window is not sent')
+  assert.ok(!('createdFrom' in half) && !('createdTo' in half), 'a half-set window is not sent')
   assert.deepEqual(reportQueryParams(EMPTY_REPORT_FILTERS, getReportView('overview')), {})
 })
 
@@ -407,8 +408,7 @@ test('views: permissions gate the picker, the stored view survives only while al
   assert.equal(resolveReportView('bogus', all), 'overview')
   assert.equal(resolveReportView('sales', { sales: false, returns: false, fees: false }), null, 'nothing readable -> null (the hub shows its EmptyState)')
   for (const v of REPORT_VIEWS) {
-    if (v.id === 'returns' || v.id === 'expenses') assert.equal(v.supportsTime, false, `${v.id} is date-only`)
-    else assert.equal(v.supportsTime, true, `${v.id} honors the clock window`)
+    assert.equal(v.supportsTime, true, `${v.id} honors continuous endpoint times`)
     if (v.groupedBy) assert.ok(v.area === 'sales', `${v.id} grouped views are sales-gated`)
   }
   const ids = REPORT_VIEWS.map((v) => v.id)

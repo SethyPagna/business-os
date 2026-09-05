@@ -2,6 +2,18 @@
 
 ## Active continuation — production usability, September 5
 
+Release focus explicitly reaffirmed: draft/header/navigation/date/Telegram/report
+fixes plus shifts, sale picker, branch products, report layout, atomic Add products
+and expanded bulk actions. Main integrated sale picker, bulk Sales/Returns,
+shift lifecycle/popups and Telegram cancellation boundary; focused gates pass.
+New requirement: configurable cashier visibility (self / all except admins /
+all including admins) across Sales/Returns/Expenses, with existing access scope
+retained. Updated sales use latest server exchange rate, not stale rate; preserve
+prior audit snapshots. Both require scoped implementation, not yet complete.
+Sep2 COGS and imported discounts are source-audit priorities. Stock candidate
+ee2711a8 has independent wrong-batch and snapshot/revision race blockers; returned
+to writer. No new release until integrated verification and blockers resolved.
+
 Latest owner decision: time-filtered reports use older expenses' system entry
 timestamp, not an assumed transaction time; retain the original expense date.
 Report agent owns boundary/timezone parity tests. Financial audit also confirmed

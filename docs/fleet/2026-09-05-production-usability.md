@@ -234,6 +234,30 @@ reportedzero writes. Sourcecost validity remains distinct from sum correctness.
 
 ## Owner decision and source-data follow-up
 
+- Release priority: current UI/report/shift/picker/branch/stock/bulk scope before
+  unrelated backlog. Main integrated picker f6314203/10046f64/e8b8628f; bulk through
+  caa7ad21; shifts/Telegram through189f17a1; product followups d1e8658f/e8e1c97c.
+  Main focused product, picker, shift lifecycle/security/report, Telegram and
+  sale/return bulk tests pass. Mistyped Telegram shift test path did not exist;
+  corrected to test-shift-report-pure.cjs and passed. Full gates still pending.
+- New VIS1: one non-conflicting visibility mode self / all-except-admin /
+  all-including-admin across sales/returns/expenses and cashier selectors. Keep
+  branch and other access checks; unauthorized users cannot elevate themselves.
+- New FX1: on sale update use latest server rate for updated calculations/change;
+  preserve previous native payments/audit records. Define retry/undo behavior
+  explicitly; do not retroactively revalue every historical transaction.
+- Independent stock review reproduced wrong explicit-batch return attribution
+  and incoherent snapshot/revision race despite seven tests passing. Also reject
+  boolean quantity instead of coercing to1. Herschel owns corrections. Missing
+  stock.session undo registration and backup preservation remain release gates.
+
+- Stock milestoneA candidate ee2711a8 contains atomic receive/create sessions.
+  Main reran test-stock-session-atomic.cjs:7 PASS (rollback, lost acknowledgement,
+  payload conflict, accumulation, ABA revision, create atomicity,25-line bound).
+  Not integrated/deployed. Aquinas assigned independent read-only certification;
+  Herschel completed and temporarily closed for capacity, backend claim reserved.
+  Transfer/remove/set and undo/backup remain pending separate commits.
+
 - Owner explicitly selects system entry time for older expenses in time-filtered
   reports. Preserve expense_date; never invent historical transaction times.
   Pauli owns the report contract and boundary/timezone regression coverage;
