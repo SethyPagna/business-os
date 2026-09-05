@@ -60,15 +60,25 @@ async function main() {
       assert.equal(result.status, 200, JSON.stringify(result))
       if (id === 2) assert.equal((await bulk.replay(f, result.body.actionHistoryId)).status, 200)
     }
+    const mutationHistory = f.sql.prepare('SELECT id FROM action_history ORDER BY id LIMIT 1').get().id
+    f.sql.prepare(`INSERT INTO sale_mutation_receipts(
+      id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
+      before_json,after_json,response_json,history_id,generation,sale_revision
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'mutation-fixture', 1, 1, 'settlement', 'mutation-request', 'digest', '{}',
+      '{"header":null,"lines":[null]}', '{"header":0,"lines":[0]}', '{"success":true}', mutationHistory, 0, 1,
+    )
+    f.sql.prepare('INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(?,?,?,?)')
+      .run('mutation-fixture', 'sale_item', 1, 0)
     const snap = (tables = f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(t => t.name)) =>
       Object.fromEntries(tables.map(t => [t, f.sql.prepare(`SELECT * FROM "${t.replaceAll('"', '""')}"`).all()
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]))
     const before = snap(backup.BACKUP_TABLES)
     const created = await backup.createCloudflareBackup(f.env, 'manual')
     const document = JSON.parse(f.env.ASSETS._store.get(created.key).body)
-    assert.equal(Object.keys(document.tables).length, 67)
+    assert.equal(Object.keys(document.tables).length, 69)
     assert.deepEqual(Object.keys(document.tables), [...backup.BACKUP_TABLES], 'full backup must include every table in exact dependency order')
-    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members']) {
+    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members', 'sale_mutation_receipts', 'sale_mutation_members']) {
       assert.ok(Object.hasOwn(document.tables, table), `backup includes durable replay table ${table}`)
     }
     assert.equal((await backup.validateCloudflareBackup(f.env, created.key)).restorable, true)
@@ -80,7 +90,7 @@ async function main() {
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
     assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
-    console.log('PASS actual FK-on streaming full 67-table roundtrip, Returns/stock replay tables, and restored-generation undo/redo')
+    console.log('PASS actual FK-on streaming full 69-table roundtrip, sale/Returns/stock replay tables, and restored-generation undo/redo')
 
     f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
     async function variant(label, omit) {
@@ -106,10 +116,10 @@ async function main() {
       assert.deepEqual(snap(), allRows, 'every DB table, including unbacked state and sequences, is unchanged')
       assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
     }
-    const omitted = ['customer_receivables', 'supplier_invoices', 'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members']
-    await refused(await variant('legacy-seven-missing', omitted), ['sale_bulk_operations', 'sale_bulk_members', 'undo_snapshots'])
-    console.log('PASS valid legacy seven-table omission refuses before any write; every DB row preserved')
-    for (const table of ['sale_bulk_operations', 'sale_bulk_members', 'undo_snapshots', 'sale_write_revisions', 'sale_amendments']) {
+    const omitted = ['customer_receivables', 'supplier_invoices', 'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_mutation_receipts', 'sale_mutation_members', 'sale_bulk_operations', 'sale_bulk_members']
+    await refused(await variant('legacy-nine-missing', omitted), ['sale_bulk_operations', 'sale_bulk_members', 'sale_mutation_receipts', 'sale_mutation_members', 'undo_snapshots'])
+    console.log('PASS valid legacy nine-table omission refuses before any write; every DB row preserved')
+    for (const table of ['sale_bulk_operations', 'sale_bulk_members', 'sale_mutation_receipts', 'sale_mutation_members', 'undo_snapshots', 'sale_write_revisions', 'sale_amendments']) {
       await refused(await variant(`missing-${table}`, [table]), [table])
     }
     console.log('PASS individually incomplete replay bundles fail validation and direct restore without writes')
