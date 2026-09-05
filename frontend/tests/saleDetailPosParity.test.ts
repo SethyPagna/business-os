@@ -11,6 +11,8 @@ const picker = read('../src/components/sales/SaleDetailProductPicker.tsx')
 const workflow = read('../src/components/sales/SaleStatusWorkflow.tsx')
 const backend = read('../../cloudflare/src/routes/sales.ts')
 const productSearchBackend = read('../../cloudflare/src/routes/products.ts')
+const saleLineAdditionBackend = read('../../cloudflare/src/lib/saleLineAddition.ts')
+const salesStatusBackend = read('../../cloudflare/src/lib/salesStatus.ts')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
 
@@ -108,14 +110,21 @@ assert.match(picker, /stockMoves && availabilityKnown && availableAfterStaged <=
 assert.match(picker, /parsedQuantity > availableAfterStaged \? 'not-enough-stock'/)
 assert.match(picker, /const \[loadedSelectionKey, setLoadedSelectionKey\] = useState\(''\)/)
 assert.match(picker, /const selectionKey =/)
-assert.match(picker, /const batchesReady = !!selectionKey && loadedSelectionKey === selectionKey/)
-const batchesReadyExpression = picker.match(/const batchesReady = ([^\r\n]+)/)?.[1]
+assert.match(picker, /const batch = branchId == null \? null : batches\.find/)
+const batchExpression = picker.match(/const batch = ([^\r\n]+)/)?.[1]
+assert.ok(batchExpression)
+const selectedBatch = new Function('branchId', 'batches', 'batchId', `return (${batchExpression})`) as (branchId: number | null, batches: Array<{ id: number }>, batchId: number) => { id: number } | null
+assert.equal(selectedBatch(null, [{ id: 501 }], 501), null, 'branchless add never reuses a stale batch')
+assert.match(picker, /const batchesReady = branchId == null[\s\S]{0,120}\? !stockMoves[\s\S]{0,160}: !!selectionKey && loadedSelectionKey === selectionKey/)
+const batchesReadyExpression = picker.match(/const batchesReady = ([\s\S]*?)[\r\n]+  const selectedBatchId/)?.[1]
 assert.ok(batchesReadyExpression)
-const batchesAreReady = new Function('selectionKey', 'loadedSelectionKey', 'loading', 'failed', `return ${batchesReadyExpression}`) as (selection: string, loaded: string, loading: boolean, failed: boolean) => boolean
-assert.equal(batchesAreReady('20:2', '20:2', false, false), true)
-assert.equal(batchesAreReady('21:2', '20:2', false, false), false, 'option switch rejects stale product batches')
-assert.equal(batchesAreReady('20:3', '20:2', false, false), false, 'branch switch rejects stale branch batches')
-assert.equal(batchesAreReady('20:2', '20:2', true, false), false)
+const batchesAreReady = new Function('branchId', 'stockMoves', 'selectionKey', 'loadedSelectionKey', 'loading', 'failed', `return (${batchesReadyExpression})`) as (branchId: number | null, stockMoves: boolean, selection: string, loaded: string, loading: boolean, failed: boolean) => boolean
+assert.equal(batchesAreReady(2, true, '20:2', '20:2', false, false), true)
+assert.equal(batchesAreReady(2, true, '21:2', '20:2', false, false), false, 'option switch rejects stale product batches')
+assert.equal(batchesAreReady(3, true, '20:3', '20:2', false, false), false, 'branch switch rejects stale branch batches')
+assert.equal(batchesAreReady(2, true, '20:2', '20:2', true, false), false)
+assert.equal(batchesAreReady(null, false, '', '', false, false), true, 'branchless stock-skipped sale may stage without fabricating a batch')
+assert.equal(batchesAreReady(null, true, '', '', false, false), false, 'branchless stock-moving sale remains blocked')
 assert.match(picker, /if \(!productId \|\| !batchesReady/)
 assert.match(picker, /role="alert"/)
 assert.match(picker, /t\('no_stock_in_branch'\)/)
@@ -139,6 +148,12 @@ assert.match(detail, /batch_label: line\.batchLabel/)
 assert.match(detail, /batch_expiry_date: line\.batchExpiryDate/)
 assert.match(detail, /applied_price_usd: line\.unitPriceUsd/)
 assert.match(detail, /const addStockMoves = !Number\(sale\?\.stock_skipped \|\| 0\)/)
+assert.doesNotMatch(detail, /addStockMoves =[^\r\n]*[\r\n]+\s*&& currentStatus !== 'awaiting_payment'/)
+const addStockMovesExpression = detail.match(/const addStockMoves = ([^\r\n]+)/)?.[1]
+assert.ok(addStockMovesExpression)
+const additionMovesStock = new Function('sale', `return (${addStockMovesExpression})`) as (sale: { stock_skipped?: number }) => boolean
+assert.equal(additionMovesStock({ stock_skipped: 1 }), false)
+assert.equal(additionMovesStock({ stock_skipped: 0 }), true, 'accepted statuses, including awaiting_payment, move stock unless sticky-skipped')
 assert.match(detail, /stockMoves=\{addStockMoves\}/)
 assert.match(detail, /stagedLines=\{addLines\}/)
 assert.match(detail, /const addHasStockError = addStockMoves/)
@@ -149,6 +164,10 @@ assert.match(detail, /t\('no_stock_in_branch'\)/)
 assert.doesNotMatch(detail, /'No Stock'/)
 assert.match(backend, /batchId: Number\(item\.batch_id\) \|\| null/)
 assert.match(backend, /allocateNewSaleLines\(/)
+assert.match(backend, /branchId: Number\(item\.branch_id \|\| sale\.branch_id\) \|\| null/)
+assert.match(saleLineAdditionBackend, /if \(!line\.branchId\) \{[\s\S]{0,160}cannot use a batch without a branch/)
+assert.match(saleLineAdditionBackend, /if \(!line\.branchId \|\| line\.heldUnits <= 0\) continue/)
+assert.match(salesStatusBackend, /\['completed', 'awaiting_payment', 'awaiting_delivery'\]/)
 
 assert.match(detail, /<SaleStatusWorkflow/)
 assert.match(workflow, /'closed' \| 'destination' \| 'review'/)

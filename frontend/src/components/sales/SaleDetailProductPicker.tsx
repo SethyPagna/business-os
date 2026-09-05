@@ -107,7 +107,11 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
     return () => { cancelled = true }
   }, [selected?.id, branchId])
 
-  const batch = batches.find((row) => row.id === batchId) || null
+  // A branchless historical sale may legitimately add an untracked line when
+  // its sticky stock_skipped flag says no stock moves. Force the batch to null
+  // even during the render-before-effect window so stale branch data can never
+  // be fabricated into that payload.
+  const batch = branchId == null ? null : batches.find((row) => row.id === batchId) || null
   const rawQuantity = Number(quantityText)
   const parsedQuantity = Math.max(1, Math.floor(rawQuantity || 1))
   const parsedPrice = Number(priceText)
@@ -118,7 +122,9 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
   // This key closes the render-before-effect window on BOTH dimensions. Old
   // batches can still be present for one render after an option/branch switch,
   // but they can neither render as selectable nor enable Continue.
-  const batchesReady = !!selectionKey && loadedSelectionKey === selectionKey && !loading && !failed
+  const batchesReady = branchId == null
+    ? !stockMoves
+    : !!selectionKey && loadedSelectionKey === selectionKey && !loading && !failed
   const selectedBatchId = batch?.id ?? null
   const stagedQuantity = stagedLines
     .filter((row) => row.productId === productId && row.batchId === selectedBatchId)

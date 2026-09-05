@@ -661,8 +661,11 @@ export default function SaleDetailModal({
   // on this screen, so the projection cannot disagree with the figure it is
   // projecting from.
   const projectedOutstandingUsd = Math.max(0, Math.round((projectedTotalUsd - totals.paidTotalUsd) * 100) / 100)
+  // Every status accepted by POST /:id/items now holds stock (including
+  // awaiting_payment); only the sticky migration flag keeps a sale outside
+  // the stock ledger. A branchless stock_skipped sale is therefore valid,
+  // while a branchless stock-moving sale remains blocked in the picker.
   const addStockMoves = !Number(sale?.stock_skipped || 0)
-    && currentStatus !== 'awaiting_payment'
   const addHasStockError = addStockMoves && addLines.some((line) => (
     line.stockQuantity <= 0 || line.quantity > line.stockQuantity
   ))
