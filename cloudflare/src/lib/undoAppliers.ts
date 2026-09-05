@@ -7,6 +7,7 @@ import { branchUpdateStatements } from './branchWrites'
 import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
 import {
   buildAllocationStatements,
+  buildOperationAllocationStatements,
   planSaleLineAddition,
   planSaleLineRemoval,
   plannedLineFromRecord,
@@ -22,8 +23,10 @@ import { amendmentEntryStatement } from './saleAmendments'
 import { replaySaleBulkStatus } from './saleBulkStatus'
 import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAction'
-import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction } from './saleSettlementAction'
+import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
+
+export const SALE_ADD_ITEMS_ACTION_KIND = 'sale.add_items'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -277,6 +280,225 @@ async function saleStateFingerprint(db: ReturnType<typeof getDb>, saleId: number
   const lines = await db.prepare('SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id').all<Record<string, unknown>>([saleId])
   const amendmentHead = await db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM sale_amendments WHERE sale_id = ?').get<{ id: number }>([saleId])
   return JSON.stringify({ sale, lines, amendmentHeadId: Number(amendmentHead?.id) || 0 })
+}
+
+type AtomicSaleAddItemsReversal = SaleAddItemsReversal & {
+  operationId?: unknown
+  saleStateRevision?: unknown
+}
+
+type ReplayStatement = { sql: string; params: Record<string, unknown> }
+
+function saleAddItemsAuditStatement(
+  user: SessionUser,
+  saleId: number,
+  direction: 'undo' | 'redo',
+  operationId: string,
+  lineCount: number,
+): ReplayStatement {
+  const details = JSON.stringify({ via: 'undo_applier', applier: SALE_ADD_ITEMS_ACTION_KIND, operation_id: operationId, lines: lineCount })
+  return {
+    sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+          VALUES(@userId,@userName,@action,'sale',@saleId,@details,'sale',@saleId,@details)`,
+    params: {
+      userId: user.id,
+      userName: user.name,
+      action: direction === 'undo' ? 'action_undo' : 'action_redo',
+      saleId,
+      details,
+    },
+  }
+}
+
+async function replayAtomicSaleAddItems(
+  db: ReturnType<typeof getDb>,
+  reversal: AtomicSaleAddItemsReversal,
+  snapshotId: number,
+  snapshotStatus: string,
+  payload: Record<string, unknown>,
+  ctx: UndoApplierContext,
+): Promise<void> {
+  if (!ctx.user || !Number.isSafeInteger(ctx.historyId) || !Number.isSafeInteger(ctx.generation) || Number(ctx.generation) < 0) {
+    throw new UndoConflictError('Refresh history before replaying these added items.')
+  }
+  const user = ctx.user
+  if (typeof reversal.saleStateRevision !== 'number' || !Number.isSafeInteger(reversal.saleStateRevision) || reversal.saleStateRevision < 0) {
+    throw new UndoConflictError('The saved sale revision is invalid.')
+  }
+  const historyId = Number(ctx.historyId)
+  const generation = Number(ctx.generation)
+  const operationId = String(payload.operation_id || '')
+  if (!operationId || String(reversal.operationId || '') !== operationId || payload.generation !== generation) {
+    throw new UndoConflictError('This added-items receipt does not match its history generation.')
+  }
+  const saleId = Number(reversal.saleId)
+  const expectedRevision = reversal.saleStateRevision
+  const operation = await db.prepare(`
+    SELECT id,sale_id,history_id,generation,sale_revision FROM sale_mutation_receipts
+    WHERE id=? AND mutation_kind='add_items'
+  `).get<Record<string, unknown>>([operationId])
+  if (!operation || Number(operation.sale_id) !== saleId || Number(operation.history_id) !== historyId
+    || Number(operation.generation) !== generation || Number(operation.sale_revision) !== expectedRevision) {
+    throw new UndoConflictError('This added-items receipt changed or no longer matches its history.')
+  }
+  const revision = await db.prepare('SELECT COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=?),0) AS revision')
+    .get<{ revision: number }>([saleId])
+  if (Number(revision?.revision) !== expectedRevision) {
+    throw new UndoConflictError('This sale was edited after the items were added. Nothing was reversed.')
+  }
+
+  const lines = reversal.lines || []
+  if (!lines.length || lines.length > 25) throw new UndoConflictError('The saved added-items line set is invalid.')
+  const guardParams: Record<string, unknown> = {
+    operation: operationId,
+    history: historyId,
+    generation,
+    saleId,
+    revision: expectedRevision,
+    snapshot: snapshotId,
+    snapshotStatus: ctx.direction === 'undo' ? 'applied' : 'reversed',
+    historyStatus: ctx.direction === 'undo' ? 'undoable' : 'redoable',
+    saleStatus: reversal.saleStatus,
+  }
+  const memberGuards: string[] = []
+  const lineGuards: string[] = []
+  for (const [ordinal, line] of lines.entries()) {
+    const lineId = Number(line.saleItemId)
+    if (!Number.isSafeInteger(lineId) || lineId <= 0) throw new UndoConflictError('A saved sale line identity is invalid.')
+    const key = `line${ordinal}`
+    guardParams[key] = lineId
+    memberGuards.push(`EXISTS(SELECT 1 FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=${ordinal} AND entity_id=@${key})`)
+    lineGuards.push(ctx.direction === 'undo'
+      ? `EXISTS(SELECT 1 FROM sale_items WHERE id=@${key} AND sale_id=@saleId)`
+      : `NOT EXISTS(SELECT 1 FROM sale_items WHERE id=@${key})`)
+  }
+  const expectedSnapshotStatus = ctx.direction === 'undo' ? 'applied' : 'reversed'
+  if (snapshotStatus !== expectedSnapshotStatus) throw new UndoConflictError('These added items were already replayed.')
+  const guard = saleMutationGuard(`
+    NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+    AND EXISTS(
+      SELECT 1 FROM sale_mutation_receipts r
+      JOIN action_history h ON h.id=r.history_id
+      JOIN undo_snapshots s ON s.id=@snapshot
+      JOIN sales sale ON sale.id=r.sale_id
+      WHERE r.id=@operation AND r.sale_id=@saleId AND r.history_id=@history
+        AND r.mutation_kind='add_items' AND r.generation=@generation AND r.sale_revision=@revision
+        AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=r.sale_id),0)=@revision
+        AND h.status=@historyStatus AND s.kind='sale.add_items' AND s.status=@snapshotStatus
+        AND sale.sale_status=@saleStatus
+        AND json_extract(h.undo_payload,'$.operation_id')=@operation
+        AND json_extract(h.redo_payload,'$.operation_id')=@operation
+        AND json_extract(h.undo_payload,'$.snapshot_id')=@snapshot
+        AND json_extract(h.redo_payload,'$.snapshot_id')=@snapshot
+        AND json_extract(h.undo_payload,'$.generation')=@generation
+        AND json_extract(h.redo_payload,'$.generation')=@generation
+        AND EXISTS(SELECT 1 FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='undo_snapshot' AND entity_id=@snapshot AND ordinal=0)
+    )
+    ${[...memberGuards, ...lineGuards].map((predicate) => `AND ${predicate}`).join('\n')}
+  `, guardParams)
+  const stamp = new Date().toISOString()
+  const statements: ReplayStatement[] = [
+    { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+    guard,
+  ]
+
+  if (ctx.direction === 'undo') {
+    const removal = planSaleLineRemoval({
+      saleId,
+      lines,
+      reason: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
+      userId: ctx.user.id,
+      userName: ctx.user.name,
+    })
+    const undoGroupId = crypto.randomUUID()
+    statements.push(
+      ...removal.statements,
+      saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
+      ...(reversal.lineMoneyBefore ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)] : []),
+      ...lines.map((line) => amendmentEntryStatement({
+        saleId, kind: 'line_removed', groupId: undoGroupId,
+        saleItemId: line.saleItemId, productId: line.productId, productName: line.productName,
+        quantityBefore: line.quantity, quantityAfter: 0,
+        totalBeforeUsd: reversal.moneyAfter.total_usd, totalAfterUsd: reversal.moneyBefore.total_usd,
+        unitsMoved: line.heldUnits, via: 'undo',
+        note: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
+        userId: user.id, userName: user.name,
+      })),
+    )
+  } else {
+    const plannedLines = lines.map(plannedLineFromRecord)
+    const plan = planSaleLineAddition({
+      saleId,
+      saleStatus: reversal.saleStatus,
+      lines: plannedLines,
+      exchangeRate: Number(reversal.moneyAfter.exchange_rate ?? reversal.exchangeRate) || 4100,
+      userId: ctx.user.id,
+      userName: ctx.user.name,
+    })
+    const redoGroupId = crypto.randomUUID()
+    const ordinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
+    for (const [statementIndex, statement] of plan.statements.entries()) {
+      statements.push(statement)
+      const ordinal = ordinalByStatement.get(statementIndex)
+      if (ordinal !== undefined) statements.push({
+        sql: `UPDATE sale_mutation_members SET entity_id=last_insert_rowid()
+              WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=@ordinal`,
+        params: { operation: operationId, ordinal },
+      })
+    }
+    statements.push(
+      ...buildOperationAllocationStatements(plan.lines, operationId, stamp),
+      saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
+      ...(reversal.lineMoneyAfter ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)] : []),
+      ...plan.lines.map((line) => amendmentEntryStatement({
+        saleId, kind: 'line_added', groupId: redoGroupId,
+        productId: line.productId, productName: line.productName,
+        quantityBefore: 0, quantityAfter: line.quantity,
+        totalBeforeUsd: reversal.moneyBefore.total_usd, totalAfterUsd: reversal.moneyAfter.total_usd,
+        unitsMoved: -line.heldUnits || 0, via: 'redo',
+        note: `Redo: items re-added to sale ${reversal.receiptNumber || `#${saleId}`}`,
+        userId: user.id, userName: user.name,
+      })),
+    )
+  }
+
+  let snapshotPayload = 'payload_json'
+  if (ctx.direction === 'redo') {
+    for (const ordinal of lines.keys()) {
+      snapshotPayload = `json_set(${snapshotPayload},'$.lines[${ordinal}].saleItemId',(SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=${ordinal}))`
+    }
+  }
+  snapshotPayload = `json_set(${snapshotPayload},'$.saleStateRevision',COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0))`
+  const nextGeneration = generation + 1
+  statements.push(
+    {
+      sql: `UPDATE undo_snapshots SET status=@status,payload_json=${snapshotPayload},updated_at=@stamp WHERE id=@snapshot`,
+      params: { status: ctx.direction === 'undo' ? 'reversed' : 'applied', stamp, snapshot: snapshotId, operation: operationId, saleId },
+    },
+    {
+      sql: `UPDATE sale_mutation_receipts SET generation=@nextGeneration,
+            sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),updated_at=@stamp
+            WHERE id=@operation`,
+      params: { nextGeneration, saleId, stamp, operation: operationId },
+    },
+    {
+      sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,
+            undo_payload=json_set(undo_payload,'$.generation',@nextGeneration),
+            redo_payload=json_set(redo_payload,'$.generation',@nextGeneration)
+            WHERE id=@history`,
+      params: { status: ctx.direction === 'undo' ? 'redoable' : 'undoable', stamp, nextGeneration, history: historyId },
+    },
+    saleAddItemsAuditStatement(ctx.user, saleId, ctx.direction, operationId, lines.length),
+    { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+  )
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    if (/constraint|guard_value/i.test(String(error))) {
+      throw new UndoConflictError('This sale or added-items receipt changed. Nothing was reversed.')
+    }
+    throw error
+  }
 }
 
 // Record a completed merge as an undoable/redoable action: the large reversal
@@ -823,7 +1045,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       }
       const snap = await db
         .prepare('SELECT id, status, payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
-        .get<{ id: number; status: string; payload_json: string }>([snapshotId, 'sale.add_items'])
+        .get<{ id: number; status: string; payload_json: string }>([snapshotId, SALE_ADD_ITEMS_ACTION_KIND])
       if (!snap) throw new Error('The saved details for these added items are no longer available, so they cannot be reversed.')
       let reversal: SaleAddItemsReversal
       try {
@@ -842,7 +1064,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         throw new Error("This sale's status changed after the items were added, so this can no longer be undone safely. Adjust the sale directly instead.")
       }
 
-      if (ctx.direction === 'undo') {
+      const atomicReversal = reversal as AtomicSaleAddItemsReversal
+      const atomicReplay = (typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
+        || atomicReversal.operationId !== undefined
+        || atomicReversal.saleStateRevision !== undefined
+      if (atomicReplay) {
+        await replayAtomicSaleAddItems(db, atomicReversal, snapshotId, snap.status, payload, ctx)
+      } else if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('These added items have already been removed.')
         const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
         if (savedFingerprint && await saleStateFingerprint(db, saleId) !== savedFingerprint) {
@@ -957,12 +1185,14 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           .run({ payload: JSON.stringify(nextReversal), id: snapshotId })
       }
 
-      await audit(
-        ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
-        ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
-        'sale', saleId,
-        { via: 'undo_applier', applier: 'sale.add_items', lines: (reversal.lines || []).length },
-      )
+      if (!atomicReplay) {
+        await audit(
+          ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+          ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
+          'sale', saleId,
+          { via: 'undo_applier', applier: SALE_ADD_ITEMS_ACTION_KIND, lines: (reversal.lines || []).length },
+        )
+      }
       await broadcast(ctx.env, 'sales', { action: 'update', id: saleId })
       await broadcast(ctx.env, 'products', { action: 'update' })
       await broadcast(ctx.env, 'inventory', { action: 'update' })
