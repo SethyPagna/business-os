@@ -621,12 +621,16 @@ app.post('/reset-section', async (c) => {
 //                         import` opening lots are deliberately untouched, so
 //                         migration 0081's lot-ledger reconcile (Step 4f)
 //                         still works and re-running this is a no-op.
+//   step='repair_sep23_subtotals' -> One allowlisted, manifest-bound repair
+//                         for sale ids 16842-16863. The helper owns every
+//                         guard and statement; this route accepts no SQL.
 //
-// Both are idempotent (the `<> 0` guards mean a second run reports 0
+// The stock actions are idempotent (the `<> 0` guards mean a second run reports 0
 // affected), take a fresh scoped backup first exactly like every reset
 // above, and only zero quantities -- no row is ever deleted here.
 // ---------------------------------------------------------------------------
-const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots'] as const
+const LEGACY_SUBTOTAL_REPAIR_STEP = 'repair_sep23_subtotals'
+const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots', LEGACY_SUBTOTAL_REPAIR_STEP] as const
 type MigrationFinalizeStep = typeof MIGRATION_FINALIZE_STEPS[number]
 
 app.post('/finalize-migration', async (c) => {
@@ -636,7 +640,7 @@ app.post('/finalize-migration', async (c) => {
     return c.json({ error: 'Too many attempts. Wait a few minutes and try again.' }, 429)
   }
 
-  const body = await c.req.json<{ step?: string }>().catch(() => ({}) as { step?: string })
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const step = body.step as MigrationFinalizeStep
   if (!MIGRATION_FINALIZE_STEPS.includes(step)) {
     return c.json({ error: `Unknown step. Must be one of: ${MIGRATION_FINALIZE_STEPS.join(', ')}` }, 400)
@@ -644,6 +648,49 @@ app.post('/finalize-migration', async (c) => {
 
   const db = getDb(c.env)
   const user = c.get('user')
+
+  if (step === LEGACY_SUBTOTAL_REPAIR_STEP) {
+    // Loaded only for this one-off path so the long-lived finalize actions and
+    // their small pure harness do not acquire an unrelated runtime dependency.
+    const repair = await import('../lib/legacySubtotalRepair')
+    let plan
+    try {
+      plan = await repair.prepareLegacySubtotalRepair(body, { id: user?.id, name: user?.name })
+    } catch (error) {
+      if (error instanceof repair.LegacySubtotalRepairValidationError) {
+        return c.json({ success: false, error: error.message }, 400)
+      }
+      return c.json({ success: false, error: 'Could not validate the subtotal repair request. No data was changed.' }, 500)
+    }
+
+    try {
+      await createSectionBackup(c.env, repair.LEGACY_SUBTOTAL_REPAIR_BACKUP_TABLES, 'manual')
+    } catch (error) {
+      return c.json({
+        success: false,
+        error: `Aborted: could not create a backup first (${(error as Error).message || 'unknown error'}). No data was changed.`,
+      }, 500)
+    }
+
+    try {
+      const result = await repair.applyLegacySubtotalRepair(db, plan)
+      return c.json({
+        success: true,
+        outcome: result.outcome,
+        affected: { sales: result.changedSales },
+        plan_id: plan.planId,
+        manifest_sha256: plan.manifestSha256,
+        message: result.outcome === 'applied'
+          ? 'Repaired the guarded 22-sale legacy subtotal cohort. A fresh backup was taken first.'
+          : 'This exact guarded subtotal repair was already applied; no sale changed. A fresh backup was taken before verification.',
+      })
+    } catch (error) {
+      if (error instanceof repair.LegacySubtotalRepairConflictError) {
+        return c.json({ success: false, error: error.message }, 409)
+      }
+      return c.json({ success: false, error: 'Subtotal repair failed. The atomic batch changed no data.' }, 500)
+    }
+  }
 
   // Same hard prerequisite as every reset: a fresh, scoped backup must
   // succeed before any write runs, so the operation is always undoable.
