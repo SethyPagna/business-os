@@ -1918,7 +1918,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       {selectedSales.length > 0 ? (
           <div className="bulk-toolbar mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm shadow-sm">
             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedSales.length}</span>
-            {canExportSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={handleExportSelected}>{translateOr('export', 'Export')}</button> : null}
             {/* Bulk status writes are Full-Access only (Part 557): View-only
                 keeps selection for Export, but the status buttons are hidden. */}
             {canChangeSaleStatus ? (
