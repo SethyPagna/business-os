@@ -29,6 +29,7 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
+import { movementSearchHaystackSql } from '../lib/movementSearch'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1031,11 +1032,12 @@ app.get('/movements', async (c) => {
     // scattered INSERT sites and no shared writer, and movement text is a
     // denormalized copy of product names (measured ~0 Latin diacritics in Part
     // 484), so the practical loss is nil and the crash risk is what mattered.
-    const movementHaystack = `(
-      COALESCE(product_name, '') || ' ' || COALESCE(branch_name, '') || ' ' ||
-      COALESCE(user_name, '') || ' ' || COALESCE(movement_type, '') || ' ' ||
-      COALESCE(reason, '')
-    )`
+    //
+    // N13 (round 2): the haystack itself lives in lib/movementSearch.ts and is
+    // built from the SAME branch and actor expressions the SELECT below renders
+    // -- searching the raw snapshots asked about values that are nowhere on the
+    // screen. Same shallow shape, same alreadyNormalizedCols=true contract.
+    const movementHaystack = movementSearchHaystackSql('inventory_movements')
     const termClauses = terms.map((term, index) => buildLikeAliasClause(term, [movementHaystack], params, `search${index}`, true))
     where.push(`(${termClauses.join(` ${mode} `)})`)
   }

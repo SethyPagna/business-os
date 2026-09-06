@@ -19,6 +19,13 @@
 //     'ung sethy pagna'). Rows with no user_id, and rows whose account has
 //     been deleted, keep their snapshot.
 //
+//  3. the Movements-tab SEARCH haystack (lib/movementSearch.ts). Reads 1 and
+//     2 changed what a row DISPLAYS; the haystack was left on the raw columns,
+//     so the search answered about a value that is nowhere on the screen. The
+//     assertions below are discriminating the same way: on the raw haystack
+//     '%james%' matches nothing while '%ung sethy%' matches three rows, and
+//     '%shop%' misses every sale/return row (they snapshot no branch_name).
+//
 // Run: node scripts/test-movement-reference-pure.cjs
 const assert = require('node:assert/strict')
 const { execSync } = require('node:child_process')
@@ -42,7 +49,7 @@ function ok(cond, label) {
 // ---- compile the real modules ---------------------------------------------
 const MODULES = [
   'stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts',
-  'movementActorName.ts', 'movementReference.ts',
+  'movementActorName.ts', 'movementReference.ts', 'movementSearch.ts',
 ]
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'movement-reference-'))
 for (const file of MODULES) {
@@ -56,8 +63,10 @@ execSync(
 const ledger = require(path.join(tmpDir, 'stockLedgerQuery.js'))
 const referenceLib = require(path.join(tmpDir, 'movementReference.js'))
 const actorLib = require(path.join(tmpDir, 'movementActorName.js'))
+const searchLib = require(path.join(tmpDir, 'movementSearch.js'))
 ok(typeof referenceLib.movementReferenceSelectSql === 'function', 'movementReference kernel compiled')
 ok(typeof actorLib.movementActorNameSql === 'function', 'movementActorName kernel compiled')
+ok(typeof searchLib.movementSearchHaystackSql === 'function', 'movementSearch haystack kernel compiled')
 
 // ---- real DB: full migration chain -----------------------------------------
 const db = openDb(loadAll())
@@ -114,10 +123,12 @@ insertMovement({
   user_id: null, user_name: 'Old system', created_at: '2026-09-01 14:22:00',
 })
 // 9612: the RETURNS-route restock of that sale -- reference_id 7 is a returns.id,
-// and return 7 does hold this product.
+// and return 7 does hold this product. Like every sale/return-family row it
+// stamps branch_id and NO branch_name snapshot (movementBranchName.ts), so its
+// Branch column is resolved at read time.
 insertMovement({
   id: 9612, product_id: 9601, product_name: 'Reference Ledger Cream', movement_type: 'return', quantity: 1,
-  reason: 'Return: damaged box', reference_id: 7,
+  reason: 'Return: damaged box', reference_id: 7, branch_name: null,
   user_id: 2, user_name: 'ung sethy pagna', created_at: '2026-09-02 09:00:00',
 })
 // 9613: a plain stock addition. Its reference_id is a stock-in session token,
@@ -132,14 +143,14 @@ insertMovement({
 // 9621: the POS sale itself.
 insertMovement({
   id: 9621, product_id: 9602, product_name: 'Collision Test Serum', movement_type: 'sale', quantity: 3,
-  reason: '', reference_id: 7, user_id: 2, user_name: 'ung sethy pagna', created_at: '2026-09-01 19:31:00',
+  reason: '', reference_id: 7, branch_name: null, user_id: 2, user_name: 'ung sethy pagna', created_at: '2026-09-01 19:31:00',
 })
 // 9622: the sale-CANCEL restock. Same movement_type and same reference_id 7 as
 // 9612 -- but this 7 is a sales.id. This is the row a returns-first lookup
 // mislabels 'RET-20260902-0007'.
 insertMovement({
   id: 9622, product_id: 9602, product_name: 'Collision Test Serum', movement_type: 'return', quantity: 3,
-  reason: 'Sale cancelled', reference_id: 7, user_id: 2, user_name: 'ung sethy pagna', created_at: '2026-09-01 20:00:00',
+  reason: 'Sale cancelled', reference_id: 7, branch_name: null, user_id: 2, user_name: 'ung sethy pagna', created_at: '2026-09-01 20:00:00',
 })
 // 9623: negative control -- a sale-family row whose reference_id names nothing
 // at all. It must stay unlabelled rather than borrow a neighbour's receipt.
@@ -221,9 +232,42 @@ ok(true, 'the /movements drill and the Stock Change ledger agree row for row')
 assert.ok(!(actorLib.RESOLVED_ACTOR_NAME_COLUMN in folded[0]), 'the helper column is dropped before the row leaves the Worker')
 ok(true, 'the actor helper column never reaches the client -- consumers see one user_name field')
 
+// ---- the SEARCH haystack: what is searched is what is shown ---------------
+//
+// The Movements tab searches through this one concatenated haystack. It has to
+// hold the SAME branch and actor the rows above render, or the field on the
+// screen and the field being searched are two different answers: typing the
+// 'james' the row shows returns nothing, and the superseded full name -- which
+// is nowhere in the UI -- returns the row. Discriminating by construction: on
+// the raw-column haystack '%james%' matches nothing and '%shop%' misses every
+// sale/return-family row (they snapshot no branch_name at all).
+const haystackSql = searchLib.movementSearchHaystackSql('inventory_movements')
+function haystackMatches(needle) {
+  return db.prepare(
+    `SELECT id FROM inventory_movements WHERE lower(COALESCE(${haystackSql}, '')) LIKE @needle ORDER BY id`,
+  ).all({ needle: `%${needle}%` }).map((row) => Number(row.id))
+}
+assert.deepEqual(haystackMatches('james'), [9612, 9621, 9622], "searching the username on the screen must find user 2's rows")
+ok(true, "search 'james' finds exactly the rows the ledger renders as 'james'")
+assert.deepEqual(haystackMatches('ung sethy'), [], 'the superseded full name is nowhere on screen and must match nothing')
+ok(true, 'search on the superseded full-name snapshot matches nothing (it is not what the row shows)')
+assert.deepEqual(
+  haystackMatches('shop'), [9611, 9612, 9613, 9621, 9622, 9623],
+  'searching the branch on the screen must find the sale/return rows that snapshot no branch_name',
+)
+ok(true, "search 'shop' finds the branch-resolved sale/return rows too, not just the snapshotted ones")
+assert.deepEqual(haystackMatches('collision test serum'), [9621, 9622, 9623], 'the haystack must still search the product name')
+assert.deepEqual(haystackMatches('damaged box'), [9612], 'the haystack must still search the reason')
+assert.deepEqual(haystackMatches('add'), [9613], 'the haystack must still search the movement type')
+ok(true, 'product name, reason and movement type stay searchable')
+
 // The routes must actually use both halves; a query that resolves and a
 // response that drops the value would pass every assertion above.
 const routeSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'inventory.ts'), 'utf8')
+assert.ok(/movementSearchHaystackSql\('inventory_movements'\)/.test(routeSrc), 'the /movements search does not use the shared haystack kernel')
+assert.ok(!/COALESCE\(user_name, ''\)/.test(routeSrc), 'the /movements search still concatenates the raw actor snapshot')
+assert.ok(!/COALESCE\(branch_name, ''\)/.test(routeSrc), 'the /movements search still concatenates the raw branch snapshot')
+ok(true, 'GET /api/inventory/movements searches through the shared haystack, not the raw snapshots')
 assert.ok(/movementActorNameSql\('inventory_movements'\)/.test(routeSrc), 'the /movements query does not resolve the actor')
 assert.ok(/movementReferenceSelectSql\('inventory_movements'\)/.test(routeSrc), 'the /movements query does not resolve the receipt')
 assert.ok(/\.map\(\(row\) => withResolvedActorName\(withResolvedBranchName\(row\)\)\)/.test(routeSrc), 'the /movements response does not fold the resolved actor back onto user_name')
