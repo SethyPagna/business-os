@@ -21,7 +21,10 @@
 //   * the tables a merge relinks come from MERGE_REPARENT_TABLES in
 //     cloudflare/src/lib/undoAppliers.ts -- the ONE list the forward fold and
 //     the undo applier both walk -- so a table added there is counted here
-//     without a second edit;
+//     without a second edit, PLUS the two links that list structurally cannot
+//     hold (promotion_rules.product_ids, a JSON id array in a TEXT column, and
+//     products.parent_id, a product FK not named *product_id) which the fold
+//     moves explicitly;
 //   * the survivor ordering mirrors chooseAutomaticKeeper / the sweep: shed
 //     fewer zeros, then more stock, then the lower id.
 //
@@ -92,8 +95,31 @@ export function loadReparentTables() {
 // only ever a SELECT: the caller supplies it, so this function cannot write
 // even by accident.
 // --------------------------------------------------------------------------
+/**
+ * Every promotion rule's product scope, parsed the way promotionRules.ts parses
+ * it. Read once per plan (the table is small and is read whole by the app too)
+ * and memoized, so counting the rules a pair would re-scope stays one SELECT.
+ */
+function promotionRuleIdLists(query) {
+  if (!promotionRuleIdLists.cache || promotionRuleIdLists.cacheFor !== query) {
+    const rows = query('SELECT id, product_ids FROM promotion_rules', {})
+    promotionRuleIdLists.cacheFor = query
+    promotionRuleIdLists.cache = rows.map((row) => {
+      let parsed = []
+      try { parsed = JSON.parse(String(row.product_ids || '[]')) } catch { parsed = [] }
+      return {
+        id: Number(row.id),
+        productIds: (Array.isArray(parsed) ? parsed : []).map(Number).filter(Number.isFinite),
+      }
+    })
+  }
+  return promotionRuleIdLists.cache
+}
+
 export function planLeadingZeroTwinMerges(query, rule, reparentTables) {
   const { identityBarcodeKey, normalizeProductGroupName, resolveMergedCostDetail } = rule
+  promotionRuleIdLists.cache = null
+  promotionRuleIdLists.cacheFor = null
 
   const products = query(`
     SELECT id, name, barcode, cost_price_usd, cost_price_khr,
@@ -145,6 +171,25 @@ export function planLeadingZeroTwinMerges(query, rule, reparentTables) {
         const [row] = query(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = @id`, { id: discarded.id })
         const n = Number(row?.n) || 0
         if (n) { moves.push({ table, column, rows: n, foldedNotRepointed: true }); movedRows += n }
+      }
+      // The two links MERGE_REPARENT_TABLES structurally cannot carry, so the
+      // walk above under-reported every pair that had one. promotion_rules
+      // scopes a discount with a JSON ARRAY of ids in a TEXT column (counted in
+      // JS, because SQL cannot ask "does this JSON list contain 101?" without
+      // guessing at LIKE), and products.parent_id is a product FK that is not
+      // named *product_id. The fold moves both; a plan that did not count them
+      // told the owner fewer rows would move than actually would.
+      const rescopedRules = promotionRuleIdLists(query)
+        .filter((rule) => rule.productIds.some((id) => id === discarded.id))
+      if (rescopedRules.length) {
+        moves.push({ table: 'promotion_rules', column: 'product_ids', rows: rescopedRules.length, jsonIdList: true })
+        movedRows += rescopedRules.length
+      }
+      const [children] = query('SELECT COUNT(*) AS n FROM products WHERE parent_id = @id', { id: discarded.id })
+      const childRows = Number(children?.n) || 0
+      if (childRows) {
+        moves.push({ table: 'products', column: 'parent_id', rows: childRows })
+        movedRows += childRows
       }
       const [stock] = query('SELECT COALESCE(SUM(quantity), 0) AS qty FROM branch_stock WHERE product_id = @id', { id: discarded.id })
       pairs.push({
@@ -228,7 +273,10 @@ export function formatPlan(plan) {
       lines.push(`       ${pair.stockToDecide} in stock on the discarded row -- the merge must be told: move it, or write it off`)
     }
     for (const move of pair.moves) {
-      lines.push(`       ${move.rows} ${move.table}.${move.column}${move.foldedNotRepointed ? ' (folded per branch/lot, not blindly re-pointed)' : ''}`)
+      const note = move.foldedNotRepointed
+        ? ' (folded per branch/lot, not blindly re-pointed)'
+        : (move.jsonIdList ? ' (the discarded id rewritten inside the rule\'s JSON scope list)' : '')
+      lines.push(`       ${move.rows} ${move.table}.${move.column}${note}`)
     }
   }
   lines.push('')

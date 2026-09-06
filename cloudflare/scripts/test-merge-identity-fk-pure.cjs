@@ -129,7 +129,14 @@ function loadProductsRoute(d1) {
     }),
     '../lib/sqlBinding': realSqlBinding,
   })
-  return { mod, adapter, MERGE_REPARENT_TABLES: realUndoAppliers.MERGE_REPARENT_TABLES }
+  return { mod, adapter, undoAppliers: realUndoAppliers, MERGE_REPARENT_TABLES: realUndoAppliers.MERGE_REPARENT_TABLES }
+}
+
+// The promotion rule as the APP reads it, so "does this rule apply to the
+// keeper?" is answered by promotionRules.ts itself and not by a re-implementation
+// of its parsing here.
+function loadPromotionRules() {
+  return loadTs(path.join('lib', 'promotionRules.ts'), {})
 }
 
 // --------------------------------------------------------------------------
@@ -141,6 +148,10 @@ const FOLD_HANDLED = new Set([
   'branch_stock.product_id',
   'product_batches.variant_product_id',
   'product_images.product_id',
+  // The two links MERGE_REPARENT_TABLES structurally cannot carry -- see the
+  // widened sweep below for why they were invisible to this file until now.
+  'promotion_rules.product_ids',
+  'products.parent_id',
 ])
 
 // Deliberate exclusions. Each one is a decision with a reason, and the reason
@@ -185,6 +196,19 @@ async function fkSweep() {
         // have to be accounted for on purpose rather than by going unnoticed.
         const col = line.match(/^\s*([A-Za-z0-9_]*product_id)\s+INTEGER/i)
         if (col) found.set(`${name}.${col[1]}`, file)
+        // A product link does not have to be an INTEGER column named
+        // *product_id -- and BOTH of the ones that are not were being orphaned
+        // by the merge while this sweep reported all clear:
+        //   * a JSON id LIST in a TEXT column (promotion_rules.product_ids;
+        //     ruleAppliesToProduct does product_ids.includes(product.id), which
+        //     is as live a link as any FK), and
+        //   * products.parent_id, a product FK whose name does not end in
+        //     product_id at all.
+        // Widening the sweep is what lets this file FAIL for them.
+        const jsonIdList = line.match(/^\s*([A-Za-z0-9_]*product_ids)\s+TEXT/i)
+        if (jsonIdList) found.set(`${name}.${jsonIdList[1]}`, file)
+        const parentLink = line.match(/^\s*(parent_id)\s+INTEGER/i)
+        if (parentLink && name === 'products') found.set(`${name}.${parentLink[1]}`, file)
       }
     }
   }
@@ -227,6 +251,10 @@ async function main() {
     // finds everything, so pin two ends known to exist.
     assert.ok(found.has('sale_items.product_id'), 'sweep must see sale_items.product_id')
     assert.ok(found.has('stock_session_members.product_id'), 'sweep must see stock_session_members.product_id')
+    // The two non-INTEGER-FK links. A sweep blind to these is exactly how they
+    // stayed orphaned by every merge while this file reported nothing to fix.
+    assert.ok(found.has('promotion_rules.product_ids'), 'sweep must see the JSON id list promotion_rules.product_ids')
+    assert.ok(found.has('products.parent_id'), 'sweep must see products.parent_id')
     assert.ok(found.size >= 10, `sweep found only ${found.size} product FKs -- the parser has stopped matching`)
   })
 
@@ -254,6 +282,82 @@ async function main() {
       assert.ok(reparented.has(`${table}.product_id`), `${table} must be relinked onto the survivor`)
     }
     assert.ok(reparented.has('promotions.link_product_id'))
+  })
+
+  // ---- 1b. The two links that are NOT integer product FKs -----------------
+  // DISCRIMINATING, and the reason the sweep above was widened: the merge walked
+  // MERGE_REPARENT_TABLES (INTEGER *product_id columns) and nothing else, so a
+  // promotion rule scoped to the discarded row kept naming a row the fold had
+  // just deactivated -- ruleAppliesToProduct then matched nothing at all and the
+  // discount left the catalogue silently -- and a child variant stayed rooted on
+  // that deactivated parent. Both are folded here for real and then undone.
+  await check('DISCRIMINATING: a promotion rule scoped to the discarded row follows it onto the keeper, and undo puts it back', async () => {
+    const live = seed()
+    const { mod: liveMod, adapter: liveAdapter, undoAppliers } = loadProductsRoute(live)
+    const promo = loadPromotionRules()
+    live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+                     VALUES (10, 'Twin 10%', 'percent_off', 10, 'products', '[200,777]', 1)`).run()
+    // A rule already naming BOTH rows must end up naming the keeper ONCE.
+    live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+                     VALUES (11, 'Both', 'percent_off', 5, 'products', '[100,200]', 1)`).run()
+    // NEGATIVE CONTROL: a rule that never named the discarded row is untouched.
+    live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+                     VALUES (12, 'Someone else', 'percent_off', 7, 'products', '[777]', 1)`).run()
+    // A child variant pointing at the row about to be deactivated.
+    live.db.prepare(`INSERT INTO products (id, name, barcode, parent_id, is_active, is_group)
+                     VALUES (400, 'Zero Twin Small', '4444444444444', ${DUP}, 1, 0)`).run()
+
+    const { reversal } = await liveMod.foldDuplicateProductInto(
+      {}, liveAdapter, { id: 1, name: 'tester' },
+      { id: KEEPER, name: 'Zero Twin' },
+      { id: DUP, name: 'Zero Twin', image_path: null },
+      new Map([[1, 'shop'], [2, 'warehouse']]),
+      'fk test merge',
+    )
+
+    const ruleRow = (id) => live.db.prepare('SELECT * FROM promotion_rules WHERE id = ?').get(id)
+    const applies = (id, productId) => promo.ruleAppliesToProduct(promo.normalizePromotionRule(ruleRow(id)), { id: productId })
+    assert.equal(applies(10, KEEPER), true, 'the discount must survive the merge on the surviving row')
+    assert.equal(applies(10, DUP), false, 'and stop naming the row that no longer exists in the catalogue')
+    assert.deepEqual(JSON.parse(ruleRow(10).product_ids), [KEEPER, 777], 'the rest of the scope list is untouched')
+    assert.deepEqual(JSON.parse(ruleRow(11).product_ids), [KEEPER],
+      'a rule that named both rows must name the survivor once, not twice')
+    assert.deepEqual(JSON.parse(ruleRow(12).product_ids), [777], 'NEGATIVE CONTROL: an unrelated rule is not rewritten')
+    assert.equal(Number(live.db.prepare('SELECT parent_id FROM products WHERE id = 400').get().parent_id), KEEPER,
+      'a child variant must not be left rooted on the deactivated row')
+    assert.deepEqual(reversal.promotionRulesBefore.map((r) => r.id).sort((a, b) => a - b), [10, 11],
+      'undo cannot restore a rule the reversal never recorded')
+    assert.deepEqual(reversal.reparentedChildProductIds, [400])
+
+    // ...and the undo, run through the REAL applier over a real snapshot row.
+    live.db.prepare(`INSERT INTO undo_snapshots (id, kind, status, payload_json) VALUES (1, 'product.merge', 'applied', @p)`)
+      .run({ p: JSON.stringify(reversal) })
+    const applier = undoAppliers.resolveUndoApplier({ applier: 'product.merge', snapshot_id: 1 })
+    assert.ok(applier, 'the product.merge applier must be registered')
+    await applier.run({ applier: 'product.merge', snapshot_id: 1 }, { env: {}, user: { id: 1, name: 'tester' }, direction: 'undo' })
+    assert.equal(ruleRow(10).product_ids, '[200,777]', 'undo restores the scope list byte for byte')
+    assert.equal(ruleRow(11).product_ids, '[100,200]')
+    assert.equal(ruleRow(12).product_ids, '[777]')
+    assert.equal(applies(10, DUP), true, 'the rule applies to the discarded row again once the merge is undone')
+    assert.equal(Number(live.db.prepare('SELECT parent_id FROM products WHERE id = 400').get().parent_id), DUP,
+      'and the child goes back to its original parent')
+  })
+
+  await check('a keeper that was itself a child of the discarded row does not become its own parent', async () => {
+    const live = seed()
+    const { mod: liveMod, adapter: liveAdapter } = loadProductsRoute(live)
+    live.db.prepare(`UPDATE products SET parent_id = ${DUP} WHERE id = ${KEEPER}`).run()
+    const { reversal } = await liveMod.foldDuplicateProductInto(
+      {}, liveAdapter, { id: 1, name: 'tester' },
+      { id: KEEPER, name: 'Zero Twin' },
+      { id: DUP, name: 'Zero Twin', image_path: null },
+      new Map([[1, 'shop'], [2, 'warehouse']]),
+      'fk test merge',
+    )
+    assert.equal(live.db.prepare(`SELECT parent_id FROM products WHERE id = ${KEEPER}`).get().parent_id, null,
+      'the keeper cannot be a child of the row it just absorbed')
+    assert.deepEqual(reversal.reparentedChildProductIds, [], 'and it is not listed as a child it moved')
+    assert.equal(reversal.keeperParentIdBefore, DUP, 'the cleared link is captured so undo can restore it')
   })
 
   // ---- 2. The price preview reads the LIVE columns ------------------------

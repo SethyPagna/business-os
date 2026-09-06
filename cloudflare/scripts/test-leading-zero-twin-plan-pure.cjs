@@ -53,6 +53,17 @@ function seed() {
   run('INSERT INTO sale_items (id, sale_id, product_id, quantity) VALUES (900, 900, 101, 2)')
   run("INSERT INTO inventory_movements (id, product_id, branch_id, movement_type, quantity) VALUES (900, 101, 1, 'in', 3)")
   run('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (101, 1, 3)')
+  // The two links MERGE_REPARENT_TABLES structurally cannot hold, and which the
+  // plan therefore used to leave out of its row count: a promotion rule whose
+  // scope is a JSON id ARRAY in a TEXT column, and a child variant pointing at
+  // the row that would be discarded.
+  run(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+       VALUES (10, 'Twin 10%', 'percent_off', 10, 'products', '[101]', 1)`)
+  // NEGATIVE CONTROL: a rule naming a different product must not be counted.
+  run(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+       VALUES (11, 'Someone else', 'percent_off', 5, 'products', '[102]', 1)`)
+  run(`INSERT INTO products (id, name, barcode, parent_id, is_active, is_group)
+       VALUES (111, 'Zero Twin Small', '4444444444444', 101, 1, 0)`)
   return d1
 }
 
@@ -111,8 +122,22 @@ async function main() {
     assert.equal(byTable.branch_stock, 1)
     assert.ok(pair.moves.find((m) => m.table === 'branch_stock').foldedNotRepointed,
       'branch_stock is summed per branch by the fold, not re-pointed -- the plan must not imply otherwise')
-    assert.equal(pair.movedRows, 3)
+    // DISCRIMINATING: pre-fix the plan walked MERGE_REPARENT_TABLES and the
+    // three fold-handled tables and nothing else, so these two moves were
+    // invisible and movedRows was 3 -- the owner was shown a smaller merge than
+    // the one that would actually run.
+    assert.equal(byTable.promotion_rules, 1, 'a discount scoped to the discarded row moves too, and must be counted')
+    assert.ok(pair.moves.find((m) => m.table === 'promotion_rules').jsonIdList,
+      'the plan must say this one is a JSON scope list, not a re-pointed FK')
+    assert.equal(byTable.products, 1, 'a child variant rooted on the discarded row moves too')
+    assert.equal(pair.movedRows, 5)
     assert.equal(pair.stockToDecide, 3, 'a stocked discard needs an answer before the merge can run')
+  })
+
+  check('NEGATIVE CONTROL: a promotion rule naming another product is not counted as a move', () => {
+    const other = plan.pairs.find((p) => p.discarded.id === 109)
+    assert.ok(!other.moves.some((m) => m.table === 'promotion_rules'),
+      'rule 11 names product 102, so no pair may claim it would move')
   })
 
   check('the cost it would write is the mean of the distinct costs', () => {

@@ -2989,6 +2989,73 @@ export async function foldDuplicateProductInto(
       params: { canonicalId, dupId: dup.id },
     })
   }
+  // promotion_rules.product_ids: a LIVE product link the walk above structurally
+  // cannot reach -- it is a JSON array of ids inside a TEXT column, not an
+  // INTEGER FK, so neither MERGE_REPARENT_TABLES nor the migration sweep that
+  // keeps that list honest can see it. promotionRules.ts decides a rule by
+  // `rule.product_ids.includes(product.id)`, so a rule scoped to the discarded
+  // row stopped applying to anything the instant this fold deactivated that row:
+  // the discount left the catalogue with no trace. Rewrite the id in place,
+  // de-duplicating (a rule scoped to BOTH rows must not end up naming the keeper
+  // twice) and keeping the order and any non-numeric entry untouched. The
+  // previous array is captured verbatim so undo restores the exact string.
+  // The table is small by design (promotionRulesSql.ts reads it whole), so this
+  // is one unfiltered SELECT rather than a LIKE guess at JSON contents.
+  const promotionRuleRows = await db
+    .prepare('SELECT id, product_ids FROM promotion_rules')
+    .all<{ id: number; product_ids: string | null }>({})
+  const promotionRulesBefore: Array<{ id: number; product_ids: string }> = []
+  for (const rule of promotionRuleRows) {
+    const raw = String(rule.product_ids ?? '')
+    let parsed: unknown
+    try { parsed = JSON.parse(raw || '[]') } catch { continue }
+    if (!Array.isArray(parsed)) continue
+    if (!parsed.some((entry) => Number(entry) === dup.id)) continue
+    const seenIds = new Set<number>()
+    const next: unknown[] = []
+    for (const entry of parsed) {
+      const mapped = Number(entry) === dup.id ? canonicalId : entry
+      const asNumber = Number(mapped)
+      if (Number.isFinite(asNumber)) {
+        if (seenIds.has(asNumber)) continue
+        seenIds.add(asNumber)
+      }
+      next.push(mapped)
+    }
+    promotionRulesBefore.push({ id: Number(rule.id), product_ids: raw })
+    statements.push({
+      sql: 'UPDATE promotion_rules SET product_ids = @ids, updated_at = CURRENT_TIMESTAMP WHERE id = @ruleId',
+      params: { ids: JSON.stringify(next), ruleId: Number(rule.id) },
+    })
+  }
+
+  // products.parent_id: the other live product link that is not a *product_id
+  // column. A child variant still pointing at the discarded row would be left
+  // rooted on a row this fold is about to deactivate (familyPagination.ts joins
+  // `parent.id = p.parent_id`), so it falls out of its own family. Move the
+  // children onto the keeper -- except the keeper itself, which cannot become
+  // its own parent: if the keeper WAS a child of the discarded row, that link is
+  // cleared instead (and captured, so undo restores it).
+  const childProductRows = await db
+    .prepare('SELECT id FROM products WHERE parent_id = @id')
+    .all<{ id: number }>({ id: dup.id })
+  const reparentedChildProductIds = childProductRows
+    .map((row) => Number(row.id))
+    .filter((childId) => Number.isFinite(childId) && childId !== canonicalId)
+  const keeperWasChildOfDup = childProductRows.some((row) => Number(row.id) === canonicalId)
+  if (reparentedChildProductIds.length) {
+    statements.push({
+      sql: 'UPDATE products SET parent_id = @canonicalId, updated_at = CURRENT_TIMESTAMP WHERE parent_id = @dupId AND id != @canonicalId',
+      params: { canonicalId, dupId: dup.id },
+    })
+  }
+  if (keeperWasChildOfDup) {
+    statements.push({
+      sql: 'UPDATE products SET parent_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @canonicalId',
+      params: { canonicalId },
+    })
+  }
+
   const byTable = (table: string): number[] => reparentedByTable.find((e) => e.table === table)?.ids ?? []
   const reparentedSaleItemIds = byTable('sale_items')
   const reparentedMovementIds = byTable('inventory_movements')
@@ -3043,6 +3110,11 @@ export async function foldDuplicateProductInto(
     // audit log is where it can still be found months later.
     ...(costOutliers.length ? { costOutliers } : {}),
     returnsReparented,
+    // The two links that are not INTEGER product FKs, so they are named
+    // explicitly rather than hiding inside reparentedTables: a promotion rule
+    // re-scoped onto the survivor, and a child variant reparented.
+    promotionRulesRescoped: promotionRulesBefore.map((rule) => rule.id),
+    childrenReparented: reparentedChildProductIds.length,
     reparentedTables: reparentedByTable.map((e) => `${e.table}:${e.ids.length}`),
   })
 
@@ -3086,6 +3158,9 @@ export async function foldDuplicateProductInto(
       reparentedSaleItemIds,
       reparentedMovementIds,
       reparentedByTable,
+      promotionRulesBefore,
+      reparentedChildProductIds,
+      keeperParentIdBefore: keeperWasChildOfDup ? dup.id : null,
       adjustmentMovementIds,
       stockDisposition,
       mergeContext,

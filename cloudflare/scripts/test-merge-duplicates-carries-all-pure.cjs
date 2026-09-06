@@ -130,6 +130,34 @@ check('the merge carries the discarded row\'s RETURNS, not just its sales', () =
   assert.ok(/reparentedByTable,/.test(routeSrc), 'undo cannot put back a link the reversal never recorded')
 })
 
+check('the merge carries the links that are NOT integer product FKs', () => {
+  // The walk above can only see INTEGER columns named *product_id, and the
+  // migration sweep that keeps its list honest sweeps for exactly that shape.
+  // Two live links have neither shape, and both were being orphaned:
+  //   * promotion_rules.product_ids -- a JSON id ARRAY in a TEXT column.
+  //     ruleAppliesToProduct does product_ids.includes(product.id), so a rule
+  //     scoped to the discarded row stopped applying to anything at all the
+  //     moment the fold deactivated it: the discount left the catalogue.
+  //   * products.parent_id -- a product FK not named *product_id, on products
+  //     itself. A child variant was left rooted on the deactivated parent.
+  assert.ok(/SELECT id, product_ids FROM promotion_rules/.test(mergeBlock),
+    'the fold must read the promotion scopes it might have to rewrite')
+  assert.ok(/UPDATE promotion_rules SET product_ids = @ids/.test(mergeBlock),
+    'a promotion rule scoped to the discarded row must follow it onto the survivor')
+  assert.ok(/promotionRulesBefore\.push\(/.test(mergeBlock) && /promotionRulesBefore,/.test(routeSrc),
+    'undo must be able to restore the scope list exactly, so the previous array is recorded')
+  assert.ok(/UPDATE products SET parent_id = @canonicalId/.test(mergeBlock),
+    'children of the discarded row must be reparented onto the survivor')
+  assert.ok(/id != @canonicalId/.test(mergeBlock),
+    'and the keeper must never be made its own parent')
+  assert.ok(/reparentedChildProductIds,/.test(routeSrc), 'undo must be able to put the children back')
+  const appliersSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'undoAppliers.ts'), 'utf8')
+  assert.ok(/UPDATE promotion_rules SET product_ids = @ids/.test(appliersSrc),
+    'the undo applier must restore the scope list, not merely record it')
+  assert.ok(/UPDATE products SET parent_id = @dupId/.test(appliersSrc),
+    'the undo applier must put the children back on the discarded row')
+})
+
 check('a WRITE-OFF zeroes the lots in place and leaves a balancing ledger line', () => {
   assert.ok(/const writeOffStock = stockDisposition === 'write_off'/.test(mergeBlock))
   assert.ok(/quantity: -qty,/.test(mergeBlock), 'the write-off must post a NEGATIVE movement, not just delete stock')

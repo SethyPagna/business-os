@@ -168,6 +168,20 @@ export interface MergeReversal {
   // inventory_movements keep their own dedicated fields above for
   // backward-compatibility with snapshots written before this existed.
   reparentedByTable?: Array<{ table: string; column: string; ids: number[] }>
+  // promotion_rules.product_ids is a JSON id LIST in a TEXT column, so the walk
+  // above (INTEGER FK columns) cannot reach it. The fold rewrites the discarded
+  // id to the keeper inside the array; this is the array as it was, verbatim, so
+  // undo restores the exact string rather than a re-serialized approximation of
+  // it. Absent on snapshots written before this existed, and on any merge whose
+  // discarded row was in no rule.
+  promotionRulesBefore?: Array<{ id: number; product_ids: string }>
+  // products.parent_id: the children the fold moved from the discarded row onto
+  // the keeper (the keeper itself is never in this list -- a row cannot be its
+  // own parent).
+  reparentedChildProductIds?: number[]
+  // Only present when the KEEPER was itself a child of the discarded row: the
+  // fold cleared that parent link, and undo puts this value back.
+  keeperParentIdBefore?: number | null
   mergedStateFingerprint?: string
 }
 
@@ -191,6 +205,21 @@ export type MergeStockDisposition = 'merge' | 'write_off'
 //   branch_stock, product_batches.variant_product_id, product_images -- moved by
 //     the fold itself, per branch / per batch_key / de-duplicated by path,
 //     which a blind UPDATE could not do.
+//   promotion_rules.product_ids -- also moved by the fold itself, and it could
+//     never be on this list: it is a JSON ARRAY of ids in a TEXT column, not an
+//     INTEGER FK, so neither this walk nor the migration sweep that keeps the
+//     walk honest can see it. It IS a live link (promotionRules.ts's
+//     ruleAppliesToProduct does `rule.product_ids.includes(product.id)`), so a
+//     rule scoped to the discarded row simply stopped applying to anything the
+//     moment the merge deactivated that row -- a discount that left the
+//     catalogue silently. The fold rewrites the id inside the array,
+//     de-duplicating when the keeper was already scoped, and records the
+//     previous array verbatim (promotionRulesBefore) so undo restores it exactly.
+//   products.parent_id -- the same shape of miss for the opposite reason: it is
+//     a product FK that is not named *product_id, on the products table itself.
+//     A child variant pointing at the discarded row would be left rooted on a
+//     deactivated parent (familyPagination.ts joins `parent.id = p.parent_id`),
+//     so the fold moves the children onto the keeper and records their ids.
 //   stock_row_moves, import_auto_merges, legacy_* -- these record what a PAST
 //     operation did to a specific product id; repointing them would rewrite
 //     provenance rather than move a live link.
@@ -750,6 +779,32 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
     for (const grp of chunk(intIds(entry?.ids), 400)) {
       stmts.push({ sql: `UPDATE ${table} SET ${column} = @dupId WHERE id IN (${grp.join(',')})`, params: { dupId } })
     }
+  }
+
+  // 4c. promotion_rules.product_ids: put back the exact array the fold rewrote.
+  //     Restored as the captured STRING, so a rule whose list also carried ids
+  //     the fold never touched comes back byte-for-byte rather than
+  //     re-serialized.
+  for (const rule of (r.promotionRulesBefore || [])) {
+    const ruleId = Number(rule?.id)
+    if (!Number.isInteger(ruleId) || ruleId <= 0) continue
+    stmts.push({
+      sql: 'UPDATE promotion_rules SET product_ids = @ids, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
+      params: { ids: String(rule?.product_ids ?? '[]'), id: ruleId },
+    })
+  }
+
+  // 4d. products.parent_id: the children the fold moved onto the keeper go back
+  //     onto the discarded row, and a keeper that was itself a child of that row
+  //     gets its cleared parent link back.
+  for (const grp of chunk(intIds(r.reparentedChildProductIds), 400)) {
+    stmts.push({ sql: `UPDATE products SET parent_id = @dupId, updated_at = CURRENT_TIMESTAMP WHERE id IN (${grp.join(',')})`, params: { dupId } })
+  }
+  if (r.keeperParentIdBefore != null) {
+    stmts.push({
+      sql: 'UPDATE products SET parent_id = @parentId, updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId',
+      params: { keeperId, parentId: Number(r.keeperParentIdBefore) },
+    })
   }
 
   // 5. product_images: pull the moved paths off the keeper, restore the dup's
