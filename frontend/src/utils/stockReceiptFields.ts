@@ -41,6 +41,44 @@ export type StockReceiptWire = {
   freeGoods?: true
 }
 
+export type BranchStockEntry = { branch_id?: unknown; quantity?: unknown }
+
+/**
+ * THE figure an adjust submission is measured against: the on-hand quantity of
+ * the BRANCH the form is adjusting.
+ *
+ * Every verdict below -- receipt or removal, picker or no picker, which fields
+ * the operator is shown -- is a comparison against this number, and
+ * routes/inventory.ts makes the same comparison against `branchStockQty(env,
+ * productId, branchId)`. So it has to be the branch's own row.
+ *
+ * Inventory.tsx used to derive it from the page's branch filter instead
+ * (`getStockQty`, which answers with the product TOTAL while the list is
+ * filtered to "All branches"). With the page on All branches and the form on a
+ * branch that holds less, "set to 20" read as a set-DOWN in the modal and as an
+ * add on the Worker: the operator was shown a batch picker and no supplier or
+ * cost field, the picked lot rode the wire into an ADD that then topped up --
+ * and inherited the first-attribution supplier of -- the lot they had picked to
+ * REMOVE from, and the submission came back 400 supplier_required with nothing
+ * on screen able to answer it.
+ *
+ * `fallbackQuantity` is used only when no branch is named: the route falls back
+ * to the default branch, which this form cannot resolve, so it keeps the only
+ * figure it can see rather than inventing a zero. A named branch with no
+ * branch_stock row holds nothing, which is exactly what branchStockQty returns.
+ */
+export function adjustBranchQuantity(
+  branchStock: readonly BranchStockEntry[] | null | undefined,
+  branchId: unknown,
+  fallbackQuantity: unknown,
+): number {
+  const numericBranchId = Number(branchId)
+  if (!(numericBranchId > 0)) return Number(fallbackQuantity) || 0
+  const rows = Array.isArray(branchStock) ? branchStock : []
+  const entry = rows.find((row) => Number(row?.branch_id) === numericBranchId)
+  return Number(entry?.quantity || 0)
+}
+
 /**
  * True when this submission puts stock in, so the receipt fields apply.
  * A 'set' is only a receipt when it raises the on-hand figure; a set that

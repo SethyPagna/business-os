@@ -22,6 +22,7 @@ import {
   isStockReceiptCreditIncomplete,
   stockReceiptWire,
   stockReceiptGateCode,
+  adjustBranchQuantity,
   STOCK_RECEIPT_GATE_CODES,
   STOCK_RECEIPT_GATE_KEYS,
 } from '../src/utils/stockReceiptFields.ts'
@@ -54,6 +55,74 @@ runTest('a stock-in is an add, or a set that RAISES the figure (S4-16)', () => {
   // Half-typed input must not be read as a receipt.
   assert.equal(isStockInSubmission('set', '', 3), false)
   assert.equal(isStockInSubmission('set', 5, undefined), false)
+})
+
+runTest('the adjust form measures against the BRANCH it is adjusting, not the page filter', () => {
+  // The fixture the two rules disagree on. Inventory.tsx derived the figure it
+  // handed the modal from `getStockQty`, which answers with whatever the LIST
+  // is showing -- the product TOTAL while the page's branch filter is "All
+  // branches" -- while the form was adjusting branch 5, which holds 12.
+  const branchStock = [{ branch_id: 5, quantity: 12 }, { branch_id: 2, quantity: 43 }]
+  const pageFilterFigure = 55 // getStockQty(adjustModal) under branchFilter 'all'
+  const branchFigure = adjustBranchQuantity(branchStock, '5', pageFilterFigure)
+  assert.equal(branchFigure, 12)
+  assert.notEqual(branchFigure, pageFilterFigure, 'the fixture must be one the two rules answer differently')
+
+  // "Set to 20" on branch 5. routes/inventory.ts compares 20 against the
+  // BRANCH row (branchStockQty), so it converts this into an add of 8 and runs
+  // it through the receipt gate.
+  const ctx = { type: 'set', quantity: 20, unlockPricing: false, branchId: 5, batchId: '7' }
+  assert.equal(isStockInSubmission('set', 20, branchFigure), true, 'the route receives goods here')
+
+  // The old answer, on the page figure: a set-DOWN. The modal showed the batch
+  // picker (asking which lot to drain), hid the supplier field, and the wire
+  // carried the picked lot id -- into an ADD, which then topped up, and
+  // inherited the supplier of, the lot the operator had picked to remove from.
+  // The submission itself came back 400 supplier_required with no field on
+  // screen able to answer it.
+  assert.equal(isStockInSubmission('set', 20, pageFilterFigure), false)
+  assert.equal(isSetDownSubmission('set', 20, pageFilterFigure), true)
+  assert.equal(isBatchPickerVisible({ ...ctx, currentQuantity: pageFilterFigure }), true)
+  assert.deepEqual(stockAdjustBatchWire({ ...ctx, currentQuantity: pageFilterFigure }), { batchId: '7', lotAttributionDeferred: true })
+
+  // The new answer: one figure, so what the modal renders and what the
+  // submitter gates are the same verdict on the same submission.
+  assert.equal(isSetDownSubmission('set', 20, branchFigure), false)
+  assert.equal(isBatchPickerVisible({ ...ctx, currentQuantity: branchFigure }), false)
+  assert.deepEqual(stockAdjustBatchWire({ ...ctx, currentQuantity: branchFigure }), { lotAttributionDeferred: false })
+
+  // No branch named: routes/inventory.ts falls back to the default branch, so
+  // the form keeps the only figure it can see rather than inventing a zero.
+  assert.equal(adjustBranchQuantity(branchStock, '', pageFilterFigure), 55)
+  assert.equal(adjustBranchQuantity(branchStock, null, pageFilterFigure), 55)
+  // A branch with no row holds nothing -- the same answer branchStockQty gives
+  // the route, and the answer `previousQuantity` already gave.
+  assert.equal(adjustBranchQuantity(branchStock, '9', pageFilterFigure), 0)
+  assert.equal(adjustBranchQuantity(undefined, '5', pageFilterFigure), 0)
+  // String branch ids from the <select> resolve the same as numbers.
+  assert.equal(adjustBranchQuantity([{ branch_id: '5', quantity: '12' }], 5, 55), 12)
+})
+
+runTest('both adjust surfaces resolve that figure through the one shared rule', () => {
+  for (const path of ['components/inventory/Inventory.tsx', 'components/products/forms/StockAdjustModal.tsx']) {
+    const text = source(path)
+    assert.ok(text.includes('adjustBranchQuantity('), `${path} must resolve the adjust figure from the shared branch rule`)
+  }
+  const inventory = source('components/inventory/Inventory.tsx')
+  assert.ok(!inventory.includes('adjustModal ? getStockQty(adjustModal) : 0'),
+    'Inventory.tsx must stop handing the modal the page filter\'s figure')
+
+  // The supplier field's visibility must be the receipt gate's own
+  // applicability, not a narrower predicate. A locked add with no branch named
+  // still reaches the Worker's gate -- routes/inventory.ts falls back to the
+  // default branch and gates every add -- and the old `createsOrFillsLot`
+  // (which required a visible batch picker, hence a branch) hid the one field
+  // that could have satisfied it.
+  const modals = source('components/inventory/InventoryStockModals.tsx')
+  assert.ok(!modals.includes('createsOrFillsLot'),
+    'the supplier field must render on the same predicate the gate runs on (isStockIn)')
+  assert.equal(stockReceiptGateCode({ isStockIn: true, supplierName: '', unitCostUsd: '3' }), 'supplier_required',
+    'the gate this fixture is about still refuses a supplier-less add')
 })
 
 runTest('on credit without a due date is refused before the request, as the route would', () => {

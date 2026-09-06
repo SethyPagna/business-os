@@ -67,7 +67,7 @@ import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import type { QueryParams } from '../../api/query.ts'
 import {
@@ -1079,7 +1079,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     { value: '', label: chooseBranchLabel },
     ...branchSelectOptions,
   ], [branchSelectOptions, chooseBranchLabel])
-  const adjustCurrentQuantity = adjustModal ? getStockQty(adjustModal) : 0
+  // The figure every adjust verdict is measured against -- receipt or removal,
+  // picker or no picker, which fields the operator is shown. It is the BRANCH
+  // the form is adjusting, not the page's branch filter: `getStockQty` answers
+  // with the product TOTAL while the list is filtered to "All branches", and
+  // routes/inventory.ts compares the requested total against the branch's own
+  // row. Handing the modal the page figure made it call a receipt a set-down
+  // (see adjustBranchQuantity's own note). One rule now, shared with
+  // StockAdjustModal.tsx and with `previousQuantity` in handleAdjust below, so
+  // what is on screen and what rides the wire cannot disagree.
+  const adjustCurrentQuantity = adjustModal
+    ? adjustBranchQuantity(adjustModal.branch_stock, adjustForm.branch_id, getStockQty(adjustModal))
+    : 0
   // Resolved against the *currently selected* adjust target (not just the
   // row the modal was opened from) so switching the "Adjust target" picker
   // (adjustTargetOptions.length > 1) updates the displayed locked price too
@@ -1115,9 +1126,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       (selectedAdjustProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), entry]),
     )
     const selectedBranchStock = numericBranchId ? selectedBranchStockById.get(numericBranchId) : null
-    const previousQuantity = numericBranchId
-      ? Number(selectedBranchStock?.quantity || 0)
-      : Number(getStockQty(selectedAdjustProduct) || 0)
+    // Same rule, same call, as `adjustCurrentQuantity` above -- the figure the
+    // modal renders its verdicts from and the figure this submission is gated
+    // against must be one number, not two derivations that agree by habit.
+    const previousQuantity = adjustBranchQuantity(
+      selectedAdjustProduct?.branch_stock,
+      numericBranchId,
+      getStockQty(selectedAdjustProduct),
+    )
     // Pricing only ever goes on the wire when it's genuinely unlocked --
     // locked (the default) is the fast add-to-this-row path, matching
     // this endpoint's behavior before the grouping feature existed.
@@ -1150,11 +1166,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     const batchWire = stockAdjustBatchWire({
       type: adjustForm.type,
       quantity: qty,
-      // `adjustCurrentQuantity`, not `previousQuantity`: this decides whether
-      // the picker was ON SCREEN, and the modal renders by that exact prop.
-      // (The receipt gate above uses previousQuantity, the branch figure the
-      // route itself compares against.) Reading a different figure here is how
-      // a form and its wire come to disagree about what the operator saw.
+      // `adjustCurrentQuantity` is the prop the modal renders the picker by,
+      // and it now resolves to the same branch figure `previousQuantity` and
+      // routes/inventory.ts compare against -- the two used to be different
+      // numbers, which is how the form and its wire came to disagree about
+      // what the operator was looking at.
       currentQuantity: adjustCurrentQuantity,
       unlockPricing,
       branchId: numericBranchId,

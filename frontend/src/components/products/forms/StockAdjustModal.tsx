@@ -14,7 +14,7 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
-import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import {
   applyRowOutcome,
   browserStockStorage,
@@ -465,8 +465,10 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
     }
     // Same figure InventoryStockModals shows as "Current" and gates its own
-    // receipt fields on, recomputed here so the wire and the form agree.
-    const currentQuantity = numericBranchId ? Number(selectedBranchStock?.quantity || 0) : stockQtyOf(product)
+    // receipt fields on -- the one shared branch rule, not a second derivation
+    // that happens to agree. (It did not: for a branch with no branch_stock
+    // row this answered 0 while the prop below answered the product total.)
+    const currentQuantity = adjustBranchQuantity(product.branch_stock, numericBranchId, stockQtyOf(product))
     const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
@@ -712,10 +714,9 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
 
   // Step 2: reuse Inventory's own adjust modal, fully wired.
   const product = selectedProduct
-  const numericBranchId = adjustForm.branch_id ? Number(adjustForm.branch_id) : null
-  const branchRows = Array.isArray(product.branch_stock) ? product.branch_stock : []
-  const branchEntry = numericBranchId ? branchRows.find((entry) => Number(entry?.branch_id) === numericBranchId) : null
-  const adjustCurrentQuantity = branchEntry ? Number(branchEntry.quantity || 0) : stockQtyOf(product)
+  // The figure the modal renders every verdict from, resolved by the same
+  // shared rule `onAdjust` gates the submission with above.
+  const adjustCurrentQuantity = adjustBranchQuantity(product.branch_stock, adjustForm.branch_id, stockQtyOf(product))
   const adjustCurrentPricing = {
     selling_price_usd: Number(product.selling_price_usd) || 0,
     selling_price_khr: Number(product.selling_price_khr) || 0,

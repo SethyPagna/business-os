@@ -240,8 +240,6 @@ export default function InventoryStockModals({
   // always creates or date-matches a lot, which is why it gates the same
   // received-date / supplier / cost / payment fields an explicit add does.
   const isStockIn = isStockInSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity)
-  const createsOrFillsLot = isStockIn
-    && (unlockPricing || adjustForm.type === 'set' || (showBatchPicker && adjustForm.batch_id !== ''))
   const creditDueMissing = adjustForm.payment_status === 'credit' && String(adjustForm.credit_due_date || '').trim() === ''
 
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
@@ -569,10 +567,19 @@ export default function InventoryStockModals({
                   </div>
                 </div>
               ) : null}
-              {/* D5a: supplier attribution for the lot this add creates or
+              {/* D5a: supplier attribution for the lot this receipt creates or
                   fills -- the same picker, same rules, as ReceiveBatchModal
-                  and BranchStockAdjuster. Adds only. */}
-              {createsOrFillsLot ? (
+                  and BranchStockAdjuster.
+                  N14-D repair: shown on `isStockIn`, which is EXACTLY the
+                  predicate the receipt gate applies (here and in
+                  lib/stockReceiptGate.ts). It used to be narrowed to "this
+                  submission creates or fills a lot I can name", which needed a
+                  visible batch picker and therefore a branch -- so a locked add
+                  with the branch cleared showed no supplier field at all, while
+                  the Worker (which falls back to the default branch and gates
+                  every add) refused it with supplier_required. A field the gate
+                  demands must never be a field the form declines to render. */}
+              {isStockIn ? (
                 <SupplierPickerField
                   idPrefix="inventory-adjust"
                   value={{ supplierId: adjustForm.supplier_id === '' ? null : adjustForm.supplier_id, supplierName: adjustForm.supplier_name }}
