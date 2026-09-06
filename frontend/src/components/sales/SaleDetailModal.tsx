@@ -867,6 +867,17 @@ export default function SaleDetailModal({
   const actualCostUsd = actualCostParsed !== null && Number.isFinite(actualCostParsed) && actualCostParsed >= 0 ? actualCostParsed : null
   const actualCostKhr = actualCostUsd === null ? null : toNumber(sale.delivery_actual_cost_khr)
   const isDelivery = !!toNumber(sale.is_delivery) || !!String(sale.delivery_contact_name || '').trim()
+  // DISPLAY is forgiving, WRITING is not. `isDelivery` above is deliberately
+  // loose so a sale that names a driver but was never flagged still reads as a
+  // delivery (S4-25). The Worker is not loose: guardDeliveryFeeAmendment and
+  // guardDeliveryActualCostAmendment both test `Number(sale.is_delivery)` and
+  // nothing else. Offering an Edit control under the looser test meant that on
+  // exactly that class of sale -- driver named, flag never set -- every Apply
+  // was guaranteed to come back 400: a control that promises what the route
+  // will refuse. The write gate is now the same question the route asks, so the
+  // refusal is unreachable rather than merely explained after the fact. Both
+  // delivery money fields share it, because they share the route's guard.
+  const canAmendDeliveryMoney = canAmendThisSale && !!toNumber(sale.is_delivery)
   // Driver info is DRIVER info. User, Sep 4 2026: "delivery only needs phone
   // and driver name...this is driver info, for customer name, phone and
   // address keep it same in customer section... make them compact".
@@ -1173,6 +1184,96 @@ export default function SaleDetailModal({
                     zero and the row did not render. */}
                 <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} />
                 <DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} />
+                {/* N41 (owner, Sep 6 2026): "i see the delivery fees it should
+                    show options to change delivery actual cost and the delivery
+                    fees. both." So the courier cost is shown and is editable --
+                    HERE, not in the totals footer. Two rulings meet on this one
+                    figure and both of them hold:
+
+                      S4-24 (Sep 4) took it out of the money summary. It is what
+                      the shop PAID the driver, never part of what the customer
+                      owes, and sitting under Change it invited the reader to
+                      subtract it from a total it was never inside -- literally
+                      the "difference" the owner asked to remove. That summary is
+                      shaped like the receipt, and the receipt does not print it.
+
+                      N41 (Sep 6) asks for it to be editable.
+
+                    Both are satisfied by putting it in the staff-only block that
+                    already names the driver and their phone: the margin figure
+                    sits beside the person it was paid to, the receipt-shaped
+                    summary is untouched, and a customer-facing surface still
+                    never sees it. */}
+                {isDelivery ? (
+                  <DetailRow label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ')}>
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="tabular-nums">
+                        {actualCostUsd === null ? (
+                          <span className="text-gray-400">{translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា')}</span>
+                        ) : fmtUSD(actualCostUsd)}
+                        {actualCostKhr !== null && actualCostKhr > 0 ? (
+                          <span className="ml-1 text-[11px] font-normal text-gray-400 dark:text-gray-500">{fmtKHR(actualCostKhr)}</span>
+                        ) : null}
+                      </span>
+                      {canAmendDeliveryMoney ? (
+                        <button
+                          type="button"
+                          onClick={() => { if (!actualCostEditing) setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setAmendMutationError(''); setActualCostEditing(!actualCostEditing) }}
+                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          {actualCostEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
+                        </button>
+                      ) : null}
+                    </span>
+                    {/* The editor is the row's own detail, not a floating block:
+                        it opens under the value it edits and inside the same
+                        DetailRow, so it cannot drift away from its label the way
+                        the fee editor once drifted out of the totals table. */}
+                    {canAmendDeliveryMoney && actualCostEditing ? (
+                      <span className="mt-2 block">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-actual-cost">
+                            {translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដថ្មី')}
+                          </label>
+                          <input
+                            id="amend-delivery-actual-cost"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={actualCostText}
+                            onChange={(event) => setActualCostText(event.target.value)}
+                            placeholder="0.00"
+                            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            disabled={amendSaving}
+                            onClick={() => stageActualDeliveryCostAmendment(actualCostUsd)}
+                            className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                          >
+                            {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActualCostEditing(false)}
+                            className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300"
+                          >
+                            {t('cancel') || 'Cancel'}
+                          </button>
+                        </span>
+                        {/* Same refusal line as the fee editor in the totals
+                            table, for the same reason -- sibling parity in the
+                            same commit set. A staging refusal never opens the
+                            ConfirmDialog, so if the reason did not render here
+                            there would be nowhere at all for it to appear. */}
+                        {amendMutationError && !amendConfirm ? (
+                          <span role="alert" className="mt-1 block text-[11px] font-medium text-red-600 dark:text-red-400">{amendMutationError}</span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </DetailRow>
+                ) : null}
                 {/* The note the cashier typed at checkout. It used to be a
                     SectionCard of its own ABOVE the items -- user, Sep 4 2026:
                     "the notes did not show in the notes area for sales, it
@@ -1486,7 +1587,7 @@ export default function SaleDetailModal({
                       sub={deliveryFeeKhr > 0
                         ? (deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr))
                         : null}
-                      action={canAmendThisSale ? (
+                      action={canAmendDeliveryMoney ? (
                         <button
                           type="button"
                           onClick={() => { if (!feeEditing) setFeeText(String(deliveryFeeUsd)); setAmendMutationError(''); setFeeEditing(!feeEditing) }}
@@ -1512,7 +1613,7 @@ export default function SaleDetailModal({
                       user was looking at. Opening it is now the Edit button in
                       the Edit column, so products and delivery are amended the
                       same way from the same place. */}
-                  {canAmendThisSale && feeEditing && (isDelivery || deliveryFeeUsd > 0) ? (
+                  {canAmendDeliveryMoney && feeEditing ? (
                     <tr className="bg-gray-50 dark:bg-gray-900/40">
                       <td colSpan={5} className="px-1.5 py-2 sm:px-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1551,65 +1652,6 @@ export default function SaleDetailModal({
                             precisely how "Apply does nothing" used to happen.
                             The editor stays open and the typed value stays put:
                             a failed action keeps the form. */}
-                        {amendMutationError && !amendConfirm ? (
-                          <p role="alert" className="mt-1 text-right text-[11px] font-medium text-red-600 dark:text-red-400">{amendMutationError}</p>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ) : null}
-                  {isDelivery ? (
-                    <MoneyRow
-                      label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ')}
-                      tone="muted"
-                      amount={actualCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(actualCostUsd)}
-                      sub={actualCostKhr !== null && actualCostKhr > 0 ? fmtKHR(actualCostKhr) : null}
-                      action={canAmendThisSale ? (
-                        <button
-                          type="button"
-                          onClick={() => { if (!actualCostEditing) setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setAmendMutationError(''); setActualCostEditing(!actualCostEditing) }}
-                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                          {actualCostEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
-                        </button>
-                      ) : null}
-                    />
-                  ) : null}
-                  {canAmendThisSale && actualCostEditing && isDelivery ? (
-                    <tr className="bg-gray-50 dark:bg-gray-900/40">
-                      <td colSpan={5} className="px-1.5 py-2 sm:px-2">
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-actual-cost">
-                            {translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដថ្មី')}
-                          </label>
-                          <input
-                            id="amend-delivery-actual-cost"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={actualCostText}
-                            onChange={(event) => setActualCostText(event.target.value)}
-                            placeholder="0.00"
-                            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                          />
-                          <button
-                            type="button"
-                            disabled={amendSaving}
-                            onClick={() => stageActualDeliveryCostAmendment(actualCostUsd)}
-                            className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
-                          >
-                            {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActualCostEditing(false)}
-                            className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300"
-                          >
-                            {t('cancel') || 'Cancel'}
-                          </button>
-                        </div>
-                        {/* Same refusal line as the fee editor above, for the
-                            same reason -- sibling parity in the same commit. */}
                         {amendMutationError && !amendConfirm ? (
                           <p role="alert" className="mt-1 text-right text-[11px] font-medium text-red-600 dark:text-red-400">{amendMutationError}</p>
                         ) : null}
@@ -1674,10 +1716,18 @@ export default function SaleDetailModal({
                       sub={changeKhr > 0 ? fmtKHR(changeKhr) : null}
                     />
                   ) : null}
-                  {/* Actual courier cost is shown for staff and is never part of
-                      the customer total. Its Edit action writes a separate
-                      append-only amendment so margin corrections remain
-                      explainable without changing the receipt. */}
+                  {/* S4-24: "Actual delivery cost" is gone from this summary.
+                      It is what the shop PAID the driver, not part of what the
+                      customer owes, and printing it under Change invited the
+                      reader to subtract it from a total it was never in --
+                      literally the "difference" the user asked to remove.
+                      N41 (Sep 6 2026) then made that figure EDITABLE, which is
+                      not a reason to bring it back here: it is shown, and
+                      corrected, in the staff-only driver block above, and the
+                      correction rides its own append-only amendment so a margin
+                      stays explainable without touching the receipt. This
+                      footer is shaped like the receipt; the receipt does not
+                      print it. */}
                 </tfoot>
               </table>
             </div>

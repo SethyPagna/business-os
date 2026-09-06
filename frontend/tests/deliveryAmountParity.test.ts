@@ -180,6 +180,48 @@ runTest('both editors refuse through the module and SAY SO instead of doing noth
   assert.equal(inline.length, 2, 'both delivery editors must render the refusal beside their own field')
 })
 
+runTest('both editors are OFFERED under the same test the route accepts them under', () => {
+  // The amount rule above is only half of parity. The other half is WHETHER the
+  // control is offered at all, and there the two sides disagreed: the modal
+  // decided a sale was a delivery if is_delivery was set OR a driver was named
+  // (deliberately loose, so a driver still shows on an unflagged sale), while
+  // the Worker's guards test is_delivery and nothing else. On a sale with a
+  // driver and no flag, both Edit buttons appeared and every Apply came back
+  // 400 -- a control that promises what the route is certain to refuse, which
+  // no amount of good error text makes acceptable.
+  //
+  // One rule, one implementation: `canAmendDeliveryMoney` asks the sale the
+  // same question the guards ask, and BOTH editors are gated on it.
+  const modal = read('../src/components/sales/SaleDetailModal.tsx')
+  const guards = read('../../cloudflare/src/lib/saleAmendments.ts')
+  for (const guard of ['guardDeliveryFeeAmendment', 'guardDeliveryActualCostAmendment']) {
+    const at = guards.indexOf(`export function ${guard}`)
+    assert.ok(at > 0, `could not find the Worker's ${guard}`)
+    assert.match(
+      guards.slice(at, at + 400),
+      /if \(!Number\(sale\.is_delivery\)\)/,
+      `${guard} no longer tests is_delivery -- the browser gate below must follow it`,
+    )
+  }
+  assert.match(
+    modal,
+    /const canAmendDeliveryMoney = canAmendThisSale && !!toNumber\(sale\.is_delivery\)/,
+    'the browser write gate must ask exactly what the Worker guards ask',
+  )
+  // Offered under the shared gate, both of them.
+  assert.match(modal, /action=\{canAmendDeliveryMoney \?/, 'the delivery-fee Edit control must use the shared write gate')
+  assert.match(modal, /\{canAmendDeliveryMoney \? \(\n\s*<button/, 'the courier-cost Edit control must use the shared write gate')
+  // ...and so are the two editors those controls open, so neither is left
+  // reachable by stale state once the control that opens it has gone.
+  for (const editor of ['canAmendDeliveryMoney && feeEditing', 'canAmendDeliveryMoney && actualCostEditing']) {
+    assert.ok(modal.includes(editor), `expected the editor gated on "${editor}"`)
+  }
+  // The looser DISPLAY test still exists -- it is what keeps a driver visible
+  // on an unflagged sale (S4-25). This is about which of the two governs a
+  // WRITE, not about deleting the other.
+  assert.match(modal, /const isDelivery = !!toNumber\(sale\.is_delivery\) \|\| /, 'the looser display test must survive')
+})
+
 runTest('the two copies of the rule are the same text, not merely the same answers', () => {
   const core = (source: string): string => {
     const start = source.indexOf('export type DeliveryAmountError')
