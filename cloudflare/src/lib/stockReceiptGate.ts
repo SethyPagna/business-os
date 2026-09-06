@@ -6,11 +6,10 @@
 // writes. They are NOT required on a remove (a set that lowers stock included:
 // that becomes a remove, and a removal has no supplier to name).
 //
-// The point is not validation for its own sake. Before this gate, four
+// The point is not validation for its own sake. Before this gate, three
 // different call sites answered "cost?" with a number the operator never
 // typed:
 //
-//   BranchStockAdjuster.tsx   unitCostUsd: product.cost_price_usd || 0
 //   BulkAddStockModal.tsx     unitCostUsd: product.purchase_price_usd || 0
 //   productWriteHelpers.ts    unitCostUsd: options.unitCostUsd ?? (…|| 0)
 //   lib/stockSession.ts       expanded('unit_cost_usd') ?? product?.cost_price_usd
@@ -66,8 +65,8 @@ export type StockReceiptGateInput = {
   lotSupplierName?: string | null
   /**
    * "The target lot's attribution is not visible here -- let the server decide."
-   * Some surfaces (BranchStockAdjuster's per-row lot picker) know a row tops up
-   * an EXISTING lot but not whether that lot is already attributed. Guessing
+   * Some surfaces (a per-row lot picker) know a row tops up an EXISTING lot
+   * but not whether that lot is already attributed. Guessing
    * either way is wrong: refuse and a complete receipt is blocked in the
    * browser; assume attributed and the surface is laxer than the wire. This
    * defers only the supplier half; the cost is still this receipt's own and is

@@ -1706,9 +1706,8 @@ app.post('/adjust', async (c) => {
       }
     } else if (rawBatchId != null && rawBatchId !== '') {
       // An interactive picker explicitly requires a choice -- 'new' isn't
-      // valid for remove (see BranchStockAdjuster.tsx/
-      // InventoryStockModals.tsx's own client-side guard); this only
-      // fires if that guard was somehow bypassed.
+      // valid for remove (see InventoryStockModals.tsx's own client-side
+      // guard); this only fires if that guard was somehow bypassed.
       return c.json({ error: 'A received date must be selected to remove stock' }, 400)
     } else {
       // Auto-routed remove (no interactive batchId at all) -- FIFO-drain
