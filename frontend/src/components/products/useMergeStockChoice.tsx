@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import MergeStockChoiceDialog, {
   type MergeIdentityDiff, type MergePricingChange, type MergeStockChoice, type MergeStockImpact,
 } from './MergeStockChoiceDialog'
+import { mergeNeedsConfirmation } from './mergeConfirmationRule'
 import { getMergePreview, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
 
 // The ONE merge-a-duplicate-pair flow, shared by every surface that resolves a
@@ -130,17 +131,14 @@ export function useMergeStockChoice(t: TranslateFn) {
     }
 
     if (needsChoice !== null) {
-      const wouldReprice = Boolean(pricing?.changes?.length)
-      // Name + barcode + cost decide whether these are one product at all. A
-      // cross-identity merge is never automatic, even with no stock and no
-      // price to move -- the operator has to be told which field differs.
-      const crossIdentity = Boolean(identity && !identity.same && identity.differs.length)
-      // The kept row has no cost of its own and would take the discarded row's
-      // (the cost ruling: 0/NULL is missing, not different). That is the right
-      // answer, and it still changes what the kept product cost -- so it is
-      // shown and confirmed rather than applied on the quiet.
-      const fillsCost = Boolean(identity?.costFill?.length)
-      if (!needsChoice && !wouldReprice && !crossIdentity && !fillsCost) {
+      // ONE rule, shared with the dialog that renders the consequences
+      // (mergeConfirmationRule.ts). It lived inline here until 2026-09-06 and
+      // had drifted from the panel it opens: it never looked at the cost the
+      // merge AVERAGES, so the canonical leading-zero pair -- two recorded
+      // costs, similar enough to average, no stock, equal selling prices --
+      // merged with no dialog at all and the cost-average section could never
+      // be reached.
+      if (!mergeNeedsConfirmation({ needsChoice, pricing, identity })) {
         try {
           await mergePossiblySameProducts(keeper.id, other.id)
         } catch (error) {

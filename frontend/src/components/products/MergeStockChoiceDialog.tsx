@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import ConfirmDialog from '../shared/ConfirmDialog'
 import InfoHint from '../shared/InfoHint'
+import { costAverageRows } from './mergeConfirmationRule'
 
 // "What happens when I save one and the other row also has stock?"
 //
@@ -152,13 +153,12 @@ export default function MergeStockChoiceDialog({
   // of the distinct costs (owner ruling, 2026-09-04). The kept row ends up
   // costing a figure neither row recorded, which is exactly the kind of
   // change that must be seen before it happens, not found afterwards.
-  const costAverages = (identity?.costVerdict === 'differs' ? Object.keys(identity?.costAfter ?? {}) : [])
-    .map((field) => ({
-      field,
-      from: Number(identity?.costBefore?.[field]) || 0,
-      to: Number(identity?.costAfter?.[field]) || 0,
-    }))
-    .filter((row) => row.to && Math.round(row.from * 10000) !== Math.round(row.to * 10000))
+  //
+  // Computed by the SAME function the flow's fast-path gate consults
+  // (mergeConfirmationRule.costAverageRows). While these were two separate
+  // expressions the gate did not know this section existed and merged straight
+  // past it, so the panel below was unreachable on the one pair it exists for.
+  const costAverages = costAverageRows(identity)
 
   const options: Array<{ value: MergeStockChoice; label: string; hint: string; tone: string }> = [
     {
