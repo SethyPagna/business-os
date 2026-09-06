@@ -291,6 +291,22 @@ const desktopTokens = ruleBody(css, '[data-reports-hub],\n[data-reports-fold]', 
 assert.match(desktopTokens, /--ui-size-body:\s*calc\(14px \* var\(--ui-km-boost, 1\)\);/, 'the desktop size tier covers the portalled fold as well as the hub')
 assert.doesNotMatch(desktop, /--ui-size-/, 'the hub-only half of the 1024 tier carries layout, not sizes')
 assert.doesNotMatch(desktopTokens, /max-width|margin-inline|padding-inline/, 'and the shared half carries sizes, not the document-column layout')
+// DISCLOSED ENGLISH CHANGE, pinned so it cannot drift silently either way.
+//
+// At 6e3abfea only ReportOptionsFold.tsx carried `data-reports-fold`; the six
+// views' detail Folds carried no scope at all and read the :root tokens
+// (12px/11px) at every width, because the base 1024 tier named
+// `[data-reports-hub]` alone. Naming the fold here moves ENGLISH fold type at
+// >=1024: body 12px -> 14px, meta 11px -> 13px. That is deliberate -- a detail
+// fold opened over a 14px report is a sibling of that report, not of the phone
+// layout -- but it is a Latin-side change in a lane whose ask was Khmer size,
+// so the exact intended numbers are asserted rather than left to drift.
+assert.match(desktopTokens, /--ui-size-meta:\s*calc\(13px \* var\(--ui-km-boost, 1\)\);/, 'English fold/hub meta is 13px from 1024 up -- change this only with the owner')
+assert.match(desktopTokens, /--ui-size-h2:\s*calc\(17px \* var\(--ui-km-boost, 1\)\);/, 'English section titles are 17px from 1024 up')
+assert.match(desktopTokens, /--ui-size-h3:\s*calc\(15px \* var\(--ui-km-boost, 1\)\);/, 'English sub-titles are 15px from 1024 up')
+// The multiplier is what makes those numbers Latin-only: at 1.0 they ARE the
+// English sizes, and only the km block moves them.
+assert.match(ruleBody(css, '[data-reports-hub],\n[data-reports-fold]'), /--ui-km-boost:\s*1;/, 'the boost is 1 for Latin, so every size above is literally the English size')
 
 // ---------------------------------------------------------------------------
 // 2 + 3. One shared segment class: four visible sides, hairline inset.
