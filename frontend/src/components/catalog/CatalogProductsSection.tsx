@@ -29,7 +29,9 @@ import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { PORTAL_MERCHANT_COLOR_DEFAULTS, ensureAccessibleSurface } from './portalContrast.ts'
 
-type CopyFn = (key: string, fallback?: string) => string
+// Same three-argument translator as everywhere else on the portal; the two
+// arity declarations silently dropped the Khmer fallback at the type level.
+type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 type ReplaceVarsFn = (template: string, values: Record<string, string | number>) => string
 type StringListSetter = Dispatch<SetStateAction<string[]>>
 type InitialFilterSetter = Dispatch<SetStateAction<string>>
@@ -387,6 +389,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             <span className="block truncate">{copy('category', 'Category')}</span>
           </div>
           <PortalFilterCombobox
+            copy={copy}
             label={copy('category', 'Category')}
             allLabel={copy('all', 'All')}
             searchPlaceholder={copy('searchCategories', 'Search categories...')}
@@ -406,6 +409,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             <span className="block truncate">{copy('brand', 'Brand')}</span>
           </div>
           <PortalFilterCombobox
+            copy={copy}
             label={copy('brand', 'Brand')}
             allLabel={copy('all', 'All')}
             searchPlaceholder={copy('searchBrands', 'Search brands...')}
@@ -426,6 +430,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               <span className="block truncate">{copy('branch', 'Branch')}</span>
             </div>
             <PortalFilterCombobox
+              copy={copy}
               label={copy('branch', 'Branch')}
               allLabel={copy('allBranches', 'All branches')}
               searchPlaceholder={copy('searchBranches', 'Search branches...')}
@@ -522,8 +527,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       <div className="mb-5 space-y-3">
         <div className="sticky top-16 z-20 -mx-1 space-y-2 rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/96 sm:top-20">
           <div className="flex items-center gap-2">
-          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
-            <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-300" />
+          {/* The wrapping <label> held only the magnifier icon, so it gave the
+              field no accessible name at all: a reader announced a bare "edit
+              text". A placeholder is not a name -- it disappears the moment
+              anything is typed, and several readers ignore it outright. */}
+          <label htmlFor="portal-product-search" className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
+            <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-300" aria-hidden="true" />
+            <span className="sr-only">{copy('searchPlaceholder', 'Search products')}</span>
             <input
               id="portal-product-search"
               name="product_search"
@@ -615,7 +625,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       {previewConfig.showPromotions !== false && visiblePromotionItems.length ? (
         <div className="mb-5 space-y-3">
           <div className="flex flex-col gap-1 px-1">
-            <div className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{promotionsTitle || copy('promotionsSectionFallback', 'Featured offers')}</div>
+            {/* WCAG 1.3.1 / 2.4.10: the promotions group announced itself as a
+                heading only by being bigger, while each promotion card below
+                it really was an <h3>. A reader jumping by heading therefore
+                landed on the offers with nothing above them saying what the
+                run of offers was. Group is h3 under the section's h2; the
+                cards drop to h4 so the levels stay in order. */}
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{promotionsTitle || copy('promotionsSectionFallback', 'Featured offers')}</h3>
             <div className="text-sm text-slate-500 dark:text-neutral-400">{promotionsIntro || copy('promotionsSectionHint', 'Our latest offers and announcements.')}</div>
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
@@ -630,7 +646,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                         </span>
                       ) : null}
                       <div className="space-y-2">
-                        {item.title ? <h3 className="text-2xl font-semibold leading-tight">{item.title}</h3> : null}
+                        {item.title ? <h4 className="text-2xl font-semibold leading-tight">{item.title}</h4> : null}
                         {item.subtitle ? <div className="text-sm font-medium text-rose-50/95">{item.subtitle}</div> : null}
                         {item.body ? <p className="text-sm leading-6 text-rose-50/90">{item.body}</p> : null}
                       </div>
@@ -766,8 +782,23 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 className={`group overflow-hidden bg-transparent transition duration-200 ${openProductDetail ? 'cursor-pointer' : ''}`}
                 onClick={() => openProductDetail?.(product)}
               >
+                {/* Opening the gallery was a click on a bare <div>: no tab stop,
+                    no name, no key handler, so the photos were unreachable
+                    without a mouse. It holds only the image and decorative
+                    badges, so it can safely BE the button. */}
                 <div
                 className={`relative aspect-square overflow-hidden rounded-2xl bg-slate-100 dark:bg-neutral-800 ${gallery.length ? 'cursor-zoom-in' : ''}`}
+                role={gallery.length ? 'button' : undefined}
+                tabIndex={gallery.length ? 0 : undefined}
+                aria-label={gallery.length ? `${copy('viewImages', 'View images')}: ${product.name}` : undefined}
+                onKeyDown={(event) => {
+                  if (!gallery.length) return
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    openProductGallery(product, 0)
+                  }
+                }}
                 onClick={(event) => {
                   event.stopPropagation()
                   if (gallery.length) openProductGallery(product, 0)
@@ -833,9 +864,25 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     ))}
                   </div>
                 ) : null}
-                <div {...getKhmerTextProps(product.name, `${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
-                  {product.name}
-                </div>
+                {/* The whole card is clickable for a pointer, but it cannot
+                    become role="button": it already contains the wishlist and
+                    add-to-list buttons, and a button may not contain buttons.
+                    The product NAME is the keyboard-reachable control that
+                    opens the sheet -- named by the product, as a reader
+                    announces it. */}
+                {openProductDetail ? (
+                  <button
+                    type="button"
+                    onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
+                    {...getKhmerTextProps(product.name, `block w-full text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}
+                  >
+                    {product.name}
+                  </button>
+                ) : (
+                  <div {...getKhmerTextProps(product.name, `${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
+                    {product.name}
+                  </div>
+                )}
                 {showDescription ? (
                   <p {...getKhmerTextProps(product.description || copy('noDescription', 'No description available.'), `${compactCatalogCards ? 'line-clamp-2 min-h-[2.2rem] text-[11px] leading-[1.15rem]' : 'line-clamp-2 min-h-[2.6rem] text-xs leading-5'} text-slate-500 dark:text-neutral-400`)}>
                     {product.description || copy('noDescription', 'No description available.')}
