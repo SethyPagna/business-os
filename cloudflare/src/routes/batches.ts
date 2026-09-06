@@ -7,7 +7,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
 import { listOpenDamagedLots } from '../lib/returnsStock'
-import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
+import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import type { Env } from '../index'
@@ -281,7 +281,7 @@ app.patch('/:id', async (c) => {
   // surfaced as a normal 409/error rather than silently merging two
   // distinct batch rows into one.
   if (body.received_at !== undefined) {
-    const iso = normalizeToIsoDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
+    const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
     if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date' }, 400)
     const resolvedIso = iso || new Date().toISOString().slice(0, 10)
     const code = dateToBatchCode(resolvedIso) as string

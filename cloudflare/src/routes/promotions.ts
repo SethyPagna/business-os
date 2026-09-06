@@ -6,7 +6,7 @@ import { audit } from '../lib/audit'
 import { hasPermission, getPermissionTier, getActionTier } from '../lib/permissions'
 import { bumpVersion } from '../lib/cache'
 import { normalizePromotionRule, isRuleActive } from '../lib/promotionRules'
-import { normalizeToIsoDate } from '../lib/batchCode'
+import { normalizeTypedDate } from '../lib/batchCode'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -65,10 +65,16 @@ function normalizeRuleWrite(body: RuleInput = {}) {
   const ids = Array.isArray(body.product_ids) ? body.product_ids : []
   const productIds = Array.from(new Set(ids.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0))).slice(0, 200)
   const money = (v: unknown) => Math.max(0, Math.round((Number(v) || 0) * 100) / 100)
+  // A promotion window is TYPED, on the Promotions page and in the
+  // catalog's Manage Promotions modal, into DateEntryInput -- which is
+  // day-first and hands back ISO. Read a slash form the same way the field
+  // that produced it did: month-first here would file the window the
+  // operator called 3 September (03/09/2026) as 9 March, and a promotion
+  // with the wrong window is silently wrong pricing, not a visible error.
   const dateOnly = (v: unknown) => {
     const raw = String(v || '').trim()
     if (!raw) return null
-    return normalizeToIsoDate(raw)
+    return normalizeTypedDate(raw)
   }
   const uses = TYPE_USES[ruleType as keyof typeof TYPE_USES]
   return {
@@ -106,8 +112,8 @@ function ruleWriteError(input: ReturnType<typeof normalizeRuleWrite>, body: Rule
   // A window the operator TYPED but the parser could not read must fail
   // loudly, not silently store an open-ended rule (Golden Rule: no silent
   // partial writes).
-  if (String(body.starts_at || '').trim() && !input.starts_at) return 'Start date is not a real date (use mm/dd/yyyy)'
-  if (String(body.ends_at || '').trim() && !input.ends_at) return 'End date is not a real date (use mm/dd/yyyy)'
+  if (String(body.starts_at || '').trim() && !input.starts_at) return 'Start date is not a real date (use dd/mm/yyyy)'
+  if (String(body.ends_at || '').trim() && !input.ends_at) return 'End date is not a real date (use dd/mm/yyyy)'
   return null
 }
 

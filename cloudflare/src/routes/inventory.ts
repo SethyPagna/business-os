@@ -17,7 +17,7 @@ import { buildIssueStateClauses, buildLikeAliasClause, runFuzzyFallbackMatch, to
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { normalizeToIsoDate } from '../lib/batchCode'
+import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
@@ -1439,8 +1439,8 @@ app.post('/adjust', async (c) => {
   // Absent stays null (the kernel then uses today); a supplied but
   // unreadable date is refused rather than silently becoming today's.
   const rawReceivedDate = body.receivedDate != null && String(body.receivedDate).trim() !== '' ? String(body.receivedDate).trim() : null
-  const receivedDate = rawReceivedDate ? normalizeToIsoDate(rawReceivedDate) : null
-  if (rawReceivedDate && !receivedDate) return c.json({ error: 'Received date must be a readable date (mm/dd/yyyy)' }, 400)
+  const receivedDate = rawReceivedDate ? normalizeTypedDate(rawReceivedDate) : null
+  if (rawReceivedDate && !receivedDate) return c.json({ error: 'Received date must be a readable date (dd/mm/yyyy)' }, 400)
   // D5a: supplier attribution for the lot this add creates or fills.
   // camelCase keys like the rest of THIS route's body (receivedDate,
   // batchId...); coerced with the same rules as POST /api/batches so the

@@ -4,8 +4,8 @@
 // RCP" -- sales receipts mint the BARE timestamp id, empty prefix). Returns
 // keep RET-/SRET- so a return number stays distinguishable from the sale
 // receipt it references. The compact date form is ONLY for these
-// identifiers -- displayed dates stay mm/dd/yyyy 24-hour app-wide
-// (frontend/src/utils/formatters.ts).
+// identifiers -- displayed dates are dd/mm/yyyy 24-hour app-wide since
+// Sep 4 2026 (frontend/src/utils/formatters.ts).
 //
 // The encoded wall clock is Asia/Phnom_Penh (UTC+07:00, no DST), the app's
 // canonical business timezone -- the same fixed-offset convention as

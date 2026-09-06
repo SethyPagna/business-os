@@ -21,7 +21,7 @@ import { fmtDate, fmtDateOnly, fmtDateTime24, fmtClock24 } from '../src/utils/fo
 import { normalizeDateEntry, isoToDisplayDate, applyDateEntryMask } from '../src/utils/dateEntry.ts'
 import { formatBatchReceivedDate, lotCodeAsDate, lotCodeToIsoDate, batchDisplayLabel } from '../src/utils/batchLabel.ts'
 import { batchReceivedInstant } from '../src/components/pos/posCore.ts'
-import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from '../src/utils/batchCode.ts'
+import { dateToBatchCode, normalizeToIsoDate, normalizeTypedDate, readBatchDateCell } from '../src/utils/batchCode.ts'
 import { businessDateTimeId, stockSessionId, isBusinessReceiptNumber } from '../src/utils/timestampId.ts'
 
 let failures = 0
@@ -205,11 +205,11 @@ await runTest('the same cell reads two different ways under two headers', () => 
 await runTest('readBatchDateCell picks the order from the header it finds', () => {
   assert.deepEqual(
     readBatchDateCell({ 'batch(dd/mm/yyyy)': '03/09/2026' }),
-    { raw: '03/09/2026', order: 'day-first' },
+    { raw: '03/09/2026', order: 'day-first', header: 'batch(dd/mm/yyyy)' },
   )
   assert.deepEqual(
     readBatchDateCell({ 'batch(mm/dd/yyyy)': '03/09/2026' }),
-    { raw: '03/09/2026', order: 'month-first' },
+    { raw: '03/09/2026', order: 'month-first', header: 'batch(mm/dd/yyyy)' },
   )
   // Bare fallback headers name no format, so they keep the only meaning they
   // have ever had. An ambiguous header changing meaning is the same defect in
@@ -217,17 +217,53 @@ await runTest('readBatchDateCell picks the order from the header it finds', () =
   for (const header of ['batch', 'date', 'received_date']) {
     assert.deepEqual(
       readBatchDateCell({ [header]: '03/09/2026' }),
-      { raw: '03/09/2026', order: 'month-first' },
+      { raw: '03/09/2026', order: 'month-first', header },
       `bare '${header}' stays month-first`,
     )
   }
   // No date column at all -- callers default this to today.
-  assert.deepEqual(readBatchDateCell({ name: 'Iced Coffee' }), { raw: '', order: 'month-first' })
+  assert.deepEqual(readBatchDateCell({ name: 'Iced Coffee' }), { raw: '', order: 'month-first', header: '' })
   // End to end: the two headers must land in DIFFERENT lots.
   const dayFirst = readBatchDateCell({ 'batch(dd/mm/yyyy)': '03/09/2026' })
   const monthFirst = readBatchDateCell({ 'batch(mm/dd/yyyy)': '03/09/2026' })
   assert.equal(dateToBatchCode(normalizeToIsoDate(dayFirst.raw, dayFirst.order)), '09032026')
   assert.equal(dateToBatchCode(normalizeToIsoDate(monthFirst.raw, monthFirst.order)), '03092026')
+})
+
+// ---------------------------------------------------------------------------
+// A TYPED date and a SPREADSHEET cell are two different questions
+// ---------------------------------------------------------------------------
+
+await runTest('normalizeTypedDate reads what a person typed into the app: day first', () => {
+  // The Worker used to answer a typed date with normalizeToIsoDate's bare
+  // (month-first) default, so POST /inventory/adjust, POST /batches, the
+  // promotions window and the stock-in session all disagreed with the very
+  // field that produced the string. 03/09/2026 is the discriminating input:
+  // both readings are real dates, so only the answer tells them apart.
+  assert.equal(normalizeTypedDate('03/09/2026'), '2026-09-03', '3 September, as the day-first field wrote it')
+  assert.equal(normalizeToIsoDate('03/09/2026'), '2026-03-09', 'the spreadsheet default is still 9 March -- deliberately unchanged')
+  // Unambiguous both ways round: a day past the 12th proves the order
+  // instead of assuming it.
+  assert.equal(normalizeTypedDate('25/12/2026'), '2026-12-25')
+  assert.equal(normalizeTypedDate('12/25/2026'), null, 'exactly ONE order is accepted; the other fails loudly rather than being guessed')
+  // ISO is read identically by both, which is why every UI field stores it.
+  assert.equal(normalizeTypedDate('2026-09-03'), '2026-09-03')
+  assert.equal(normalizeTypedDate(''), null)
+  assert.equal(normalizeTypedDate('not-a-date'), null)
+})
+
+await runTest('normalizeTypedDate agrees with the field that feeds it', () => {
+  // dateEntry.normalizeDateEntry is what DateEntryInput runs in the browser;
+  // normalizeTypedDate is what the Worker runs on the same keystrokes. If
+  // these two ever disagree, the screen and the database are telling the
+  // operator different days -- which is the whole defect this pairs against.
+  const today = new Date(2026, 8, 4)
+  for (const typed of ['03/09/2026', '25/12/2026', '9/3/2026', '2026-03-09', '29/02/2024']) {
+    assert.equal(
+      normalizeTypedDate(typed), normalizeDateEntry(typed, today).iso,
+      `the Worker and the field must read "${typed}" as the same day`,
+    )
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -253,7 +289,7 @@ await runTest('the frontend and Worker batchCode copies have identical bodies', 
   )
   // The mirror must really carry the shared API, not just match by both
   // being truncated the same way.
-  for (const symbol of ['readBatchDateCell', 'normalizeToIsoDate', 'dateToBatchCode']) {
+  for (const symbol of ['readBatchDateCell', 'normalizeToIsoDate', 'normalizeTypedDate', 'dateToBatchCode']) {
     assert.ok(mirror.includes(`export function ${symbol}`), `mirror exports ${symbol}`)
   }
 })

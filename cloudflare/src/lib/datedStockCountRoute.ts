@@ -44,7 +44,9 @@ export function parseDatedStockCountEntries(body: Record<string, unknown>): { en
   const entries: ParsedDatedCountEntry[] = []
   for (let i = 0; i < raw.length; i += 1) {
     const row = (raw[i] || {}) as Record<string, unknown>
-    const date = normalizeToIsoDate(row.date as string) || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : null)
+    // Entries arrive already resolved to ISO; a slash form could only come
+    // from the mapped sheet, which is month-first (datedStockCountResolve.ts).
+    const date = normalizeToIsoDate(row.date as string, 'month-first') || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : null)
     const productId = Number.parseInt(String(row.productId ?? ''), 10)
     const branchId = Number.parseInt(String(row.branchId ?? ''), 10)
     const count = Number(row.count)
@@ -199,7 +201,8 @@ export async function buildDatedStockCountPlan(
           batchId: Number(row.batchId),
           productId: Number(batch.productId),
           branchId: Number(row.branchId),
-          date: normalizeToIsoDate(batch.receivedAt) || String(batch.receivedAt || '').slice(0, 10),
+          // received_at comes straight out of D1 as ISO.
+          date: normalizeToIsoDate(batch.receivedAt, 'month-first') || String(batch.receivedAt || '').slice(0, 10),
           quantity: Number(row.quantity) || 0,
         }
       })
