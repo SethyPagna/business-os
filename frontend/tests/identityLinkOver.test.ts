@@ -283,9 +283,14 @@ check('the bulk edit builders never emit an identity field', () => {
   // it cannot re-admit an identity field the builders dropped.
   const payload = buildProductBulkUpdatePayload(
     buildProductBulkInfoUpdates(everything), { updated_at: 't' }, { id: 1, name: 'u' },
-  )
+  ) as unknown as Record<string, unknown>
+  // Read as a bag on purpose: the point is what the payload CARRIES at runtime,
+  // and the builder's declared return type does not list the pass-through keys
+  // at all -- so a typed read here would be checking the annotation, not the
+  // object that goes on the wire.
   assert.equal(payload.name, undefined)
   assert.equal(payload.barcode, undefined)
+  assert.equal(payload.userName, 'u', 'the bookkeeping fields it IS meant to add must still be there')
 })
 
 // The kernel agrees, from the other direction: a payload with neither field
