@@ -96,6 +96,52 @@ export function railRendersThroughPortal(edge: string | null | undefined): boole
   return edge === 'screen'
 }
 
+/** How the inline (editor-preview) rail's sticky wrapper is sized inside its
+ * track, read off the two class strings the component actually ships.
+ *
+ * This is the whole of the bug it exists to stop: the track is a flex row
+ * (`absolute inset-y-0 right-0 flex w-9`) spanning the full height of the
+ * products grid, and a flex child defaults to `align-self: stretch`. The
+ * sticky wrapper was therefore exactly as tall as the track -- and a sticky
+ * box that fills its containing block has nowhere to travel, so it scrolls
+ * away with the grid while its `sticky top-24` source line reads correct.
+ *
+ * Anything that takes the wrapper's height back to its content restores the
+ * travel: `self-start` (or `self-baseline`) on the wrapper, `items-start` on
+ * the track, or an explicit `h-fit`. */
+export function railStickyAlignSelf(trackClass: string, stickyClass: string): 'stretch' | 'start' {
+  const track = typeof trackClass === 'string' ? trackClass : ''
+  const sticky = typeof stickyClass === 'string' ? stickyClass : ''
+  const hasClass = (source: string, name: string) =>
+    new RegExp(`(?:^|\\s)${name}(?:\\s|$)`).test(source)
+  if (hasClass(sticky, 'self-start') || hasClass(sticky, 'self-baseline') || hasClass(sticky, 'h-fit')) return 'start'
+  if (hasClass(track, 'items-start')) return 'start'
+  return 'stretch'
+}
+
+/** Where the inline rail's top actually lands, relative to the top of the
+ * scrollport it sticks inside, for a given scroll position.
+ *
+ * CSS sticky in one expression: the box shifts down its containing block by
+ * however much the scroll has eaten into `stickyOffset`, but never past the
+ * room left over inside that block (`trackHeight - boxHeight`). A stretched
+ * box leaves zero room, so the shift is pinned at 0 and the rail simply
+ * translates with the page -- which is why the returned top goes negative. */
+export function railStickyTop(input: {
+  alignSelf: 'stretch' | 'start'
+  trackTop: number
+  trackHeight: number
+  railHeight: number
+  stickyOffset: number
+  scrollTop: number
+}): number {
+  const boxHeight = input.alignSelf === 'stretch' ? input.trackHeight : input.railHeight
+  const travel = Math.max(0, input.trackHeight - boxHeight)
+  const wanted = input.scrollTop + input.stickyOffset - input.trackTop
+  const shift = Math.min(Math.max(wanted, 0), travel)
+  return input.trackTop + shift - input.scrollTop
+}
+
 /** The keys the rail actually renders: de-duplicated, ordered the way every
  * other initials surface in the app orders them, with `#` pinned last. A
  * non-array or junk payload degrades to an empty rail rather than throwing --

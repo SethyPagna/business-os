@@ -398,11 +398,19 @@ export default function AlphaIndexRail({
   if (edge === 'inline') {
     return (
       <div className="pointer-events-none absolute inset-y-0 right-0 z-30 flex w-9 justify-center">
-        {/* A percentage sticky offset would resolve against this full-height
+        {/* `self-start` is load-bearing, not decoration: the track is a flex
+            row, so this wrapper defaulted to `align-self: stretch` and was as
+            tall as the whole grid. A sticky box that fills its containing
+            block has no room left to travel, so it scrolled away with the
+            products while this very line said `sticky`. Sized to its content
+            it pins at scrollport top + 96px and lets go only at the end of
+            the track (railStickyTop covers both).
+
+            A percentage sticky offset would resolve against the full-height
             track, not the scrollport, so the rail is pinned a fixed distance
             below the top of whatever scrolls -- clear of the preview's own
             sticky search row. */}
-        <div className="pointer-events-auto sticky top-24">
+        <div className="pointer-events-auto sticky top-24 self-start">
           {railNode}
         </div>
       </div>

@@ -31,6 +31,8 @@ import {
   railIndexAtOffset,
   railPointerDownAction,
   railRendersThroughPortal,
+  railStickyAlignSelf,
+  railStickyTop,
   railTouchActionClass,
   resolveBrandJump,
   sortRailKeys,
@@ -387,9 +389,57 @@ runTest('the admin portal EDITOR PREVIEW gets a brand index too, not a carve-out
   const inlineBranch = /if \(edge === 'inline'\) \{[\s\S]*?\n  \}/.exec(rail)
   assert.ok(inlineBranch, 'the inline variant needs its own render branch')
   assert.doesNotMatch(inlineBranch![0], /createPortal/, 'the preview rail must stay inside the preview panel')
-  assert.match(inlineBranch![0], /sticky top-24/, 'it follows the preview scroll instead of scrolling away with the grid')
   assert.match(inlineBranch![0], /pointer-events-none absolute inset-y-0 right-0/, 'its track must not swallow clicks on the product cards under it')
   assert.match(inlineBranch![0], /pointer-events-auto/, 'the rail itself still has to be operable')
+})
+
+runTest('the editor preview rail actually STICKS -- the shipped classes give it room to travel', () => {
+  // `sticky top-24` on its own was a source line that read correct and behaved
+  // wrong. The track is `flex`, so the wrapper inherited `align-self: stretch`
+  // and was as tall as the whole 2400px grid; a sticky box that fills its
+  // containing block has zero travel, so the rail scrolled away with the
+  // products (measured railTop -435px after an 800px panel scroll) while a
+  // /sticky top-24/ assertion kept passing. So this test derives the geometry
+  // from the two class strings the component actually ships and asks where the
+  // rail lands, rather than asking whether a word appears.
+  const inlineBranch = /if \(edge === 'inline'\) \{[\s\S]*?\n  \}/.exec(rail)
+  assert.ok(inlineBranch, 'the inline variant needs its own render branch')
+  const trackClass = /<div className="((?:(?!").)*absolute inset-y-0(?:(?!").)*)"/.exec(inlineBranch![0])?.[1] ?? ''
+  const stickyClass = /<div className="((?:(?!").)*sticky(?:(?!").)*)"/.exec(inlineBranch![0])?.[1] ?? ''
+  assert.ok(trackClass && stickyClass, `both the track and the sticky wrapper need a readable className, got "${trackClass}" / "${stickyClass}"`)
+
+  const offsetStep = Number(/(?:^|\s)top-(\d+)(?:\s|$)/.exec(stickyClass)?.[1])
+  assert.ok(Number.isFinite(offsetStep), `the sticky wrapper needs a fixed top offset, got "${stickyClass}"`)
+  const stickyOffset = offsetStep * 4 // Tailwind's 0.25rem step, at the 16px root
+
+  const alignSelf = railStickyAlignSelf(trackClass, stickyClass)
+  assert.equal(alignSelf, 'start', `a stretched flex child has no sticky travel; got "${stickyClass}" inside "${trackClass}"`)
+
+  // A tall preview: 2400px of products, a 400px rail, the panel scrolled 800px.
+  const geometry = { trackTop: 0, trackHeight: 2400, railHeight: 400, stickyOffset, scrollTop: 800 }
+  assert.equal(
+    railStickyTop({ ...geometry, alignSelf }),
+    stickyOffset,
+    'mid-scroll the rail must sit at the top of the preview scrollport, not follow the grid',
+  )
+  // The negative control is the shipped bug itself, so this test cannot pass
+  // for the wrong reason: stretched, the same numbers put the rail 800px above
+  // the scrollport -- off the panel entirely.
+  assert.equal(
+    railStickyTop({ ...geometry, alignSelf: 'stretch' }),
+    -800,
+    'a full-height wrapper cannot stick at all, whatever its top- offset says',
+  )
+  assert.equal(
+    railStickyTop({ ...geometry, alignSelf, trackTop: 300, scrollTop: 0 }),
+    300,
+    'before the grid reaches the sticky line the rail sits at its natural place, beside the first row',
+  )
+  assert.equal(
+    railStickyTop({ ...geometry, alignSelf, scrollTop: 2400 }),
+    -400,
+    'and it lets go at the end of the track rather than escaping the products it indexes',
+  )
 })
 
 runTest('the admin callers still get the sidebar rail (no edge prop, no behaviour change)', () => {
