@@ -129,8 +129,12 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  const lowStockRule = load('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
  const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
+ const registry=load('lib/paymentMethodRegistry.ts')
+ const reconciliation=load('lib/shiftReconciliation.ts',{'./db':{getDb:()=>db},'./salesAnalytics':analytics,
+   './nativeSaleChange':nativeSaleChange,'./paymentMethodRegistry':registry})
  const telegram=load('lib/telegram.ts',{'./lowStockSettings':lowStockStub,'./db':{getDb:()=>db},'./businessDateWindow':dates,
-   './salesAnalytics':analytics,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,'./telegramLang':load('lib/telegramLang.ts')})
+   './salesAnalytics':analytics,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,
+   './telegramLang':load('lib/telegramLang.ts'),'./shiftReconciliation':reconciliation})
  const shift={user_id:7,branch_id:2,scope_mode:'per_account',opened_at:'2026-09-04T02:00:00.000Z',closed_at:'2026-09-04T04:00:00.000Z'}
  const initial=await telegram.shiftExpenses({},shift,0)
  assert.equal(initial.khr,44100,'created_at, not fee_date, assigns shift expenses')
@@ -148,6 +152,12 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  assert.match(grouped.details[8].label,/Other expenses/)
  assert.equal((await telegram.shiftExpenses({},{...shift,scope_mode:'shop_wide'},0)).usd,83)
  assert.equal((await telegram.shiftExpenses({},{...shift,user_id:99},0)).khr,0)
+ // A fee recorded with NO branch is still paid out of the one drawer that was
+ // open (owner ruling, Sep 6 2026), while another branch's fee stays out.
+ sql.exec("INSERT INTO fees(id,created_at,branch_id,label,amount_usd,created_by) VALUES(44,'2026-09-04 03:00:00',NULL,'No branch',7,7)")
+ assert.equal((await telegram.shiftExpenses({},shift,0)).usd,85,'a NULL-branch fee counts against the open drawer')
+ assert.equal((await reconciliation.shiftExpenses({},shift,0)).usd,85,'and the shared module is the one that says so')
+ sql.exec('DELETE FROM fees WHERE id=44')
  console.log('PASS report routes: real Hono/SQLite, all three readers, permissions, canonical refund/profit/credit, search/filter, mixed-time cursor and frozen insertion bound')
  console.log('PASS shift expenses: real grouped SQL, complete overflow totals, branch/employee policy, mixed timestamps and exclusive closing bound')
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>sql.close())

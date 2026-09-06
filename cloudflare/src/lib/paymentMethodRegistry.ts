@@ -200,3 +200,85 @@ function parsePaymentDetailMethods(raw: unknown): string[] {
     .map((entry) => String((entry as { method?: unknown } | null)?.method ?? '').trim())
     .filter(Boolean)
 }
+
+/**
+ * ---- Method KIND: which configured methods are drawer cash ----------------
+ *
+ * A shift reconciliation has to answer "how much of what was tendered is
+ * physically in the drawer", and until now the only answer in the codebase was
+ * two string literals inside lib/telegram.ts:
+ *
+ *     if (method === 'cash' || method === 'សាច់ប្រាក់')
+ *
+ * That is a name check masquerading as a type check. The POS method field is
+ * free text merged into `pos_payment_methods` by mergePaymentMethods() above,
+ * and settings.ts's /payment-methods/replace lets the operator rename a method
+ * across the whole history -- so "Cash" becoming "Cash USD" silently turned a
+ * full drawer into $0.00 of recorded cash, with no error and no review flag.
+ *
+ * The kind is therefore resolved in this order:
+ *
+ *   1. `pos_payment_method_kinds` -- an explicit {method: kind} map the
+ *      operator can pin. It wins outright, so ANY rename can be made correct.
+ *   2. A cash TOKEN in the name. This covers every rename that keeps the word
+ *      ("Cash", "Cash (USD)", "Cash drawer", "សាច់ប្រាក់ដុល្លារ") instead of
+ *      only the two exact spellings the literals matched.
+ *   3. Otherwise digital -- a bank transfer is not drawer cash.
+ *
+ * And when NOTHING resolves to cash, the reconciliation says so
+ * (`cash_method_unresolved`) rather than reporting an empty drawer: a shop
+ * that renamed its cash method to "Drawer" gets a visible review flag, which
+ * is the honest answer, not a $0.00 expectation that reads as theft.
+ */
+export type PaymentMethodKind = 'cash' | 'digital'
+export type PaymentMethodKindMap = Record<string, PaymentMethodKind>
+
+/** Substrings that make a method name drawer cash. Lowercased; Khmer has no case. */
+export const CASH_METHOD_TOKENS = ['cash', 'សាច់ប្រាក់'] as const
+
+/** The settings key holding the explicit override map. */
+export const PAYMENT_METHOD_KINDS_SETTING = 'pos_payment_method_kinds'
+
+/**
+ * `{"Cash USD": "cash", "ABA": "digital"}` -> keyed by paymentMethodKey.
+ * Malformed settings read as an empty map: an override that cannot be parsed
+ * must fall back to the token rule, never make every method digital.
+ */
+export function parsePaymentMethodKinds(raw: unknown): PaymentMethodKindMap {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    const text = raw.trim()
+    if (!text) return {}
+    try { parsed = JSON.parse(text) } catch { return {} }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  const out: PaymentMethodKindMap = {}
+  for (const [method, kind] of Object.entries(parsed as Record<string, unknown>)) {
+    const key = paymentMethodKey(method)
+    if (!key) continue
+    const value = String(kind ?? '').trim().toLowerCase()
+    if (value === 'cash' || value === 'digital') out[key] = value
+  }
+  return out
+}
+
+export function resolvePaymentMethodKind(method: unknown, kinds: PaymentMethodKindMap = {}): PaymentMethodKind {
+  const key = paymentMethodKey(method)
+  if (!key) return 'digital'
+  const declared = kinds[key]
+  if (declared) return declared
+  return CASH_METHOD_TOKENS.some((token) => key.includes(token)) ? 'cash' : 'digital'
+}
+
+export function isCashPaymentMethod(method: unknown, kinds: PaymentMethodKindMap = {}): boolean {
+  return resolvePaymentMethodKind(method, kinds) === 'cash'
+}
+
+/**
+ * True when at least one CONFIGURED method is drawer cash. False is the
+ * rename-broke-it signal: the shop is still taking cash, but no name in the
+ * checkout list can be recognised as cash any more.
+ */
+export function hasConfiguredCashMethod(configured: string[], kinds: PaymentMethodKindMap = {}): boolean {
+  return configured.some((method) => isCashPaymentMethod(method, kinds))
+}

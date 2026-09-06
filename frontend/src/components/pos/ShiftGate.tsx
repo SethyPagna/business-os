@@ -3,6 +3,7 @@ import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import { closeShift, fetchCurrentShift, openShift, parseShiftCount, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 
 /**
  * S4R4-5 -- the cash-drawer shift gate for POS.
@@ -455,6 +456,16 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
               </div>
             )}
 
+            {/* What the drawer SHOULD hold, from the server's one
+                reconciliation -- before the close so the cashier counts
+                against a number instead of guessing, and after it so the
+                difference is stated rather than left to be worked out. */}
+            {shift?.reconciliation && (
+              <div className="rounded border border-gray-200 px-3 py-2 dark:border-gray-700">
+                <ShiftCashBreakdown reconciliation={shift.reconciliation} />
+              </div>
+            )}
+
             {!closed && (
               <>
                 <div className="grid grid-cols-2 gap-3">
@@ -487,25 +498,19 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
               </>
             )}
 
-            <div className="flex justify-end gap-2 pt-1">
-              {closed ? (
-                <button type="button" onClick={dismiss} className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white">
-                  {t('done')}
+            {!closed && (
+              // One close affordance on this modal: the header X. The footer
+              // carries only the button that writes, so "end the shift" and
+              // "put this away" can never be confused for one another.
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button" disabled={busy || parseShiftCount(countedUsd) == null || parseShiftCount(countedKhr) == null} onClick={() => void submitClose()}
+                  className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {busy ? t('saving_label') : t('shift_end')}
                 </button>
-              ) : (
-                <>
-                  <button type="button" onClick={dismiss} className="rounded border px-3 py-2 text-sm">
-                    {t('back')}
-                  </button>
-                  <button
-                    type="button" disabled={busy || parseShiftCount(countedUsd) == null || parseShiftCount(countedKhr) == null} onClick={() => void submitClose()}
-                    className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  >
-                    {busy ? t('saving_label') : t('shift_end')}
-                  </button>
-                </>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </Modal>
       )}

@@ -1,7 +1,8 @@
 import Clock3 from 'lucide-react/dist/esm/icons/clock-3.js'
 import { useApp } from '../../AppContext.tsx'
 import { fmtClock24, fmtDateOnly, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { shiftCashDifference, type Shift } from '../../api/shiftTransport.ts'
+import type { Shift } from '../../api/shiftTransport.ts'
+import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
 
 type Props = {
   shift: Shift
@@ -36,10 +37,6 @@ export default function ShiftSummary({ shift, detail = false, className = '' }: 
   const after = shift.closing_counted_usd == null || shift.closing_counted_khr == null
     ? '—'
     : `${fmtUSD(shift.closing_counted_usd)} · ${fmtKHR(shift.closing_counted_khr)}`
-  const difference = shiftCashDifference(shift)
-  const differenceText = difference.usd == null || difference.khr == null
-    ? '—'
-    : `${fmtUSD(difference.usd)} · ${fmtKHR(difference.khr)}`
 
   return (
     <section className={`min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900 ${className}`}>
@@ -70,12 +67,17 @@ export default function ShiftSummary({ shift, detail = false, className = '' }: 
           </dl>
           <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-zinc-800/70">
             <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-gray-100"><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{tr('shift_cash_breakdown', 'Cash breakdown')}</div>
-            <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
-              <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="font-medium">{before}</dd></div>
-              <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_after', 'After')}</dt><dd className="font-medium">{after}</dd></div>
-              <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_difference', 'Difference')}</dt><dd className="font-medium">{differenceText}</dd></div>
-            </dl>
-            <p className="mt-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{tr('shift_difference_hint', 'Closing counted cash minus opening cash. This drawer difference is not profit.')}</p>
+            {/* The eight drawer rows the server reconciled, and the same eight the
+                Telegram shift report prints. When the server sent no breakdown
+                (an old row, or a list read) the before/after pair still stands. */}
+            {shift.reconciliation
+              ? <ShiftCashBreakdown className="mt-2" reconciliation={shift.reconciliation} />
+              : (
+                <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+                  <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="font-medium">{before}</dd></div>
+                  <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_after', 'After')}</dt><dd className="font-medium">{after}</dd></div>
+                </dl>
+              )}
           </div>
           {shift.opening_note || shift.closing_note ? (
             <dl className="grid gap-2 text-xs sm:grid-cols-2">

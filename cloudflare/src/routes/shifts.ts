@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { sendTelegramShiftReport } from '../lib/telegram'
+import { loadShiftReconciliation, type ShiftReconciliation } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -57,7 +58,14 @@ function requiredReason(value: unknown): string | null {
   const reason = optionalText(value)
   return reason && reason.length <= 500 ? reason : null
 }
-function displayName(user: SessionUser): string | null { return user.name || user.username || null }
+/**
+ * The ACTOR SNAPSHOT written onto a shift row and its audit line. The
+ * account's username, not its display name: the id is the source of truth,
+ * the username is the stable handle a rename cascades through, and a display
+ * name is free text that can be changed to anything by the person it names.
+ * `user.name` remains the fallback only for accounts that carry no username.
+ */
+function displayName(user: SessionUser): string | null { return user.username || user.name || null }
 function canUseShifts(user: SessionUser): boolean { return hasAnyPermission(user, ['pos', 'sales']) }
 function shiftPermissionError(c: { json: (body: object, status: 403) => Response }, user: SessionUser): Response | null {
   return canUseShifts(user) ? null : c.json({ error: 'You do not have permission to use shifts.' }, 403)
@@ -77,6 +85,43 @@ function shiftCode(nowIso: string): string {
 
 export function canManageShifts(user: SessionUser): boolean {
   return isAdminControlUser(user)
+}
+
+/**
+ * ---- O8: a shift row is cash, so it is not public to the shop ------------
+ *
+ * Every row carries an opening float and a counted drawer, so listing all of
+ * them to anyone holding the `pos` permission published each cashier's till
+ * to their colleagues. A caller sees:
+ *
+ *   - their OWN shifts, always;
+ *   - shop_wide shifts, when the shop runs on `shift_scope_mode=shop_wide`
+ *     (migration 0118) -- such a shift belongs to the branch by definition,
+ *     which is what that setting means;
+ *   - everything, if they hold the shift-review capability. That is the SAME
+ *     capability that already gates cancel (canManageShifts), not a new one.
+ *
+ * `shift_admin_exempt` is the other half of 0118 and is unchanged: it decides
+ * whether an admin must register a shift, not what an admin may read.
+ *
+ * The clause is SQL, not a filter applied after the read, so a hidden row
+ * never leaves D1; and a caller-supplied `user_id` narrows within it and can
+ * never widen it.
+ */
+function shiftVisibility(user: SessionUser, policy: ShiftPolicy) {
+  const reviewer = canManageShifts(user)
+  const shopWide = policy.scope_mode === 'shop_wide'
+  return {
+    reviewer,
+    scope: reviewer || shopWide ? 'all' as const : 'own' as const,
+    clause: `(@reviewer = 1 OR shift_sessions.user_id = @selfId
+      OR (@shopWide = 1 AND shift_sessions.scope_mode = 'shop_wide'))`,
+    params: { reviewer: reviewer ? 1 : 0, selfId: user.id, shopWide: shopWide ? 1 : 0 },
+  }
+}
+function canSeeShift(user: SessionUser, policy: ShiftPolicy, shift: ShiftRow): boolean {
+  return canManageShifts(user) || shift.user_id === user.id
+    || (policy.scope_mode === 'shop_wide' && shift.scope_mode === 'shop_wide')
 }
 function storedShift(shift: ShiftDbRow): ShiftRow {
   const { has_reopened_child: _hasReopenedChild, ...stored } = shift
@@ -209,6 +254,25 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
   if (batchChanges(results[0]) !== 1) return { changed: false, conflict: true }
   return { changed: true, conflict: false, shift: await readShiftByCode(db, child.shiftCode) }
 }
+/**
+ * The drawer breakdown for one shift, from the ONE shared definition
+ * (lib/shiftReconciliation.ts) the Telegram report also calls. Returned with
+ * the close and with the reads so the close dialog, the shift summary and the
+ * bot message cannot print three different expected drawers.
+ *
+ * A failure here returns null rather than throwing: the close has already
+ * committed by the time this runs, and losing the receipt-side arithmetic
+ * must not turn a successful close into a 500 the cashier will retry.
+ */
+async function reconciliationFor(env: Env, shift: ShiftRow): Promise<ShiftReconciliation | null> {
+  try { return await loadShiftReconciliation(env, shift, Date.now()) } catch { return null }
+}
+type ReconciledShift = ShiftResponseRow & { reconciliation: ShiftReconciliation | null }
+async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow): Promise<ReconciledShift> {
+  const shift = responseShift(user, row)
+  return { ...shift, reconciliation: await reconciliationFor(env, shift) }
+}
+
 function currentResponse(user: SessionUser, shift: ShiftDbRow | undefined, policy: ShiftPolicy, exempt: boolean) {
   const presented = shift ? responseShift(user, shift) : null
   return { shift: presented, policy, exempt, needs_registration: !exempt && (!shift || !!shift.cancelled_at),
@@ -226,7 +290,12 @@ app.get('/current', async (c) => {
   const policy = await readShiftPolicy(db)
   const exempt = policy.admin_exempt && isAdminControlUser(user)
   const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
-  return c.json(currentResponse(user, shift, policy, exempt))
+  const body = currentResponse(user, shift, policy, exempt)
+  // The breakdown the close dialog and the shift summary render. Computed for
+  // an open shift too: a cashier counting down wants to know what the drawer
+  // SHOULD hold before they type what it does.
+  const presented = body.shift ? { ...body.shift, reconciliation: await reconciliationFor(c.env, body.shift) } : null
+  return c.json({ ...body, shift: presented })
 })
 
 app.get('/', async (c) => {
@@ -240,18 +309,20 @@ app.get('/', async (c) => {
   if (parsedUserId != null && (!Number.isInteger(parsedUserId) || parsedUserId <= 0)) return c.json({ error: 'Invalid user id.' }, 400)
   const requestedUserId = parsedUserId
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit')) || 50))
-  const filters = `(@requestedUserId IS NULL OR user_id = @requestedUserId)
+  const visibility = shiftVisibility(user, await readShiftPolicy(db))
+  const filters = `${visibility.clause}
+      AND (@requestedUserId IS NULL OR user_id = @requestedUserId)
       AND (@branchId IS NULL OR branch_id = @branchId)
       AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)`
-  const params = { requestedUserId, branchId, from: c.req.query('from') || null, to: c.req.query('to') || null, limit }
+  const params = { ...visibility.params, requestedUserId, branchId, from: c.req.query('from') || null, to: c.req.query('to') || null, limit }
   const [openShifts, closedShifts] = await Promise.all([
     db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters} AND closed_at IS NULL AND cancelled_at IS NULL
       ORDER BY business_date DESC, opened_at DESC, id DESC`).all<ShiftDbRow>(params),
     db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters} AND (closed_at IS NOT NULL OR cancelled_at IS NOT NULL)
       ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT @limit`).all<ShiftDbRow>(params),
   ])
-  return c.json({ shifts: [...openShifts, ...closedShifts].map((shift) => responseShift(user, shift)), scope: 'all' })
+  return c.json({ shifts: [...openShifts, ...closedShifts].map((shift) => responseShift(user, shift)), scope: visibility.scope })
 })
 
 app.get('/:id/history', async (c) => {
@@ -261,10 +332,13 @@ app.get('/:id/history', async (c) => {
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
+  // 404, not 403: a caller who may not see this shift must not learn that it
+  // exists, which id probing would otherwise reveal one status code at a time.
+  if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   const amendments = await db.prepare(`SELECT id, shift_session_id, actor_user_id, actor_name, reason,
     before_json, after_json, created_at FROM shift_session_amendments
     WHERE shift_session_id = @id ORDER BY created_at ASC, id ASC`).all({ id })
-  return c.json({ shift: responseShift(user, shift), amendments })
+  return c.json({ shift: await reconciledShift(c.env, user, shift), amendments })
 })
 
 app.post('/open', async (c) => {
@@ -367,7 +441,7 @@ app.post('/close', async (c) => {
   if (!shift) return c.json({ error: 'No shift is registered for today. Register the opening float first.' }, 404)
   if (shift.cancelled_at) return c.json({ error: 'This shift was cancelled. Register a replacement opening first.' }, 409)
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
-  if (shift.closed_at) return c.json({ shift: responseShift(user, shift), already_closed: true, is_open: false }, 200)
+  if (shift.closed_at) return c.json({ shift: await reconciledShift(c.env, user, shift), already_closed: true, is_open: false }, 200)
   const countedUsd = requiredMoney(body.closing_counted_usd); const countedKhr = requiredMoney(body.closing_counted_khr)
   if (countedUsd == null || countedKhr == null) return c.json({ error: 'Valid USD and KHR closing counts are required.' }, 400)
   const closedAt = new Date().toISOString()
@@ -379,10 +453,10 @@ app.post('/close', async (c) => {
   if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
     try { c.executionCtx.waitUntil(report) } catch { void report }
-    return c.json({ shift: result.shift ? responseShift(user, result.shift) : null, already_closed: false, is_open: false }, 200)
+    return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
   }
   if (result.shift?.closed_at) {
-    return c.json({ shift: responseShift(user, result.shift), already_closed: true, is_open: false }, 200)
+    return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: true, is_open: false }, 200)
   }
   return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
 })
@@ -414,7 +488,7 @@ app.post('/:id/close', async (c) => {
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, shift.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
-  return c.json({ shift: responseShift(user, result.shift), already_closed: false, is_open: false }, 200)
+  return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)
 })
 
 app.post('/:id/cancel', async (c) => {

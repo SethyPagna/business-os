@@ -12,6 +12,38 @@ import { apiFetch, route } from './http.ts'
 // up, and nothing is written -- which is the correct behaviour anyway, since
 // the employee has not registered yet.
 
+/**
+ * The drawer reconciliation the server computes in ONE place
+ * (cloudflare/src/lib/shiftReconciliation.ts) and returns with the close and
+ * with the shift reads. Per currency, never cross-converted:
+ *
+ *   expected   = opening + cash sales - refunds - expenses - courier
+ *   difference = counted - expected
+ *
+ * The client renders these numbers and NEVER recomputes them. A second
+ * implementation on this side is exactly how the app, the close dialog and
+ * the Telegram shift report would come to disagree about one drawer -- which
+ * is why the old `shiftCashDifference` helper (counted minus the opening
+ * float) is gone rather than repointed: on a drawer that took $40 of cash
+ * sales it reported a $3.25 SURPLUS for a till that is $28 short.
+ */
+export type ShiftMoney = { usd: number; khr: number }
+export type ShiftCountedMoney = { usd: number | null; khr: number | null }
+export type ShiftReconciliation = {
+  opening: ShiftMoney
+  cash_sales: ShiftMoney
+  refunds: ShiftMoney
+  expenses: ShiftMoney
+  courier: ShiftMoney
+  expected: ShiftMoney
+  counted: ShiftCountedMoney
+  difference: ShiftCountedMoney
+  /** A component could not be established; the figures are shown with a warning. */
+  needs_review: boolean
+  /** Machine codes, translated by the app's own pack. */
+  review_codes: string[]
+}
+
 export type Shift = {
   id: number
   shift_code: string
@@ -41,6 +73,9 @@ export type Shift = {
   reopen_reason: string | null
   reopened_by_user_id: number | null
   reopened_by_user_name: string | null
+  // Present on the close response and on the shift reads. Absent on rows that
+  // come back from a list (the server does not price a whole page of shifts).
+  reconciliation?: ShiftReconciliation | null
 }
 
 export type ShiftCapabilities = {
@@ -97,18 +132,6 @@ export function orderShiftRows(rows: Shift[]): Shift[] {
     const openedOrder = right.opened_at.localeCompare(left.opened_at)
     return openedOrder || right.id - left.id
   })
-}
-
-export function shiftCashDifference(shift: Pick<Shift,
-  'opening_float_usd' | 'opening_float_khr' | 'closing_counted_usd' | 'closing_counted_khr'
->): { usd: number | null; khr: number | null } {
-  const difference = (closing: number | null, opening: number) => closing == null
-    ? null
-    : Number((Number(closing) - Number(opening)).toFixed(2))
-  return {
-    usd: difference(shift.closing_counted_usd, shift.opening_float_usd),
-    khr: difference(shift.closing_counted_khr, shift.opening_float_khr),
-  }
 }
 
 export function parseShiftCount(value: unknown): number | null {
