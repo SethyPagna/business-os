@@ -1,7 +1,7 @@
 import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDateTime24, fmtDayFirst } from '../../utils/formatters.ts'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Cloud from 'lucide-react/dist/esm/icons/cloud.js'
@@ -711,7 +711,11 @@ function formatDateTime(raw: unknown): string {
   const value = rawValue.includes('T') || rawValue.endsWith('Z') ? rawValue : `${rawValue.replace(' ', 'T')}Z`
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return rawValue
-  return date.toLocaleString('en-US', {
+  // Day-first (Sep 6 2026). This list is read next to a restore decision,
+  // and a bare en-US toLocaleString rendered the month first -- so the
+  // snapshot someone picks to roll back to could be a different day from
+  // the one they believe they are picking.
+  return fmtDayFirst(date, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
