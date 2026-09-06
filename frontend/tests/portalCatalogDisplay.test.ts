@@ -326,11 +326,19 @@ runTest('public product discovery uses a sticky unified search, responsive brand
   assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-blue-400/,
     'search should stay sticky and use the same blue discovery accent as filters')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
-    'large screens need a labelled brand index rail')
-  assert.match(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\][\s\S]*overflow-y-auto/,
-    'the desktop alphabet rail must scroll within the sticky sidebar')
-  assert.match(catalogProductsSectionSource, /overflow-x-auto[\s\S]*lg:hidden/,
-    'small screens need a horizontally scrollable alphabet row')
+    'the brand index still needs its labelled, translated name')
+  // The brand index used to be TWO controls: a scrolling 4-column letter grid
+  // in the desktop aside and a horizontally scrolling chip row below `lg`.
+  // Both were inner scroll containers over the product list. They are now one
+  // screen-edge rail that serves every breakpoint (see alphaIndexRail.test.ts
+  // and storefrontScrollRoot.test.ts) -- and BOTH mounts of this section keep
+  // an index: the storefront pins it to the screen edge, the admin portal
+  // editor's preview takes the in-flow variant so it cannot float out of the
+  // preview panel.
+  assert.match(catalogProductsSectionSource, /<AlphaIndexRail\b[\s\S]*edge=\{publicView \? 'screen' : 'inline'\}/,
+    'every breakpoint gets the same vertical brand rail, and the editor preview gets one too')
+  assert.doesNotMatch(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\]/,
+    'the desktop letter grid and its inner scroller are retired')
   assert.match(paginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
     'storefront paging should use the same current Back/Next/page-size control as the rest of the app')
   assert.match(paginationSource, /pageSizeOptions=\{CATALOG_PAGE_SIZE_OPTIONS\}/)

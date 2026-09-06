@@ -66,7 +66,14 @@ export default function CatalogPaginationControls({
       label={label}
       t={t}
       editablePageSizeInput={false}
-      className={`rounded-2xl bg-white/92 dark:bg-neutral-900/90 ${className}`}
+      // The storefront's own layout: one centred pill with the per-page
+      // chooser inside it and no "Showing X-Y of N" row. The old wrapper
+      // classes here (a rounded card with its own background) existed to
+      // dress that summary row's box; with the summary gone there is no box
+      // left to dress, and a full-width card behind a centred pill would just
+      // reintroduce the bar the owner asked us to remove.
+      layout="centered"
+      className={className}
     />
   )
 }

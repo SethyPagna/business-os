@@ -20,6 +20,9 @@ import { SectionShell, StatusPill } from './catalogUi'
 import PortalFilterCombobox from './PortalFilterCombobox'
 import PortalPromoStrip from './PortalPromoStrip.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import AlphaIndexRail from '../shared/AlphaIndexRail.tsx'
+import { RAIL_ALL_KEY, resolveBrandJump } from '../../utils/alphaRail.ts'
+import { pagerState } from '../../utils/pagerState.ts'
 import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
@@ -292,6 +295,16 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     [letterFilteredProducts, page, pageSize, serverPaged],
   )
   const totalProducts = serverPaged ? Number(productTotal || 0) : letterFilteredProducts.length
+  // One fact, consulted by BOTH pager mounts. They used to disagree: the top
+  // one rendered unconditionally while the bottom one was gated on the page
+  // COUNT, so a single-page result showed a pager above the grid and nothing
+  // below it. Sharing that count gate then hid BOTH on a single page -- and
+  // the per-page chooser lives inside the pill, with the storefront's page
+  // size held in component state rather than in the URL, so a shopper on
+  // 100/page who narrowed to 12 products had no way back short of reloading
+  // the site. The pill renders whenever there is anything to show; on one
+  // page its arrows are simply disabled.
+  const showPager = pagerState(effectivePage, totalProducts, effectivePageSize, CATALOG_DEFAULT_PAGE_SIZE).visible
   const visiblePromotionItems = useMemo(
     () => Array.isArray(promotionItems)
       ? promotionItems.filter((item) => item?.title || item?.subtitle || item?.body || item?.mediaUrl)
@@ -468,7 +481,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       {/* Desktop (lg+): an always-visible left rail replaces the floating
           Filters layer used below `lg`; no popover is needed when there is
           room for a permanent sidebar. */}
-      <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
+      {/* `relative` so the editor preview's in-flow brand rail (edge="inline",
+          mounted at the end of this grid) has a positioned ancestor to stick
+          inside. The public storefront's rail is `fixed` and portalled, so
+          this changes nothing for it. */}
+      <div className="relative lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
         <aside className="hidden min-w-0 lg:sticky lg:top-20 lg:block lg:min-w-0 lg:self-start">
           <div className="min-w-0 space-y-2 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
             <div className="flex items-center justify-between gap-2 px-1 pb-1">
@@ -481,33 +498,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             </div>
             {renderFilterFields()}
           </div>
-          {initialOptions.length > 1 ? (
-            <div className="mt-3 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
-              <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-neutral-400">
-                {copy('jumpToBrand', 'Jump to brand')}
-              </div>
-              <div className="grid max-h-[min(18rem,calc(100vh-32rem))] grid-cols-4 gap-1 overflow-y-auto overscroll-contain pr-1">
-                <button
-                  type="button"
-                  className={`h-8 rounded-lg text-xs font-semibold transition ${effectiveInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
-                  onClick={() => updateInitialFilter?.('all')}
-                >
-                  {copy('all', 'All')}
-                </button>
-                {initialOptions.map((item) => (
-                  <button
-                    key={`rail-${item.key}`}
-                    type="button"
-                    className={`h-8 rounded-lg text-xs font-semibold transition ${effectiveInitialFilter === item.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
-                    onClick={() => updateInitialFilter?.(effectiveInitialFilter === item.key ? 'all' : item.key)}
-                    title={`${item.label} (${item.count})`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          {/* The brand index used to be a second card here: a 4-column letter
+              GRID inside its own `max-h-[...] overflow-y-auto` box. That box
+              sat over the product list and swallowed wheel/touch gestures
+              aimed at the page, and it duplicated a `lg:hidden` chip row
+              below the search field. Both are now the single screen-edge
+              AlphaIndexRail mounted at the end of this section. */}
         </aside>
 
         <div className="min-w-0">
@@ -596,28 +592,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
           </div>
 
-        {initialOptions.length > 1 ? (
-          <div className="flex gap-1 overflow-x-auto overscroll-x-contain rounded-xl border border-slate-100 bg-slate-50/80 p-1 [scrollbar-width:thin] dark:border-neutral-800 dark:bg-neutral-950/60 lg:hidden">
-            <button
-              type="button"
-              className={`h-8 min-w-9 shrink-0 rounded-lg px-2 text-xs font-semibold transition ${effectiveInitialFilter === 'all' ? 'bg-blue-600 text-white shadow-sm dark:bg-amber-400 dark:text-neutral-950' : 'text-slate-600 hover:bg-white hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
-              onClick={() => updateInitialFilter?.('all')}
-            >
-              {copy('all', 'All')}
-            </button>
-            {initialOptions.map((item) => (
-              <button
-                key={`row-${item.key}`}
-                type="button"
-                className={`h-8 min-w-9 shrink-0 rounded-lg px-2 text-xs font-semibold transition ${effectiveInitialFilter === item.key ? 'bg-blue-600 text-white shadow-sm dark:bg-amber-400 dark:text-neutral-950' : 'text-slate-600 hover:bg-white hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
-                onClick={() => updateInitialFilter?.(effectiveInitialFilter === item.key ? 'all' : item.key)}
-                title={`${item.label} (${item.count})`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        {/* The `lg:hidden` letter chip row lived here: an `overflow-x-auto`
+            strip of `h-8 min-w-9` buttons pinned under the search field. On a
+            375px screen it was a full-width horizontal scroller directly
+            above the grid, and it was the phone half of a control the
+            screen-edge rail now provides at every breakpoint. */}
 
         <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-1 pt-2 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
           <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : copy('filterCompactHint', 'Use quick filters to narrow products faster.')}</span>
@@ -698,24 +677,32 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       ) : null}
 
-      <CatalogPaginationControls
-        className="mb-4"
-        page={effectivePage}
-        pageSize={effectivePageSize}
-        totalItems={totalProducts}
-        label={copy('products', 'products')}
-        t={(key) => ({
-          page: copy('page', 'Page'),
-          of: copy('of', 'of'),
-          showing: copy('showing', 'Showing'),
-          per_page: copy('perPage', 'per page'),
-        })[key] || key}
-        onPageChange={updatePage}
-        onPageSizeChange={(size) => {
-          updatePageSize?.(size)
-          updatePage?.(1)
-        }}
-      />
+      {/* Back / page / total / Next / per-page, centred, above the grid --
+          and the identical mount below it. `back` and `next` have to be in
+          this map: PaginationControls treats any truthy return as the label,
+          so the map's `|| key` fallback was printing the raw lowercase keys
+          "back" and "next" as the button captions in every language. */}
+      {showPager ? (
+        <CatalogPaginationControls
+          className="mb-4"
+          page={effectivePage}
+          pageSize={effectivePageSize}
+          totalItems={totalProducts}
+          label={copy('products', 'products')}
+          t={(key) => ({
+            page: copy('page', 'Page'),
+            of: copy('of', 'of'),
+            back: copy('back', 'Back'),
+            next: copy('next', 'Next'),
+            per_page: copy('perPage', 'per page'),
+          })[key] || key}
+          onPageChange={updatePage}
+          onPageSizeChange={(size) => {
+            updatePageSize?.(size)
+            updatePage?.(1)
+          }}
+        />
+      ) : null}
 
       {/* Tighter vertical rhythm on phones so more products show per screen
           (user, Aug 31: "minimized for better useability ... same for public
@@ -925,7 +912,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         })}
       </div>
 
-      {totalProducts > effectivePageSize ? (
+      {showPager ? (
         <CatalogPaginationControls
           className="mt-4"
           page={effectivePage}
@@ -935,7 +922,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           t={(key) => ({
             page: copy('page', 'Page'),
             of: copy('of', 'of'),
-            showing: copy('showing', 'Showing'),
+            back: copy('back', 'Back'),
+            next: copy('next', 'Next'),
             per_page: copy('perPage', 'per page'),
           })[key] || key}
           onPageChange={updatePage}
@@ -952,6 +940,31 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       ) : null}
         </div>
+
+      {/* One vertical brand index: collapsed it is a column of dashes, hover
+          (mouse) or touch opens it, a letter selects that brand group and the
+          same letter again clears back to All. It replaces BOTH letter lists
+          this section used to carry, and it adds nothing to the page flow --
+          no inner scroller over the grid, no width at 320/375.
+
+          BOTH mounts get one. The storefront's is viewport-`fixed` at the
+          screen edge and portalled to <body>; the admin portal EDITOR PREVIEW
+          renders this same section inside a `.page-scroll` panel, where a
+          fixed rail would float out of the preview and over the admin's own
+          chrome -- so it takes the `inline` variant, which sticks inside this
+          (relatively positioned) grid instead. Gating the preview out
+          entirely, as an earlier pass did, left the editor with no brand
+          index at all after both letter lists were deleted. */}
+      {initialOptions.length > 1 ? (
+        <AlphaIndexRail
+          edge={publicView ? 'screen' : 'inline'}
+          letters={initialOptions.map((item) => item.key)}
+          activeKey={effectiveInitialFilter === RAIL_ALL_KEY ? null : effectiveInitialFilter}
+          resetOption={{ key: RAIL_ALL_KEY, ariaLabel: copy('all', 'All') }}
+          label={copy('jumpToBrand', 'Jump to brand')}
+          onJump={(key) => updateInitialFilter?.(resolveBrandJump(effectiveInitialFilter, key))}
+        />
+      ) : null}
       </div>
     </SectionShell>
   )

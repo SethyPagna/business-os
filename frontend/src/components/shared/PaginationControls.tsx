@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PageSizeSelect from './PageSizeSelect'
+import { clampPageNumber, pagerState } from '../../utils/pagerState.ts'
 
 export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
 
@@ -51,17 +52,19 @@ export interface PaginationControlsProps {
   // `compact`; leaving it off keeps the existing three-column compact layout,
   // so callers that don't set it are unaffected.
   rangeAsPageSize?: boolean
+  // Opt-in CENTRED single-line form for the public storefront. The default
+  // three-part admin row -- a "Showing 1-50 of 3,555 products" summary on the
+  // left, then a labelled per-page column and the pager pushed to the right
+  // edge -- is what a shopper was being shown above and below the product
+  // grid. This variant drops the summary entirely, folds the per-page chooser
+  // INTO the pager pill (sized to the value it prints, not a fixed column),
+  // and centres the whole thing. 'default' stays the default, so every admin
+  // consumer of this control renders exactly as before.
+  layout?: 'default' | 'centered'
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
-  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
-  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
-  const parsedTotal = Number(totalItems || 0)
-  const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0
-  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
-  const parsedPage = Number(page || 1)
-  const requestedPage = Number.isFinite(parsedPage) ? parsedPage : 1
-  return Math.max(1, Math.min(totalPages, requestedPage))
+  return clampPageNumber(page, totalItems, pageSize, DEFAULT_PAGE_SIZE)
 }
 
 export function paginateItems<T>(items: readonly T[] = [], page: NumericInput = 1, pageSize: NumericInput = DEFAULT_PAGE_SIZE): T[] {
@@ -88,15 +91,15 @@ export default function PaginationControls({
   editablePageInput = true,
   editablePageSizeInput = true,
   rangeAsPageSize = false,
+  layout = 'default',
 }: PaginationControlsProps) {
-  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
-  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
-  const parsedTotal = Number(totalItems || 0)
-  const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0
-  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
-  const safePage = clampPage(page, total, safePageSize)
-  const start = total ? ((safePage - 1) * safePageSize) + 1 : 0
-  const end = Math.min(total, safePage * safePageSize)
+  // One shared kernel (utils/pagerState.ts) answers all of it: the clamped
+  // page, the page count, the item range, whether each arrow is dead, and
+  // whether the control renders at all.
+  const state = pagerState(page, totalItems, pageSize, DEFAULT_PAGE_SIZE)
+  const { total, totalPages, start, end, backDisabled, nextDisabled } = state
+  const safePageSize = state.pageSize
+  const safePage = state.page
   const pageLabel = typeof t === 'function' ? (t('page') || 'Page') : 'Page'
   const ofLabel = typeof t === 'function' ? (t('of') || 'of') : 'of'
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
@@ -143,7 +146,78 @@ export default function PaginationControls({
     }
   }
 
-  if (total <= 0) return null
+  if (!state.visible) return null
+
+  if (layout === 'centered') {
+    // Storefront pager: [< Back] [page / total] [Next >] [50 v], centred, and
+    // mounted identically above and below the grid.
+    //
+    // The per-page trigger carries no width floor and no separate caption --
+    // the "per page" wording survives as its accessible name, which is where
+    // it belongs for a control whose visible value is already the number of
+    // items. Nothing here prints the item range, so the retired "Showing"
+    // string has no remaining consumer.
+    const arrowButtonClass = 'inline-flex h-8 shrink-0 items-center gap-0.5 px-2.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    return (
+      <div className={`flex w-full justify-center ${className}`}>
+        <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white pr-1 text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+          <button
+            type="button"
+            className={`${arrowButtonClass} rounded-l-full`}
+            disabled={backDisabled}
+            onClick={() => onPageChange?.(safePage - 1)}
+            aria-label={backLabel}
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+            <span className="hidden sm:inline">{backLabel}</span>
+          </button>
+          <div className="inline-flex min-w-0 shrink items-center gap-1 px-1">
+            {editablePageInput ? (
+              <>
+                <span className="sr-only">{pageLabel}</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label={pageLabel}
+                  className="h-7 w-9 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                  value={pageDraft}
+                  onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                  onBlur={(event) => commitPageDraft(event.currentTarget.value)}
+                  onKeyDown={handlePageInputKeyDown}
+                />
+              </>
+            ) : (
+              <span className="px-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
+            )}
+            <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">/ {totalPages}</span>
+          </div>
+          <button
+            type="button"
+            className={arrowButtonClass}
+            disabled={nextDisabled}
+            onClick={() => onPageChange?.(safePage + 1)}
+            aria-label={nextLabel}
+          >
+            <span className="hidden sm:inline">{nextLabel}</span>
+            <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+          </button>
+          {onPageSizeChange ? (
+            <PageSizeSelect
+              value={safePageSize}
+              options={pageSizeOptions}
+              onChange={(nextValue) => onPageSizeChange?.(nextValue)}
+              ariaLabel={perPageLabel}
+              allowCustom={editablePageSizeInput}
+              className="shrink-0"
+              buttonClassName="h-7 w-auto gap-1 rounded-full border-slate-200 bg-slate-100 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              menuClassName="min-w-[7rem]"
+              optionClassName="text-xs"
+            />
+          ) : null}
+        </div>
+      </div>
+    )
+  }
 
   if (compact && rangeAsPageSize) {
     // The user's "‹ page (1-20) / total ›" form. Everything lives on one line
@@ -162,7 +236,7 @@ export default function PaginationControls({
         <button
           type="button"
           className={arrowButtonClass}
-          disabled={safePage <= 1}
+          disabled={backDisabled}
           onClick={() => onPageChange?.(safePage - 1)}
           aria-label={backLabel}
         >
@@ -207,7 +281,7 @@ export default function PaginationControls({
         <button
           type="button"
           className={arrowButtonClass}
-          disabled={safePage >= totalPages}
+          disabled={nextDisabled}
           onClick={() => onPageChange?.(safePage + 1)}
           aria-label={nextLabel}
         >
@@ -247,7 +321,7 @@ export default function PaginationControls({
             <button
               type="button"
               className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={safePage <= 1}
+              disabled={backDisabled}
               onClick={() => onPageChange?.(safePage - 1)}
               aria-label={backLabel}
             >
@@ -278,7 +352,7 @@ export default function PaginationControls({
             <button
               type="button"
               className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={safePage >= totalPages}
+              disabled={nextDisabled}
               onClick={() => onPageChange?.(safePage + 1)}
               aria-label={nextLabel}
             >
@@ -314,7 +388,7 @@ export default function PaginationControls({
           <button
             type="button"
             className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
-            disabled={safePage <= 1}
+            disabled={backDisabled}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label={backLabel}
           >
@@ -344,7 +418,7 @@ export default function PaginationControls({
           <button
             type="button"
             className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
-            disabled={safePage >= totalPages}
+            disabled={nextDisabled}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
           >

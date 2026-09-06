@@ -72,7 +72,26 @@ assert.match(sectionSwitcher, /section-switcher max-w-full min-w-0/, 'shared sec
 assert.match(sectionSwitcher, /flex min-w-0 flex-wrap/, 'shared section switcher must wrap without horizontal scrolling')
 
 const pagination = read('components/shared/PaginationControls.tsx')
-assert.equal((pagination.match(/hidden sm:inline">\{(?:back|next)Label\}/g) || []).length, 2, 'compact pager labels must collapse to icon-only on narrow screens')
+// Every SINGLE-LINE PILL form of the pager must collapse its Back/Next words
+// to icon-only on narrow screens -- a pill has no room to wrap. Checked per
+// branch instead of as one whole-file count: a count silently turns into a
+// failure the moment another compliant pill branch is added, which is what the
+// centred storefront layout did.
+for (const [name, from, to] of [
+  ['centered', "  if (layout === 'centered')", '  if (compact && rangeAsPageSize)'],
+  ['compact range-as-page-size', '  if (compact && rangeAsPageSize)', '  if (compact)'],
+] as const) {
+  const start = pagination.indexOf(from)
+  const end = pagination.indexOf(to, start + from.length)
+  assert.ok(start > 0 && end > start, `pagination pill branch '${name}' must still be findable`)
+  const branch = pagination.slice(start, end)
+  assert.equal(
+    (branch.match(/hidden sm:inline">\{(?:back|next)Label\}/g) || []).length,
+    2,
+    `${name} pager labels must collapse to icon-only on narrow screens`,
+  )
+  assert.doesNotMatch(branch, /<span>\{(?:back|next)Label\}<\/span>/, `${name} pager must not render an always-on Back/Next word`)
+}
 assert.match(pagination, /onPageChange\?\.\(safePage\)/, 'pager must repair stale out-of-range controlled pages')
 
 const modal = read('components/shared/Modal.tsx')
