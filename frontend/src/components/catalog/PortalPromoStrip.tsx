@@ -112,7 +112,7 @@ export default function PortalPromoStrip({
     <div className="mb-3">
       <div
         ref={trackRef}
-        className="flex gap-2 overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex gap-2 overflow-x-auto overscroll-x-contain scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onPointerEnter={() => { pausedRef.current = true }}
         onPointerLeave={() => { pausedRef.current = false }}
         onTouchStart={() => { pausedRef.current = true }}

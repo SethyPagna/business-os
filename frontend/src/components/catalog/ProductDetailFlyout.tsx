@@ -197,7 +197,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
           {/* One image at a time, as a card. Arrows step through the set and
               the image itself opens the lightbox, where the photos can be
               viewed on their own without the rest of the page. The thumbnail
@@ -242,7 +242,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             ) : null}
           </div>
           {gallery.length > 1 ? (
-            <div className="flex gap-2 overflow-x-auto p-3">
+            <div className="flex gap-2 overflow-x-auto overscroll-x-contain p-3">
               {gallery.map((image, index) => (
                 <button
                   type="button"

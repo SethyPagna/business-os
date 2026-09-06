@@ -471,7 +471,7 @@ export default function CatalogPreviewSurface({
                                   />
                                 </div>
                               ) : null}
-                              <div className="max-h-[min(60vh,20rem)] overflow-y-auto py-1">
+                              <div className="max-h-[min(60vh,20rem)] overflow-y-auto overscroll-contain py-1">
                                 {firstPartyTranslateOptions.length ? firstPartyTranslateOptions.map(renderOption) : null}
                                 {externalTranslateOptions.length ? (
                                   <>
@@ -529,7 +529,7 @@ export default function CatalogPreviewSurface({
                 className="portal-nav-shell rounded-b-[28px] border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
-                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden" aria-label={copy('publicNavigation', 'Section navigation')}>
+                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden overscroll-x-contain" aria-label={copy('publicNavigation', 'Section navigation')}>
                   <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
                     {portalTabs.map((item) => {
                       const Icon = item.icon

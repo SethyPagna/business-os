@@ -151,7 +151,7 @@ export default function PortalFilterCombobox({
               className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-7 pr-2 text-xs text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-500/50 dark:focus:ring-amber-500/15"
             />
           </label>
-          <div className="max-h-56 overflow-y-auto p-1.5" role="listbox">
+          <div className="max-h-56 overflow-y-auto overscroll-contain p-1.5" role="listbox">
             <button
               type="button"
               onClick={() => { onClear(); closeMenu() }}

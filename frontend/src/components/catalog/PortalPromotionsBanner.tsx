@@ -170,7 +170,7 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
       ) : null}
       <div
         ref={scrollRef}
-        className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {!loaded
           ? [0, 1, 2].map((key) => <SkeletonCard key={key} />)
