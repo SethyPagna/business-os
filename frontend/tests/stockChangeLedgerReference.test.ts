@@ -81,7 +81,10 @@ const sc = read('components/products/StockChangeSection.tsx').replace(/\r\n/g, '
 
 // The desktop Reason cell leads with the record and keeps the free text under
 // it -- that ORDER is the fix: the reason line was all there was before.
-const reasonCell = sc.match(/<td>\s*\{model\.reference\.label \? \([\s\S]*?<\/td>/)
+// Anchored on the conditional itself rather than on the `<td>` that opens the
+// cell: the cell carries a leading comment, and a rule that breaks when a
+// comment is added is pinning the whitespace, not the order.
+const reasonCell = sc.match(/\{model\.reference\.label \? \([\s\S]*?<\/td>/)
 assert.ok(reasonCell, 'the desktop Reason cell must render the receipt line before the reason line')
 assert.ok(
   reasonCell[0].indexOf('referenceText(row)') < reasonCell[0].indexOf('{model.reason}'),
@@ -118,15 +121,32 @@ assert.ok(
 )
 
 // (b) ...and it is paid for by the numeric columns, whose content is bounded
-// (a clock, a signed integer, "128 -> 130"). None of them may grow.
-const NUMERIC_CEILING: Array<[string, string, number]> = [
-  ['Time', time, 5.5 * 16],
-  ['Type', type, 8 * 16],
-  ['Quantity', quantity, 5.5 * 16],
-  ['Before -> After', beforeAfter, 7.5 * 16],
+// (a clock, a signed integer, "128 -> 130"). None of them may grow -- and none
+// of them may be STARVED either. A ceiling-only rule is not discriminating: it
+// passes a 1rem Type column, which wraps its own chip and doubles the row
+// height, which is the same "ugly at large screens" the owner reported, one
+// column along. So each fixed column also carries a floor, measured from the
+// widest thing it must hold at the dense 13px scale plus the ~16px the cell
+// spends on horizontal padding:
+//   Time             '19:31' / '––:––'                       ~52 + 16 -> 4rem
+//   Type             the longest chip label 'Adjust Quantity'
+//                    ~95 + 12 (the chip's own px-1.5) + 16   -> 7.5rem
+//   Quantity         the uppercase header 'QUANTITY', wider
+//                    than any signed integer under it        ~60 + 16 -> 5rem
+//   Before -> After  '1280 → 1300' (the header itself wraps
+//                    by design, dense-th-wrap)               ~72 + 16 -> 5.5rem
+const NUMERIC_BOUNDS: Array<[string, string, number, number]> = [
+  ['Time', time, 4 * 16, 5.5 * 16],
+  ['Type', type, 7.5 * 16, 8 * 16],
+  ['Quantity', quantity, 5 * 16, 5.5 * 16],
+  ['Before -> After', beforeAfter, 5.5 * 16, 7.5 * 16],
 ]
-for (const [label, value, ceiling] of NUMERIC_CEILING) {
+for (const [label, value, floor, ceiling] of NUMERIC_BOUNDS) {
   assert.ok(rem(value) > 0, `${label} must stay a fixed-width column, found ${value}`)
+  assert.ok(
+    rem(value) >= floor,
+    `${label} is starved and wraps its own content (${value} < ${floor / 16}rem)`,
+  )
   assert.ok(rem(value) <= ceiling, `${label} must not take width from Product (${value} > ${ceiling / 16}rem)`)
 }
 
@@ -138,7 +158,13 @@ const FLOOR = 980
 const fixedPx = widths.reduce((sum, value) => sum + rem(value), 0)
 const percentPx = widths.reduce((sum, value) => sum + (pct(value) / 100) * FLOOR, 0)
 const reasonPx = FLOOR - fixedPx - percentPx
-assert.ok(reasonPx >= 96, `the Reason column is left ${Math.round(reasonPx)}px at the ${FLOOR}px floor; it needs at least 96`)
+// 140px is the RECEIPT LINE's requirement, not a round number: the widest
+// thing the cell's first line must hold is 'Return RET-20260902-0007' -- 24
+// characters at the dense 13px scale, ~118px semibold -- and the cell spends
+// ~16px on its own left/right padding. 96px (what this asserted before) fits
+// 'Sale 202609...' and nothing more, so it passed the very budget that clips
+// the line the lane exists to add.
+assert.ok(reasonPx >= 140, `the Reason column is left ${Math.round(reasonPx)}px at the ${FLOOR}px floor; the receipt line needs at least 140`)
 assert.match(sc, /min-w-\[980px\]/, 'the table keeps its 980px floor -- widening it would add a horizontal scrollbar at 1280')
 console.log(`PASS the column budget gives Product ${product} and still leaves Reason ${Math.round(reasonPx)}px at the ${FLOOR}px floor`)
 
@@ -155,7 +181,25 @@ const titledName = sc.split('\n').filter((line) => (
   /\btruncate\b|dense-cell-truncate|line-clamp/.test(line)
 ))
 assert.deepEqual(titledName, [], `a clipped product name is still a dead-end title tooltip:\n${titledName.join('\n')}`)
-console.log('PASS the product name is revealed through the shared TruncatedText, not a dead-end title')
+
+// The SAME rule for the receipt line, and for the same reason twice over: a
+// receipt id is the value a person copies out of this row (ids-fully-visible),
+// and the Reason column is the narrowest cell that holds one, so it is the
+// line most likely to clip. Guaranteeing the fit at the 980px floor (c) is
+// half the answer; the other half is that a Reason cell squeezed by a long
+// branch/supplier value at some other width still reveals what it clipped.
+assert.match(
+  sc,
+  /<TruncatedText text=\{referenceText\(row\)\}/,
+  'the desktop receipt line must render through TruncatedText -- a clipped receipt id must stay revealable by tap',
+)
+const titledReference = sc.split('\n').filter((line) => (
+  /\{referenceText\(row\)\}<\/span>/.test(line) &&
+  /title=\{referenceText\(row\)\}/.test(line) &&
+  /\btruncate\b|dense-cell-truncate|line-clamp/.test(line)
+))
+assert.deepEqual(titledReference, [], `a clipped receipt line is still a dead-end title tooltip:\n${titledReference.join('\n')}`)
+console.log('PASS the product name and the receipt line are revealed through the shared TruncatedText, not a dead-end title')
 
 // ---- 4. sibling parity: every reader of a movement row says the same thing --
 

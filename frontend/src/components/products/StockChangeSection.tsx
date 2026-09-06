@@ -617,22 +617,36 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               problem: Product held 18% -- about 180px of a 1005px content
               width at 1280 -- so a real name ("L'Occitane Hand Cream Shea
               Butter 20% 150ml") was cut after a third of itself while four
-              fixed-width numeric columns held width they cannot use. Time,
-              Quantity and Before -> After are bounded by their own content
-              (a clock, a signed integer, "128 -> 130"), so they are trimmed
-              to what that content needs and the space goes to Product and to
-              Reason, which now carries the receipt line as well. Percentages
-              stay under the fixed columns' remainder so the table still fits
-              its 980px floor with no horizontal scrollbar at 1280. */}
+              fixed-width numeric columns held width they cannot use.
+
+              The budget is solved against three hard constraints, not tuned by
+              eye, because trimming the numeric columns "as far as they go" only
+              moves the clipping one column along:
+                - every FIXED column holds its own widest content at the dense
+                  13px scale plus ~16px cell padding: Time 4.25rem ('19:31'),
+                  Type 7.5rem (the longest chip, 'Adjust Quantity', ~95px + the
+                  chip's own px-1.5), Quantity 5rem (the uppercase 'QUANTITY'
+                  header, wider than any signed integer under it),
+                  Before -> After 5.75rem ('1280 → 1300');
+                - Reason keeps >= 140px at the table's 980px floor, which is
+                  what its first line needs for the widest receipt this ledger
+                  prints, 'Return RET-20260902-0007' (~118px + padding);
+                - Product keeps the largest proportional share, 24%.
+              22.5rem fixed + 48.5% = 360px + 475px at 980, leaving Reason
+              145px -- so the table still fits its floor with no horizontal
+              scrollbar at 1280, and nothing is starved to get there. The
+              numbers are pinned in tests/stockChangeLedgerReference.test.ts
+              section 3 with floors AND ceilings; a ceiling alone passed a
+              1rem Type column that wraps its own chip. */}
           <colgroup>
             <col className="w-[4.25rem]" />
-            <col className="w-[26%]" />
-            <col className="w-[6rem]" />
-            <col className="w-[4rem]" />
+            <col className="w-[24%]" />
+            <col className="w-[7.5rem]" />
+            <col className="w-[5rem]" />
             <col className="w-[5.75rem]" />
+            <col className="w-[8%]" />
             <col className="w-[9.5%]" />
-            <col className="w-[12%]" />
-            <col className="w-[6.5%]" />
+            <col className="w-[7%]" />
             <col />
           </colgroup>
           <thead>
@@ -715,8 +729,17 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                         it, where it belongs, and is never printed as a
                         receipt number. */}
                     <td>
+                      {/* Through TruncatedText, like the product name and for
+                          the same reason twice over: a receipt id is the value
+                          a person copies out of this row, and this is the
+                          narrowest cell that holds one. The budget above
+                          guarantees the fit at the 980px floor; this
+                          guarantees that a cell squeezed at some other width
+                          still REVEALS what it clipped, by tap as well as
+                          hover, instead of a `title` nothing marks as
+                          openable. */}
                       {model.reference.label ? (
-                        <span className="block dense-cell-truncate font-semibold text-gray-600 dark:text-gray-300" title={referenceText(row)}>{referenceText(row)}</span>
+                        <TruncatedText text={referenceText(row)} className="font-semibold text-gray-600 dark:text-gray-300" />
                       ) : null}
                       <span className={`block dense-cell-truncate ${model.reference.label ? 'leading-[0.85rem] text-[0.68rem] text-gray-400' : 'text-gray-500'}`} title={model.reason}>{model.reason}</span>
                     </td>
