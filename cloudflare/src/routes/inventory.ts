@@ -27,6 +27,8 @@ import { transferDirectionError } from '../lib/branchRoleGuards'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
+import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
+import { movementReferenceSelectSql } from '../lib/movementReference'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -619,7 +621,14 @@ app.get('/bootstrap', async (c) => {
       params: {},
       qtyExpr: 'COALESCE(p.stock_quantity, 0)',
     }),
-    db.prepare('SELECT * FROM inventory_movements ORDER BY created_at DESC, id DESC LIMIT 50').all({}),
+    // N13: the bootstrap's movement preview is the SAME ledger rows the
+    // /movements drill serves, so it resolves branch / actor / receipt
+    // through the same shared expressions instead of showing a blank branch
+    // and a full name on its first 50 rows.
+    db.prepare(`SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN},
+      ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
+      ${movementReferenceSelectSql('inventory_movements')}
+      FROM inventory_movements ORDER BY created_at DESC, id DESC LIMIT 50`).all<Record<string, unknown>>({}),
     db.prepare("SELECT DISTINCT trim(brand) AS value FROM products WHERE is_active = 1 AND trim(COALESCE(brand, '')) <> '' ORDER BY lower(trim(brand)) ASC").all<{ value: string }>({}),
     // Previously missing -- same gap as getInventoryProductMetadata's own
     // brands-only query, just this route's separate first-load copy of it.
@@ -650,7 +659,10 @@ app.get('/bootstrap', async (c) => {
       stock_value_usd: familyStats.stock_value_usd,
       stock_value_khr: familyStats.stock_value_khr,
     },
-    movements: { items: movements || [], total: (movements || []).length, page: 1, pageSize: 50 },
+    movements: {
+      items: (movements || []).map((row) => withResolvedActorName(withResolvedBranchName(row))),
+      total: (movements || []).length, page: 1, pageSize: 50,
+    },
     filters: { brands: (brands || []).map((row) => row.value), categories: (categories || []).map((row) => row.value) },
     branches: branchRows || [],
   })
@@ -1052,14 +1064,22 @@ app.get('/movements', async (c) => {
   // shared expression. It is aliased rather than named branch_name because
   // `SELECT *` already emits that column, and folded back onto branch_name in
   // JS so every consumer still sees one field.
+  // N13: the ACTOR is resolved the same way and for the same reason -- older
+  // rows snapshot the full name, and every history surface names the account
+  // username. Same aliased-then-folded shape as the branch.
+  // N13: and the RECORD the row belongs to -- reference_id alone identifies
+  // nothing to a person, so the receipt it names is resolved here too. These
+  // two are new column names, so they need no fold.
   const items = await db.prepare(`
-    SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN}
+    SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN},
+      ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
+      ${movementReferenceSelectSql('inventory_movements')}
     FROM inventory_movements
     ${whereSql}
     ORDER BY created_at DESC, id DESC
     LIMIT @pageSize OFFSET @offset
   `).all<Record<string, unknown>>({ ...params, pageSize, offset })
-  return c.json({ items: (items || []).map(withResolvedBranchName), total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
+  return c.json({ items: (items || []).map((row) => withResolvedActorName(withResolvedBranchName(row))), total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
 })
 
 // ---- Reasons (saved as JSON in settings, matching the Docker backend) ----

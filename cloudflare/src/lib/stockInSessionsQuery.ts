@@ -1,3 +1,8 @@
+// N13: a stock-in session names its actor from the same movement rows the
+// Stock Change ledger reads, so it resolves the account username the same
+// way -- one rule, one implementation (lib/movementActorName.ts).
+import { movementActorNameSql } from './movementActorName'
+
 export const STOCK_IN_SESSION_KEY_SQL = `CASE
   WHEN m.reference_id IS NOT NULL AND CAST(m.reference_id AS TEXT) NOT LIKE 'revert:%'
     THEN 'session:' || CAST(m.reference_id AS TEXT)
@@ -49,10 +54,10 @@ export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: st
     SELECT ${STOCK_IN_SESSION_KEY_SQL} AS session_key,
            MIN(m.created_at) AS created_at, MAX(b.received_at) AS received_at,
            MAX(m.branch_id) AS branch_id, MAX(m.branch_name) AS branch_name,
-           MAX(m.user_name) AS user_name, MAX(b.supplier_id) AS supplier_id,
+           MAX(${movementActorNameSql('m')}) AS user_name, MAX(b.supplier_id) AS supplier_id,
            MAX(b.supplier_name) AS supplier_name,
            COUNT(DISTINCT COALESCE(CAST(m.branch_id AS TEXT), '') || ':' || COALESCE(m.branch_name, '')) AS branch_state_count,
-           COUNT(DISTINCT COALESCE(CAST(m.user_id AS TEXT), '') || ':' || COALESCE(m.user_name, '')) AS user_state_count,
+           COUNT(DISTINCT COALESCE(CAST(m.user_id AS TEXT), '') || ':' || COALESCE(${movementActorNameSql('m')}, '')) AS user_state_count,
            COUNT(DISTINCT COALESCE(CAST(b.supplier_id AS TEXT), '') || ':' || lower(trim(COALESCE(b.supplier_name, '')))) AS supplier_state_count,
            COUNT(*) AS line_count, SUM(ABS(COALESCE(m.quantity, 0))) AS quantity,
            SUM(CASE WHEN COALESCE(m.total_cost_usd, 0) > 0 THEN m.total_cost_usd ELSE 0 END) AS movement_cost_usd,
@@ -81,7 +86,7 @@ export function stockInSessionLinesSql(locator: StockInSessionLocator): string {
            p.cost_price_usd, p.cost_price_khr,
            m.branch_id, m.branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
            m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
-           m.reason, m.reference_id, m.user_name, m.created_at, m.batch_id,
+           m.reason, m.reference_id, ${movementActorNameSql('m')} AS user_name, m.created_at, m.batch_id,
            b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
            b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
            b.payment_status AS batch_payment_status, b.credit_due_date AS batch_credit_due_date,

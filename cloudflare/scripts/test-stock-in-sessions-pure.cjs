@@ -9,9 +9,12 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const root = path.join(__dirname, '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-in-sessions-'))
 fs.copyFileSync(path.join(root, 'src', 'lib', 'stockInSessionsQuery.ts'), path.join(tmp, 'stockInSessionsQuery.ts'))
+// N13: the session query names its actor through the shared account-username
+// expression, so that pure dependency comes along for the isolated compile.
+fs.copyFileSync(path.join(root, 'src', 'lib', 'movementActorName.ts'), path.join(tmp, 'movementActorName.ts'))
 const version = execSync('npx tsc --version', { cwd: root, encoding: 'utf8' }).trim()
 const ignore = /^Version\s+(?:[6-9]|\d{2,})\./.test(version) ? ' --ignoreConfig' : ''
-execSync(`npx tsc "${path.join(tmp, 'stockInSessionsQuery.ts')}" --outDir "${tmp}" --module commonjs --target es2022 --strict --skipLibCheck${ignore}`, { cwd: root })
+execSync(`npx tsc "${path.join(tmp, 'stockInSessionsQuery.ts')}" "${path.join(tmp, 'movementActorName.ts')}" --outDir "${tmp}" --module commonjs --target es2022 --strict --skipLibCheck${ignore}`, { cwd: root })
 const kernel = require(path.join(tmp, 'stockInSessionsQuery.js'))
 const db = openDb(loadAll())
 
