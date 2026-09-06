@@ -2184,7 +2184,7 @@ export default function Settings() {
                 {t('telegram_help_paragraph')}
               </p>
               <div className="sm:col-span-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800/70 dark:text-gray-300">
-                <span className="font-medium">{t('telegram_help_commands_label')}</span> {t('telegram_help_commands_desc')} <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, and <code>/help</code>. {t('telegram_help_commands_note')}
+                <span className="font-medium">{t('telegram_help_commands_label')}</span> {t('telegram_help_commands_desc')} <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, {t('telegram_help_commands_and')} <code>/help</code>. {t('telegram_help_commands_note')}
               </div>
             </div>
           </SettingsSection>

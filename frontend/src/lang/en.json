@@ -4915,6 +4915,7 @@
   "telegram_cat_stock_out_desc": "Product, quantity, branch, and reason",
   "telegram_chat_id_label": "Telegram chat ID",
   "telegram_chat_id_placeholder": "Example: -1001234567890",
+  "telegram_help_commands_and": "and",
   "telegram_help_commands_desc": "this same Telegram chat can use",
   "telegram_help_commands_label": "Owner / manager commands:",
   "telegram_help_commands_note": "Keep this chat private to owners/managers; sending a test message automatically connects commands.",
