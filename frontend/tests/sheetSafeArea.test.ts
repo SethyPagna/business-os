@@ -51,14 +51,18 @@ runTest('mobile:F1 -- ProductDetailFlyout panel clears the home indicator', () =
 })
 
 runTest('mobile:F1 -- ProductDetailFlyout gesture strip keeps only Add to Bucket', () => {
-  // Before the fix this string appears twice: once as the header X's
-  // aria-label, once as the footer Close button's visible text. The footer
+  // Before the fix the string was used twice: once as the header X's
+  // aria-label, once as the footer Close button's VISIBLE text. The footer
   // Close duplicated the header X with no distinct purpose (Add to Bucket is
-  // the strip's one real action) -- so after the fix it appears exactly once.
-  const closeCopyOccurrences = productDetailFlyoutSource.match(/copy\('close', 'Close'\)/g) || []
-  assert.equal(
-    closeCopyOccurrences.length,
-    1,
+  // the strip's one real action). Counting raw occurrences was a stale proxy:
+  // the lightbox label wiring (65e22314) legitimately reuses the same string as
+  // a prop, so the lock asserts the two things that matter -- one header
+  // aria-label, and no button whose visible text is the close label.
+  const headerCloseLabels = productDetailFlyoutSource.match(/aria-label=\{copy\('close', 'Close'\)\}/g) || []
+  assert.equal(headerCloseLabels.length, 1, 'exactly one header X carries the close aria-label')
+  assert.doesNotMatch(
+    productDetailFlyoutSource,
+    />\s*\{copy\('close', 'Close'\)\}\s*<\/button>/,
     'the footer Close button duplicating the header X must be removed -- only the header aria-label should remain',
   )
   assert.match(
