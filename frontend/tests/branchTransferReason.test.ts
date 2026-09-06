@@ -107,6 +107,10 @@ runTest('every write path runs the check before it writes or parks a confirm', (
     // so the operator is not asked to approve a transfer that cannot run.
     { handler: 'handleBulkTransfer', commit: 'setPendingTransfer(' },
     { handler: 'handleTransferEntireBranch', commit: 'setPendingTransfer(' },
+    // runPendingTransfer is the ONE place that actually POSTs -- both scopes
+    // go through it, and it is the only site that can catch a pendingTransfer
+    // armed with a reason that was since cleared (see the two tests below).
+    { handler: 'runPendingTransfer', commit: 'transferStockBulk({' },
   ]
   for (const { handler, commit } of paths) {
     const body = handlerBody(handler)
@@ -116,6 +120,40 @@ runTest('every write path runs the check before it writes or parks a confirm', (
     assert.ok(commitAt > 0, `${handler} must still reach ${commit}`)
     assert.ok(guardAt < commitAt, `${handler}: the reason check must run before ${commit}`)
   }
+})
+
+runTest('runPendingTransfer checks the reason as its very first statement, not just before the POST', () => {
+  // A guard that merely runs "before transferStockBulk({" could still sit
+  // after beginSingleAction/setSavingBulk -- which would arm the in-flight
+  // ref and flip the UI to "saving" before refusing, and would let a second,
+  // unrelated call race past it. The check must be the first thing that
+  // happens when this function runs, full stop, so EVERY caller -- present
+  // (handleBulkTransfer, handleTransferEntireBranch's synchronous arm) and
+  // the one this file's handler-body walk cannot even see (the deferred park
+  // inside the branch-listing load effect, which arms pendingTransfer with
+  // no guard of its own once the fetch resolves) -- is checked here before
+  // anything else runs.
+  const body = handlerBody('runPendingTransfer')
+  const declEnd = body.indexOf('=> {') + '=> {'.length
+  const guardAt = body.indexOf('if (!requireTransferReason()) return')
+  assert.ok(guardAt > 0, 'runPendingTransfer must run the shared reason check')
+  const beforeGuard = body.slice(declEnd, guardAt).trim()
+  assert.equal(beforeGuard, '', 'the reason check must be the FIRST statement in runPendingTransfer, before beginSingleAction or any other state change')
+})
+
+runTest('the deferred whole-branch park has no guard of its own -- it is covered only by runPendingTransfer', () => {
+  // Three call sites arm pendingTransfer with a real transfer: the
+  // checked-rows path and the whole-branch path's synchronous arm (both
+  // walked by the test above, both preceded by their own
+  // requireTransferReason() call) plus the whole-branch path's DEFERRED arm
+  // inside the branch-listing load effect -- reached only once the fetch
+  // resolves, by which point the operator may have cleared the reason field.
+  // That third site is why the guard has to live in runPendingTransfer
+  // itself rather than at each `setPendingTransfer(` call: this test proves
+  // the count so a fourth arming site added later is caught here too, not
+  // silently uncovered.
+  const armingCalls = (modal.match(/setPendingTransfer\(buildPendingTransfer\(/g) || []).length
+  assert.equal(armingCalls, 3, 'expected exactly three call sites that arm pendingTransfer with a real transfer')
 })
 
 runTest('both endpoints receive `reason`, never the legacy `note`', () => {

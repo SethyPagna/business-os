@@ -960,8 +960,23 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * reports exactly how far it got. Re-running is the documented recovery and
    * is safe: rows already moved have no stock left in the source branch, so
    * they are simply absent from the next run's item list.
+   *
+   * requireTransferReason() runs FIRST here, not only at the two call sites
+   * that arm pendingTransfer synchronously (handleBulkTransfer,
+   * handleTransferEntireBranch's already-loaded path). Transfer entire
+   * branch has a THIRD, deferred path: when the branch listing hasn't
+   * loaded yet, handleTransferEntireBranch checks the reason, then only
+   * arms entireBranchAfterLoadRef and returns -- the actual
+   * setPendingTransfer happens later, inside the load effect above, once
+   * the fetch resolves. The reason field stays enabled the whole time that
+   * fetch is in flight, so it can be cleared before the effect parks the
+   * confirm dialog, and ConfirmDialog's own onConfirm never re-validates
+   * anything -- it just calls this function. Checking here, in the one
+   * actual write path, covers every arming site (present and future) with
+   * no per-caller duplication.
    */
   const runPendingTransfer = async (pending: PendingTransfer) => {
+    if (!requireTransferReason()) return
     if (!beginSingleAction(transferBulkInFlightRef, { blocked: savingBulk })) return
     setSavingBulk(true)
     const chunks: PendingTransferItem[][] = []
