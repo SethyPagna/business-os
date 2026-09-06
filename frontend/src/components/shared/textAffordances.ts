@@ -43,10 +43,18 @@ import { createLongPressHandlers, createLongPressState } from '../../utils/longP
 export const COPY_ATTR = 'data-copy-value'
 export const REVEAL_ATTR = 'data-reveal-text'
 export const COPY_SELECTOR = '[data-copy-value]'
+// While the styled panel is open the native `title` is parked here so the
+// browser's own tooltip does not stack on top of it (see `parkTitle`). It
+// belongs in the SELECTOR, not just in a stash: a dense cell whose only
+// opt-in was that `title` stops matching the moment its panel opens, and
+// then every later event on it -- the mouseout that should close the panel,
+// a re-hover, a click -- resolves to no target at all and the float hangs.
+export const TITLE_PARK_ATTR = 'data-affordance-title'
 // A cell opts in either explicitly (TruncatedText, and anything that wants
 // the reveal without the dense-table styling) or by already carrying the
-// dense-table truncation contract plus the `title` it was relying on.
-export const REVEAL_SELECTOR = '[data-reveal-text], .dense-cell-truncate[title]'
+// dense-table truncation contract plus the `title` it was relying on --
+// parked or not.
+export const REVEAL_SELECTOR = `[data-reveal-text], .dense-cell-truncate[title], .dense-cell-truncate[${TITLE_PARK_ATTR}]`
 // Ancestors whose OWN click is the point of the surface. The dense tables
 // already mark them: main.css styles `tr[data-clickable='true']` with a
 // pointer cursor and a hover tint, and all four dense surfaces set it on the
@@ -195,9 +203,6 @@ export interface AffordanceLabels {
 }
 
 const COPIED_RESET_MS = 1600
-// Stashes the native `title` while the styled panel is open so the browser
-// tooltip does not stack on top of it.
-const TITLE_PARK_ATTR = 'data-affordance-title'
 
 let installed = false
 let labels: AffordanceLabels = { copy: 'Copy', copied: 'Copied' }

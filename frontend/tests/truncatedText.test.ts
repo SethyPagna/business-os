@@ -28,11 +28,14 @@ import {
   REVEAL_ATTR,
   REVEAL_SELECTOR,
   SURFACE_CLICK_SELECTOR,
+  TITLE_PARK_ATTR,
   claimsClick,
+  ensureTextAffordances,
   isClipped,
   nextFloatState,
   placeFloat,
 } from '../src/components/shared/textAffordances.ts'
+import { buildClickableRow, installAffordanceDom, wait, type StubElement } from './affordanceDomStub.ts'
 
 const read = (path: string): string => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
@@ -201,5 +204,70 @@ for (const token of ['.text-affordance-float', '.text-affordance-value', '.text-
 assert.ok(css.includes('.text-affordance-float[hidden]'), 'the closed panel must beat the display:flex rule explicitly')
 assert.match(css, /\.dark \.text-affordance-float/, 'the float must be themed in dark mode')
 assert.match(controller, /document\.body\.appendChild\(host\)/, 'one body-level host, created by the controller itself')
+
+/* ---------------------------------------------------------------- *
+ * 5. The controller, driven for real.
+ *
+ * Everything above this line reads source text or calls the pure core, and
+ * neither can see the defect this section exists for. `parkTitle` REMOVES
+ * the `title` attribute while the panel is open -- and `title` is the only
+ * thing a plain `.dense-cell-truncate` cell matches REVEAL_SELECTOR on. So
+ * from the instant the float opened, that cell resolved to NO affordance
+ * target: `mouseout` returned early and the panel never closed on
+ * hover-out, and a re-hover was just as dead. The fix keeps the parked cell
+ * matchable (`.dense-cell-truncate[${TITLE_PARK_ATTR}]` is part of the
+ * selector). Comparing against the open element inside the mouseout handler
+ * would have closed the panel while leaving that cell invisible to every
+ * OTHER listener, which is the same bug with one symptom hidden.
+ *
+ * A `data-reveal-text` span -- an opt-in parking cannot touch -- runs the
+ * identical sequence as a POSITIVE CONTROL, so a broken harness cannot
+ * report both halves green.
+ * ---------------------------------------------------------------- */
+
+const dom = installAffordanceDom()
+ensureTextAffordances()
+const host = dom.host()
+if (!host) throw new Error('the controller must build its own body-level host')
+
+const outside = dom.el('div')
+dom.body.append(outside)
+
+const hoverThenLeave = async (cell: StubElement) => {
+  dom.fire('mouseover', { target: cell })
+  await wait(HOVER_OPEN_DELAY_MS + 60)
+  const opened = host.hidden === false
+  const shown = String(host.childNodes[0]?.textContent || '')
+  dom.fire('mouseout', { target: cell, relatedTarget: outside })
+  return { opened, shown, closed: host.hidden === true }
+}
+
+// Control: opts in through `data-reveal-text`, which parking never touches.
+const controlCell = dom.el('span', { [REVEAL_ATTR]: 'Supplier name far too long for its column' }, { scrollWidth: 240, clientWidth: 90 })
+buildClickableRow(dom, controlCell)
+const control = await hoverThenLeave(controlCell)
+assert.equal(control.opened, true, 'control: hover opens the one panel')
+assert.equal(control.shown, 'Supplier name far too long for its column', 'control: the panel shows the full value')
+assert.equal(control.closed, true, 'control: hover-out closes it')
+
+// The case: a dense cell whose ONLY opt-in is the `title` the panel parks.
+const denseTitle = 'Warehouse -> Shop, damaged carton returned'
+const denseCell = dom.el('span', { class: 'dense-cell-truncate', title: denseTitle }, { scrollWidth: 260, clientWidth: 80 })
+buildClickableRow(dom, denseCell)
+const dense = await hoverThenLeave(denseCell)
+assert.equal(dense.opened, true, 'a titled dense cell opens on hover')
+assert.equal(dense.shown, denseTitle, 'and shows the value its native tooltip used to')
+assert.equal(dense.closed, true, 'and it must CLOSE on hover-out -- parking its title must not make it unmatchable')
+assert.equal(denseCell.getAttribute('title'), denseTitle, 'the native title comes back once the panel is closed')
+assert.equal(denseCell.getAttribute(TITLE_PARK_ATTR), null, 'and the parking slot is cleared')
+
+// Re-hovering the same cell has to work too -- the failure mode was not
+// "the close is missing", it was "this element stopped matching", which
+// takes every later event on it with it.
+const again = await hoverThenLeave(denseCell)
+assert.equal(again.opened, true, 're-hovering the same cell opens it again')
+assert.equal(again.closed, true, 'and it closes again')
+
+dom.restore()
 
 console.log('PASS one delegated reveal serves every truncated cell, without taking a click the surface owns')
