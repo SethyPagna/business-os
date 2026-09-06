@@ -190,6 +190,23 @@ await runTest('DatedStockReconciliationModal documents its real launcher and Bac
   assert.doesNotMatch(dsrm, /locked in from ImportModeWizard/, 'that launch path does not exist anywhere in the file')
 })
 
+// The audit's rule:F8 finding: on step === 'done' the footer rendered both a
+// left "Cancel" button (calling onClose) and a right "Done" button (also
+// calling onClose) -- a second close affordance alongside the shared Modal's
+// own header X, the same defect this lane already removed from
+// BulkImportModal.tsx:3001. The done screen must offer exactly one action.
+await runTest('DatedStockReconciliationModal done step has no reachable Cancel button', () => {
+  const dsrm = fs.readFileSync(
+    new URL('../src/components/products/import/DatedStockReconciliationModal.tsx', import.meta.url),
+    'utf8',
+  )
+  assert.doesNotMatch(
+    dsrm,
+    /step === 'upload' \|\| step === 'done' \? T\('cancel'/,
+    'the done step must not resolve the left button to Cancel',
+  )
+})
+
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)

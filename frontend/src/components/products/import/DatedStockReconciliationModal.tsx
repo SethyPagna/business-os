@@ -616,19 +616,21 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
           no-wrap row overflowed at 320 in English and in Khmer at 375. The
           row wraps and both buttons may shrink. */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-        <button
-          type="button"
-          onClick={() => {
-            if (step === 'upload' || step === 'done') onClose()
-            else if (step === 'mapping' || step === 'review') restartUpload()
-            else if (step === 'plan') setStep('review')
-          }}
-          disabled={working || step === 'resolving' || step === 'applying_decisions' || step === 'applying'}
-          className="inline-flex min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {step === 'upload' || step === 'done' ? T('cancel', 'Cancel') : T('back', 'Back')}
-        </button>
+        {step !== 'done' ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (step === 'upload') onClose()
+              else if (step === 'mapping' || step === 'review') restartUpload()
+              else if (step === 'plan') setStep('review')
+            }}
+            disabled={working || step === 'resolving' || step === 'applying_decisions' || step === 'applying'}
+            className="inline-flex min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            {step === 'upload' ? T('cancel', 'Cancel') : T('back', 'Back')}
+          </button>
+        ) : <span />}
         {step === 'mapping' ? (
           <button type="button" onClick={() => void runResolve()} disabled={!mappingComplete} className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">
             {T('continue', 'Continue')}
