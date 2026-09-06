@@ -419,6 +419,59 @@ await runTest('the pick button reads the derived gate rather than re-deriving in
   assert.match(sheet, /renderPickButton\(product\)/)
 })
 
+// The owner's 2026-09-06 ask is not only the sentence -- it is that the
+// warehouse option is SHOWN with its count, greyed, and ANSWERS the tap.
+// Scoped to the branch-step block, so an aria-disabled anywhere else in the
+// sheet cannot stand in for this one.
+await runTest('the greyed warehouse pill still takes the tap, and answers it with the prompt', () => {
+  const sheet = src('components', 'pos', 'ProductDetailSheet.tsx')
+  const block = sheet.split('const branchStep =')[1]?.split(/\r?\n\r?\n/)[0] ?? ''
+  assert.ok(block, 'the branch step must still exist')
+  // Greyed, not inert: aria-disabled tells assistive tech the option is
+  // refused while the button itself stays clickable.
+  assert.match(block, /aria-disabled=\{blocked\}/, 'the blocked pill must be marked aria-disabled')
+  // Discriminating: the DOM attribute would swallow the tap outright, the
+  // handler below would never run, and the operator would get silence --
+  // exactly the "nothing happens when I press it" this ask exists to end.
+  assert.doesNotMatch(
+    block,
+    /\sdisabled=\{blocked\}/,
+    'a DOM-disabled pill eats the click and no prompt ever fires; it must be aria-disabled',
+  )
+  assert.match(
+    block,
+    /if \(blocked\) \{ setBranchNotice\(warehouseBlockedMessage\); return \}/,
+    'clicking a blocked branch must show the warehouse prompt and stop, not fall through to selection',
+  )
+  // "should show the warehouse stock as well": the count rides on the pill.
+  assert.match(block, /\{branch\.quantity\}/, 'the pill must print the on-hand quantity of that branch')
+  assert.match(block, /\{branchNotice\}/, 'the notice the handler sets must actually be rendered')
+})
+
+// The prompt only fires on a sale surface: intent decides whether the
+// warehouse is refused at all (shared/ProductOptionSheet.tsx defaults to
+// intent 'stock', where the warehouse is a legitimate pick). A sale-side
+// mount that lost the prop would make the warehouse SELECTABLE with every
+// other test still green, because they only assert the component name.
+await runTest('every sale-side option-sheet mount declares the sale intent', () => {
+  const saleDetail = src('components', 'sales', 'SaleDetailModal.tsx')
+  const saleMounts = saleDetail.split('<ProductOptionSheet').slice(1)
+  assert.equal(saleMounts.length, 2, 'SaleDetailModal has two sale-side pickers: add items, and Replace')
+  saleMounts.forEach((mount, index) => {
+    assert.match(mount.split('/>')[0], /intent="sell"/, `SaleDetailModal option-sheet mount #${index + 1} must sell, not stock`)
+  })
+  const newReturn = src('components', 'returns', 'NewReturnModal.tsx')
+  const returnMounts = newReturn.split('<ProductOptionSheet').slice(1)
+  assert.equal(returnMounts.length, 1, 'the returns replacement picker is the one option-sheet mount there')
+  assert.match(returnMounts[0].split('/>')[0], /intent="sell"/, 'a replacement line is sold, so its picker must refuse the warehouse')
+  // The adapter default is the failure mode being pinned against.
+  assert.match(
+    src('components', 'shared', 'ProductOptionSheet.tsx'),
+    /intent = 'stock'/,
+    "the adapter default is 'stock'; that is why every sale mount must say so explicitly",
+  )
+})
+
 // ---------------------------------------------------------------------------
 // The Worker's two refusals, shown from the packs.
 // ---------------------------------------------------------------------------
