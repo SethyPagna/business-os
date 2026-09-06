@@ -21,7 +21,7 @@ export default function QuickAddModal({ title, children, onSave, onClose, saving
             type="button"
             onClick={onClose}
             disabled={saving}
-            aria-label="Close"
+            aria-label={T('close', 'Close')}
             className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <X className="h-4 w-4" />

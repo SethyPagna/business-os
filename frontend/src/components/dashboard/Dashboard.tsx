@@ -1052,10 +1052,9 @@ export default function Dashboard() {
   const calcTrend = (curr: number, prev: number) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
   const aRevenue  = analytics?.totals?.revenue_usd || 0
   const aGrossSales = analytics?.totals?.gross_sales_usd || 0
-  const aItemDiscounts = analytics?.totals?.item_discount_usd || 0
-  const aDiscounts = analytics?.totals?.total_discount_usd ?? ((analytics?.totals?.discount_usd || 0) + aItemDiscounts)
+  const aDiscounts = analytics?.totals?.discount_usd || 0
   const aStoreDiscounts = analytics?.totals?.store_discount_usd || 0
-  const aMemberDiscounts = analytics?.totals?.membership_discount_usd ?? 0
+  const aMemberDiscounts = analytics?.totals?.membership_discount_usd || Math.max(0, aDiscounts - aStoreDiscounts)
   const aTax = analytics?.totals?.tax_usd || 0
   const aDelivery = analytics?.totals?.delivery_usd || 0
   const aStockValue = summary?.stock_value_usd || 0
@@ -1132,7 +1131,7 @@ export default function Dashboard() {
   const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Revenue − COGS + delivery fees charged − courier costs')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')
   const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points')
-  const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0)} - ${fmtUSD(aRefundUsd)}`
+  const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aRefundUsd)}`
   const collectedExampleText = `${fmtUSD(aRevenue + aTax + aDelivery)} = ${fmtUSD(aRevenue)} + ${fmtUSD(aTax)} + ${fmtUSD(aDelivery)}`
   const rangeLabel = (() => {
     return `${customStart} - ${customEnd}`
@@ -1306,7 +1305,6 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('store_discounts', 'Store discounts'), value: fmtUSD(aStoreDiscounts) },
         { label: translateOr('membership_discounts', 'Membership discounts'), value: fmtUSD(aMemberDiscounts) },
-        { label: translateOr('item_discounts', 'Item discounts'), value: fmtUSD(aItemDiscounts) },
         { label: translateOr('discount_rate', 'Discount rate'), value: `${aDiscountRate.toFixed(1)}%` },
       ],
     },

@@ -1399,6 +1399,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             onChanged={() => { void loadReturns(true) }}
             notify={notify}
             t={t}
+            tr={tr}
           />
         </Suspense>
       ) : null}

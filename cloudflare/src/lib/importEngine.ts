@@ -69,7 +69,7 @@ import {
   type ParsedCsvRow,
 } from './importCsv'
 import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
-import { createMembershipNumberAllocator } from './membershipNumber'
+import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -1881,16 +1881,30 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   // duplicating routes/contacts.ts's. Two minters on one column is a
   // collision waiting for the day someone imports a spreadsheet while a
   // cashier registers a walk-in. Both now come from lib/membershipNumber.ts:
-  // one random eight-character format. The allocator is the
+  // one house format (`LC-#####`), one gap-fill rule. The allocator is the
   // synchronous flavour, seeded from the full `existing` snapshot this pass
-  // already loaded (no D1 round trip per row) and remembering every number it
-  // hands out plus all supplied IDs, so blank rows cannot take a later row's ID
-  // either. The partial UNIQUE index from migration 0015 stays the final
-  // arbiter at write time.
+  // already loaded (no D1 round trip per row) plus all supplied IDs, and
+  // remembers every number it hands out so blank rows cannot take a later
+  // row's ID either. The partial UNIQUE index from migration 0015 stays the
+  // final arbiter at write time.
+  //
+  // The seed must ALSO union portal_accounts.membership_id, same as
+  // mintMembershipNumber() does for every other minting path (manual add,
+  // storefront signup): a bulk import never WRITES portal_accounts, but a
+  // portal signup can reserve a slot in it with no matching customer row yet
+  // (e.g. a signup whose contact fold failed) -- that slot is a real
+  // reservation in the ONE shared sequence, not something only the customers
+  // table gets a say over, so an import that never consulted it could hand a
+  // blank row the exact number a pending portal account already holds.
+  const portalTaken = table === 'customers'
+    ? (await db.prepare(`SELECT membership_id FROM portal_accounts WHERE ${membershipGlob('membership_id')}`).all<{ membership_id: string }>())
+      .map((record) => record.membership_id)
+    : []
   const nextMembershipNumber = table === 'customers'
     ? createMembershipNumberAllocator([
         ...existing.map((record) => (record as { membership_number?: unknown }).membership_number),
         ...rows.map((row) => row.membership_number),
+        ...portalTaken,
       ])
     : (): string => { throw new Error('Membership numbers are customers-only') }
 
