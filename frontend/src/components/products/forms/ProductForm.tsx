@@ -32,8 +32,10 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '..
 import { getPermissionTierFromMap, parsePermissionMap } from '../../../utils/permissions.ts'
 import { actionAllowed, isActionOverriddenOff } from '../../../utils/permissionActions.ts'
 
-// The server's "same name + barcode + cost is the same product -- merge into it
-// instead of creating a twin" 409, unpacked into the row it is pointing at.
+// The server's "same name + same barcode (leading zeros folded) is the same
+// product -- merge into it instead of creating a twin" 409, unpacked into the
+// row it is pointing at. classifyCreateMatches asks this same question on the
+// client, so this 409 should now only be reachable on a genuine race.
 // Returns null for any other failure, so an unrelated error can never be
 // mistaken for an invitation to merge two products together.
 function duplicateCollisionFrom(error: unknown): { id: number; name: string | null } | null {
@@ -863,11 +865,10 @@ export default function ProductForm({
     () => classifyCreateMatches({
       name: form.name,
       barcode: form.barcode,
+      // cost is deliberately NOT passed: it is not part of product identity
       selling_price_usd: parseNumericInput(form.selling_price_usd),
-      cost_price_usd: parseNumericInput(form.cost_price_usd),
-      cost_price_khr: parseNumericInput(form.cost_price_khr),
     }, createMatches),
-    [form.name, form.barcode, form.selling_price_usd, form.cost_price_usd, form.cost_price_khr, createMatches],
+    [form.name, form.barcode, form.selling_price_usd, createMatches],
   )
   useEffect(() => {
     if (!isCreateMode) return
@@ -1476,7 +1477,7 @@ export default function ProductForm({
                   ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
                   : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'}`}>
                   {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_hint', 'This exact product already exists (same name, barcode, and cost) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ បាកូដ និងថ្លៃដើមដូចគ្នា) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
+                    ? tr('create_match_twin_hint', 'This product already exists (same name and barcode; leading zeros are ignored) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ និងបាកូដដូចគ្នា; សូន្យនៅខាងដើមមិនរាប់បញ្ចូល) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
                     : createVerdict.kind === 'name_match'
                       ? tr('create_match_name_hint', 'This name already exists ({n} rows) — saving adds this as a new row of that group.', 'ឈ្មោះនេះមានរួចហើយ ({n} ជួរ) — ការរក្សាទុកនឹងបន្ថែមជាជួរថ្មីនៃក្រុមនោះ។').replace('{n}', String(createVerdict.groupRows.length))
                       : tr('create_match_barcode_hint', 'This barcode is already on "{name}".', 'បាកូដនេះមាននៅលើ "{name}" រួចហើយ។').replace('{name}', createVerdict.canonicalName)}
@@ -2008,7 +2009,7 @@ export default function ProductForm({
               <div className={`space-y-1 ${createVerdict.kind === 'exact_twin' ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
                 <p>
                   {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_body', 'An identical product already exists — same name, barcode, and cost. Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នាបេះបិទមានរួចហើយ — ឈ្មោះ បាកូដ និងថ្លៃដើមដូចគ្នា។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
+                    ? tr('create_match_twin_body', 'The same product already exists — same name and barcode (leading zeros are ignored; a different cost does not make a new row). Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នានេះមានរួចហើយ — ឈ្មោះ និងបាកូដដូចគ្នា (សូន្យនៅខាងដើមមិនរាប់បញ្ចូល; ថ្លៃដើមខុសគ្នាមិនបង្កើតជួរថ្មីទេ)។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
                     : createVerdict.kind === 'name_match'
                       ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
                       : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}
