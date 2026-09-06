@@ -4100,7 +4100,10 @@ function ProductsFullEditor() {
           previously a border-t continuation of the sticky card above it). */}
       {hasSelected && bulkEditMode === 'info' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">{tr('bulk_edit_update_info_for', 'Update basic info for')} <strong>{selectedVisibleCount}</strong> {tr('bulk_edit_products_count_suffix', 'products')}</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_update_info_for_count', 'Update basic info for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div><label className="text-xs text-gray-500 block mb-1">{tr('category', 'Category')}</label>
               <AppSelect
@@ -4150,13 +4153,16 @@ function ProductsFullEditor() {
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
             const { buildProductBulkInfoUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkInfoUpdates(bulkEditForm))
-          }}>{tr('bulk_edit_apply_to_prefix', 'Apply to')} {selectedVisibleCount} {tr('bulk_edit_products_count_suffix', 'products')}</button>
+          }}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
         </div>
       )}
 
       {hasSelected && bulkEditMode === 'pricing' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">{tr('bulk_edit_update_pricing_for', 'Update pricing for')} <strong>{selectedVisibleCount}</strong> {tr('bulk_edit_products_count_suffix', 'products')}</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_update_pricing_for_count', 'Update pricing for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="grid grid-cols-2 gap-2">
             <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_usd', 'Selling Price (USD)')}</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
@@ -4182,7 +4188,7 @@ function ProductsFullEditor() {
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
             const { buildProductBulkPricingUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkPricingUpdates(bulkEditForm))
-          }}>{tr('bulk_edit_apply_to_prefix', 'Apply to')} {selectedVisibleCount} {tr('bulk_edit_products_count_suffix', 'products')}</button>
+          }}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
 
           {/* Relative adjustment, kept in the same panel as the absolute
               "set every price to X" fields above but visually separated,
@@ -4289,9 +4295,12 @@ function ProductsFullEditor() {
 
       {hasSelected && bulkEditMode === 'stock' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Adjust stock for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_adjust_stock_for_count', 'Adjust stock for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="flex gap-3 flex-wrap items-end">
-            <div><label className="text-xs text-gray-500 block mb-1">Quantity</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('quantity', 'Quantity')}</label>
               <input className="input text-xs py-1 w-24" type="number" min="0" value={bulkEditForm.qty??1} onChange={e=>setBulkEditForm(f=>({...f,qty:e.target.value}))} />
               {/* Same 1/5/10/20 quick-pick chips as InventoryStockModals.tsx's
                   Adjust modal and BranchStockAdjuster.tsx's per-branch rows --
@@ -4310,7 +4319,7 @@ function ProductsFullEditor() {
                 ))}
               </div>
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Action</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('action', 'Action')}</label>
               {/* Same border-2 / primary-50+primary-700 selected-state styling
                   as Inventory's Adjust-stock modal and the product edit
                   page's BranchStockAdjuster -- was previously a solid
@@ -4323,13 +4332,16 @@ function ProductsFullEditor() {
               </div>
             </div>
           </div>
-          <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={handleBulkAddStock}>Apply to {selectedVisibleCount} products</button>
+          <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={handleBulkAddStock}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
         </div>
       )}
 
       {hasSelected && bulkEditMode === 'branch' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">{tr('bulk_edit_move_stock_to_branch_for', 'Move stock to a branch for')} <strong>{selectedVisibleCount}</strong> {tr('bulk_edit_products_count_suffix', 'products')}</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_move_stock_to_branch_for_count', 'Move stock to a branch for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="flex gap-2 flex-wrap items-end">
             <div><label className="text-xs text-gray-500 block mb-1">{tr('target_branch', 'Target Branch')}</label>
               <AppSelect

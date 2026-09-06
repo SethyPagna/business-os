@@ -1,15 +1,17 @@
-// Products bulk-edit panels (Info / Pricing / Move stock) were three whole
-// panels of raw English -- audit finding "products-bulkedit-i18n" (i18n:1,
-// i18n:2, i18n:3). Only the Brand label (Info) and the wholesale rows +
-// relative-adjustment block (Pricing) had already been wired through
-// tr()/t(); everything else -- headings, Category/Unit/Supplier/Target
-// Branch labels, the "Keep current"/"Select branch" option labels, every
-// "Leave blank to keep" placeholder, the Low Stock Threshold label, the KHR
-// auto-calc note, both "Apply to N products" buttons, the "Move Stock"
-// button and its "Select a branch first" error toast -- rendered in English
-// even in Khmer mode. This file proves each of those now resolves through
-// tr()/t() against real pack keys, and that the literal English strings
-// are gone from the three panels' source.
+// Products bulk-edit panels (Info / Pricing / Stock / Move stock) were raw
+// English -- audit finding "products-bulkedit-i18n" (i18n:1, i18n:2, i18n:3),
+// plus a Round-2 verifier finding that the Stock panel (the fourth panel,
+// inside this lane's own declared region) was left untranslated even though
+// its mode chip ("Stock" / stock_short) IS translated, and that the first
+// round invented a competing prefix+bare-number+suffix i18n mechanism that
+// structurally cannot reorder for Khmer word order. This file proves:
+//   1. every panel resolves its strings through tr()/t() against real pack
+//      keys, and the literal English strings are gone from all four panels;
+//   2. the one-rule-one-implementation fix: no bulk-edit key is a sentence
+//      fragment (a `_prefix`/`_suffix` key) -- each count sentence is ONE key
+//      carrying a single {count} placeholder, substituted the same way as
+//      every other {count}-templated key in this codebase (see the comment
+//      by productSelectedLabel above, and ExportFieldsModal.tsx).
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -51,23 +53,32 @@ const pricingPanel = sliceBetween(
   "hasSelected && bulkEditMode === 'pricing'",
   "hasSelected && bulkEditMode === 'stock'",
 )
+const stockPanel = sliceBetween(
+  "hasSelected && bulkEditMode === 'stock'",
+  "hasSelected && bulkEditMode === 'branch'",
+)
 const movePanel = sliceBetween(
   "hasSelected && bulkEditMode === 'branch'",
   '{/* A-Z filter row removed',
 )
 
 const NEW_KEYS = [
-  'bulk_edit_update_info_for',
-  'bulk_edit_update_pricing_for',
-  'bulk_edit_move_stock_to_branch_for',
-  'bulk_edit_products_count_suffix',
-  'bulk_edit_apply_to_prefix',
+  'bulk_edit_update_info_for_count',
+  'bulk_edit_update_pricing_for_count',
+  'bulk_edit_adjust_stock_for_count',
+  'bulk_edit_move_stock_to_branch_for_count',
+  'bulk_edit_apply_to_count',
   'bulk_price_khr_auto_note',
   'keep_current',
   'leave_blank_to_keep',
   'target_branch',
   'select_branch_first',
 ]
+
+// The keys the Round-1 commit introduced and that the Round-2 fix retires:
+// a prefix + bare JSX number + suffix cannot reorder for Khmer, where the
+// count follows the noun ("ផលិតផលចំនួន {count}") not the English order.
+const RETIRED_KEYS = ['bulk_edit_apply_to_prefix', 'bulk_edit_products_count_suffix']
 
 await runTest('bulk-edit i18n: every new key exists in both packs with non-placeholder Khmer', () => {
   for (const key of NEW_KEYS) {
@@ -81,6 +92,34 @@ await runTest('bulk-edit i18n: every new key exists in both packs with non-place
   }
 })
 
+await runTest('bulk-edit i18n: no sentence-fragment (_prefix/_suffix) keys remain, and count keys carry {count}', () => {
+  for (const key of RETIRED_KEYS) {
+    assert.equal(en[key], undefined, `en.json still has retired fragment key '${key}'`)
+    assert.equal(km[key], undefined, `km.json still has retired fragment key '${key}'`)
+    assert.doesNotMatch(source, new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `Products.tsx still references retired key '${key}'`)
+  }
+  // Every key this lane's bulk-edit region references that carries a count
+  // must be ONE key with a literal {count} placeholder -- never split into a
+  // separate prefix/suffix pair, and never itself named *_prefix/*_suffix.
+  const countKeys = [
+    'bulk_edit_update_info_for_count',
+    'bulk_edit_update_pricing_for_count',
+    'bulk_edit_adjust_stock_for_count',
+    'bulk_edit_move_stock_to_branch_for_count',
+    'bulk_edit_apply_to_count',
+  ]
+  for (const key of countKeys) {
+    assert.doesNotMatch(key, /_prefix$|_suffix$/, `count key '${key}' is itself a sentence fragment`)
+    assert.match(en[key] as string, /\{count\}/, `en.json '${key}' must contain a {count} placeholder`)
+    assert.match(km[key] as string, /\{count\}/, `km.json '${key}' must contain a {count} placeholder`)
+  }
+  // No key anywhere in either pack is a bare sentence-fragment key (the
+  // pre-existing, unrelated 'object_prefix' R2 setting is not a sentence
+  // fragment and is excluded).
+  const fragmentKeys = Object.keys(en).filter((k) => (k.endsWith('_prefix') || k.endsWith('_suffix')) && k !== 'object_prefix')
+  assert.deepEqual(fragmentKeys, [], `unexpected sentence-fragment keys survive in en.json: ${fragmentKeys.join(', ')}`)
+})
+
 await runTest('bulk-edit Info panel: heading, field labels and placeholders are translated', () => {
   assert.doesNotMatch(infoPanel, /Update basic info for <strong>/, 'heading still hardcoded English')
   assert.doesNotMatch(infoPanel, />Category<\/label>/, 'Category label still hardcoded')
@@ -91,7 +130,7 @@ await runTest('bulk-edit Info panel: heading, field labels and placeholders are 
   assert.doesNotMatch(infoPanel, />Low Stock Threshold<\/label>/, 'Low Stock Threshold label still hardcoded')
   assert.doesNotMatch(infoPanel, />Apply to \{selectedVisibleCount\} products</, 'Apply button still hardcoded')
 
-  assert.match(infoPanel, /tr\('bulk_edit_update_info_for', 'Update basic info for'\)/)
+  assert.match(infoPanel, /tr\('bulk_edit_update_info_for_count', 'Update basic info for \{count\} products'\)/)
   assert.match(infoPanel, /tr\('category', 'Category'\)/)
   assert.match(infoPanel, /tr\('unit', 'Unit'\)/)
   assert.match(infoPanel, /tr\('supplier', 'Supplier'\)/)
@@ -99,7 +138,7 @@ await runTest('bulk-edit Info panel: heading, field labels and placeholders are 
   assert.equal((infoPanel.match(/tr\('keep_current', 'Keep current'\)/g) || []).length, 2, 'expected Category AND Unit to both offer the Keep-current option')
   assert.match(infoPanel, /tr\('leave_blank_to_keep', 'Leave blank to keep'\)/)
   assert.match(infoPanel, /tr\('low_stock_threshold', 'Low Stock Threshold'\)/)
-  assert.match(infoPanel, /tr\('bulk_edit_apply_to_prefix', 'Apply to'\)/)
+  assert.match(infoPanel, /tr\('bulk_edit_apply_to_count', 'Apply to \{count\} products'\)\.replace\('\{count\}', String\(selectedVisibleCount\)\)/)
   // Brand was already translated before this lane -- must still be intact.
   assert.match(infoPanel, /\{t\('brand'\)\|\|'Brand'\}/)
 })
@@ -113,7 +152,7 @@ await runTest('bulk-edit Pricing panel: price labels, placeholders and auto-calc
   assert.doesNotMatch(pricingPanel, /"Leave blank to keep"/, 'a placeholder is still hardcoded')
   assert.doesNotMatch(pricingPanel, />KHR prices will auto-calculate at current exchange rate</, 'auto-calc note still hardcoded')
 
-  assert.match(pricingPanel, /tr\('bulk_edit_update_pricing_for', 'Update pricing for'\)/)
+  assert.match(pricingPanel, /tr\('bulk_edit_update_pricing_for_count', 'Update pricing for \{count\} products'\)/)
   assert.match(pricingPanel, /tr\('selling_price_usd', 'Selling Price \(USD\)'\)/)
   assert.match(pricingPanel, /tr\('selling_price_khr', 'Selling Price \(KHR\)'\)/)
   assert.match(pricingPanel, /tr\('purchase_price_usd', 'Purchase Price \(USD\)'\)/)
@@ -125,7 +164,23 @@ await runTest('bulk-edit Pricing panel: price labels, placeholders and auto-calc
   // Wholesale labels were already translated before this lane -- must still be intact.
   assert.match(pricingPanel, /tr\('wholesale_price_usd_full'/)
   assert.match(pricingPanel, /tr\('wholesale_price_khr_full'/)
-  assert.match(pricingPanel, /tr\('bulk_edit_apply_to_prefix', 'Apply to'\)/)
+  assert.match(pricingPanel, /tr\('bulk_edit_apply_to_count', 'Apply to \{count\} products'\)\.replace\('\{count\}', String\(selectedVisibleCount\)\)/)
+})
+
+await runTest('bulk-edit Stock panel: heading, Quantity/Action labels and Apply button are translated', () => {
+  assert.doesNotMatch(stockPanel, /Adjust stock for <strong>/, 'heading still hardcoded English')
+  assert.doesNotMatch(stockPanel, />Quantity<\/label>/, 'Quantity label still hardcoded')
+  assert.doesNotMatch(stockPanel, />Action<\/label>/, 'Action label still hardcoded')
+  assert.doesNotMatch(stockPanel, />Apply to \{selectedVisibleCount\} products</, 'Apply button still hardcoded')
+
+  assert.match(stockPanel, /tr\('bulk_edit_adjust_stock_for_count', 'Adjust stock for \{count\} products'\)/)
+  assert.match(stockPanel, /tr\('quantity', 'Quantity'\)/)
+  assert.match(stockPanel, /tr\('action', 'Action'\)/)
+  assert.match(stockPanel, /tr\('bulk_edit_apply_to_count', 'Apply to \{count\} products'\)\.replace\('\{count\}', String\(selectedVisibleCount\)\)/)
+  // Add/Remove/Set action chips were already translated before this lane.
+  assert.match(stockPanel, /t\('add'\)\s*\|\|\s*'Add'/)
+  assert.match(stockPanel, /t\('remove'\)/)
+  assert.match(stockPanel, /t\('set'\)/)
 })
 
 await runTest('bulk-edit Move-stock panel: label, options, button and error toast are translated', () => {
@@ -136,7 +191,7 @@ await runTest('bulk-edit Move-stock panel: label, options, button and error toas
   assert.doesNotMatch(movePanel, />Move Stock</, 'Move Stock button still hardcoded')
   assert.doesNotMatch(movePanel, /notify\('Select a branch first','error'\)/, 'error toast still hardcoded')
 
-  assert.match(movePanel, /tr\('bulk_edit_move_stock_to_branch_for', 'Move stock to a branch for'\)/)
+  assert.match(movePanel, /tr\('bulk_edit_move_stock_to_branch_for_count', 'Move stock to a branch for \{count\} products'\)/)
   assert.match(movePanel, /tr\('target_branch', 'Target Branch'\)/g)
   assert.equal((movePanel.match(/tr\('target_branch', 'Target Branch'\)/g) || []).length, 2, 'expected both the label AND the ariaLabel to use target_branch')
   assert.match(movePanel, /tr\('select_branch', 'Select branch'\)/)
