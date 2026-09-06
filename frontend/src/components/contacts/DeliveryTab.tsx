@@ -208,42 +208,43 @@ interface OptionEditorProps {
   total: number
   onChange: (option: ContactOption) => void
   onRemove: () => void
+  t: TranslateFn
 }
 
-function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditorProps) {
+function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEditorProps) {
   const set = (key: keyof ContactOption, value: string) => onChange({ ...option, [key]: value })
   const fieldId = (field: string) => `delivery-option-${index}-${field}`
   return (
     <div className="border border-gray-200 dark:border-zinc-600 rounded-xl p-3 space-y-2 bg-gray-50 dark:bg-zinc-800/60">
       <div className="flex items-center gap-2">
         <span className="text-xs font-bold text-gray-400 w-5 flex-shrink-0">#{index + 1}</span>
-        <label htmlFor={fieldId('label')} className="sr-only">Delivery option label</label>
+        <label htmlFor={fieldId('label')} className="sr-only">{t('delivery_option_label_sr') || 'Delivery option label'}</label>
         <input
           id={fieldId('label')}
           name={fieldId('label')}
           autoComplete="off"
           className="input text-xs py-1 flex-1"
-          placeholder="Label (e.g. Morning Shift, Zone A)"
+          placeholder={t('delivery_option_label_placeholder') || 'Label (e.g. Morning Shift, Zone A)'}
           value={option.label}
           onChange={e => set('label', e.target.value)}
         />
         {total > 1 && (
-          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 text-xs px-1.5 py-1 rounded flex-shrink-0" aria-label="Remove delivery option">x</button>
+          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 text-xs px-1.5 py-1 rounded flex-shrink-0" aria-label={t('delivery_option_remove_aria') || 'Remove delivery option'}>x</button>
         )}
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label htmlFor={fieldId('name')} className="block text-xs text-gray-400 mb-0.5">Name</label>
-          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder="Driver / rider name" value={option.name} onChange={e => set('name', e.target.value)} />
+          <label htmlFor={fieldId('name')} className="block text-xs text-gray-400 mb-0.5">{t('name') || 'Name'}</label>
+          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder={t('delivery_option_name_placeholder') || 'Driver / rider name'} value={option.name} onChange={e => set('name', e.target.value)} />
         </div>
         <div>
-          <label htmlFor={fieldId('phone')} className="block text-xs text-gray-400 mb-0.5">Phone</label>
-          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" className="input text-xs py-1" placeholder="Phone number" value={option.phone} onChange={e => set('phone', e.target.value)} />
+          <label htmlFor={fieldId('phone')} className="block text-xs text-gray-400 mb-0.5">{t('phone') || 'Phone'}</label>
+          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" className="input text-xs py-1" placeholder={t('phone_number') || 'Phone number'} value={option.phone} onChange={e => set('phone', e.target.value)} />
         </div>
       </div>
       <div>
-        <label htmlFor={fieldId('area')} className="block text-xs text-gray-400 mb-0.5">Area / Zone</label>
-        <input id={fieldId('area')} name={fieldId('area')} autoComplete="off" className="input text-xs py-1" placeholder="Coverage area or zone" value={option.area} onChange={e => set('area', e.target.value)} />
+        <label htmlFor={fieldId('area')} className="block text-xs text-gray-400 mb-0.5">{t('area_zone') || 'Area / Zone'}</label>
+        <input id={fieldId('area')} name={fieldId('area')} autoComplete="off" className="input text-xs py-1" placeholder={t('delivery_option_area_placeholder') || 'Coverage area or zone'} value={option.area} onChange={e => set('area', e.target.value)} />
       </div>
     </div>
   )
@@ -365,6 +366,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
                 total={options.length}
                 onChange={(nextOption) => updateOption(index, nextOption)}
                 onRemove={() => removeOption(index)}
+                t={t}
               />
             ))}
           </div>
@@ -392,7 +394,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
           <label htmlFor="delivery-form-notes" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('notes')||'Notes'}</label>
           <textarea id="delivery-form-notes" name="delivery_notes" autoComplete="off" className="input resize-none" rows={2} value={form.notes||''} onChange={e => set('notes', e.target.value)} />
         </div>
-        <p className="text-xs text-gray-400">Provide driver name or phone number.</p>
+        <p className="text-xs text-gray-400">{t('delivery_option_hint') || 'Provide driver name or phone number.'}</p>
 
         {localError ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
