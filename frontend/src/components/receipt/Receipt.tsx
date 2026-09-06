@@ -221,7 +221,6 @@ const LABELS = {
     date: 'Date:',
     cashier: 'Cashier:',
     payment: 'Payment:',
-    rate: 'Rate:',
     status: 'Status:',
     customer: 'Customer:',
     phone: 'Phone:',
@@ -246,7 +245,6 @@ const LABELS = {
     item: 'Item',
     unitPrice: 'Price',
     lineTotal: 'Total',
-    totalQty: 'Total Qty:',
     itemDiscount: 'Item Discount:',
     totalDiscount: 'Total Discount:',
     visitWebsite: 'Visit our website',
@@ -258,7 +256,6 @@ const LABELS = {
     date: 'កាលបរិច្ឆេទ:',
     cashier: 'អ្នកគិតលុយ:',
     payment: 'ការទូទាត់:',
-    rate: 'អត្រាប្តូរ:',
     status: 'ស្ថានភាព:',
     customer: 'អតិថិជន:',
     phone: 'ទូរស័ព្ទ:',
@@ -283,7 +280,6 @@ const LABELS = {
     item: 'ទំនិញ',
     unitPrice: 'តម្លៃ',
     lineTotal: 'សរុប',
-    totalQty: 'សរុបចំនួនទំនិញ:',
     itemDiscount: 'សរុបបញ្ចុះលើទំនិញ:',
     totalDiscount: 'សរុបបញ្ចុះតម្លៃ:',
     visitWebsite: 'ទស្សនាគេហទំព័ររបស់យើង',
@@ -442,7 +438,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // excludes the per-line cut, and the Total below already has the other two
   // taken off. receiptTotals.test.ts states the size of that gap.
   const totalDiscountUsd = lineSavingsUsd + discountUsd + membershipDiscountUsd
-  const totalQty = items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0)
   // The item table’s column track, defined ONCE so the header and the rows
   // cannot drift apart. Four columns by default -- item, qty, price, total --
   // and three when a shop turns the price column off.
@@ -481,12 +476,25 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const footerDivider = (tpl.footer_separator || '-').repeat(28)
   const headerAlignClass = tpl.align_header === 'left' ? 'text-left' : tpl.align_header === 'right' ? 'text-right' : 'text-center'
 
+  // The rate, as the owner asked for it: the bare value, no label. Empty
+  // when the template hides it, which is also what decides whether the
+  // cashier row carries it at all.
+  const exchangeRateText = tpl.show_exchange_rate ? `1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}` : ''
   const showMembershipId = tpl.show_customer_membership !== false
   const hasCustomer = sale.customer_name || sale.customer_phone || sale.customer_address || (showMembershipId && sale.customer_membership_number)
   const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || sale.delivery_contact_address)
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
   const showDeliveryDriverPhone = showDeliveryContactSection && tpl.delivery_show_driver_phone !== false
+  // With the fee heading gone the section is nothing but its driver rows, so
+  // it must not render when every one of them is switched off -- an empty
+  // block still prints its dashed rule, and a divider with nothing under it
+  // is exactly the kind of stray line the owner is asking us to remove.
+  const hasDeliveryContactRows = Boolean(
+    (showDeliveryDriverName && sale.delivery_contact_name)
+    || (showDeliveryDriverPhone && sale.delivery_contact_phone)
+    || (showDeliveryContactSection && sale.delivery_contact_address && tpl.delivery_show_address !== false),
+  )
 
   const sectionMap: Record<string, ReactNode> = {
     header: (
@@ -504,9 +512,25 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       <div key="order_info">
         {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold breakAll /> : null}
         {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} /> : null}
-        {tpl.show_cashier ? <Row label={labelFor(lang, 'cashier')} value={sale.cashier_name || '-'} /> : null}
+        {/* N33 (owner, Sep 6 2026, reading a printed 80mm receipt): "the
+            exchange rate just show the rate, no need 'Exchange Rate: n' just
+            'n' ... and merge into same row as cashier." So the rate is no
+            longer a labelled row of its own -- it rides the cashier row as a
+            bare value, which is also one printed line fewer on the roll. With
+            the cashier row switched off it still prints, unlabelled, so
+            hiding the cashier cannot silently take the rate with it. */}
+        {tpl.show_cashier || exchangeRateText ? (
+          <Row
+            label={tpl.show_cashier ? labelFor(lang, 'cashier') : ''}
+            value={tpl.show_cashier ? (
+              <>
+                {sale.cashier_name || '-'}
+                {exchangeRateText ? <span className="ml-1 whitespace-nowrap text-[0.85em] font-normal">· {exchangeRateText}</span> : null}
+              </>
+            ) : <span className="whitespace-nowrap">{exchangeRateText}</span>}
+          />
+        ) : null}
         {tpl.show_payment_method ? <Row label={labelFor(lang, 'payment')} value={sale.payment_method || 'Cash'} subValue={paymentDetails.length > 1 ? paymentDetails.map((detail) => `${detail.method}: ${detail.amount_usd > 0 ? fmtUSD(detail.amount_usd) : ''}${detail.amount_usd > 0 && detail.amount_khr > 0 ? ' + ' : ''}${detail.amount_khr > 0 ? fmtKHR(detail.amount_khr) : ''}`).join(' · ') : ''} /> : null}
-        {tpl.show_exchange_rate ? <Row label={labelFor(lang, 'rate')} value={`1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}`} /> : null}
       </div>
     ),
     customer: hasCustomer ? (
@@ -517,9 +541,16 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         {showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
       </div>
     ) : null,
-    delivery: hasDelivery && showDeliveryContactSection ? (
+    // N33 (owner, Sep 6 2026): "the delivery fee is shown twice in a row, by
+    // the delivery driver and phone number and the mid to bottom ... remove
+    // the by the delivery driver and phone ... keep near the mid to bottom."
+    // The heading that used to open this section was the SAME "Delivery Fee:"
+    // label the totals row prints, so the phrase appeared twice on one
+    // receipt. The fee now has exactly one home -- the totals block below --
+    // and this section is what it always described: the driver's name, phone
+    // and address rows, each under its own flag.
+    delivery: hasDelivery && showDeliveryContactSection && hasDeliveryContactRows ? (
       <div key="delivery" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        <div className="mb-1 font-semibold">{labelFor(lang, 'delivery')}</div>
         {showDeliveryDriverName && sale.delivery_contact_name ? <Row label={labelFor(lang, 'driver') || 'Delivery:'} value={sale.delivery_contact_name} /> : null}
         {showDeliveryDriverPhone && sale.delivery_contact_phone ? <Row label={labelFor(lang, 'phone')} value={sale.delivery_contact_phone} /> : null}
         {showDeliveryContactSection && sale.delivery_contact_address && tpl.delivery_show_address !== false ? <Row label={labelFor(lang, 'address')} value={sale.delivery_contact_address} /> : null}
@@ -609,9 +640,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         })}
       </div>
     ),
-    total_qty: tpl.show_item_qty && totalQty > 0 ? (
-      <Row key="total_qty" label={labelFor(lang, 'totalQty')} value={totalQty.toLocaleString()} />
-    ) : null,
     // The per-line cut, by name. Hidden when there is none, so an
     // undiscounted sale does not print a row of zeroes.
     item_discount: showItemDiscount && lineSavingsUsd > 0 ? (
@@ -716,8 +744,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   for (const key of fieldOrderBase) {
     if (key === 'items') {
       fieldOrder.push('items')
-      // Straight under the table, where the photo puts them.
-      fieldOrder.push('total_qty')
       fieldOrder.push('item_discount')
       continue
     }
@@ -742,7 +768,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   if (!fieldOrder.includes('membership_points')) fieldOrder.push('membership_points')
   // A hand-edited field_order that dropped `items` or `discount` still gets
   // the new rows rather than silently losing them.
-  for (const key of ['total_qty', 'item_discount', 'total_discount']) {
+  for (const key of ['item_discount', 'total_discount']) {
     if (!fieldOrder.includes(key)) fieldOrder.push(key)
   }
   // AFTER the total, never before it: the refund row carries the Net total
@@ -778,7 +804,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         <Row label={labelFor(lang, 'date')} value={dateStr} />
         {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {sale.customer_address ? <Row label={labelFor(lang, 'address')} value={displayAddress(sale.customer_address)} /> : null}
-        <Row label={labelFor(lang, 'qty')} value={items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0).toLocaleString()} />
       </div>
       <div className="border-y border-gray-900 py-1">
         <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={fmtKHR(totalKhr)} bold />
