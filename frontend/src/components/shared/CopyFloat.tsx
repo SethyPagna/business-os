@@ -15,12 +15,18 @@ export type CopyFloatProps = Record<string, string> | Record<string, never>
 // double-click on a pointer device, press-and-hold on touch, both opening
 // the one shared float with the full value and a Copy button.
 //
-// Whether a PLAIN click also opens it depends on the surface, not on this
-// hook: the controller gives the click to whatever is underneath when
-// something underneath wants it (see `claimsClick`). In the two product
-// detail modals nothing does, so a click opens the panel. On the Products
-// list the value sits inside a row whose click toggles selection, so the
-// row keeps it and the two gestures above are how the panel opens there.
+// Whether a PLAIN click or press also opens it depends on the surface, not
+// on this hook: the controller gives both to whatever is underneath when
+// something underneath wants them (see `claimsClick`). In the two product
+// detail modals nothing does, so a click opens the panel and so does a
+// press-and-hold. On the Products list the value sits inside a row that has
+// no onClick at all outside selection mode -- it synthesises "open this
+// product" from a tap and "enter select mode" from a hold, both off the
+// press -- so the row keeps every press on a pointer device, and copying
+// there is the double-click. Touch is the exception the ASK asks for: a
+// hold on the value copies, because on a phone there is no other gesture
+// left, and the row keeps the tap and every hold that is not on one of
+// these four values.
 //
 // This hook hands back a props SPREAD rather than a wrapper component on
 // purpose. The values it marks are a header <div>, a middot-separated
