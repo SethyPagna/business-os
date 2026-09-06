@@ -6,8 +6,17 @@
 // left behind: the Worker still READ a slash date the operator typed as
 // month-first, and still told them to type mm/dd/yyyy, while the field that
 // produced the string was day-first. For every day <= 12 both readings are
-// real dates, so the disagreement stored a wrong month with nothing on screen
-// to show it.
+// real dates, so nothing on screen would show the disagreement.
+//
+// How far that got, traced rather than assumed: DateEntryInput.commit only
+// ever calls onChange with ISO ('YYYY-MM-DD') or '', at every call site, so
+// no in-app path has handed these routes a slash date and no stored row is
+// known to be wrong. The defect was LATENT -- a parser that disagreed with
+// its own UI, and a refusal message that named the wrong order to an operator
+// who had just been rejected. Both are worth closing (the next sender need
+// not be a React field: an integration, a retry of a raw body, or a new form
+// that posts what was typed), and the message half is reachable today. This
+// is not a report of damaged data, and nothing here calls for a repair sweep.
 //
 // Two questions look identical and are not:
 //

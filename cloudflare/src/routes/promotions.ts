@@ -67,10 +67,14 @@ function normalizeRuleWrite(body: RuleInput = {}) {
   const money = (v: unknown) => Math.max(0, Math.round((Number(v) || 0) * 100) / 100)
   // A promotion window is TYPED, on the Promotions page and in the
   // catalog's Manage Promotions modal, into DateEntryInput -- which is
-  // day-first and hands back ISO. Read a slash form the same way the field
-  // that produced it did: month-first here would file the window the
-  // operator called 3 September (03/09/2026) as 9 March, and a promotion
-  // with the wrong window is silently wrong pricing, not a visible error.
+  // day-first and hands back ISO. Both of those senders post ISO, so this
+  // branch has not been reached from the app and no stored window is known
+  // to be wrong; the fix is closing a latent disagreement, not repairing
+  // data. It still matters, because whoever DOES send a slash form next
+  // (an integration, a raw retry, a new form that posts what was typed)
+  // would have the window the operator called 3 September (03/09/2026)
+  // filed as 9 March -- and a promotion with the wrong window is wrong
+  // pricing, which shows up as money rather than as an error.
   const dateOnly = (v: unknown) => {
     const raw = String(v || '').trim()
     if (!raw) return null
