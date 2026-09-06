@@ -327,6 +327,174 @@ export function identityKeepSeparateClusterKeys(
   return keys
 }
 
+// ---------------------------------------------------------------------------
+// "WHAT WAS FOLDED INTO THIS ROW?" (N34). The other half of the owner's
+// "keep it changeable in conflict": a pair kept separate stays visible in
+// Conflicts and can still be merged, and a merge that HAS happened must stay
+// inspectable, or the surface only ever shows work that is still outstanding
+// and a fold becomes a thing that happened to the catalog with nothing to point
+// at afterwards.
+//
+// WHERE THE HISTORY LIVES, and why not the audit log. A merge writes three
+// records: a 'merge_duplicate' audit_logs row, an action_history row, and an
+// undo_snapshots row carrying the exact reversal. Only the last is durable --
+// audit_logs is purged on a retention window (21 days by default, and settable
+// lower from Settings), so an audit-backed history would show a fold for three
+// weeks and then quietly stop showing it, which is worse than not offering it
+// at all. undo_snapshots has no retention pass anywhere in the Worker: it is
+// the record that has to survive as long as the undo it describes.
+//
+// So this reads undo_snapshots, in both shapes the merge paths write:
+//   * 'product.merge'      -- one fold, payload IS the reversal.
+//   * 'product.merge.bulk' -- one run of many folds, payload.reversals is the
+//                             array, in application order.
+// Reading only the first would silently omit every fold done through the
+// whole-catalog cleanup, which is the path that folds the MOST rows.
+//
+// `status` is carried through rather than filtered on: a snapshot flips to
+// 'reversed' when the merge is undone, and a fold that was undone is a true and
+// useful thing to see next to one that stands. The caller decides how to show
+// it; hiding it here would make an undone merge indistinguishable from one that
+// never happened.
+export type ProductIdentityFold = {
+  /** The row that was folded away. */
+  fromId: number
+  fromName: string | null
+  /** The row that survived, i.e. the one this history is being read for. */
+  intoId: number
+  intoName: string | null
+  at: string | null
+  by: string | null
+  source: 'merge' | 'bulk_merge'
+  /** True when the merge was undone; the pair is two rows again. */
+  reversed: boolean
+}
+
+export type ProductIdentityHistory = {
+  productId: number
+  /** Rows folded INTO this one. Newest first. */
+  mergedFrom: ProductIdentityFold[]
+  /** The fold that retired THIS row, if it was itself merged away. */
+  mergedInto: ProductIdentityFold | null
+  /**
+   * The 'keep them separate' decisions recorded against this row. Read from
+   * audit_logs, so this list is RETENTION-BOUND and can be empty for a decision
+   * that really was taken -- unlike mergedFrom/mergedInto above. Reported
+   * separately for exactly that reason: the two lists do not have the same
+   * lifetime, and presenting them as one would let an aged-out decision read as
+   * a decision never made.
+   */
+  keptSeparate: Array<{ at: string | null; by: string | null; keptSeparateFrom: number[]; path: string | null }>
+}
+
+type SnapshotRow = { id: number; status: string | null; payload_json: string | null; created_at: string | null; created_by_name: string | null }
+
+function parseReversal(raw: unknown): { keeperId: number; keeperName: string | null; dupId: number; dupName: string | null } | null {
+  if (!raw || typeof raw !== 'object') return null
+  const row = raw as Record<string, unknown>
+  const keeperId = Number(row.keeperId)
+  const dupId = Number(row.dupId)
+  if (!Number.isInteger(keeperId) || keeperId <= 0) return null
+  if (!Number.isInteger(dupId) || dupId <= 0) return null
+  return {
+    keeperId,
+    keeperName: row.keeperName == null ? null : String(row.keeperName),
+    dupId,
+    dupName: row.dupName == null ? null : String(row.dupName),
+  }
+}
+
+/** Every fold recorded in one snapshot row, whichever of the two shapes it is. */
+function foldsInSnapshot(row: SnapshotRow, source: 'merge' | 'bulk_merge'): ProductIdentityFold[] {
+  let payload: unknown = null
+  try { payload = row.payload_json ? JSON.parse(row.payload_json) : null } catch { return [] }
+  const list = source === 'bulk_merge'
+    ? (Array.isArray((payload as { reversals?: unknown })?.reversals) ? (payload as { reversals: unknown[] }).reversals : [])
+    : [payload]
+  const folds: ProductIdentityFold[] = []
+  for (const entry of list) {
+    const reversal = parseReversal(entry)
+    if (!reversal) continue
+    folds.push({
+      fromId: reversal.dupId,
+      fromName: reversal.dupName,
+      intoId: reversal.keeperId,
+      intoName: reversal.keeperName,
+      at: row.created_at,
+      by: row.created_by_name,
+      source,
+      reversed: String(row.status || '') === 'reversed',
+    })
+  }
+  return folds
+}
+
+/**
+ * The folds and decisions recorded against one product row.
+ *
+ * Deliberately NOT filtered in SQL by keeper/dup id. The bulk shape stores its
+ * reversals as a JSON array inside one TEXT column, so narrowing it in SQL would
+ * mean json_each -- a second dialect of the same question, and one this
+ * codebase has been bitten by before (see the header of this module). The rows
+ * are bounded instead (the two merge kinds only, newest first, capped) and the
+ * matching is done in JS with the same parse the appliers use. A catalog with
+ * more merge history than the cap shows its most recent folds, which is the
+ * half anyone is looking at.
+ */
+export async function readProductIdentityHistory(db: D1Compat, productId: number): Promise<ProductIdentityHistory> {
+  const id = Number(productId)
+  const empty: ProductIdentityHistory = { productId: id, mergedFrom: [], mergedInto: null, keptSeparate: [] }
+  if (!Number.isInteger(id) || id <= 0) return empty
+
+  const [singles, bulks, decisions] = await Promise.all([
+    db.prepare(`
+      SELECT id, status, payload_json, created_at, created_by_name
+      FROM undo_snapshots WHERE kind = 'product.merge'
+      ORDER BY id DESC LIMIT 500
+    `).all<SnapshotRow>({}),
+    db.prepare(`
+      SELECT id, status, payload_json, created_at, created_by_name
+      FROM undo_snapshots WHERE kind = 'product.merge.bulk'
+      ORDER BY id DESC LIMIT 200
+    `).all<SnapshotRow>({}),
+    // audit_logs.entity_id is TEXT (migration 0001), and audit() binds a NUMBER
+    // into it, so the stored value is the text '10'. Comparing that column to a
+    // bound integer matches NOTHING here -- silently, with no error and an
+    // empty list that reads exactly like "no decision was ever taken". Both
+    // sides are compared as text, explicitly, so the query cannot depend on
+    // which engine's affinity rules are running it.
+    db.prepare(`
+      SELECT created_at, user_name, details
+      FROM audit_logs
+      WHERE action = 'identity_keep_separate' AND entity = 'product' AND CAST(entity_id AS TEXT) = @id
+      ORDER BY id DESC LIMIT 50
+    `).all<{ created_at: string | null; user_name: string | null; details: string | null }>({ id: String(id) }),
+  ])
+
+  const folds = [
+    ...singles.flatMap((row) => foldsInSnapshot(row, 'merge')),
+    ...bulks.flatMap((row) => foldsInSnapshot(row, 'bulk_merge')),
+  ]
+  const mergedFrom = folds.filter((fold) => fold.intoId === id)
+  // A row can only have been folded away once and still exist to be asked
+  // about, so the newest such fold is the answer.
+  const mergedInto = folds.find((fold) => fold.fromId === id) || null
+
+  const keptSeparate = decisions.map((row) => {
+    let details: Record<string, unknown> = {}
+    try { details = row.details ? (JSON.parse(row.details) as Record<string, unknown>) : {} } catch { details = {} }
+    const ids = Array.isArray(details.keptSeparateFrom) ? details.keptSeparateFrom.map(Number).filter(Number.isInteger) : []
+    return {
+      at: row.created_at,
+      by: row.user_name,
+      keptSeparateFrom: ids,
+      path: details.path == null ? null : String(details.path),
+    }
+  })
+
+  return { productId: id, mergedFrom, mergedInto, keptSeparate }
+}
+
 export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
   const [rows, dismissalRows] = await Promise.all([
     db.prepare(`

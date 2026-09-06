@@ -149,6 +149,16 @@ export function getPossiblySameProducts(): Promise<unknown> {
   return apiFetch('GET', '/api/products/possible-duplicates')
 }
 
+// N34: what has already been DECIDED about this row -- the folds that were
+// merged into it (and the fold that retired it, if it was merged away), plus
+// the "keep them separate" answers recorded against it. Conflicts lists what is
+// still outstanding; this is the other half, so a fold that has already happened
+// is still something the operator can point at. Read-only and repeatable, so a
+// plain apiFetch like its sibling sweep above.
+export function getProductIdentityHistory(id: number | string): Promise<unknown> {
+  return apiFetch('GET', `/api/products/${encodeId(id)}/identity-history`)
+}
+
 export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
   return route(
     'products:dismissDuplicateCluster',

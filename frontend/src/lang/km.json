@@ -1,4 +1,10 @@
 {
+  "identity_history_title": "បានសម្រេចរួច",
+  "identity_history_hint": "ការបញ្ចូលគ្នាត្រូវបានអានពីកំណត់ត្រាត្រឡប់វិញ ដូច្នេះវានៅតែបង្ហាញ ដរាបណានៅអាចត្រឡប់វិញបាន។ ការសម្រេចទុកឱ្យដាច់ដោយឡែក មកពីកំណត់ហេតុសវនកម្ម ហើយនឹងបាត់ទៅតាមរយៈពេលរក្សាទុក។",
+  "identity_history_merged_from": "បានបញ្ចូល៖ {name}",
+  "identity_history_merged_into": "បានបញ្ចូលទៅ៖ {name}",
+  "identity_history_kept_separate": "ទុកដាច់ដោយឡែកពី #{ids}",
+  "identity_history_reversed": "បានត្រឡប់វិញ",
   "identity_keep_separate_action": "ទុកឱ្យដាច់ដោយឡែក",
   "identity_keep_separate_only_note": "មិនទាន់មានជួរដែលបានរក្សាទុកដើម្បីភ្ជាប់នៅឡើយទេ។ សូមបើកផលិតផលដែលមានស្រាប់ ឬទុកឱ្យដាច់ដោយឡែក — គូនេះនឹងបង្ហាញនៅក្នុងទំនាស់ ដែលអ្នកនៅតែអាចបញ្ចូលគ្នាបាន។",
   "identity_link_over_action": "ភ្ជាប់កំណត់ត្រា",

@@ -18,7 +18,7 @@ import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
-import { findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityKeepSeparateClusterKeys, normalizeProductClusterKey, pickSameIdentityRows, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityKeepSeparateClusterKeys, normalizeProductClusterKey, pickSameIdentityRows, readProductIdentityHistory, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail, resolveMergedPricing } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
@@ -1744,6 +1744,26 @@ app.get('/auto-merges/:productId', async (c) => {
       return { id: row.id, import_job_id: row.import_job_id, row_number: row.row_number, losing, created_at: row.created_at }
     }),
   })
+})
+
+// N34, the inspection half of "keep it changeable in conflict". Conflicts shows
+// what is still OUTSTANDING; a fold that has already happened left nothing on
+// any screen to point at, so "was this row merged, and from what?" could only be
+// answered by reading the audit log -- which is purged on a retention window and
+// so stops answering it after three weeks. This reads undo_snapshots instead,
+// the one record of a merge that is kept for as long as the undo is.
+//
+// Gated like the sibling /auto-merges/:productId, and for the same reason: the
+// fold names the retired row and who did it, which is internal catalog history,
+// not something a POS-only account or an image uploader needs.
+app.get('/:id/identity-history', async (c) => {
+  const user = c.get('user')
+  if (getPermissionTier(user, 'products') === 'none' && getPermissionTier(user, 'inventory') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const productId = Number(c.req.param('id'))
+  if (!Number.isInteger(productId) || productId <= 0) return c.json({ error: 'Invalid product id' }, 400)
+  return c.json(await readProductIdentityHistory(getDb(c.env), productId))
 })
 
 app.get('/rename-impact', async (c) => {

@@ -1,4 +1,10 @@
 {
+  "identity_history_title": "Already decided",
+  "identity_history_hint": "Merges are read from the undo record, so they stay visible for as long as they can be undone. Keep-separate decisions come from the audit log and age out with it.",
+  "identity_history_merged_from": "Merged in: {name}",
+  "identity_history_merged_into": "Merged into: {name}",
+  "identity_history_kept_separate": "Kept separate from #{ids}",
+  "identity_history_reversed": "undone",
   "identity_keep_separate_action": "Keep them separate",
   "identity_keep_separate_only_note": "There is no saved row yet to link over. Open the existing product instead, or keep them separate — the pair is then listed in Conflicts, where you can still merge them either way.",
   "identity_link_over_action": "Link records over",
