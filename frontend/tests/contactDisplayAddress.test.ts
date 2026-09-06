@@ -20,6 +20,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { contactDisplayAddress } from '../src/components/contacts/contactOptionUtils.ts'
+import { buildSalesImportRows } from '../src/utils/salesImportContract.ts'
 import { contactDisplayAddress as workerContactDisplayAddress } from '../../cloudflare/src/lib/contactOptions.ts'
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
@@ -120,7 +121,27 @@ assert.match(bulkUpdate, /address: contactDisplayAddress\(/, 'the bulk customer 
 // POS checkout.
 assert.match(pos, /customer_address: contactDisplayAddress\(active\.customer\.address\)/, 'POS checkout must snapshot the display address')
 
-for (const [label, source] of [['routes/sales.ts', salesRoutes], ['routes/contacts.ts', contactsRoutes], ['lib/saleBulkUpdate.ts', bulkUpdate]] as const) {
+// A Replace return mints a NEW sale row and copies the source sale's snapshot
+// onto it. Until the repair script runs, the source sale of any legacy row
+// still holds options JSON -- so without the kernel here a return made today
+// creates a brand new sale carrying the gibberish forward.
+const returnsRoutes = worker('src/routes/returns.ts')
+assert.match(
+  returnsRoutes,
+  /customer_address: contactDisplayAddress\(saleMeta\.customer_address\)/,
+  'the replacement sale a Replace return mints must carry the display address',
+)
+// The sales importer is a writer too: a CSV exported by a build older than
+// this fix has the options JSON in its customer_address column, and importing
+// it would put machine text straight back into sales.customer_address.
+const importEngine = worker('src/lib/importEngine.ts')
+assert.match(
+  importEngine,
+  /customer_address: contactDisplayAddress\(str\(first\.customer_address\)\)/,
+  'the sales importer must normalize the address column it stores',
+)
+
+for (const [label, source] of [['routes/sales.ts', salesRoutes], ['routes/contacts.ts', contactsRoutes], ['lib/saleBulkUpdate.ts', bulkUpdate], ['routes/returns.ts', returnsRoutes], ['lib/importEngine.ts', importEngine]] as const) {
   assert.match(source, /contactDisplayAddress/, `${label} must import the kernel`)
 }
 
@@ -146,6 +167,28 @@ assert.match(receipt, /const hasCustomer = [^\n]*customerAddress/, 'the customer
 const saleDetail = read('src/components/sales/SaleDetailModal.tsx')
 assert.match(saleDetail, /const customerAddress = contactDisplayAddress\(sale\.customer_address\)/, 'the sale detail must resolve the address through the kernel')
 assert.match(saleDetail, /label=\{t\('address'\) \|\| 'Address'\} value=\{customerAddress\}/, 'the Address row must render the resolved value')
+
+// The FRONTEND export is a reader too, and unlike the Worker's it is driven
+// here for real rather than pinned by shape: buildSalesImportRows is the
+// function behind the Sales page's Export, and it read the raw column.
+const exportRow = buildSalesImportRows([{
+  receipt_number: 'R-1',
+  created_at: '2026-09-06T03:00:00.000Z',
+  customer_address: OPTIONS_JSON,
+  items: [{ product_name: 'Widget', quantity: 1, applied_price_usd: 5 }],
+}])[0] as Record<string, unknown>
+assert.equal(
+  exportRow.customer_address,
+  'St 271, Phnom Penh',
+  'the Sales page export must write the display address, not the options JSON',
+)
+const emptyExportRow = buildSalesImportRows([{
+  receipt_number: 'R-2',
+  created_at: '2026-09-06T03:00:00.000Z',
+  customer_address: '[]',
+  items: [{ product_name: 'Widget', quantity: 1, applied_price_usd: 5 }],
+}])[0] as Record<string, unknown>
+assert.equal(emptyExportRow.customer_address, '', 'an empty options array exports as blank, never "[]"')
 
 // The sales EXPORT is a reader too -- a CSV cell full of options JSON is the
 // same defect in a different container.
