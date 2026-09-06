@@ -140,6 +140,40 @@ export function parseShiftCount(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
+/**
+ * The count a FORM field holds, where blank means 0.
+ *
+ * Owner, 2026-09-06: the Start-shift button sat disabled because only one
+ * currency had been typed -- "i had to enter the usd as well as khmer riel".
+ * A drawer that holds only dollars, or only riel, is a normal drawer, so a
+ * field left blank is recorded as 0 and the field says so (placeholder "0" +
+ * shift_blank_count_hint). Only a blank becomes 0: a negative, NaN or
+ * infinite entry is still rejected, exactly as parseShiftCount rejects it.
+ *
+ * This is the ONE rule for every two-currency count form (POS register, POS
+ * close, and the Shifts popup's amend / close / reopen). The Worker's
+ * requiredMoney already accepts 0, so it is unchanged.
+ */
+export function shiftCountOrZero(value: unknown): number | null {
+  if (typeof value === 'string' && value.trim() === '') return 0
+  return parseShiftCount(value)
+}
+
+export type ShiftCountBlocker = 'both_blank' | 'invalid'
+
+/**
+ * Why a two-currency count pair cannot be submitted yet, or null when it can.
+ * Rendered NEXT TO the button (ShiftSubmitRow), never swallowed by a bare
+ * `disabled`. The action is allowed once EITHER field holds a valid count.
+ */
+export function shiftCountPairBlocker(usd: unknown, khr: unknown): ShiftCountBlocker | null {
+  const usdBlank = typeof usd === 'string' && usd.trim() === ''
+  const khrBlank = typeof khr === 'string' && khr.trim() === ''
+  if (usdBlank && khrBlank) return 'both_blank'
+  if (shiftCountOrZero(usd) == null || shiftCountOrZero(khr) == null) return 'invalid'
+  return null
+}
+
 function requiredShiftCount(value: unknown, label: string): number {
   const parsed = parseShiftCount(value)
   if (parsed == null) throw new Error(`${label} must be an explicit non-negative number`)

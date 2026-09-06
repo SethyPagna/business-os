@@ -77,7 +77,11 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            m.product_id, m.product_name, ${PRODUCT_COLUMNS_SQL},
            m.branch_id, m.branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
            m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
-           CASE WHEN COALESCE(m.total_cost_usd, 0) > 0 THEN 0 ELSE 1 END AS cost_missing,
+           -- "Missing" means the row recorded NO cost at all (NULL). A cost of
+           -- 0.00 is a recorded fact -- a free/sample line -- and counting it
+           -- as missing made the receipt claim a cost it does not know
+           -- (a7ff72f7). Keep the test on NULL, never on > 0.
+           CASE WHEN m.total_cost_usd IS NOT NULL THEN 0 ELSE 1 END AS cost_missing,
            m.reason, m.reference_id, m.user_id, ${SESSION_ACTOR_SQL} AS user_name, m.created_at, m.batch_id,
            b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
            b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
@@ -186,7 +190,7 @@ export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: st
            COUNT(DISTINCT COALESCE(CAST(s.user_id AS TEXT), 'name:' || COALESCE(s.user_name, ''))) AS user_state_count,
            COUNT(DISTINCT s.supplier_state) AS supplier_state_count,
            COUNT(*) AS line_count, SUM(s.quantity) AS quantity,
-           SUM(CASE WHEN COALESCE(s.total_cost_usd, 0) > 0 THEN s.total_cost_usd ELSE 0 END) AS movement_cost_usd,
+           SUM(CASE WHEN s.total_cost_usd IS NOT NULL THEN s.total_cost_usd ELSE 0 END) AS movement_cost_usd,
            SUM(s.cost_missing) AS lines_without_movement_cost,
            COUNT(DISTINCT s.payment_state) AS payment_state_count,
            MAX(s.payment_status) AS payment_status, MAX(s.credit_due_date) AS credit_due_date

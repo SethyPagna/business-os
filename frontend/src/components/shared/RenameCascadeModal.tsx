@@ -77,7 +77,7 @@ export default function RenameCascadeModal({
   // layer, still below App.tsx's toasts (z-[1100]) and InfoHint (z-[1200]).
   return createPortal(
     <div role="dialog" aria-modal="true" className={`fixed inset-0 ${layer === 'nested' ? 'z-[1080]' : 'z-[1060]'} bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4`} onClick={() => !busy && onChoose('cancel')}>
-      <div className="max-h-[min(88vh,34rem)] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl fade-in" onClick={(event) => event.stopPropagation()}>
+      <div className="max-h-[min(88vh,34rem)] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] dark:bg-gray-800 sm:max-w-md sm:rounded-2xl sm:pb-0 fade-in" onClick={(event) => event.stopPropagation()}>
         <div className="border-b border-gray-200 p-3 dark:border-gray-700">
           <h3 className="font-bold text-gray-900 dark:text-white">{t('rename_cascade_title') || 'Rename — what happens to the rest?'}</h3>
           <p className="mt-2 text-sm">

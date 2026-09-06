@@ -146,6 +146,51 @@ export function serializeContactOptions(options: ContactOptionSource[] = [], mod
   return clean.length ? JSON.stringify(clean) : null
 }
 
+// N21: ONE definition of "what address does a human actually see" for a
+// stored contact address value.
+//
+// customers.address holds the Contact Options JSON serialized above -- an
+// array of {label,name,phone,email,address,area} -- while sales.customer_address
+// was snapshotted RAW out of that column, so the sale detail, the receipt and
+// the CSV export all printed the JSON itself (the owner's "[]" gibberish, and
+// "[object Object]" from a reader that did String(parsed[0])). This accepts
+// every shape that column has ever held -- a plain typed address, an options
+// array, a legacy array of plain strings -- and returns the one line a person
+// should read, or '' when there is nothing to show. It never returns machine
+// text: a value that LOOKS like stored JSON but does not parse is treated as
+// truncated machine text, not as an address somebody typed.
+//
+// This function is duplicated BYTE FOR BYTE in the other package's twin
+// (cloudflare/src/lib/contactOptions.ts and
+// frontend/src/components/contacts/contactOptionUtils.ts -- the two share no
+// module) and the copies are compared character by character by
+// frontend/tests/contactDisplayAddress.test.ts. Edit both or neither.
+export function contactDisplayAddress(raw: unknown, mode: 'address' | 'area' = 'address'): string {
+  const text = String(raw ?? '').trim()
+  if (!text) return ''
+  const key = mode === 'area' ? 'area' : 'address'
+  const looksStructured = text.startsWith('[') || text.startsWith('{')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (_) {
+    return looksStructured ? '' : text
+  }
+  if (Array.isArray(parsed)) {
+    for (const entry of parsed) {
+      const value = entry && typeof entry === 'object'
+        ? String((entry as Record<string, unknown>)[key] ?? '').trim()
+        : String(entry ?? '').trim()
+      if (value) return value
+    }
+    return ''
+  }
+  // A bare scalar round-trips to itself (a house number like "271" parses as
+  // a number and is still an address); anything object-shaped is machine text.
+  if (parsed === null || typeof parsed === 'object') return ''
+  return text
+}
+
 export function getPrimaryContactOption(options: ContactOptionSource[] = [], mode: ContactOptionMode = 'address'): NormalizedContactOption {
   for (const entry of Array.isArray(options) ? options : []) {
     if (hasContactOptionData(entry, mode)) return normalizeContactOption(entry, mode)

@@ -9,8 +9,15 @@ import { sanitizeSaleDetailText } from '../src/components/sales/saleDetailText.t
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (relative: string) => fs.readFileSync(path.resolve(here, relative), 'utf8')
 const detail = read('../src/components/sales/SaleDetailModal.tsx')
-const picker = read('../src/components/sales/SaleDetailProductPicker.tsx')
 const workflow = read('../src/components/sales/SaleStatusWorkflow.tsx')
+// N19: the add-items pick IS the POS pick, so the parity check reads the POS
+// sheet, the adapter that mounts it, and the pure staging rule -- not a
+// private picker of this screen's own.
+const optionSheet = read('../src/components/shared/ProductOptionSheet.tsx')
+const posSheet = read('../src/components/pos/ProductDetailSheet.tsx')
+const pos = read('../src/components/pos/POS.tsx')
+const addLineRules = read('../src/components/sales/saleAddLines.ts')
+const salesDir = path.resolve(here, '../src/components/sales')
 const backend = read('../../cloudflare/src/routes/sales.ts')
 const productSearchBackend = read('../../cloudflare/src/routes/products.ts')
 const saleLineAdditionBackend = read('../../cloudflare/src/lib/saleLineAddition.ts')
@@ -62,7 +69,6 @@ assert.equal(sanitizeSaleDetailText(undefined), '')
 assert.equal(sanitizeSaleDetailText(0), '0')
 
 assert.match(detail, /placeholder=\{translateOr\('add_items_search_placeholder', 'Search by name or barcode'/)
-assert.match(detail, /<SaleDetailProductPicker/)
 assert.match(detail, /buildProductGroups\(addCandidates, new Map\(\), \{ preserveInputOrder: true \}\)/)
 assert.match(detail, /pageSize: 8/)
 assert.match(productSearchBackend, /paginateProductFamilies/)
@@ -74,87 +80,190 @@ assert.match(detail, /addCandidateGroups\.map\(\(candidate\)/)
 assert.doesNotMatch(detail, /addCandidateGroups\.map\([\s\S]{0,900}candidate\.barcode/)
 assert.match(detail, /const addSearchInputRef = useRef<HTMLInputElement \| null>\(null\)/)
 assert.match(detail, /ref=\{addSearchInputRef\}/)
-// Adding a line is TWO steps now -- the shared option sheet answers which
-// row / branch / received date, then the line form asks quantity and price --
-// and the backdrop must stay inert for both. Naming only the second one left
-// the sheet dismissable by a backdrop click that also ran the sale's own
-// close guard.
-assert.match(detail, /inert=\{addPicking \|\| addSheetGroup \? true : undefined\}/)
-assert.match(detail, /aria-hidden=\{addPicking \|\| addSheetGroup \? true : undefined\}/)
-assert.match(detail, /onClick=\{addPicking \|\| addSheetGroup \? undefined : closeGuard\.requestClose\}/)
+// ---- N19: the add-items pick IS the POS pick ----
+//
+// Owner, 2026-09-06: "for add to item, the design when clicked should be like
+// the POS, same identical design, don't create new." It was not. The shared
+// option sheet answered which row and which branch, and then a SECOND,
+// private modal -- SaleDetailProductPicker.tsx, its own Modal layout, its own
+// option grid, its own lot list -- asked the received date, the quantity and
+// the price all over again. These assertions pin identity, not resemblance.
+
+// 1. The private modal is gone, and nothing references it.
+assert.equal(fs.existsSync(path.resolve(salesDir, 'SaleDetailProductPicker.tsx')), false)
+// The name survives only in the comment that records why it went; nothing
+// imports or renders it.
+assert.doesNotMatch(detail, /import[^\r\n]*SaleDetailProductPicker|<SaleDetailProductPicker/)
+
+// 2. Import identity: this screen and the POS mount the SAME sheet module.
+//    ProductOptionSheet is a thin adapter over it, never a twin.
+assert.match(detail, /import ProductOptionSheet from '\.\.\/shared\/ProductOptionSheet\.tsx'/)
+assert.match(optionSheet, /import ProductDetailSheet from '\.\.\/pos\/ProductDetailSheet\.tsx'/)
+assert.match(pos, /const ProductDetailSheet = lazyRetry\(\(\) => import\('\.\/ProductDetailSheet'\)/)
+assert.match(optionSheet, /<ProductDetailSheet/)
+
+// 2b. The LIST half of the same owner report. Clicking a result was made the
+//     POS pick in round 2, but the results themselves were still this
+//     screen's own one-line ProductSearchRow -- name, "N options · Stock: n",
+//     a price range -- beside the POS's card grid. "Same identical design"
+//     covers what you look at before you click, so the POS card body is now
+//     ONE component, components/pos/ProductCard.tsx, and the POS itself
+//     renders that component rather than a copy of it.
+const productCard = read('../src/components/pos/ProductCard.tsx')
+// The row it replaces is gone from this screen entirely -- both the add-items
+// list and the Replace list mount the card.
+assert.doesNotMatch(detail, /ProductSearchRow/)
+assert.doesNotMatch(detail, /ProductSearchGroupRow/)
+assert.match(detail, /import ProductCard from '\.\.\/pos\/ProductCard\.tsx'/)
+assert.match(pos, /import ProductCard from '\.\/ProductCard\.tsx'/)
+// The POS uses the extracted piece: exactly one <ProductCard, inside the
+// .pos-product-grid it always drew its cards in.
+assert.equal((pos.match(/<ProductCard\b/g) || []).length, 1, 'POS renders the shared card exactly once')
+assert.match(pos, /<div className="pos-product-grid">[\s\S]{0,200}<ProductCard/)
+// Both product searches on the sale screen mount the same card in the same
+// grid class -- add-items and Replace answer identically.
+assert.equal((detail.match(/<ProductCard\b/g) || []).length, 2, 'add-items and Replace both mount the shared card')
+assert.equal((detail.match(/className="pos-product-grid/g) || []).length, 2)
+// The card body lives in exactly ONE file. These are the fragments that made
+// the POS card what it is; if any of them reappears in POS.tsx or in the sale
+// modal, a copy has been made.
+const cardMarkup = [
+  'relative w-full aspect-square rounded-lg bg-gray-100',
+  'line-clamp-2',
+  'ProductDiscountBadge',
+  'promotionBadgeForProduct',
+  'computeExpiryStatus',
+]
+for (const fragment of cardMarkup) {
+  assert.ok(productCard.includes(fragment), `ProductCard.tsx lost the POS card's ${fragment}`)
+  assert.ok(!detail.includes(fragment), `components/sales/SaleDetailModal.tsx re-implements the POS card: ${fragment}`)
+}
+// POS.tsx keeps promotionBadgeForProduct for its one-tap gate, but nothing
+// of the card body: no badge component of its own, no expiry read, no
+// inline card markup.
+assert.doesNotMatch(pos, /function ProductDiscountBadge|<ProductDiscountBadge/)
+assert.doesNotMatch(pos, /computeExpiryStatus\(/)
+assert.doesNotMatch(pos, /aspect-square rounded-lg bg-gray-100/)
+// The card body itself, carried over unchanged -- the two lines nothing else
+// in the app draws.
+assert.match(productCard, /\{choiceLabel\}: <span className="font-semibold text-primary-600 dark:text-primary-400">\{variants\.length\}<\/span>/)
+assert.match(productCard, /\{expiryInfo\.status === 'expired' \? \(t\('expired'\) \|\| 'Expired'\) : \(t\('expiring_soon'\) \|\| 'Expiring soon'\)\}/)
+// The sale screen reads the SAME shelf the pick will draw from -- the sale's
+// own branch, through the one branchStockQuantity rule saleAddLines.ts caps
+// with. A card showing the cross-branch total over a shop-only sale is the
+// exact mismatch round 2 removed from the staged line.
+assert.match(detail, /import \{ branchStockQuantity[^\r\n]*\} from '\.\.\/pos\/productSheetState\.ts'/)
+assert.match(detail, /branchStockQuantity\(row, sale\?\.branch_id \?\? null\) \?\? toNumber\(row\.stock_quantity\)/)
+// A card click still only OPENS the sheet; nothing on the card commits a pick.
+assert.match(detail, /onOpen=\{\(\) => setAddSheetGroup\(candidate\)\}/)
+assert.match(detail, /onOpen=\{\(\) => setReplacePicking\(candidate\)\}/)
+// Shop-wide promotion rules are not loaded on this screen and an amendment
+// does not price by them, so the card must not advertise one it will not
+// honour. It still shows the product's own discount, which evaluates with no
+// rules at all.
+assert.match(detail, /promotionRules: NO_PROMOTION_RULES/)
+// Both lists spread ONE description of a result-as-a-card, so they cannot
+// answer the same query differently -- which is how they drifted apart before.
+assert.equal((detail.match(/\{\.\.\.productCardProps\(candidate\)\}/g) || []).length, 2)
+
+// 3. No second sheet implementation survives in the sales folder: nothing
+//    named like a picker/sheet, and nothing there fetching a lot list of its
+//    own -- the received-date question belongs to the one sheet.
+for (const file of fs.readdirSync(salesDir)) {
+  assert.doesNotMatch(file, /ProductPicker|ProductSheet/, `second product sheet in components/sales: ${file}`)
+  if (!/\.tsx?$/.test(file)) continue
+  assert.doesNotMatch(
+    fs.readFileSync(path.resolve(salesDir, file), 'utf8'),
+    /getProductBatches/,
+    `components/sales/${file} fetches its own lot list instead of using the shared sheet`,
+  )
+}
+
+// 4. It opens as a SALE (warehouse shown greyed with its count, never
+//    selectable), at the sale's own branch, and it is handed the tracked
+//    product ids so the sheet's OWN received-date step can engage. Without
+//    them that step could never appear -- which is exactly why a second modal
+//    had to ask the lot question.
+assert.match(detail, /<ProductOptionSheet[\s\S]{0,900}intent="sell"[\s\S]{0,500}trackedBatchProductIds=\{trackedBatchProductIds\}/)
+assert.match(detail, /activeBranchId=\{sale\.branch_id \?\? null\}/)
+assert.match(detail, /getTrackedBatchProductIds\(sale\?\.branch_id \?\? null\)/)
+// A FAILED lookup must not collapse into "nothing is batch-tracked" -- that
+// would drop the step from an addition that needs one and move stock with no
+// lot recorded. Same rule POS.tsx and TransferModal.tsx follow.
+assert.doesNotMatch(detail, /getTrackedBatchProductIds[\s\S]{0,500}catch[\s\S]{0,160}setTrackedBatchProductIds\(new Set\(\)\)/)
+assert.match(optionSheet, /trackedBatchProductIds=\{trackedBatchProductIds\}/)
+assert.match(posSheet, /trackedBatchProductIds\?\.has\(Number\(row\.id\)\)|trackedBatchProductIds/)
+
+// 5. Both portalled sheets keep the sale modal underneath inert. Naming only
+//    one left the other dismissable by a backdrop click that also ran the
+//    sale's own close guard.
+assert.match(detail, /inert=\{addSheetGroup \|\| replacePicking \? true : undefined\}/)
+assert.match(detail, /aria-hidden=\{addSheetGroup \|\| replacePicking \? true : undefined\}/)
+assert.match(detail, /onClick=\{addSheetGroup \|\| replacePicking \? undefined : closeGuard\.requestClose\}/)
 assert.match(detail, /<UnsavedChangesPrompt guard=\{closeGuard\}/)
 assert.match(detail, /requestAnimationFrame\(\(\) => addSearchInputRef\.current\?\.focus\(\)\)/)
-assert.match(picker, /import Modal from '\.\.\/shared\/Modal\.tsx'/)
-assert.match(picker, /layer="nested"/)
-assert.match(picker, /unsavedChanges="read-only"/)
-assert.match(picker, /event\.key !== 'Escape'/)
-assert.match(picker, /document\.addEventListener\('keydown', onKeyDown, true\)/)
-assert.match(picker, /document\.removeEventListener\('keydown', onKeyDown, true\)/)
-assert.match(picker, /__groupChoices/)
-assert.match(picker, /candidates\.filter/)
-assert.match(picker, /Options \/ variants/)
-assert.match(picker, /setBatchId\(null\)/)
-assert.match(picker, /getProductBatches\(productId, branchId, true\)/)
-assert.match(picker, /received_at/)
-assert.match(picker, /expiry_date/)
-assert.match(picker, /batches\.length > 0 && !batch/)
-assert.match(picker, /htmlFor="sale-detail-picker-quantity"/)
-assert.match(picker, /htmlFor="sale-detail-picker-price"/)
-assert.match(picker, /setPriceText\(String\(number\(selected\?\.selling_price_usd\)\)\)/)
-assert.match(picker, /Number\.isInteger\(rawQuantity\)/)
-const quantityValidExpression = picker.match(/const quantityValid = ([^\r\n]+)/)?.[1]
-assert.ok(quantityValidExpression)
-const quantityIsValid = new Function('rawQuantity', `return ${quantityValidExpression}`) as (quantity: number) => boolean
-assert.equal(quantityIsValid(1), true)
-assert.equal(quantityIsValid(1.5), false)
-assert.match(picker, /quantity: parsedQuantity/)
-assert.match(picker, /unitPriceUsd: parsedPrice/)
-assert.match(picker, /batchId: batch\?\.id \?\? null/)
-assert.match(picker, /const stagedQuantity = stagedLines/)
-assert.match(picker, /row\.productId === productId && row\.batchId === selectedBatchId/)
-assert.match(picker, /const trackedAvailableQuantity = batches\.reduce/)
-assert.match(picker, /batches\.length > 0 \? trackedAvailableQuantity : number\(selected\?\.stock_quantity\)/)
-assert.match(picker, /stockMoves && availabilityKnown && availableAfterStaged <= 0 \? 'no-stock'/)
-assert.match(picker, /parsedQuantity > availableAfterStaged \? 'not-enough-stock'/)
-assert.match(picker, /const \[loadedSelectionKey, setLoadedSelectionKey\] = useState\(''\)/)
-assert.match(picker, /const selectionKey =/)
-assert.match(picker, /const batch = branchId == null \? null : batches\.find/)
-const batchExpression = picker.match(/const batch = ([^\r\n]+)/)?.[1]
-assert.ok(batchExpression)
-const selectedBatch = new Function('branchId', 'batches', 'batchId', `return (${batchExpression})`) as (branchId: number | null, batches: Array<{ id: number }>, batchId: number) => { id: number } | null
-assert.equal(selectedBatch(null, [{ id: 501 }], 501), null, 'branchless add never reuses a stale batch')
-assert.match(picker, /const batchesReady = branchId == null[\s\S]{0,120}\? !stockMoves[\s\S]{0,160}: !!selectionKey && loadedSelectionKey === selectionKey/)
-const batchesReadyExpression = picker.match(/const batchesReady = ([\s\S]*?)[\r\n]+  const selectedBatchId/)?.[1]
-assert.ok(batchesReadyExpression)
-const batchesAreReady = new Function('branchId', 'stockMoves', 'selectionKey', 'loadedSelectionKey', 'loading', 'failed', `return (${batchesReadyExpression})`) as (branchId: number | null, stockMoves: boolean, selection: string, loaded: string, loading: boolean, failed: boolean) => boolean
-assert.equal(batchesAreReady(2, true, '20:2', '20:2', false, false), true)
-assert.equal(batchesAreReady(2, true, '21:2', '20:2', false, false), false, 'option switch rejects stale product batches')
-assert.equal(batchesAreReady(3, true, '20:3', '20:2', false, false), false, 'branch switch rejects stale branch batches')
-assert.equal(batchesAreReady(2, true, '20:2', '20:2', true, false), false)
-assert.equal(batchesAreReady(null, false, '', '', false, false), true, 'branchless stock-skipped sale may stage without fabricating a batch')
-assert.equal(batchesAreReady(null, true, '', '', false, false), false, 'branchless stock-moving sale remains blocked')
-assert.match(picker, /if \(!productId \|\| !batchesReady/)
-assert.match(picker, /role="alert"/)
-assert.match(picker, /t\('no_stock_in_branch'\)/)
-assert.match(picker, /t\('not_enough_stock'\)/)
+// 6. A barcode -- typed or scanned -- NARROWS the list and never auto-adds
+//    (owner rule, every surface). The search effect may only set candidates;
+//    the ONE call that stages a line sits inside the sheet's onPick, behind a
+//    human choice.
+const addSearchEffect = detail.slice(
+  detail.indexOf('const text = addQuery.trim()'),
+  detail.indexOf('// What makes two staged lines the SAME line'),
+)
+assert.ok(addSearchEffect.length > 100, 'add-items search effect not found')
+assert.doesNotMatch(addSearchEffect, /setAddSheetGroup|setAddLines|stagedLineFromSheetPick/)
+assert.equal((detail.match(/stagedLineFromSheetPick\(/g) || []).length, 1, 'exactly one call site')
+assert.match(detail, /<ProductOptionSheet[\s\S]{0,1400}onPick=\{\(picked, selection\) => \{[\s\S]{0,300}stageAddLineFromPick\(/)
+assert.match(detail, /const stageAddLineFromPick = [\s\S]{0,400}stagedLineFromSheetPick\(picked, selection\)/)
+// The results grid only OPENS the sheet; it never commits a pick.
+assert.match(detail, /onOpen=\{\(\) => setAddSheetGroup\(candidate\)\}/)
+
+// 7. The staged line still lands in addLines exactly as before, and the rule
+//    that builds it is one testable module rather than this file's text --
+//    tests/saleAddLines.test.ts evaluates it on data.
+assert.match(detail, /from '\.\/saleAddLines\.ts'/)
+assert.match(detail, /stagedLineFromSheetPick,/)
+assert.match(addLineRules, /import \{ branchStockQuantity, type BranchStockRow \} from '\.\.\/pos\/productSheetState\.ts'/)
+// POS behaviour: a pick adds ONE unit at the row's own selling price, and a
+// repeat pick bumps the quantity instead of duplicating the row.
+assert.match(addLineRules, /quantity: 1,/)
+assert.match(addLineRules, /unitPriceUsd: price,/)
+assert.match(addLineRules, /priceText: price > 0 \? String\(price\) : '0'/)
+assert.match(addLineRules, /quantity: merged\[index\]\.quantity \+ next\.quantity/)
+// The cap is the shelf the sheet was read at, narrowed by the picked lot --
+// never the CROSS-BRANCH stock_quantity the private modal staged.
+assert.match(addLineRules, /batchQuantity \?\? branchStockQuantity\(picked, selection\?\.branchId\) \?\? toNumber\(picked\.stock_quantity\)/)
+// One implementation of "units at this branch", shared with the sheet itself.
+assert.match(posSheet, /branchStockQuantity\(variant, branchId\) \?\? 0/)
 assert.ok(en.no_stock_in_branch && km.no_stock_in_branch)
 assert.ok(en.not_enough_stock && km.not_enough_stock)
-assert.doesNotMatch(picker, /'No Stock'/)
-assert.doesNotMatch(picker, /'Not Enough Stock'/)
-assert.match(picker, /disabled=\{!batchesReady \|\| loading \|\| failed \|\| !!stockError/)
-assert.doesNotMatch(picker, /Pick a lot/i)
-
-assert.match(detail, /const quantity = Math\.max\(1, Math\.floor\(Number\(choice\.quantity\) \|\| 1\)\)/)
-assert.match(detail, /quantity,/)
-assert.match(detail, /quantity: next\[existing\]\.quantity \+ quantity/)
-assert.match(detail, /next\[existing\] = \{[\s\S]{0,350}unitPriceUsd: price,[\s\S]{0,120}priceText: price > 0/)
-assert.match(detail, /next\[existing\] = \{[\s\S]{0,500}stockQuantity: choice\.batchQuantity \?\? toNumber\(choice\.stockQuantity\)/)
-assert.match(detail, /priceText: price > 0 \? String\(price\) : '0'/)
+assert.ok(en.add && km.add)
 assert.match(detail, /unitPriceUsd: toNumber\(text\)/)
 assert.match(detail, /batch_id: line\.batchId/)
 assert.match(detail, /batch_label: line\.batchLabel/)
 assert.match(detail, /batch_expiry_date: line\.batchExpiryDate/)
 assert.match(detail, /applied_price_usd: line\.unitPriceUsd/)
+// 7b. The staged lot caption prints ONE date. `line.batchLabel` is
+//     batchDisplayLabel's answer, which for a lot with no custom code already
+//     IS the received date (local, day-first); the caption appended the raw
+//     UTC slice beside it -- "02/09/2026 · Received: 2026-09-01", one date
+//     twice, in two formats, on two different days east of UTC. The rule is
+//     data-tested in tests/saleAddLines.test.ts.
+assert.doesNotMatch(detail, /batchReceivedAt\.slice\(0, 10\)/)
+assert.match(detail, /\{stagedLineBatchCaption\(line, t\)\}/)
+assert.match(addLineRules, /import \{ formatBatchReceivedDate \} from '\.\.\/\.\.\/utils\/batchLabel\.ts'/)
+assert.match(addLineRules, /import \{ fmtDateOnly \} from '\.\.\/\.\.\/utils\/formatters\.ts'/)
+assert.match(addLineRules, /!label\.includes\(received\)/)
+// Dates render through the app's formatter; the raw ISO stays on the wire.
+assert.match(addLineRules, /fmtDateOnly\(expiry\)/)
+// Whether the rendered caption really carries ONE formatted date and never a
+// raw ISO is asserted on DATA, not on this file's text:
+// tests/saleAddLines.test.ts runs the caption for a lot received at
+// "2026-09-01 18:30:00" and asserts neither '2026-09-01' nor the stored
+// expiry ISO survives into it.
+// Both caption keys already ship in both packs -- no new string.
+assert.ok(en.received_date && km.received_date)
+assert.ok(en.expiry_date && km.expiry_date)
 assert.match(detail, /const addStockMoves = !Number\(sale\?\.stock_skipped \|\| 0\)/)
 assert.doesNotMatch(detail, /addStockMoves =[^\r\n]*[\r\n]+\s*&& currentStatus !== 'awaiting_payment'/)
 const addStockMovesExpression = detail.match(/const addStockMoves = ([^\r\n]+)/)?.[1]
@@ -162,9 +271,11 @@ assert.ok(addStockMovesExpression)
 const additionMovesStock = new Function('sale', `return (${addStockMovesExpression})`) as (sale: { stock_skipped?: number }) => boolean
 assert.equal(additionMovesStock({ stock_skipped: 1 }), false)
 assert.equal(additionMovesStock({ stock_skipped: 0 }), true, 'accepted statuses, including awaiting_payment, move stock unless sticky-skipped')
-assert.match(detail, /stockMoves=\{addStockMoves\}/)
-assert.match(detail, /stagedLines=\{addLines\}/)
+// The stock guard moved WHOLE onto the staged row (it is the only place a
+// quantity is typed now), and it still reads the cap the sheet handed over.
 assert.match(detail, /const addHasStockError = addStockMoves/)
+assert.match(detail, /line\.stockQuantity <= 0 \|\| line\.quantity > line\.stockQuantity/)
+assert.match(detail, /addStockMoves && \(line\.stockQuantity <= 0 \|\| line\.quantity > line\.stockQuantity\)/)
 assert.match(detail, /disabled=\{addSaving \|\| addLines\.length === 0 \|\| addHasStockError\}/)
 assert.match(detail, /if \(!onAddItems \|\| !addLines\.length \|\| addHasStockError\) return/)
 assert.doesNotMatch(detail, /More than the stock this product had a moment ago/)

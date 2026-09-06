@@ -321,26 +321,26 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
                     <>
                 <div className="flex items-center gap-2">
                   <span className="w-5 flex-shrink-0 text-xs font-bold text-gray-400">#{index + 1}</span>
-                  <input id={fieldId('label')} name={fieldId('label')} className="input flex-1 text-xs py-1" autoComplete="off" placeholder="Option label" value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
-                  {options.length > 1 ? <button type="button" onClick={() => removeOption(index)} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">Remove</button> : null}
+                  <input id={fieldId('label')} name={fieldId('label')} className="input flex-1 text-xs py-1" autoComplete="off" placeholder={t('contact_option_label') || 'Option label'} value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
+                  {options.length > 1 ? <button type="button" onClick={() => removeOption(index)} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">{t('remove') || 'Remove'}</button> : null}
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">Name</label>
-                    <input id={fieldId('name')} name={fieldId('name')} className="input text-xs py-1" autoComplete="name" placeholder="Contact name" value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
+                    <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">{t('name') || 'Name'}</label>
+                    <input id={fieldId('name')} name={fieldId('name')} className="input text-xs py-1" autoComplete="name" placeholder={t('contact_option_name') || 'Contact name'} value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
                   </div>
                   <div>
-                    <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">Phone</label>
-                    <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" autoComplete="tel" placeholder="Phone number" value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: event.target.value })} />
+                    <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">{t('phone') || 'Phone'}</label>
+                    <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" autoComplete="tel" placeholder={t('phone_number') || 'Phone number'} value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: event.target.value })} />
                   </div>
                 </div>
                 <div>
-                  <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">Email</label>
-                  <input id={fieldId('email')} name={fieldId('email')} className="input text-xs py-1" autoComplete="email" type="email" placeholder="Email address" value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
+                  <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">{t('email') || 'Email'}</label>
+                  <input id={fieldId('email')} name={fieldId('email')} className="input text-xs py-1" autoComplete="email" type="email" placeholder={t('contact_option_email') || 'Email address'} value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
                 </div>
                 <div>
-                  <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">Address</label>
-                  <input id={fieldId('address')} name={fieldId('address')} className="input text-xs py-1" autoComplete="street-address" placeholder="Office or pickup address" value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
+                  <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">{t('address') || 'Address'}</label>
+                  <input id={fieldId('address')} name={fieldId('address')} className="input text-xs py-1" autoComplete="street-address" placeholder={t('supplier_option_address') || 'Office or pickup address'} value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
                 </div>
                     </>
                   )

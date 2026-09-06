@@ -17,7 +17,7 @@ import {
   type ContactDuplicateMatch,
   type ContactDuplicateTable,
 } from '../lib/contactDuplicates'
-import type { ContactOptionMode } from '../lib/contactOptions'
+import { contactDisplayAddress, type ContactOptionMode } from '../lib/contactOptions'
 import { canonicalizePhone } from '../lib/phone'
 import { mintMembershipNumber, normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/membershipNumber'
 import { revokePortalSessionsForAccount } from '../lib/portalSession'
@@ -863,7 +863,7 @@ function registerContactRoutes(config: ContactConfig) {
         // The id is authoritative, but these operational rows also expose a
         // mutable display snapshot in lists, details, reports and exports.
         // Repointing only the FK left the survivor linked to the loser name.
-        { sql: `UPDATE sales SET customer_id = @keepId, customer_name = @keeperName, customer_phone = @keeperPhone, customer_address = @keeperAddress WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name, keeperPhone: keeper.phone ?? null, keeperAddress: keeper.address ?? null } },
+        { sql: `UPDATE sales SET customer_id = @keepId, customer_name = @keeperName, customer_phone = @keeperPhone, customer_address = @keeperAddress WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name, keeperPhone: keeper.phone ?? null, keeperAddress: contactDisplayAddress(keeper.address) || null } },
         { sql: `UPDATE returns SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
         { sql: `UPDATE customer_share_submissions SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
         // Was missing until an earlier session -- loyalty_point_adjustments
@@ -1195,7 +1195,10 @@ function registerContactRoutes(config: ContactConfig) {
     if ((nameChanged && snapshotCarry) || phoneChanged || addressChanged) {
       if (config.table === 'customers') {
         const customerPhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
-        const customerAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
+        // N21: sales carry the DISPLAY address, not the Contact Options JSON
+        // the customers.address column holds -- the customer row itself keeps
+        // the full options set, which is what the Customers page edits.
+        const customerAddress = contactDisplayAddress(Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address) || null
         const snapshotName = nameChanged && !snapshotCarry ? current.name : name
         statements.push(
           { sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name: snapshotName, phone: customerPhone ?? null, address: customerAddress ?? null } },

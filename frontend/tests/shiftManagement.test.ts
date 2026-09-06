@@ -165,7 +165,9 @@ for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) 
 }
 ok(!/hasPermission|canManage/.test(modal), 'the shift popup never derives actions from Settings permission')
 ok(/expectedRevision: shift\.revision/.test(modal) && /expectedRevision: edit\.expectedRevision/.test(modal), 'the amend draft captures and submits the row revision without a pre-submit refresh')
-ok(/parseShiftCount\(edit\.openingUsd\)/.test(modal) && !/Number\((?:edit|close|reopen)\.[^)]+\) \|\| 0/.test(modal), 'amend/close/reopen forms never coerce blank or invalid counts to zero')
+// 2026-09-06: blank is 0 through the shared shiftCountOrZero rule (executed
+// in tests/shiftGateUx.test.ts); an INVALID count is still never coerced.
+ok(/shiftCountOrZero\(edit\.openingUsd\)/.test(modal) && !/Number\((?:edit|close|reopen)\.[^)]+\) \|\| 0/.test(modal), 'amend/close/reopen forms record a blank count as 0 through the shared rule and never coerce an invalid one')
 ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /required value=\{close\.closedAt\}/.test(modal), 'historic close starts without a guessed timestamp and requires user entry')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
 ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')

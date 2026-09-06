@@ -353,11 +353,15 @@ await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled
 // guards two things: the tier still never leaks onto the outside grid (the
 // original point of the test), and the tier that IS offered is wholesale.
 await runTest('the POS offers wholesale as the only alternate tier, and never on the card face', () => {
-  const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
-  const cardStart = pos.indexOf('Product cards show only the normal selling price')
-  const cardEnd = pos.indexOf('Colored qty+unit', cardStart)
+  // N19 round 3: the card body moved out of POS.tsx into the shared
+  // components/pos/ProductCard.tsx the sale screen mounts too, so the lock
+  // follows it -- the outside card face must not show a tier on EITHER
+  // surface now, which is more than this test used to cover.
+  const card = fs.readFileSync(new URL('../src/components/pos/ProductCard.tsx', import.meta.url), 'utf8')
+  const cardStart = card.indexOf('Product cards show only the normal selling price')
+  const cardEnd = card.indexOf('Colored qty+unit', cardStart)
   assert.ok(cardStart >= 0 && cardEnd > cardStart, 'the product-card price block should remain identifiable')
-  const cardPriceBlock = pos.slice(cardStart, cardEnd)
+  const cardPriceBlock = card.slice(cardStart, cardEnd)
   assert.doesNotMatch(cardPriceBlock, /special_price|wholesale_price/, 'tier labels and values must not appear on the outside POS product card')
 
   const sheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')

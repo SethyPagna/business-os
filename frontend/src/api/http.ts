@@ -1370,8 +1370,19 @@ export async function route<T = any>(
     if (isInvalidSessionError(e)) {
       throw e
     }
+    // The server's machine-readable code and status travel with the event.
+    // Without them the global write banner could only reprint the raw error
+    // sentence, so a failure the user can actually FIX -- an out-of-date app
+    // shell rejected by a newer Worker (code client_request_id_required) --
+    // read as the same opaque "Write failed" as everything else.
     window.dispatchEvent(new CustomEvent('sync:error', {
-      detail: { channel, error: e.message, ts: new Date().toISOString() },
+      detail: {
+        channel,
+        error: e.message,
+        code: e.code || null,
+        status: Number(e?.status || 0) || null,
+        ts: new Date().toISOString(),
+      },
     }))
     throw e
   }

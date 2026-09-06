@@ -81,6 +81,19 @@ runTest('changed cost offers and uses the existing price-variant path', () => {
   assert.match(modalSource, /Total cost'\)}: \$\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
 })
 
+runTest('known zero catalog cost is prefetched and session cost keeps zero distinct from missing', () => {
+  assert.match(modalSource, /candidate\.cost_price_usd != null[\s\S]*candidate\.purchase_price_usd/)
+  assert.match(modalSource, /Number\.isFinite\(cost\) && cost >= 0/)
+  assert.match(modalSource, /tr\('cost_price_usd', 'Cost price \$'\)/)
+  assert.match(sessionsSource, /movementTotal != null && Number\.isFinite\(movementTotal\) && movementTotal >= 0/)
+  // The UNION kernel (N29) splits this in two: the movement half decides per
+  // row whether a cost was recorded at all, the grouped half sums that flag
+  // across both line kinds. A recorded 0.00 is a cost; only NULL is missing.
+  assert.match(stockSessionQuerySource, /CASE WHEN m\.total_cost_usd IS NOT NULL THEN 0 ELSE 1 END AS cost_missing/)
+  assert.match(stockSessionQuerySource, /SUM\(s\.cost_missing\) AS lines_without_movement_cost/)
+  assert.match(stockSessionQuerySource, /SUM\(CASE WHEN s\.total_cost_usd IS NOT NULL THEN s\.total_cost_usd ELSE 0 END\) AS movement_cost_usd/)
+})
+
 runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only after real writes', () => {
   assert.match(modalSource, /return createPortal\(/)
   assert.match(modalSource, /const closeIfIdle = \(\) => \{ if \(!saving\) \{ if \(successCount > 0\) onDone\(\); onClose\(\) \} \}/)
