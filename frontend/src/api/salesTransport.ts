@@ -5,6 +5,7 @@ import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
+import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
 
 type SalePayload = ExpectedUpdatedAtPayload
 type ResultRecord = Record<string, unknown>
@@ -163,7 +164,11 @@ export async function attachSaleCustomer(
       customer_name: result?.customer?.name || null,
       customer_membership_number: result?.customer?.membership_number || null,
       customer_phone: result?.customer?.phone || null,
-      customer_address: result?.customer?.address || null,
+      // N21: the response carries the customer's RAW address column (the
+      // Contact Options JSON); the server stored the display address on the
+      // sale. Mirror what the server stored, or the sale detail shows the JSON
+      // again the moment this device reads its local copy offline.
+      customer_address: contactDisplayAddress(result?.customer?.address) || null,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result
@@ -172,7 +177,7 @@ export async function attachSaleCustomer(
       customer_id: payload?.customer_id || null,
       customer_name: payload?.customer_name || '',
       customer_phone: payload?.customer_phone || '',
-      customer_address: payload?.customer_address || '',
+      customer_address: contactDisplayAddress(payload?.customer_address) || '',
     })
   }
 }

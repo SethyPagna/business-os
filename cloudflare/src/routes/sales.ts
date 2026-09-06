@@ -790,7 +790,12 @@ app.post('/', async (c) => {
       customer_id: customer?.id || null,
       customer_name: body.customer_name || customer?.name || null,
       customer_phone: body.customer_phone || null,
-      customer_address: body.customer_address || null,
+      // N21: normalized, not trusted. The POS sends the display address now,
+      // but an out-of-date shell -- or a sale it queued offline and replayed
+      // after the update -- still sends the raw Contact Options JSON out of
+      // customers.address, and the server is the only place that catches that.
+      // A plainly typed address passes through untouched.
+      customer_address: contactDisplayAddress(body.customer_address) || null,
       // Write-time diacritic fold of this sale's own searchable text fields
       // (migration 0082) -- the same normalizeSearchText the typed query is
       // run through, so folded queries match folded storage. Read additively

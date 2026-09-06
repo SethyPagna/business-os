@@ -151,6 +151,34 @@ assert.match(saleDetail, /label=\{t\('address'\) \|\| 'Address'\} value=\{custom
 // same defect in a different container.
 assert.match(salesRoutes, /customer_address: index === 0 \? contactDisplayAddress\(sale\.customer_address\)/, 'the sales export must emit the display address')
 
+// The OFFLINE MIRROR is both. attachSaleCustomer writes the linked customer's
+// columns into the local sales table, and the sale detail reads that copy when
+// the network is down -- so mirroring customers.address raw put the options
+// JSON back on the screen the moment the device went offline, even though the
+// server had stored the display address. Same for the optimistic snapshot the
+// failure path attaches.
+const salesTransport = read('src/api/salesTransport.ts')
+assert.match(
+  salesTransport,
+  /customer_address: contactDisplayAddress\(result\?\.customer\?\.address\) \|\| null/,
+  'the offline mirror must store the display address, matching what the server wrote',
+)
+assert.match(
+  salesTransport,
+  /customer_address: contactDisplayAddress\(payload\?\.customer_address\) \|\| ''/,
+  'the attempted-write snapshot must carry the display address too',
+)
+
+// And the server does not trust the client: a shell built before this change,
+// or a sale it queued offline and replayed afterwards, still sends the raw
+// column. cloudflare/scripts/test-sale-customer-address-snapshot-pure.cjs
+// exercises that against the real route.
+assert.match(
+  salesRoutes,
+  /customer_address: contactDisplayAddress\(body\.customer_address\) \|\| null/,
+  'sale creation must normalize the address a client sent',
+)
+
 // ---------------------------------------------------------------------------
 // 5. The Customer card shows ONE address row (owner: "just keep address ...
 //    because in sales only show address"). The receipt-template delivery
