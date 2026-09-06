@@ -124,6 +124,13 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function normalizeCategoryRows(rows: unknown): CategoryRow[] {
   if (!Array.isArray(rows)) return []
   return rows
+    // GET /api/categories now returns the lookup table UNION the category
+    // strings products actually carry (cloudflare/src/lib/lookupSuggestions.ts),
+    // so a product form can suggest a category that has no lookup row. The
+    // MANAGER is the other half of that rule: it renames and deletes lookup
+    // ROWS, and a used-only name has none -- listing it here would render
+    // rename/delete controls with nothing behind them.
+    .filter((entry) => (entry as { source?: unknown } | null | undefined)?.source !== 'products')
     .map((row) => {
       const source = row as Partial<CategoryRow> | null | undefined
       return {
