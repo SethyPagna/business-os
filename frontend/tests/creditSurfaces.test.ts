@@ -102,6 +102,18 @@ check('the Dashboard never negates the credit', !/-\s*aCredit/.test(dashboard) &
 // or the printed formula would stop footing.
 check('the credit is not a term of the printed revenue equation',
   !/key: 'rpt_pending_credit'/.test(read('../src/utils/statsFormulas.ts')))
+// Naming the AMOUNT is only half of it: the Recent Sales chip, the View-more
+// portal list and the recent-sale detail Status row all read `sale_status`,
+// and a private mapping here sent every unmatched status -- 'awaiting_payment'
+// included -- to `completedStatusLabel`, so a credit sale announced itself as
+// a green "Completed" right beside the Credit line above. The mapping now
+// lives in utils/dashboardSaleStatus.ts and is pinned by
+// tests/dashboardSaleStatus.test.ts; here we only pin that Dashboard.tsx no
+// longer carries the fall-through that caused it.
+check('Dashboard no longer falls through to Completed for an unmatched status',
+  !/return completedStatusLabel/.test(dashboard) && !/const completedStatusLabel/.test(dashboard))
+check('the Dashboard status chip reads the shared credit-aware mapper',
+  /dashboardSaleStatusLabel\(status, t\)/.test(dashboard) && /dashboardSaleStatusTone\(/.test(dashboard))
 
 // ---- 5. The notification row says Credit, in BOTH languages ----------------
 // NotificationCenter.tsx has carried a localised ITEM_META_COPY/

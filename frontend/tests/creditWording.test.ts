@@ -28,7 +28,7 @@
 //
 // Run: node tests/creditWording.test.ts
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, unknown>
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, unknown>
@@ -58,27 +58,46 @@ const CREDIT_KEYS = [
   'rpt_hint_delivery_net',
   'rpt_hint_gross_profit',
   'rpt_hint_pending',
-  'rpt_hint_pending_cogs',
-  'rpt_hint_pending_delivery_paid',
-  'rpt_hint_pending_gross',
-  'rpt_hint_pending_profit',
-  'rpt_hint_pending_revenue',
   'rpt_hint_sales_list',
-  'rpt_pending_block',
-  'rpt_pending_cogs',
   'rpt_pending_credit',
-  'rpt_pending_delivery_collected',
-  'rpt_pending_delivery_paid',
-  'rpt_pending_discounts',
-  'rpt_pending_gross_sales',
-  'rpt_pending_profit',
-  'rpt_pending_revenue',
   'rpt_profit_hint',
   'stats_profit_hint',
   'stats_sales_hint',
   'status_awaiting_payment',
   'summary_awaiting_payment',
 ]
+
+/**
+ * Same rule, but for pack keys NO component reads. They describe a per-figure
+ * credit block under the report totals (gross sales / discounts / net sales /
+ * cost of goods / profit, each with its own hint) that was never wired up:
+ * grep the ref for any of them outside src/lang and you get nothing, on this
+ * branch and on the integration tip. Pre-existing, and NOT this lane's to
+ * build -- components/sales/reports/** belongs to the reports lane, and the
+ * handoff asks it either to render the block or to retire the keys.
+ *
+ * They are still held to the one-word rule below, because the day the block
+ * IS rendered it must not reintroduce a sixth name. Section 8 proves the list
+ * really is unrendered, so a key that starts being used moves up, not down.
+ */
+const CREDIT_KEYS_UNRENDERED = [
+  'rpt_hint_pending_cogs',
+  'rpt_hint_pending_delivery_paid',
+  'rpt_hint_pending_gross',
+  'rpt_hint_pending_profit',
+  'rpt_hint_pending_revenue',
+  'rpt_pending_block',
+  'rpt_pending_cogs',
+  'rpt_pending_delivery_collected',
+  'rpt_pending_delivery_paid',
+  'rpt_pending_discounts',
+  'rpt_pending_gross_sales',
+  'rpt_pending_profit',
+  'rpt_pending_revenue',
+]
+
+/** Every credit key, rendered or not: sections 1-4 hold both to one word. */
+const ALL_CREDIT_KEYS = [...CREDIT_KEYS, ...CREDIT_KEYS_UNRENDERED]
 
 /**
  * POSITIVE CONTROL. Supplier credit -- what the shop owes a supplier -- keeps
@@ -100,13 +119,13 @@ let checks = 0
 const check = (label: string, cond: boolean) => { assert.ok(cond, label); checks++ }
 
 // ---- 1. Both packs carry every key -----------------------------------------
-for (const key of CREDIT_KEYS) {
+for (const key of ALL_CREDIT_KEYS) {
   check(`en.json defines ${key}`, typeof en[key] === 'string' && String(en[key]).length > 0)
   check(`km.json defines ${key}`, typeof km[key] === 'string' && String(km[key]).length > 0)
 }
 
 // ---- 2. ONE WORD in English -------------------------------------------------
-for (const key of CREDIT_KEYS) {
+for (const key of ALL_CREDIT_KEYS) {
   const value = String(en[key])
   check(`en ${key} says "credit"`, /credit/i.test(value))
   for (const retired of EN_RETIRED) {
@@ -115,7 +134,7 @@ for (const key of CREDIT_KEYS) {
 }
 
 // ---- 3. ONE TERM in Khmer ---------------------------------------------------
-for (const key of CREDIT_KEYS) {
+for (const key of ALL_CREDIT_KEYS) {
   const value = String(km[key])
   check(`km ${key} uses ${KM_CREDIT}`, value.includes(KM_CREDIT))
   for (const retired of KM_RETIRED) {
@@ -129,7 +148,7 @@ for (const key of CREDIT_KEYS) {
 // ---- 4. Never a leading minus, never a deduction ----------------------------
 // The owner's second sentence: "instead of $-n... just $n". No credit label may
 // carry a minus sign or a subtraction arrow of its own.
-for (const key of CREDIT_KEYS) {
+for (const key of ALL_CREDIT_KEYS) {
   for (const [lang, pack] of [['en', en], ['km', km]] as const) {
     const value = String(pack[key])
     check(`${lang} ${key} carries no leading minus`, !/[-−]\s*[$0-9{]/.test(value))
@@ -165,6 +184,7 @@ check('the control set really contains a retired word, so it would have caught a
 // `translateOr(key, fallback)` renders the fallback whenever the key is
 // missing, so a stale fallback is a sixth name waiting for one missing key.
 const surfaces: [string, string[]][] = [
+  ['../src/utils/saleStatus.ts', ['Awaiting Payment']],   // STATUS_LABELS lives here now
   ['../src/components/sales/StatusBadge.tsx', ['Awaiting Payment']],
   ['../src/components/pos/POS.tsx', ['Awaiting Payment']],
   ['../src/components/sales/SaleDetailModal.tsx', ['Credit — awaiting payment']],
@@ -177,4 +197,21 @@ for (const [rel, banned] of surfaces) {
   }
 }
 
-console.log(`PASS creditWording: ${checks} checks -- one word "Credit" / "${KM_CREDIT}" across ${CREDIT_KEYS.length} keys in both packs`)
+// ---- 8. The rendered/unrendered split above is a FACT, not a claim ---------
+// If the reports lane wires the credit block up, its keys stop being
+// unrendered and belong in CREDIT_KEYS -- this fails then, instead of the
+// browser plan quietly expecting a block that no component draws.
+const srcRoot = new URL('../src/', import.meta.url)
+const srcFiles = readdirSync(srcRoot, { recursive: true, encoding: 'utf8' })
+  .map((rel) => rel.replace(/\\/g, '/'))
+  .filter((rel) => /\.(ts|tsx)$/.test(rel) && !rel.startsWith('lang/'))
+const srcText = srcFiles.map((rel) => readFileSync(new URL(rel, srcRoot), 'utf8')).join('\n')
+check('the src sweep really loaded the components (control)', srcFiles.length > 100 && srcText.includes("'rpt_pending_credit'"))
+for (const key of CREDIT_KEYS_UNRENDERED) {
+  check(`${key} is still referenced by no component -- if this fails, move it into CREDIT_KEYS`, !srcText.includes(`'${key}'`) && !srcText.includes(`"${key}"`))
+}
+for (const key of ['rpt_pending_credit', 'rpt_hint_pending', 'status_awaiting_payment']) {
+  check(`${key} IS rendered by a component`, srcText.includes(`'${key}'`))
+}
+
+console.log(`PASS creditWording: ${checks} checks -- one word "Credit" / "${KM_CREDIT}" across ${ALL_CREDIT_KEYS.length} keys in both packs (${CREDIT_KEYS.length} rendered, ${CREDIT_KEYS_UNRENDERED.length} pack-only)`)
