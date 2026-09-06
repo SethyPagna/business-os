@@ -130,6 +130,13 @@ const NAME_CELLS: Array<[string, string, string]> = [
   // because the ellipsis was otherwise a dead end. Scrolling replaces both,
   // and the toggle's state has to go with it or it becomes zombie code.
   ['Products > Conflicts row', 'components/products/ProductDuplicatesTab.tsx', '{product.name || `#${product.id}`}'],
+  // The two stock-in pickers, named as siblings by N36. Both offer a product
+  // by NAME and both truncated it, so the row that tells you which product you
+  // are about to receive stock into was the one row whose name you could not
+  // finish reading -- and a dropdown option has no detail sheet to fall back
+  // on. Same shared class, no per-file CSS, handlers untouched.
+  ['Stock-in picker (fast stock-in)', 'components/inventory/FastStockInModal.tsx', '{group.name}</span>'],
+  ['Stock-in picker (create session)', 'components/products/CreateProductsSessionModal.tsx', '{group.name}</span>'],
 ]
 
 runTest('every product-name cell carries the one shared class', () => {
