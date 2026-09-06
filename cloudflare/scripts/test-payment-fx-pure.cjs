@@ -21,6 +21,11 @@ const actual = new Set(['actorSnapshot','movementBranchName',
   // real modules, so POST /sales here rejects a warehouse line exactly as
   // the Worker does rather than silently resolving to an empty stub.
   'branchRoleGuards','branchRoles',
+  // N41: the one acceptance rule for both delivery money fields. A stub leaves
+  // parseDeliveryAmountUsd undefined and every delivery amendment 500s here
+  // while the real route works -- exactly the false red the branch-role
+  // modules above were added to avoid. It has no imports of its own.
+  'deliveryAmounts',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

@@ -36,7 +36,16 @@ const helper = load('lib/saleBulkStatus.ts')
 function fixture(migrate = true) {
   const sql=new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
-  for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || !f.startsWith('0120_'))).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
+  // `migrate: false` builds the PRE-0120 database this file's first scenario is
+  // about -- one that has never seen the bulk-status feature -- so 0120 can be
+  // applied to it by hand and its effect observed.
+  //
+  // It used to exclude 0120 alone and keep everything AFTER it, which is not a
+  // database that has ever existed: 0129 rebuilds sale_amendments and recreates
+  // the sale_revision triggers 0120 introduced, so applying 0120 afterwards
+  // died with "trigger sale_revision_sale_amendments_insert already exists".
+  // A migration chain is ordered; "before 0120" means everything below it.
+  for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || Number(f.slice(0,4)) < 120)).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
   sql.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'),(2,'Warehouse'); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',100),(2,'B',100); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,50),(1,2,50),(2,1,100)")
   let failAt=null, beforeBatch=null, batches=0, reads=0
   const readRows=[]
