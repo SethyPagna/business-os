@@ -419,6 +419,21 @@ test('sumTotals keeps net sales summable and drops it when a row is missing it',
 })
 
 
+test('normalizeTotals carries the voided-receipt count the kernel reports', () => {
+  // cancelled_tx_count is the only place a VOIDED receipt appears: clause 2 of
+  // the scoping rule makes it contribute 0 to every money figure, so the count
+  // is what the Overview and By period views print beside the official count
+  // (the reports-redesign peer's "Voided/Deleted Inv"). It is on SalesTotals
+  // and survives gateTotals, so a totals line that drops it reports 0 voids on
+  // a day that had them.
+  const t = normalizeTotals({ ...adminTotals, cancelled_tx_count: 3 })
+  assert.equal(t?.cancelled_tx_count, 3)
+  assert.equal(normalizeTotals(adminTotals)?.cancelled_tx_count, 0, 'absent reads 0, like every other count')
+  const summed = sumTotals([normalizeTotals({ ...adminTotals, cancelled_tx_count: 3 })!, normalizeTotals({ ...adminTotals, cancelled_tx_count: 4 })!])
+  assert.equal(summed.cancelled_tx_count, 7, 'voids add up across the rolled-up rows')
+  assert.equal(summed.revenue_usd, 510, 'and it did not disturb the money columns')
+})
+
 test('buildIncomeStatement: Not Paid is one consolidated memo below business totals', () => {
   const opts = { profitMode: 'net' as const, khrToUsd, expenses: { usd: 10, khr: 40000 } }
   const base = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), ...opts }))

@@ -365,6 +365,13 @@ export interface ReportTotals {
   pending_membership_discount_usd: number
   pending_delivery_usd: number
   pending_delivery_cost_usd: number
+  /**
+   * Receipts VOIDED in the window. Clause 2 of the scoping rule makes a
+   * cancelled sale contribute 0 to every money figure above, so this count is
+   * the only place it appears at all -- what the Overview and By period views
+   * print beside the official count.
+   */
+  cancelled_tx_count: number
   cost_usd?: number
   profit_usd?: number
   margin_pct?: number | null
@@ -383,7 +390,7 @@ const TOTAL_KEYS: Array<keyof ReportTotals> = [
   'delivery_net_usd', 'recognized_delivery_usd', 'recognized_delivery_cost_usd',
   'refund_usd', 'revenue_usd', 'pending_revenue_usd', 'collected_total_usd', 'avg_order_usd',
   'pending_tx_count', 'pending_gross_sales_usd', 'pending_store_discount_usd', 'pending_membership_discount_usd',
-  'pending_delivery_usd', 'pending_delivery_cost_usd',
+  'pending_delivery_usd', 'pending_delivery_cost_usd', 'cancelled_tx_count',
 ]
 
 /**
