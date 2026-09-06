@@ -284,8 +284,29 @@ assertAllBilingual([
 const feeLines = assertAllBilingual([
   'Type: rent', 'Amount: $150.00', 'Date: 2026-09-03', 'Label: September', 'Note: paid in cash',
 ], 'routes/fees.ts inline fee lines')
-// routes/fees.ts emits a bare ISO fee_date; the feed must show ONE date shape.
-assert.ok(feeLines.includes('Date / កាលបរិច្ឆេទ: 09/03/2026'), 'an ISO Date value is normalised to the pinned mm/dd/yyyy')
+// routes/fees.ts emits a bare ISO fee_date; the feed must show ONE date shape
+// -- and since Sep 4 2026 that shape is DAY-first, the same one
+// telegram.ts's formatBusinessDateTime already prints on every other Date
+// line in the feed. This reorder was left month-first when the app moved,
+// so the Expenses Date line contradicted the Sale/Return/Transfer Date lines
+// sitting directly above it in the same chat.
+//
+// 2026-09-03 is the discriminating input: 03/09/2026 and 09/03/2026 are both
+// real dates, so only the answer tells the two orders apart.
+assert.ok(feeLines.includes('Date / កាលបរិច្ឆេទ: 03/09/2026'), 'an ISO Date value is normalised to the app-wide dd/mm/yyyy')
+assert.ok(!feeLines.includes('Date / កាលបរិច្ឆេទ: 09/03/2026'), 'and NOT to the month-first transpose of the same day')
+// Positive control -- a day past the 12th can only be read one way, so this
+// catches a reorder that happens to look right on ambiguous dates.
+assert.equal(
+  lang.localizeTelegramLine('Date: 2026-12-25'), 'Date / កាលបរិច្ឆេទ: 25/12/2026',
+  '25 December has exactly one day-first rendering',
+)
+// The same instant through the formatter every other Date line uses must
+// agree with the reorder above -- one feed, one convention.
+assert.equal(
+  telegram.formatBusinessDateTime('2026-09-03T04:00:00.000Z').slice(0, 10), '03/09/2026',
+  'formatBusinessDateTime and the ISO reorder must not drift apart',
+)
 assert.equal(lang.localizeTelegramLine('Date: 09/03/2026 10:04'), 'Date / កាលបរិច្ឆេទ: 09/03/2026 10:04', 'an already-formatted date is untouched')
 assert.equal(lang.localizeTelegramLine('Note: 2026-09-03'), 'Note / កំណត់ចំណាំ: 2026-09-03', 'only the Date label is reformatted')
 console.log('PASS payloads: sale, stock, transfer, both return kinds and both inline route messages are bilingual')

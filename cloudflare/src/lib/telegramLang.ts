@@ -319,9 +319,16 @@ export function localizeTelegramLine(line: string): string {
   if (!entry) return text
   let value = text.slice(split + 2)
   // routes/fees.ts puts a bare ISO `fee_date` on its Date line while every
-  // other message uses mm/dd/yyyy. Normalising the one unambiguous shape here
-  // gives the whole feed ONE date convention without editing that route.
-  if (entry.en === 'Date') value = value.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1')
+  // other message is already formatted by telegram.ts's
+  // formatBusinessDateTime. Normalising the one unambiguous shape here gives
+  // the whole feed ONE date convention without editing that route.
+  //
+  // DAY-first, matching formatBusinessDateTime and the rest of the app (owner,
+  // Sep 4 2026: "change the whole app to dd-mm-yyy"; restated Sep 6). This
+  // reorder was left month-first when the app moved, so an Expenses message
+  // read 09/03/2026 for the day a Sale message directly above it in the same
+  // chat called 03/09/2026 -- one instant, two orders, one feed.
+  if (entry.en === 'Date') value = value.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')
   if (entry.localizeValue) value = localizeTelegramValue(value)
   return `${entry.en}${BILINGUAL_SEPARATOR}${entry.km}: ${value}`
 }
