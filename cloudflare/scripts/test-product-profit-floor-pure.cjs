@@ -24,13 +24,23 @@
 //      came back out of COGS -- the mirror defect            +4.00 -> +12.00
 //   H  the SAME defect in UNITS. One sale carrying two sale_items rows for one
 //      product at two different branches, all five units returned. The sold
-//      side is branch-scoped; the return side is deliberately not (it inherits
-//      scope through the sale, exactly as the kernel's CUSTOMER_REFUND_JOIN
-//      does), so a 5-unit reversal met a 3-unit branch-1 sale and ran past
-//      what that scope had recognised. Money was already capped at what the
-//      (sale, product) pair recognised; the unit count was the one column that
-//      was not, so the list could render "Net sold -2" while the pane opened
-//      from that row clamped it to 0.               qty_sold -2.00 -> 0
+//      side is branch-scoped and the return side cannot be -- a sale-level
+//      return names no sale LINE -- so a 5-unit reversal met a 3-unit branch-1
+//      sale and ran past what that scope had recognised. Money was capped at
+//      what the (sale, product) pair recognised; the unit count was not, so
+//      the list could render "Net sold -2" while the pane opened from that row
+//      clamped it to 0.                             qty_sold -2.00 -> 0
+//   I  the same branch-split sale with a PARTIAL return, which is what shows
+//      that a cap is not the fix. Capping is per branch, so the SAME reversal
+//      comes off at every branch the sale touched: 3 units at branch 1 and 2
+//      at branch 2, two units returned, and branch 1 -- which had nothing come
+//      back -- read qty 1 / revenue $10 / profit $6 while the two branch rows
+//      summed to more reversal than the sale ever had. The sale-level return
+//      is now APPORTIONED across the sale's branch lines (the branch it names
+//      first, up to what that branch recognised; the remainder proportionally
+//      over the others), so the branch slices partition the unfiltered row
+//      instead of each subtracting the whole.
+//                                    branch 1: qty 1 / $10 / $6 -> 3 / $30 / $18
 //
 // Plus the two positive controls, without which a "nothing is negative any
 // more" sweep would be indistinguishable from a broken instrument:
@@ -138,8 +148,9 @@ function setupDatabase() {
       (5,'E: restock the legacy flag missed','e',1,0,0,0,0,0),
       (6,'F: genuinely sold below cost','f',1,0,0,0,0,0),
       (7,'G: an ordinary sale and return','g',1,0,0,0,0,0),
-      (8,'H: one sale, two branches, all of it returned','h',1,0,0,0,0,0);
-    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0);
+      (8,'H: one sale, two branches, all of it returned','h',1,0,0,0,0,0),
+      (9,'I: one sale, two branches, a partial return at one of them','i',1,0,0,0,0,0);
+    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0),(9,1,0),(9,2,0);
 
     -- A: the sale is in AUGUST, the return is inside the September window.
     INSERT INTO sales VALUES (100,1,'completed','2026-08-01 03:00:00',100,400000,0,0,0,0);
@@ -187,6 +198,20 @@ function setupDatabase() {
     INSERT INTO sale_items VALUES (107,106,8,2,2,20,80000,4,16000);
     INSERT INTO returns VALUES (206,106,1,'completed','customer','2026-09-05 04:00:00');
     INSERT INTO return_items VALUES (206,206,8,1,5,50,200000,4,16000,1,'restock');
+
+    -- I: the same branch-split sale with a PARTIAL return -- 3 units at
+    -- branch 1 and 2 at branch 2, and the customer brings back the two
+    -- branch-2 units ($20, restocked). Branch 1 sold three units and none of
+    -- them came back, so branch 1 must still read 3 / $30 / profit $18, and
+    -- the two branch figures must add back up to the unfiltered row. A cap
+    -- alone cannot produce this: capping subtracts the whole 2-unit reversal
+    -- at branch 1 as well (qty 1, revenue $10, profit $6) and then the two
+    -- branches sum to more reversal than the sale ever had.
+    INSERT INTO sales VALUES (108,1,'completed','2026-09-05 03:00:00',50,200000,0,0,0,0);
+    INSERT INTO sale_items VALUES (108,108,9,1,3,30,120000,4,16000);
+    INSERT INTO sale_items VALUES (109,108,9,2,2,20,80000,4,16000);
+    INSERT INTO returns VALUES (207,108,2,'completed','customer','2026-09-05 04:00:00');
+    INSERT INTO return_items VALUES (207,207,9,2,2,20,80000,4,16000,1,'restock');
   `)
   return d1
 }
@@ -195,7 +220,7 @@ const round2 = (value) => Math.round(value * 100) / 100
 
 async function main() {
   const db = dbAdapter(setupDatabase())
-  const items = [1, 2, 3, 4, 5, 6, 7, 8].map((id) => ({ id }))
+  const items = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((id) => ({ id }))
   await attachInventoryProductMetrics(db, items, {
     branchId: '1', startDate: '2026-09-05', endDate: '2026-09-05',
   })
@@ -224,7 +249,9 @@ async function main() {
   assert.deepEqual(at(5), { qty_sold: 1, revenue_usd: 20, revenue_khr: 80000, cogs_usd: 8, profit_usd: 12 },
     'E: stock_action wins over the legacy return_to_stock flag, so restocked goods leave COGS (COGS was 16, profit understated at 4)')
   assert.deepEqual(at(8), { qty_sold: 0, revenue_usd: 0, revenue_khr: 0, cogs_usd: 0, profit_usd: 0 },
-    'H: the unit reversal is capped at what the same (sale, product) pair recognised in scope, exactly as the money is -- 3 units sold at branch 1, a 5-unit refund, and Net sold is 0, not -2')
+    'H: the sale-level return is apportioned over the sale\'s branch lines, so branch 1 absorbs the 3 units it sold and the remaining 2 land on branch 2 -- Net sold 0, not -2')
+  assert.deepEqual(at(9), { qty_sold: 3, revenue_usd: 30, revenue_khr: 120000, cogs_usd: 12, profit_usd: 18 },
+    'I: a PARTIAL return of the branch-2 units takes nothing off branch 1, which sold 3 and had none of them come back (cap-only reading: qty 1, revenue 10, profit 6)')
 
   // ---- the positive controls ----------------------------------------------
   assert.deepEqual(at(6), { qty_sold: 1, revenue_usd: 5, revenue_khr: 20000, cogs_usd: 9, profit_usd: -4 },
@@ -283,18 +310,45 @@ async function main() {
         `${label}: gross is before the return reversal, so it cannot be below net (product ${row.product_id})`)
     }
   }
-  // The branch-scoped shape must actually discriminate. Product 8 (case H) is
-  // the only thing sold at branch 2, so that scope must return exactly it --
-  // and branch 3, where nothing was sold, must come back empty. Either half
-  // alone would pass on a builder that quietly ignored @branchId.
+  // The branch-scoped shape must actually discriminate. Products 8 and 9 (the
+  // two branch-split sales) are the only things sold at branch 2, so that
+  // scope must return exactly them -- and branch 3, where nothing was sold,
+  // must come back empty. Either half alone would pass on a builder that
+  // quietly ignored @branchId.
   const branchScopedSql = productSalesLedger.buildProductSalesLedgerSql({ branchScoped: true })
   const branchTwo = db.prepare(`SELECT * FROM (${branchScopedSql}) fin ORDER BY fin.product_id`).all({ branchId: 2 })
-  assert.deepEqual(branchTwo.map((row) => Number(row.product_id)), [8],
-    'the branch-scoped shape really filters on @branchId: only case H has a branch-2 sale line')
-  assert.equal(round2(Number(branchTwo[0].qty_sold)), 0,
-    'and the 5-unit refund is capped at the 2 units branch 2 recognised, not subtracted whole (base: -3)')
+  assert.deepEqual(branchTwo.map((row) => Number(row.product_id)), [8, 9],
+    'the branch-scoped shape really filters on @branchId: only cases H and I have a branch-2 sale line')
+  const branchTwoById = new Map(branchTwo.map((row) => [Number(row.product_id), row]))
+  assert.equal(round2(Number(branchTwoById.get(8).qty_sold)), 0,
+    'H at branch 2: the 2 units branch 2 sold are the 2 the branch-1 line could not absorb, so branch 2 nets to 0 (base: -3)')
+  assert.deepEqual(
+    [round2(Number(branchTwoById.get(9).qty_sold)), round2(Number(branchTwoById.get(9).revenue_usd))],
+    [0, 0],
+    'I at branch 2: the partial return was recorded at branch 2 and belongs entirely to it -- 2 sold, 2 back, nothing left')
   const branchThree = db.prepare(`SELECT * FROM (${branchScopedSql}) fin`).all({ branchId: 3 })
   assert.equal(branchThree.length, 0, 'a branch with no sale lines returns nothing')
+
+  // THE invariant the apportionment exists to restore, stated over every
+  // product rather than the two the fixture was built for: slicing the ledger
+  // by branch must partition it, never duplicate or lose a reversal. A cap
+  // alone cannot satisfy this -- it subtracts the same reversal once per
+  // branch, so the branch rows sum to more than the whole.
+  const unfilteredSql = productSalesLedger.buildProductSalesLedgerSql({})
+  const unfiltered = new Map(db.prepare(`SELECT * FROM (${unfilteredSql}) fin`).all({})
+    .map((row) => [Number(row.product_id), row]))
+  const branchOneById = new Map(db.prepare(`SELECT * FROM (${branchScopedSql}) fin`).all({ branchId: 1 })
+    .map((row) => [Number(row.product_id), row]))
+  const columnOf = (row, column) => (row ? Number(row[column]) || 0 : 0)
+  for (const productId of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+    for (const column of ['qty_sold', 'revenue_usd', 'cogs_usd']) {
+      assert.equal(
+        round2(columnOf(branchOneById.get(productId), column) + columnOf(branchTwoById.get(productId), column)),
+        round2(columnOf(unfiltered.get(productId), column)),
+        `branch 1 + branch 2 = the unfiltered ${column} for product ${productId}: a branch slice partitions the ledger`,
+      )
+    }
+  }
 
   // ---- one implementation, not five ---------------------------------------
   const inventorySource = fs.readFileSync(path.join(srcRoot, 'routes/inventory.ts'), 'utf8')
