@@ -124,6 +124,12 @@ const NAME_CELLS: Array<[string, string, string]> = [
   // pass, which is exactly the sibling gap this list exists to catch.
   ['Branch stock card', 'components/branches/Branches.tsx', '{product.name}</div>'],
   ['Branch stock group title', 'components/branches/Branches.tsx', '{group.name}</span>'],
+  // Products > Conflicts. A duplicate cluster row is a product row on a
+  // Products SUB PAGE, so it is inside the ask, and it was the last name cell
+  // still on `truncate` -- behind a tap-to-unwrap toggle that existed only
+  // because the ellipsis was otherwise a dead end. Scrolling replaces both,
+  // and the toggle's state has to go with it or it becomes zombie code.
+  ['Products > Conflicts row', 'components/products/ProductDuplicatesTab.tsx', '{product.name || `#${product.id}`}'],
 ]
 
 runTest('every product-name cell carries the one shared class', () => {
