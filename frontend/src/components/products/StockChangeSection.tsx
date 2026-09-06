@@ -625,14 +625,22 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <span className="block dense-cell-truncate font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
                       <span className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400" title={model.barcode}>{model.barcode}</span>
                     </td>
-                    <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate">{translateMovementType(row.movement_type, t)}</span></span></td>
+                    <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate" title={translateMovementType(row.movement_type, t)}>{translateMovementType(row.movement_type, t)}</span></span></td>
                     <td className={`text-center font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
                     <td className="text-center tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
                     <td><span className="dense-cell-truncate" title={model.branch}>{model.branch}</span></td>
                     <td>
                       <span className="block dense-cell-truncate" title={row.batch_supplier_name || ''}>{historyField(row.batch_supplier_name)}</span>
                       {row.batch_id ? (
-                        <span className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400" title={tr(t, 'batch', 'Batch')}>
+                        // Titled with the label itself, like every sibling cell in this
+                        // row. The line truncates, so its tooltip is the only way to
+                        // read a long lot code; titling it with the FIELD name instead
+                        // ("Received date", the 'batch' key) spent the one affordance
+                        // that could reveal the value on repeating the column header.
+                        <span
+                          className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400"
+                          title={batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+                        >
                           {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
                         </span>
                       ) : null}

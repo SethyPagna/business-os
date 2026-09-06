@@ -156,3 +156,15 @@ for (const [label, aria] of ROW_ACTIONS) {
   console.log(`PASS Stock Change ${label} is a button-kit action (${matches.length} site(s))`)
 }
 console.log('PASS Stock Change barcode has its own line on both the desktop table and the mobile card')
+
+// (e) Every truncated cell reveals itself. The dense row exists to fit six
+// columns, so `dense-cell-truncate` clips real values -- a lot code, a long
+// branch name, a reason sentence. A clipped value with no tooltip is a
+// dead-end ellipsis, and a tooltip carrying something OTHER than the value is
+// worse: the lot line used to title itself `tr(t, 'batch')`, which reads
+// "Received date" in both packs and hid the code it was covering.
+const truncated = [...sc.matchAll(/<span\b[^>]*\bdense-cell-truncate\b[^>]*>/g)].map((m) => m[0])
+assert.ok(truncated.length >= 6, `expected the dense row's truncated cells, found ${truncated.length}`)
+const untitled = truncated.filter((span) => !/\btitle=/.test(span))
+assert.deepEqual(untitled, [], `a truncated Stock Change cell has no tooltip to reveal it:\n${untitled.map((s) => `  ${s}`).join('\n')}`)
+console.log(`PASS all ${truncated.length} truncated Stock Change cells reveal their value on hover`)
