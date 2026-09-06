@@ -325,6 +325,27 @@ assert.match(css, /body\.lang-km \[data-reports-hub\] \.text-sm,[\s\S]{0,120}lin
 assert.doesNotMatch(sheetCode, /text-\[11px\]/, 'the block meta size follows the surface token, so Khmer scales it')
 assert.doesNotMatch(sheetCode, /text-\[10px\]/, 'and so does the line note')
 
+// ...but following the boost is NOT the same as following `--ui-size-meta`.
+//
+// VERIFIER DEFECT. Replacing the receipt's hard-coded `text-[11px]` /
+// `text-[10px]` with `text-[length:var(--ui-size-meta)]` did make Khmer scale
+// -- and silently changed ENGLISH too, because `--ui-size-meta` is 11px at the
+// root but 13px from 1024px up. English block meta went 11px -> 13px and the
+// English line note went 10px -> 13px at every desktop width, in a lane whose
+// only typographic mandate was "make the KHMER text larger".
+//
+// The receipt's two smallest sizes therefore get their OWN tokens, expressed
+// against the boost and declared exactly once (in the root-scoped block, never
+// re-declared by the 1024 tier). English is then 11px/10px at every width, as
+// it was at 6e3abfea, while Khmer reads 13.2px/12px.
+assert.match(scoped, /--ui-size-receipt-meta:\s*calc\(11px \* var\(--ui-km-boost, 1\)\);/, "the receipt block meta keeps its own 11px base, so the desktop tier's 13px meta cannot inflate English")
+assert.match(scoped, /--ui-size-note:\s*calc\(10px \* var\(--ui-km-boost, 1\)\);/, 'and the line note keeps its own 10px base')
+assert.doesNotMatch(desktopTokens, /--ui-size-receipt-meta|--ui-size-note/, 'neither token may be re-declared at 1024: that is exactly how English drifted from 11/10 to 13/13')
+assert.match(sheetCode, /text-\[length:var\(--ui-size-receipt-meta,11px\)\]/, 'the block meta reads its own token')
+assert.match(sheetCode, /text-\[length:var\(--ui-size-note,10px\)\]/, 'and so does the line note')
+assert.doesNotMatch(sheetCode, /shrink-0 text-\[length:var\(--ui-size-meta\)\]/, 'the block meta must not borrow the surface-wide meta token, which is 13px on desktop')
+assert.doesNotMatch(sheetCode, /leading-snug text-\[length:var\(--ui-size-meta\)\]/, 'nor may the note')
+
 // English is unchanged: nothing outside `body.lang-km` raises a size.
 assert.equal((css.match(/--ui-km-boost:\s*1;/g) || []).length, 1, 'exactly one neutral boost declaration')
 

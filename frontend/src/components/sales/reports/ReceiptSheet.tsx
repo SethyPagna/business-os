@@ -97,7 +97,7 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
             {block.title != null || block.meta != null ? (
               <div className="flex items-baseline justify-between gap-2">
                 {block.title != null ? <div className="min-w-0 truncate font-semibold">{block.title}</div> : <span />}
-                {block.meta != null ? <div className="shrink-0 text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{block.meta}</div> : null}
+                {block.meta != null ? <div className="shrink-0 text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{block.meta}</div> : null}
               </div>
             ) : null}
             {block.lines.length ? (
@@ -146,7 +146,7 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
                         // in the 420px statement). `w-0 min-w-full` makes the
                         // spanning row contribute nothing to track sizing and
                         // then fill the pair's width, so it wraps under them.
-                        <span className="col-span-2 w-0 min-w-full whitespace-normal pl-3 font-sans text-[length:var(--ui-size-meta)] leading-snug text-[var(--ui-ink-3)]">{line.note}</span>
+                        <span className="col-span-2 w-0 min-w-full whitespace-normal pl-3 font-sans text-[length:var(--ui-size-note,10px)] leading-snug text-[var(--ui-ink-3)]">{line.note}</span>
                       ) : null}
                     </Fragment>
                   )

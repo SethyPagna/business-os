@@ -185,6 +185,19 @@
   --ui-size-meta: calc(11px * var(--ui-km-boost, 1));
   --ui-size-h2: calc(15px * var(--ui-km-boost, 1));
   --ui-size-h3: calc(14px * var(--ui-km-boost, 1));
+  /* The receipt sheet's two smallest sizes have their OWN tokens, and are
+     deliberately absent from the >=1024 tier below.
+
+     They used to be hard-coded `text-[11px]` / `text-[10px]`, which Khmer
+     could not follow. Pointing them at `--ui-size-meta` fixed that and broke
+     something else: that token is 11px at the root but 13px from 1024px up, so
+     ENGLISH block meta went 11 -> 13px and the English line note went 10 ->
+     13px on every desktop width -- a change to Latin type in a lane whose
+     mandate was "make the KHMER text larger". Their own boost-aware tokens,
+     declared once, keep English at exactly 11/10px at every width (as at
+     6e3abfea) while Khmer reads 13.2/12px. */
+  --ui-size-receipt-meta: calc(11px * var(--ui-km-boost, 1));
+  --ui-size-note: calc(10px * var(--ui-km-boost, 1));
   --ui-lh-heading: 1.3;
   --ui-font-display: inherit;
 }
