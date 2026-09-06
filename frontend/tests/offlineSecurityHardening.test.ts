@@ -123,7 +123,9 @@ await runTest('UX exposes vault, conflicts, storage, security, and update states
 })
 
 await runTest('offline security hardening test is part of the utility suite', () => {
-  assert.match(packageSource, /offlineSecurityHardening\.test\.ts/)
+  // Since 0a5e836e test:utils runs every tests/*.test.ts through the discovery
+  // runner, so this file is in the suite by existing; pin the runner instead.
+  assert.match(packageSource, /"test:utils": "node tests\/runTestChain\.ts"/)
 })
 
 if (failed > 0) {
