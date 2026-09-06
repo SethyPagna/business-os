@@ -158,12 +158,16 @@ const FLOOR = 980
 const fixedPx = widths.reduce((sum, value) => sum + rem(value), 0)
 const percentPx = widths.reduce((sum, value) => sum + (pct(value) / 100) * FLOOR, 0)
 const reasonPx = FLOOR - fixedPx - percentPx
-// 140px is the RECEIPT LINE's requirement, not a round number: the widest
-// thing the cell's first line must hold is 'Return RET-20260902-0007' -- 24
-// characters at the dense 13px scale, ~118px semibold -- and the cell spends
-// ~16px on its own left/right padding. 96px (what this asserted before) fits
-// 'Sale 202609...' and nothing more, so it passed the very budget that clips
-// the line the lane exists to add.
+// 140px is the RECEIPT LINE's requirement, not a round number: the cell's
+// first line must hold a composed receipt ("Sale 20260901-142200", 20
+// characters at the dense 13px scale) plus the compact copy button (16px) and
+// its gap, inside the ~16px the cell spends on its own left/right padding.
+// 96px (what this asserted before) fits 'Sale 202609...' and nothing more, so
+// it passed the very budget that clips the line the lane exists to add.
+// Beyond that width the id WRAPS -- the longest return label,
+// 'Return RET-20260902-0007', can take a second row at the floor -- because
+// the owner's ruling is that a receipt id is never truncated, and a wrapped
+// id is still whole while a clipped one is not.
 assert.ok(reasonPx >= 140, `the Reason column is left ${Math.round(reasonPx)}px at the ${FLOOR}px floor; the receipt line needs at least 140`)
 assert.match(sc, /min-w-\[980px\]/, 'the table keeps its 980px floor -- widening it would add a horizontal scrollbar at 1280')
 console.log(`PASS the column budget gives Product ${product} and still leaves Reason ${Math.round(reasonPx)}px at the ${FLOOR}px floor`)
@@ -182,24 +186,62 @@ const titledName = sc.split('\n').filter((line) => (
 ))
 assert.deepEqual(titledName, [], `a clipped product name is still a dead-end title tooltip:\n${titledName.join('\n')}`)
 
-// The SAME rule for the receipt line, and for the same reason twice over: a
-// receipt id is the value a person copies out of this row (ids-fully-visible),
-// and the Reason column is the narrowest cell that holds one, so it is the
-// line most likely to clip. Guaranteeing the fit at the 980px floor (c) is
-// half the answer; the other half is that a Reason cell squeezed by a long
-// branch/supplier value at some other width still reveals what it clipped.
-assert.match(
-  sc,
-  /<TruncatedText text=\{referenceText\(row\)\}/,
-  'the desktop receipt line must render through TruncatedText -- a clipped receipt id must stay revealable by tap',
+// The receipt line is NOT the same rule. Owner ruling (Sep 6 2026), after the
+// first round shipped it through TruncatedText: a receipt id is shown in FULL,
+// never truncated, wrapping onto a second row when it must, with the shared
+// copy affordance beside it -- and it opens its record where a detail opener
+// is reachable from the surface (it is not from here; see the lane report).
+// TruncatedText is the opposite bargain: it clips to one line and hands the
+// tail back only in a tooltip, and its whole click budget goes on opening that
+// tooltip. So the ledger's receipt renders through CopyableId -- the same
+// component the Sale detail, the Return detail and this section's own movement
+// modal already use -- on BOTH the desktop row and the mobile card, because
+// "shows the full id and copies it" is one rule, not a large-screen one.
+const receiptRenders = [...sc.matchAll(/<CopyableId([\s\S]*?)\/>/g)].map((m) => m[1])
+const rowReceipts = receiptRenders.filter((props) => /value=\{referenceText\(row\)\}/.test(props))
+assert.equal(
+  rowReceipts.length,
+  2,
+  `the desktop row and the mobile card must both render the receipt through CopyableId, found ${rowReceipts.length}`,
 )
-const titledReference = sc.split('\n').filter((line) => (
-  /\{referenceText\(row\)\}<\/span>/.test(line) &&
-  /title=\{referenceText\(row\)\}/.test(line) &&
+for (const props of rowReceipts) {
+  assert.match(props, /\bcompact\b/, 'a ledger row keeps its dense height: the copy affordance uses the compact variant')
+  // Displayed as the record, copied as the bare receipt: pasting "Sale " in
+  // front of an id into a search box finds nothing, and a receipt id in this
+  // business is bare YYYYMMDD-HHMMSS.
+  assert.match(props, /copyValue=\{model\.reference\.label\}/, 'the clipboard must get the bare receipt id, not the composed label')
+  assert.match(props, /copy_return_id/, 'a return row must offer the return-id copy label')
+  assert.match(props, /copy_receipt_number/, 'a sale row must offer the receipt-number copy label')
+}
+// ...and the component it delegates to must actually keep the id whole and
+// keep the copy gesture out of the row's own click, or the two rules above are
+// satisfied only on paper.
+const copyable = read('components/shared/CopyableId.tsx').replace(/\r\n/g, '\n')
+assert.match(copyable, /whitespace-normal break-all/, 'CopyableId must wrap the id rather than clip it')
+// Its own prose uses the word 'truncation'; what matters is that no rendered
+// class clips the id, so this reads the code with its comments stripped.
+const copyableCode = copyable.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n')
+assert.ok(
+  !/\btruncate\b|line-clamp/.test(copyableCode),
+  'CopyableId must never clip -- truncation is not legitimate for an identifier',
+)
+assert.match(
+  copyable,
+  /const handleCopy = \(event: \{ stopPropagation: \(\) => void \}\): void => \{\n\s*event\.stopPropagation\(\)/,
+  'copying an id must not also fire the click of the row that contains it',
+)
+assert.match(copyable, /onClick=\{\(event\) => event\.stopPropagation\(\)\}/, 'selecting the id must not open the row either')
+// The receipt must not go back through a clipping wrapper on either surface.
+assert.ok(
+  !/<TruncatedText text=\{referenceText\(row\)\}/.test(sc),
+  'the receipt line must not be clipped by TruncatedText -- an id is shown in full',
+)
+const clippedReference = sc.split('\n').filter((line) => (
+  /\{referenceText\(row\)\}/.test(line) &&
   /\btruncate\b|dense-cell-truncate|line-clamp/.test(line)
 ))
-assert.deepEqual(titledReference, [], `a clipped receipt line is still a dead-end title tooltip:\n${titledReference.join('\n')}`)
-console.log('PASS the product name and the receipt line are revealed through the shared TruncatedText, not a dead-end title')
+assert.deepEqual(clippedReference, [], `the receipt line is still clipped:\n${clippedReference.join('\n')}`)
+console.log('PASS the clipped product name is revealed, and the receipt is shown in full and copied on both ledger surfaces')
 
 // ---- 4. sibling parity: every reader of a movement row says the same thing --
 

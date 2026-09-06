@@ -566,6 +566,27 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               the branch/user/reason chips, where it used to push the amount
               column around on a narrow card. */}
           <div className="mt-0.5 break-all font-mono text-[10px] leading-[0.9rem] text-gray-400">{model.barcode}</div>
+          {/* N13 + owner ruling: the receipt gets the same first position on
+              the card that it has in the table's Reason cell -- the owner
+              reads this surface at 375px too, and "which sale was this" is the
+              whole question. Its OWN line rather than a chip in the wrapping
+              row below, because at 375px a receipt id needs the full width to
+              wrap into instead of being squeezed between a branch and a
+              reason -- and because the copy affordance belongs beside the id,
+              not floating in a chip row.  */}
+          {model.reference.label ? (
+            <CopyableId
+              compact
+              className="mt-1"
+              value={referenceText(row)}
+              copyValue={model.reference.label}
+              copyLabel={model.reference.kind === 'return'
+                ? tr(t, 'copy_return_id', 'Copy return ID')
+                : tr(t, 'copy_receipt_number', 'Copy receipt number')}
+              copiedLabel={tr(t, 'copied', 'Copied')}
+              valueClassName="text-[11px] font-semibold text-gray-600 dark:text-gray-300"
+            />
+          ) : null}
           {/* One row model: branch · user · reason, always in this order and
               always present (an absent value shows the shared placeholder
               instead of vanishing, which is what made a Sale row look broken). */}
@@ -576,13 +597,6 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               </span>
             ) : null}
             {row.batch_supplier_name ? <span className="break-words font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
-            {/* N13: the receipt gets the same first position on the card that
-                it has in the table's Reason cell -- the owner reads this
-                surface at 375px too, and "which sale was this" is the whole
-                question. */}
-            {model.reference.label ? (
-              <span className="break-words font-semibold text-gray-600 dark:text-gray-300">{referenceText(row)}</span>
-            ) : null}
             {model.isBare ? (
               // Nothing was recorded at all: say so once, not three times.
               <span className="break-words" title={`${tr(t, 'branch', 'Branch')} · ${tr(t, 'cashier_user', 'User')} · ${tr(t, 'reason', 'Reason')}`}>{model.branch}</span>
@@ -729,17 +743,32 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                         it, where it belongs, and is never printed as a
                         receipt number. */}
                     <td>
-                      {/* Through TruncatedText, like the product name and for
-                          the same reason twice over: a receipt id is the value
-                          a person copies out of this row, and this is the
-                          narrowest cell that holds one. The budget above
-                          guarantees the fit at the 980px floor; this
-                          guarantees that a cell squeezed at some other width
-                          still REVEALS what it clipped, by tap as well as
-                          hover, instead of a `title` nothing marks as
-                          openable. */}
+                      {/* Owner ruling (Sep 6 2026): a receipt id is shown in
+                          FULL, never truncated, and is one tap to copy. So it
+                          renders through CopyableId -- the same component the
+                          Sale detail, the Return detail and this section's own
+                          movement modal use -- and not through TruncatedText,
+                          which clips to one line and reveals the tail only in
+                          a tooltip. The column budget above keeps the common
+                          case on one line; beyond it the id WRAPS rather than
+                          losing its tail, which is the half of an id that
+                          distinguishes two receipts made the same day.
+                          Displayed as the record ("Sale 20260901-142200") and
+                          copied as the bare receipt, because that is what a
+                          search box takes. CopyableId stops the click from
+                          reaching the row, so copying an id is not also the
+                          gesture that opens the movement modal. */}
                       {model.reference.label ? (
-                        <TruncatedText text={referenceText(row)} className="font-semibold text-gray-600 dark:text-gray-300" />
+                        <CopyableId
+                          compact
+                          value={referenceText(row)}
+                          copyValue={model.reference.label}
+                          copyLabel={model.reference.kind === 'return'
+                            ? tr(t, 'copy_return_id', 'Copy return ID')
+                            : tr(t, 'copy_receipt_number', 'Copy receipt number')}
+                          copiedLabel={tr(t, 'copied', 'Copied')}
+                          valueClassName="font-semibold text-gray-600 dark:text-gray-300"
+                        />
                       ) : null}
                       <span className={`block dense-cell-truncate ${model.reference.label ? 'leading-[0.85rem] text-[0.68rem] text-gray-400' : 'text-gray-500'}`} title={model.reason}>{model.reason}</span>
                     </td>
