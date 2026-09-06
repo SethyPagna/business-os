@@ -16,6 +16,12 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import InfoHint from '../shared/InfoHint.tsx'
 import { RECEIPT_CONTRAST_ATTR, normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
+import {
+  RECEIPT_ITEM_COLUMN_GAP_EM,
+  RECEIPT_ITEM_NUMERIC_FONT_EM,
+  RECEIPT_ROW_GRID_TEMPLATE,
+  receiptItemGridTemplate,
+} from '../../utils/receiptItemColumns.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 // N4 (owner, Sep 6 2026): "Open PDF" is removed -- it opened the same document
@@ -213,7 +219,6 @@ const LABELS = {
     date: 'Date:',
     cashier: 'Cashier:',
     payment: 'Payment:',
-    rate: 'Rate:',
     status: 'Status:',
     customer: 'Customer:',
     phone: 'Phone:',
@@ -238,7 +243,6 @@ const LABELS = {
     item: 'Item',
     unitPrice: 'Price',
     lineTotal: 'Total',
-    totalQty: 'Total Qty:',
     itemDiscount: 'Item Discount:',
     totalDiscount: 'Total Discount:',
     visitWebsite: 'Visit our website',
@@ -250,7 +254,6 @@ const LABELS = {
     date: 'កាលបរិច្ឆេទ:',
     cashier: 'អ្នកគិតលុយ:',
     payment: 'ការទូទាត់:',
-    rate: 'អត្រាប្តូរ:',
     status: 'ស្ថានភាព:',
     customer: 'អតិថិជន:',
     phone: 'ទូរស័ព្ទ:',
@@ -275,7 +278,6 @@ const LABELS = {
     item: 'ទំនិញ',
     unitPrice: 'តម្លៃ',
     lineTotal: 'សរុប',
-    totalQty: 'សរុបចំនួនទំនិញ:',
     itemDiscount: 'សរុបបញ្ចុះលើទំនិញ:',
     totalDiscount: 'សរុបបញ្ចុះតម្លៃ:',
     visitWebsite: 'ទស្សនាគេហទំព័ររបស់យើង',
@@ -305,7 +307,12 @@ function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
 
 function Row({ label, value, subValue, bold = false, tone = '', breakAll = false }: RowProps) {
   return (
-    <div data-receipt-line="true" className={`my-1 grid grid-cols-[minmax(0,1fr)_minmax(4.6rem,auto)] items-start gap-x-3 gap-y-1 ${tone}`}>
+    // The value track comes from utils/receiptItemColumns, the ONE place that
+    // owns the receipt's grid geometry, so printReceipt.ts's paper re-layout
+    // cannot drift from what the screen shows (it carried 4.25rem against this
+    // row's 4.6rem). `em`, not `rem`: a receipt printed at 9px must not pay a
+    // 16px-rooted value column.
+    <div data-receipt-line="true" style={{ gridTemplateColumns: RECEIPT_ROW_GRID_TEMPLATE }} className={`my-1 grid items-start gap-x-3 gap-y-1 ${tone}`}>
       <span className={`min-w-0 overflow-visible whitespace-normal break-words pr-1 leading-snug ${bold ? 'font-semibold' : ''}`}>{label}</span>
       {/* `breakAll` is for identifiers: a receipt number has no spaces to
           wrap at, so on a narrow paper width (or a phone) `break-words`
@@ -434,14 +441,25 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // excludes the per-line cut, and the Total below already has the other two
   // taken off. receiptTotals.test.ts states the size of that gap.
   const totalDiscountUsd = lineSavingsUsd + discountUsd + membershipDiscountUsd
-  const totalQty = items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0)
-  // The item table’s column track, defined ONCE so the header and the rows
-  // cannot drift apart. Four columns by default -- item, qty, price, total --
-  // and three when a shop turns the price column off.
+  // The item table’s column track, defined ONCE -- in
+  // utils/receiptItemColumns, which printReceipt.ts reads for the paper
+  // re-layout too -- so the header, the rows and the export cannot drift
+  // apart. Four columns by default (item, qty, price, total), three when a
+  // shop turns the price column off.
+  //
+  // N33 (owner, Sep 6 2026): "for the items, qty, price, total make them
+  // compact... especially name, it is being pushed two rows." See that
+  // module's header for the two causes -- `auto` money tracks taking their
+  // max-content width, and `rem` sizing that ignored the receipt's own font
+  // size -- and why fit-content in em fixes both.
   const showUnitPriceCol = tpl.show_item_unit_price !== false
-  const itemGridCols = showUnitPriceCol
-    ? 'grid-cols-[minmax(0,1fr)_2.2rem_minmax(3.9rem,auto)_minmax(3.4rem,auto)]'
-    : 'grid-cols-[minmax(0,1fr)_2.2rem_minmax(4.6rem,auto)]'
+  const itemGridStyle: CSSProperties = {
+    gridTemplateColumns: receiptItemGridTemplate(showUnitPriceCol),
+    columnGap: `${RECEIPT_ITEM_COLUMN_GAP_EM}em`,
+  }
+  // Qty, Price and Total print a touch smaller than the product name: the
+  // name is what a customer reads, the figures only have to be legible.
+  const itemNumericStyle: CSSProperties = { fontSize: `${RECEIPT_ITEM_NUMERIC_FONT_EM}em` }
   const totalUsd = toNumber(sale.total_usd ?? sale.total)
   const totalKhr = totals.totalKhr
   const paidUsd = totals.paidUsd
@@ -473,6 +491,10 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const footerDivider = (tpl.footer_separator || '-').repeat(28)
   const headerAlignClass = tpl.align_header === 'left' ? 'text-left' : tpl.align_header === 'right' ? 'text-right' : 'text-center'
 
+  // The rate, as the owner asked for it: the bare value, no label. Empty
+  // when the template hides it, which is also what decides whether the
+  // cashier row carries it at all.
+  const exchangeRateText = tpl.show_exchange_rate ? `1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}` : ''
   const showMembershipId = tpl.show_customer_membership !== false
   // N21: sales.customer_address may hold the Contact Options JSON that was
   // snapshotted raw out of customers.address. Rendering it through the shared
@@ -486,6 +508,15 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
   const showDeliveryDriverPhone = showDeliveryContactSection && tpl.delivery_show_driver_phone !== false
+  // With the fee heading gone the section is nothing but its driver rows, so
+  // it must not render when every one of them is switched off -- an empty
+  // block still prints its dashed rule, and a divider with nothing under it
+  // is exactly the kind of stray line the owner is asking us to remove.
+  const hasDeliveryContactRows = Boolean(
+    (showDeliveryDriverName && sale.delivery_contact_name)
+    || (showDeliveryDriverPhone && sale.delivery_contact_phone)
+    || (showDeliveryContactSection && sale.delivery_contact_address && tpl.delivery_show_address !== false),
+  )
 
   const sectionMap: Record<string, ReactNode> = {
     header: (
@@ -503,9 +534,32 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       <div key="order_info">
         {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold breakAll /> : null}
         {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} /> : null}
-        {tpl.show_cashier ? <Row label={labelFor(lang, 'cashier')} value={sale.cashier_name || '-'} /> : null}
+        {/* N33 (owner, Sep 6 2026, reading a printed 80mm receipt): "the
+            exchange rate just show the rate, no need 'Exchange Rate: n' just
+            'n' ... and merge into same row as cashier." So the rate is no
+            longer a labelled row of its own -- it rides the cashier row as a
+            bare value, which is also one printed line fewer on the roll. With
+            the cashier row switched off it still prints, unlabelled, so
+            hiding the cashier cannot silently take the rate with it. */}
+        {tpl.show_cashier || exchangeRateText ? (
+          <Row
+            label={tpl.show_cashier ? labelFor(lang, 'cashier') : ''}
+            value={tpl.show_cashier ? (
+              <>
+                {sale.cashier_name || '-'}
+                {/* A REAL space, not `ml-1`: a margin is not a soft wrap
+                    opportunity, so the nowrap rate span had nowhere to break
+                    and stayed welded to the cashier's name. On 58mm paper --
+                    and in `both` mode, whose label is twice as long -- the row
+                    then had to overflow or break the LABEL. With the space the
+                    rate drops whole onto a second line under the name:
+                    "Rath" / "· 1 USD = 4,065 ៛". */}
+                {exchangeRateText ? <>{' '}<span className="whitespace-nowrap text-[0.85em] font-normal">· {exchangeRateText}</span></> : null}
+              </>
+            ) : <span className="whitespace-nowrap">{exchangeRateText}</span>}
+          />
+        ) : null}
         {tpl.show_payment_method ? <Row label={labelFor(lang, 'payment')} value={sale.payment_method || 'Cash'} subValue={paymentDetails.length > 1 ? paymentDetails.map((detail) => `${detail.method}: ${detail.amount_usd > 0 ? fmtUSD(detail.amount_usd) : ''}${detail.amount_usd > 0 && detail.amount_khr > 0 ? ' + ' : ''}${detail.amount_khr > 0 ? fmtKHR(detail.amount_khr) : ''}`).join(' · ') : ''} /> : null}
-        {tpl.show_exchange_rate ? <Row label={labelFor(lang, 'rate')} value={`1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}`} /> : null}
       </div>
     ),
     customer: hasCustomer ? (
@@ -516,9 +570,16 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         {showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
       </div>
     ) : null,
-    delivery: hasDelivery && showDeliveryContactSection ? (
+    // N33 (owner, Sep 6 2026): "the delivery fee is shown twice in a row, by
+    // the delivery driver and phone number and the mid to bottom ... remove
+    // the by the delivery driver and phone ... keep near the mid to bottom."
+    // The heading that used to open this section was the SAME "Delivery Fee:"
+    // label the totals row prints, so the phrase appeared twice on one
+    // receipt. The fee now has exactly one home -- the totals block below --
+    // and this section is what it always described: the driver's name, phone
+    // and address rows, each under its own flag.
+    delivery: hasDelivery && showDeliveryContactSection && hasDeliveryContactRows ? (
       <div key="delivery" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        <div className="mb-1 font-semibold">{labelFor(lang, 'delivery')}</div>
         {showDeliveryDriverName && sale.delivery_contact_name ? <Row label={labelFor(lang, 'driver') || 'Delivery:'} value={sale.delivery_contact_name} /> : null}
         {showDeliveryDriverPhone && sale.delivery_contact_phone ? <Row label={labelFor(lang, 'phone')} value={sale.delivery_contact_phone} /> : null}
         {showDeliveryContactSection && sale.delivery_contact_address && tpl.delivery_show_address !== false ? <Row label={labelFor(lang, 'address')} value={sale.delivery_contact_address} /> : null}
@@ -531,11 +592,17 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             columns are narrower than the old single one was, because there
             are now two of them on the same 58mm paper -- the item column
             still takes every pixel the other three leave. */}
-        <div data-receipt-line="true" className={`mb-1 grid ${itemGridCols} gap-x-1.5 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500`}>
-          <span data-receipt-cell="name">{labelFor(lang, 'item')}</span>
-          <span data-receipt-cell="qty" className="whitespace-normal text-center leading-tight">{labelFor(lang, 'qty')}</span>
-          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right">{labelFor(lang, 'unitPrice')}</span> : null}
-          <span data-receipt-cell="line-total" className="text-right">{labelFor(lang, 'lineTotal')}</span>
+        {/* `text-[10px]` sits on the CELLS, never on this grid container. The
+            tracks and the column gap are `em`, so a 10px container resolved
+            them against 10px while the item rows below resolved the same
+            template against the receipt's own font size -- the header lined up
+            with nothing underneath it. One em base for the header and the rows
+            is what gives the Price figures a shared right edge down the page. */}
+        <div data-receipt-line="true" style={itemGridStyle} className="mb-1 grid border-b border-dashed border-gray-300 pb-1 font-semibold text-gray-500">
+          <span data-receipt-cell="name" className="text-[10px]">{labelFor(lang, 'item')}</span>
+          <span data-receipt-cell="qty" className="whitespace-normal text-center text-[10px] leading-tight">{labelFor(lang, 'qty')}</span>
+          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right text-[10px] leading-tight">{labelFor(lang, 'unitPrice')}</span> : null}
+          <span data-receipt-cell="line-total" className="text-right text-[10px] leading-tight">{labelFor(lang, 'lineTotal')}</span>
         </div>
         {items.map((item, index) => {
           // Every figure on this line comes from the shared calculation, so the
@@ -572,7 +639,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             : ''
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="py-1.5">
-              <div data-receipt-line="true" className={`grid ${itemGridCols} items-start gap-x-1.5`}>
+              <div data-receipt-line="true" style={itemGridStyle} className="grid items-start">
                 <div data-receipt-cell="name" className="min-w-0 overflow-visible whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
@@ -583,23 +650,30 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
                 </div>
-                <div data-receipt-cell="qty" className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
+                <div data-receipt-cell="qty" style={itemNumericStyle} className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
                 {/* Savings describe the price, so they sit in the Price
                     column -- not as a second block under the product name.
                     A discounted row reads "$28.00 (-$7.00)" at a glance.
                     The old "qty × unit" subline is gone: the unit price is
-                    its own column now, so the subline only repeated it. */}
+                    its own column now, so the subline only repeated it.
+
+                    N33: the cut is its own BLOCK under the price, not an
+                    inline span beside it. Inline, this cell's max-content was
+                    "$21.00 (-$3.00)" on one line -- ~95px of an 80mm receipt's
+                    ~270px content box -- so the discounted row's price track
+                    grew past its floor and stopped matching the plain rows and
+                    the header. As a block the cell's max-content is the widest
+                    SINGLE figure, both figures are nowrap, and no number is
+                    ever broken across lines. */}
                 {showUnitPriceCol ? (
-                  <div data-receipt-cell="price" className="min-w-0 whitespace-nowrap text-right leading-snug">
-                    <div>
-                      {fmtUSD(unitUsd)}
-                      {hasItemDiscount ? <span className="ml-1 text-[10px] font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</span> : null}
-                    </div>
+                  <div data-receipt-cell="price" style={itemNumericStyle} className="min-w-0 text-right leading-snug">
+                    <div className="whitespace-nowrap">{fmtUSD(unitUsd)}</div>
+                    {hasItemDiscount ? <div className="whitespace-nowrap font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</div> : null}
                   </div>
                 ) : null}
-                <div data-receipt-cell="line-total" className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
+                <div data-receipt-cell="line-total" style={itemNumericStyle} className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
                   <div>{fmtUSD(lineUsd)}</div>
-                  {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
+                  {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[0.85em] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
               </div>
               {tpl.item_separator && index < items.length - 1 ? <div aria-hidden="true" className="mt-1.5 border-t border-gray-200/80" /> : null}
@@ -608,9 +682,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         })}
       </div>
     ),
-    total_qty: tpl.show_item_qty && totalQty > 0 ? (
-      <Row key="total_qty" label={labelFor(lang, 'totalQty')} value={totalQty.toLocaleString()} />
-    ) : null,
     // The per-line cut, by name. Hidden when there is none, so an
     // undiscounted sale does not print a row of zeroes.
     item_discount: showItemDiscount && lineSavingsUsd > 0 ? (
@@ -715,8 +786,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   for (const key of fieldOrderBase) {
     if (key === 'items') {
       fieldOrder.push('items')
-      // Straight under the table, where the photo puts them.
-      fieldOrder.push('total_qty')
       fieldOrder.push('item_discount')
       continue
     }
@@ -741,7 +810,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   if (!fieldOrder.includes('membership_points')) fieldOrder.push('membership_points')
   // A hand-edited field_order that dropped `items` or `discount` still gets
   // the new rows rather than silently losing them.
-  for (const key of ['total_qty', 'item_discount', 'total_discount']) {
+  for (const key of ['item_discount', 'total_discount']) {
     if (!fieldOrder.includes(key)) fieldOrder.push(key)
   }
   // AFTER the total, never before it: the refund row carries the Net total
@@ -777,7 +846,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         <Row label={labelFor(lang, 'date')} value={dateStr} />
         {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
-        <Row label={labelFor(lang, 'qty')} value={items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0).toLocaleString()} />
       </div>
       <div className="border-y border-gray-900 py-1">
         <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={fmtKHR(totalKhr)} bold />

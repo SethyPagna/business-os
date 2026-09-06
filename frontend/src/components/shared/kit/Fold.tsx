@@ -1,6 +1,12 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
+import { useApp as useAppHook } from '../../../AppContext.tsx'
+
+// Same cast Modal.tsx/UnsavedChangesPrompt.tsx use -- Fold is a kit
+// component adopted only inside the admin app (see KitGallery.tsx), which
+// always sits under AppProvider.
+const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 
 export type FoldProps = {
   open: boolean
@@ -76,6 +82,11 @@ function placeAnchored(rect: DOMRect, panelWidth: number): CSSProperties {
 }
 
 export default function Fold({ open, onClose, title, actions, children, anchorRef, size = 'md', className = '' }: FoldProps) {
+  const { t } = useApp()
+  const tr = (key: string, fallback: string): string => {
+    const value = t(key)
+    return value && value !== key ? value : fallback
+  }
   const panelWidth = size === 'lg' ? 448 : 320
   const panelRef = useRef<HTMLDivElement>(null)
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
@@ -190,7 +201,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
         <div className="flex min-w-0 items-center gap-2 border-b border-[var(--ui-line)] px-4 py-2.5">
           <h3 className="min-w-0 flex-1 truncate font-[family-name:var(--ui-font-display)] text-[length:var(--ui-size-h3)] font-semibold text-[var(--ui-ink)]">{title}</h3>
           {actions}
-          <button type="button" onClick={onClose} aria-label="Close" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius)] text-[var(--ui-ink-2)] hover:bg-[var(--ui-surface-2)]">
+          <button type="button" onClick={onClose} aria-label={tr('close', 'Close')} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius)] text-[var(--ui-ink-2)] hover:bg-[var(--ui-surface-2)]">
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
@@ -210,7 +221,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
       <div className="flex min-w-0 items-center gap-2 border-b border-[var(--ui-line)] px-3 py-2">
         <h3 className="min-w-0 flex-1 truncate font-[family-name:var(--ui-font-display)] text-[length:var(--ui-size-h3)] font-semibold text-[var(--ui-ink)]">{title}</h3>
         {actions}
-        <button type="button" onClick={onClose} aria-label="Close" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--ui-radius)] text-[var(--ui-ink-2)] hover:bg-[var(--ui-surface-2)]">
+        <button type="button" onClick={onClose} aria-label={tr('close', 'Close')} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--ui-radius)] text-[var(--ui-ink-2)] hover:bg-[var(--ui-surface-2)]">
           <X className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>

@@ -142,6 +142,13 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
 
   return (
     <div className="space-y-3 p-3">
+      {/* Same pinned filter + date row as the AP ledger it mirrors: the
+          app-wide "search bar row and the date both can be pinned and stick
+          ... for all sections and pages" convention, at the `sticky top-2`
+          offset the Customers/Suppliers/Delivery search rows use one level
+          up. The sticky wrapper is outside the overflow-x-auto row because a
+          horizontally scrolling box cannot itself be the sticky element. */}
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
         <AppSelect
           ariaLabel={tr('customer', 'Customer')}
@@ -186,6 +193,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           resetLabel={tr('reset', 'Reset')}
           className="ml-auto hidden lg:inline-block"
         />
+      </div>
       </div>
 
       {error ? (

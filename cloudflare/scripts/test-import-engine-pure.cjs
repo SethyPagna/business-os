@@ -1169,14 +1169,20 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // membership_number -> name match priority (phone deliberately dropped as
 // a customer match key -- phone/address can be shared by multiple
 // different customers, unlike name and membership_number). Real transpiled
-// classifyContacts against a small in-memory fake D1 (its only DB touch is
-// `db.prepare(sql).all()` to load the existing table once up front -- no
-// writes happen at classify time, those are a separate later apply phase).
+// classifyContacts against a small in-memory fake D1 (its DB touch is two
+// `db.prepare(sql).all()` reads up front -- the existing table, and (for
+// customers) portal_accounts.membership_id, unioned into the allocator's
+// seed exactly like lib/membershipNumber.ts's own mintMembershipNumber does
+// -- no writes happen at classify time, those are a separate later apply
+// phase). The fake routes each query by table name in its SQL so the two
+// reads can be seeded independently.
 {
   const { classifyContacts } = moduleObj.exports
   assert.strictEqual(typeof classifyContacts, 'function', 'classifyContacts should be exported from importEngine.ts')
 
-  const makeFakeDb = (existingRows) => ({ prepare: () => ({ all: async () => existingRows }) })
+  const makeFakeDb = (existingRows, portalRows = []) => ({
+    prepare: (sql) => ({ all: async () => (String(sql).includes('portal_accounts') ? portalRows : existingRows) }),
+  })
   const row = (fields, rowNumber) => ({ _rowNumber: rowNumber, ...fields })
   const withDecisions = (decisionsByRowNumber) => JSON.stringify({ decisionsByRowNumber })
 
@@ -1187,7 +1193,29 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifyContacts(db, 'customers', [row({ name: 'Dara' }, 1)], null)
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].action, 'create')
-    assert.ok(/^[A-Z0-9]{8}$/.test(String(results[0].data.membership_number || '')), 'new customers receive an eight-character membership ID from the shared authority')
+    assert.strictEqual(results[0].data.membership_number, 'LC-00001', 'a brand-new customer gap-fills the house LC- sequence from the shared authority')
+  }
+
+  // 1b) The allocator's seed must UNION portal_accounts.membership_id, same
+  // as lib/membershipNumber.ts's own mintMembershipNumber() does for every
+  // other minting path (manual add, storefront signup) -- an orphaned
+  // portal account (e.g. a signup whose contact fold failed, so it has no
+  // matching customer row) still reserves its slot for an import. Verified
+  // red on HEAD before this fix: with only 'LC-00001' in customers and no
+  // portal query, a blank row minted 'LC-00002' -- colliding with the
+  // portal-only 'LC-00002' the very next signup would have reserved.
+  {
+    const db = makeFakeDb(
+      [{ id: 1, name: 'Existing', membership_number: 'LC-00001' }],
+      [{ membership_id: 'LC-00002' }],
+    )
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Blank' }, 1)], null)
+    assert.strictEqual(results.length, 1)
+    assert.strictEqual(
+      results[0].data.membership_number,
+      'LC-00003',
+      'the allocator must skip both the customers row (LC-00001) AND the orphaned portal_accounts row (LC-00002)',
+    )
   }
 
   // 2) Matched existing customer whose stored membership_number is

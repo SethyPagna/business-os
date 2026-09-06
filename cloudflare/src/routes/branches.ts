@@ -339,7 +339,10 @@ app.post('/transfer', async (c) => {
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? ''), 10)
   const quantity = Number(body.quantity)
-  const note = body.note != null ? String(body.note).trim() || null : null
+  // The operator's own reason. `reason` is what every current client sends;
+  // a non-empty legacy `note` is still accepted as the reason so a cached
+  // PWA build or a queued offline replay is not 400ed mid-release.
+  const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
   // Optional batch/lot to transfer -- see this route's comment above for
   // why this has to move branch_batch_stock alongside the plain
   // branch_stock total, not instead of it.
@@ -348,6 +351,20 @@ app.post('/transfer', async (c) => {
   if (!productId || !fromBranchId || !toBranchId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
   if (!(quantity > 0)) return c.json({ error: 'Transfer quantity must be greater than zero' }, 400)
+  // The same mandatory-cause rule POST /inventory/adjust enforces, on the
+  // route the Branches transfer modal calls.
+  // Inventory.tsx has refused a reasonless transfer in the browser since
+  // Part 387; nothing behind it did, so a stale tab, a replayed offline
+  // write or any direct caller could move stock with no recorded cause.
+  // Checked ahead of any DB work, so no path can move stock without one.
+  // The sentence is the exact English of the `transfer_reason_required`
+  // pack key -- the convention branchRoleGuards' refusals already follow, and
+  // exactly what a client-side mapping keys off. That mapping does not cover
+  // it yet: BRANCH_RULE_MESSAGE_KEYS in frontend/src/api/branchRuleErrors.ts
+  // carries only the two branch-role sentences, so a refusal that outruns the
+  // UI still surfaces in English. One entry there is all Khmer needs, with no
+  // Worker change -- which is the whole point of pinning the wording here.
+  if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
 
   const db = getDb(c.env)
   const product = await db.prepare(`
@@ -387,7 +404,7 @@ app.post('/transfer', async (c) => {
   const destProductId = mergeTarget?.id ?? productId
   const destProductName = mergeTarget?.name ?? product.name
   const mergedNote = mergeTarget ? `Added to existing product "${destProductName}" (#${destProductId}) at ${toBranch?.name || 'destination'}` : null
-  const combinedNote = [note, mergedNote].filter(Boolean).join(' -- ') || null
+  const combinedNote = [reason, mergedNote].filter(Boolean).join(' -- ') || null
 
   // Same batch when the destination product wasn't redirected (the lot
   // itself hasn't changed, only which branch's branch_batch_stock has the
@@ -415,7 +432,7 @@ app.post('/transfer', async (c) => {
       // transfer touched no specific lot and stays NULL.
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: sourceBatch?.id ?? null },
+      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: sourceBatch?.id ?? null },
     },
     {
       // Recorded against destProductId -- this is a real per-product stock
@@ -424,7 +441,7 @@ app.post('/transfer', async (c) => {
       // the quantity, not necessarily the row the operator picked.
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${productId})` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: destBatchId },
+      params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: destBatchId },
     },
   ]
   // Track A/C audit (part 53) found this was missing: when the transfer
@@ -506,7 +523,7 @@ app.post('/transfer', async (c) => {
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
       lines: formatTransferTelegramLines({
-        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: actorSnapshot(user),
+        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user),
         items: [{
           product: product.name, quantity, lot: sourceBatch?.lot_code || null, mergedInto: mergeTarget ? destProductName : null,
           fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
@@ -564,11 +581,28 @@ app.post('/transfer-bulk', async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? ''), 10)
-  const note = body.note != null ? String(body.note).trim() || null : null
+  // The operator's own reason. `reason` is what every current client sends;
+  // a non-empty legacy `note` is still accepted as the reason so a cached
+  // PWA build or a queued offline replay is not 400ed mid-release.
+  const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
   const rawItems = Array.isArray(body.items) ? body.items : []
 
   if (!fromBranchId || !toBranchId) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
+  // The same mandatory-cause rule /transfer enforces above -- one transfer
+  // is not exempt from it because it carries many products.
+  // Inventory.tsx has refused a reasonless transfer in the browser since
+  // Part 387; nothing behind it did, so a stale tab, a replayed offline
+  // write or any direct caller could move stock with no recorded cause.
+  // Checked ahead of any DB work, so no path can move stock without one.
+  // The sentence is the exact English of the `transfer_reason_required`
+  // pack key -- the convention branchRoleGuards' refusals already follow, and
+  // exactly what a client-side mapping keys off. That mapping does not cover
+  // it yet: BRANCH_RULE_MESSAGE_KEYS in frontend/src/api/branchRuleErrors.ts
+  // carries only the two branch-role sentences, so a refusal that outruns the
+  // UI still surfaces in English. One entry there is all Khmer needs, with no
+  // Worker change -- which is the whole point of pinning the wording here.
+  if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
   if (!rawItems.length) return c.json({ error: 'No products selected' }, 400)
   if (rawItems.length > MAX_BULK_TRANSFER_ITEMS) {
     return c.json({ error: `Too many products in one transfer (max ${MAX_BULK_TRANSFER_ITEMS}) -- split into more than one transfer` }, 400)
@@ -691,7 +725,7 @@ app.post('/transfer-bulk', async (c) => {
     const destProductId = mergeTarget?.id ?? item.productId
     const destProductName = mergeTarget?.name ?? product.name
     const mergedNote = mergeTarget ? `Added to existing product "${destProductName}" (#${destProductId}) at ${toBranch?.name || 'destination'}` : null
-    const combinedNote = [note, mergedNote].filter(Boolean).join(' -- ') || null
+    const combinedNote = [reason, mergedNote].filter(Boolean).join(' -- ') || null
     if (mergeTarget) merges.push({ productId: item.productId, productName: product.name, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName })
 
     // Resolved BEFORE the movement inserts so both legs can stamp their
@@ -716,7 +750,7 @@ app.post('/transfer-bulk', async (c) => {
       {
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
               VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: item.productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity: item.quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: sourceBatchForItem?.id ?? null },
+        params: { productId: item.productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity: item.quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: sourceBatchForItem?.id ?? null },
       },
       {
         // Recorded against destProductId, same as the single-item route --
@@ -725,7 +759,7 @@ app.post('/transfer-bulk', async (c) => {
         // quantity, not necessarily the row the operator selected.
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
               VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity: item.quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${item.productId})` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: destBatchIdForItem },
+        params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity: item.quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: destBatchIdForItem },
       },
     )
 
@@ -814,7 +848,7 @@ app.post('/transfer-bulk', async (c) => {
     }))
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
-      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: actorSnapshot(user), items: lines }),
+      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user), items: lines }),
     })
   })().catch((error) => console.error('[telegram] bulk transfer notification failed', error)))
   return c.json({ success: true, transferredCount: items.length, merges })

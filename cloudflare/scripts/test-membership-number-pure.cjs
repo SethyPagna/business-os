@@ -6,7 +6,11 @@
 //
 // What it pins:
 //   1. legacy LC-##### formatting/parsing remains compatible
-//   2. new allocation is random, exactly eight uppercase alphanumeric characters
+//   2. new allocation gap-fills the LC- house sequence over
+//      customers.membership_number UNION portal_accounts.membership_id
+//      UNION extraTaken (owner, 2026-09-06: a prior change had regressed
+//      this to eight random characters, contradicting the format every
+//      existing customer already carries -- see migration 0110)
 //   3. concurrent minting -- the UNIQUE index arbitrates and the loser retries
 //   4. one minter: no source file mints its own membership number any more
 //   5. migration 0110 backfilling existing rows into the same sequence
@@ -89,9 +93,9 @@ check(() => assert.deepEqual(
 ))
 
 const allocate = membership.createMembershipNumberAllocator(['LC-00001', 'LC-00003', null, '', 'LCMN-DEADBEEF'])
-const allocated = [allocate(), allocate(), allocate()]
-check(() => assert.ok(allocated.every(n => /^[A-Z0-9]{8}$/.test(n))))
-check(() => assert.equal(new Set(allocated).size, 3))
+check(() => assert.equal(allocate(), 'LC-00002', 'the hole at 2 is filled before the sequence grows past 3'))
+check(() => assert.equal(allocate(), 'LC-00004', 'the next call continues past the already-taken 3'))
+check(() => assert.equal(allocate(), 'LC-00005', 'each call remembers what it has already handed out'))
 
 // --- 3. minting against a real database ------------------------------------
 
@@ -115,6 +119,10 @@ const insertCustomer = (name, membershipNumber) => rawDb
   .prepare('INSERT INTO customers (name, membership_number) VALUES (@name, @membership_number)')
   .run({ name, membership_number: membershipNumber })
 
+const insertPortalAccount = (membershipId) => rawDb
+  .prepare('INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES (@membership_id, @name, @phone, @password_hash)')
+  .run({ membership_id: membershipId, name: 'Portal Test', phone: `phone-${membershipId}`, password_hash: 'x' })
+
 async function main() {
   // The unique index from migration 0015 must actually exist on this schema --
   // it is the ONE uniqueness guarantee everything else leans on.
@@ -126,8 +134,29 @@ async function main() {
   insertCustomer('Legacy', 'lc-00001')
   insertCustomer('Legacy long', 'LCMN-A1B2C3D4')
   const before = await db.prepare('SELECT membership_number FROM customers ORDER BY id').all()
+
+  // Discriminating case (owner, 2026-09-06): from taken [LC-00001, LC-00002,
+  // LC-00004] the next mint is LC-00003 -- the old random-eight-character
+  // code disagreed on every one of these assertions.
+  insertCustomer('Beta', 'LC-00002')
+  insertCustomer('Gamma', 'LC-00004')
   const minted = await membership.mintMembershipNumber(db)
-  assert.match(minted, /^[A-Z0-9]{8}$/)
+  assert.equal(minted, 'LC-00003', 'the hole at 3 is filled before the sequence grows; a legacy LCMN- number does not block')
+
+  // A portal account can hold a number with no matching customer row yet
+  // (e.g. a signup whose contact fold failed) -- mint must see it too, since
+  // customers and portal_accounts share ONE sequence.
+  insertPortalAccount('LC-00003')
+  const mintedAfterPortal = await membership.mintMembershipNumber(db)
+  assert.equal(mintedAfterPortal, 'LC-00005', 'portal_accounts.membership_id reserves its slot even with no matching customer row')
+
+  // extraTaken still folds in numbers held by neither table yet (e.g. other
+  // rows already assigned earlier in the same in-flight import batch).
+  const mintedWithExtra = await membership.mintMembershipNumber(db, ['LC-00005'])
+  assert.equal(mintedWithExtra, 'LC-00006', 'extraTaken is unioned with both tables')
+
+  // Concurrent-collision retry still works: the DB unique index is the final
+  // arbiter when two writers mint the same instant, and the loser re-mints.
   let raceAttempts = 0
   const recovered = await membership.withMintedMembershipNumber(db, async (number) => {
     raceAttempts += 1
@@ -135,11 +164,11 @@ async function main() {
     insertCustomer('Racer', number)
     return number
   })
-  assert.equal(raceAttempts, 2)
-  assert.match(recovered, /^[A-Z0-9]{8}$/)
+  assert.equal(raceAttempts, 2, 'the loser of the UNIQUE-index race re-mints and retries')
+  assert.equal(recovered, 'LC-00006', 'the retried mint is still a valid gap-fill result')
   const after = await db.prepare('SELECT membership_number FROM customers ORDER BY id LIMIT 2').all()
   assert.deepEqual(after, before, 'minting never rewrites legacy identities')
-  checks += 4
+  checks += 6
 
   const collisionError = new Error('D1_ERROR: UNIQUE constraint failed: index \'idx_customers_membership_lower_pg\'')
   assert.equal(membership.isMembershipCollision(collisionError), true)
@@ -148,6 +177,33 @@ async function main() {
   assert.equal(membership.isMembershipCollision(new Error('no such column: membership_number')), false)
   checks += 4
 
+  // --- the SQL glob has to agree with parseMembershipSequence about
+  // whitespace (verifier finding, 2026-09-06). parseMembershipSequence trims
+  // before it parses, and every lookup compares lower(trim(...)), so a
+  // hand-typed " LC-00001 " IS taken. Without trim() inside membershipGlob the
+  // SQL filter alone disagreed: the padded row dropped out of the taken set,
+  // gap-fill handed LC-00001 straight back out, the INSERT succeeded (the
+  // 0015 index keys on lower(), not trim()), and the trim-equal membership
+  // lookup then returned two rows. Fresh database so this padded seed cannot
+  // perturb the sequence the assertions above pin.
+  const paddedRaw = openDb(loadAll())
+  const paddedDb = {
+    prepare(sql) {
+      const stmt = paddedRaw.prepare(sql)
+      return { get: async (p) => stmt.get(p), all: async (p) => stmt.all(p) || [], run: async (p) => stmt.run(p) }
+    },
+  }
+  paddedRaw.prepare("INSERT INTO customers (name, membership_number) VALUES ('Padded', ' LC-00001 '), ('Plain', 'LC-00002')").run()
+  assert.equal(
+    await membership.mintMembershipNumber(paddedDb), 'LC-00003',
+    'a whitespace-padded " LC-00001 " is taken -- the glob trims exactly like parseMembershipSequence',
+  )
+  paddedRaw.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES (' lc-00003 ', 'Padded Portal', '099222333', 'x')").run()
+  assert.equal(
+    await membership.mintMembershipNumber(paddedDb), 'LC-00004',
+    'the same trim covers portal_accounts.membership_id -- ONE glob, both columns',
+  )
+  checks += 2
   // Every number in the table is unique and every house number parses.
   const all = await db.prepare('SELECT membership_number FROM customers').all()
   const seen = new Set()
@@ -232,7 +288,7 @@ check(() => assert.equal(bulk[4999], 'LC-05000'))
 check(() => assert.equal(new Set(bulk).size, 5000, 'no number is issued twice'))
 
 main().then(() => {
-  console.log(`PASS ${checks} membership-number checks (legacy compatibility, random IDs, concurrency, historical migration)`)
+  console.log(`PASS ${checks} membership-number checks (legacy compatibility, LC- gap-fill over customers+portal_accounts, concurrency, historical migration)`)
 }).catch((error) => {
   console.error(error)
   process.exit(1)

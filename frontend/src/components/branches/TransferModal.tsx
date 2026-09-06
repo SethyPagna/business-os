@@ -161,7 +161,7 @@ type TransferApi = {
     productId: string | number
     productName: string
     quantity: number
-    note: string
+    reason: string
     userId?: string | number
     userName?: string
     // Present only when the source product is batch/lot-tracked -- see the
@@ -172,7 +172,7 @@ type TransferApi = {
   transferStockBulk: (payload: {
     fromBranchId: number
     toBranchId: number
-    note: string
+    reason: string
     items: Array<{ productId: string | number; quantity: number }>
     userId?: string | number
     userName?: string
@@ -221,7 +221,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [products, setProducts] = useState<TransferProduct[]>([])
   const [selectedProduct, setSelectedProduct] = useState<TransferProduct | null>(null)
   const [quantity, setQuantity] = useState('')
-  const [note, setNote] = useState('')
+  // The transfer's documented cause. Required -- see requireTransferReason.
+  const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [loadingMoreProducts, setLoadingMoreProducts] = useState(false)
@@ -289,7 +290,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // the branches picked and the quantities typed against them; the search
   // box and paging are navigation, not work.
   const transferDirty = Boolean(fromBranch) || Boolean(toBranch)
-    || Boolean(quantity.trim()) || Boolean(note.trim())
+    || Boolean(quantity.trim()) || Boolean(reason.trim())
     || Object.values(selectedQuantities).some((value) => String(value || '').trim().length > 0)
   const closeGuard = useCloseGuard({ dirty: transferDirty }, onClose)
 
@@ -761,6 +762,25 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   })
 
   /**
+   * The transfer's documented cause, checked once for all three write paths
+   * this modal has: the single-product transfer, the checked-rows transfer
+   * and the whole-branch transfer.
+   *
+   * Every Worker route that moves stock now refuses a reasonless request
+   * (branches.ts POST /transfer and /transfer-bulk, inventory.ts POST
+   * /transfer and /move-row) -- the same rule Inventory.tsx's own transfer
+   * button has always enforced in the browser. Raised here, once, so the
+   * three entry points share one check instead of three copies that can
+   * drift. Nothing is disabled and nothing typed is thrown away: the
+   * operator is told what is missing and the form stays exactly as it was.
+   */
+  const requireTransferReason = (): boolean => {
+    if (reason.trim()) return true
+    notify(t('transfer_reason_required') || 'A transfer reason is required.', 'error')
+    return false
+  }
+
+  /**
    * Moves every in-stock row out of the source branch -- the thing the old
    * Select all checkbox gestured at but never actually did.
    *
@@ -777,6 +797,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
       return
     }
+    if (!requireTransferReason()) return
     // The listing is only fetched once something asks for it. Ask, and
     // re-enter through the ref once it lands, so the confirm can show real
     // counts instead of guessing at them.
@@ -826,6 +847,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       return
     }
 
+    if (!requireTransferReason()) return
+
     const fromName = branches.find((branch) => String(branch.id) === String(fromBranch))?.name || t('source_branch') || 'source branch'
     const toName = branches.find((branch) => String(branch.id) === String(toBranch))?.name || t('destination_branch') || 'destination branch'
     const lot = selectedBatch
@@ -847,7 +870,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         productId: selectedProduct.id,
         productName: selectedProduct.name || '',
         quantity: qty,
-        note,
+        reason,
         userId: user?.id,
         userName: user?.name,
         batchId: selectedBatchId,
@@ -904,6 +927,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       return
     }
     if (!selectedEntries.length) return
+    if (!requireTransferReason()) return
 
     const productsById = new Map(multiProducts.map((product) => [String(product.id), product]))
     const items: Array<{ productId: string | number; quantity: number }> = []
@@ -936,8 +960,23 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * reports exactly how far it got. Re-running is the documented recovery and
    * is safe: rows already moved have no stock left in the source branch, so
    * they are simply absent from the next run's item list.
+   *
+   * requireTransferReason() runs FIRST here, not only at the two call sites
+   * that arm pendingTransfer synchronously (handleBulkTransfer,
+   * handleTransferEntireBranch's already-loaded path). Transfer entire
+   * branch has a THIRD, deferred path: when the branch listing hasn't
+   * loaded yet, handleTransferEntireBranch checks the reason, then only
+   * arms entireBranchAfterLoadRef and returns -- the actual
+   * setPendingTransfer happens later, inside the load effect above, once
+   * the fetch resolves. The reason field stays enabled the whole time that
+   * fetch is in flight, so it can be cleared before the effect parks the
+   * confirm dialog, and ConfirmDialog's own onConfirm never re-validates
+   * anything -- it just calls this function. Checking here, in the one
+   * actual write path, covers every arming site (present and future) with
+   * no per-caller duplication.
    */
   const runPendingTransfer = async (pending: PendingTransfer) => {
+    if (!requireTransferReason()) return
     if (!beginSingleAction(transferBulkInFlightRef, { blocked: savingBulk })) return
     setSavingBulk(true)
     const chunks: PendingTransferItem[][] = []
@@ -957,7 +996,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           res = await withLoaderTimeout<TransferBulkResult>(() => getTransferApi().transferStockBulk({
             fromBranchId: Number.parseInt(fromBranch, 10),
             toBranchId: Number.parseInt(toBranch, 10),
-            note,
+            reason,
             items: chunks[index],
             userId: user?.id,
             userName: user?.name,
@@ -1165,7 +1204,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           {selectedProduct && mode === 'single' ? (
             // Once a product is picked the search box + result list above
             // collapse away entirely (this panel replaces them) -- keeping
-            // both stacked made the modal tall enough that quantity/note sat
+            // both stacked made the modal tall enough that quantity/reason sat
             // below the fold, reported as the selected area being "very bad
             // and large". "Change" clears the pick, restoring the list.
             <div className="space-y-2.5 rounded-xl bg-blue-50 p-3 dark:bg-blue-900/20">
@@ -1243,7 +1282,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 </div>
               ) : null}
 
-              {/* Quantity and note share one row from sm up -- stacked they
+              {/* Quantity and reason share one row from sm up -- stacked they
                   pushed the panel (and the modal's footer) taller for no
                   gain; each label sits over its own field either way. */}
               <div className="grid gap-2.5 sm:grid-cols-[auto,minmax(0,1fr)]">
@@ -1278,16 +1317,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 </div>
 
                 <div className="min-w-0">
-                  <label htmlFor="transfer-note" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {t('transfer_note') || 'Transfer note'} ({t('optional') || 'Optional'})
+                  <label htmlFor="transfer-reason" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {t('transfer_reason') || 'Transfer reason'} ({t('required') || 'Required'})
                   </label>
                   <input
-                    id="transfer-note"
-                    name="transfer_note"
+                    id="transfer-reason"
+                    name="transfer_reason"
                     className="input"
-                    value={note}
-                    onChange={(event) => setNote(event.target.value)}
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
                     placeholder={t('transfer_stock_note_placeholder') || 'e.g. Restocking branch 2'}
+                    aria-required="true"
                   />
                 </div>
               </div>
@@ -1451,16 +1491,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               </div>
 
               <div className="mt-3">
-                <label htmlFor="transfer-note-multi" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {t('transfer_note') || 'Transfer note'} ({t('optional') || 'Optional'})
+                <label htmlFor="transfer-reason-multi" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('transfer_reason') || 'Transfer reason'} ({t('required') || 'Required'})
                 </label>
                 <input
-                  id="transfer-note-multi"
-                  name="transfer_note_multi"
+                  id="transfer-reason-multi"
+                  name="transfer_reason_multi"
                   className="input"
-                  value={note}
-                  onChange={(event) => setNote(event.target.value)}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
                   placeholder={t('transfer_bulk_note_placeholder') || 'e.g. Restocking branch 2'}
+                  aria-required="true"
                 />
               </div>
             </div>

@@ -140,7 +140,6 @@ check('the lot picker distinguishes a load failure from an empty result', () => 
 // ---- no call site may leave a rejection unhandled ----
 for (const [label, file] of [
   ['Inventory stock modal', ['components', 'inventory', 'InventoryStockModals.tsx']],
-  ['Branch stock adjuster', ['components', 'products', 'forms', 'BranchStockAdjuster.tsx']],
 ] as const) {
   check(`${label} handles a rejected getProductBatches (it no longer falls back internally)`, () => {
     const text = src(...file)

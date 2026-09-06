@@ -3907,6 +3907,7 @@ export default function POS() {
                 next: posCopy('Next'),
                 imageCount: '{current}/{total}',
                 dotsLabel: 'Image {current} of {total}',
+                close: t('close') || 'Close',
               }}
             />
           ) : null}

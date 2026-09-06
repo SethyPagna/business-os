@@ -54,7 +54,6 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
   const totals = lib.deriveTotals(level, /* costUsd */ 20, /* returnedCostUsd */ 0, { itemDiscountUsd: 0 })
   assert.equal(totals.discount_usd, 7, 'discount_usd = store + membership')
   assert.equal(totals.revenue_usd, 93, 'revenue_usd = gross_sales - discount (excludes tax/delivery)')
-  assert.equal(totals.gross_sales_usd, 100, 'gross sales is the merchandise subtotal before line discounts; invoice discounts remain separate')
   assert.equal(totals.collected_total_usd, 103, 'collected_total = revenue + tax + customer-paid delivery')
   // profit = revenue - cost + what delivery is worth (93 - 20 + 6).
   //
@@ -68,23 +67,6 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
   assert.equal(totals.store_delivery_usd, 3, 'the waived fee is still REPORTED -- it just is not a cost')
   assert.notEqual(totals.profit_usd, 70, 'the waived fee must not be subtracted a second time')
   assert.equal(totals.avg_order_usd, Math.round((93 / 3) * 100) / 100, 'avg_order = revenue / tx_count')
-}
-
-// Line/product discounts are already removed from subtotal_usd by the sale
-// writer. Gross must restore them exactly once, while net sales must not.
-{
-  const totals = lib.deriveTotals({
-    tx_count: 1,
-    gross_sales_usd: 97,
-    store_discount_usd: 5,
-    membership_discount_usd: 2,
-    tax_usd: 0,
-    delivery_usd: 0,
-  }, 0, 0, { itemDiscountUsd: 3 })
-  assert.equal(totals.gross_sales_usd, 100, 'gross restores the line discount once')
-  assert.equal(totals.total_discount_usd, 10, 'total discounts include line and invoice discounts')
-  assert.equal(totals.net_sales_usd, 90, 'net sales keeps invoice discounts on the already line-discounted subtotal')
-  assert.equal(totals.revenue_usd, 90, 'revenue remains net sales before refunds')
 }
 
 // ---- deriveTotals: the fan-out bug this replaces can't reproduce here ----

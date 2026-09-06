@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import InfoHint from './InfoHint.tsx'
 
 // D5a: the one supplier picker every manual add-stock/receive surface
-// shares (ReceiveBatchModal, InventoryStockModals, BranchStockAdjuster,
-// BulkAddStockModal) -- the same cross-surface rule as the D4b batch
+// shares (ReceiveBatchModal, InventoryStockModals, BulkAddStockModal) --
+// the same cross-surface rule as the D4b batch
 // picker: no surface gets a weaker version of the field than its siblings.
 //
 // Semantics mirror the batch writer's first-attribution-sticks rule
