@@ -331,9 +331,16 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   ]
 
   const language = settings?.language || 'en'
-  const mobileTitle = currentSection
-    ? sectionLabel(currentSection)
-    : getNavLabel(NAV_CONFIG_ITEMS.find((item) => item.id === page) || { id: page, key: page, permission: null }, t, language)
+  // What the bar names is what is ON SCREEN. With the pages layer open the
+  // screen is the page (its tile unfolded over the sub page), so the bar says
+  // the page; closed, it says the section the route names. Back is a pure
+  // toggle and must stay one -- navigating away would discard the sub page's
+  // state -- so this is the half of "it still shows the page i back from"
+  // that the section-state fix could not reach: the route legitimately still
+  // names the sub page, and the title was reading it unconditionally.
+  const mobileTitle = (moreOpen && inline) || !currentSection
+    ? getNavLabel(NAV_CONFIG_ITEMS.find((item) => item.id === page) || { id: page, key: page, permission: null }, t, language)
+    : sectionLabel(currentSection)
   const brandLogo = settings?.customer_portal_logo_image || ''
   const brandName = settings?.business_name || 'Business OS'
   const sidebarBg = settings?.ui_sidebar_color || ''

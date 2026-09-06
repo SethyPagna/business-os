@@ -233,6 +233,27 @@ runTest('Back opens the layer without navigating, so the section it marks is the
     'only a section row in the layer navigates, and it names the section it goes to')
 })
 
+runTest('while the layer is open the bar names the page on screen, not the sub page behind it', () => {
+  // Acceptance (2), reconciled with what Back actually does. Back is a pure
+  // toggle (the case above), so the route still names the sub page -- and the
+  // title read `sectionLabel(currentSection)` with no condition at all, which
+  // is why "it still shows the page i back from" outlived the section-state
+  // fix: the BAR kept reading "Stock changes" while the screen already showed
+  // the Products tile unfolded over it. The chrome now describes what is ON
+  // SCREEN. That needs no navigation, so the sub page keeps its state, and
+  // closing the layer hands its name straight back.
+  const title = sidebar.slice(sidebar.indexOf('const mobileTitle ='), sidebar.indexOf('const brandLogo'))
+  assert.match(sidebar, /const mobileTitle = \(moreOpen && inline\) \|\| !currentSection/,
+    'the open pages layer -- and "no section at all" -- take the page-level label')
+  assert.match(title, /: sectionLabel\(currentSection\)/,
+    'and with the layer closed the bar still names the section you are in')
+  assert.match(title, /getNavLabel\(NAV_CONFIG_ITEMS\.find\(\(item\) => item\.id === page\)/,
+    "the page-level label is the nav item's own, not a second source of names")
+  // Negative control: exactly what shipped -- the section label, unconditional.
+  assert.doesNotMatch(title, /const mobileTitle = currentSection\s*\n\s*\? sectionLabel/,
+    'the unconditional section title must be gone')
+})
+
 runTest('resolveHubSection is unchanged for the hosts that own a fallback', () => {
   // The refactor that produced resolveChromeSection must not move the host
   // hook's own answer -- sectionNavigation.test.ts drives the real thing.
