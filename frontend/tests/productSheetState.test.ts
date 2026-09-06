@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { branchAllowsSale, deriveProductSheetState, resolveSaleBranch } from '../src/components/pos/productSheetState.ts'
-import { BRANCH_RULE_MESSAGE_KEYS, branchRuleMessageKey, localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
+import { BRANCH_RULE_MESSAGE_KEYS, LEGACY_BRANCH_RULE_MESSAGE_KEYS, branchRuleMessageKey, localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
 import { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination } from '../src/utils/branchRoles.ts'
 
 let failed = 0
@@ -428,15 +428,15 @@ const kmPack = JSON.parse(src('lang', 'km.json')) as Record<string, string>
 
 await runTest('a Worker branch-rule refusal is translated, and nothing else is touched', () => {
   const t = (key: string) => kmPack[key]
-  assert.equal(branchRuleMessageKey('Only allow Shop sale. Please transfer to Shop first.'), 'pos_warehouse_not_sellable')
+  assert.equal(branchRuleMessageKey('Warehouse Sale Disabled, Please transfer to Shop First'), 'pos_warehouse_not_sellable')
   assert.equal(branchRuleMessageKey('Transfers move stock from Warehouse to Shop.'), 'transfer_source_warehouse_only')
   // The paths that show these wrap the sentence to different depths.
-  assert.equal(branchRuleMessageKey('Error: Only allow Shop sale. Please transfer to Shop first.'), 'pos_warehouse_not_sellable')
+  assert.equal(branchRuleMessageKey('Error: Warehouse Sale Disabled, Please transfer to Shop First'), 'pos_warehouse_not_sellable')
   assert.equal(branchRuleMessageKey('Insufficient stock in source branch'), null)
   assert.equal(branchRuleMessageKey(''), null)
   assert.equal(branchRuleMessageKey(null), null)
   assert.equal(
-    localizeBranchRuleError('Only allow Shop sale. Please transfer to Shop first.', t),
+    localizeBranchRuleError('Warehouse Sale Disabled, Please transfer to Shop First', t),
     kmPack.pos_warehouse_not_sellable,
     'a Khmer session must read the Khmer sentence, not the English the server sent',
   )
@@ -444,11 +444,34 @@ await runTest('a Worker branch-rule refusal is translated, and nothing else is t
   assert.equal(localizeBranchRuleError('Something else entirely', t), 'Something else entirely')
 })
 
-await runTest('the mapped sentences are the exact English of the pack keys', () => {
+await runTest('a stale Worker/client pair still localizes on the RETIRED English wording', () => {
+  // 2026-09-06: the wording changed from "Only allow Shop sale. Please
+  // transfer to Shop first." to "Warehouse Sale Disabled, Please transfer to
+  // Shop First". A Worker isolate mid-deploy, or an offline sale queued
+  // before the change and replayed after it, can still send the old
+  // sentence -- discriminating because a mapper that only knows the CURRENT
+  // string answers null here and leaks English into a Khmer session.
+  const t = (key: string) => kmPack[key]
+  const retired = 'Only allow Shop sale. Please transfer to Shop first.'
+  assert.equal(branchRuleMessageKey(retired), 'pos_warehouse_not_sellable')
+  assert.equal(branchRuleMessageKey(`Error: ${retired}`), 'pos_warehouse_not_sellable')
+  assert.equal(localizeBranchRuleError(retired, t), kmPack.pos_warehouse_not_sellable)
+  assert.ok(
+    LEGACY_BRANCH_RULE_MESSAGE_KEYS.some(([english, key]) => english === retired && key === 'pos_warehouse_not_sellable'),
+    'the retired sentence must be listed as a legacy alias',
+  )
+})
+
+await runTest('the mapped sentences are the exact English of the pack keys, and the retired wording is gone', () => {
   // If either side drifts, the mapping stops matching and the operator is
   // shown an English sentence in a Khmer session -- silently.
-  assert.equal(enPack.pos_warehouse_not_sellable, 'Only allow Shop sale. Please transfer to Shop first.')
+  assert.equal(enPack.pos_warehouse_not_sellable, 'Warehouse Sale Disabled, Please transfer to Shop First')
   assert.equal(enPack.transfer_source_warehouse_only, 'Transfers move stock from Warehouse to Shop.')
+  // Discriminating: the CURRENT mapping must no longer emit the retired
+  // English -- a mapping that still pointed at the old sentence would pass
+  // every assertion above by coincidence (both keys resolve the same way)
+  // while quietly shipping the wrong wording to a fresh client/server pair.
+  assert.notEqual(enPack.pos_warehouse_not_sellable, 'Only allow Shop sale. Please transfer to Shop first.')
   for (const [english, key] of BRANCH_RULE_MESSAGE_KEYS) {
     assert.equal(enPack[key], english, `${key} must be the sentence the Worker sends`)
     assert.ok(kmPack[key], `${key} must exist in the Khmer pack`)

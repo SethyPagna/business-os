@@ -2394,7 +2394,7 @@ export default function POS() {
       ? { branchId: overrideBranchId, blocked: false }
       : resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })
     if (saleBranch.blocked) {
-      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+      notify(t('pos_warehouse_not_sellable') || 'Warehouse Sale Disabled, Please transfer to Shop First', 'error')
       setDetailProduct(product)
       return
     }

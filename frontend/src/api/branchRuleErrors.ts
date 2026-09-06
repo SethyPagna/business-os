@@ -17,8 +17,20 @@
 // and against the Worker's constants by
 // cloudflare/scripts/test-selling-branch-guard-pure.cjs.
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
-  ['Only allow Shop sale. Please transfer to Shop first.', 'pos_warehouse_not_sellable'],
+  ['Warehouse Sale Disabled, Please transfer to Shop First', 'pos_warehouse_not_sellable'],
   ['Transfers move stock from Warehouse to Shop.', 'transfer_source_warehouse_only'],
+]
+
+// The Worker sent a different English sentence for the warehouse-sale
+// refusal before the wording changed (2026-09-06). A deploy is never
+// instantaneous across every Worker isolate and every cached client, so a
+// request that lands mid-rollout can still carry the old text -- and an
+// offline sale queued before the change can replay it days later. Those must
+// still localize to the same pack key rather than leak English into a Khmer
+// session; this list carries no key of its own, only aliases onto the ones
+// above.
+export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ['Only allow Shop sale. Please transfer to Shop first.', 'pos_warehouse_not_sellable'],
 ]
 
 /**
@@ -35,6 +47,9 @@ export function branchRuleMessageKey(message: unknown): string | null {
   const text = String(message ?? '').trim()
   if (!text) return null
   for (const [english, key] of BRANCH_RULE_MESSAGE_KEYS) {
+    if (text === english || text.includes(english)) return key
+  }
+  for (const [english, key] of LEGACY_BRANCH_RULE_MESSAGE_KEYS) {
     if (text === english || text.includes(english)) return key
   }
   return null
