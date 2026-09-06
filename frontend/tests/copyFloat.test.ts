@@ -197,6 +197,33 @@ for (const key of ['copy', 'copied', 'copy_hint']) {
 }
 assert.doesNotMatch(km.copy_hint, /[A-Za-z]/, 'km.json copy_hint must be Khmer, not an English placeholder')
 
+// The hint is attached as the native `title` of every copy trigger
+// (CopyFloat.tsx), so it is a PROMISE about which gestures exist -- and it
+// named a hold for a whole round while `press.onMouseDown` was never called
+// and the mousedown handler swallowed the press that would have produced
+// one. Pin the promise to what the controller actually registers, so the two
+// cannot drift apart again. (`press.onMouseDown(` is the CALL; the type
+// alias reads `press.onMouseDown>`, which is what the source looked like
+// while the gesture did nothing.)
+const registersDoubleClick = controller.includes("addEventListener('dblclick'")
+const registersHold = controller.includes('press.onMouseDown(') && controller.includes('press.onTouchStart(')
+assert.equal(
+  /double-click/i.test(en.copy_hint),
+  registersDoubleClick,
+  'the hint may promise a double-click only where the controller answers one',
+)
+assert.equal(
+  /\bhold\b/i.test(en.copy_hint),
+  registersHold,
+  'the hint may promise a hold only where the controller arms one on BOTH pointer and touch',
+)
+// Khmer names the same two gestures joined by ឬ ("or"): ចុចពីរដង
+// (press twice) ឬ ចុចឱ្យជាប់ (press and hold) ដើម្បីចម្លង (to copy).
+assert.equal(km.copy_hint.includes('ឬ'), registersDoubleClick && registersHold,
+  'the Khmer hint must offer the same two gestures the English one does, not one of them')
+assert.ok(km.copy_hint.includes('ចុចពីរដង'), 'ចុចពីរដង -- press twice, the double-click half')
+assert.ok(km.copy_hint.includes('ចុចឱ្យជាប់'), 'ចុចឱ្យជាប់ -- press and hold, the hold half')
+
 /* ---------------------------------------------------------------- *
  * 5. The ownership rule, driven for real.
  *
