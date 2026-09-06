@@ -42,12 +42,13 @@ function loadTs(relPath, requireShim) {
   return mod.exports
 }
 const detailRule = loadTs('lib/productDetailRule.ts', {})
-const { pickSameIdentityRow, resolveProductIdentityEdit } = loadTs('lib/productIdentity.ts', {
+const { pickSameIdentityRows, resolveProductIdentityEdit, identityKeepSeparateClusterKeys } = loadTs('lib/productIdentity.ts', {
   './db': {},
   './sqlBinding': { buildInClause: () => ({ sql: '', params: {} }), selectInChunks: async () => [] },
   './productDetailRule': detailRule,
 })
-assert.equal(typeof pickSameIdentityRow, 'function', 'productIdentity must export pickSameIdentityRow')
+assert.equal(typeof pickSameIdentityRows, 'function', 'productIdentity must export pickSameIdentityRows')
+assert.equal(typeof identityKeepSeparateClusterKeys, 'function', 'productIdentity must export identityKeepSeparateClusterKeys')
 assert.equal(typeof resolveProductIdentityEdit, 'function', 'productIdentity must export resolveProductIdentityEdit')
 
 // ---- 1. The guard's SQL against the real schema, then the real comparison ----
@@ -68,13 +69,17 @@ sqlite.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_pr
   (7, 'Placeholder', '0', 1, 0, 1)`).run()
 
 // Exactly what the route does: narrow in SQL, compare with the shared fold.
-const run = (name, barcode, excludeId) => pickSameIdentityRow(
+const matchesFor = (name, barcode, excludeId) => pickSameIdentityRows(
   sqlite.prepare(sqlMatch[1]).all({
     nameKey: String(name).trim().replace(/\s+/g, ' ').toLowerCase(),
     excludeId,
   }),
   barcode,
 )
+// Every assertion below asks the singular question the old helper asked; the
+// route itself now reads the whole list (a name group can hold more than one
+// row with the same folded barcode, and the link-over prompt names them all).
+const run = (name, barcode, excludeId) => matchesFor(name, barcode, excludeId)[0] ?? null
 
 assert.equal(run('Dior Lip Glow 001', '3348901', null)?.id, 1, 'same name + barcode finds the twin')
 assert.equal(run('  dior  lip glow 001 ', '3348901', null)?.id, 1, 'name compare is case/whitespace-insensitive')
@@ -173,11 +178,11 @@ assert.ok(preFixEdit(11, { cost_price_usd: 4 }), 'control: the old rule even que
 
 // ---- 2. Wiring: both routes, guard before the review queue, no override ----
 const createAt = source.indexOf("app.post('/', async (c) => {")
-const createGuardAt = source.indexOf('findSameProductIdentityProduct(', createAt)
+const createGuardAt = source.indexOf('findSameProductIdentityProducts(', createAt)
 const createQueueAt = source.indexOf("actionType: 'create'", createAt)
 assert.ok(createAt > 0 && createGuardAt > createAt && createQueueAt > createGuardAt,
   'create: the identity guard runs BEFORE maybeQueueForReview so reviewers never approve duplicates')
-assert.match(source, /findSameProductIdentityProduct\(c\.env, nextName, nextBarcode, Number\(id\)\)/, 'edit: name/barcode changes are judged too')
+assert.match(source, /findSameProductIdentityProducts\(c\.env, nextName, nextBarcode, Number\(id\)\)/, 'edit: name/barcode changes are judged too')
 // The edit guard's trigger, pinned at the source: it resolves the edit first and
 // only queries when the identity actually moved, and cost is nowhere in it.
 const editGuardAt = source.indexOf('const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, body)')
@@ -186,11 +191,55 @@ const editTriggerAt = source.lastIndexOf('if (body.name !== undefined', editGuar
 const editTrigger = source.slice(editTriggerAt, editGuardAt)
 assert.ok(!/cost_price_(usd|khr)/.test(editTrigger),
   'edit: cost stopped being identity on Sep 4 2026, so a cost change must not trigger the duplicate lookup')
-const editLookupAt = source.indexOf('findSameProductIdentityProduct(c.env, nextName, nextBarcode, Number(id))', editGuardAt)
+const editLookupAt = source.indexOf('findSameProductIdentityProducts(c.env, nextName, nextBarcode, Number(id))', editGuardAt)
 assert.match(source.slice(editGuardAt, editLookupAt), /if \(changesIdentity\) \{/,
   'edit: the lookup runs ONLY when the edit moves the row onto a different identity')
-assert.match(source, /return pickSameIdentityRow\(rows, barcode\)/, 'the guard compares through the shared fold, not a local one')
+assert.match(source, /return pickSameIdentityRows\(rows, barcode\)/, 'the guard compares through the shared fold, not a local one')
 assert.match(source, /code: 'duplicate_product'/, 'refusal carries a machine-readable code')
-assert.ok(!/confirm_duplicate/.test(source), 'no override flag: the identity rule is absolute on this path')
+// ---- 3. The two answers (N34), and the one that is NOT a default ----
+// This assertion used to read "no override flag: the identity rule is absolute
+// on this path". The owner's N34 ruling supersedes that: "prompt user if they
+// should link over, and keep it changeable in conflict". So an override does
+// exist -- keep the two rows separate -- and what has to be pinned instead is
+// that it is never inferred. Only the exact decision word opens the door: a
+// truthy field, a 'true', a '1' or a typo all still refuse.
+const decisionFn = source.slice(source.indexOf('function readIdentityDecision'))
+const decisionBody = decisionFn.slice(0, decisionFn.indexOf('\n}'))
+assert.match(decisionBody, /=== IDENTITY_KEEP_SEPARATE/,
+  'the decision is an exact-value compare, never a truthiness test')
+assert.ok(!/Boolean\(|!!|!= *null/.test(decisionBody),
+  'a truthy field must never be read as a decision to overwrite another product\'s identity')
+// Both doors refuse when no decision was sent, and BOTH delete the field so it
+// can never reach cleanPayload or the review queue as if it were a column.
+assert.match(source, /if \(createMatches\.length && !createDecision\)/, 'create: no decision means the same refusal as before')
+assert.match(source, /if \(matches\.length && !readIdentityDecision\(body\)\)/, 'edit: no decision means the same refusal as before')
+assert.equal((source.match(/delete body\[IDENTITY_DECISION_FIELD\]/g) || []).length, 2,
+  'both doors strip the decision field from the payload they go on to write')
+// The refusal is structured: every candidate, its ids, and the answers that
+// are actually available at that door (there is no row to link over on create).
+assert.match(source, /candidateIds: matches\.map\(\(row\) => row\.id\)/, 'the refusal names every candidate id')
+assert.match(source, /resolutions: mode === 'create'/, 'the available answers depend on the door')
+assert.match(source, /\['link_over', IDENTITY_KEEP_SEPARATE\]/, 'the edit door offers link-over')
+// A kept-separate pair must be VISIBLE in Conflicts, so the decision retires
+// the dismissals that would hide it -- otherwise "changeable in conflict" is a
+// promise the surface cannot keep.
+assert.match(source, /retireKeepSeparateDismissals\(c\.env, name,/, 'create: the kept-separate pair is un-hidden in Conflicts')
+assert.match(source, /retireKeepSeparateDismissals\(c\.env, keptSeparateName,/, 'edit: the kept-separate pair is un-hidden in Conflicts')
+assert.match(source, /'identity_keep_separate'/, 'the decision is audited, not silent')
+
+// The cluster keys the retirement uses are the sweep's own keys. A pair kept
+// separate under the name 'Mac Lipstick 601' with barcodes '0601'/'601' must
+// clear the name, similar and leadingzero dismissals -- and NOT a raw-barcode
+// one, because a 4-character floor excludes '601'.
+const keys = identityKeepSeparateClusterKeys('Mac  Lipstick 601', ['0601', '601'])
+const keyed = keys.map((k) => `${k.type}:${k.value}`).sort()
+assert.deepEqual(keyed, ['barcode:0601', 'leadingzero:601', 'name:mac lipstick 601', 'similar:601 lipstick mac'],
+  'the retirement clears exactly the clusters the sweep would report this pair in')
+// NEGATIVE CONTROL: the placeholder barcode '0' forms no barcode cluster at
+// all (238 production rows carry it), so keeping such a pair separate must not
+// retire a dismissal that has nothing to do with it.
+const placeholderKeys = identityKeepSeparateClusterKeys('Placeholder', ['0'])
+assert.ok(!placeholderKeys.some((k) => k.type === 'leadingzero' || k.type === 'barcode'),
+  "the placeholder '0' never keys a barcode cluster")
 
 console.log('test-product-identity-guard-pure: all checks passed')

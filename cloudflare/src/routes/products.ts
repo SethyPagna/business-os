@@ -18,7 +18,7 @@ import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
-import { findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, normalizeProductClusterKey, pickSameIdentityRow, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityKeepSeparateClusterKeys, normalizeProductClusterKey, pickSameIdentityRows, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail, resolveMergedPricing } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
@@ -1497,14 +1497,79 @@ const scientificBarcodeError = (barcode: string) => ({
   code: 'barcode_scientific_notation',
 })
 
-async function findSameProductIdentityProduct(
+type IdentityMatchRow = { id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }
+
+// N34. The operator's answer to "this edit moves the row onto <product>'s
+// identity". `link_over` is not carried on the write itself -- the client runs
+// the existing merge kernel (POST /possible-duplicates/merge), one Worker
+// transaction, and never reaches this door again; only `keep_separate` has to
+// be expressible ON the save, because it is the answer that says "write it
+// anyway". Anything else in the field, including a missing one, means no
+// answer was given and the guard refuses exactly as before: a decision this
+// consequential is never inferred from a default.
+const IDENTITY_DECISION_FIELD = '__identity_decision'
+const IDENTITY_KEEP_SEPARATE = 'keep_separate'
+
+function readIdentityDecision(body: Record<string, unknown>): 'keep_separate' | null {
+  return body[IDENTITY_DECISION_FIELD] === IDENTITY_KEEP_SEPARATE ? IDENTITY_KEEP_SEPARATE : null
+}
+
+// The structured refusal. It used to be a bare sentence plus one `duplicate`
+// row, so a client could show a message but could not offer the two answers
+// the owner asked for ("prompt user if they should link over, and keep it
+// changeable in conflict") without re-deriving the candidates itself. It now
+// names every candidate the save collides with and the resolutions that are
+// actually available at this door -- there is no row to link over yet on
+// create, so create offers open-the-existing-row instead of a merge.
+// `code` and `duplicate` are unchanged so existing callers keep working.
+function identityMatchRefusal(
+  matches: IdentityMatchRow[],
+  mode: 'create' | 'edit',
+): Record<string, unknown> {
+  const primary = matches[0]
+  const others = matches.length > 1 ? ` (and ${matches.length - 1} more row${matches.length > 2 ? 's' : ''} with this identity)` : ''
+  return {
+    error: mode === 'create'
+      ? `"${primary.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Edit it or add stock to it instead of creating a duplicate.${others}`
+      : `"${primary.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Link this product's records over to it, or keep the two separate and settle it in Conflicts.${others}`,
+    code: 'duplicate_product',
+    duplicate: primary,
+    matches,
+    candidateIds: matches.map((row) => row.id),
+    resolutions: mode === 'create'
+      ? ['open_existing', IDENTITY_KEEP_SEPARATE]
+      : ['link_over', IDENTITY_KEEP_SEPARATE],
+    decisionField: IDENTITY_DECISION_FIELD,
+  }
+}
+
+// Retire the dismissals that would hide a kept-separate pair from Conflicts.
+// Without this the operator's "keep them separate" answer can land on a
+// cluster somebody dismissed months ago, and the pair he just chose to create
+// is invisible on the one surface where he was promised he could change his
+// mind. The keys come from the sweep's own keying function.
+async function retireKeepSeparateDismissals(env: Env, name: unknown, barcodes: readonly unknown[]): Promise<number> {
+  const keys = identityKeepSeparateClusterKeys(name, barcodes)
+  if (!keys.length) return 0
+  const db = getDb(env)
+  let removed = 0
+  for (const key of keys) {
+    const result = await db
+      .prepare('DELETE FROM product_duplicate_dismissals WHERE cluster_type = @type AND cluster_value = @value')
+      .run({ type: key.type, value: key.value })
+    removed += Number((result as { changes?: number }).changes) || 0
+  }
+  return removed
+}
+
+async function findSameProductIdentityProducts(
   env: Env,
   name: string,
   barcode: unknown,
   excludeId: number | null,
-): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number } | null> {
+): Promise<IdentityMatchRow[]> {
   const nameKey = normalizeProductGroupName(name)
-  if (!nameKey) return null
+  if (!nameKey) return []
   // Cost is NO LONGER part of this guard. It was, and that contradicted the
   // Sep-4 identity ruling head-on: the form happily minted a second row for
   // one article bought at a second price, which is the exact duplicate the
@@ -1523,10 +1588,10 @@ async function findSameProductIdentityProduct(
       AND (@excludeId IS NULL OR id != @excludeId)
     ORDER BY id ASC
     LIMIT 200
-  `).all<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }>({
+  `).all<IdentityMatchRow>({
     nameKey, excludeId,
   })
-  return pickSameIdentityRow(rows, barcode)
+  return pickSameIdentityRows(rows, barcode)
 }
 
 app.post('/', async (c) => {
@@ -1549,14 +1614,20 @@ app.post('/', async (c) => {
   // Same name with a DIFFERENT (or no) barcode stays a legitimate child row
   // and passes through untouched. Checked before the review queue so a
   // reviewer is never asked to approve a duplicate either.
-  const duplicate = await findSameProductIdentityProduct(c.env, name, body.barcode, null)
-  if (duplicate) {
-    return c.json({
-      error: `"${duplicate.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Edit it or add stock to it instead of creating a duplicate.`,
-      code: 'duplicate_product',
-      duplicate,
-    }, 409)
+  //
+  // ...unless the operator has answered "keep them separate" (N34). That is a
+  // deliberate decision, taken in front of the named candidates, and it is the
+  // only way a genuinely different article that happens to share a name and a
+  // folded barcode with an existing row can be entered at all. It is recorded,
+  // and the dismissals that would hide the resulting pair from Conflicts are
+  // retired, so the decision stays visible and reversible there.
+  const createDecision = readIdentityDecision(body)
+  const createMatches = await findSameProductIdentityProducts(c.env, name, body.barcode, null)
+  if (createMatches.length && !createDecision) {
+    return c.json(identityMatchRefusal(createMatches, 'create'), 409)
   }
+  const createKeptSeparateFrom = createMatches.map((row) => row.id)
+  delete body[IDENTITY_DECISION_FIELD]
 
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body)
   if (imageLimitError) {
@@ -1617,6 +1688,18 @@ app.post('/', async (c) => {
   await seedBranchStockForNewProduct(c.env, id as number, branchId, initialQty)
   await seedInitialBatchForNewProduct(c.env, id as number, branchId, initialQty)
 
+  // N34: the row was written over a live identity collision because the
+  // operator said "keep them separate". Record it, and clear the dismissals
+  // that would hide the pair from Conflicts -- the surface the owner asked to
+  // stay changeable. Done AFTER the insert so a failed write leaves no trace
+  // of a decision that never took effect.
+  if (createKeptSeparateFrom.length) {
+    const retired = await retireKeepSeparateDismissals(c.env, name, [body.barcode, ...createMatches.map((row) => row.barcode)])
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'identity_keep_separate', 'product', id, {
+      keptSeparateFrom: createKeptSeparateFrom, path: 'create', dismissalsRetired: retired,
+    })
+  }
+
   const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
   if ('image_gallery' in body) {
     const gallery = await syncProductImageGallery(c.env, id as number, body.image_gallery, imageLimitForUser(user))
@@ -1624,7 +1707,7 @@ app.post('/', async (c) => {
   }
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
-  return c.json({ item, id, success: true })
+  return c.json({ item, id, success: true, keptSeparateFrom: createKeptSeparateFrom })
 })
 
 // D6: before -> after preview numbers for a rename, before anything
@@ -1771,6 +1854,9 @@ app.put('/:id', async (c) => {
       return c.json(scientificBarcodeError(nextBarcodeText), 400)
     }
   }
+  let keptSeparateFrom: number[] = []
+  let keptSeparateBarcodes: unknown[] = []
+  let keptSeparateName: unknown = null
   let renamedProductIds: number[] = []
   let renamedProductName: string | null = null
   if (body.name !== undefined || body.barcode !== undefined) {
@@ -1790,13 +1876,20 @@ app.put('/:id', async (c) => {
     // key and no longer reaches this block at all.
     const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, body)
     if (changesIdentity) {
-      const duplicate = await findSameProductIdentityProduct(c.env, nextName, nextBarcode, Number(id))
-      if (duplicate) {
-        return c.json({
-          error: `"${duplicate.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Merge into it instead of creating a twin.`,
-          code: 'duplicate_product',
-          duplicate,
-        }, 409)
+      // N34. The refusal now carries every candidate this edit collides with
+      // and the two answers the owner asked for -- link the records over
+      // (the client runs the existing carry-all merge kernel, one Worker
+      // transaction), or keep the two rows separate. Only "keep separate" is
+      // expressible on the save itself, and only when the operator sent it
+      // explicitly: no decision means the same 409 as before.
+      const matches = await findSameProductIdentityProducts(c.env, nextName, nextBarcode, Number(id))
+      if (matches.length && !readIdentityDecision(body)) {
+        return c.json(identityMatchRefusal(matches, 'edit'), 409)
+      }
+      if (matches.length) {
+        keptSeparateFrom = matches.map((row) => row.id)
+        keptSeparateBarcodes = [nextBarcode, ...matches.map((row) => row.barcode)]
+        keptSeparateName = nextName
       }
     }
     // D6 / 9.1 ("rename does not regroup"): when the operator chose to
@@ -1827,6 +1920,11 @@ app.put('/:id', async (c) => {
     }
     delete body.__rename_scope
   }
+  // The decision is an instruction to this door, never a products column.
+  // Deleted unconditionally (not only inside the name/barcode branch above) so
+  // a client that sends it on an edit that turned out to move nothing cannot
+  // leave it in the payload that reaches cleanPayload or the review queue.
+  delete body[IDENTITY_DECISION_FIELD]
 
   // Image-only edits are never queued for review -- 'review' tier and this
   // restricted role are mutually exclusive access shapes (see
@@ -1889,9 +1987,23 @@ app.put('/:id', async (c) => {
     const gallery = await syncProductImageGallery(c.env, id, body.image_gallery, ADMIN_MAX_IMAGES_PER_PRODUCT)
     ;(item as Record<string, unknown>).image_gallery = gallery
   }
+  // N34: same follow-up as the create path -- the edit landed on another row's
+  // identity because the operator answered "keep them separate", so retire the
+  // dismissals that would hide the resulting pair from Conflicts and record the
+  // decision. After the write, so a failed update leaves no trace of it.
+  if (keptSeparateFrom.length) {
+    const retired = await retireKeepSeparateDismissals(c.env, keptSeparateName, keptSeparateBarcodes)
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'identity_keep_separate', 'product', Number(id), {
+      keptSeparateFrom, path: 'edit', dismissalsRetired: retired,
+    })
+  }
   await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id }))
-  return c.json({ item: isImageOnlyEdit ? restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)) : item, success: true })
+  return c.json({
+    item: isImageOnlyEdit ? restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)) : item,
+    success: true,
+    keptSeparateFrom,
+  })
 })
 
 app.delete('/:id', async (c) => {

@@ -19,7 +19,7 @@ export { normalizeLeadingZeroBarcodeForCleanup, identityBarcodeKey, productRowId
  * evaluated inside the batch being committed and so have no JS to run.
  *
  * Every other comparison site narrows in SQL and folds in JS on purpose (see
- * pickSameIdentityRow below) precisely to avoid a second copy of the rule.
+ * pickSameIdentityRows below) precisely to avoid a second copy of the rule.
  * This is the exception, so it is written ONCE, here, beside the rule it
  * mirrors, and cloudflare/scripts/test-stock-session-identity-guard-pure.cjs
  * runs this expression and the real identityBarcodeKey over the same fixture
@@ -100,15 +100,19 @@ export type ProductIdentityRow = {
 // into a third language -- the drift trap this whole module exists to close --
 // so the SQL narrows to the name group and the fold is applied here, over the
 // same identityBarcodeKey every other comparison site uses.
-export function pickSameIdentityRow<T extends { barcode?: string | null }>(
+//
+// Returns EVERY such row, not the first (it returned the first until N34). A
+// name group can legitimately hold more than one row with the same folded
+// barcode -- that residue is exactly what the Conflicts sweep reports -- and a
+// link-over prompt naming only one of them lets the operator settle a collision
+// and meet the same refusal on the very next save. Callers that only need to
+// know whether there is one read `.length`.
+export function pickSameIdentityRows<T extends { barcode?: string | null }>(
   rows: T[],
   barcode: unknown,
-): T | null {
+): T[] {
   const key = identityBarcodeKey(barcode)
-  for (const row of rows) {
-    if (identityBarcodeKey(row.barcode) === key) return row
-  }
-  return null
+  return rows.filter((row) => identityBarcodeKey(row.barcode) === key)
 }
 
 // Finds another ACTIVE product row that is genuinely the same item as
@@ -278,6 +282,49 @@ export function normalizeProductClusterKey(type: 'leadingzero' | 'barcode' | 'na
   if (type === 'barcode') return String(value ?? '').trim()
   if (type === 'similar') return normalizeProductFuzzyName(value)
   return normalizeProductGroupName(value)
+}
+
+// ---------------------------------------------------------------------------
+// KEEP SEPARATE (N34). When an edit would move a row onto another product's
+// identity, the operator gets two answers, not one: link the records over
+// (merge), or keep the two rows separate. "Keep separate" is the answer the
+// guard could not previously express at all -- the save was simply refused --
+// so a genuinely different article that happens to share a name and a folded
+// barcode with another row could never be saved at all.
+//
+// Keeping them separate is only honest if the pair then SHOWS UP in Conflicts,
+// where the owner asked for it to stay changeable either way. The sweep finds
+// it on its own -- a pair sharing a name_key and a folded barcode always forms
+// a cluster -- UNLESS somebody dismissed that cluster earlier, in which case
+// the old dismissal silently hides the pair the operator just chose to create
+// and the decision becomes unreviewable. So a keep-separate decision retires
+// the dismissals that would hide it.
+//
+// These are the cluster keys the resulting pair can land in, normalized
+// through normalizeProductClusterKey -- the same function the sweep keys by,
+// so a new cluster type cannot drift from this list. The two length floors are
+// the sweep's own and are deliberately different: the leading-zero class uses
+// the fold's 3-digit bound, the raw-barcode class MIN_REAL_BARCODE_LENGTH.
+export type ProductClusterType = 'leadingzero' | 'barcode' | 'name' | 'similar'
+
+export function identityKeepSeparateClusterKeys(
+  name: unknown,
+  barcodes: readonly unknown[],
+): Array<{ type: ProductClusterType; value: string }> {
+  const keys: Array<{ type: ProductClusterType; value: string }> = []
+  const push = (type: ProductClusterType, raw: unknown, floor: number) => {
+    const value = normalizeProductClusterKey(type, raw)
+    if (value.length < floor) return
+    if (keys.some((key) => key.type === type && key.value === value)) return
+    keys.push({ type, value })
+  }
+  push('name', name, 1)
+  push('similar', name, 1)
+  for (const barcode of barcodes) {
+    push('leadingzero', barcode, 3)
+    push('barcode', barcode, MIN_REAL_BARCODE_LENGTH)
+  }
+  return keys
 }
 
 export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
