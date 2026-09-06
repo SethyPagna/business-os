@@ -2195,11 +2195,14 @@ app.post('/customers/:id/points', async (c) => {
   const customer = await db.prepare('SELECT id, name, membership_number FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null }>([customerId])
   if (!customer) return c.json({ error: 'Customer not found.' }, 404)
   const note = String(body.note || '').trim().slice(0, 500) || null
+  // created_by_name is a USER_NAME_SNAPSHOTS column (userIdentity.ts), so the
+  // rename cascade rewrites it to the account USERNAME. Stamping the full name
+  // here would make this row change shape the first time anyone is renamed.
   const result = await db.prepare(`
     INSERT INTO loyalty_point_adjustments (customer_id, points, note, created_by_id, created_by_name)
     VALUES (@customerId, @points, @note, @actorId, @actorName)
-  `).run({ customerId, points: Number(points.toFixed(2)), note, actorId: actor.id, actorName: actor.name })
-  await audit(c.env, actor.id, actor.name, 'award_points', 'customer', customerId, {
+  `).run({ customerId, points: Number(points.toFixed(2)), note, actorId: actor.id, actorName: actorSnapshot(actor) })
+  await audit(c.env, actor.id, actorSnapshot(actor), 'award_points', 'customer', customerId, {
     adjustmentId: result.lastInsertRowid,
     customerName: customer.name,
     membershipNumber: customer.membership_number,

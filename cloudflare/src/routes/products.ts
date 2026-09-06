@@ -2876,7 +2876,7 @@ export async function foldDuplicateProductInto(
       writeOffFrag: `%${writeOffMarker(dup.id)}%`,
     })).map((r) => Number(r.id))
 
-  await audit(env, user?.id ?? null, user?.name ?? null, 'merge_duplicate', 'product', dup.id, {
+  await audit(env, user?.id ?? null, actorSnapshot(user), 'merge_duplicate', 'product', dup.id, {
     productName: dup.name,
     mergedIntoProductId: canonicalId,
     mergedIntoProductName: canonicalName,

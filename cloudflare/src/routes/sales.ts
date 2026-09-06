@@ -1455,7 +1455,7 @@ app.patch('/:id/status', async (c) => {
       "stock_skipped_at = datetime('now')",
       'stock_skipped_by_name = @stock_skipped_by_name',
     )
-    updateParams.stock_skipped_by_name = user?.name ?? null
+    updateParams.stock_skipped_by_name = actorSnapshot(user)
   }
 
   // Y10: the payment for an awaiting-payment sale is decided when it is
@@ -1577,7 +1577,7 @@ app.patch('/:id/status', async (c) => {
     )
     updateParams.cancel_reason = cancelReason
     updateParams.cancel_note = cancelNote
-    updateParams.cancelled_by_name = user?.name ?? null
+    updateParams.cancelled_by_name = actorSnapshot(user)
     updateParams.status_before_cancel = oldStatus
   } else if (oldStatus === 'cancelled') {
     // Un-cancel: the cancellation record clears, and its linked lost-fee

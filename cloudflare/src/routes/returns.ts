@@ -1139,7 +1139,7 @@ app.post('/', async (c) => {
     // Write-time diacritic fold of this return's own searchable text fields
     // (migration 0082), read additively by the returns search builder.
     search_normalized: normalizeSearchText(
-      [returnNumber, body.receipt_number || saleMeta.receipt_number, user?.name, body.customer_name || saleMeta.customer_name, branchName, body.reason, body.return_type || 'restock', body.notes]
+      [returnNumber, body.receipt_number || saleMeta.receipt_number, actorSnapshot(user), body.customer_name || saleMeta.customer_name, branchName, body.reason, body.return_type || 'restock', body.notes]
         .filter(Boolean)
         .join(' '),
     ),
@@ -1847,7 +1847,7 @@ app.post('/supplier', async (c) => {
     // Write-time diacritic fold of this supplier return's own searchable text
     // fields (migration 0082), read additively by the returns search builder.
     search_normalized: normalizeSearchText(
-      [returnNumber, user?.name, branchName, body.reason, 'supplier_return', body.notes, body.supplier_name, settlement]
+      [returnNumber, actorSnapshot(user), branchName, body.reason, 'supplier_return', body.notes, body.supplier_name, settlement]
         .filter(Boolean)
         .join(' '),
     ),

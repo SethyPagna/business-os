@@ -99,6 +99,24 @@ ok(true, 'a deleted account with nothing to fall back on stores null, never a fa
 const BANNED = [
   /\b\w+\s*:\s*user\??\.name\b/,
   /\b\w+\s*:\s*ctx\.user\??\.name\b/,
+  // The session is not always called `user`: contacts.ts binds c.get('user')
+  // to `actor`, and its loyalty-adjustment insert stamped `actor.name` into a
+  // USER_NAME_SNAPSHOTS column, invisible to a `user`-only census.
+  /\b\w+\s*:\s*actor\??\.name\b/,
+  // ASSIGNMENT form. The colon patterns only see object literals, but the
+  // single-sale PATCH /:id/status path builds its bind params by assignment
+  // (`updateParams.cancelled_by_name = user?.name`) -- which is exactly how
+  // two full-name stamps in sales.ts survived the first census while
+  // lib/saleBulkStatus.ts, doing the same job for a group, stamped the
+  // username. One column must not carry two conventions.
+  /\b\w+\s*=\s*(?:user|actor|ctx\.user)\??\.name\b/,
+  // POSITIONAL form. audit() takes the actor name as a bare third ARGUMENT, so
+  // a full name reaches it on a line carrying no key and no `=` for the two
+  // patterns above to bite on -- the shape undoAppliers.ts:1228 still had after
+  // every keyed site in the file had been converted. It is matched in argument
+  // position (after `(` or `,`, before `,` or `)`) so that it sees the call
+  // whether its arguments are stacked one per line or packed onto one.
+  /(?:^|[(,])\s*(?:user|actor|ctx\.user)\??\.name(?:\s*\?\?\s*null)?\s*[,)]/,
   /user\??\.name\s*\|\|\s*user\??\.username/,
   /\b\w+_?[Nn]ame\s*:\s*body\.cashier_name/,
   /\b\w+\s*:\s*body\.(cashier_name|user_name|userName)\b/,
@@ -121,11 +139,16 @@ const WRITERS = [
   ['grouped return action', 'src/lib/returnBulkAction.ts'],
   ['bulk delete jobs', 'src/lib/bulkDeleteEngine.ts'],
   ['settlement action', 'src/lib/saleSettlementAction.ts'],
+  // loyalty_point_adjustments.created_by_name is in USER_NAME_SNAPSHOTS
+  // (userIdentity.ts:26), so a full name written here is not merely
+  // inconsistent -- the next rename cascade rewrites the row to the username
+  // and the stored history silently changes shape.
+  ['loyalty_point_adjustments.created_by_name (award points)', 'src/routes/contacts.ts'],
 ]
 
 for (const [label, rel, usesKernel = true] of WRITERS) {
   const src = read(rel)
-  const offenders = src.split('\r\n').map((line, i) => [i + 1, line])
+  const offenders = src.split(/\r?\n/).map((line, i) => [i + 1, line])
     // Comments are allowed to quote the old shape -- these files explain what
     // they replaced. Only real code counts.
     .filter(([, line]) => !/^\s*(\/\/|\*|\/\*)/.test(line))
@@ -134,6 +157,25 @@ for (const [label, rel, usesKernel = true] of WRITERS) {
   if (usesKernel) assert.ok(/actorSnapshot\(/.test(src), `${rel} does not use the shared actorSnapshot() kernel`)
   ok(true, `writer routes its actor through actorSnapshot(): ${label} (${rel})`)
 }
+
+// Explaining WHY a column takes the username is what turned these call sites
+// into commented ones -- and a `//` line dropped one line too low lands INSIDE
+// the SQL template literal, where it is not a comment at all but text sent to
+// D1. tsc cannot see it (the template is still a valid string) and the census
+// above cannot either (it skips comment-shaped lines). It only fails at
+// runtime, on the statement, in production. So the SQL itself is checked.
+for (const [, rel] of WRITERS) {
+  const src = read(rel)
+  const statements = [...src.matchAll(/\.prepare\(\s*`([\s\S]*?)`/g)]
+  const commented = statements
+    .map(([, sql], i) => [i + 1, sql.split(/\r?\n/).find((line) => /^\s*(\/\/|\/\*)/.test(line))])
+    .filter(([, line]) => line)
+  assert.deepEqual(
+    commented.map(([, line]) => line), [],
+    `${rel} has a JS comment INSIDE a prepared SQL string -- it will be sent to D1 verbatim:\n${commented.map(([n, l]) => `  statement #${n}: ${l.trim()}`).join('\n')}`,
+  )
+}
+ok(true, `no writer hides a JS comment inside a prepared SQL statement (${WRITERS.length} files)`)
 
 // Write-offs: the damaged-lot writer takes its actor as an argument, so pin
 // every call site instead of the writer.
@@ -156,11 +198,38 @@ ok(true, `write-off (damaged_stock_lots) actor: ${newWriteOffs} creation site(s)
 // sales.ts is the one writer that trusted the CLIENT rather than a wrong
 // server field, so it gets its own explicit pin.
 const salesSrc = read('src/routes/sales.ts')
-const salesCode = salesSrc.split('\r\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\r\n')
+const salesCode = salesSrc.split(/\r?\n/).filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n')
 assert.ok(!/cashier_name:\s*body\.cashier_name/.test(salesCode), 'sales.ts still trusts body.cashier_name')
 assert.ok(/cashier_name:\s*actorSnapshot\(user\)/.test(salesSrc), 'sales.ts sale insert does not derive cashier_name from the session')
 assert.ok(/cashier_id:\s*actorId\(user\)/.test(salesSrc), 'sales.ts sale insert does not derive cashier_id from the session (id and name must agree, or the rename cascade splits them)')
 ok(true, 'POST /api/sales derives BOTH cashier_id and cashier_name from the session')
+
+// The single-sale PATCH /:id/status path writes the SAME two columns that
+// lib/saleBulkStatus.ts writes for a group. They must agree: SaleDetailModal
+// renders cancelled_by_name, so one sale cancelled from the detail modal and
+// one cancelled from a group selection cannot read "Za Sethy" and "za".
+assert.ok(!/cancelled_by_name\s*=\s*user\??\.name/.test(salesCode), 'sales.ts PATCH /:id/status stamps cancelled_by_name with the full name')
+assert.ok(!/stock_skipped_by_name\s*=\s*user\??\.name/.test(salesCode), 'sales.ts PATCH /:id/status stamps stock_skipped_by_name with the full name')
+assert.ok(/cancelled_by_name = actorSnapshot\(user\)/.test(salesCode), 'sales.ts PATCH /:id/status does not stamp cancelled_by_name from the session username')
+assert.ok(/stock_skipped_by_name = actorSnapshot\(user\)/.test(salesCode), 'sales.ts PATCH /:id/status does not stamp stock_skipped_by_name from the session username')
+const bulkStatusSrc = read('src/lib/saleBulkStatus.ts')
+assert.ok(/cancelled_by_name:\s*actorSnapshot\(user\)/.test(bulkStatusSrc), 'saleBulkStatus.ts (the group path for the same column) must stamp the username too')
+ok(true, 'cancelled_by_name / stock_skipped_by_name carry ONE identity whether the sale is changed singly or in a group')
+
+// Search blobs are actor snapshots too. sales.ts folds actorSnapshot(user)
+// into search_normalized; if returns.ts folds the full name instead, the same
+// cashier is findable on sales and invisible on returns. Matched across lines
+// because the array literal sits under the normalizeSearchText( call.
+for (const [label, rel] of [['sales', 'src/routes/sales.ts'], ['returns', 'src/routes/returns.ts']]) {
+  const src = read(rel)
+  const blobs = src.split('search_normalized: normalizeSearchText(').slice(1).map((chunk) => chunk.slice(0, 500))
+  assert.ok(blobs.length > 0, `${rel} has no search_normalized blob to check`)
+  for (const [i, blob] of blobs.entries()) {
+    assert.ok(!/\b(?:user|actor)\??\.name\b/.test(blob), `${rel} search_normalized blob #${i + 1} folds the full name into the search index`)
+    assert.ok(/actorSnapshot\(user\)/.test(blob), `${rel} search_normalized blob #${i + 1} does not fold the session username into the search index`)
+  }
+  ok(true, `${label}: ${blobs.length} search_normalized blob(s) index the session USERNAME`)
+}
 
 // audit_logs is written from 130+ call sites that pass a name positionally, so
 // the resolution has to live inside audit() itself.

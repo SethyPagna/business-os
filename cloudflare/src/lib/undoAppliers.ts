@@ -1225,7 +1225,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       await audit(
         ctx.env,
         ctx.user?.id ?? null,
-        ctx.user?.name ?? null,
+        actorSnapshot(ctx.user),
         ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
         'branch',
         id,
