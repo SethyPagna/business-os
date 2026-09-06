@@ -1023,9 +1023,9 @@ export default function Settings() {
       if (action === 'test') await sendTelegramTest()
       else await sendTelegramTodaySummary()
       setTelegramStatus(await getTelegramStatus().catch(() => telegramStatus))
-      notify(action === 'test' ? 'Telegram test message sent and commands connected.' : "Today's Telegram summary was sent.", 'success')
+      notify(action === 'test' ? (t('telegram_test_sent') || 'Telegram test message sent and commands connected.') : (t('telegram_summary_sent') || "Today's Telegram summary was sent."), 'success')
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Telegram action failed', 'error')
+      notify(error instanceof Error ? error.message : (t('telegram_action_failed') || 'Telegram action failed'), 'error')
     } finally {
       setTelegramAction(null)
     }
