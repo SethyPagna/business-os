@@ -51,19 +51,86 @@ await runTest('the suggestion banner renders on Screen 1 before upload, and only
   assert.match(source, /\{datedReconciliationSignal && !dismissedDatedSignal && step === 1 \? \(/)
 })
 
-await runTest('the banner never claims to auto-switch -- its action button closes the import (cancel), not a silent mode change', () => {
-  const bannerStart = source.indexOf('datedReconciliationSignal && !dismissedDatedSignal && step === 1')
-  assert.ok(bannerStart >= 0, 'banner block exists')
-  const bannerBlock = source.slice(bannerStart, bannerStart + 2200)
-  assert.match(bannerBlock, /onClick=\{onClose\}/)
-  assert.match(bannerBlock, /Cancel this import & choose Dated Reconciliation/)
+// The banner block, bounded exactly -- from its own condition to the next
+// Screen-1 block -- so an assertion about "no onClick={onClose} here" cannot
+// accidentally read a neighbouring control.
+function bannerBlockOf(src: string): string {
+  const start = src.indexOf('datedReconciliationSignal && !dismissedDatedSignal && step === 1')
+  assert.ok(start >= 0, 'banner block exists')
+  const end = src.indexOf("{step === 1 && mode === 'products' ?", start)
+  assert.ok(end > start, 'banner block ends before the Screen 1 upload card')
+  return src.slice(start, end)
+}
+
+// The import-review audit's finding: this button PROMISED the Dated
+// Reconciliation importer and was wired to onClose alone, so the live Worker
+// routes behind it (routes/inventory.ts POST /dated-stock-count/resolve,
+// /resolve/apply-decisions, /preview, /apply) had no client at all -- the
+// only component that speaks them, DatedStockReconciliationModal.tsx, had
+// zero importers anywhere in the frontend. Cancelling an import is not
+// choosing a mode; the button now opens the importer it names.
+await runTest('the banner action opens the Dated Reconciliation importer rather than only cancelling this import', () => {
+  const bannerBlock = bannerBlockOf(source)
+  assert.doesNotMatch(bannerBlock, /onClick=\{onClose\}/, 'closing this modal is not "choosing Dated Reconciliation"')
+  assert.doesNotMatch(bannerBlock, /Cancel this import & choose Dated Reconciliation/, 'the old label promised a destination it never reached')
+  assert.match(bannerBlock, /onClick=\{\(\) => setDatedReconciliationOpen\(true\)\}/)
+  assert.match(bannerBlock, /Open the Dated Reconciliation import/)
   assert.match(bannerBlock, /onClick=\{\(\) => setDismissedDatedSignal\(true\)\}/)
   assert.match(bannerBlock, /No, this file is correct/)
 })
 
-await runTest("the banner surfaces the detector's own repeatedGroupCount and sampleProductName, not a canned message", () => {
+await runTest('BulkImportModal actually mounts DatedStockReconciliationModal, so those Worker routes have a client', () => {
+  assert.match(
+    source,
+    /const DatedStockReconciliationModal = lazyRetry\(\(\) => import\('\.\/DatedStockReconciliationModal'\), 'products-dated-stock-reconciliation'\)/,
+    'a 600-line flow only the dated-count shape reaches must not ride along in the bulk-import chunk',
+  )
+  assert.match(source, /import \{ lazyRetry \} from '\.\.\/\.\.\/\.\.\/utils\/lazyImport\.ts'/)
+  assert.match(source, /const \[datedReconciliationOpen, setDatedReconciliationOpen\] = useState\(false\)/)
+  // Swapped, not stacked: one dialog on screen at a time, so the
+  // importer's own Back still reads as "back inside that flow" rather
+  // than fighting a second modal's backdrop underneath it.
+  assert.match(source, /if \(datedReconciliationOpen\) \{\s*return \(\s*<Suspense fallback=\{null\}>\s*<DatedStockReconciliationModal/)
+  assert.match(source, /import \{ Suspense, useMemo, useRef, useState \} from 'react'/)
+})
+
+await runTest('the mounted importer gets the translator and the product list its review step needs', () => {
+  const start = source.indexOf('<DatedStockReconciliationModal')
+  assert.ok(start >= 0)
+  const block = source.slice(start, source.indexOf('/>', start))
+  // Its t is (key, fallback?, km?); this modal's T is (key, fallback) and
+  // is not assignable as-is, so the adapter is what carries the packs in.
+  assert.match(block, /t=\{\(key: string, fallback\?: string\) => T\(key, fallback \?\? key\)\}/, 'without a translator every label falls back to English')
+  assert.match(block, /products=\{products\}/, 'its unresolved-row picker labels candidates "#123" without this')
+  assert.match(block, /setDatedReconciliationOpen\(false\)/)
+  assert.match(block, /onDone=\{/)
+  // Backing out returns to this file's analysis; once a reconciliation has
+  // actually been applied there is nothing to come back to.
+  assert.match(block, /if \(datedReconciliationApplied\) onClose\(\)/)
+  assert.match(source, /const \[datedReconciliationApplied, setDatedReconciliationApplied\] = useState\(false\)/)
+})
+
+// The owner's import preference is one fast client-side review, then apply
+// directly. The reconciliation flow is an ALTERNATIVE for the dated-count
+// file shape, never a second mandatory review bolted onto the ordinary
+// import -- so the only thing that may open it is the detector's own banner.
+await runTest('the importer is reachable only from the dated-count signal, never as a second mandatory review step', () => {
+  const opens = [...source.matchAll(/setDatedReconciliationOpen\(true\)/g)]
+  assert.equal(opens.length, 1, 'exactly one place may open it')
   const bannerStart = source.indexOf('datedReconciliationSignal && !dismissedDatedSignal && step === 1')
-  const bannerBlock = source.slice(bannerStart, bannerStart + 2200)
+  const bannerEnd = source.indexOf("{step === 1 && mode === 'products' ?", bannerStart)
+  const at = opens[0].index ?? -1
+  assert.ok(at > bannerStart && at < bannerEnd, 'the only opener sits inside the suggestion banner')
+})
+
+await runTest('ImportModeWizard forwards the product list it already receives from Products.tsx', () => {
+  const wizard = fs.readFileSync(new URL('../src/components/products/import/ImportModeWizard.tsx', import.meta.url), 'utf8')
+  assert.match(wizard, /export default function ImportModeWizard\(\{ onClose, onDone, t, products \}/, 'products was a declared-but-never-read prop')
+  assert.match(wizard, /<BulkImportModal[^>]*products=\{products\}/)
+})
+
+await runTest("the banner surfaces the detector's own repeatedGroupCount and sampleProductName, not a canned message", () => {
+  const bannerBlock = bannerBlockOf(source)
   assert.match(bannerBlock, /datedReconciliationSignal\.repeatedGroupCount/)
   assert.match(bannerBlock, /datedReconciliationSignal\.sampleProductName/)
 })

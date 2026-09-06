@@ -446,7 +446,7 @@
   "dated_count_upload_heading": "Upload a dated stock-count file",
   "dated_count_use_imported_price": "Use imported price",
   "dated_reconciliation_suggestion_dismiss": "No, this file is correct",
-  "dated_reconciliation_suggestion_switch": "Cancel this import & choose Dated Reconciliation",
+  "dated_reconciliation_suggestion_switch": "Open the Dated Reconciliation import",
   "dated_reconciliation_suggestion_title": "This might be a dated stock-count file",
   "dated_stock_reconciliation_title": "Dated Stock Reconciliation",
   "deactivate": "Deactivate",
