@@ -923,7 +923,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 [tr(t, 'category', 'Category'), detail.category],
                 [tr(t, 'brand', 'Brand'), detail.brand],
                 [tr(t, 'tag', 'Tag'), detail.tag_label],
-                [tr(t, 'unit_cost', 'Unit cost'), detail.unit_cost_usd != null || detail.batch_unit_cost_usd != null ? fmtOptionalUsd(detail.unit_cost_usd ?? detail.batch_unit_cost_usd) : null],
+                [tr(t, 'cost_price', 'Cost price'), detail.unit_cost_usd != null || detail.batch_unit_cost_usd != null ? fmtOptionalUsd(detail.unit_cost_usd ?? detail.batch_unit_cost_usd) : null],
                 [tr(t, 'total_cost', 'Total cost'), detail.total_cost_usd != null || detail.batch_received_cost_usd != null ? fmtOptionalUsd(detail.total_cost_usd ?? detail.batch_received_cost_usd) : null],
                 [tr(t, 'expiry_date', 'Expiry'), detail.batch_expiry_date],
                 [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],

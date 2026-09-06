@@ -74,6 +74,20 @@ runTest('the fast stock-in queue wraps the name and shows the barcode under it',
   assert.doesNotMatch(queue, /min-w-0 truncate/)
 })
 
+const ledgerSource = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
+
+// One figure, one name. The stock-in surfaces call the movement's per-unit
+// money 'Cost price' (the session lines table, the line detail and the fast
+// flow's own input all read tr('cost_price'/'cost_price_usd')); the sibling
+// Stock change detail rendered the SAME column as 'Unit cost', so an operator
+// comparing the two screens saw two names for one number.
+runTest('the Stock change detail names the movement cost the way the stock-in surfaces do', () => {
+  assert.match(ledgerSource, /\[tr\(t, 'cost_price', 'Cost price'\), detail\.unit_cost_usd != null \|\| detail\.batch_unit_cost_usd != null/)
+  assert.doesNotMatch(ledgerSource, /tr\(t, 'unit_cost', 'Unit cost'\)/)
+  // and the surfaces it now agrees with, so the pair cannot drift apart again
+  assert.match(sectionSource, /tr\('cost_price', 'Cost price'\)/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
