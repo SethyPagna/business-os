@@ -117,8 +117,19 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
                       </span>
                       <span className={['shrink-0 text-right font-mono', cellClass].join(' ').trim()}>
                         {line.value}
-                        {line.note != null ? <span className="ml-1 font-sans text-[10px] text-[var(--ui-ink-3)]">{line.note}</span> : null}
                       </span>
+                      {line.note != null ? (
+                        // The note gets its OWN row under the pair, never the
+                        // value cell: inside the cell its full text was the
+                        // value track's max-content, so one "not available --
+                        // no courier cost recorded on 253 deliveries" pushed
+                        // every other label in the block down to an ellipsis
+                        // (verifier, Sep 6, measured 313px -> 86px label track
+                        // in the 420px statement). `w-0 min-w-full` makes the
+                        // spanning row contribute nothing to track sizing and
+                        // then fill the pair's width, so it wraps under them.
+                        <span className="col-span-2 w-0 min-w-full whitespace-normal pl-3 font-sans text-[10px] leading-snug text-[var(--ui-ink-3)]">{line.note}</span>
+                      ) : null}
                     </Fragment>
                   )
                 })}
