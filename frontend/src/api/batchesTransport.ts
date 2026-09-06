@@ -59,6 +59,12 @@ export type BatchSelection = {
   batchId: number
   batchLabel: string | null
   batchExpiryDate: string | null
+  // The lot's own received date, carried so a host that DISPLAYS the picked
+  // intake ("Batch 2 · Received: 09/01/2026" on a staged sale line) does not
+  // have to re-fetch the lot list to find out what it just picked. Optional:
+  // the POS cart line stores the label and the expiry only, and nothing
+  // upstream is required to supply it.
+  batchReceivedAt?: string | null
   quantity: number
 }
 
