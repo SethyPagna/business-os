@@ -24,6 +24,7 @@ import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/d
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1040,13 +1041,20 @@ app.get('/movements', async (c) => {
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
   const total = await db.prepare(`SELECT COUNT(*) AS count FROM inventory_movements ${whereSql}`).get<{ count: number }>(params)
+  // N13: the branch a movement happened at. Sale/return-family rows carry
+  // branch_id but no branch_name snapshot, so this drill showed an empty
+  // Branch column for them; resolved from the id (snapshot-first) via the
+  // shared expression. It is aliased rather than named branch_name because
+  // `SELECT *` already emits that column, and folded back onto branch_name in
+  // JS so every consumer still sees one field.
   const items = await db.prepare(`
-    SELECT * FROM inventory_movements
+    SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN}
+    FROM inventory_movements
     ${whereSql}
     ORDER BY created_at DESC, id DESC
     LIMIT @pageSize OFFSET @offset
-  `).all({ ...params, pageSize, offset })
-  return c.json({ items, total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
+  `).all<Record<string, unknown>>({ ...params, pageSize, offset })
+  return c.json({ items: (items || []).map(withResolvedBranchName), total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
 })
 
 // ---- Reasons (saved as JSON in settings, matching the Docker backend) ----

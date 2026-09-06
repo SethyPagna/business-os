@@ -19,6 +19,10 @@
 // `row_move_out` and `write_off` are kept for any legacy rows even though
 // current code writes `move_out` / `return_reversal` instead.
 import { localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from './businessDateWindow'
+// N13: sale/return-family movements stamp branch_id but not branch_name, so
+// the ledger rendered their Branch column empty. Resolved through the id here
+// (snapshot-first) -- see lib/movementBranchName.ts for why it is read-side.
+import { movementBranchNameSql } from './movementBranchName'
 
 export const LEDGER_OUT_TYPES = [
   'remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
@@ -161,7 +165,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   const rowsSql = `
     SELECT
       m.id, m.product_id, m.product_name, p.barcode, p.unit, p.brand, p.category, p.tag_label,
-      m.branch_id, m.branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
+      m.branch_id, ${movementBranchNameSql('m')} AS branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(m.quantity, 0)) ELSE ABS(COALESCE(m.quantity, 0)) END AS signed_quantity,
       m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
       m.reason, m.reference_id, m.user_name, m.created_at,
