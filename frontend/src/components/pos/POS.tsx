@@ -1,7 +1,7 @@
 // POS
 /**
  * Point-of-Sale screen.
- * Sub-components (ProductImage, CartItem) are imported from
+ * Sub-components (ProductCard, CartItem) are imported from
  * sibling files.
  *
  * Key features:
@@ -19,7 +19,6 @@ import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'rea
 import type { ChangeEvent, KeyboardEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import { useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
@@ -31,7 +30,7 @@ import {
   EMPTY_CUSTOMER,
   createEmptyOrder,
 } from '../../constants'
-import ProductImage from './ProductImage'
+import ProductCard from './ProductCard.tsx'
 import CartItem     from './CartItem'
 import ShiftGate, { EndShiftButton } from './ShiftGate'
 import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
@@ -49,7 +48,6 @@ import {
   getCartLineId,
   findMatchingCartLineIndex,
   applyManualDiscount,
-  computeExpiryStatus,
   repricePromotionCartLines,
   resolveWholesaleAutoRule,
   applyWholesaleAutoPricing,
@@ -58,7 +56,7 @@ import {
   resolveChangeExchangeRate,
   type ManualDiscountType,
 } from './posCore.ts'
-import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
+import { promotionBadgeForProduct, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { effectiveTaxRate } from '../../utils/taxSettings.ts'
@@ -73,7 +71,6 @@ import { calculateProductDiscount, normalizePriceValue } from '../../utils/prici
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
-import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import {
   buildProductLightboxState,
   getProductGalleryImages,
@@ -623,33 +620,6 @@ function paymentMethodSummary(details: PaymentDetail[]): string {
   return methods.join(' + ') || 'Cash'
 }
 
-function ProductDiscountBadge({
-  product,
-  exchangeRate,
-  fmtUSD,
-  label = 'Discounts',
-  promotionRules = [],
-}: {
-  exchangeRate: number
-  fmtUSD: (value: unknown) => string
-  label?: string
-  product: ProductRecord
-  promotionRules?: readonly PromotionRule[]
-}) {
-  // G1: one kernel decides what the card advertises -- the product's own
-  // discount OR the best promotion rule, including "buy >= X" deals that
-  // don't cut the qty-1 price but must still be visible on the card.
-  const badge = promotionBadgeForProduct(product, promotionRules)
-  if (!badge.active) return null
-  const text = badge.kind === 'quantity_hint'
-    ? ((badge.show_title && badge.title) || `${label} ${badge.min_quantity}+`)
-    : `${(badge.show_title && badge.title) || String(product?.discount_label || '') || label} ${fmtUSD(evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
-  return (
-    <span className="absolute bottom-1 left-1 right-1 z-10 truncate rounded-md px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: badge.badge_color || '#e11d48' }} title={text}>
-      {text}
-    </span>
-  )
-}
 export default function POS() {
   const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp() as AppContextValue
   // Settings > Stock Alerts. The till colours its grid and answers its stock
@@ -3137,102 +3107,24 @@ export default function POS() {
               />
             </div>
             <div className="pos-product-grid">
-              {pagedProductCards.map(p => {
-                const variants = getVariantChoices(p)
-                const groupProduct = hasVariantChoices(p)
-                const groupMeta: ProductGroupMeta | null = p.__groupMeta || null
-                const choiceLabel = groupMeta?.groupKind === 'variant'
-                  ? posCopy('Variants', 'ជម្រើសផ្សេងៗ')
-                  : posCopy('Options', 'ជម្រើស')
-                const stock   = getDisplayStock(p)
-                const variantInStock = variants.some((variant) => getDisplayStock(variant) > asNumber(variant.out_of_stock_threshold))
-                const inStock = groupProduct ? variantInStock : stock > asNumber(p.out_of_stock_threshold)
-                const promoBadge = promotionBadgeForProduct(p, promotionRules)
-                const expiryInfo = !groupProduct ? computeExpiryStatus(p.expiry_date, p.expiry_alert_days) : null
-                return (
-                  <div
-                    key={p.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`card relative cursor-pointer p-3 text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}`}
-                    onClick={() => openProductCard(p, { groupProduct, inStock })}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        openProductCard(p, { groupProduct, inStock })
-                      }
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="relative w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden"
-                      onClick={(event) => { event.stopPropagation(); openImageLightbox(p, 0) }}
-                      aria-label={posCopy('Preview product images', 'មើលរូបភាពទំនិញ')}
-                    >
-                      {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
-                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} promotionRules={promotionRules} />
-                    </button>
-                    {/* The purple "Groups: N" chip that used to sit here was
-                        removed (user): it duplicated the "Options: N" count now
-                        shown on the bottom row below — same number twice. */}
-                    <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>
-                      {p.__displayName || p.name}
-                      {/* P4: the operator's own memory-aid tag chip */}
-                      {String(p.tag_label || '').trim() ? (
-                        <span className="ml-1 inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-semibold text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">{String(p.tag_label).trim()}</span>
-                      ) : null}
-                    </p>
-                    {/* Product cards show only the normal selling price. VIP
-                        stays inside the product's price options, matching the
-                        wholesale tier instead of advertising a tier label on
-                        the outside grid. Grouped cards still show the highest
-                        option selling price. */}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      <span className="text-sm font-bold text-blue-600">
-                        {fmtUSD(groupProduct ? (groupMeta?.maxSellingPriceUsd || asNumber(p.selling_price_usd)) : asNumber(p.selling_price_usd))}
-                      </span>
-                    </div>
-                    {asNumber(p.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(p.selling_price_khr))}</p> : null}
-                    {promoBadge.active ? (
-                      <p className="text-[11px] font-semibold" style={{ color: promoBadge.badge_color || '#e11d48' }}>
-                        {promoBadge.kind === 'quantity_hint'
-                          ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
-                          : `${(promoBadge.show_title && promoBadge.title) || p.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(evaluatePromotionPricing(p, 1, promotionRules, exchangeRate).unit_price_usd)}`}
-                      </p>
-                    ) : null}
-                    {/* Colored qty+unit instead of a separate "Out of Stock" label --
-                        same convention as Products/Inventory/Branches: red when out,
-                        amber/yellow when low, emerald when healthy. Group products have
-                        no single qty to color against (variants can each differ), so
-                        they keep the neutral gray style. */}
-                    {/* Grouped card's bottom row (user): "Options: N | Total: n"
-                        — the single home for the option count (the removed
-                        purple chip's duplicate) and the summed stock. The
-                        labels stay grey but the NUMBERS carry colour (user,
-                        Sep 3 2026): the option count in the accent, the summed
-                        stock in the same red/amber/emerald convention a flat
-                        product's "qty unit" uses, judged against the group's
-                        total. A flat product keeps its coloured "qty unit". */}
-                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
-                      {groupProduct ? (
-                        <>
-                          {choiceLabel}: <span className="font-semibold text-primary-600 dark:text-primary-400">{variants.length}</span>
-                          {groupMeta?.stockTotal != null ? (
-                            <>
-                              {' | '}{posCopy('Total', 'សរុប')}: <span className={`font-semibold ${groupMeta.stockTotal <= 0 ? 'text-red-500' : groupMeta.stockTotal <= effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold) ? 'text-yellow-500' : 'text-emerald-500'}`}>{groupMeta.stockTotal}</span>
-                            </>
-                          ) : null}
-                        </>
-                      ) : `${stock} ${p.unit}`}
-                    </p>
-                    {expiryInfo && expiryInfo.status !== 'ok' ? (
-                      <p className={`text-[11px] font-semibold ${expiryInfo.status === 'expired' ? 'text-red-600' : 'text-yellow-600'}`}>
-                        {expiryInfo.status === 'expired' ? (t('expired') || 'Expired') : (t('expiring_soon') || 'Expiring soon')}
-                      </p>
-                    ) : null}
-                  </div>
-                )
-              })}
+              {pagedProductCards.map(p => (
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  variants={getVariantChoices(p)}
+                  groupMeta={p.__groupMeta || null}
+                  getStock={(row) => getDisplayStock(row as ProductRecord)}
+                  lowStockConfig={lowStockConfig}
+                  promotionRules={promotionRules}
+                  exchangeRate={exchangeRate}
+                  fmtUSD={fmtUSD}
+                  fmtKHR={fmtKHR}
+                  t={t}
+                  copy={posCopy}
+                  onOpen={(options) => openProductCard(p, options)}
+                  onOpenImage={() => openImageLightbox(p, 0)}
+                />
+              ))}
               {visibleProductCards.length === 0 && (
                 <div className="col-span-full text-center py-12 text-gray-400">
                   {catalogRefreshing ? (

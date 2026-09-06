@@ -212,10 +212,11 @@ await runTest('every product picker mounts the shared option sheet', () => {
     2,
     'both the add-items picker and the Replace picker must open the shared sheet',
   )
-  // N19: the two result lists are ONE shared row component now (they used to
-  // render differently), so the handler travels as onSelect. The rule is
-  // unchanged -- a result row OPENS the sheet and does nothing else.
-  assert.match(saleDetail, /onSelect=\{\(\) => setAddSheetGroup\(candidate\)\}/, 'a result row opens the sheet, never a line form directly')
+  // N19 round 3: the two result lists are ONE shared component now, and it is
+  // the POS's own card (components/pos/ProductCard.tsx), so the handler
+  // travels as onOpen. The rule is unchanged -- a result OPENS the sheet and
+  // does nothing else.
+  assert.match(saleDetail, /onOpen=\{\(\) => setAddSheetGroup\(candidate\)\}/, 'a result card opens the sheet, never a line form directly')
   // N19: there is no line form left to seed. The second modal that used to
   // re-ask the received date, the quantity and the price with a layout the
   // POS has never rendered is deleted; the sheet's own received-date step

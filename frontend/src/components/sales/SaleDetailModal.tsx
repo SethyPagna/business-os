@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
@@ -33,6 +33,11 @@ import {
   type StagedAddLine,
 } from './saleAddLines.ts'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
+// The POS's own product card and the one 'units at this branch' rule it is
+// read with -- the same rule saleAddLines.ts caps a staged line by.
+import ProductCard from '../pos/ProductCard.tsx'
+import { branchStockQuantity } from '../pos/productSheetState.ts'
+import { useLowStockConfig } from '../../AppContext'
 import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
@@ -165,46 +170,31 @@ interface SaleAmendmentRequest {
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
 type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
 
-// One search RESULT as buildProductGroups leaves it: the family's lead row
-// plus the three summary figures the row prints.
-type ProductSearchGroupRow = AddProductCandidate & {
-  __groupStock?: number
-  __groupMinPrice?: number
-  __groupMaxPrice?: number
-}
+// Nothing here draws a product card. Both product searches on this screen --
+// adding items, and replacing a line -- mount components/pos/ProductCard.tsx,
+// the POS's own card, in the POS's own grid.
+//
+// They used to render a one-line row of this file's own ("name / N options ·
+// Stock: n / price range") while the POS showed its card grid, which is the
+// other half of the owner's 2026-09-06 report: "the design when clicked
+// should be like the POS, same identical design, don't create new." The click
+// already opened the POS sheet; what you looked at BEFORE clicking was still
+// something new. The row is gone rather than restyled, because a lookalike is
+// exactly what drifts.
+//
+// Promotion rules are shop-wide pricing the POS loads and charges by. This
+// screen loads none, and an amendment does not price by them either, so the
+// card is handed an empty list: it still advertises the product's OWN
+// discount (which evaluates with no rules at all) and never advertises a
+// promotion this surface would not honour.
+const NO_PROMOTION_RULES: never[] = []
 
-// ONE row for a product-search result on this screen, used by both places
-// that search products here -- adding items and replacing a line. They used
-// to render two different rows (one with the option count and the group's
-// stock, one with only a name and a price), so the same search answered
-// differently depending on which button opened it. Tapping a row only OPENS
-// the shared option sheet; nothing here commits a pick.
-function ProductSearchRow({ candidate, fmtUSD, optionsWord, stockWord, onSelect }: {
-  candidate: ProductSearchGroupRow
-  fmtUSD: (value: number) => string
-  optionsWord: string
-  stockWord: string
-  onSelect: () => void
-}) {
-  const minPrice = toNumber(candidate.__groupMinPrice)
-  const maxPrice = toNumber(candidate.__groupMaxPrice)
-  return (
-    <button
-      type="button"
-      className="flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-      onClick={onSelect}
-    >
-      <span className="min-w-0">
-        <span className="block break-words font-medium text-gray-900 dark:text-white">{candidate.__displayName || candidate.name}</span>
-        <span className="block text-[11px] text-gray-400">
-          {`${candidate.__groupChoices?.length || 1} ${optionsWord} · ${stockWord}: ${toNumber(candidate.__groupStock)}`}
-        </span>
-      </span>
-      <span className="whitespace-nowrap tabular-nums text-gray-700 dark:text-gray-200">
-        {minPrice !== maxPrice ? `${fmtUSD(minPrice)}–${fmtUSD(maxPrice)}` : fmtUSD(minPrice)}
-      </span>
-    </button>
-  )
+// One search RESULT as buildProductGroups leaves it: the family's lead row,
+// plus the three figures the card prints off the whole group.
+type AddCandidateGroup = AddProductCandidate & {
+  __groupStock: number
+  __groupKind: 'variant' | 'option'
+  __groupMaxPrice: number
 }
 
 // Which sale states accept a new line. Hand-synced twin of the Worker's
@@ -396,6 +386,22 @@ export default function SaleDetailModal({
   const [replacePicking, setReplacePicking] = useState<AddProductCandidate | null>(null)
   const addSearchSeqRef = useRef(0)
   const addSearchInputRef = useRef<HTMLInputElement | null>(null)
+  // The card colours its quantity by the owner's Stock Alerts numbers, the
+  // same source the POS grid reads.
+  const lowStockConfig = useLowStockConfig()
+  /**
+   * Units on the shelf THIS sale sells from.
+   *
+   * The POS card reads its branch filter's shelf; here the shelf is fixed --
+   * the sale's own branch -- and it must be the SAME number the pick is then
+   * capped at, or the card advertises 32 (2 at the shop, 30 at the warehouse)
+   * over a sale the Worker will only let take 2. That cap is
+   * branchStockQuantity, so this is branchStockQuantity too.
+   */
+  const cardStock = useCallback(
+    (row: AddProductCandidate): number => branchStockQuantity(row, sale?.branch_id ?? null) ?? toNumber(row.stock_quantity),
+    [sale?.branch_id],
+  )
   const addCandidateGroups = useMemo(() => buildProductGroups(addCandidates, new Map(), { preserveInputOrder: true }).map((group) => {
     const choices = (group.sellableItems.length ? group.sellableItems : [group.leadProduct]) as AddProductCandidate[]
     const lead = choices[0] || group.leadProduct as AddProductCandidate
@@ -404,11 +410,38 @@ export default function SaleDetailModal({
       __displayName: group.name || String(lead.name || ''),
       __groupKey: group.key,
       __groupChoices: choices,
-      __groupStock: choices.reduce((sum, row) => sum + toNumber(row.stock_quantity), 0),
-      __groupMinPrice: group.minSellingPriceUsd,
+      // Summed on the sale's shelf, not across every branch -- the group's
+      // total has to be the total of the numbers its options would show.
+      __groupStock: choices.reduce((sum, row) => sum + cardStock(row), 0),
+      __groupKind: group.groupKind,
       __groupMaxPrice: group.maxSellingPriceUsd,
     } satisfies AddProductCandidate
-  }), [addCandidates])
+  }), [addCandidates, cardStock])
+  /**
+   * One search result, described as a POS card. Both product searches on this
+   * screen spread this, so they cannot answer the same query differently --
+   * which is how they drifted apart the first time.
+   */
+  const productCardProps = (candidate: AddCandidateGroup) => ({
+    product: candidate,
+    // A family of one is a flat product: it has no options to count, and the
+    // card prints its "qty unit" rather than an "Options: 1" row.
+    variants: (candidate.__groupChoices?.length || 0) > 1 ? (candidate.__groupChoices as AddProductCandidate[]) : [],
+    groupMeta: {
+      groupKind: String(candidate.__groupKind || 'option'),
+      maxSellingPriceUsd: toNumber(candidate.__groupMaxPrice),
+      stockTotal: toNumber(candidate.__groupStock),
+    },
+    getStock: cardStock,
+    lowStockConfig,
+    promotionRules: NO_PROMOTION_RULES,
+    // The sale's own rate: what its money was already converted at.
+    exchangeRate: toNumber(sale?.exchange_rate) || 4100,
+    fmtUSD,
+    fmtKHR,
+    t,
+    copy: (en: string, km = en): string => (isKhmer ? km : en),
+  })
   const closeAddPicker = (): void => {
     setAddSheetGroup(null)
     requestAnimationFrame(() => addSearchInputRef.current?.focus())
@@ -1299,19 +1332,15 @@ export default function SaleDetailModal({
                                 {addSearching ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{t('loading') || 'Loading'}</div>
                                 ) : addCandidates.length ? (
-                                  <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-700">
+                                  <div className="pos-product-grid mt-1 max-h-64 overflow-y-auto pr-0.5">
                                     {addCandidateGroups.map((candidate) => (
-                                      <li key={String(candidate.__groupKey || candidate.id)}>
-                                        <ProductSearchRow
-                                          candidate={candidate}
-                                          fmtUSD={fmtUSD}
-                                          optionsWord={t('options') || 'options'}
-                                          stockWord={t('current_stock') || 'Stock'}
-                                          onSelect={() => setReplacePicking(candidate)}
-                                        />
-                                      </li>
+                                      <ProductCard
+                                        key={String(candidate.__groupKey || candidate.id)}
+                                        {...productCardProps(candidate)}
+                                        onOpen={() => setReplacePicking(candidate)}
+                                      />
                                     ))}
-                                  </ul>
+                                  </div>
                                 ) : addQuery.trim().length >= 2 ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}</div>
                                 ) : null}
@@ -1571,21 +1600,17 @@ export default function SaleDetailModal({
               ) : null}
               {/* A typed or scanned barcode NARROWS this list. It never
                   auto-adds and never auto-opens a sheet, on this surface or
-                  any other (owner rule): the person picks the row. */}
+                  any other (owner rule): the person picks the card. */}
               {addCandidates.length > 0 ? (
-                <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                <div className="pos-product-grid mt-2 max-h-80 overflow-y-auto pr-0.5">
                   {addCandidateGroups.map((candidate) => (
-                    <li key={String(candidate.id)}>
-                      <ProductSearchRow
-                        candidate={candidate}
-                        fmtUSD={fmtUSD}
-                        optionsWord={t('options') || 'options'}
-                        stockWord={t('current_stock') || 'Stock'}
-                        onSelect={() => setAddSheetGroup(candidate)}
-                      />
-                    </li>
+                    <ProductCard
+                      key={String(candidate.__groupKey || candidate.id)}
+                      {...productCardProps(candidate)}
+                      onOpen={() => setAddSheetGroup(candidate)}
+                    />
                   ))}
-                </ul>
+                </div>
               ) : null}
               {addSheetGroup ? (
                 <ProductOptionSheet

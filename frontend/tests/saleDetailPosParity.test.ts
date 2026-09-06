@@ -102,6 +102,70 @@ assert.match(optionSheet, /import ProductDetailSheet from '\.\.\/pos\/ProductDet
 assert.match(pos, /const ProductDetailSheet = lazyRetry\(\(\) => import\('\.\/ProductDetailSheet'\)/)
 assert.match(optionSheet, /<ProductDetailSheet/)
 
+// 2b. The LIST half of the same owner report. Clicking a result was made the
+//     POS pick in round 2, but the results themselves were still this
+//     screen's own one-line ProductSearchRow -- name, "N options · Stock: n",
+//     a price range -- beside the POS's card grid. "Same identical design"
+//     covers what you look at before you click, so the POS card body is now
+//     ONE component, components/pos/ProductCard.tsx, and the POS itself
+//     renders that component rather than a copy of it.
+const productCard = read('../src/components/pos/ProductCard.tsx')
+// The row it replaces is gone from this screen entirely -- both the add-items
+// list and the Replace list mount the card.
+assert.doesNotMatch(detail, /ProductSearchRow/)
+assert.doesNotMatch(detail, /ProductSearchGroupRow/)
+assert.match(detail, /import ProductCard from '\.\.\/pos\/ProductCard\.tsx'/)
+assert.match(pos, /import ProductCard from '\.\/ProductCard\.tsx'/)
+// The POS uses the extracted piece: exactly one <ProductCard, inside the
+// .pos-product-grid it always drew its cards in.
+assert.equal((pos.match(/<ProductCard\b/g) || []).length, 1, 'POS renders the shared card exactly once')
+assert.match(pos, /<div className="pos-product-grid">[\s\S]{0,200}<ProductCard/)
+// Both product searches on the sale screen mount the same card in the same
+// grid class -- add-items and Replace answer identically.
+assert.equal((detail.match(/<ProductCard\b/g) || []).length, 2, 'add-items and Replace both mount the shared card')
+assert.equal((detail.match(/className="pos-product-grid/g) || []).length, 2)
+// The card body lives in exactly ONE file. These are the fragments that made
+// the POS card what it is; if any of them reappears in POS.tsx or in the sale
+// modal, a copy has been made.
+const cardMarkup = [
+  'relative w-full aspect-square rounded-lg bg-gray-100',
+  'line-clamp-2',
+  'ProductDiscountBadge',
+  'promotionBadgeForProduct',
+  'computeExpiryStatus',
+]
+for (const fragment of cardMarkup) {
+  assert.ok(productCard.includes(fragment), `ProductCard.tsx lost the POS card's ${fragment}`)
+  assert.ok(!detail.includes(fragment), `components/sales/SaleDetailModal.tsx re-implements the POS card: ${fragment}`)
+}
+// POS.tsx keeps promotionBadgeForProduct for its one-tap gate, but nothing
+// of the card body: no badge component of its own, no expiry read, no
+// inline card markup.
+assert.doesNotMatch(pos, /function ProductDiscountBadge|<ProductDiscountBadge/)
+assert.doesNotMatch(pos, /computeExpiryStatus\(/)
+assert.doesNotMatch(pos, /aspect-square rounded-lg bg-gray-100/)
+// The card body itself, carried over unchanged -- the two lines nothing else
+// in the app draws.
+assert.match(productCard, /\{choiceLabel\}: <span className="font-semibold text-primary-600 dark:text-primary-400">\{variants\.length\}<\/span>/)
+assert.match(productCard, /\{expiryInfo\.status === 'expired' \? \(t\('expired'\) \|\| 'Expired'\) : \(t\('expiring_soon'\) \|\| 'Expiring soon'\)\}/)
+// The sale screen reads the SAME shelf the pick will draw from -- the sale's
+// own branch, through the one branchStockQuantity rule saleAddLines.ts caps
+// with. A card showing the cross-branch total over a shop-only sale is the
+// exact mismatch round 2 removed from the staged line.
+assert.match(detail, /import \{ branchStockQuantity[^\r\n]*\} from '\.\.\/pos\/productSheetState\.ts'/)
+assert.match(detail, /branchStockQuantity\(row, sale\?\.branch_id \?\? null\) \?\? toNumber\(row\.stock_quantity\)/)
+// A card click still only OPENS the sheet; nothing on the card commits a pick.
+assert.match(detail, /onOpen=\{\(\) => setAddSheetGroup\(candidate\)\}/)
+assert.match(detail, /onOpen=\{\(\) => setReplacePicking\(candidate\)\}/)
+// Shop-wide promotion rules are not loaded on this screen and an amendment
+// does not price by them, so the card must not advertise one it will not
+// honour. It still shows the product's own discount, which evaluates with no
+// rules at all.
+assert.match(detail, /promotionRules: NO_PROMOTION_RULES/)
+// Both lists spread ONE description of a result-as-a-card, so they cannot
+// answer the same query differently -- which is how they drifted apart before.
+assert.equal((detail.match(/\{\.\.\.productCardProps\(candidate\)\}/g) || []).length, 2)
+
 // 3. No second sheet implementation survives in the sales folder: nothing
 //    named like a picker/sheet, and nothing there fetching a lot list of its
 //    own -- the received-date question belongs to the one sheet.
@@ -151,8 +215,8 @@ assert.doesNotMatch(addSearchEffect, /setAddSheetGroup|setAddLines|stagedLineFro
 assert.equal((detail.match(/stagedLineFromSheetPick\(/g) || []).length, 1, 'exactly one call site')
 assert.match(detail, /<ProductOptionSheet[\s\S]{0,1400}onPick=\{\(picked, selection\) => \{[\s\S]{0,300}stageAddLineFromPick\(/)
 assert.match(detail, /const stageAddLineFromPick = [\s\S]{0,400}stagedLineFromSheetPick\(picked, selection\)/)
-// The results list only OPENS the sheet; it never commits a pick.
-assert.match(detail, /onSelect=\{\(\) => setAddSheetGroup\(candidate\)\}/)
+// The results grid only OPENS the sheet; it never commits a pick.
+assert.match(detail, /onOpen=\{\(\) => setAddSheetGroup\(candidate\)\}/)
 
 // 7. The staged line still lands in addLines exactly as before, and the rule
 //    that builds it is one testable module rather than this file's text --
