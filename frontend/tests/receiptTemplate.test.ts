@@ -202,12 +202,12 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   assert.match(receiptSource, /const target = variant === 'compact' \? compactPrintRef\.current : printRef\.current/)
   assert.match(receiptSource, /const exportReceiptVariant = async/)
   assert.match(receiptSource, /printTools\.printReceipt\(target,\s*\{[\s\S]*title,/)
-  assert.match(receiptSource, /printTools\.openReceiptPdf\(target,\s*\{[\s\S]*title,/)
+  // N4 (owner, Sep 6 2026): the Open PDF action is gone, so the receipt
+  // exports through Print and Image only -- see receiptActionRow.test.ts.
+  assert.doesNotMatch(receiptSource, /printTools\.openReceiptPdf/)
   assert.match(receiptSource, /const defaultVariant: ReceiptVariant = 'full'/,
-    'Open PDF and Image must export the detailed receipt, not silently use the 80x50 summary card')
-  assert.match(receiptSource, /void exportReceiptPdf\('open', 'compact'\)/)
+    'Image must export the detailed receipt, not silently use the 80x50 summary card')
   assert.match(receiptSource, /void exportReceiptPdf\('image', 'compact'\)/)
-  assert.match(receiptSource, /void exportBothSeparately\('open'\)/)
   assert.match(receiptSource, /void exportBothSeparately\('image'\)/)
   assert.match(receiptSource, /exportReceiptPdf\('print', 'compact'\)/)
   assert.match(receiptSource, /exportReceiptPdf\('print', 'full'\)/)

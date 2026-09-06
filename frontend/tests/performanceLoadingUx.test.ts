@@ -2259,8 +2259,8 @@ assert.match(
 )
 assert.match(
   receipt,
-  /const exportReceiptVariant = async \(printTools: ReceiptPrintModule[\s\S]*printTools\.downloadReceiptImage[\s\S]*printTools\.printReceipt[\s\S]*printTools\.openReceiptPdf[\s\S]*const printTools = await loadReceiptPrintModule\(\)[\s\S]*exportReceiptVariant\(printTools/,
-  'receipt export actions should use the lazy-loaded print tools for image, print, and PDF flows',
+  /const exportReceiptVariant = async \(printTools: ReceiptPrintModule[\s\S]*printTools\.downloadReceiptImage[\s\S]*printTools\.printReceipt[\s\S]*const printTools = await loadReceiptPrintModule\(\)[\s\S]*exportReceiptVariant\(printTools/,
+  'receipt export actions should use the lazy-loaded print tools for the image and print flows',
 )
 assert.match(
   usersPage,
