@@ -319,4 +319,95 @@ runTest('large screens keep the merged single row -- the earlier rule is not reg
   assert.doesNotMatch(app, /<header[^>]*className="[^"]*h-14/, 'App.tsx still has no standalone desktop top bar')
 })
 
+// ----------------------------------------------- HUB CHIP ROW (parity) -----
+//
+// The second layer of the same two-layer navigation: the chips a hub renders
+// in its own body. Large screens show it INSTEAD of the compact top bar (the
+// "merge into one row" rule), and compact "sections" mode shows it too -- so
+// it has to carry the same language as the bar, on every hub.
+
+/** Every page that renders the shared row, enumerated so a new hub cannot
+ *  quietly opt out of the chrome. Products is handled separately below: it
+ *  renders its own copy of the same row. */
+const HUB_PAGES: Array<[string, string]> = [
+  ['SalesHubPage', 'components/sales/SalesHubPage.tsx'],
+  ['BranchesHubPage', 'components/branches/BranchesHubPage.tsx'],
+  ['Contacts', 'components/contacts/Contacts.tsx'],
+  ['PromotionsPage', 'components/promotions/PromotionsPage.tsx'],
+  ['ReviewLogsPage', 'components/review/ReviewLogsPage.tsx'],
+  ['SettingsHubPage', 'components/utils-settings/SettingsHubPage.tsx'],
+]
+
+const hubNav = read('components/shared/HubSectionNav.tsx')
+const products = read('components/products/Products.tsx')
+
+runTest('every hub reaches the chip row through the one shared component', () => {
+  for (const [label, rel] of HUB_PAGES) {
+    assert.match(read(rel), /<HubSectionNav/, `${label} renders the shared row`)
+  }
+  // Two implementations of one row is the standing exception, and it is
+  // styled by the same rules rather than forked: both carry the same classes.
+  assert.match(products, /bos-nav-chrome hub-section-pills flex max-w-full flex-wrap/,
+    'the Products copy is the same row, and a chrome surface')
+  assert.match(hubNav, /bos-nav-chrome hub-section-pills flex max-w-full flex-wrap/,
+    'so is the shared one')
+})
+
+runTest('the chip row wears the chrome, not grey-on-white with a per-hub hue', () => {
+  for (const [label, source] of [['HubSectionNav', hubNav], ['Products', products]] as Array<[string, string]>) {
+    // Negative controls -- exactly what each row shipped.
+    assert.doesNotMatch(source, /hub-section-pills[^"'`]*bg-gray-100/, `${label}: the grey well is gone`)
+    assert.doesNotMatch(source, /hub-section-pill[^"'`]*text-gray-500/, `${label}: the grey resting ink is gone`)
+    assert.doesNotMatch(source, /hub-section-pill[^"'`]*bg-white/, `${label}: the white active chip is gone`)
+    // The state is carried by aria-pressed alone, which the stylesheet reads,
+    // so the accessible state and the visible state cannot come apart.
+    assert.match(source, /aria-pressed=\{isActive\}/, `${label}: state is announced`)
+  }
+  assert.doesNotMatch(hubNav, /section\.tone/, 'the per-hub active ink is gone from the row')
+  assert.doesNotMatch(hubNav, /tone\?: string/, 'and from HubSectionDef')
+  for (const [label, rel] of HUB_PAGES) {
+    assert.doesNotMatch(read(rel), /icon: [^,\n]+, tone:/, `${label} no longer hands the row a tone`)
+  }
+  assert.match(css, /\.hub-section-pill\[aria-pressed='true'\] \{[\s\S]*?box-shadow: inset 0 -2px 0 0 var\(--nav-accent\)/,
+    'the open chip carries the gold underline')
+  assert.match(css, /\.hub-section-rule \{[\s\S]*?border-bottom: 2px solid var\(--nav-line\)/,
+    'and the rule under the row is the chrome line, not gray-200')
+  assert.doesNotMatch(hubNav, /border-b-2 border-gray-200/, 'that grey rule is gone from the source')
+})
+
+runTest('the chip row is legible in both themes, resting and open', () => {
+  const light = css.slice(css.indexOf('.bos-nav-chrome {'), css.indexOf(':root.dark .bos-nav-chrome'))
+  const dark = css.slice(css.indexOf(':root.dark .bos-nav-chrome'), css.indexOf('body.lang-km .bos-nav-chrome'))
+  for (const [name, block] of [['light', light], ['dark', dark]] as Array<[string, string]>) {
+    // Dark's ink-2 is a `var(--dm-*)` ref; its documented fallback is what a
+    // theme-less render shows, so measure that.
+    const well = token(block, 'nav-panel')
+    const chip = token(block, 'nav-chip-open')
+    const resting = name === 'light' ? token(block, 'nav-ink-2') : '#d4d4d4'
+    const open = token(block, 'nav-accent-strong')
+    assert.ok(contrast(resting, well) >= 5.5, `${name}: resting chip ink on the well (${contrast(resting, well).toFixed(2)}:1)`)
+    assert.ok(contrast(open, chip) >= 4.5, `${name}: open chip ink on its ground (${contrast(open, chip).toFixed(2)}:1)`)
+    // Open vs resting is a real step, not a tint: a different ink AND a
+    // ground that lifts the chip off the well it sits in.
+    assert.notEqual(open, resting, `${name}: the open chip's ink differs`)
+    // The lift has to be REAL in both themes. --nav-surface used for both gave
+    // dark a 1.07:1 step -- a state you cannot see -- which is why the open
+    // chip's ground is its own token rather than the bar's.
+    assert.ok(contrast(chip, well) >= 1.15, `${name}: the open chip's ground lifts off the well (${contrast(chip, well).toFixed(3)}:1)`)
+    assert.match(css, /\.hub-section-pill\[aria-pressed='true'\] \{[\s\S]*?background-color: var\(--nav-chip-open\)/,
+      'the open chip paints that token')
+  }
+})
+
+runTest('the chip row stays compact and touch-safe on every screen it appears on', () => {
+  for (const [label, source] of [['HubSectionNav', hubNav], ['Products', products]] as Array<[string, string]>) {
+    assert.match(source, /hub-section-pill inline-flex min-h-11/, `${label}: 44px touch target when it wraps`)
+    assert.match(source, /text-\[13px\] font-semibold/, `${label}: 13px compact type`)
+    assert.match(source, /md:h-8 md:min-h-0/, `${label}: 32px compact row at md+`)
+    // No horizontal overflow at 375: the row wraps, it never scrolls.
+    assert.match(source, /hub-section-pills flex max-w-full flex-wrap/, `${label}: wraps inside the viewport`)
+    assert.doesNotMatch(source, /hub-section-pills[^"'`]*overflow-x-auto/, `${label}: never scrolls sideways`)
+  }
+})
+
 if (failed > 0) process.exitCode = 1

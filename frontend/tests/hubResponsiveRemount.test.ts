@@ -24,6 +24,11 @@ const load = (id: string) => {
   // hubSectionNav.test.ts, here the two inputs are driven directly.
   if (id.includes('sectionNavPreference')) return { useMobileSectionNavMode: () => mode, useLayeredSectionNav: () => compact && mode === 'pages' }
   if (id.includes('hubNavigation')) return { sealRootHubSection: () => {} }
+  // Vite resolves a component's `import './x.css'` to a side-effect module
+  // with no exports; it contributes nothing to the tree this test measures,
+  // so it stays inert here instead of reading as an unexpected dependency.
+  // Only a stylesheet passes: a real module still cannot slip the whitelist.
+  if (id.endsWith('.css')) return {}
   throw new Error(`Unexpected dependency ${id}`)
 }
 new Function('require', 'module', 'exports', compiled)(load, module, module.exports)

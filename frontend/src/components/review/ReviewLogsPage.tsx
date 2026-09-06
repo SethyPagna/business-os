@@ -67,7 +67,7 @@ export default function ReviewLogsPage() {
     <div className="flex min-h-0 flex-1 flex-col space-y-3">
       <HubSectionNav
         pageId="review"
-        sections={chips.map((chip) => ({ id: chip.key, label: chip.label, icon: chip.icon, tone: chip.activeColor }))}
+        sections={chips.map((chip) => ({ id: chip.key, label: chip.label, icon: chip.icon }))}
         active={section}
         onChange={(id) => setSection(id as ReviewLogsSection)}
         desktopNavigation={chips.length > 1 ? (

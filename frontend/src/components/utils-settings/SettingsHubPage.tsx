@@ -63,9 +63,9 @@ export default function SettingsHubPage() {
   const [section, setSection] = useHubSection<SettingsHubSection>('settings', () => initialSection(canSettings, canUsers, canBackup), getHubDestinations('settings', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
 
   const tabs: HubSectionDef[] = [
-    { id: 'settings', label: t('settings') || 'Settings', icon: SettingsIcon, hidden: !canSettings, tone: 'text-blue-600', description: t('hub_desc_settings_settings') || 'Business and app preferences' },
-    { id: 'users', label: t('users') || 'Users', icon: UsersIcon, hidden: !canUsers, tone: 'text-violet-600', description: t('hub_desc_settings_users') || 'Manage staff accounts' },
-    { id: 'backup', label: t('backup') || 'Backup', icon: DatabaseBackup, hidden: !canBackup, tone: 'text-emerald-600', description: t('hub_desc_settings_backup') || 'Backup and restore data' },
+    { id: 'settings', label: t('settings') || 'Settings', icon: SettingsIcon, hidden: !canSettings, description: t('hub_desc_settings_settings') || 'Business and app preferences' },
+    { id: 'users', label: t('users') || 'Users', icon: UsersIcon, hidden: !canUsers, description: t('hub_desc_settings_users') || 'Manage staff accounts' },
+    { id: 'backup', label: t('backup') || 'Backup', icon: DatabaseBackup, hidden: !canBackup, description: t('hub_desc_settings_backup') || 'Backup and restore data' },
   ]
 
   return (
