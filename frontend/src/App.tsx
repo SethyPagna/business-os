@@ -13,6 +13,7 @@ import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getM
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
+import { ensureTextAffordances } from './components/shared/textAffordances.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
@@ -1704,6 +1705,16 @@ export default function App() {
 
   useVisibilityRecovery(authReady && !!user)
   useIntentChunkWarmup(authReady ? user : null, page, canAccessPage)
+
+  // The ONE text-affordance controller (components/shared/textAffordances.ts)
+  // is a document-level singleton that serves every `.dense-cell-truncate`
+  // cell in the app -- Stock Changes, Stock-in Sessions, Returns, Fees --
+  // without any of those files importing it. That only holds if something
+  // mounts it on every route. Its other two mount points are CopyFloat and
+  // TruncatedText, and TruncatedText's one consumer renders inside a modal
+  // most of those pages never open, so Returns and Fees had truncated cells
+  // with nothing serving them. The shell is the one place always mounted.
+  useEffect(() => { ensureTextAffordances({ copy: t('copy'), copied: t('copied') }) }, [t])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined

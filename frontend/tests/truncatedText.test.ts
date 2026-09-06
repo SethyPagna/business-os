@@ -197,6 +197,19 @@ for (const file of [
   assert.doesNotMatch(source, /TruncatedText/, `${file} must gain the reveal with no edit of its own`)
 }
 
+// ...and the assertions above prove only that the MARKUP is there. Nothing
+// serves it unless the singleton has been installed on that route, and for a
+// round it had not been: the only mount points were CopyFloat (Products,
+// both product detail modals) and TruncatedText, whose sole consumer
+// (StatsStrip) renders inside a modal Returns and Fees never open -- so
+// exactly the surfaces this delegation exists for had a `title` and no
+// reveal. The shell mounts it instead, once, for every route there is.
+const shell = read('App.tsx')
+assert.match(shell, /import \{ ensureTextAffordances \} from '\.\/components\/shared\/textAffordances\.ts'/,
+  'the app shell must import the one controller')
+assert.match(shell, /useEffect\(\(\) => \{ ensureTextAffordances\(\{ copy: t\('copy'\), copied: t\('copied'\) \}\) \}, \[t\]\)/,
+  'the app shell must install it on mount, with the panel labels in the current language')
+
 // The panel is styled where it is built -- plain DOM on document.body, so a
 // surface that imports nothing from this lane still gets a themed float.
 const css = read('styles/main.css')
