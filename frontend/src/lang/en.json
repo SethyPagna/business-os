@@ -4328,7 +4328,7 @@
   "sales_load_failed": "Failed to load sales",
   "sales_load_slow": "Sales are taking longer than expected. Tap Refresh or revisit the page in a moment.",
   "sales_receipt_enabled": "Use compact 80 × 50mm sales receipt",
-  "sales_receipt_enabled_desc": "Shows shop and customer details, item count, total, ABA payment details, and an optional payment note.",
+  "sales_receipt_enabled_desc": "Shows shop and customer details, total, ABA payment details, and an optional payment note.",
   "sales_receipt_title": "80 × 50mm ABA Sales Receipt",
   "sales_refresh_failed": "Sales could not refresh right now. Showing the latest loaded data.",
   "same": "same",

@@ -321,6 +321,24 @@ await runTest('the retired row leaves no zombie behind', () => {
   assert.doesNotMatch(receiptSource, /total_qty/, 'and no field-order entry for it')
 })
 
+await runTest('the 80x50 setting no longer promises a row it does not print', () => {
+  // The toggle's own description listed "item count" among what the compact
+  // card shows. The card stopped counting items, so the sentence became a
+  // promise the receipt does not keep -- in both packs and in the fallback
+  // literal beside them.
+  const settingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
+  const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  assert.ok(en.sales_receipt_enabled_desc, 'the key stays -- only the stale clause goes')
+  assert.ok(km.sales_receipt_enabled_desc)
+  assert.ok(!en.sales_receipt_enabled_desc.includes('item count'), en.sales_receipt_enabled_desc)
+  assert.ok(!km.sales_receipt_enabled_desc.includes('ចំនួនទំនិញ'), km.sales_receipt_enabled_desc)
+  assert.ok(!settingsSource.includes('item count'), 'nor the English fallback beside the key')
+  // The rest of the sentence still describes the card, in both packs.
+  assert.ok(en.sales_receipt_enabled_desc.includes('ABA'))
+  assert.ok(km.sales_receipt_enabled_desc.includes('ABA'))
+})
+
 // --- 4. compact item rows: the name column gets the width -----------------
 
 await runTest('a 34-character product name fits two lines at 80 mm', () => {
