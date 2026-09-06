@@ -179,6 +179,27 @@ assert.match(detail, /batch_id: line\.batchId/)
 assert.match(detail, /batch_label: line\.batchLabel/)
 assert.match(detail, /batch_expiry_date: line\.batchExpiryDate/)
 assert.match(detail, /applied_price_usd: line\.unitPriceUsd/)
+// 7b. The staged lot caption prints ONE date. `line.batchLabel` is
+//     batchDisplayLabel's answer, which for a lot with no custom code already
+//     IS the received date (local, day-first); the caption appended the raw
+//     UTC slice beside it -- "02/09/2026 · Received: 2026-09-01", one date
+//     twice, in two formats, on two different days east of UTC. The rule is
+//     data-tested in tests/saleAddLines.test.ts.
+assert.doesNotMatch(detail, /batchReceivedAt\.slice\(0, 10\)/)
+assert.match(detail, /\{stagedLineBatchCaption\(line, t\)\}/)
+assert.match(addLineRules, /import \{ formatBatchReceivedDate \} from '\.\.\/\.\.\/utils\/batchLabel\.ts'/)
+assert.match(addLineRules, /import \{ fmtDateOnly \} from '\.\.\/\.\.\/utils\/formatters\.ts'/)
+assert.match(addLineRules, /!label\.includes\(received\)/)
+// Dates render through the app's formatter; the raw ISO stays on the wire.
+assert.match(addLineRules, /fmtDateOnly\(expiry\)/)
+// Whether the rendered caption really carries ONE formatted date and never a
+// raw ISO is asserted on DATA, not on this file's text:
+// tests/saleAddLines.test.ts runs the caption for a lot received at
+// "2026-09-01 18:30:00" and asserts neither '2026-09-01' nor the stored
+// expiry ISO survives into it.
+// Both caption keys already ship in both packs -- no new string.
+assert.ok(en.received_date && km.received_date)
+assert.ok(en.expiry_date && km.expiry_date)
 assert.match(detail, /const addStockMoves = !Number\(sale\?\.stock_skipped \|\| 0\)/)
 assert.doesNotMatch(detail, /addStockMoves =[^\r\n]*[\r\n]+\s*&& currentStatus !== 'awaiting_payment'/)
 const addStockMovesExpression = detail.match(/const addStockMoves = ([^\r\n]+)/)?.[1]

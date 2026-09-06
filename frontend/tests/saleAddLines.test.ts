@@ -19,10 +19,13 @@ import assert from 'node:assert/strict'
 import {
   mergeStagedAddLine,
   stagedAddLineKey,
+  stagedLineBatchCaption,
   stagedLineFromSheetPick,
   type SaleAddCandidate,
   type StagedAddLine,
 } from '../src/components/sales/saleAddLines.ts'
+import { formatBatchReceivedDate } from '../src/utils/batchLabel.ts'
+import { fmtDateOnly } from '../src/utils/formatters.ts'
 
 let failed = 0
 function runTest(name: string, fn: () => void) {
@@ -51,6 +54,17 @@ const shopAndWarehouse: SaleAddCandidate = {
     { branch_id: 2, branch_name: 'warehouse', quantity: 30 },
   ],
 }
+
+// The two pack keys the staged caption uses. Both already ship in en.json and
+// km.json, so nothing new is asked of the packs.
+const captionCopy = (key: string): string => (({
+  received_date: 'Received date',
+  expiry_date: 'Expiry date',
+}) as Record<string, string>)[key] ?? ''
+
+// Every date-shaped token in a caption, in either the app's dd/mm/yyyy or the
+// stored ISO -- so a test can say "this caption shows ONE date" and mean it.
+const datesIn = (caption: string): string[] => caption.match(/\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2}/g) || []
 
 runTest('the staged cap is the branch the sheet was read at, not the cross-branch total', () => {
   const line = stagedLineFromSheetPick(shopAndWarehouse, { branchId: '1' })
@@ -196,6 +210,73 @@ runTest('re-picking refreshes what the lot holds, so a stale cap cannot linger',
   assert.equal(merged.length, 1)
   assert.equal(merged[0].stockQuantity, 3)
   assert.equal(merged[0].batchQuantity, 3)
+})
+
+// ---- the staged lot caption ----
+//
+// D1 hands received_at back as "YYYY-MM-DD HH:MM:SS" in UTC. The label the
+// sheet puts on the pick is batchDisplayLabel's answer, which for a lot with
+// no custom code IS that date, rendered LOCAL and day-first. The caption used
+// to append `batchReceivedAt.slice(0, 10)` next to it, so one lot read
+// "02/09/2026 · Received: 2026-09-01" -- the same date twice, in two formats,
+// and for this 18:30Z stamp anywhere east of UTC on two different DAYS.
+runTest('the staged lot caption states the received date once, in the format the label uses', () => {
+  const receivedAt = '2026-09-01 18:30:00'
+  const label = formatBatchReceivedDate(receivedAt)
+  assert.ok(label)
+  const line = stagedLineFromSheetPick(shopAndWarehouse, {
+    branchId: '1',
+    batch: { batchId: 501, batchLabel: label, batchExpiryDate: null, batchReceivedAt: receivedAt, quantity: 4 },
+  })
+  assert.ok(line)
+  const caption = stagedLineBatchCaption(line, captionCopy)
+  assert.deepEqual(datesIn(caption), [label], 'one date, the one the label already shows')
+  assert.equal(caption, label)
+  // The old rule's own output, asserted against on this same input, so the
+  // case is provably discriminating rather than merely green.
+  const previousRule = `${label} · Received: ${receivedAt.slice(0, 10)}`
+  assert.equal(receivedAt.slice(0, 10), '2026-09-01')
+  assert.notEqual(caption, previousRule)
+  assert.ok(!caption.includes('2026-09-01'), 'the raw UTC slice must not appear')
+  assert.equal(datesIn(previousRule).length, 2, 'the old caption really did print two dates')
+})
+
+runTest('a genuine lot code caption DOES state the received date, once and formatted', () => {
+  // Only a custom lot code leaves the received date unsaid by the label --
+  // there the caption is the one place it can be read, so it stays.
+  const receivedAt = '2026-09-01 18:30:00'
+  const shown = formatBatchReceivedDate(receivedAt)
+  assert.ok(shown)
+  const line = stagedLineFromSheetPick(shopAndWarehouse, {
+    branchId: '1',
+    batch: { batchId: 77, batchLabel: 'LOT-A19', batchExpiryDate: null, batchReceivedAt: receivedAt, quantity: 4 },
+  })
+  assert.ok(line)
+  const caption = stagedLineBatchCaption(line, captionCopy)
+  assert.equal(caption, `LOT-A19 · Received date: ${shown}`)
+  assert.deepEqual(datesIn(caption), [shown])
+  assert.ok(!caption.includes('2026-09-01'), 'formatted, not sliced')
+})
+
+runTest('the caption formats the expiry date, and the wire keeps the stored ISO', () => {
+  const line = stagedLineFromSheetPick(shopAndWarehouse, {
+    branchId: '1',
+    batch: { batchId: 88, batchLabel: 'LOT-A19', batchExpiryDate: '2027-01-05', batchReceivedAt: '', quantity: 4 },
+  })
+  assert.ok(line)
+  const caption = stagedLineBatchCaption(line, captionCopy)
+  assert.equal(fmtDateOnly('2027-01-05'), '05/01/2027')
+  assert.equal(caption, 'LOT-A19 · Expiry date: 05/01/2027')
+  assert.ok(!caption.includes('2027-01-05'), 'the stored ISO is a wire format, never a displayed one')
+  // Formatting is for the eye only: the line still posts the ISO the server
+  // stores (SaleDetailModal sends line.batchExpiryDate verbatim).
+  assert.equal(line.batchExpiryDate, '2027-01-05')
+})
+
+runTest('a line with no lot has no caption at all', () => {
+  const line = stagedLineFromSheetPick(shopAndWarehouse, { branchId: '1' })
+  assert.ok(line)
+  assert.equal(stagedLineBatchCaption(line, captionCopy), '')
 })
 
 if (failed > 0) {

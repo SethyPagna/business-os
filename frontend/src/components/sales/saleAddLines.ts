@@ -29,6 +29,8 @@
 // selling price, and both are edited afterwards on the staged row -- the
 // same place a POS cart line is edited.
 import { branchStockQuantity, type BranchStockRow } from '../pos/productSheetState.ts'
+import { formatBatchReceivedDate } from '../../utils/batchLabel.ts'
+import { fmtDateOnly } from '../../utils/formatters.ts'
 
 export type SaleAddCandidate = Record<string, unknown> & {
   id?: number | string | null
@@ -143,6 +145,43 @@ export function stagedLineFromSheetPick(
     batchExpiryDate: batch ? String(batch.batchExpiryDate || '') : '',
     batchQuantity,
   }
+}
+
+/**
+ * The one-line lot caption under a staged row: which lot, plus the dates that
+ * lot's own label does not already say.
+ *
+ * `batchLabel` is batchDisplayLabel's answer (utils/batchLabel.ts) -- the same
+ * text the POS sheet prints on its lot pill -- and for a lot with no custom
+ * code that label ALREADY IS the received date, rendered local and day-first.
+ * The caption used to append `batchReceivedAt.slice(0, 10)` beside it
+ * regardless, so a lot received at "2026-09-01 18:30:00" (D1 writes UTC, no
+ * marker) read "02/09/2026 · Received: 2026-09-01": one instant printed
+ * twice, in two formats, and east of UTC on two different calendar days.
+ *
+ * So the received date is stated only when the label is a genuine lot code --
+ * the one case that leaves it unsaid -- and always through
+ * formatBatchReceivedDate, the function the label itself used, so the two can
+ * never disagree again. The expiry goes through the app's date formatter for
+ * the same reason no other surface prints a stored ISO at a person.
+ *
+ * Display only: the staged line keeps the stored strings, and SaleDetailModal
+ * posts those (batch_expiry_date is the ISO the server stores).
+ */
+export function stagedLineBatchCaption(
+  line: Pick<StagedAddLine, 'batchLabel' | 'batchReceivedAt' | 'batchExpiryDate'>,
+  t: (key: string) => string,
+): string {
+  const label = String(line.batchLabel || '').trim()
+  if (!label) return ''
+  const parts = [label]
+  const received = formatBatchReceivedDate(line.batchReceivedAt)
+  if (received && !label.includes(received)) {
+    parts.push(`${t('received_date') || 'Received date'}: ${received}`)
+  }
+  const expiry = String(line.batchExpiryDate || '').trim()
+  if (expiry) parts.push(`${t('expiry_date') || 'Expiry date'}: ${fmtDateOnly(expiry)}`)
+  return parts.join(' · ')
 }
 
 /**

@@ -26,6 +26,7 @@ import StatusBadge, { getStatusLabel } from './StatusBadge.tsx'
 import {
   mergeStagedAddLine,
   stagedAddLineKey,
+  stagedLineBatchCaption,
   stagedLineFromSheetPick,
   type SaleAddCandidate,
   type SaleAddSheetSelection,
@@ -1622,7 +1623,7 @@ export default function SaleDetailModal({
                           <span className="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-white">
                             {line.name}
                             {line.barcode ? <span className="mt-0.5 block font-mono text-[11px] font-normal text-gray-400">{line.barcode}</span> : null}
-                            {line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{line.batchLabel}{line.batchReceivedAt ? ` · ${translateOr('received_date', 'Received', 'ថ្ងៃទទួល')}: ${line.batchReceivedAt.slice(0, 10)}` : ''}{line.batchExpiryDate ? ` · ${t('expiry_date') || 'Expiry'}: ${line.batchExpiryDate}` : ''}</span> : null}
+                            {line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{stagedLineBatchCaption(line, t)}</span> : null}
                           </span>
                           <span className="flex items-center gap-1">
                             <label htmlFor={`sale-add-qty-${stagedLineKey(line)}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>
