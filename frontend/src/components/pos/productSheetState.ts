@@ -235,6 +235,23 @@ export function defaultDisplayStock(product: SheetProductLike | undefined): numb
   return toNumber(product?.stock_quantity)
 }
 
+// The one ordering rule for the branch strip, so the two surfaces that show
+// it -- the tappable pills and the "Shop: n · Warehouse: n" summary line
+// under them -- are the same list in the same order. Both read the single
+// `branchOptions` array this comparator sorts; neither sorts again.
+//
+// Role first: a branch that SELLS leads the strip and the stock-only
+// warehouse closes it, so the greyed, unselectable option never takes the
+// first slot on any of the pickers. Alphabetical only breaks ties, which is
+// why the two canonical names (Shop, Warehouse) come out in the order they
+// always had while a third branch cannot push the warehouse to the front.
+export function compareBranchesForDisplay(a: string, b: string): number {
+  const rank = (name: string) => (branchRoleFromName(name) === 'warehouse' ? 1 : 0)
+  const byRole = rank(a) - rank(b)
+  if (byRole !== 0) return byRole
+  return a.localeCompare(b, undefined, { sensitivity: 'base' })
+}
+
 export function deriveProductSheetState(input: ProductSheetStateInput): ProductSheetState {
   const {
     product,
@@ -275,8 +292,13 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     }
   }
 
-  const branchIds = [...branchNames.keys()].sort((a, b) => (
-    String(branchNames.get(a)).localeCompare(String(branchNames.get(b)), undefined, { sensitivity: 'base' })
+  // ONE ordering, applied once. `branchOptions` is built in this order and
+  // `branchSummary` below is that same array joined -- the pills and the
+  // stock line under them can never disagree about which branch comes
+  // first, because neither of them sorts.
+  const branchIds = [...branchNames.keys()].sort((a, b) => compareBranchesForDisplay(
+    String(branchNames.get(a) ?? a),
+    String(branchNames.get(b) ?? b),
   ))
 
   const stockAtBranch = (row: SheetProductLike | null, branchId: string | null): number => {
@@ -370,6 +392,10 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
       ? toNumber(selectedBatch.quantity)
       : effectiveVariantStock
 
+  // Straight off `branchOptions`, in the order compareBranchesForDisplay
+  // already put them. Never `[...branchOptions].sort(...)`: a second sort
+  // here is a second ordering rule, and the summary line would then contradict
+  // the pill strip it sits under.
   const branchSummary = branchOptions.map((option) => `${option.name}: ${option.quantity}`).join(' · ')
 
   // The pick gate. `displayedStock` is the number the sheet SHOWS, so the

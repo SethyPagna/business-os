@@ -82,6 +82,79 @@ await runTest('branch pills carry the resolved row quantity and the group total'
   assert.equal(warehouse?.quantity, 6)
   assert.equal(warehouse?.groupQuantity, 7)
   assert.equal(state.branchSummary, 'Shop: 8 · Warehouse: 6')
+  // Paired with the summary above: the pills are the same list in the same
+  // order, so this pin fails if EITHER surface reorders on its own.
+  assert.deepEqual(state.branchOptions.map((option) => option.name), ['Shop', 'Warehouse'])
+})
+
+// One ordering rule for the branch strip, shared by both surfaces that show
+// it. The pills the operator taps and the stock summary line under them are
+// the SAME array in the SAME order: a summary that sorted a copy of its own
+// would print "Warehouse: 6 · Shop: 8" above pills reading Shop, Warehouse.
+// The rule is role-first (the selling branch leads, the greyed stock-only
+// warehouse closes the row), then alphabetical -- NOT plain alphabetical,
+// which only agrees with it because the two canonical names happen to sort
+// that way.
+await runTest('the branch pills and the stock summary share one ordering', () => {
+  const rows = [
+    { id: 61, name: 'Grouped', barcode: 'A1', branch_stock: branchStock(4, 1) },
+    { id: 62, name: 'Grouped', barcode: 'A2', branch_stock: branchStock(8, 6) },
+  ]
+  const state = deriveProductSheetState({
+    product: rows[0],
+    variants: rows,
+    groupProduct: true,
+    selectedVariantId: '62',
+    intent: 'sell',
+  })
+  // The coupling itself: the summary IS the pill list rendered, never a
+  // second sort of it. Re-sorting a copy at the summary line turns this red
+  // while every other assertion in the file stays green.
+  assert.equal(
+    state.branchSummary,
+    state.branchOptions.map((option) => `${option.name}: ${option.quantity}`).join(' · '),
+    'the summary must read the pill order, not an order of its own',
+  )
+  // Discriminating on the ordering rule itself: with these names plain
+  // alphabetical order and the role-first rule give DIFFERENT answers, so a
+  // localeCompare-only sort answers ['Warehouse', 'Zone A'] here -- an
+  // unsellable, greyed pill taking the first slot of the strip.
+  const oddly = deriveProductSheetState({
+    product: {
+      id: 63,
+      name: 'Odd',
+      branch_stock: [
+        { branch_id: 1, branch_name: 'Warehouse', quantity: 6 },
+        { branch_id: 3, branch_name: 'Zone A', quantity: 2 },
+      ],
+    },
+    variants: [],
+    groupProduct: false,
+    intent: 'sell',
+  })
+  assert.deepEqual(
+    oddly.branchOptions.map((option) => option.name),
+    ['Zone A', 'Warehouse'],
+    'a plain alphabetical sort would lead the strip with the branch that cannot sell',
+  )
+  assert.equal(oddly.branchSummary, 'Zone A: 2 · Warehouse: 6')
+  // ...and the same rule holds on a stock surface, so the strip does not
+  // reshuffle when the same product is opened from a receiving picker.
+  const stocking = deriveProductSheetState({
+    product: {
+      id: 64,
+      name: 'Odd',
+      branch_stock: [
+        { branch_id: 1, branch_name: 'Warehouse', quantity: 6 },
+        { branch_id: 3, branch_name: 'Zone A', quantity: 2 },
+      ],
+    },
+    variants: [],
+    groupProduct: false,
+    intent: 'stock',
+  })
+  assert.deepEqual(stocking.branchOptions.map((option) => option.name), ['Zone A', 'Warehouse'])
+  assert.equal(stocking.branchSummary, oddly.branchSummary, 'the order is a property of the branches, not of the intent')
 })
 
 // SHAPE D (the "RECON residue" shape): branch_stock says 28 at the shop and
