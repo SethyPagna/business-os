@@ -1144,6 +1144,13 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     const receiptGate = stockReceiptGateCode({
       isStockIn,
       supplierName: adjustForm.supplier_name,
+      // Picking an EXISTING lot blanks the supplier field on purpose: an
+      // attributed lot keeps its first supplier and the picker shows that name
+      // locked instead (InventoryStockModals.tsx). This form cannot read the
+      // lot from here, so it defers the supplier half to routes/inventory.ts,
+      // which looks the lot up and refuses an unattributed one. The cost half
+      // is never deferred.
+      lotAttributionDeferred: adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new',
       unitCostUsd: adjustForm.unit_cost_usd,
       freeGoods: adjustForm.free_goods,
     })

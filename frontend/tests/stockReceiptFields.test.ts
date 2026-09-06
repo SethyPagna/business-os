@@ -216,6 +216,22 @@ runTest('nothing invents a receipt cost any more', () => {
     assert.match(source(path), /stockReceiptGateCode/, `${path} must check the receipt gate before submitting`)
   }
 
+  // Picking an existing lot BLANKS the supplier field on purpose -- an
+  // attributed lot keeps its first supplier and the picker shows that name
+  // locked. A gate that only read the (now empty) field would refuse a
+  // complete receipt, so every surface that can pick a lot must either read
+  // the lot's own name or say it cannot see one.
+  for (const [path, marker] of [
+    ['components/inventory/Inventory.tsx', 'lotAttributionDeferred'],
+    ['components/products/forms/StockAdjustModal.tsx', 'lotAttributionDeferred'],
+    ['components/products/forms/BranchStockAdjuster.tsx', 'lotAttributionDeferred'],
+    ['components/inventory/ReceiveBatchModal.tsx', 'lotSupplierName'],
+    ['components/products/CreateProductsSessionModal.tsx', 'lotSupplierName'],
+  ] as Array<[string, string]>) {
+    assert.ok(source(path).includes(marker),
+      `${path} picks a lot, so it must pass ${marker} rather than refusing an attributed top-up`)
+  }
+
   // The only exemption is explicit and auditable: a correction restores a
   // figure the ledger already held. It must be spelled on the wire, never
   // inferred from a reason string.
