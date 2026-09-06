@@ -6,6 +6,7 @@ import { useApp } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import Modal from '../shared/Modal.tsx'
+import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import { SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from '../pos/ShiftGate.tsx'
 import ShiftSummary from './ShiftSummary.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from './ShiftCountFields.tsx'
@@ -436,8 +437,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                     <div className="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
                       <h3 className="text-sm font-semibold">{t('shift_amend')}</h3>
                       <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
-                        <label className="text-xs">{t('shift_opened_at')}<input className="input mt-1" type="datetime-local" value={edit.openedAt} onChange={(event) => setEdit({ ...edit, openedAt: event.target.value })} /></label>
-                        <label className="text-xs">{t('shift_closed_at')}<input className="input mt-1" type="datetime-local" value={edit.closedAt} disabled={!selected.closed_at} onChange={(event) => setEdit({ ...edit, closedAt: event.target.value })} /></label>
+                        <div className="text-xs"><span className="block">{t('shift_opened_at')}</span><DateTimeEntryInput className="mt-1" value={edit.openedAt} onChange={(next) => setEdit({ ...edit, openedAt: next })} t={t} dateAriaLabel={`${t('shift_opened_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_opened_at')} · ${t('time')}`} /></div>
+                        <div className="text-xs"><span className="block">{t('shift_closed_at')}</span><DateTimeEntryInput className="mt-1" value={edit.closedAt} disabled={!selected.closed_at} onChange={(next) => setEdit({ ...edit, closedAt: next })} t={t} dateAriaLabel={`${t('shift_closed_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_closed_at')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={edit.openingUsd} khr={edit.openingKhr} onUsd={(value) => setEdit({ ...edit, openingUsd: value })} onKhr={(value) => setEdit({ ...edit, openingKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} usd={edit.closingUsd} khr={edit.closingKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, closingUsd: value })} onKhr={(value) => setEdit({ ...edit, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_opening_note')}<input className="input mt-1" value={edit.openingNote} onChange={(event) => setEdit({ ...edit, openingNote: event.target.value })} /></label>
@@ -452,7 +453,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                     <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/20">
                       <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p></div>
                       <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
-                        <label className="text-xs font-semibold sm:col-span-2">{t('shift_close_time_required')}<input className="input mt-1" type="datetime-local" required value={close.closedAt} onChange={(event) => setClose({ ...close, closedAt: event.target.value })} /></label>
+                        <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>
                       </fieldset>
