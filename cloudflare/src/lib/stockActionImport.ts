@@ -23,6 +23,11 @@ export const UNIFIED_STOCK_COLUMNS = [
   // same product may carry different suppliers across batches — supplier
   // is stored on the BATCH the add creates (migration 0062).
   'supplier',
+  // Optional (N14-D): the operator's explicit "these goods were free"
+  // declaration. Without it, a $0.00 cost_price on an add row is refused --
+  // the gate's free_goods_required message used to point the operator at a
+  // control this sheet had no column for.
+  'free_goods',
 ] as const
 
 export interface UnifiedStockCatalogProduct {
@@ -62,6 +67,8 @@ export interface UnifiedStockResolvedRow {
   batchLabel: string | null
   /** As-entered supplier for this row's batch; '' when the column is absent/blank. */
   supplier: string
+  /** The sheet's optional free_goods column, parsed to a boolean (N14-D). */
+  freeGoods: boolean
   branchRefs: Array<{ slot: 'shop' | 'warehouse'; branchId: number; branchName: string; pending: boolean; value: number }>
   plan: StockActionPlan | null
   conflicts: string[]
@@ -74,6 +81,14 @@ function text(value: unknown): string {
 
 function key(value: unknown): string {
   return text(value).toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** The sheet's free_goods cell, read the way a spreadsheet checkbox column
+ *  is actually typed -- '1'/'true'/'yes'/'y', case-insensitive; anything
+ *  else (blank included) is "not declared free". */
+function parseFreeGoodsFlag(value: unknown): boolean {
+  const normalized = text(value).toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'y'
 }
 
 function optionalNumber(value: unknown, field: string): { value: number | null; error: string | null } {
@@ -241,6 +256,7 @@ export function resolveUnifiedStockImportRows(
       costPriceUsd: cost.value ?? matched.product?.cost_price_usd ?? null,
       batchLabel: batchLabel || null,
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
+      freeGoods: parseFreeGoodsFlag(raw.free_goods),
       branchRefs,
       plan: null,
       conflicts,

@@ -481,6 +481,66 @@ async function test(name, fn) {
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
   })
 
+  // 11) RECONCILE mode's upward delta is an ADD, and the gate runs on it too.
+  // Before this test, no case anywhere applied a reconcile-mode increase --
+  // stockActionResolver.ts turns a counted rise into an 'add' plan, which
+  // dispatchStockActionSingle routes through the exact same applyUnifiedStockAdd
+  // writer a direct-mode add uses. Proved here rather than inferred: a stock-
+  // take sheet with no supplier/cost columns must refuse the raised rows and
+  // leave the ledger at its PRE-import count, not silently apply an
+  // unattributed receipt.
+  await test('reconcile mode: a counted increase is an add, and the receipt gate refuses it', async () => {
+    const { sqlite, db } = makeDb()
+    seedProduct(sqlite, { id: 80, name: 'Counted', barcode: 'CT80', shop: 3 })
+    seedJob(sqlite, 'job-reconcile-gate', [
+      // Counted total 10 against 3 on hand -- a +7 add, no supplier, no cost.
+      { _rowNumber: 2, name: 'Counted', barcode: 'CT80', shop: '10', warehouse: '', date: '08/27/2026', action: '' },
+    ], { stock_action_mode: 'reconcile' })
+    const { out } = await runJobToCompletion(db, 'job-reconcile-gate', JSON.stringify({ stock_action_mode: 'reconcile' }))
+    assert.deepStrictEqual(out, { applied: 0, failed: 1 })
+    const refused = JSON.parse(sqlite.prepare(`SELECT result_json FROM import_job_rows WHERE job_id='job-reconcile-gate' AND row_number=2`).get().result_json)
+    assert.strictEqual(refused.action, 'error')
+    assert.match(refused.message, /A stock-in must name the supplier the goods came from/)
+    // The ledger stays at the PRE-import count -- refused, not partially applied.
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=80 AND branch_id=1`).get().quantity, 3)
+    assert.strictEqual(sqlite.prepare(`SELECT stock_quantity FROM products WHERE id=80`).get().stock_quantity, 3)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=80`).get().n, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements WHERE product_id=80`).get().n, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-reconcile-gate'`).get().status, 'completed_with_errors')
+  })
+
+  // 12) The concurrency race: two add rows sharing one lot (same product +
+  // batchIdentity's date/label key) must not race applyUnifiedStockAdd's
+  // read of the lot's current supplier. Before the fix, importEngine.ts's
+  // dispatch loop pushed BOTH rows onto pendingAdds and awaited them with
+  // Promise.all, so the order their INSERTs actually land in D1 -- not the
+  // order they appear in the sheet -- decided whether the pair's supplier
+  // row or its blank row 'wins' the lot's first attribution, and a re-run of
+  // the identical file could come back with a different {applied, failed}.
+  // Run twice on FRESH databases and assert the two outcomes are identical:
+  // a scheduling-dependent answer is exactly what this pins against.
+  await test('two add rows sharing one lot never race: the outcome is scheduling-independent', async () => {
+    const buildRows = () => [
+      // Row 2 supplies the lot; row 3 (same product+date+batch => same lot)
+      // does not. Sequentially this always tops up an already-attributed lot
+      // (deferred, so it is complete); concurrently the blank row can read the
+      // lot BEFORE row 2's INSERT commits and get refused instead.
+      { _rowNumber: 2, name: 'Raced', barcode: 'RC90', shop: '2', warehouse: '', date: '08/27/2026', action: 'add', cost_price: '4', supplier: 'Bong Long', batch: 'RACE-LOT' },
+      { _rowNumber: 3, name: 'Raced', barcode: 'RC90', shop: '0', warehouse: '3', date: '08/27/2026', action: 'add', cost_price: '4', batch: 'RACE-LOT' },
+    ]
+    const runOnce = async () => {
+      const { sqlite, db } = makeDb()
+      seedProduct(sqlite, { id: 90, name: 'Raced', barcode: 'RC90' })
+      seedJob(sqlite, 'job-race', buildRows(), { stock_action_mode: 'direct' })
+      const { out } = await runJobToCompletion(db, 'job-race', JSON.stringify({ stock_action_mode: 'direct' }))
+      return out
+    }
+    const first = await runOnce()
+    const second = await runOnce()
+    assert.deepStrictEqual(first, second, 'the same file must not import differently run to run')
+    assert.deepStrictEqual(first, { applied: 2, failed: 0 }, 'both rows of one lot land: the blank row inherits the lot supplier, never a race')
+  })
+
   if (failures > 0) { console.error(`\n${failures} test(s) failed`); process.exit(1) }
   console.log('\nAll stock-action apply-engine tests passed')
 })().catch((error) => { console.error(error); process.exit(1) })

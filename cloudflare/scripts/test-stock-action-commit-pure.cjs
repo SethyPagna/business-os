@@ -187,6 +187,28 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
   )
   wroteNothing(zeroCost, 'zero cost')
 
+  // ...but the sheet's own free_goods column is exactly the declaration the
+  // refusal above asks for -- ticked, a $0.00 receipt applies AND the ledger
+  // keeps the words, not just the zero (appendReceiptNotes, mirroring
+  // routes/batches.ts:218's interactive equivalent).
+  const zeroCostDeclaredFree = setup()
+  const freeResult = await subject.applyUnifiedStockAdd(zeroCostDeclaredFree.db, { ...input, costPriceUsd: 0, freeGoods: true })
+  assert.strictEqual(freeResult.applied, true, 'a declared-free $0.00 receipt is accepted')
+  assert.strictEqual(
+    zeroCostDeclaredFree.sqlite.prepare(`SELECT unit_cost_usd FROM product_batches`).get().unit_cost_usd,
+    0,
+  )
+  assert.match(
+    zeroCostDeclaredFree.sqlite.prepare(`SELECT notes FROM product_batches`).get().notes,
+    /Free goods \(no cost\)/,
+    'the lot notes record the CLAIM, not merely the zero',
+  )
+  assert.match(
+    zeroCostDeclaredFree.sqlite.prepare(`SELECT reason FROM inventory_movements`).get().reason,
+    /Free goods \(no cost\)/,
+    'the movement reason records the same declaration',
+  )
+
   const negativeCost = setup()
   await assert.rejects(
     () => subject.applyUnifiedStockAdd(negativeCost.db, { ...input, costPriceUsd: -2 }),

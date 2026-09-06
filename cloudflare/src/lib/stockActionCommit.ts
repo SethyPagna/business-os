@@ -1,7 +1,7 @@
 import type { D1Compat } from './db'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
-import { stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
 
 /**
  * The FOURTH receipt wire (N14-D).
@@ -19,7 +19,7 @@ import { stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInp
  * sites, not a second implementation.
  */
 export function unifiedStockReceiptRefusal(
-  input: Pick<StockReceiptGateInput, 'supplierName' | 'lotSupplierName' | 'lotAttributionDeferred' | 'unitCostUsd'>,
+  input: Pick<StockReceiptGateInput, 'supplierName' | 'lotSupplierName' | 'lotAttributionDeferred' | 'unitCostUsd' | 'freeGoods'>,
 ): string | null {
   return stockReceiptGateMessage(stockReceiptGateCode({
     isStockIn: true,
@@ -27,6 +27,7 @@ export function unifiedStockReceiptRefusal(
     lotSupplierName: input.lotSupplierName,
     lotAttributionDeferred: input.lotAttributionDeferred,
     unitCostUsd: input.unitCostUsd,
+    freeGoods: input.freeGoods,
     // An import row is always a new receipt. 'correction' is the undo/restore
     // exemption and no import can claim it.
     attribution: 'receipt',
@@ -51,6 +52,9 @@ export interface UnifiedStockAddInput {
    *  supplier already recorded on the lot is never overwritten. */
   supplierName?: string | null
   supplierId?: number | null
+  /** The operator's explicit "these goods were free" declaration (N14-D),
+   *  threaded from the sheet's optional free_goods column. */
+  freeGoods?: boolean | null
 }
 
 export interface UnifiedStockCommitResult {
@@ -121,7 +125,14 @@ function normalizedBatchLabel(value: unknown): string {
   return String(value || '').trim().replace(/[\u0000-\u001f]/g, '').slice(0, 120).toLowerCase().replace(/\s+/g, ' ')
 }
 
-function batchIdentity(date: string, label: string | null | undefined): { batchKey: string; lotCode: string; receivedAt: string } {
+/**
+ * Exported so the import dispatcher can compute the SAME lot key this writer
+ * keys its idempotency/attribution reads on (productId + batchKey) -- it
+ * needs that key to serialize concurrent add rows that would otherwise race
+ * each other's first-read-of-lot_supplier_name (see importEngine.ts's
+ * pendingLotKeys). One identity rule, not a second hand-copy of it.
+ */
+export function batchIdentity(date: string, label: string | null | undefined): { batchKey: string; lotCode: string; receivedAt: string } {
   const receivedAt = normalizeToIsoDate(date)
   if (!receivedAt) throw new Error('Stock action date is invalid')
   const datedCode = dateToBatchCode(receivedAt)
@@ -235,10 +246,12 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // refused row leaves no pending commit, no lot and no movement behind --
   // applyStockActionsJob records the message on the row and the operator sees
   // it in the finished report.
+  const freeGoods = input.freeGoods === true
   const refusal = unifiedStockReceiptRefusal({
     supplierName,
     lotSupplierName: pre?.lot_supplier_name ?? null,
     unitCostUsd: input.costPriceUsd,
+    freeGoods,
   })
   if (refusal) throw new Error(refusal)
   const params = {
@@ -247,7 +260,10 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     sellingPriceUsd: optionalMoney(input.sellingPriceUsd),
     wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd),
     costPriceUsd: optionalMoney(input.costPriceUsd),
-    reason: `Unified stock import ${jobId}, row ${rowNumber}`,
+    // The declaration is stamped into the words, not just the zero -- the
+    // same appendReceiptNotes routes/batches.ts:218 uses for the interactive
+    // wire, so a $0.00 accepted receipt reads as free goods on this wire too.
+    reason: appendReceiptNotes(`Unified stock import ${jobId}, row ${rowNumber}`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
   }
 
   await db.batch([

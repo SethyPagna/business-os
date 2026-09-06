@@ -78,7 +78,7 @@ import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchC
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
-import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
+import { applyUnifiedStockAdd, applyUnifiedStockSale, batchIdentity, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
@@ -4366,7 +4366,7 @@ async function dispatchStockActionSingle(
   // cost to describe and the gate must not touch it.
   const receivesStock = plan.branchActions.some((a) => a.direction === 'add' && a.quantity > 0)
   if (plan.kind === 'create' && receivesStock) {
-    const refusal = unifiedStockReceiptRefusal({ supplierName, unitCostUsd: resolved.costPriceUsd })
+    const refusal = unifiedStockReceiptRefusal({ supplierName, unitCostUsd: resolved.costPriceUsd, freeGoods: resolved.freeGoods })
     if (refusal) throw new Error(refusal)
   }
   let productId = resolved.productId ?? 0
@@ -4404,6 +4404,7 @@ async function dispatchStockActionSingle(
       costPriceUsd: resolved.costPriceUsd,
       supplierName,
       supplierId,
+      freeGoods: resolved.freeGoods,
     })
   }
 }
@@ -4749,6 +4750,26 @@ async function applyStockActionsContinuation(
   let after = stock.dispatchAfterRow
   let moreRows = true
   const pendingAdds: Array<Promise<void>> = []
+  // Two add rows sharing one lot (same product + batchIdentity) must never be
+  // IN FLIGHT together: applyUnifiedStockAdd's gate reads the lot's current
+  // supplier once, at the top of its own call, before either write lands --
+  // so two concurrent adds into the SAME lot, one supplied and one blank,
+  // race that read and accept or refuse depending on which promise's INSERT
+  // happens to land first. Tracking the lot keys already dispatched in this
+  // flush window and forcing a flush before a repeat lets each lot's adds
+  // still run serially (correct) while unrelated lots keep the concurrency
+  // this queue exists for.
+  const pendingLotKeys = new Set<string>()
+  const addLotKey = (resolved: UnifiedStockResolvedRow): string => {
+    try {
+      return `${resolved.productId}:${batchIdentity(resolved.date, resolved.batchLabel).batchKey}`
+    } catch {
+      // An unparsable date/label fails inside applyUnifiedStockAdd itself
+      // (caught by runSingle below); give it a key nothing else can share so
+      // it neither blocks nor is blocked by a sibling row.
+      return `invalid:${resolved.rowNumber}`
+    }
+  }
   const runSingle = async (r: StockActionImportResult) => {
     try {
       await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
@@ -4764,6 +4785,7 @@ async function applyStockActionsContinuation(
   const flushAdds = async () => {
     if (!pendingAdds.length) return
     await Promise.all(pendingAdds.splice(0, pendingAdds.length))
+    pendingLotKeys.clear()
   }
 
   outer: while (unitsDispatched < STOCK_ACTION_MAX_UNITS) {
@@ -4821,6 +4843,13 @@ async function applyStockActionsContinuation(
       // Single unit: create / add / noop.
       unitsDispatched += 1
       if (plan.kind === 'add') {
+        const lotKey = addLotKey(resolved)
+        // A second row of an already-in-flight lot must wait for the first
+        // to land -- flush everything pending rather than pick out just the
+        // one conflicting promise, since Promise.all is already the unit of
+        // ordering this queue uses.
+        if (pendingLotKeys.has(lotKey)) await flushAdds()
+        pendingLotKeys.add(lotKey)
         pendingAdds.push(runSingle(r))
         if (pendingAdds.length >= STOCK_ACTION_ADD_CONCURRENCY) await flushAdds()
       } else {
