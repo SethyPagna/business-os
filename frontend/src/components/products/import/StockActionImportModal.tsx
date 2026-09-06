@@ -74,6 +74,15 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   // generic issues because the remedy is its own -- fill the cost column --
   // and it can be done before the file is ever uploaded.
   const [gateCount, setGateCount] = useState(0)
+  // Reconcile mode's own unconditional warning (N14-D): the per-row gate
+  // above is DIRECT-only because a reconcile number is a counted total, not a
+  // change -- but a sheet with no cost_price column at all guarantees every
+  // counted increase resolveRowStockAction turns into an 'add' will meet the
+  // gate as a stock-in with no cost, and stockActionResolver.ts never shows
+  // this mode's rows to the reader at all (unlike direct mode's issue list).
+  // Without this the sheet uploads clean and comes back with every increased
+  // row failed.
+  const [reconcileNoCostColumn, setReconcileNoCostColumn] = useState(false)
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -89,7 +98,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   // counts must follow the operator's current choice rather than whichever
   // mode happened to be selected when the file was picked.
   useEffect(() => {
-    if (!csvText.trim()) { setRowCount(0); setIssueCount(0); setGateCount(0); return }
+    if (!csvText.trim()) { setRowCount(0); setIssueCount(0); setGateCount(0); setReconcileNoCostColumn(false); return }
     try {
       const result = parseUnifiedStockRows(parseCsvRows(csvText) as Record<string, unknown>[], mode)
       setRowCount(result.rows.length)
@@ -99,10 +108,12 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
       // one-column fix look like two problems.
       setIssueCount(result.issues.filter((issue) => issue.code !== 'receipt_gate').length)
       setGateCount(result.issues.filter((issue) => issue.code === 'receipt_gate').length)
+      setReconcileNoCostColumn(mode === 'reconcile' && result.rows.length > 0 && result.headerMap.cost_price == null)
     } catch (err) {
       setRowCount(0)
       setIssueCount(0)
       setGateCount(0)
+      setReconcileNoCostColumn(false)
       setError(err instanceof Error ? err.message : tr('stock_import_read_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។'))
     }
     // tr is stable enough for a message string; the parse depends only on these.
@@ -235,6 +246,19 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
                   '{count} row(s) add stock with no cost in the file — fill the cost column so each stock-in records what you paid.',
                   '{count} ជួរដេកបន្ថែមស្តុកដោយគ្មានថ្លៃដើមក្នុងឯកសារ — សូមបំពេញជួរឈរថ្លៃដើម ដើម្បីឲ្យស្តុកចូលនីមួយៗកត់ត្រាថ្លៃដែលអ្នកបានបង់។',
                 ).replace('{count}', String(gateCount))}
+              </span>
+            </div>
+          ) : null}
+
+          {reconcileNoCostColumn ? (
+            <div className="inline-flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {tr(
+                  'stock_import_reconcile_no_cost_note',
+                  'This file has no cost column. In Reconcile mode, any product whose counted total is higher than what is on hand is a stock-in and needs a supplier and unit cost — add the cost_price (and supplier) columns before importing.',
+                  'ឯកសារនេះគ្មានជួរឈរថ្លៃដើមទេ។ ក្នុងរបៀបផ្សះផ្សា ផលិតផលណាដែលចំនួនរាប់សរុបខ្ពស់ជាងស្តុកបច្ចុប្បន្នគឺជាការបន្ថែមស្តុក ហើយត្រូវការឈ្មោះអ្នកផ្គត់ផ្គង់ និងថ្លៃដើម — សូមបន្ថែមជួរឈរ cost_price (និងអ្នកផ្គត់ផ្គង់) មុននឹងនាំចូល។',
+                )}
               </span>
             </div>
           ) : null}

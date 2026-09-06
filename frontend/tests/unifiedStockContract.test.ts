@@ -14,19 +14,23 @@ import {
 // family (nothing outside its own tests imported it since Part 361 replaced
 // the client-side flow), so the surviving contract gets its own file.
 // 'supplier' (11th, OPTIONAL — migration 0062) attributes the batch a row's
-// stock was bought from; ten-column files must keep importing unchanged.
+// stock was bought from; 'free_goods' (12th, OPTIONAL — N14-D) declares a
+// $0.00 cost as free rather than an invented zero. Ten-column files must
+// keep importing unchanged.
 assert.deepEqual(UNIFIED_STOCK_HEADERS, [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
-  'selling_price', 'wholesale_price', 'cost_price', 'batch', 'supplier',
+  'selling_price', 'wholesale_price', 'cost_price', 'batch', 'supplier', 'free_goods',
 ])
 assert.equal(buildUnifiedStockTemplateCsv(), `﻿${UNIFIED_STOCK_HEADERS.join(',')}\r\n`)
-assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'Warehouse', 'Sale Date', 'Movement', 'Price USD', 'Special Price', 'Unit Cost', 'Lot Code', 'Vendor Name']), {
+assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'Warehouse', 'Sale Date', 'Movement', 'Price USD', 'Special Price', 'Unit Cost', 'Lot Code', 'Vendor Name', 'Free']), {
   name: 'Product Name', barcode: 'UPC', shop: 'Shop Qty', warehouse: 'Warehouse', date: 'Sale Date', action: 'Movement',
-  selling_price: 'Price USD', wholesale_price: 'Special Price', cost_price: 'Unit Cost', batch: 'Lot Code', supplier: 'Vendor Name',
+  selling_price: 'Price USD', wholesale_price: 'Special Price', cost_price: 'Unit Cost', batch: 'Lot Code', supplier: 'Vendor Name', free_goods: 'Free',
 })
-// A ten-column file (no supplier header) still maps cleanly — supplier just
-// resolves to nothing.
-assert.equal(mapUnifiedStockHeaders(['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'wholesale_price', 'cost_price', 'batch']).supplier, null)
+// A ten-column file (no supplier or free_goods header) still maps cleanly —
+// both just resolve to nothing.
+const tenColumnMap = mapUnifiedStockHeaders(['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'wholesale_price', 'cost_price', 'batch'])
+assert.equal(tenColumnMap.supplier, null)
+assert.equal(tenColumnMap.free_goods, null)
 assert.equal(normalizeUnifiedStockDate('08/27/2026'), '2026-08-27')
 assert.equal(normalizeUnifiedStockDate('2026-02-29'), null)
 
@@ -74,12 +78,42 @@ assert.deepEqual(noCost.issues.map((issue) => issue.code), ['receipt_gate'])
 assert.equal(noCost.issues[0].gateCode, 'cost_required')
 assert.equal(noCost.rows.length, 1, 'a gated row stays visible for review with its reason')
 
-// $0.00 is the claim "these goods were free", and the sheet has no column to
-// declare it -- so it is refused rather than recorded as a free receipt.
+// $0.00 is the claim "these goods were free". Left undeclared, it is refused
+// rather than recorded as a free receipt...
 const zeroCost = parseUnifiedStockRows([
   { name: 'A', barcode: '1', warehouse: '3', date: '08/27/2026', action: 'add', cost_price: '0', supplier: 'Bong Long' },
 ])
 assert.deepEqual(zeroCost.issues.map((issue) => issue.gateCode), ['free_goods_required'])
+// ...but the free_goods column (N14-D) is exactly the control the refusal's
+// own message points at, so a sheet that ticks it passes clean.
+const zeroCostDeclaredFree = parseUnifiedStockRows([
+  { name: 'A', barcode: '1', warehouse: '3', date: '08/27/2026', action: 'add', cost_price: '0', supplier: 'Bong Long', free_goods: 'yes' },
+])
+assert.equal(zeroCostDeclaredFree.issues.length, 0, 'a declared-free $0.00 receipt is not gated')
+assert.equal(zeroCostDeclaredFree.rows[0].freeGoods, true)
+
+// A CREATE row has no lot yet, so a blank supplier is certain to be refused
+// server-side -- this screen can say so before the upload instead of only in
+// the finished report, unlike an ordinary add whose supplier may be deferred
+// to an already-attributed lot the sheet cannot see.
+const createNoSupplier = parseUnifiedStockRows([
+  { name: 'Brand New', barcode: '9', shop: '2', date: '08/27/2026', action: 'create', cost_price: '5' },
+])
+assert.deepEqual(createNoSupplier.issues.map((issue) => issue.gateCode), ['supplier_required'])
+// 'new' is the same action, mirroring the resolver's CREATE_ACTION_RE.
+assert.deepEqual(
+  parseUnifiedStockRows([{ name: 'Brand New', barcode: '9', shop: '2', date: '08/27/2026', action: 'new', cost_price: '5' }])
+    .issues.map((issue) => issue.gateCode),
+  ['supplier_required'],
+)
+// An ordinary add (no explicit create/new) keeps deferring the supplier half:
+// it may be topping up an already-attributed lot this screen cannot see.
+assert.deepEqual(
+  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: 'add', cost_price: '5' }])
+    .issues.map((issue) => issue.gateCode),
+  [],
+  'a plain add defers the supplier question to the server, which can see the lot',
+)
 
 // A sale takes stock OUT and carries no receipt facts...
 const saleRow = parseUnifiedStockRows([
