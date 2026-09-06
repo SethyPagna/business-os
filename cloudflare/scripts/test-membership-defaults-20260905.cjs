@@ -6,7 +6,14 @@ const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 const raw = openDb(loadAll())
-const db = { prepare(sql) { const s = raw.prepare(sql); return { get: async p => s.get(p), all: async p => s.all(p), run: async p => s.run(p) } } }
+// The PUT route commits through db.batch; the hook lets the membership race
+// check below plant a competing writer between a mint and its UPDATE.
+let membershipBatchCalls = 0
+let onMembershipBatch = null
+const db = {
+  prepare(sql) { const s = raw.prepare(sql); return { get: async p => s.get(p), all: async p => s.all(p), run: async p => s.run(p) } },
+  batch: async items => { membershipBatchCalls += 1; if (onMembershipBatch) { const hook = onMembershipBatch; onMembershipBatch = null; hook(items) } return raw.batch(items) },
+}
 function load(file, dependencies = {}) {
   const filename = path.join(__dirname, '../src', file)
   const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }, fileName: filename }).outputText
@@ -19,7 +26,7 @@ const portal = load('routes/portal.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => next() },
 })
-const contacts = load('routes/contacts.ts', {
+const contactDependencies = {
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => {
     const permissions = c.req.header('x-test-permissions')
@@ -31,6 +38,22 @@ const contacts = load('routes/contacts.ts', {
   '../lib/sqlBinding': load('lib/sqlBinding.ts'),
   '../lib/membershipNumber': membership,
   './portal': { ...portal, loadSettingsMap: async () => ({ loyalty_points_enabled: 'false' }) },
+}
+const contacts = load('routes/contacts.ts', contactDependencies).default
+// A second load of the SAME route file with the rest of its collaborators
+// wired up: the read-only checks above only need the handful listed there,
+// but the membership race check at the end drives a real PUT /customers/:id
+// end to end, so conflictControl, contactDuplicates, phone and the
+// fire-and-forget audit/broadcast/cache calls all have to resolve.
+const contactsWrite = load('routes/contacts.ts', {
+  ...contactDependencies,
+  '../lib/conflictControl': load('lib/conflictControl.ts'),
+  '../lib/contactDuplicates': load('lib/contactDuplicates.ts', { './contactOptions': load('lib/contactOptions.ts') }),
+  '../lib/phone': load('lib/phone.ts'),
+  '../lib/audit': { audit: async () => {} },
+  '../lib/cache': { bumpVersion: async () => {} },
+  '../durable-objects/broadcastHub': { broadcast: async () => {} },
+  '../lib/actorSnapshot': { actorSnapshot: () => ({}) },
 }).default
 const imports = load('lib/importEngine.ts', {
   './membershipNumber': membership,
@@ -124,6 +147,99 @@ async function main() {
   const applied = await db.prepare('SELECT name,membership_number FROM customers WHERE id=1').get()
   assert.equal(applied.name, 'Member updated')
   assert.equal(applied.membership_number, ' legacy-Id ', 'apply cannot rewrite identity from a stale review')
-  console.log('PASS membership routes: auth, exact scope, redaction, public 403; LC- gap-fill minting over customers+portal_accounts, bounded retries, imports and preservation')
+
+  // --- undo/redo of a hard delete must not dead-end on a gap-fill race
+  // (verifier finding, 2026-09-06): bulkDeleteEngine.ts hard-deletes
+  // customers, and CustomersTab.tsx's undo/redo replays the deleted
+  // customer's OWN membership_number verbatim through POST /customers.
+  // Gap-fill deliberately reuses a number freed by that delete
+  // (membershipNumber.ts's header decision), so if a brand-new signup or
+  // manual add grabbed that exact slot during the undo window, the restore
+  // must mint a fresh number (isUndoRestore: true) instead of the flat 400
+  // a normal manual add still gets for the identical collision (a real
+  // typo/duplicate signal staff need to see).
+  //
+  // Wiring the FULL POST /customers route here would mean stubbing every
+  // one of its other dependencies (audit, broadcast, cache versioning,
+  // contactDuplicates+contactOptions, actorSnapshot...), none of which this
+  // decision touches -- so, same technique as the import-engine apply-block
+  // slice just above, the REAL source's own membership-collision block is
+  // extracted verbatim by anchor text and executed directly. Any edit that
+  // moves this block without keeping the same two anchors fails loudly here
+  // (assert.ok on both indexOf calls) rather than silently testing nothing.
+  const contactsSource = fs.readFileSync(path.join(__dirname, '../src/routes/contacts.ts'), 'utf8')
+  const collisionAnchorStart = 'let mintMembership = false'
+  const collisionAnchorEnd = 'const runContactInsert = async'
+  const collisionStart = contactsSource.indexOf(collisionAnchorStart)
+  assert.ok(collisionStart > 0, 'contacts.ts POST /customers: could not find the membership-collision decision block (start anchor moved)')
+  const collisionEnd = contactsSource.indexOf(collisionAnchorEnd, collisionStart)
+  assert.ok(collisionEnd > collisionStart, 'contacts.ts POST /customers: could not find the end of the membership-collision decision block (end anchor moved)')
+  const collisionSlice = contactsSource.slice(collisionStart, collisionEnd)
+  assert.match(collisionSlice, /isUndoRestore/, 'the extracted slice must be the isUndoRestore-aware block, not a stale match')
+  const collisionCode = ts.transpileModule(collisionSlice, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const runCollisionDecision = new Function(`return (async function(db, payload, body, config, c, normalizeMembershipNumber) {
+${collisionCode}
+    return { mintMembership, payload }
+  })`)()
+
+  raw.prepare("INSERT INTO customers (name, membership_number) VALUES ('Reused Slot Owner', 'LC-00007')").run()
+  const jsonC = { json: (jsonBody, status) => ({ __earlyReturn: true, status, jsonBody }) }
+
+  const normalCollision = await runCollisionDecision(
+    db, { membership_number: 'LC-00007' }, {}, { table: 'customers' }, jsonC, membership.normalizeMembershipNumber,
+  )
+  assert.strictEqual(normalCollision.status, 400, 'a normal manual add (no isUndoRestore) still gets the flat 400 on a real collision')
+  assert.match(normalCollision.jsonBody.error, /already in use/)
+
+  const restoreCollision = await runCollisionDecision(
+    db, { membership_number: 'LC-00007' }, { isUndoRestore: true }, { table: 'customers' }, jsonC, membership.normalizeMembershipNumber,
+  )
+  assert.strictEqual(restoreCollision.__earlyReturn, undefined, 'an undo/redo restore must NOT early-return the 400 on the exact same collision')
+  assert.strictEqual(restoreCollision.mintMembership, true, 'the collision must fall back to minting a fresh number, not reuse the taken one')
+
+  const restoreNoCollision = await runCollisionDecision(
+    db, { membership_number: 'LC-09999' }, { isUndoRestore: true }, { table: 'customers' }, jsonC, membership.normalizeMembershipNumber,
+  )
+  assert.strictEqual(restoreNoCollision.__earlyReturn, undefined)
+  assert.strictEqual(restoreNoCollision.mintMembership, false, 'isUndoRestore only changes what happens ON a collision -- no collision means no forced mint')
+  assert.strictEqual(restoreNoCollision.payload.membership_number, 'LC-09999', 'a non-colliding supplied number survives untouched')
+
+  // --- PUT /customers/:id must mint through withMintedMembershipNumber too
+  // (verifier finding, 2026-09-06). The POST route already deferred its mint
+  // into the retry wrapper; the PUT route minted once, up front, and handed
+  // the number straight to the UPDATE -- so a writer that took that number in
+  // between turned a routine edit into a raw 500 with the field still blank.
+  // ONE rule, ONE retry story, both call sites.
+  raw.prepare("INSERT INTO customers (id,name) VALUES (900,'Race A'),(901,'Race B')").run()
+  const putCustomer = (id, payload) => contactsWrite.request(`/customers/${id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-test-permissions': '{"contacts":true}' },
+    body: JSON.stringify(payload),
+  }, {}, { waitUntil: () => {}, passThroughOnException: () => {} })
+
+  const firstPut = await putCustomer(900, { name: 'Race A', membership_number: '' })
+  assert.equal(firstPut.status, 200, 'blanking the membership field on a customer that has never had one mints a house number')
+  const firstNumber = (await db.prepare('SELECT membership_number FROM customers WHERE id=900').get()).membership_number
+  assert.match(firstNumber, /^LC-\d{5}$/)
+
+  // The second PUT loses the UNIQUE-index race: a competing writer grabs the
+  // exact number it just minted, in the instant between the mint and the
+  // UPDATE. Planted inside db.batch so the timing is deterministic rather
+  // than a hopeful Promise.all interleave.
+  membershipBatchCalls = 0
+  onMembershipBatch = items => {
+    const minted = items[0].params.membership_number
+    raw.prepare("INSERT INTO customers (name,membership_number) VALUES ('Interloper',@n)").run({ n: minted })
+  }
+  const secondPut = await putCustomer(901, { name: 'Race B', membership_number: '' })
+  assert.equal(secondPut.status, 200, 'losing the race re-mints and retries -- it must never surface as a 500')
+  assert.equal(membershipBatchCalls, 2, 'exactly one retry: the first UPDATE lost the index, the second won')
+  const secondNumber = (await db.prepare('SELECT membership_number FROM customers WHERE id=901').get()).membership_number
+  assert.match(secondNumber, /^LC-\d{5}$/)
+  assert.notEqual(secondNumber, firstNumber, 'the two edited customers end with DISTINCT house numbers')
+  const interloperNumber = (await db.prepare("SELECT membership_number FROM customers WHERE name='Interloper'").get()).membership_number
+  assert.notEqual(secondNumber, interloperNumber, 'the retry took the next free number, not the one it lost')
+
+  console.log('PASS membership routes: auth, exact scope, redaction, public 403; LC- gap-fill minting over customers+portal_accounts, bounded retries, imports, preservation, undo/redo restore-vs-manual-add collision handling, and PUT-path mint retry')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

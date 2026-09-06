@@ -19,7 +19,7 @@ import {
 } from '../lib/contactDuplicates'
 import type { ContactOptionMode } from '../lib/contactOptions'
 import { canonicalizePhone } from '../lib/phone'
-import { mintMembershipNumber, normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/membershipNumber'
+import { normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/membershipNumber'
 import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
@@ -222,10 +222,10 @@ function pickColumns(body: Record<string, unknown>, columns: string[]): Record<s
 // authority, shared with the import engine and the storefront signup, which
 // hands out the next gap-filling `LC-#####`. This file used to carry its own
 // random `LCMN-XXXXXXXX` generator; see that module's header for why four
-// independent minters on one column was the bug.
-async function generateMembershipNumber(env: Env): Promise<string> {
-  return mintMembershipNumber(getDb(env))
-}
+// independent minters on one column was the bug. Both mint call sites
+// (POST's runContactInsert, PUT's runContactUpdate) go straight through
+// withMintedMembershipNumber now, so there is no standalone wrapper here
+// any more.
 
 // Shared error shape for both duplicate severities the create/update
 // routes actively block on. `duplicate` carries the conflicting row so
@@ -1004,10 +1004,26 @@ function registerContactRoutes(config: ContactConfig) {
       const raw = normalizeMembershipNumber(payload.membership_number)
       if (raw) {
         const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@raw)) LIMIT 1').get({ raw })
-        if (existing) return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
-        // Supplied values also restore deleted legacy contacts via undo.
-        // Compare normalized, but preserve the identity bytes on restoration.
-        payload.membership_number = String(payload.membership_number)
+        if (existing) {
+          // Undo/redo of a hard delete (CustomersTab.tsx) replays the
+          // customer's own original number verbatim -- gap-fill deliberately
+          // reuses a number freed by that delete (see membershipNumber.ts's
+          // header), so if a brand-new signup or manual add landed on that
+          // exact slot during the undo window, the restore must not
+          // dead-end on a 400 the user has no field to fix. Fall back to a
+          // fresh mint instead of rejecting. A normal manual add (no
+          // isUndoRestore flag) still gets the strict 400 below -- that
+          // path IS a real typo/duplicate signal staff need to see.
+          if (body.isUndoRestore === true) {
+            mintMembership = true
+          } else {
+            return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
+          }
+        } else {
+          // Supplied values also restore deleted legacy contacts via undo.
+          // Compare normalized, but preserve the identity bytes on restoration.
+          payload.membership_number = String(payload.membership_number)
+        }
       } else {
         mintMembership = true
       }
@@ -1154,6 +1170,13 @@ function registerContactRoutes(config: ContactConfig) {
     const duplicateBlock = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.confirmDuplicate === true)
     if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
 
+    // Customers only, same deferred-mint shape as the POST route above: a
+    // number staff typed in wins (after a reuse check); a blank one on a
+    // customer that has never had one is minted from the house LC-
+    // sequence, deferred into the batch below so a concurrent writer
+    // winning the UNIQUE index race is handed the next free number instead
+    // of a raw 500.
+    let mintMembership = false
     if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'membership_number')) {
       const raw = normalizeMembershipNumber(payload.membership_number)
       if (current.membership_number) {
@@ -1163,7 +1186,7 @@ function registerContactRoutes(config: ContactConfig) {
         if (existing) return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
         payload.membership_number = raw
       } else {
-        payload.membership_number = current.membership_number || (await generateMembershipNumber(c.env))
+        mintMembership = true
       }
     }
 
@@ -1225,7 +1248,21 @@ function registerContactRoutes(config: ContactConfig) {
         statements.push({ sql: `UPDATE sales SET delivery_contact_name = @name WHERE delivery_contact_id = @id`, params: { id, name } })
       }
     }
-    if (statements.length) await db.batch(statements)
+    // The contact UPDATE built above carries `payload` as its params, so a
+    // deferred mint (mintMembership) has to refresh them before the batch
+    // runs: withMintedMembershipNumber re-mints and calls back on a lost
+    // UNIQUE race, and the retry must write the NEW number, not the one it
+    // just lost. Same one retry story as the POST route above.
+    const contactUpdate = columns.length ? statements[0] : null
+    if (mintMembership) {
+      await withMintedMembershipNumber(db, async (membershipNumber) => {
+        payload.membership_number = membershipNumber
+        if (contactUpdate) contactUpdate.params = { ...payload, id }
+        if (statements.length) await db.batch(statements)
+      })
+    } else if (statements.length) {
+      await db.batch(statements)
+    }
     if (config.table === 'suppliers' && nameChanged && snapshotCarry) {
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'supplier_cascade', id, {
         from: String(current.name || '').trim(),
