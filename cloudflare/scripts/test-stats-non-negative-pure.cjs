@@ -116,6 +116,19 @@ sale({ id: 5, created_at: AT(8, 14), sale_status: 'cancelled', subtotal_usd: 200
 sale({ id: 6, created_at: AT(7, 20), sale_status: 'completed', subtotal_usd: 60, total_usd: 60 })
 // S7 -- SEPTEMBER: sold line has no cost snapshot, its return carries a real cost.
 sale({ id: 7, created_at: AT(9, 3), sale_status: 'completed', subtotal_usd: 50, total_usd: 50 })
+// S8/S9 -- OCTOBER, the delivery cohort. Every sale in production that carries
+// a courier cost is awaiting_payment (12 of 15,044, ids 16836-16872), which is
+// exactly the shape the deliveryActualCostExpr comment used to say contributed
+// "nothing to a recognized figure yet". recognizedExpr is `<> 'cancelled'`, so
+// it always did. S9 additionally carries a standalone `fees` delivery row
+// linked to the sale -- the anti-double-count guard must zero its courier cost
+// so the same payment is not charged twice.
+sale({ id: 8, created_at: AT(10, 5), sale_status: 'awaiting_payment', subtotal_usd: 100, total_usd: 105,
+  delivery_fee_usd: 5, delivery_fee_paid_by: 'customer', is_delivery: 1, delivery_actual_cost_usd: 2 })
+sale({ id: 9, created_at: AT(10, 6), sale_status: 'awaiting_payment', subtotal_usd: 50, total_usd: 54,
+  delivery_fee_usd: 4, delivery_fee_paid_by: 'customer', is_delivery: 1, delivery_actual_cost_usd: 3 })
+db.prepare(`INSERT INTO fees (id, fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, created_at)
+  VALUES (1, 'delivery', 'Grab', 3, 0, '2026-10-06', 9, 1, '2026-10-06 05:00:00')`).run()
 
 const insItem = db.prepare('INSERT INTO sale_items (id, sale_id, quantity, cost_price_usd, total_usd, branch_id, product_id, product_name) VALUES (?,?,?,?,?,?,?,?)')
 insItem.run(1, 1, 1, 30, 90, 1, 101, 'A')
@@ -125,6 +138,8 @@ insItem.run(4, 4, 1, 8, 40, 1, 104, 'D')
 insItem.run(5, 5, 1, 99, 200, 1, 105, 'E')  // cancelled -- must not reach COGS
 insItem.run(6, 6, 1, 20, 60, 1, 106, 'F')
 insItem.run(7, 7, 1, null, 50, 1, 107, 'G') // NULL cost snapshot
+insItem.run(8, 8, 1, 40, 100, 1, 108, 'H')  // OCTOBER delivery cohort
+insItem.run(9, 9, 1, 10, 50, 1, 109, 'I')
 
 const insRet = db.prepare('INSERT INTO returns (id, sale_id, total_refund_usd, status, return_scope, created_at, branch_id, reason) VALUES (?,?,?,?,?,?,?,?)')
 insRet.run(2, 2, 25, 'completed', 'customer', AT(8, 11), 1, 'damaged')   // refund on the unvalued receipt
@@ -245,6 +260,41 @@ check(`SEPTEMBER: a sold line with no cost snapshot cannot absorb its return's c
 check(`SEPTEMBER revenue and profit stay non-negative (${sep.revenue_usd} / ${sep.profit_usd})`,
   sep.revenue_usd === 40 && sep.profit_usd === 40)
 check(`AUGUST absorbed every returned cost it counted, so it reports no shortfall (${aug.returned_cost_shortfall_usd})`, aug.returned_cost_shortfall_usd === 0)
+
+// ---- 6b. The awaiting-payment delivery cohort is INSIDE the realised figures
+// (ask item 4). deliveryActualCostExpr's note used to end "so this expression
+// contributes nothing to a recognized figure yet", reasoning from a cohort that
+// is entirely awaiting_payment. recognizedExpr admits awaiting_payment, so the
+// courier cost reduced delivery_net_usd and profit_usd the whole time -- and
+// was reported a SECOND time as pending_delivery_cost_usd, which is a subset,
+// not a complement. This pins the corrected comment to behaviour.
+const OCT = { startDate: '2026-10-01', endDate: '2026-10-31', branchId: null }
+const oct = await lib.getSalesTotals({ __db: db }, OCT)
+check(`OCTOBER: an awaiting_payment sale's courier cost enters recognized_delivery_cost_usd (${oct.recognized_delivery_cost_usd})`,
+  oct.recognized_delivery_cost_usd === 2)
+check(`...so it reduces delivery_net_usd: charged 9 - paid 2 = ${oct.delivery_net_usd}`,
+  oct.recognized_delivery_usd === 9 && oct.delivery_net_usd === 7)
+check(`...and therefore profit_usd today (${oct.profit_usd} = revenue ${oct.revenue_usd} - COGS ${oct.cost_usd} + delivery net ${oct.delivery_net_usd})`,
+  oct.revenue_usd === 150 && oct.cost_usd === 50 && oct.profit_usd === 107)
+check('POSITIVE CONTROL: the retired claim ("contributes nothing to a recognized figure") would have given delivery_net 9 and profit 109',
+  oct.delivery_net_usd !== 9 && oct.profit_usd !== 109)
+check(`the SAME cost is additionally reported as pending_delivery_cost_usd -- a subset, never added on top (${oct.pending_delivery_cost_usd})`,
+  oct.pending_delivery_cost_usd === 2 && oct.pending_delivery_usd === 5 + 4)
+check(`the pending block mirrors the realised one over the same cohort (${oct.pending_revenue_usd} / ${oct.pending_profit_usd})`,
+  oct.pending_revenue_usd === 150 && oct.pending_cost_usd === 50 && oct.pending_profit_usd === 107)
+check(`the anti-double-count guard zeroes the courier cost of a sale that also has a standalone delivery fee row (S9's $3 is charged once, in fees)`,
+  oct.recognized_delivery_cost_usd === 2 && oct.delivery_actual_cost_usd === 5)
+check(`OCTOBER revenue and profit stay non-negative`, oct.revenue_usd >= 0 && oct.profit_usd >= 0)
+// The comment may still QUOTE the refuted sentence -- it does, inside the
+// retraction that names it -- but it may never assert it. So the check is
+// positional: every occurrence has to sit inside "used to conclude ... That
+// was already false", never standing on its own as the note's conclusion.
+const kernelSource = fs.readFileSync(srcPath, 'utf8')
+const claimHits = [...kernelSource.matchAll(/contributes nothing to a recognized figure/g)]
+check(`the deliveryActualCostExpr note states the claim only to retract it (${claimHits.length} occurrence(s))`,
+  claimHits.length === 1
+  && /used to conclude[\s\S]{0,120}contributes nothing to a recognized figure/.test(kernelSource)
+  && /That was already false when\s*\n\/\/ it was written/.test(kernelSource))
 
 // ---- 7. pending_item_discount_usd is no longer dropped on the floor --------
 const derived = lib.deriveTotals({ tx_count: 1, recognized_net_usd: 10 }, 0, 0, { itemDiscountUsd: 3, pendingItemDiscountUsd: 4, cancelledTxCount: 2, unvaluedCostUsd: 9 })
