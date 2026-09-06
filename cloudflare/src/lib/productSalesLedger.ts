@@ -55,16 +55,21 @@
 //     its own charged total is a broken row, not negative income;
 //   * the refund is capped at that same net value -- a reversal cannot take
 //     back more than the line recognised;
+//   * the returned QUANTITY is capped the same way, for the same reason: a
+//     sale split across branches is scoped on the sold side only, so a 5-unit
+//     refund could meet a 3-unit branch-scoped sale and report -2 units sold;
 //   * COGS is floored at 0 after the restocked cost comes off -- the kernel's
 //     `Math.max(0, costUsd - returnedCostUsd)`, which covers a returned line
 //     whose cost snapshot is larger than the sold line's.
-// Therefore `revenue_usd >= 0` and `cogs_usd >= 0` for every product, and
+// Therefore `qty_sold >= 0`, `revenue_usd >= 0` and `cogs_usd >= 0` for every product, and
 // `profit_usd = revenue_usd - cogs_usd` is negative ONLY when the product was
 // genuinely sold below cost. That loss is real and stays visible: profit is not
 // floored, here or in the kernel ("hiding it would be the same lie in the other
-// direction"). It also makes inventory/ProductDetailModal.tsx's
-// `Math.max(0, revenue) - Math.max(0, cogs)` a provable no-op rather than a
-// second, disagreeing definition.
+// direction"). It also makes all FOUR of inventory/ProductDetailModal.tsx's
+// clamps -- `Math.max(0, ...)` over qty_sold, revenue_usd and cogs_usd, plus
+// the `Math.max(0, revenue) - Math.max(0, cogs)` profit built on the last two
+// -- provable no-ops rather than a second, disagreeing definition of the same
+// four cells the Inventory list renders raw.
 //
 // DELIBERATELY NOT MIRRORED from the kernel: valuedSaleExpr. The kernel holds
 // zero-subtotal receipts out of COGS because its revenue is derived from the
@@ -142,7 +147,13 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
   const refundKhr = refundBasisLineExpr('ri.total_khr', 's.subtotal_khr', netSaleKhrExpr('s.'))
   return `
     SELECT sold.product_id AS product_id,
-           SUM(sold.qty_sold - COALESCE(ret.qty_returned, 0)) AS qty_sold,
+           -- Units carry the SAME cap as the money below: a reversal cannot
+           -- take back more than this (sale, product) pair recognised in
+           -- scope. Without it a sale split across branches -- 3 units at
+           -- branch 1, 2 at branch 2, all 5 returned -- reported "Net sold -2"
+           -- at branch 1, because the sold side is branch-scoped and the
+           -- return side is not (it inherits scope through the sale).
+           SUM(sold.qty_sold - MIN(sold.qty_sold, COALESCE(ret.qty_returned, 0))) AS qty_sold,
            SUM(sold.store_discount_usd) AS store_discount_usd,
            SUM(sold.store_discount_khr) AS store_discount_khr,
            SUM(sold.membership_discount_usd) AS membership_discount_usd,

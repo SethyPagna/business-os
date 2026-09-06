@@ -22,6 +22,15 @@
 //   E  a return line written stock_action='restock' with the legacy
 //      return_to_stock flag still 0: goods back on the shelf whose cost never
 //      came back out of COGS -- the mirror defect            +4.00 -> +12.00
+//   H  the SAME defect in UNITS. One sale carrying two sale_items rows for one
+//      product at two different branches, all five units returned. The sold
+//      side is branch-scoped; the return side is deliberately not (it inherits
+//      scope through the sale, exactly as the kernel's CUSTOMER_REFUND_JOIN
+//      does), so a 5-unit reversal met a 3-unit branch-1 sale and ran past
+//      what that scope had recognised. Money was already capped at what the
+//      (sale, product) pair recognised; the unit count was the one column that
+//      was not, so the list could render "Net sold -2" while the pane opened
+//      from that row clamped it to 0.               qty_sold -2.00 -> 0
 //
 // Plus the two positive controls, without which a "nothing is negative any
 // more" sweep would be indistinguishable from a broken instrument:
@@ -128,8 +137,9 @@ function setupDatabase() {
       (4,'D: return with no sale behind it','d',1,0,0,0,0,0),
       (5,'E: restock the legacy flag missed','e',1,0,0,0,0,0),
       (6,'F: genuinely sold below cost','f',1,0,0,0,0,0),
-      (7,'G: an ordinary sale and return','g',1,0,0,0,0,0);
-    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0);
+      (7,'G: an ordinary sale and return','g',1,0,0,0,0,0),
+      (8,'H: one sale, two branches, all of it returned','h',1,0,0,0,0,0);
+    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0);
 
     -- A: the sale is in AUGUST, the return is inside the September window.
     INSERT INTO sales VALUES (100,1,'completed','2026-08-01 03:00:00',100,400000,0,0,0,0);
@@ -168,6 +178,15 @@ function setupDatabase() {
     INSERT INTO sale_items VALUES (105,105,7,1,3,30,120000,4,16000);
     INSERT INTO returns VALUES (205,105,1,'completed','customer','2026-09-05 04:00:00');
     INSERT INTO return_items VALUES (205,205,7,1,2,20,80000,4,16000,1,'restock');
+
+    -- H: ONE sale, two sale_items rows for one product at two branches
+    -- (3 units at branch 1, 2 at branch 2), and one return of all 5 units.
+    -- Scoped to branch 1 the sold side sees 3 and the return side sees 5.
+    INSERT INTO sales VALUES (106,1,'completed','2026-09-05 03:00:00',50,200000,0,0,0,0);
+    INSERT INTO sale_items VALUES (106,106,8,1,3,30,120000,4,16000);
+    INSERT INTO sale_items VALUES (107,106,8,2,2,20,80000,4,16000);
+    INSERT INTO returns VALUES (206,106,1,'completed','customer','2026-09-05 04:00:00');
+    INSERT INTO return_items VALUES (206,206,8,1,5,50,200000,4,16000,1,'restock');
   `)
   return d1
 }
@@ -176,7 +195,7 @@ const round2 = (value) => Math.round(value * 100) / 100
 
 async function main() {
   const db = dbAdapter(setupDatabase())
-  const items = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id }))
+  const items = [1, 2, 3, 4, 5, 6, 7, 8].map((id) => ({ id }))
   await attachInventoryProductMetrics(db, items, {
     branchId: '1', startDate: '2026-09-05', endDate: '2026-09-05',
   })
@@ -204,6 +223,8 @@ async function main() {
     'D: a return with no sale behind it has nothing in scope to reverse (was -30.00 / profit -25.00)')
   assert.deepEqual(at(5), { qty_sold: 1, revenue_usd: 20, revenue_khr: 80000, cogs_usd: 8, profit_usd: 12 },
     'E: stock_action wins over the legacy return_to_stock flag, so restocked goods leave COGS (COGS was 16, profit understated at 4)')
+  assert.deepEqual(at(8), { qty_sold: 0, revenue_usd: 0, revenue_khr: 0, cogs_usd: 0, profit_usd: 0 },
+    'H: the unit reversal is capped at what the same (sale, product) pair recognised in scope, exactly as the money is -- 3 units sold at branch 1, a 5-unit refund, and Net sold is 0, not -2')
 
   // ---- the positive controls ----------------------------------------------
   assert.deepEqual(at(6), { qty_sold: 1, revenue_usd: 5, revenue_khr: 20000, cogs_usd: 9, profit_usd: -4 },
@@ -218,6 +239,11 @@ async function main() {
     assert.ok(revenue >= 0, `revenue_usd is non-negative by construction (product ${item.id} = ${revenue})`)
     assert.ok(cogs >= 0, `cogs_usd is non-negative by construction (product ${item.id} = ${cogs})`)
     assert.ok(Number(item.revenue_khr) >= 0, `revenue_khr is non-negative by construction (product ${item.id})`)
+    // Net sold is the fourth cell of the same row and the fourth clamp in
+    // inventory/ProductDetailModal.tsx (`Math.max(0, p.qty_sold || 0)`), so it
+    // carries the same invariant as the money: a reversal cannot take back
+    // more units than the same (sale, product) pair recognised in scope.
+    assert.ok(Number(item.qty_sold) >= 0, `qty_sold is non-negative by construction (product ${item.id} = ${Number(item.qty_sold)})`)
     // The whole point of the lane: this is inventory/ProductDetailModal.tsx's
     // formula. With both operands non-negative its Math.max() clamps are
     // no-ops, so the list and the pane opened from that very row cannot
@@ -252,17 +278,23 @@ async function main() {
       }
       assert.ok(Number(row.revenue_usd) >= 0, `${label}: revenue_usd non-negative (product ${row.product_id})`)
       assert.ok(Number(row.cogs_usd) >= 0, `${label}: cogs_usd non-negative (product ${row.product_id})`)
+      assert.ok(Number(row.qty_sold) >= 0, `${label}: qty_sold non-negative (product ${row.product_id} = ${Number(row.qty_sold)})`)
       assert.ok(Number(row.gross_revenue_usd) >= Number(row.revenue_usd),
         `${label}: gross is before the return reversal, so it cannot be below net (product ${row.product_id})`)
     }
   }
-  // The branch-scoped shape must actually discriminate: everything in this
-  // fixture is branch 1, so scoping to branch 2 has to come back empty rather
-  // than quietly ignoring @branchId.
-  const otherBranch = db.prepare(
-    `SELECT * FROM (${productSalesLedger.buildProductSalesLedgerSql({ branchScoped: true })}) fin`,
-  ).all({ branchId: 2 })
-  assert.equal(otherBranch.length, 0, 'the branch-scoped shape really filters on @branchId')
+  // The branch-scoped shape must actually discriminate. Product 8 (case H) is
+  // the only thing sold at branch 2, so that scope must return exactly it --
+  // and branch 3, where nothing was sold, must come back empty. Either half
+  // alone would pass on a builder that quietly ignored @branchId.
+  const branchScopedSql = productSalesLedger.buildProductSalesLedgerSql({ branchScoped: true })
+  const branchTwo = db.prepare(`SELECT * FROM (${branchScopedSql}) fin ORDER BY fin.product_id`).all({ branchId: 2 })
+  assert.deepEqual(branchTwo.map((row) => Number(row.product_id)), [8],
+    'the branch-scoped shape really filters on @branchId: only case H has a branch-2 sale line')
+  assert.equal(round2(Number(branchTwo[0].qty_sold)), 0,
+    'and the 5-unit refund is capped at the 2 units branch 2 recognised, not subtracted whole (base: -3)')
+  const branchThree = db.prepare(`SELECT * FROM (${branchScopedSql}) fin`).all({ branchId: 3 })
+  assert.equal(branchThree.length, 0, 'a branch with no sale lines returns nothing')
 
   // ---- one implementation, not five ---------------------------------------
   const inventorySource = fs.readFileSync(path.join(srcRoot, 'routes/inventory.ts'), 'utf8')
