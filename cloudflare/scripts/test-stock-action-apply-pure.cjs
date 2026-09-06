@@ -34,6 +34,10 @@ const migrationsDir = path.join(__dirname, '..', 'migrations')
 const REAL = new Set([
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
+  // productIdentity holds identityBarcodeKeySql, the ONE SQL spelling of the
+  // fold the bounded catalog query narrows with. Stubbed, this harness would
+  // green over a query that never folds.
+  'productIdentity',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
 ])

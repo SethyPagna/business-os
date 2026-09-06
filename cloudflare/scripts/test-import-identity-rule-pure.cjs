@@ -23,6 +23,10 @@ const libDir = path.join(__dirname, '..', 'src', 'lib')
 const REAL = new Set([
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
+  // productIdentity carries identityBarcodeKeySql -- the ONE SQL spelling of the
+  // fold the bounded catalog query uses. Stubbing it would let this test pass
+  // over a query that never folds.
+  'productIdentity',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
 ])
@@ -236,7 +240,7 @@ function seedCatalog(sqlite) {
     assert.strictEqual(byRow.get(2).productId, 2, 'name-compatible barcode match attaches')
     assert.strictEqual(byRow.get(3).productId, null, 'same barcode + different name never attaches')
     assert.strictEqual(byRow.get(3).conflicts.length, 0, 'it is a CREATE of its own product, not a blocked conflict')
-    assert.strictEqual(byRow.get(3).identityKey, 'new:chanel no5|b1|cost:0', 'the new product keeps its exact name+barcode+cost identity')
+    assert.strictEqual(byRow.get(3).identityKey, 'new:chanel no5|b1', 'the new product keeps its exact name+barcode identity')
     assert.strictEqual(byRow.get(4).productId, null, 'same name + a NEW barcode is a child row (create), not an attach to the other-barcode sibling')
     assert.strictEqual(byRow.get(4).conflicts.length, 0)
     assert.strictEqual(byRow.get(5).productId, null, 'blank barcode differs from a real barcode and creates a child row')
@@ -244,6 +248,130 @@ function seedCatalog(sqlite) {
     assert.strictEqual(byRow.get(6).conflicts.length, 1)
     assert.match(byRow.get(6).conflicts[0], /name/i)
     console.log('PASS §12 matchProduct never attaches across names')
+  }
+
+  // ---- N15 §12: the live stock_actions import asks the SAME identity question
+  // Two rules used to live only here and nowhere else in the app, and each one
+  // MINTED the rows the merge tool then has to clean up:
+  //   * the barcode was compared RAW, so a sheet written in the GTIN-14 form of
+  //     a code stored as EAN-13 matched nothing and the import created the
+  //     leading-zero twin itself;
+  //   * a different COST forked a new product -- the pre-Sep-4 rule, gone from
+  //     products.ts and stockSession.ts, so a restock at a new price silently
+  //     became a second product row.
+  //
+  // DISCRIMINATING: on the pre-fix code rows 2, 3 and 4 below all report
+  // productId null (three fresh products), and rows 2 and 3 carry two DIFFERENT
+  // new-product identity keys.
+  {
+    const products = [
+      { id: 10, name: 'Rose Lip Oil', barcode: '3614274226546', selling_price_usd: 20, wholesale_price_usd: 18, cost_price_usd: 4 },
+      { id: 11, name: 'Short Code Balm', barcode: '0012', selling_price_usd: 6, wholesale_price_usd: 5, cost_price_usd: 3 },
+    ]
+    const branches = [{ id: 1, name: 'Shop' }, { id: 2, name: 'Warehouse' }]
+    const row = (rowNumber, fields) => ({ _rowNumber: rowNumber, date: '2026-08-28', action: 'add', shop: '1', ...fields })
+    const resolved = resolveUnifiedStockImportRows([
+      row(2, { name: 'Rose Lip Oil', barcode: '03614274226546', cost_price: '4' }),
+      row(3, { name: 'Rose Lip Oil', barcode: '3614274226546', cost_price: '9' }),
+      row(4, { name: '', barcode: '03614274226546' }),
+      row(5, { name: 'Short Code Balm', barcode: '12', cost_price: '3' }),
+      row(6, { name: 'Brand New Thing', barcode: '00099887766554', cost_price: '2' }),
+      row(7, { name: 'Brand New Thing', barcode: '99887766554', cost_price: '7' }),
+    ], 'direct', products, branches, [])
+    const byRow = new Map(resolved.map((r) => [r.rowNumber, r]))
+    assert.strictEqual(byRow.get(2).productId, 10, 'a zero-padded stock-action row attaches to the clean-barcode product instead of minting the twin')
+    assert.strictEqual(byRow.get(2).conflicts.length, 0)
+    assert.strictEqual(byRow.get(3).productId, 10, 'a different COST is not a different product -- cost stopped being identity on Sep 4 2026')
+    assert.strictEqual(byRow.get(3).costPriceUsd, 9, 'the row still carries its own cost onto the batch it adds')
+    assert.strictEqual(byRow.get(2).identityKey, byRow.get(3).identityKey,
+      'both rows resolve to ONE product identity, so the resolver plans one product, not a cost fork')
+    assert.strictEqual(byRow.get(4).productId, 10, 'a barcode-only row folds too (no name to disambiguate, one candidate)')
+    assert.strictEqual(byRow.get(5).productId, null, "'0012' and '12' are NOT one code -- stripping would leave under 3 characters")
+    assert.strictEqual(byRow.get(5).conflicts.length, 0, 'so that row is a plain create, not a blocked conflict')
+    // Same fold for rows that must CREATE: two sheet lines writing one new code
+    // two ways, at two costs, are one new product -- not three.
+    assert.strictEqual(byRow.get(6).productId, null)
+    assert.strictEqual(byRow.get(6).identityKey, byRow.get(7).identityKey,
+      'two spellings of the same new barcode at two costs share one new-product identity')
+    assert.strictEqual(byRow.get(6).identityKey, 'new:brand new thing|99887766554')
+    console.log('PASS N15 §12 the stock-action import folds the barcode and no longer forks on cost')
+  }
+
+  // ---- N15 §12: the CATALOG QUERY has to fold too --------------------------
+  // matchProduct can only fold candidates the SQL actually selected. The
+  // barcode prefilter compared LOWER(TRIM(barcode)) raw, so for a barcode-only
+  // sheet row the clean-barcode product was never even loaded and the import
+  // created the twin regardless of what matchProduct decided. This runs the
+  // real classifyUnifiedStockActions against a real SQLite.
+  //
+  // DISCRIMINATING: on the pre-fix code row 2 is action='create'.
+  {
+    const { normalizeSearchText } = loadReal('searchMatch')
+    const { classifyUnifiedStockActions } = loadReal('stockActionCatalog')
+    const sqlite = new Database(':memory:')
+    sqlite.exec(`
+      CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, name_normalized TEXT,
+        barcode TEXT, selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0,
+        cost_price_usd REAL DEFAULT 0, is_active INTEGER DEFAULT 1);
+      CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+      CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
+        batch_key TEXT, lot_code TEXT, is_active INTEGER DEFAULT 1);
+      CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0);
+      INSERT INTO branches (id, name) VALUES (1, 'Shop'), (2, 'Warehouse');
+    `)
+    const insert = sqlite.prepare(`INSERT INTO products (id, name, name_normalized, barcode, selling_price_usd, wholesale_price_usd, cost_price_usd)
+      VALUES (@id, @name, @normalized, @barcode, @selling, @wholesale, @cost)`)
+    insert.run({ id: 10, name: 'Rose Lip Oil', normalized: normalizeSearchText('Rose Lip Oil'), barcode: '3614274226546', selling: 20, wholesale: 18, cost: 4 })
+    insert.run({ id: 11, name: 'Short Code Balm', normalized: normalizeSearchText('Short Code Balm'), barcode: '0012', selling: 6, wholesale: 5, cost: 3 })
+    sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5), (11, 1, 5)`).run()
+    const db = {
+      prepare(sql) {
+        const stmt = sqlite.prepare(sql)
+        return {
+          get: (p) => Promise.resolve(stmt.get(p || {})),
+          all: (p) => Promise.resolve(stmt.all(p || {})),
+          run: (p) => { const i = stmt.run(p || {}); return Promise.resolve({ changes: i.changes, lastInsertRowid: Number(i.lastInsertRowid) }) },
+        }
+      },
+    }
+    // The barcode-only rows go through ALONE on purpose: `found` is one map
+    // for the whole window, so a sibling row naming the same product would
+    // load it through the NAME prefilter and hide a barcode prefilter that
+    // never folds.
+    const results = await classifyUnifiedStockActions(db, [
+      { _rowNumber: 2, name: '', barcode: '03614274226546', date: '2026-08-28', action: 'add', shop: '1' },
+      { _rowNumber: 4, name: '', barcode: '12', date: '2026-08-28', action: 'add', shop: '1' },
+    ], null)
+    const named = await classifyUnifiedStockActions(db, [
+      { _rowNumber: 3, name: 'Rose Lip Oil', barcode: '3614274226546', date: '2026-08-28', action: 'add', shop: '1', cost_price: '9' },
+    ], null)
+    const byRow = new Map([...results, ...named].map((r) => [r.rowNumber, r]))
+    assert.strictEqual(byRow.get(2).existingId, 10, `the barcode prefilter must SELECT the folded match (got: ${byRow.get(2).message})`)
+    assert.strictEqual(byRow.get(2).action, 'update', 'so the row updates the existing product instead of creating the twin')
+    assert.strictEqual(byRow.get(3).existingId, 10, 'a different cost still lands on the same product')
+    // Negative control on the same instrument: a fold that also swallowed
+    // short codes would report this one as an update too.
+    assert.strictEqual(byRow.get(4).existingId, null, "'12' must NOT reach the '0012' product")
+    assert.strictEqual(byRow.get(4).action, 'create')
+    console.log('PASS N15 §12 the bounded catalog query folds the barcode the same way matchProduct does')
+  }
+
+  // ---- N15 §12: the client's in-sheet grouping mirrors the server ----------
+  // The review screen groups sheet rows by name+barcode to raise the
+  // cost/batch confirm gate. Keyed on the RAW barcode, one file listing '0601'
+  // and '601' looked like two products to the reviewer while the import that
+  // followed treated them as one.
+  //
+  // DISCRIMINATING: on the pre-fix code this conflict map is empty.
+  {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'products', 'import', 'unifiedStockImport.ts'), 'utf8')
+    assert.match(src, /import \{ identityBarcodeKey \} from '\.\.\/\.\.\/\.\.\/utils\/productDetailRule\.ts'/,
+      'the sheet review must reach the fold through the rule module both packages carry verbatim')
+    assert.match(src, /\$\{identityBarcodeKey\(row\.barcode\)\}/,
+      'findUnifiedStockCostBatchConflicts must group on the FOLDED barcode')
+    assert.doesNotMatch(src, /\$\{row\.barcode\.trim\(\)\.toLowerCase\(\)\}/,
+      'the raw-barcode grouping key is the bug; it must be gone')
+    console.log('PASS N15 §12 the client sheet review groups on the same folded key')
   }
 
   // ---- unifyTouchedProductGroups (D6b) ------------------------------------
