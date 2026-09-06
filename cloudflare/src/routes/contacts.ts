@@ -995,10 +995,10 @@ function registerContactRoutes(config: ContactConfig) {
     if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
 
     // Customers only. A number staff typed in wins (after a reuse check);
-    // a blank one gets a secure random eight-character ID. The mint is deferred
+    // a blank one is minted from the house LC- sequence. The mint is deferred
     // into the INSERT below so that when two walk-ins are registered at the
     // same instant, the writer that loses the UNIQUE index race is handed
-    // a fresh random number instead of an error.
+    // the next free number instead of an error.
     let mintMembership = false
     if (config.table === 'customers') {
       const raw = normalizeMembershipNumber(payload.membership_number)

@@ -56,15 +56,14 @@ function existingReject(): SignupResult {
 // matches the customer record and login requires phone AND password -- so a
 // sequential id costs nothing that the old entropy was buying.
 //
-// mintMembershipNumber() reads the customers table, and every id issued here
-// is mirrored there (claimAccount either claims an existing customer's number
-// or creates the customer row). portal_accounts ids are passed in as extra
-// taken numbers anyway, so a stale account row can never collide with a fresh
-// mint. The INSERT below is still the final arbiter for a lost race.
+// mintMembershipNumber() reads BOTH customers.membership_number and
+// portal_accounts.membership_id directly, so a stale/orphaned account row
+// (e.g. a signup whose contact fold failed below) can never collide with a
+// fresh mint here. Every id issued here is mirrored into customers too
+// (claimAccount either claims an existing customer's number or creates the
+// customer row). The INSERT below is still the final arbiter for a lost race.
 async function generateMembershipId(env: Env): Promise<string> {
-  const db = getDb(env)
-  const accountIds = await db.prepare('SELECT membership_id FROM portal_accounts').all<{ membership_id: string }>()
-  return mintMembershipNumber(db, accountIds.map((row) => row.membership_id))
+  return mintMembershipNumber(getDb(env))
 }
 
 // Does any customer already carry this canonical phone (primary or a secondary

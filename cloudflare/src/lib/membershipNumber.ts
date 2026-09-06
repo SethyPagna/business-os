@@ -1,13 +1,69 @@
-// One authority for newly minted IDs. Legacy helpers below remain for historical compatibility;
-// existing identities are never renumbered. New IDs contain eight secure random A-Z/0-9 characters.
+// The ONE membership-number authority for the whole app.
+//
+// Before this file there were four independent minters, all producing a
+// random `LCMN-XXXXXXXX`:
+//   1. routes/contacts.ts  generateMembershipNumber()   (manual add/edit)
+//   2. lib/importEngine.ts nextMembershipNumber()       (spreadsheet import)
+//   3. lib/portalAccounts.ts generateMembershipId()     (storefront signup)
+//   4. frontend customerMembershipNumber.ts             (composed in the browser!)
+// Four sources on one column is how you get a collision the day someone
+// imports a spreadsheet while a cashier registers a walk-in -- each source
+// only checked the rows IT knew about.
+//
+// The house format is `LC-#####` (Leang Cosmetic), zero-padded to
+// MEMBERSHIP_SEQUENCE_DIGITS, and the sequence is GAP-FILLING: the next
+// number handed out is the smallest positive integer not currently in use,
+// so a number freed by a deleted/merged customer is reused before the
+// sequence grows.
+//
+// Two tables share this ONE sequence: customers.membership_number (the CRM)
+// and portal_accounts.membership_id (the storefront -- a signup mints from
+// here too, see portalAccounts.ts). mintMembershipNumber() reads both before
+// picking a gap, so a portal account with no matching customer row yet (e.g.
+// a signup whose contact fold failed) still reserves its slot.
+//
+// Uniqueness has exactly one guarantee PER TABLE: the partial UNIQUE index
+// `idx_customers_membership_lower_pg` on lower(customers.membership_number)
+// (migration 0015) and `idx_portal_accounts_membership` on
+// lower(portal_accounts.membership_id) (migration 0087). Everything here is
+// an optimisation on top of those -- mintMembershipNumber() picks the gap,
+// and withMintedMembershipNumber() re-mints and retries when a concurrent
+// writer wins the race.
+//
+// 2026-09-06 (owner): a prior change ("mint secure IDs") replaced this
+// gap-filling LC- sequence with eight random A-Z0-9 characters for every
+// NEWLY created customer, while the 4,966 customers that already existed
+// stayed on LC-00001..LC-04966 (migration 0110's backfill) and the Add
+// Customer form kept promising "The next available LC- number is assigned
+// when you save." Two of the three minting paths (manual add, storefront
+// signup) were quietly minting the wrong shape. Restored to LC- gap-filling
+// everywhere; the random path is gone, not kept as a fallback.
+
 import type { D1Compat } from './db'
 
 export const MEMBERSHIP_PREFIX = 'LC-'
 export const MEMBERSHIP_SEQUENCE_DIGITS = 5
 /** Shown as an input placeholder / example. Never written to the database. */
 export const MEMBERSHIP_PLACEHOLDER = 'LC-00001'
+
+/**
+ * SQLite GLOB fragment selecting rows whose `column` is `LC-`/`lc-` + digits
+ * only. Folded to lowercase on both sides: GLOB is case-sensitive (unlike
+ * LIKE), and a hand-typed membership number is stored exactly as entered --
+ * routes/contacts.ts's create/update paths do not force it to uppercase, so
+ * a staff-typed `lc-00042` is a real row this must still recognise as taken
+ * (parseMembershipSequence already treats it as sequence 42 via its own
+ * upper-casing; this glob has to agree, or gap-fill would keep handing out
+ * a number that only fails at INSERT time via the case-insensitive UNIQUE
+ * index, exhausting withMintedMembershipNumber's retry budget on a number
+ * it could have skipped up front).
+ */
+function membershipGlob(column: string): string {
+  return `lower(${column}) GLOB 'lc-[0-9]*' AND lower(${column}) NOT GLOB 'lc-*[^0-9]*'`
+}
+
 /** SQLite GLOB that selects rows whose number is `LC-` followed by digits only. */
-export const MEMBERSHIP_SQL_GLOB = "membership_number GLOB 'LC-[0-9]*' AND membership_number NOT GLOB 'LC-*[^0-9]*'"
+export const MEMBERSHIP_SQL_GLOB = membershipGlob('membership_number')
 
 const MEMBERSHIP_PATTERN = /^LC-(\d+)$/
 
@@ -87,48 +143,65 @@ export function allocateMembershipSequences(taken: Iterable<number>, count: numb
  * membership numbers. The import engine holds every existing customer row in
  * memory already, so it mints from this rather than paying a D1 round trip per
  * row. Numbers it hands out are added to the snapshot, so two blank rows in
- * one file can't collide with each other.
+ * one file can't collide with each other. (Customers-only snapshot: a bulk
+ * import never writes portal_accounts, so there is nothing there for it to
+ * consult -- see mintMembershipNumber below for the DB-facing minter that
+ * unions both tables.)
  */
-const MEMBERSHIP_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-const MEMBERSHIP_ATTEMPTS = 32
-
-export function randomMembershipNumber(): string {
-  let result = ''
-  // Rejection sampling avoids bias from 256 not being divisible by 36.
-  for (let draw = 0; draw < MEMBERSHIP_ATTEMPTS && result.length < 8; draw += 1) {
-    const bytes = crypto.getRandomValues(new Uint8Array(16))
-    for (const byte of bytes) {
-      if (byte < 252) result += MEMBERSHIP_ALPHABET[byte % 36]
-      if (result.length === 8) break
-    }
-  }
-  if (result.length !== 8) throw new Error('Could not generate a membership number')
-  return result
-}
-
 export function createMembershipNumberAllocator(existingNumbers: Iterable<unknown>): () => string {
-  const taken = new Set(Array.from(existingNumbers, normalizeMembershipNumber))
+  const takenSequences = new Set<number>()
+  for (const value of existingNumbers) {
+    const sequence = parseMembershipSequence(value)
+    if (sequence !== null) takenSequences.add(sequence)
+  }
   return () => {
-    for (let attempt = 0; attempt < MEMBERSHIP_ATTEMPTS; attempt += 1) {
-      const candidate = randomMembershipNumber()
-      if (taken.has(candidate)) continue
-      taken.add(candidate)
-      return candidate
-    }
-    throw new Error('Could not mint a unique membership number')
+    const sequence = firstFreeMembershipSequence(takenSequences)
+    takenSequences.add(sequence)
+    return formatMembershipNumber(sequence)
   }
 }
 
+// --- D1-facing -------------------------------------------------------------
+
+/**
+ * The next house number, gap-filled over every store that shares the
+ * sequence: `customers.membership_number`, `portal_accounts.membership_id`
+ * (a storefront signup mints from here too -- see portalAccounts.ts), and
+ * `extraTaken`, a caller-supplied set of numbers not yet persisted anywhere
+ * (e.g. other rows already assigned earlier in the same in-flight import
+ * batch). Reading both tables here, rather than trusting a caller to fold
+ * portal_accounts into extraTaken, means an orphaned portal account (e.g. a
+ * signup whose contact fold failed, leaving no matching customer row) still
+ * reserves its slot for every caller, not just the one that happened to pass
+ * it in.
+ *
+ * The database's own UNIQUE indexes remain the final arbiter for a lost
+ * race; see withMintedMembershipNumber below.
+ */
 export async function mintMembershipNumber(db: D1Compat, extraTaken: Iterable<unknown> = []): Promise<string> {
-  const allocate = createMembershipNumberAllocator(extraTaken)
-  for (let attempt = 0; attempt < MEMBERSHIP_ATTEMPTS; attempt += 1) {
-    const candidate = allocate()
-    const collision = await db.prepare(
-      'SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(@candidate) LIMIT 1',
-    ).get({ candidate })
-    if (!collision) return candidate
+  const sequences: number[] = []
+  for (const value of extraTaken) {
+    const sequence = parseMembershipSequence(value)
+    if (sequence !== null) sequences.push(sequence)
   }
-  throw new Error('Could not mint a unique membership number')
+
+  const customerRows = await db.prepare(
+    `SELECT membership_number FROM customers WHERE ${MEMBERSHIP_SQL_GLOB}`,
+  ).all<{ membership_number: string }>()
+  for (const row of customerRows) {
+    const sequence = parseMembershipSequence(row.membership_number)
+    if (sequence !== null) sequences.push(sequence)
+  }
+
+  const portalRows = await db.prepare(
+    `SELECT membership_id FROM portal_accounts WHERE ${membershipGlob('membership_id')}`,
+  ).all<{ membership_id: string }>()
+  for (const row of portalRows) {
+    const sequence = parseMembershipSequence(row.membership_id)
+    if (sequence !== null) sequences.push(sequence)
+  }
+
+  return formatMembershipNumber(firstFreeMembershipSequence(sequences))
 }
 
 /**
@@ -144,8 +217,10 @@ export function isMembershipCollision(error: unknown): boolean {
 
 /**
  * Mint a number, run the write with it, and if the DB says someone else took
- * that number first, mint a fresh random value and retry. The database unique
- * index remains the final arbiter when concurrent writers choose the same ID.
+ * that number first, mint the next one and try again. This is the concurrency
+ * story for a deterministic sequence: two cashiers registering walk-ins at the
+ * same instant both compute the same next number, one INSERT loses, and this
+ * hands the loser the following number instead of an error.
  */
 export async function withMintedMembershipNumber<T>(
   db: D1Compat,

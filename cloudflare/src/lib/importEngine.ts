@@ -1878,7 +1878,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   // duplicating routes/contacts.ts's. Two minters on one column is a
   // collision waiting for the day someone imports a spreadsheet while a
   // cashier registers a walk-in. Both now come from lib/membershipNumber.ts:
-  // one random eight-character format. The allocator is the
+  // one house format (`LC-#####`), one gap-fill rule. The allocator is the
   // synchronous flavour, seeded from the full `existing` snapshot this pass
   // already loaded (no D1 round trip per row) and remembering every number it
   // hands out plus all supplied IDs, so blank rows cannot take a later row's ID
