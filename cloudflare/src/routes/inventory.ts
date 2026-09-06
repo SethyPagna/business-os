@@ -261,11 +261,17 @@ export async function attachInventoryProductMetrics(
       // of this row, not one -- qty_sold, revenue_usd and cogs_usd each with
       // `Math.max(0, ...)`, and the profit built on the last two -- and the
       // list renders all four raw, so agreement needs the ledger to guarantee
-      // all four. It does: qty_sold carries the same per-(sale, product) cap
-      // the money does, which is what stopped a branch-split sale reporting
-      // "Net sold -2" in the list beside "0" in the pane. A negative PROFIT
-      // survives only where it is true -- the product was sold below cost --
-      // and is not floored, here or in the sales kernel.
+      // all four. It does, and for the branch-scoped read it takes an
+      // APPORTIONMENT rather than a cap to get there: a customer return names
+      // no sale LINE, so subtracting it whole at every branch the sale touched
+      // is what reported "Net sold -2" here beside "0" in the pane. Each
+      // return line is now split across the sale's branch lines, so the branch
+      // rows partition the unfiltered figure instead of each reversing the
+      // whole. The per-(sale, product) caps stay behind that as a residual
+      // guard for the one case no scoping rule can fix -- a return line taking
+      // back more than the sale recognised for the product at all. A negative
+      // PROFIT survives only where it is true -- the product was sold below
+      // cost -- and is not floored, here or in the sales kernel.
       profit_usd: revenueUsd - cogsUsd,
     })
   }

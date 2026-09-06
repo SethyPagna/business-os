@@ -144,12 +144,13 @@ export default function InventoryProductsSurface({
   // cogs_usd with Math.max(0, ...) and derives Profit from the clamped pair,
   // over the SAME row object -- because the Worker's four hand-copied
   // sales-minus-returns joins could emit a negative revenue or COGS, and
-  // because the per-product ledger that replaced them left the UNIT count
-  // uncapped for one more round (a sale split across branches reported
-  // "Net sold -2" here beside "0" in the pane).
-  // cloudflare/src/lib/productSalesLedger.ts now makes qty_sold >= 0,
-  // revenue_usd >= 0 and cogs_usd >= 0 true by construction, so all four
-  // clamps are no-ops and the two surfaces agree cell for cell.
+  // because the per-product ledger that replaced them subtracted a whole
+  // customer return at every branch the sale touched (a sale split across
+  // branches reported "Net sold -2" here beside "0" in the pane).
+  // cloudflare/src/lib/productSalesLedger.ts now apportions each return over
+  // the sale's branch lines and makes qty_sold >= 0, revenue_usd >= 0 and
+  // cogs_usd >= 0 true by construction, so all four clamps are no-ops and the
+  // two surfaces agree cell for cell.
   //
   // A negative reaching this line therefore means one thing: the product was
   // genuinely sold below cost. That is real and stays visible (yellow). Do NOT

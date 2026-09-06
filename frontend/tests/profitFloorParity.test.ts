@@ -102,12 +102,14 @@ assert.doesNotMatch(workerRoute, /localDateAtOrAfter\('r\.created_at'\)/,
 assert.doesNotMatch(workerRoute, /return_to_stock = 1/,
   'the restock test is lib/returnsStock.ts\'s rule (RESTOCKED_RETURN_LINE), not a hand-written boolean that misses stock_action')
 assert.match(workerLedger, /JOIN sales s ON s\.id = r\.sale_id/,
-  'the return side joins through the sale, which is what carries the recognition, window and branch scope onto it')
+  'the return side joins through the sale, which is what carries the recognition and window scope onto it -- branch is NOT among them: `si.branch_id = @branchId` is a sale-LINE clause, and nothing on the return side inherits it')
+assert.match(workerLedger, /SUM\(qty\) OVER \(PARTITION BY sale_id, product_id\)/,
+  'so the branch-scoped read apportions each return across the sale\'s branch lines instead, against a denominator that deliberately ignores the branch filter -- subtracting the whole return at every branch is what reported Net sold -2')
 assert.match(workerLedger, /MIN\(sold\.net_usd, COALESCE\(ret\.refund_usd, 0\)\)/,
   'a reversal is capped at what the sale recognised for that product, so revenue_usd >= 0 by construction')
 assert.match(workerLedger, /MAX\(0, sold\.cogs_usd - COALESCE\(ret\.cogs_returned_usd, 0\)\)/,
   'and returned cost cannot drive COGS below zero')
 assert.match(workerLedger, /MIN\(sold\.qty_sold, COALESCE\(ret\.qty_returned, 0\)\)/,
-  'the UNIT reversal carries the same cap as the money -- without it a sale split across branches reported Net sold -2 in the list while the pane showed 0')
+  'the UNIT reversal carries the same residual cap as the money, for the one case apportionment cannot reach: a return line taking back more than the sale recognised for the product at all')
 
 console.log('profit floor parity (list vs pane, one Dashboard formula) tests passed')
