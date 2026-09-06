@@ -273,6 +273,37 @@ assert.ok(/movementReferenceSelectSql\('inventory_movements'\)/.test(routeSrc), 
 assert.ok(/\.map\(\(row\) => withResolvedActorName\(withResolvedBranchName\(row\)\)\)/.test(routeSrc), 'the /movements response does not fold the resolved actor back onto user_name')
 ok(true, 'GET /api/inventory/movements resolves and folds the actor, and resolves the receipt')
 
+// ---- no zombie exports in the reference kernel ----------------------------
+//
+// This module's whole job is to be the ONE place that decides which table a
+// reference_id points at. An exported list that nothing consumes is a second
+// copy of that decision, free to drift from the three lists the SQL actually
+// gates on, and a reader has no way to tell which one is authoritative. So
+// every exported symbol must be referenced somewhere other than its own
+// declaration -- inside this module or outside it, but somewhere.
+const referencePath = path.join(cloudflareRoot, 'src', 'lib', 'movementReference.ts')
+const referenceSrc = fs.readFileSync(referencePath, 'utf8')
+const exportedNames = [...referenceSrc.matchAll(/export (?:const|function) ([A-Za-z0-9_]+)/g)].map((m) => m[1])
+assert.ok(exportedNames.length >= 6, 'the export scan found nothing to check -- this guard would pass vacuously')
+function sourceFiles(dir, out = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) sourceFiles(full, out)
+    else if (/\.(ts|cjs|js)$/.test(entry.name)) out.push(full)
+  }
+  return out
+}
+const allSource = [
+  ...sourceFiles(path.join(cloudflareRoot, 'src')),
+  ...sourceFiles(path.join(cloudflareRoot, 'scripts')),
+].map((file) => fs.readFileSync(file, 'utf8')).join('\n')
+for (const name of exportedNames) {
+  const uses = (allSource.match(new RegExp(`\\b${name}\\b`, 'g')) || []).length
+  assert.ok(uses > 1, `movementReference.ts exports ${name} and nothing consumes it (zombie)`)
+}
+ok(true, `every movementReference export has a consumer (${exportedNames.length} checked)`)
+
 // The stock-in session surfaces read the same movement rows and must name the
 // actor the same way -- one rule, one implementation.
 const sessionSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockInSessionsQuery.ts'), 'utf8')

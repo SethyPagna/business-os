@@ -57,12 +57,13 @@ export const MOVEMENT_RETURN_REFERENCE_TYPES = [
 /** Written by both families; resolved by product membership, never by existence. */
 export const MOVEMENT_AMBIGUOUS_REFERENCE_TYPES = ['return', 'damage_in', 'damage_out'] as const
 
-/** Every movement_type that can carry a receipt reference at all. */
-export const MOVEMENT_REFERENCE_TYPES = [
-  ...MOVEMENT_SALE_REFERENCE_TYPES,
-  ...MOVEMENT_RETURN_REFERENCE_TYPES,
-  ...MOVEMENT_AMBIGUOUS_REFERENCE_TYPES,
-] as const
+// There is deliberately NO exported union of the three lists above. The CASE
+// below gates on them one branch at a time and falls through to NULL, so a
+// union adds no behaviour -- it would only be a second copy of "which types
+// carry a receipt", free to drift from the lists the SQL actually uses, with
+// nothing to tell a reader which copy is authoritative.
+// test-movement-reference-pure.cjs fails on any export of this module that has
+// no consumer.
 
 function list(values: readonly string[]): string {
   return values.map((value) => `'${value}'`).join(', ')
