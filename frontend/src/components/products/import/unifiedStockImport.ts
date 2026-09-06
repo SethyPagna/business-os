@@ -173,9 +173,13 @@ export function parseUnifiedStockRows(
     // counted TOTAL, so whether it puts stock in is a function of live stock
     // this screen has not read -- guessing would flag rows the server accepts.
     // The Worker gates every mode; this half only warns early, and it defers
-    // the SUPPLIER question the same way the import dispatcher does, because a
-    // row may top up a lot that is already attributed and only the server can
-    // see that. What it can settle here is this receipt's own cost.
+    // the SUPPLIER question because a row may top up a lot that is already
+    // attributed -- applyUnifiedStockAdd reads that lot's supplier and decides,
+    // and this screen has no catalog to read it from. Nor can it settle the
+    // cost for an EXISTING product, whose blank cost column resolves to the
+    // product's catalog cost server-side; what it can say is that the sheet
+    // itself states no cost, which is why the note asks for the column rather
+    // than promising a refusal.
     // An unreadable price is already reported above; re-reporting it as a gate
     // refusal would count one bad cell as two rows needing attention.
     const action = clean(read('action'))
