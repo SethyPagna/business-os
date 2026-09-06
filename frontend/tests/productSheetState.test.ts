@@ -6,7 +6,8 @@
 // on data shapes where the old and new implementations disagree.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { deriveProductSheetState } from '../src/components/pos/productSheetState.ts'
+import { branchAllowsSale, deriveProductSheetState, resolveSaleBranch } from '../src/components/pos/productSheetState.ts'
+import { BRANCH_RULE_MESSAGE_KEYS, branchRuleMessageKey, localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
 import { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination } from '../src/utils/branchRoles.ts'
 
 let failed = 0
@@ -200,12 +201,263 @@ await runTest('every product picker mounts the shared option sheet', () => {
     assert.match(text, /ProductOptionSheet/, `${site.join('/')} must open the shared option sheet`)
   }
   assert.match(src('components', 'pos', 'POS.tsx'), /ProductDetailSheet/)
+  // SaleDetailModal has TWO sale-side pickers, and this test used to pass on
+  // either one: add-items-to-a-sale kept its own option grid and its own batch
+  // list while only Replace reached the shared sheet, which is exactly the
+  // "same product, different choices depending on the button" this work exists
+  // to end. Both mounts, or neither counts.
+  const saleDetail = src('components', 'sales', 'SaleDetailModal.tsx')
+  assert.equal(
+    (saleDetail.match(/<ProductOptionSheet/g) || []).length,
+    2,
+    'both the add-items picker and the Replace picker must open the shared sheet',
+  )
+  assert.match(saleDetail, /onClick=\{\(\) => setAddSheetGroup\(candidate\)\}/, 'a result row opens the sheet, never the line form directly')
+  assert.doesNotMatch(saleDetail, /onClick=\{\(\) => setAddPicking\(candidate\)\}/, 'the old straight-to-the-line-form path must be gone')
+  // What is left behind is the line FORM (quantity, unit price), which is not
+  // a picker -- and it must be seeded with what the sheet already resolved.
+  assert.match(saleDetail, /presetBatchId=\{addPicking\.batchId\}/)
+  assert.match(saleDetail, /branchId=\{addPicking\.branchId \?\? sale\.branch_id \?\? null\}/)
   // ...and the adapter stays an adapter, not a second implementation.
   assert.match(
     src('components', 'shared', 'ProductOptionSheet.tsx'),
     /from '\.\.\/pos\/ProductDetailSheet\.tsx'/,
     'the shared sheet must BE the POS sheet, not a copy of it',
   )
+})
+
+await runTest('the Replace mount forwards its branch and does not offer a date the write discards', () => {
+  const saleDetail = src('components', 'sales', 'SaleDetailModal.tsx')
+  // sales.ts's line_replaced branch reads replacement.branch_id; without it
+  // the swap fell back to the sale's own branch, which is not necessarily the
+  // branch whose quantity the operator was reading.
+  assert.match(saleDetail, /stageReplacement\(picked as unknown as AddProductCandidate, selection\.branchId\)/)
+  assert.match(saleDetail, /branch_id: replacementBranchId/)
+  // ...and that same write plans the line with batchId null and draws it by
+  // FIFO, so a received date chosen here would be silently ignored.
+  assert.match(saleDetail, /hideReceivedDates/, 'the step the write cannot honour must not be offered')
+})
+
+// ---------------------------------------------------------------------------
+// Which branch a POS cart line resolves to.
+//
+// POS answered this as `primaryBranchFilterId ?? pickBestBranchId(product)`,
+// and neither half knew the warehouse does not sell. Every case below is one
+// the old resolution and this one give DIFFERENT answers to.
+// ---------------------------------------------------------------------------
+
+// The resolution this replaced, kept here as the positive control: a test
+// that only asserts the new answer cannot tell a fix from a fixture that
+// happened to agree with the old code. Every case below is one the two
+// disagree on, checked as a disagreement rather than described as one.
+function legacyPosBranchId(
+  product: { branch_stock?: Array<{ branch_id?: number; branch_name?: string; quantity?: number }> },
+  primaryBranchFilterId: number | null,
+  defaultBranchId: number | null,
+): number | null {
+  if (primaryBranchFilterId != null) return primaryBranchFilterId
+  let bestBranchId: number | null = null
+  let bestQuantity = 0
+  for (const entry of product?.branch_stock || []) {
+    const branchId = Number(entry.branch_id)
+    const qty = Number(entry.quantity || 0)
+    if (!Number.isFinite(branchId) || qty <= 0) continue
+    if (defaultBranchId != null && branchId === defaultBranchId) return branchId
+    if (qty > bestQuantity) { bestBranchId = branchId; bestQuantity = qty }
+  }
+  return bestBranchId || defaultBranchId || null
+}
+
+await runTest('POSITIVE CONTROL: the old resolution books every one of these at the warehouse', () => {
+  const warehouseOnly = { branch_stock: branchStock(0, 12) }
+  const mostlyWarehouse = { branch_stock: branchStock(1, 90) }
+  assert.equal(legacyPosBranchId(warehouseOnly, null, null), 1, 'old: warehouse-only stock resolved to the warehouse')
+  assert.equal(legacyPosBranchId(mostlyWarehouse, null, null), 1, 'old: the warehouse won on quantity')
+  assert.equal(legacyPosBranchId(mostlyWarehouse, null, 1), 1, 'old: is_default handed it the warehouse outright')
+  assert.equal(legacyPosBranchId(mostlyWarehouse, 1, null), 1, 'old: the branch filter was taken verbatim')
+  // ...and every one of those is a branch the Worker refuses a sale line at.
+  assert.equal(branchCanSell('Warehouse'), false)
+})
+
+await runTest('a product held only at the warehouse blocks the add instead of booking it there', () => {
+  const product = { id: 61, name: 'Waiting on a transfer', branch_stock: branchStock(0, 12), stock_quantity: 12 }
+  const decision = resolveSaleBranch(product, { defaultBranchId: null })
+  // The old highest-stock loop returned branch 1 here, and the checkout then
+  // refused the sale with a 400 the cashier could do nothing about.
+  assert.equal(decision.branchId, null)
+  assert.equal(decision.blocked, true, 'there IS stock, just not where a sale may be rung')
+})
+
+await runTest('filtering the grid to the warehouse blocks the add', () => {
+  const product = { id: 62, name: 'Both branches', branch_stock: branchStock(4, 9), stock_quantity: 13 }
+  // primaryBranchFilterId used to be taken verbatim.
+  assert.deepEqual(resolveSaleBranch(product, { activeBranchFilterId: 1 }), { branchId: null, blocked: true })
+  assert.deepEqual(resolveSaleBranch(product, { activeBranchFilterId: 2 }), { branchId: 2, blocked: false })
+})
+
+await runTest('the warehouse never wins on quantity, nor by being the default branch', () => {
+  const product = { id: 63, name: 'Mostly in the warehouse', branch_stock: branchStock(1, 90), stock_quantity: 91 }
+  // Old loop: 90 > 1, so the warehouse won outright.
+  assert.deepEqual(resolveSaleBranch(product, {}), { branchId: 2, blocked: false })
+  // Old loop: is_default short-circuited before any quantity was compared.
+  assert.deepEqual(resolveSaleBranch(product, { defaultBranchId: 1 }), { branchId: 2, blocked: false })
+  assert.deepEqual(resolveSaleBranch(product, { defaultBranchId: 2 }), { branchId: 2, blocked: false })
+})
+
+await runTest('a branch the payload does not name is left alone', () => {
+  const product = { id: 64, name: 'Third branch', branch_stock: [{ branch_id: 7, branch_name: 'Kiosk', quantity: 3 }] }
+  assert.equal(branchAllowsSale(product, 7), true, 'an unrecognised name is not evidence of a stock-only branch')
+  assert.equal(branchAllowsSale(product, 999), true, 'an id the payload never mentions is not blocked')
+  assert.deepEqual(resolveSaleBranch(product, { activeBranchFilterId: 7 }), { branchId: 7, blocked: false })
+  // Nothing anywhere is not the same as stock in the wrong place.
+  const empty = { id: 65, name: 'Nothing anywhere', branch_stock: branchStock(0, 0) }
+  assert.deepEqual(resolveSaleBranch(empty, {}), { branchId: null, blocked: false })
+})
+
+// ---------------------------------------------------------------------------
+// A host whose write cannot carry a received date.
+// ---------------------------------------------------------------------------
+
+await runTest('hiding the received-date step un-gates the pick instead of blocking it forever', () => {
+  const product = { id: 71, name: 'Tracked', branch_stock: branchStock(6, 0), stock_quantity: 6 }
+  const tracked = new Set([71])
+  const asked = deriveProductSheetState({ product, variants: [], groupProduct: false, trackedBatchProductIds: tracked, batches: [] })
+  assert.equal(asked.batchSelectionRequired, true)
+  assert.equal(asked.batchReadyToSell, false, 'normally the pick waits for a received date')
+  const hidden = deriveProductSheetState({
+    product, variants: [], groupProduct: false, trackedBatchProductIds: tracked, batches: [], receivedDateStepHidden: true,
+  })
+  assert.equal(hidden.batchSelectionRequired, false, 'a hidden step is an ABSENT step, not an unanswered one')
+  assert.equal(hidden.batchReadyToSell, true)
+  assert.equal(hidden.stockWithoutReceivedDate, false)
+  assert.equal(hidden.displayedStock, 6, 'on-hand still comes from branch_stock')
+})
+
+// ---------------------------------------------------------------------------
+// The Worker's two refusals, shown from the packs.
+// ---------------------------------------------------------------------------
+
+const enPack = JSON.parse(src('lang', 'en.json')) as Record<string, string>
+const kmPack = JSON.parse(src('lang', 'km.json')) as Record<string, string>
+
+await runTest('a Worker branch-rule refusal is translated, and nothing else is touched', () => {
+  const t = (key: string) => kmPack[key]
+  assert.equal(branchRuleMessageKey('Only allow Shop sale. Please transfer to Shop first.'), 'pos_warehouse_not_sellable')
+  assert.equal(branchRuleMessageKey('Transfers move stock from Warehouse to Shop.'), 'transfer_source_warehouse_only')
+  // The paths that show these wrap the sentence to different depths.
+  assert.equal(branchRuleMessageKey('Error: Only allow Shop sale. Please transfer to Shop first.'), 'pos_warehouse_not_sellable')
+  assert.equal(branchRuleMessageKey('Insufficient stock in source branch'), null)
+  assert.equal(branchRuleMessageKey(''), null)
+  assert.equal(branchRuleMessageKey(null), null)
+  assert.equal(
+    localizeBranchRuleError('Only allow Shop sale. Please transfer to Shop first.', t),
+    kmPack.pos_warehouse_not_sellable,
+    'a Khmer session must read the Khmer sentence, not the English the server sent',
+  )
+  assert.equal(localizeBranchRuleError('Transfers move stock from Warehouse to Shop.', t), kmPack.transfer_source_warehouse_only)
+  assert.equal(localizeBranchRuleError('Something else entirely', t), 'Something else entirely')
+})
+
+await runTest('the mapped sentences are the exact English of the pack keys', () => {
+  // If either side drifts, the mapping stops matching and the operator is
+  // shown an English sentence in a Khmer session -- silently.
+  assert.equal(enPack.pos_warehouse_not_sellable, 'Only allow Shop sale. Please transfer to Shop first.')
+  assert.equal(enPack.transfer_source_warehouse_only, 'Transfers move stock from Warehouse to Shop.')
+  for (const [english, key] of BRANCH_RULE_MESSAGE_KEYS) {
+    assert.equal(enPack[key], english, `${key} must be the sentence the Worker sends`)
+    assert.ok(kmPack[key], `${key} must exist in the Khmer pack`)
+    assert.notEqual(kmPack[key], enPack[key], `${key} must be translated, not copied`)
+  }
+})
+
+await runTest('every error path named in the ask maps the refusal to the pack', () => {
+  const sites = [
+    ['components', 'pos', 'POS.tsx'],
+    ['components', 'sales', 'SaleDetailModal.tsx'],
+    ['components', 'returns', 'NewReturnModal.tsx'],
+    ['components', 'branches', 'TransferModal.tsx'],
+    ['components', 'inventory', 'Inventory.tsx'],
+  ]
+  for (const site of sites) {
+    assert.match(
+      src(...site),
+      /localizeBranchRuleError\(/,
+      `${site.join('/')} must show the Worker's branch-rule refusal from the packs`,
+    )
+  }
+})
+
+// ---------------------------------------------------------------------------
+// The pack itself: no zombie keys, and the relabelled step's empty state has
+// one.
+// ---------------------------------------------------------------------------
+
+await runTest('the received-date empty state is a pack key, and label_prices is gone', () => {
+  assert.equal(enPack.label_prices, undefined, 'a key nothing references must not sit in the pack')
+  assert.equal(kmPack.label_prices, undefined)
+  assert.ok(enPack.received_dates_none)
+  assert.ok(kmPack.received_dates_none)
+  assert.notEqual(kmPack.received_dates_none, enPack.received_dates_none)
+  const sheet = src('components', 'pos', 'ProductDetailSheet.tsx')
+  assert.match(sheet, /t\('received_dates_none'\)/)
+  assert.doesNotMatch(sheet, /posCopy\('No lots available at this branch/, 'the bilingual literal must be retired (the prose above it may still quote the old wording)')
+})
+
+await runTest('the non-POS mounts get a language-aware posCopy, not an English identity', () => {
+  const adapter = src('components', 'shared', 'ProductOptionSheet.tsx')
+  assert.doesNotMatch(
+    adapter,
+    /posCopy=\{\(english: string\) => english\}/,
+    'stubbing posCopy to identity shipped English into a Khmer session on every non-POS surface',
+  )
+  assert.match(adapter, /=== 'km'/, 'the adapter must resolve the pair from the active language')
+})
+
+// ---------------------------------------------------------------------------
+// Picked is not dismissed.
+// ---------------------------------------------------------------------------
+
+await runTest('confirming a pick does not fire the host discard path', () => {
+  const sheet = src('components', 'pos', 'ProductDetailSheet.tsx')
+  const body = sheet.split('const confirmPick =')[1]?.split('\n  }')[0] ?? ''
+  assert.ok(body.includes('onPick?.('), 'confirmPick must still hand the choice back')
+  assert.ok(
+    !body.includes('onClose()'),
+    'confirmPick calling onClose ran the host DISCARD path on top of its accept path -- '
+    + 'CreateProductsSessionModal nulls the picked product in its onClose, so the line form never opened',
+  )
+  // ...which only works because every host closes its own sheet on the pick.
+  const closesItself: Array<[string[], RegExp]> = [
+    [['components', 'products', 'forms', 'StockAdjustModal.tsx'], /onPick=\{\(product, selection\) => \{\s*\n\s*setPicking\(null\)/],
+    [['components', 'branches', 'TransferModal.tsx'], /setPicking\(null\)\s*\n\s*\}\}/],
+    [['components', 'returns', 'NewReturnModal.tsx'], /setReplacementPicking\(null\)\s*\n\s*\}\}/],
+    [['components', 'inventory', 'FastStockInModal.tsx'], /closeCandidateOptions\(\)/],
+  ]
+  for (const [site, pattern] of closesItself) {
+    assert.match(src(...site), pattern, `${site.join('/')} must close the sheet from inside its own onPick`)
+  }
+  // CreateProductsSessionModal closes it by gate rather than by setter: the
+  // sheet is mounted only while no product is picked.
+  assert.match(
+    src('components', 'products', 'CreateProductsSessionModal.tsx'),
+    /\{selectedGroup && !selectedProduct \? \(/,
+    'the sheet unmounts the moment the pick sets a product, and the line form takes its place',
+  )
+})
+
+await runTest('a single-choice group opens on the row it offers, not on the family root', () => {
+  for (const site of [
+    ['components', 'inventory', 'FastStockInModal.tsx'],
+    ['components', 'products', 'CreateProductsSessionModal.tsx'],
+  ] as string[][]) {
+    const text = src(...site)
+    assert.doesNotMatch(
+      text,
+      /product=\{\{\s*\n?\s*\.\.\.\(selectedGroup\.leadProduct \|\| selectedGroup\.items\[0\]\)/,
+      `${site.join('/')} must take the lead from the offered rows, not from group.leadProduct`,
+    )
+    assert.match(text, /\[0\] \|\| selectedGroup\.leadProduct/, `${site.join('/')} must fall back only after choices[0]`)
+  }
 })
 
 if (failed) {

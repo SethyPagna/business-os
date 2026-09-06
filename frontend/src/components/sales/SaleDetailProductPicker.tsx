@@ -33,7 +33,7 @@ export type SaleDetailProductChoice = {
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0
 
-export default function SaleDetailProductPicker({ candidate, candidates, branchId, fmtUSD, t, stockMoves, stagedLines, onCancel, onChoose }: {
+export default function SaleDetailProductPicker({ candidate, candidates, branchId, fmtUSD, t, stockMoves, stagedLines, presetBatchId = null, onCancel, onChoose }: {
   candidate: SaleDetailProductCandidate
   candidates: SaleDetailProductCandidate[]
   branchId: number | string | null
@@ -41,6 +41,13 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
   t: (key: string) => string
   stockMoves: boolean
   stagedLines: ReadonlyArray<{ productId: number; batchId: number | null; quantity: number }>
+  // The received date the shared option sheet already chose upstream. When it
+  // is present and still exists at this branch, the step below stops being a
+  // question and becomes a statement -- asking twice is how the two surfaces
+  // used to end up booked against different lots. When it is absent (the row
+  // is not batch-tracked, so the sheet never asked) the step stays a question,
+  // because this picker's availability check still needs an answer.
+  presetBatchId?: number | null
   onCancel: () => void
   onChoose: (choice: SaleDetailProductChoice) => void
 }) {
@@ -99,13 +106,18 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
     void getProductBatches(productId, branchId, true)
       .then((payload) => {
         if (cancelled) return
-        setBatches(Array.isArray(payload?.batches) ? payload.batches : [])
+        const list = Array.isArray(payload?.batches) ? payload.batches : []
+        setBatches(list)
+        // Only a lot that is actually here can be seeded: a stale preset from
+        // a different branch would otherwise select a row this list does not
+        // contain and enable Continue against nothing.
+        if (presetBatchId != null && list.some((row) => Number(row.id) === Number(presetBatchId))) setBatchId(Number(presetBatchId))
         setLoadedSelectionKey(selectionKey)
       })
       .catch(() => { if (!cancelled) setFailed(true) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [selected?.id, branchId])
+  }, [selected?.id, branchId, presetBatchId])
 
   // A branchless historical sale may legitimately add an untracked line when
   // its sticky stock_skipped flag says no stock moves. Force the batch to null
@@ -126,6 +138,9 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
     ? !stockMoves
     : !!selectionKey && loadedSelectionKey === selectionKey && !loading && !failed
   const selectedBatchId = batch?.id ?? null
+  // The sheet's answer survived the load, so this step has nothing left to
+  // ask -- it states what was chosen instead of offering it again.
+  const presetChosen = presetBatchId != null && batch != null && Number(batch.id) === Number(presetBatchId)
   const stagedQuantity = stagedLines
     .filter((row) => row.productId === productId && row.batchId === selectedBatchId)
     .reduce((sum, row) => sum + number(row.quantity), 0)
@@ -213,8 +228,13 @@ export default function SaleDetailProductPicker({ candidate, candidates, branchI
       </dl>
 
       <div>
-        <div className="text-xs font-semibold text-gray-500">{t('batch') || 'Stock batch'}</div>
-        {branchId == null ? <p className="mt-1 text-xs text-amber-700">{t('branch_required') || 'This sale has no branch, so an exact stock batch cannot be loaded.'}</p> : failed ? <p className="mt-1 text-xs text-red-600">{t('load_failed') || 'Could not load stock batches.'}</p> : !batchesReady ? <p className="mt-1 text-xs text-gray-400">{t('loading') || 'Loading'}</p> : batches.length ? (
+        <div className="text-xs font-semibold text-gray-500">{t('batches') || 'Received dates'}</div>
+        {batchesReady && presetChosen ? (
+          <p className="mt-1 text-sm text-gray-900 dark:text-white">
+            {batchDisplayLabel(batch as ProductBatch, t('batch') || 'Batch')}
+            <span className="ml-2 text-[11px] text-gray-500">{`${t('received_date') || 'Received'}: ${batch?.received_at ? String(batch.received_at).slice(0, 10) : '—'}`}</span>
+          </p>
+        ) : branchId == null ? <p className="mt-1 text-xs text-amber-700">{t('branch_required') || 'This sale has no branch, so an exact stock batch cannot be loaded.'}</p> : failed ? <p className="mt-1 text-xs text-red-600">{t('load_failed') || 'Could not load stock batches.'}</p> : !batchesReady ? <p className="mt-1 text-xs text-gray-400">{t('loading') || 'Loading'}</p> : batches.length ? (
           <div className="mt-1.5 space-y-2">{batches.map((row) => <button key={row.id} type="button" aria-pressed={row.id === batchId} onClick={() => setBatchId(row.id)} className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm ${row.id === batchId ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800'}`}><span><span className="block font-mono font-medium">{batchDisplayLabel(row, t('batch') || 'Batch')}</span><span className="block text-[11px] opacity-80">{t('received_date') || 'Received'}: {row.received_at ? String(row.received_at).slice(0, 10) : '—'}{row.expiry_date ? ` · ${t('expiry_date') || 'Expiry'}: ${row.expiry_date}` : ''}</span></span><span className="shrink-0 tabular-nums">{row.quantity}</span></button>)}</div>
         ) : <p className="mt-1 text-xs text-gray-500">{t('no_batches') || 'No tracked stock batches. This item will use normal product stock.'}</p>}
       </div>
