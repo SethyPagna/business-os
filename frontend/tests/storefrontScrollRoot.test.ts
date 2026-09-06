@@ -106,7 +106,19 @@ runTest('the public shell is not a two-axis scroll container by accident', () =>
   const shellEnd = previewSurface.indexOf('max-w-[1680px]')
   assert.ok(shellStart > 0 && shellEnd > shellStart, 'the public shell wrapper must still be findable')
   const shell = previewSurface.slice(shellStart, shellEnd)
-  assert.match(shell, /overflowY: 'auto'/, 'iOS momentum scrolling on the shell is deliberate and stays')
+  // Reversed on purpose (owner, Sep 6: "fix scrollability in public
+  // website"). This line used to assert the opposite -- "iOS momentum
+  // scrolling on the shell is deliberate and stays" -- on a premise that does
+  // not hold: the shell has `height: auto` (only a min-height), so it grows
+  // with the catalog and its scrollHeight never exceeds its clientHeight. It
+  // is a scrollport that can never scroll, so it buys no momentum (the
+  // DOCUMENT was always the box actually moving) while costing every
+  // `position: sticky` descendant its scrollport -- the section nav and the
+  // products search row resolve against a box that never moves, i.e. they
+  // scroll away. storefrontScrollOwner.test.ts derives that consequence from
+  // the declared values instead of restating the spelling.
+  assert.doesNotMatch(shell, /overflowY: 'auto'/, 'the document, not the shell, owns vertical scroll on the public route')
+  assert.doesNotMatch(shell, /WebkitOverflowScrolling/, 'momentum on a scrollport with nothing to scroll is a no-op, and the scrollport itself is what breaks sticky')
   assert.doesNotMatch(
     shell,
     /overflow-visible/,

@@ -274,9 +274,30 @@ export default function CatalogPreviewSurface({
       // horizontal axis without making the shell a scrollport; `hidden` would
       // make it one and break every sticky descendant, and the pinned section
       // nav lives in here.
+      //
+      // The VERTICAL axis then had to follow, and this is the fix for
+      // "scrollability in public website". `overflowY: 'auto'` was kept here
+      // as "iOS momentum scrolling on the shell", but this box has
+      // `height: auto` (only a min-height), so it grows with the catalog and
+      // its scrollHeight never exceeds its clientHeight: it is a scrollport
+      // that can never scroll, and `-webkit-overflow-scrolling: touch` on a
+      // scrollport with nothing to scroll buys no momentum -- the DOCUMENT
+      // was always the thing actually moving. What that dead scrollport DID
+      // do is become the nearest scrollport ancestor for every `position:
+      // sticky` descendant, and a sticky element resolves against its
+      // scrollport, not the page. So the section nav (`sticky top-1`) and the
+      // products search/filter row (`sticky top-16`) were pinned to a box
+      // that never moves -- i.e. they simply scrolled away -- on the live
+      // storefront, where the JS pinning fallback is also switched off
+      // (PublicCatalogPage passes publicPortalNavPinned={false}).
+      //
+      // `overflow-x: clip` is deliberately the only overflow left: `clip`
+      // paired with `visible` is the ONE pair CSS does not rewrite to `auto`,
+      // so the horizontal containment above survives while the document goes
+      // back to owning vertical scroll for the whole public route.
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-x-clip' : 'w-full'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowX: 'clip', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowX: 'clip' } : {}),
         background: portalBackground,
       }}
     >

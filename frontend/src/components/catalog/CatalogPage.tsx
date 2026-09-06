@@ -2024,18 +2024,29 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     mediaUploadOriginalValuesRef.current.clear()
   }, [])
 
+  // Same save/restore shape as PublicCatalogPage's copy of this effect: the
+  // cleanup used to REMOVE the marker unconditionally, so an admin mount of
+  // this page (publicView false) stripped an attribute it never set, and a
+  // StrictMode remount ran remove-after-set on a shell that may still need it.
+  // Restoring the captured value makes both directions idempotent.
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlMarker = html.getAttribute('data-public-portal')
+    const previousBodyMarker = body.getAttribute('data-public-portal')
     if (publicView) {
-      document.body.setAttribute('data-public-portal', 'true')
-      document.documentElement.setAttribute('data-public-portal', 'true')
+      body.setAttribute('data-public-portal', 'true')
+      html.setAttribute('data-public-portal', 'true')
     } else {
-      document.body.removeAttribute('data-public-portal')
-      document.documentElement.removeAttribute('data-public-portal')
+      body.removeAttribute('data-public-portal')
+      html.removeAttribute('data-public-portal')
     }
     return () => {
-      document.body.removeAttribute('data-public-portal')
-      document.documentElement.removeAttribute('data-public-portal')
+      if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')
+      else html.setAttribute('data-public-portal', previousHtmlMarker)
+      if (previousBodyMarker === null) body.removeAttribute('data-public-portal')
+      else body.setAttribute('data-public-portal', previousBodyMarker)
     }
   }, [publicView])
 
@@ -3447,9 +3458,15 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     return (
     <div
       data-portal-root="true"
+      // publicView: the DOCUMENT owns vertical scroll on the public route
+      // (full reasoning in CatalogPreviewSurface.tsx). `overflow-visible` on
+      // the class beside an inline `overflowY: 'auto'` is the contradiction
+      // CSS resolves against us -- the visible axis computes to `auto` and
+      // this shell becomes a two-axis scrollport that can never scroll.
+      // !publicView is untouched: the admin editor keeps `.page-scroll`.
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        ...(publicView ? { touchAction: 'pan-y pinch-zoom' } : {}),
         background: portalBackground,
       }}
     >
@@ -3481,10 +3498,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           data-portal-root="true"
           // Same fix as CatalogPreviewSurface: this fallback is nested inside the
           // page's own .page-scroll wrapper (see the !publicView return below), so it
-          // must not declare a second scroll container.
+          // must not declare a second scroll container -- and on publicView the
+          // document is the scroll owner, so it must not declare one there either.
           className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
           style={{
-            ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+            ...(publicView ? { touchAction: 'pan-y pinch-zoom' } : {}),
             background: portalBackground,
           }}
         >

@@ -670,6 +670,47 @@ export default function PublicCatalogPage() {
   const [reloadToken, setReloadToken] = useState(0)
   const publicPageRootRef = useRef<HTMLDivElement | null>(null)
 
+  // The `data-public-portal` document marker, which NOTHING was setting on
+  // the live storefront.
+  //
+  // There are two storefront entries. index.tsx picks PublicCatalogRoot ->
+  // this component whenever isPublicCatalogPath() is true, which is every
+  // path on the customer host -- that is the shipped shop. App.tsx's
+  // PublicCatalogView -> `<CatalogPage publicView />` is the other one, and
+  // CatalogPage carries its own effect for this attribute. This file never
+  // renders CatalogPage (it mounts CatalogPreviewSurface directly), so on the
+  // entry customers actually load, html/body never got the marker at all.
+  //
+  // Everything keyed off it was therefore inert on the real shop: the
+  // `overflow-y: auto` + `height: auto` unlock in main.css, and in
+  // public-portal.css the Google-Translate banner suppression plus the
+  // `body { top: 0 !important; position: static !important }` that undoes the
+  // banner's downward shove of the whole document, and the
+  // `.portal-contact-value` wrapping. (The media-protection and coarse-
+  // pointer tap-target rules survived only because they carry a second
+  // `[data-public-media-protection='true']` selector, which this page's root
+  // div does set.)
+  //
+  // Previous values are captured and restored rather than blindly removed, so
+  // a StrictMode double-mount -- or any future route that renders this page
+  // under a shell that already set the marker -- cannot leave the document
+  // stripped of it.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlMarker = html.getAttribute('data-public-portal')
+    const previousBodyMarker = body.getAttribute('data-public-portal')
+    html.setAttribute('data-public-portal', 'true')
+    body.setAttribute('data-public-portal', 'true')
+    return () => {
+      if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')
+      else html.setAttribute('data-public-portal', previousHtmlMarker)
+      if (previousBodyMarker === null) body.removeAttribute('data-public-portal')
+      else body.setAttribute('data-public-portal', previousBodyMarker)
+    }
+  }, [])
+
   // Drives the scroll-to-top/bottom buttons in CatalogPreviewSurface. This
   // used to be hardcoded to `false` here, which silently disabled the
   // feature on the real public portal (it only ever worked in the admin's
