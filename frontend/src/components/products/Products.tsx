@@ -4530,6 +4530,7 @@ function ProductsFullEditor() {
               next: t('next') || 'Next',
               imageCount: '{current}/{total}',
               dotsLabel: 'Image {current} of {total}',
+              close: t('close') || 'Close',
             }}
           />
         </Suspense>

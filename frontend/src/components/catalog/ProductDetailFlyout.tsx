@@ -373,6 +373,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               next: copy('nextImage', 'Next image'),
               imageCount: copy('imageCount', '{current}/{total}'),
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+              close: copy('close', 'Close'),
             }}
           />
         ) : null}

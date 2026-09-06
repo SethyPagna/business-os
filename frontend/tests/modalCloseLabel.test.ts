@@ -43,4 +43,30 @@ assert.match(modal, /role="dialog"/, 'positive control: Modal.tsx dialog role at
 assert.match(lightbox, /aria-label="Zoom out"/, 'positive control: ImageGalleryLightbox.tsx Zoom out label (out of this fix\'s scope) is untouched')
 assert.match(lightbox, /aria-label=\{copy\.prev\}/, 'positive control: ImageGalleryLightbox.tsx prev/next labels (existing convention) are untouched')
 
+// F11 follow-up: ImageGalleryLightbox.tsx gaining a `close` field on its
+// `labels` prop type is necessary but not sufficient -- every real caller
+// must actually PASS that field, or the component falls back to its
+// hardcoded English 'Close' default and the fix has no runtime effect for
+// any of the app's four real lightbox usages (POS, Products, and both
+// catalog/portal call sites). Each caller must wire `close` through the
+// same translation mechanism it already uses for the sibling prev/next
+// labels right next to it.
+const pos = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+const products = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+const catalogPreview = readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
+const productDetailFlyout = readFileSync(new URL('../src/components/catalog/ProductDetailFlyout.tsx', import.meta.url), 'utf8')
+
+assert.match(pos, /close:\s*t\('close'\)\s*\|\|\s*'Close',/, "POS.tsx's lightbox labels must pass a translated close label, not rely on the component default")
+assert.match(products, /close:\s*t\('close'\)\s*\|\|\s*'Close',/, "Products.tsx's lightbox labels must pass a translated close label, not rely on the component default")
+assert.match(productDetailFlyout, /close:\s*copy\('close', 'Close'\),/, "ProductDetailFlyout.tsx's lightbox labels must pass a translated close label, not rely on the component default")
+const catalogPreviewCloseMatches = catalogPreview.match(/close:\s*copy\('close', 'Close'\),/g) || []
+assert.equal(catalogPreviewCloseMatches.length, 2, 'CatalogPreviewSurface.tsx has two ImageGalleryLightbox call sites (product gallery + portal image view); BOTH must pass a translated close label')
+
+// Positive control: each caller's own prev/next siblings, right next to the
+// new close field, are untouched -- proves these regexes are scoped to the
+// close wiring and not just matching anything in these large files.
+assert.match(pos, /prev:\s*posCopy\('Prev'\)/, "positive control: POS.tsx's lightbox prev label (existing convention) is untouched")
+assert.match(products, /prev:\s*t\('prev'\)\s*\|\|\s*'Prev'/, "positive control: Products.tsx's lightbox prev label (existing convention) is untouched")
+assert.match(productDetailFlyout, /prev:\s*copy\('prevImage', 'Previous image'\)/, "positive control: ProductDetailFlyout.tsx's lightbox prev label (existing convention) is untouched")
+
 console.log('modalCloseLabel.test.ts OK')
