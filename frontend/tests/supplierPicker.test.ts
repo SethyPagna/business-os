@@ -47,7 +47,13 @@ ok('all four manual add surfaces render the ONE shared SupplierPickerField (cros
 // same control the product form's Category/Brand/Unit/Supplier and the
 // create-products header's Brand render), so the field keeps only what is
 // supplier-specific. The GUARANTEES are unchanged and asserted in both
-// places: the id semantics here, the mousedown/touchstart safety there.
+// places: the id semantics here, the pointer safety there.
+//
+// The pointer rule this file has always pinned is UNCHANGED: a pick lands on
+// mousedown. A tap synthesises mousedown before the focus change that blurs
+// the input, which is why this picker worked on its four touch surfaces with
+// no touch handler at all -- so a touchstart that picks is not "the mobile
+// path", it is a regression that turns a scroll of the list into a selection.
 const suggestionInput = read('components/shared/SuggestionTextInput.tsx')
 assert.match(picker, /import SuggestionTextInput/, 'the picker wraps the shared control instead of copying it')
 assert.match(
@@ -61,9 +67,9 @@ assert.match(
   'typing clears supplierId -- an edited name can never ride on a stale id',
 )
 assert.match(suggestionInput, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'suggestion picks beat blur via mousedown')
-assert.match(suggestionInput, /onTouchStart=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'and on touch, where mousedown never precedes blur')
+assert.doesNotMatch(suggestionInput, /onTouchStart=\{[^}]*pick\(/, 'a tap already reaches the mousedown path; a touchstart pick would fire mid-scroll')
 assert.match(picker, /fields: ['"]names['"]/, 'suggestions come from the permission-free name-only suppliers read')
-ok('picker: free text stays name-only, picks are mousedown/touch-safe, list is the names-only read')
+ok('picker: free text stays name-only, picks are mousedown-safe on mouse and touch, list is the names-only read')
 
 // --- Locked variant: when the lot is already attributed the field is
 // read-only -- no input element in that branch, so no choice can be

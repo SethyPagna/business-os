@@ -1,7 +1,8 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   buildSuggestionMatches,
   nextSuggestionIndex,
+  shouldPickOnClick,
   type SuggestionFilterMode,
   type SuggestionOption,
 } from '../../utils/suggestionMatching.ts'
@@ -33,8 +34,10 @@ import {
 //  - options are de-duplicated case-insensitively
 //  - the list FLOATS above the content (absolute + z-40); it never pushes the
 //    form down
-//  - picks land on mousedown/touchstart with preventDefault, so the input's
-//    blur cannot swallow them on desktop or mobile
+//  - picks land on MOUSEDOWN with preventDefault, so the input's blur cannot
+//    swallow them -- on touch too, since a tap's synthetic mousedown is
+//    dispatched before the focus change (click is the fallback path; see
+//    shouldPickOnClick in utils/suggestionMatching.ts)
 //  - keyboard: ArrowDown/ArrowUp move, Enter takes the highlighted row,
 //    Escape closes without changing the value
 //  - roles: combobox + listbox + option, aria-expanded/aria-activedescendant
@@ -117,7 +120,12 @@ export default function SuggestionTextInput({
   // empty until it was unmounted.
   const requestOptions = () => { onRequestOptions?.() }
 
+  // When the last pick happened, so the click that closes a tap's own
+  // mousedown->mouseup->click sequence does not pick the row a second time.
+  const lastPickAtRef = useRef(0)
+
   const pick = (option: SuggestionOption) => {
+    lastPickAtRef.current = Date.now()
     onChange(option.value, option)
     setOpen(false)
     setCursor(-1)
@@ -192,11 +200,19 @@ export default function SuggestionTextInput({
               role="option"
               aria-selected={index === cursor}
               className={`flex min-h-11 w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${index === cursor ? 'bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-blue-50 dark:hover:bg-blue-900/20'}`}
-              // Mouse AND touch: the pick has to beat the input's blur on both,
-              // and a touch device never fires mousedown before blur.
+              // Mouse AND touch both arrive here: a tap's synthetic mousedown
+              // is dispatched BEFORE the focus change that blurs the input, so
+              // preventDefault + pick beats the blur on either. There is
+              // deliberately no touchstart handler -- preventDefault there
+              // cancels the gesture before the browser has decided tap-or-
+              // scroll, which made dragging the list select a row.
               onMouseDown={(event) => { event.preventDefault(); pick(option) }}
-              onTouchStart={(event) => { event.preventDefault(); pick(option) }}
-              onClick={(event) => { event.preventDefault() }}
+              // Fallback for a browser that skips the synthetic mousedown; the
+              // 120ms deferred blur above keeps this row mounted for it.
+              onClick={(event) => {
+                event.preventDefault()
+                if (shouldPickOnClick(lastPickAtRef.current, Date.now())) pick(option)
+              }}
             >
               <span className="min-w-0 flex-1">
                 {/* Wraps instead of truncating: a suggestion hidden behind an

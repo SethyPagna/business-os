@@ -104,3 +104,31 @@ export function nextSuggestionIndex(current: number, count: number, delta: numbe
   if (current < 0) return delta > 0 ? 0 : count - 1
   return ((current + delta) % count + count) % count
 }
+
+/**
+ * How long after a pick a click still belongs to the SAME pointer gesture.
+ * One tap dispatches touchstart -> touchend -> mousedown -> mouseup -> click,
+ * and the whole sequence lands well inside this window.
+ */
+export const PICK_GESTURE_WINDOW_MS = 400
+
+/**
+ * Whether the click on a suggestion row should pick it.
+ *
+ * A row picks on MOUSEDOWN, because that is what beats the input's blur --
+ * on mouse and on touch alike: a tap's synthetic mousedown is dispatched
+ * before the focus change, which is why SupplierPickerField's mousedown-only
+ * picker has always worked on its four touch surfaces. Handling touchstart
+ * instead is worse than redundant: preventDefault there cancels the gesture
+ * before the browser has decided whether it was a tap or a scroll, so
+ * dragging a long list selects whichever row the finger first touched.
+ *
+ * Click remains as the fallback for a browser that skips the synthetic
+ * mousedown (the deferred blur in SuggestionTextInput keeps the row mounted
+ * long enough for it). It must not pick twice when the mousedown of the same
+ * tap already did -- hence the window.
+ */
+export function shouldPickOnClick(lastPickAt: number, now: number): boolean {
+  if (!(lastPickAt > 0)) return true
+  return now - lastPickAt >= PICK_GESTURE_WINDOW_MS
+}

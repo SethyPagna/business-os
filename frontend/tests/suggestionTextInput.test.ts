@@ -21,6 +21,8 @@ import {
   buildSuggestionMatches,
   nextSuggestionIndex,
   normalizeSuggestionOptions,
+  shouldPickOnClick,
+  PICK_GESTURE_WINDOW_MS,
 } from '../src/utils/suggestionMatching.ts'
 
 let passed = 0
@@ -157,9 +159,30 @@ check('the control opens on focus AND on typing, and floats above the form', () 
   assert.match(component, /max-h-\[min\(14rem,45vh\)\]/, 'the list is capped against the viewport so it stays on screen at 375px')
 })
 
-check('picks beat blur on mouse AND touch', () => {
-  assert.match(component, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/)
-  assert.match(component, /onTouchStart=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'a touch device never fires mousedown before blur')
+check('DISCRIMINATING: a tap picks through mousedown -- no onTouchStart may pick', () => {
+  // Round-1 defect: the row carried
+  //     onTouchStart={(event) => { event.preventDefault(); pick(option) }}
+  // preventDefault on touchstart cancels the tap's ENTIRE synthetic mouse
+  // sequence and the scroll the gesture might still have become, so dragging
+  // a long list to read row 12 picked row 1 the instant the finger landed. It
+  // was never needed either: a tap synthesises mousedown BEFORE the focus
+  // change that blurs the input, which is exactly why the base
+  // SupplierPickerField's mousedown-only picker has worked on its four touch
+  // surfaces since D5a.
+  assert.doesNotMatch(component, /onTouchStart=\{[^}]*pick\(/, 'no touchstart handler may pick -- scrolling the list must not select a row')
+  assert.match(component, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'the mousedown fast path is what beats blur, on mouse and touch alike')
+  assert.match(component, /onClick=\{\(event\) => \{[\s\S]{0,200}shouldPickOnClick[\s\S]{0,120}pick\(option\)/, 'click is the fallback for a browser that skips the synthetic mousedown')
+  assert.match(component, /window\.setTimeout\([\s\S]{0,200}, 120\)/, 'the deferred blur keeps the row mounted long enough for that click to land')
+})
+
+check('DISCRIMINATING: the click fallback picks, except when the same tap already picked on mousedown', () => {
+  // Positive control -- round 1's onClick could never pick, on ANY input:
+  //     onClick={(event) => { event.preventDefault() }}
+  const oldClickPicks = (_lastPickAt: number, _now: number): boolean => false
+  assert.equal(oldClickPicks(0, 5_000), false, 'positive control: the old click handler really never picked')
+  assert.equal(shouldPickOnClick(0, 5_000), true, 'a click with no preceding pick IS the pick')
+  assert.equal(shouldPickOnClick(5_000, 5_000 + PICK_GESTURE_WINDOW_MS - 1), false, 'the click of a tap whose mousedown already picked must not pick a second time')
+  assert.equal(shouldPickOnClick(5_000, 5_000 + PICK_GESTURE_WINDOW_MS), true, 'a genuinely new gesture picks again')
 })
 
 check('the list is a real combobox for keyboard and screen readers', () => {
