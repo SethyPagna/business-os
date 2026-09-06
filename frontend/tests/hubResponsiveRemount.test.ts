@@ -40,6 +40,8 @@ for (const testCase of [
   { compact: true, mode: 'pages', chrome: false },
   { compact: false, mode: 'pages', chrome: true },
   { compact: true, mode: 'sections', chrome: true },
+  // `custom` no longer names a branch: the desktopNavigation escape hatch
+  // is gone, so a host that still passes one gets the SHARED row anyway.
   { compact: false, mode: 'sections', chrome: true, custom: true },
   { compact: false, mode: 'pages', chrome: false, single: true },
   { compact: true, mode: 'pages', chrome: false },
@@ -50,7 +52,9 @@ for (const testCase of [
   const content = nodes.find((node: any) => node.type === React.Fragment && node.props.children === child)
   assert.ok(content, 'content must always have a keyed Fragment, not shift as an unkeyed child')
   assert.equal(content.key, '.$hub-content', 'same content identity at 320/1440 and both navigation modes')
-  assert.equal(nodes.length, testCase.chrome ? 2 : 1, 'legacy/custom chrome appears only in its existing modes')
+  assert.equal(nodes.length, testCase.chrome ? 2 : 1, 'chrome appears only in the modes that show a chip row')
+  assert.equal(nodes.filter((node: any) => node.type === 'nav').length, 0,
+    'a host cannot inject its own desktop chip row and bypass the shared one')
 }
 assert.equal(changes, 0, 'viewport renders must not invoke navigation or dirty Back callbacks')
 console.log('PASS hub responsive content identity across pages/legacy/custom/single-section branches')

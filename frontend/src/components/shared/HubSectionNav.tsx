@@ -35,8 +35,12 @@ type HubSectionNavProps = {
    *  first say -- this component only ever WRITES here. */
   storageKey?: string
   pageId?: string
-  /** Preserve a host's established desktop chrome when adopting mobile navigation. */
-  desktopNavigation?: ReactNode
+  /* No `desktopNavigation` escape hatch. It let a host hand in its own chip
+     row and be returned it verbatim at md+, BEFORE the shared row was ever
+     rendered -- so Review kept a bg-gray-100 well, a bg-white active chip and
+     a per-hue active ink on every large screen, i.e. exactly the reported
+     picture, on the one hub that opted out. A hub gets the shared row or it
+     gets nothing; a row-wide modifier belongs on the shared row. */
   children?: ReactNode
 }
 
@@ -72,7 +76,6 @@ export default function HubSectionNav({
   onChange,
   storageKey,
   pageId,
-  desktopNavigation,
   children,
 }: HubSectionNavProps) {
   const { settings, page } = useAppCore() as { settings?: Record<string, unknown>; page: string }
@@ -88,7 +91,6 @@ export default function HubSectionNav({
   // 0 to 1 and remount it. Keep its React identity without a new DOM wrapper.
   const content = <Fragment key="hub-content">{children}</Fragment>
   if (layered || visible.length <= 1) return <>{content}</>
-  if (!isCompact && desktopNavigation) return <>{desktopNavigation}{content}</>
 
   if (!layered) {
     // Desktop/tablet always, and compact + "sections" preference: the chip

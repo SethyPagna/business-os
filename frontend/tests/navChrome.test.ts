@@ -39,6 +39,12 @@ const runTest = (name: string, fn: () => void): void => {
 const read = (rel: string): string =>
   readFileSync(new URL(`../src/${rel}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
+/** Source with its comments removed. A retired name is worth NAMING in the
+ *  comment that explains why it is retired, so "is it gone" has to be asked
+ *  of the code, not of the file's text. */
+const code = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+
 const sidebar = read('components/navigation/Sidebar.tsx')
 const app = read('App.tsx')
 const css = read('components/navigation/nav-chrome.css')
@@ -366,8 +372,23 @@ runTest('the chip row wears the chrome, not grey-on-white with a per-hub hue', (
   assert.doesNotMatch(hubNav, /section\.tone/, 'the per-hub active ink is gone from the row')
   assert.doesNotMatch(hubNav, /tone\?: string/, 'and from HubSectionDef')
   for (const [label, rel] of HUB_PAGES) {
-    assert.doesNotMatch(read(rel), /icon: [^,\n]+, tone:/, `${label} no longer hands the row a tone`)
+    const source = read(rel)
+    assert.doesNotMatch(source, /icon: [^,\n]+, tone:/, `${label} no longer hands the row a tone`)
+    // A hue handed in as a whole forked ROW is the same defect wearing a
+    // different prop name: Review passed `desktopNavigation`, HubSectionNav
+    // returned it verbatim at md+ and the shared row below never rendered --
+    // so on every large screen Review kept bg-gray-100 / bg-white / blue,
+    // teal, rose while the other five hubs wore the chrome.
+    assert.doesNotMatch(code(source), /desktopNavigation/, `${label} does not fork its own desktop row`)
+    assert.doesNotMatch(code(source), /activeColor/, `${label} carries no per-chip active hue`)
   }
+  assert.doesNotMatch(code(hubNav), /desktopNavigation/, 'the escape hatch is gone from the shared component')
+  assert.doesNotMatch(code(hubNav), /if \(!isCompact && desktopNavigation\)/,
+    'and with it the early return that shipped a host row instead of the chrome')
+  // The escape hatch existed for one row-wide behaviour -- sideways scrolling
+  // for Review's long "Deleted sales (old system)" label. The shared row wraps
+  // instead (the standing "no horizontal overflow at 375" rule), so there is
+  // nothing left to preserve; the case below re-asserts it never scrolls.
   assert.match(css, /\.hub-section-pill\[aria-pressed='true'\] \{[\s\S]*?box-shadow: inset 0 -2px 0 0 var\(--nav-accent\)/,
     'the open chip carries the gold underline')
   assert.match(css, /\.hub-section-rule \{[\s\S]*?border-bottom: 2px solid var\(--nav-line\)/,
