@@ -4,7 +4,9 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { sendTelegramShiftReport } from '../lib/telegram'
-import { loadShiftReconciliation, type ShiftReconciliation } from '../lib/shiftReconciliation'
+import {
+  loadShiftFigures, loadShiftReconciliation, type ShiftFigures, type ShiftReconciliation,
+} from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -291,10 +293,40 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
 async function reconciliationFor(env: Env, shift: ShiftRow): Promise<ShiftReconciliation | null> {
   try { return await loadShiftReconciliation(env, shift, Date.now()) } catch { return null }
 }
-type ReconciledShift = ShiftResponseRow & { reconciliation: ShiftReconciliation | null }
+/**
+ * The shift REPORT figures -- sales, COGS, profit, delivery and the expense
+ * split, from lib/shiftReconciliation.ts.
+ *
+ * ADMIN ONLY, and null for everyone else. The drawer reconciliation above is
+ * the cashier's own till and travels with the close; COGS and profit are the
+ * shop's margin and belong to the same reviewer capability that already gates
+ * cancel and cross-cashier reads (canManageShifts). A cashier closing their
+ * own drawer sees what they counted against what was expected, and no more.
+ *
+ * Absent from the LIST read and from /current on purpose: each call runs the
+ * sales kernel over the window, and neither a page of shifts nor a polled
+ * banner is a report. It is attached where a report is actually opened -- the
+ * per-shift history read -- and to the close response that renders the same
+ * summary.
+ *
+ * Null on failure, for the same reason as the reconciliation: the close has
+ * already committed, and losing the report half must never fail the request.
+ */
+async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow): Promise<ShiftFigures | null> {
+  if (!canManageShifts(user)) return null
+  try { return await loadShiftFigures(env, shift, Date.now()) } catch { return null }
+}
+type ReconciledShift = ShiftResponseRow & {
+  reconciliation: ShiftReconciliation | null
+  figures?: ShiftFigures | null
+}
 async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow): Promise<ReconciledShift> {
   const shift = responseShift(user, row)
-  return { ...shift, reconciliation: await reconciliationFor(env, shift) }
+  const [reconciliation, figures] = await Promise.all([
+    reconciliationFor(env, shift),
+    figuresFor(env, user, shift),
+  ])
+  return { ...shift, reconciliation, figures }
 }
 
 function currentResponse(user: SessionUser, shift: ShiftDbRow | undefined, policy: ShiftPolicy, exempt: boolean) {
