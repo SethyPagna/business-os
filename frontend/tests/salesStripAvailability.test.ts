@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../src/utils/loaders.ts'
+// The REAL formula module the cards build their equations from -- injected,
+// not stubbed, so a card that prints an equation that does not foot fails here.
+import { buildEquation, revenueTerms, profitTerms, equationResidual } from '../src/utils/statsFormulas.ts'
 
 const source = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const lifecycleStart = source.indexOf('  type SalesStripPayload =')
@@ -19,7 +22,7 @@ function render(hooks: any, props: any, api: any, helpers: any) {
   const { useState, useRef, useMemo, useCallback, useEffect } = hooks
   const { stripRange, isActive, user, canViewSales, canViewFees, getPermissionTier } = props
   const { getSalesStatsStrip, getFeesReport } = api
-  const { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } = helpers
+  const { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms } = helpers
   const withLoaderTimeout = (load: () => unknown) => load()
   const t = (key: string) => key
   const translateOr = (_key: string, en: string, km = en) => props.language === 'km' ? km : en
@@ -36,7 +39,21 @@ type View = { status: string; data: unknown; fees: unknown; cards: Card[]; reloa
 type Slot = { value?: any; deps?: unknown[]; cleanup?: () => void }
 type Pending = { params: Record<string, unknown>; resolve: (value: unknown) => void; reject: (reason: unknown) => void }
 const range = { startDate: '2026-09-01', endDate: '2026-09-05', startTime: '', endTime: '' }
-const sales = (revenue = 42) => ({ totals: { tx_count: revenue ? 2 : 0, revenue_usd: revenue, cost_usd: 12, profit_usd: 28, store_delivery_usd: 2 }, by_status: [{ sale_status: 'completed', count: 2, total_usd: revenue }], by_payment: [{ payment_method: 'cash', tx_count: 2, collected_usd: revenue }], returns: { count: 1, refund_usd: 5 } })
+const sales = (revenue = 42) => ({
+  totals: {
+    tx_count: revenue ? 2 : 0, revenue_usd: revenue, net_sales_usd: revenue + 3, refund_usd: 3,
+    cost_usd: 12, profit_usd: 28,
+    // 42 - 12 + 0 - 2 = 28. store_delivery_usd is a memo the shop waived,
+    // never a term: it is here precisely so a formula that subtracts it
+    // stops footing.
+    recognized_delivery_usd: 0, recognized_delivery_cost_usd: 2, store_delivery_usd: 2,
+  },
+  by_status: [{ sale_status: 'completed', count: 2, total_usd: revenue }],
+  by_payment: [{ payment_method: 'cash', tx_count: 2, collected_usd: revenue }],
+  // RETURN-DATE activity: 5 paid out at the desk, of which 3 reverses a
+  // sale rung in this range. Revenue is down by the 3, never by the 5.
+  returns: { count: 1, refund_usd: 5 },
+})
 const fees = { totals: { amount_usd: 3, amount_khr: 4000 }, by_type: [{ fee_type: 'tax', amount_usd: 3, amount_khr: 4000 }] }
 
 function harness() {
@@ -74,7 +91,7 @@ function harness() {
   const enqueue = (queue: Pending[], params: Record<string, unknown>) => new Promise((resolve, reject) => queue.push({ params, resolve, reject }))
   const api = { getSalesStatsStrip: (params: Record<string, unknown>) => enqueue(requests.sales, params), getFeesReport: (params: Record<string, unknown>) => enqueue(requests.fees, params) }
   let view: View
-  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent }); return view }
+  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms }); return view }
   const commit = () => {
     for (const [index, effect] of effects) { slots[index].cleanup?.(); slots[index].cleanup = effect() || undefined }
     effects.clear()
@@ -126,7 +143,17 @@ await test('ready cards retain existing financial formulas and distinct expense 
   assert.equal(card(view, 'cogs').value, '$12.00')
   assert.equal(card(view, 'profit').value, '$28.00')
   assert.equal(card(view, 'profit').sub, '66.7% margin')
-  assert.equal(card(view, 'profit').hint, 'Gross profit = revenue − COGS + delivery fees charged − courier cost (including Not Paid).')
+  // The hint is the sentence PLUS the equation with this period's numbers,
+  // and the equation has to close on the value the card shows.
+  const profitHint = card(view, 'profit').hint!
+  assert.match(profitHint, /^Gross profit = revenue − COGS \+ delivery fees charged − courier cost \(including Not Paid\)\./)
+  assert.equal(profitHint.split('\n').pop(), 'Gross profit $28.00 = Revenue $42.00 − COGS $12.00 − Delivery paid to couriers $2.00')
+  assert.equal(equationResidual(28, profitTerms(sales().totals)), 0, 'the printed profit equation foots')
+  const revenueHint = card(view, 'revenue').hint!
+  assert.equal(revenueHint.split('\n').pop(), 'Revenue $42.00 = Net sales $45.00 − Refunds $3.00')
+  assert.equal(equationResidual(42, revenueTerms(sales().totals)), 0, 'the printed revenue equation foots')
+  // ... and it uses the sale-basis refund (3), never the returns desk's 5.
+  assert.ok(!revenueHint.includes('$5.00'), 'the return-date total is not a term of revenue')
   assert.equal(card(view, 'expenses').value, '$3.00 · 4000 KHR')
 })
 

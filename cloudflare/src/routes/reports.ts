@@ -13,6 +13,7 @@ import {
   SALES_GROUP_KEYS,
   type SalesGroupKey,
   recognizedExpr,
+  recognizedValuedExpr,
   awaitingExpr,
   netSaleExpr,
   customerDeliveryFeeExpr,
@@ -193,7 +194,15 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   // cost_usd / profit_usd, so they leave with them. The rest of the pending
   // block (unpaid gross sales, discounts, revenue, delivery) is sale-header
   // money any sales-reading caller can already see and stays in `rest`.
-  const { cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd, ...rest } = row as Record<string, unknown>
+  // unvalued_cost_usd and returned_cost_shortfall_usd (Sep 6 2026) are COGS
+  // the kernel HELD OUT of cost_usd -- the cost of receipts with no sale
+  // value, and the part of a return's cost that had no counted cost to come
+  // off. They are the same money as cost_usd, reported separately so the
+  // repair is auditable rather than silent, so they leave by the same door.
+  const {
+    cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd,
+    unvalued_cost_usd, returned_cost_shortfall_usd, ...rest
+  } = row as Record<string, unknown>
   if (!isAdmin) return rest
   const revenue = num(rest.revenue_usd)
   const profit = num(profit_usd)
@@ -205,6 +214,8 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     margin_pct: revenue > 0 ? round2((profit / revenue) * 100) : null,
     pending_cost_usd: round2(num(pending_cost_usd)),
     pending_profit_usd: round2(num(pending_profit_usd)),
+    unvalued_cost_usd: round2(num(unvalued_cost_usd)),
+    returned_cost_shortfall_usd: round2(num(returned_cost_shortfall_usd)),
   }
 }
 
@@ -334,6 +345,14 @@ app.get('/overview', async (c) => {
   }
 
   if (canReturns) {
+  // RETURN-DATE ACTIVITY, not a revenue term. Every figure below is scoped
+  // by the date the RETURN was created, which answers "what did the returns
+  // desk do in this window". The kernel reverses a refund in the period of
+  // the SALE it belongs to, so these two totals differ whenever a return
+  // crosses a period boundary, and they are not interchangeable. Nothing may
+  // subtract this from a revenue, profit or collected figure -- doing so
+  // takes refunds off twice, on mismatched bases, and can drive a period
+  // below zero. The sale-basis reversal is SalesTotals.refund_usd.
     const base = `COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'`
     const money = `COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr`
     const cur = reportRecordRange('returns', 'returns', f)
@@ -460,17 +479,34 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
     let select: string; let joins = ''
     if (kind === 'sales') {
       const recognized = recognizedExpr('s.'); const net = netSaleExpr('s.'); const refund = netRefundExpr('s.', 'rf.')
+      // COGS is measured over a NARROWER population than revenue, and the two
+      // gates are not interchangeable. Revenue and the refund that reverses it
+      // ride on recognizedExpr (everything but a cancelled sale). COGS rides on
+      // recognizedValuedExpr, which additionally drops a receipt whose header
+      // value was never recorded -- see valuedSaleExpr and the getSalesTotals
+      // level query, where cost_usd, missing_snapshot_lines and returnedCostSql
+      // all carry that same gate.
+      //
+      // These columns used to be gated on `recognized` alone while claiming to
+      // follow deriveTotals. They followed its FLOOR and not its POPULATION:
+      // the Sep 2-3 import's zero-subtotal receipts recognise $0 of revenue and
+      // were still billed their full COGS here, so the receipt list stopped
+      // summing to the Overview COGS and profit sitting above it, and each
+      // unvalued receipt showed a loss the size of its own goods.
+      const recognizedValued = recognizedValuedExpr('s.')
       const rawCost = `(COALESCE((SELECT SUM(si.cost_price_usd * si.quantity) FROM sale_items si WHERE si.sale_id=s.id),0)
         - COALESCE((SELECT SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END)
           FROM return_items ri JOIN returns r ON r.id=ri.return_id WHERE r.sale_id=s.id
           AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'),0))`
-      // A receipt floors its own cost; the loaded statement floors the SUM,
-      // exactly like deriveTotals. Carry the un-floored value for that rollup.
+      // A receipt floors its own cost; the loaded statement floors the SUM --
+      // the same two-level floor deriveTotals applies over the population above.
+      // Carry the un-floored value so that rollup can re-floor once.
       const cost = `MAX(0, ${rawCost})`
-      const adminColumns = isAdmin ? `, CASE WHEN ${recognized} THEN ${cost} ELSE 0 END AS cost_usd,
-        CASE WHEN ${recognized} THEN ${rawCost} ELSE 0 END AS cost_before_floor_usd,
-        CASE WHEN ${recognized} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
-        CASE WHEN ${recognized} THEN ${net}-${refund}-${cost}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END AS gross_profit_usd` : ''
+      const costCol = `CASE WHEN ${recognizedValued} THEN ${cost} ELSE 0 END`
+      const adminColumns = isAdmin ? `, ${costCol} AS cost_usd,
+        CASE WHEN ${recognizedValued} THEN ${rawCost} ELSE 0 END AS cost_before_floor_usd,
+        CASE WHEN ${recognizedValued} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
+        CASE WHEN ${recognized} THEN ${net}-${refund}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END - ${costCol} AS gross_profit_usd` : ''
       select = `s.id, s.created_at AS cursor_at, s.created_at AS date, ${localDateExpr('s.created_at')} AS business_date,
         s.receipt_number, s.branch_name AS branch, s.cashier_name AS cashier, s.customer_name AS customer, s.customer_phone,
         s.payment_method, ${saleStatusExpr('s.')} AS status, COALESCE(s.subtotal_usd,0) AS gross_sales_usd,

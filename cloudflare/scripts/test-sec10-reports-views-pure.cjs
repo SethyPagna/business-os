@@ -79,6 +79,7 @@ db.exec(`
     branch_name TEXT,
     customer_id INTEGER,
     customer_name TEXT,
+    customer_phone TEXT,
     cashier_id INTEGER,
     cashier_name TEXT,
     payment_method TEXT,
@@ -128,8 +129,14 @@ db.exec(`
     created_at TEXT,
     branch_id INTEGER
   );
-  CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT);
+  CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT, phone TEXT, gender TEXT);
   CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);
+  -- The catalog side of the product ranking (category / barcode / on-hand,
+  -- Sep 6 2026). Empty here: the ranking must still report every sold
+  -- product with blank catalog fields rather than dropping the row.
+  CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, category TEXT, stock_quantity REAL);
+  CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT);
+  CREATE TABLE branch_stock (id INTEGER PRIMARY KEY, product_id INTEGER, branch_id INTEGER, quantity REAL);
 `)
 
 // created_at is stored as UTC; the kernel shifts +7h to the business day.
@@ -337,13 +344,20 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   check('parseGranularity: week/month pass through, anything else is day', parseGranularity('week') === 'week' && parseGranularity(' Month ') === 'month' && parseGranularity('hour') === 'day' && parseGranularity(undefined) === 'day')
 
   // ---- admin gating: absence is the contract ----
-  const SECRET = ['cost_usd', 'profit_usd', 'margin_pct', 'cost_missing_snapshot_lines']
-  const totalsRow = { tx_count: 5, revenue_usd: 230, cost_usd: 73, profit_usd: 154, cost_missing_snapshot_lines: 1, pending_revenue_usd: 40 }
+  // unvalued_cost_usd / returned_cost_shortfall_usd are COGS the kernel held
+  // OUT of cost_usd (Sep 6 2026). Same money, same door: a non-admin who
+  // could read them would be reading part of the cost base.
+  const SECRET = ['cost_usd', 'profit_usd', 'margin_pct', 'cost_missing_snapshot_lines', 'unvalued_cost_usd', 'returned_cost_shortfall_usd', 'pending_cost_usd', 'pending_profit_usd']
+  const totalsRow = { tx_count: 5, revenue_usd: 230, cost_usd: 73, profit_usd: 154, cost_missing_snapshot_lines: 1, pending_revenue_usd: 40, unvalued_cost_usd: 12, returned_cost_shortfall_usd: 4, cancelled_tx_count: 2, pending_cost_usd: 9, pending_profit_usd: 31 }
   const gatedStaff = gateTotals(totalsRow, false)
   check('gateTotals(non-admin): no cost/profit/margin/missing keys exist at all', SECRET.every((k) => !(k in gatedStaff)))
   check('gateTotals(non-admin): the public figures are untouched', gatedStaff.revenue_usd === 230 && gatedStaff.tx_count === 5 && gatedStaff.pending_revenue_usd === 40)
   const gatedAdmin = gateTotals(totalsRow, true)
   check('gateTotals(admin): cost/profit rounded, margin = profit/revenue (66.96%), missing lines carried', gatedAdmin.cost_usd === 73 && gatedAdmin.profit_usd === 154 && gatedAdmin.margin_pct === 66.96 && gatedAdmin.cost_missing_snapshot_lines === 1)
+  check('gateTotals(admin): the held-out COGS is reported, rounded, beside cost_usd', gatedAdmin.unvalued_cost_usd === 12 && gatedAdmin.returned_cost_shortfall_usd === 4)
+  check('gateTotals(admin): the awaiting-payment cohort keeps its own COGS and profit', gatedAdmin.pending_cost_usd === 9 && gatedAdmin.pending_profit_usd === 31)
+  check('gateTotals(non-admin): unpaid REVENUE is sale-header money and still readable', gatedStaff.pending_revenue_usd === 40)
+  check('gateTotals: cancelled_tx_count is not admin money and reaches every caller', gatedStaff.cancelled_tx_count === 2 && gatedAdmin.cancelled_tx_count === 2)
   check('gateTotals(admin): zero revenue -> margin null, never NaN/Infinity', gateTotals({ revenue_usd: 0, profit_usd: -5, cost_usd: 5 }, true).margin_pct === null)
   const productRow = { product_id: 101, product_name: 'A', qty: 3, line_sales_usd: 140, cost_usd: 50, profit_usd: 90, cost_missing_snapshot_lines: 0 }
   check('gateProductRow(non-admin): strips every admin key', SECRET.every((k) => !(k in gateProductRow(productRow, false))))

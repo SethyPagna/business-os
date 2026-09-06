@@ -51,7 +51,7 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
     delivery_usd: 6,        // customer-paid delivery (already excludes store-paid, per the SQL CASE)
     store_delivery_usd: 3,  // store-absorbed delivery -- a cost, not revenue
   }
-  const totals = lib.deriveTotals(level, /* costUsd */ 20)
+  const totals = lib.deriveTotals(level, /* costUsd */ 20, /* returnedCostUsd */ 0, { itemDiscountUsd: 0 })
   assert.equal(totals.discount_usd, 7, 'discount_usd = store + membership')
   assert.equal(totals.revenue_usd, 93, 'revenue_usd = gross_sales - discount (excludes tax/delivery)')
   assert.equal(totals.collected_total_usd, 103, 'collected_total = revenue + tax + customer-paid delivery')
@@ -86,7 +86,7 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
     store_delivery_usd: 0,
   }
   const realCostAcrossThreeItems = 12 + 8 + 4 // three distinct line costs, genuinely summed
-  const totals = lib.deriveTotals(oneSaleThreeItems, realCostAcrossThreeItems)
+  const totals = lib.deriveTotals(oneSaleThreeItems, realCostAcrossThreeItems, 0, { itemDiscountUsd: 0 })
   assert.equal(totals.revenue_usd, 50, 'revenue for a multi-item sale must equal its real subtotal, not subtotal * item_count')
   assert.equal(totals.tax_usd, 5, 'tax for a multi-item sale must not be multiplied by item count')
   assert.equal(totals.cost_usd, 24, 'cost is a genuine per-item sum (12+8+4), unrelated to the fan-out bug')
@@ -105,7 +105,7 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
     tax_usd: 0, delivery_usd: 12, store_delivery_usd: 3,
     delivery_actual_cost_usd: 9, delivery_actual_cost_count: 3, delivery_sale_count: 4,
   }
-  const totals = lib.deriveTotals(level, 20)
+  const totals = lib.deriveTotals(level, 20, 0, { itemDiscountUsd: 0 })
   assert.equal(totals.delivery_actual_cost_usd, 9, 'actual courier cost sums straight through')
   assert.equal(totals.delivery_margin_usd, 3, 'margin = customer-charged delivery (12) - actual cost (9)')
   assert.equal(totals.delivery_actual_cost_count, 3, 'how many sales actually recorded a cost')
@@ -118,7 +118,7 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
 }
 {
   // No actual costs recorded at all (every historical sale): zeros, not NaN.
-  const totals = lib.deriveTotals({ tx_count: 1, gross_sales_usd: 10, delivery_usd: 2 }, 0)
+  const totals = lib.deriveTotals({ tx_count: 1, gross_sales_usd: 10, delivery_usd: 2 }, 0, 0, { itemDiscountUsd: 0 })
   assert.equal(totals.delivery_actual_cost_usd, 0)
   assert.equal(totals.delivery_margin_usd, 2)
   assert.equal(totals.delivery_actual_cost_count, 0)

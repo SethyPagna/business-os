@@ -158,6 +158,34 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  assert.equal((await telegram.shiftExpenses({},shift,0)).usd,85,'a NULL-branch fee counts against the open drawer')
  assert.equal((await reconciliation.shiftExpenses({},shift,0)).usd,85,'and the shared module is the one that says so')
  sql.exec('DELETE FROM fees WHERE id=44')
+ // ---- The zero-subtotal receipt: the receipt list and the Overview must be
+ // measuring ONE population. The Sep 2-3 import wrote 22 receipts whose header
+ // value was never recorded (ids 16842-16863). valuedSaleExpr holds them out of
+ // the kernel's COGS -- they recognise no revenue, so charging their goods
+ // against income would drive a day's profit negative with nothing on screen to
+ // explain it -- but the per-receipt columns here were gated on recognizedExpr
+ // alone, so the receipt list still billed the full cost against a $0 receipt
+ // and its rows stopped summing to the Overview above them. The return line
+ // exercises the reversal on the same row.
+ sql.exec(`INSERT INTO sales(id,created_at,sale_status,branch_id,branch_name,cashier_name,cashier_id,customer_name,receipt_number,payment_method,subtotal_usd,tax_usd,total_usd)
+   VALUES(5,'2026-09-04 02:10:00','completed',2,'Shop','Za',7,'Import','R5','Cash',0,0,0);
+  INSERT INTO sale_items(id,sale_id,cost_price_usd,quantity) VALUES(5,5,45,1);
+  INSERT INTO returns(id,sale_id,created_at,branch_id,return_number,receipt_number,customer_name,total_refund_usd) VALUES(5,5,'2026-09-04 02:20:00',2,'RET5','R5','Import',12);
+  INSERT INTO return_items(id,return_id,cost_price_usd,quantity,stock_action,return_to_stock) VALUES(5,5,10,1,'restock',1)`)
+ const unvalued=(await get('sales','q=Import')).body.rows[0]
+ assert.equal(unvalued.net_revenue_usd,0,'a receipt with no recorded header value recognises no revenue')
+ assert.equal(unvalued.refund_usd,0,'and a refund cannot take back more than it recognised')
+ assert.equal(unvalued.cost_usd,0,'so its COGS is held out too -- profit stays a difference over one population')
+ assert.equal(unvalued.cost_before_floor_usd,0)
+ assert.equal(unvalued.cost_missing_snapshot_lines,0)
+ assert.equal(unvalued.gross_profit_usd,0,'the row that earns nothing does not lose 45 either')
+ const canonical=await analytics.getSalesTotals({},{startDate:'2026-09-04',endDate:'2026-09-04',branchId:2})
+ const listRows=(await get('sales','')).body.rows
+ const listCost=listRows.reduce((n,r)=>n+Number(r.cost_usd||0),0)
+ assert.equal(listCost,canonical.cost_usd,`per-receipt cost sums to the Overview COGS (list ${listCost}, canonical ${canonical.cost_usd})`)
+ assert.equal(canonical.unvalued_tx_count,2,'the held-out receipts are counted rather than hidden -- R5 and the header-less id 99 inserted above')
+ assert.equal(canonical.unvalued_cost_usd,45)
+ await assertCanonical()
  console.log('PASS report routes: real Hono/SQLite, all three readers, permissions, canonical refund/profit/credit, search/filter, mixed-time cursor and frozen insertion bound')
  console.log('PASS shift expenses: real grouped SQL, complete overflow totals, branch/employee policy, mixed timestamps and exclusive closing bound')
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>sql.close())

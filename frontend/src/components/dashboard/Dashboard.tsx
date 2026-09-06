@@ -11,6 +11,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
+import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -147,7 +148,6 @@ interface DashboardPeriodRow {
   profit_usd?: number
   cost_usd?: number
   tx_count?: number
-  refunds_usd?: number
   count?: number
   [key: string]: unknown
 }
@@ -1085,8 +1085,23 @@ export default function Dashboard() {
   const aProductCount = summary?.product_count || 0
   const aDiscountRate = aGrossSales > 0 ? (aDiscounts / aGrossSales) * 100 : 0
   const aAvgStockValue = aProductCount > 0 ? aStockValue / aProductCount : 0
+  // RETURN-DATE ACTIVITY: how many returns were processed in this range and
+  // what was paid out for them, counted on the date the RETURN happened. It
+  // answers "how busy was the returns desk", and it is NOT the figure revenue
+  // was reduced by -- a return processed today against a sale from last month
+  // is in this number and in last month's revenue. Nothing may subtract it
+  // from a revenue or profit figure. The sale-basis reversal, which revenue
+  // already has out, is `aKernelRefund` below.
   const aReturns   = analytics?.periodReturns?.return_count  || 0
   const aRefundUsd = analytics?.periodReturns?.refund_usd    || 0
+  const aKernelRefund = analytics?.totals?.refund_usd || 0
+  // net_sales_usd arrived with the Sep 6 kernel; an older Worker still in
+  // front of this bundle gets the identity read backwards rather than a
+  // formula that silently fails to foot.
+  const aFormulaTotals: DashboardMetricMap = {
+    ...(analytics?.totals || {}),
+    net_sales_usd: analytics?.totals?.net_sales_usd ?? (aRevenue + aKernelRefund),
+  }
   const aItemsRet  = analytics?.periodReturns?.items_returned || 0
   const aSupplierReturns = analytics?.periodSupplierReturns?.return_count || 0
   const aSupplierLossUsd = analytics?.periodSupplierReturns?.loss_usd || 0
@@ -1249,11 +1264,13 @@ export default function Dashboard() {
     {
       id: 'revenue',
       // Part 388: expressive/expression-based info -- the FORMULA with this
-      // period's real numbers substituted, not prose alone. COGS is merged
-      // into this card (its standalone card showed a single row).
+      // period's real numbers substituted. Built from statsFormulas so the
+      // sentence is the server's identity rather than prose: it used to read
+      // `Gross − Discounts`, which named no refund term at all and could not
+      // foot on any period where somebody returned something.
       info: `${translateOr('dash_info_revenue', "Money actually kept from sales in this period: gross sales, minus discounts and refunds.")}
 
-${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('gross_revenue', 'Gross')} ${fmtUSD(aGrossSales)} − ${translateOr('discounts', 'Discounts')} ${fmtUSD(aDiscounts)}`,
+${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, revenueTerms(aFormulaTotals), fmtUSD, translateOr)}`,
       label: translateOr('revenue', 'Revenue'),
       value: fmtUSD(aRevenue),
       sub: aGrossSales !== aRevenue ? `${grossShortLabel} ${fmtUSD(aGrossSales)}` : `${translateOr('net_revenue', 'Net revenue')} ${fmtUSD(aRevenue)}`,
@@ -1265,9 +1282,15 @@ ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('
       // Delivery card below (which also makes the outer count EVEN at 8).
       details: [
         { label: translateOr('revenue', 'Net revenue'), value: fmtUSD(aRevenue) },
+        // The equation's own two terms, in order, so the drill and the info
+        // formula are the same arithmetic. Refunds here is the SALE-basis
+        // reversal already taken off revenue -- not the Returns card's
+        // return-date total, which used to sit on this line and invited the
+        // reader to subtract it a second time.
+        { label: translateOr('rpt_net_sales', 'Net sales'), value: fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0) },
+        { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aKernelRefund) },
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
-        { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aRefundUsd) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
       ],
     },
@@ -1290,9 +1313,13 @@ ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('
     // above and in Profit's own formula below.
     {
       id: 'profit',
-      info: `${translateOr('dash_info_profit', "What is left after subtracting what the goods cost you from what you kept.")}
+      // The delivery pair replaces the old `− Store-paid delivery` term: the
+      // waived fee was never charged, so there is no cash to take off profit
+      // (it is revenue foregone, reported on the Delivery card). What profit
+      // really carries is the fees charged minus what the couriers were paid.
+      info: `${translateOr('dash_info_profit', "What is left after subtracting what the goods cost you from what you kept, plus what delivery earned or cost.")}
 
-${translateOr('gross_profit', 'Gross profit')} ${fmtUSD(aProfit)} = ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} − ${translateOr('cogs', 'COGS')} ${fmtUSD(aCost)} − ${translateOr('store_paid_delivery', 'Store-paid delivery')} ${fmtUSD(aStoreDelivery)}
+${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: aProfit }, profitTerms(aFormulaTotals), fmtUSD, translateOr)}
 ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profit')} ÷ ${translateOr('revenue_short', 'Revenue')} = ${aRevenue > 0 ? ((aProfit / aRevenue) * 100).toFixed(2) : '0.00'}%`,
       label: translateOr('gross_profit', 'Gross Profit'),
       value: fmtUSD(aProfit),
@@ -1303,7 +1330,11 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
       details: [
         { label: translateOr('est_profit', 'Est. profit'), value: fmtUSD(aProfit) },
         { label: `${translateOr('cost_price', 'Cost price')} (${translateOr('cogs', 'COGS')})`, value: fmtUSD(aCost) },
-        { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
+        // The two delivery terms profit actually carries. Store-paid delivery
+        // is NOT one of them and moved to the Delivery card, where it is a
+        // memo figure rather than a subtraction nothing performs.
+        { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_usd) || 0) },
+        { label: translateOr('rpt_delivery_paid', 'Delivery paid to couriers'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
       ],
     },
@@ -1326,12 +1357,13 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
     },
     {
       id: 'returns',
-      // Part 388: the net-sold story merges into Returns -- what left the
-      // shop, minus what came back, expressed as the formula with this
-      // period's numbers.
-      info: `${translateOr('dash_info_returns', "Items customers brought back in this period, and what you refunded for them.")}
-
-${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aRevenue - aRefundUsd)} = ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} − ${translateOr('total_refunded', 'Refunded')} ${fmtUSD(aRefundUsd)}`,
+      // This card is returns ACTIVITY, and says so. The "Net after refunds =
+      // Revenue − Refunded" line that used to sit here is deleted, not
+      // relabelled: it subtracted refunds from a revenue figure that already
+      // had them out, and it did it with the return-date total, so on a
+      // period whose returns mostly reversed older sales it printed a number
+      // far below revenue -- and, with enough of them, below zero.
+      info: translateOr('dash_info_returns', "Returns processed in this period, counted on the day the return was made, with what was paid out for them. Revenue already has its refunds taken off in the period of the original sale, so this figure is never subtracted from it."),
       label: translateOr('returns_count', 'Returns'),
       value: aReturns,
       color: aReturns > 0 ? 'text-orange-600' : 'text-gray-500',
@@ -1343,7 +1375,8 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
       details: [
         { label: translateOr('customer_returns', 'Customer returns'), value: aReturns },
         { label: translateOr('items', 'Items'), value: aItemsRet },
-        { label: translateOr('total_refunded', 'Refunded'), value: fmtUSD(aRefundUsd) },
+        { label: translateOr('stats_refunded_by_return_date', 'Refunded (by return date)'), value: fmtUSD(aRefundUsd) },
+        { label: translateOr('stats_refund_in_revenue', "Taken off this period's revenue"), value: fmtUSD(aKernelRefund) },
         { label: `${translateOr('supplier_returns', 'Supplier returns')} (${aSupplierReturns})`, value: fmtUSD(aSupplierLossUsd) },
       ],
     },
