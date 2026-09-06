@@ -133,6 +133,51 @@ runTest('the unit chip inside the strip is not left larger than the prices', () 
 })
 
 // ---------------------------------------------------------------------------
+// 1b. The DESKTOP qty cell is deliberately left wrapping
+// ---------------------------------------------------------------------------
+// The owner's sentence -- "the qty unit is being pushed to next row if selling
+// price, wholesale price, cost price is fully there" -- also describes, word
+// for word, what Products.tsx:3425 does on the desktop Products table: its
+// qty+unit div carries `flex-wrap` and `gap-y-0.5`, and the comment above it
+// says the unit chip is ALLOWED to drop to its own line. Silence about that
+// cell would be indistinguishable from missing it, so the ruling is stated
+// here and goes red if the premise it rests on ever moves.
+//
+// The ruling is: leave it. It is a DIFFERENT defect with the same symptom.
+//   - The three prices are not in this cell. Cost is its own <td>
+//     (Products.tsx:3385), selling+wholesale another (:3389), qty a third
+//     (:3411), inside `<table className="w-full min-w-[58rem] table-fixed ...">`
+//     (ProductsListSurface.tsx:314) with an explicit colgroup. Under
+//     `table-fixed` a column's width comes from the colgroup, not from its
+//     content, so a fully-populated price column CANNOT take width from the
+//     qty column. The owner's causal clause ("if ... price is fully there")
+//     is only true of the mobile strip, where all four values do share one
+//     flex row -- and that is the row this lane compacted.
+//   - The wrap here is the Aug 19 2026 fix for a different ask: a long or
+//     Khmer unit name spilling PAST the cell's right edge. Removing
+//     `flex-wrap` would restore that overflow. Removing it and compacting
+//     instead would be a fix for a problem this column does not have.
+//
+// So the pin is on the premise, not on the pixels: if someone drops
+// `table-fixed`/`min-w-[58rem]`, or converts this cell without thinking, the
+// reasoning above stops holding and this file says so.
+
+runTest('the desktop qty cell keeps its deliberate wrap, and the premise for that still holds', () => {
+  const qtyCell = /className=\{`flex flex-wrap items-center justify-end gap-x-1 gap-y-0\.5 font-bold \$\{stockStatusTextClass\}`\}/
+  assert.match(products, qtyCell, 'the desktop qty+unit cell must keep flex-wrap and gap-y-0.5 (Aug 19 2026: a long/Khmer unit name must drop, not spill past the cell edge)')
+  const surface = fs.readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
+  assert.match(surface, /<table className="w-full min-w-\[58rem\] table-fixed /, 'the desktop table must stay table-fixed at min-w-[58rem] -- that is the whole reason the price columns cannot squeeze the qty column')
+  // Positive control on the "different cell" half: the prices really are in
+  // other <td>s, so the qty cell's wrap cannot be the owner's price-driven one.
+  for (const priceCell of ['<div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>', '<div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>']) {
+    assert.ok(products.includes(priceCell), `the desktop prices must stay in their own column: ${priceCell}`)
+  }
+  // And the MOBILE strip -- the row where the four values really do share one
+  // flex line -- must not have been "fixed" by copying this wrap back onto it.
+  assert.doesNotMatch(stripMarkup(), /flex-wrap/, 'the desktop ruling must not leak onto the mobile strip')
+})
+
+// ---------------------------------------------------------------------------
 // 2. Arithmetic
 // ---------------------------------------------------------------------------
 // Advance widths at 1rem for the app's sans stack, rounded conservatively
