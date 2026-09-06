@@ -32,7 +32,8 @@ function ok(cond, label) {
 }
 
 // ---- compile the real modules ---------------------------------------------
-const MODULES = ['stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts']
+// stockLedgerQuery imports ./stockInSessionsQuery since the session lane (c438eee0), so the temp compile needs it too.
+const MODULES = ['stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts', 'stockInSessionsQuery.ts']
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'movement-branch-'))
 for (const file of MODULES) {
   fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', file), path.join(tmpDir, file))
