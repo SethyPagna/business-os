@@ -1072,6 +1072,17 @@ export default function Dashboard() {
   const aDeliveryActualCount = analytics?.totals?.delivery_actual_cost_count || 0
   const aDeliverySales = analytics?.totals?.delivery_sale_count || 0
   const aDeliveryMargin = analytics?.totals?.delivery_margin_usd ?? (aDelivery - aDeliveryActual)
+  // CREDIT (owner, Sep 6 2026: "don't minus for credit amount add into revenue
+  // and profit, just note the credit amount is that much"). The kernel already
+  // puts this cohort INSIDE revenue_usd, cost_usd and profit_usd
+  // (recognizedExpr is `<> 'cancelled'`) and reports it additionally as
+  // pending_revenue_usd. Until now no Dashboard card named it, so the one
+  // figure the owner asked to see was on the wire and off the screen.
+  //
+  // It is an ANNOTATION on the Revenue card, never a term of it: nothing here
+  // may add it to aRevenue or take it off aProfit, or the printed equation
+  // would stop footing against the server.
+  const aCredit = analytics?.totals?.pending_revenue_usd || 0
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
@@ -1289,6 +1300,9 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         // reader to subtract it a second time.
         { label: translateOr('rpt_net_sales', 'Net sales'), value: fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aKernelRefund) },
+        // How much of the Net revenue above is still owed. Positive and
+        // unsigned: it is a slice of the figure it sits under, not a minus.
+        ...(aCredit > 0 ? [{ label: translateOr('rpt_pending_credit', 'Credit'), value: fmtUSD(aCredit) }] : []),
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
