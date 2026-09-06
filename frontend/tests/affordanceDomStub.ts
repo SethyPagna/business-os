@@ -19,6 +19,8 @@ export interface StubEventInit {
   target?: StubElement | null
   relatedTarget?: StubElement | null
   key?: string
+  clientX?: number
+  clientY?: number
 }
 
 export interface StubEvent {
@@ -26,6 +28,10 @@ export interface StubEvent {
   target: StubElement | null
   relatedTarget: StubElement | null
   key: string
+  // utils/longPress.ts reads these off the press it is handed, so the
+  // harness has to carry them or the press half cannot be driven at all.
+  clientX: number
+  clientY: number
   stopped: boolean
   defaulted: boolean
   stopPropagation: () => void
@@ -183,6 +189,8 @@ export function installAffordanceDom(): AffordanceDomHarness {
         target: init.target || null,
         relatedTarget: init.relatedTarget || null,
         key: init.key || '',
+        clientX: init.clientX ?? 0,
+        clientY: init.clientY ?? 0,
         stopped: false,
         defaulted: false,
         stopPropagation() { event.stopped = true },

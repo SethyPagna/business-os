@@ -218,6 +218,21 @@ const rowClick = dom.fire('click', { target: pill })
 assert.equal(rowClick.stopped, false, "a copy field must not swallow its row's click")
 assert.equal(host.hidden, true, 'and it opens no panel on that click')
 
+// ...and the PRESS is the half that actually matters on this row. Outside
+// selection mode the product row's `onClick` is `undefined`: it spreads
+// utils/longPress.ts's onMouseDown/onMouseUp instead (Products.tsx
+// renderDesktopProductRow / renderMobileProductCard,
+// `{...(selectionModeActive ? {} : longPress)}`), so a tap opens the product
+// and a hold enters select mode, both synthesised from the press. Stopping
+// mousedown/mouseup on a copy field deleted BOTH -- and the click assertion
+// above stayed green the whole time, because the click was never where this
+// row's behaviour lived.
+const rowPress = dom.fire('mousedown', { target: pill })
+assert.equal(rowPress.stopped, false, "a copy field must not swallow its row's mousedown")
+const rowRelease = dom.fire('mouseup', { target: pill })
+assert.equal(rowRelease.stopped, false, 'nor its mouseup')
+assert.equal(host.hidden, true, 'and a press inside a row it does not own opens no panel')
+
 // ...but double-click, which no row uses, still copies. (Touch reaches the
 // same panel through press-and-hold; both land on the one 'gesture' intent.)
 const doubleClick = dom.fire('dblclick', { target: pill })

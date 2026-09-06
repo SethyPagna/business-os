@@ -449,20 +449,29 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   document.addEventListener('mousedown', (event) => {
     if (insideFloat(event.target)) return
     const found = targetFrom(event.target)
-    // A copy field keeps the PRESS even where it hands the click back. The
-    // Products row enters select mode on a click-and-hold and the copy
-    // panel opens on press-and-hold (both through utils/longPress.ts), and
-    // one hold cannot mean two things. Stopping the press costs the row
-    // nothing it needs: a `click` still dispatches after a stopped
-    // mousedown/mouseup, so the row's own onClick -- the selection toggle
-    // -- fires exactly as it always did.
-    if (found?.kind === 'copy') { event.stopPropagation(); return }
+    // ONE ownership rule, at every entry point -- the press included.
+    //
+    // An earlier cut of this lane stopped the press for EVERY copy field on
+    // the theory that a `click` still dispatches afterwards, so the row
+    // would lose nothing. On the Products list the row's click is not where
+    // its behaviour lives: outside selection mode `onClick` is `undefined`
+    // and the row spreads utils/longPress.ts's onMouseDown/onMouseUp
+    // instead (Products.tsx renderDesktopProductRow / renderMobileProductCard,
+    // `{...(selectionModeActive ? {} : longPress)}`) -- a tap opens the
+    // product and a hold enters select mode, both synthesised from the
+    // press. Swallowing mousedown/mouseup there deleted BOTH, wherever a
+    // copyable value happened to be drawn.
+    //
+    // So the press goes to whoever owns the click: `pressWillOpenFloat` is
+    // that same rule, and inside a clickable surface it is false, which
+    // leaves the row every event it had before this lane existed.
+    if (found?.kind === 'copy' && pressWillOpenFloat(found)) { event.stopPropagation(); return }
     if (state && !pressWillOpenFloat(found)) apply({ type: 'dismiss' })
   }, true)
 
   document.addEventListener('mouseup', (event) => {
     const found = targetFrom(event.target)
-    if (found?.kind === 'copy') event.stopPropagation()
+    if (found?.kind === 'copy' && pressWillOpenFloat(found)) event.stopPropagation()
   }, true)
 
   document.addEventListener('touchstart', (event) => {
