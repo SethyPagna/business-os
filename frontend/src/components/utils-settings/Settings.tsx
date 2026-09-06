@@ -2154,11 +2154,11 @@ export default function Settings() {
                 </div>
               </div>
               {[
-                ['telegram_sales_enabled', 'Sales & new receipts', 'Receipt number, status, totals, items, customer, and branch'],
-                ['telegram_status_enabled', 'Receipt status changes', 'Payment, delivery, completion, and cancellation changes'],
-                ['telegram_fees_enabled', 'Fees', 'New fee type, amount, date, label, and note'],
-                ['telegram_stock_in_enabled', 'Stock in', 'Product, quantity, branch, reason, and lot'],
-                ['telegram_stock_out_enabled', 'Stock out', 'Product, quantity, branch, and reason'],
+                ['telegram_sales_enabled', t('telegram_cat_sales') || 'Sales & new receipts', t('telegram_cat_sales_desc') || 'Receipt number, status, totals, items, customer, and branch'],
+                ['telegram_status_enabled', t('telegram_cat_status') || 'Receipt status changes', t('telegram_cat_status_desc') || 'Payment, delivery, completion, and cancellation changes'],
+                ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
+                ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and lot'],
+                ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
               ].map(([key, label, description]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
                   <div className="pr-3">
@@ -2174,17 +2174,17 @@ export default function Settings() {
               ))}
               <div className="sm:col-span-2 flex flex-wrap gap-2 pt-1">
                 <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('test')} disabled={!canEditSettings || telegramAction !== null}>
-                  {telegramAction === 'test' ? 'Sending test...' : 'Send test message'}
+                  {telegramAction === 'test' ? (t('telegram_sending_test') || 'Sending test...') : (t('telegram_send_test') || 'Send test message')}
                 </button>
                 <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('summary')} disabled={!canEditSettings || telegramAction !== null}>
-                  {telegramAction === 'summary' ? 'Sending summary...' : "Send today's summary"}
+                  {telegramAction === 'summary' ? (t('telegram_sending_summary') || 'Sending summary...') : (t('telegram_send_today_summary') || "Send today's summary")}
                 </button>
               </div>
               <p className="sm:col-span-2 text-xs text-gray-500 dark:text-gray-400">
-                Save the chat ID and switches first. The bot token is a server secret, so it is never displayed in the app. Start a chat with the bot or add it to the target group before sending a test.
+                {t('telegram_help_paragraph')}
               </p>
               <div className="sm:col-span-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800/70 dark:text-gray-300">
-                <span className="font-medium">Owner / manager commands:</span> this same Telegram chat can use <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, and <code>/help</code>. Keep this chat private to owners/managers; sending a test message automatically connects commands.
+                <span className="font-medium">{t('telegram_help_commands_label')}</span> {t('telegram_help_commands_desc')} <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, and <code>/help</code>. {t('telegram_help_commands_note')}
               </div>
             </div>
           </SettingsSection>
