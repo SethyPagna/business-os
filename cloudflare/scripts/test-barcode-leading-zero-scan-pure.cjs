@@ -31,15 +31,31 @@
 //      the native BarcodeDetector both report UPC_E as its own 8 digits),
 //      so this is reachable from a plain camera scan.
 //
-// What this asserts (each case fails on base 01f0c93c):
-//   1. indexed path: stored padded, scanned bare  -> found
-//   2. indexed path: stored bare, scanned padded  -> found
-//   3. indexed path: UPC-E scan finds the UPC-A row, and vice versa
-//   4. compat path (useSearchIndex:false): all of the above
-//   5. NO COLLISION: two codes differing by anything other than leading
-//      zeros never match each other, the '0' placeholder is never an
-//      identity, and a GTIN-8 that is not a valid UPC-E keeps its own id
-//   6. the exact-barcode row still RANKS ahead of a mere substring hit
+// WHAT ACTUALLY DISCRIMINATES, measured by replaying this file against the
+// base 01f0c93c copies of lib/searchMatch.ts + lib/productSearchQuery.ts,
+// not asserted. Six of the twenty-three checks are red at base:
+//   * indexed path: UPC-E scan finds the UPC-A row, and vice versa (2)
+//   * compat path: stored bare, scanned WITH a leading zero -> found (1)
+//     -- the ONE padding direction base got wrong, per A above; the other
+//     two padding cases on this path, and all three on the indexed path,
+//     were already green at base
+//   * compat path: UPC-E, both directions (2)
+//   * kernel: barcodeKeysMatch folds the UPC-E/UPC-A pair both ways (1)
+//
+// One check is red on 690086ff and GREEN at base, which is why it stays:
+//   * '<path>: the derived UPC-E spelling never leaks into the padding
+//     keyspace'. Base derives no equivalent at all, so it cannot leak;
+//     690086ff carried the derived spelling through normalizeBarcodeKey and
+//     made row 301's ordinary 7-digit code '1234565' the same article as
+//     '012345000065'.
+//
+// The remaining checks were already true at base. They are fences, not
+// discriminators, and are kept because the UPC-E rule is exactly the kind
+// of change that could break them: the padding cases base got right, NO
+// COLLISION (two codes differing by anything other than leading zeros, the
+// '0' placeholder, a GTIN-8 that is not a valid UPC-E), the exact-barcode
+// row still RANKING ahead of a mere substring hit, and normalizeBarcodeKey
+// still returning the stored-form key.
 //
 // Run: node scripts/test-barcode-leading-zero-scan-pure.cjs
 

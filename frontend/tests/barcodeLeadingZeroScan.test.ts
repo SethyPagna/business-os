@@ -9,22 +9,55 @@
 // empty even when the server answered correctly:
 //
 //   1. THE RE-FILTER. Several pickers take the server's page and re-filter
-//      it locally with fuzzyTextMatches. That was a plain compact-substring
-//      test, and substring containment is ASYMMETRIC: a row stored
-//      '885909950805' does not contain the scanned '0885909950805', so the
-//      client silently dropped the row the server had just matched. Same
-//      for the UPC-E/UPC-A pair, which share no substring at all.
+//      it locally with fuzzyTextMatches. Given the barcode as its own
+//      field, that already folded PADDING at base -- but not the
+//      UPC-E/UPC-A pair, which shares no substring at all and no amount of
+//      ltrim() brings together, so the client dropped a row the server had
+//      just matched.
 //
 //   2. THE JOINED HAYSTACK. A picker that pre-joins its fields into ONE
 //      string ("name sku barcode") destroys the barcode as a discrete code
-//      -- no per-field fold can see it any more. Those call sites must pass
-//      the fields separately.
+//      -- no per-field fold can see it any more, so even the padding fold
+//      it already had never ran. Those call sites must pass the fields
+//      separately.
 //
 //   3. THE HANDOFF. Nothing on the decode -> search box path may coerce the
 //      scanned text to a number: Number('0123') is 123, which would destroy
 //      the leading zero before any matcher ever sees it.
 //
-// Each assertion below fails on base 01f0c93c.
+// WHAT ACTUALLY DISCRIMINATES, measured rather than asserted. This file
+// cannot be LOADED against base 01f0c93c at all -- expandUpcE, compressUpcA,
+// barcodeSearchKeys and searchTermBarcodeKeys are not exported there -- so
+// "every assertion fails on base" would be a vacuous claim. Measured
+// instead by replaying each assertion against the base kernel's own
+// exports, the checks split three ways:
+//
+//   NEW BEHAVIOUR, red at base:
+//     * the whole UPC-E half -- expandUpcE / compressUpcA / the pair in
+//       barcodeSearchKeys, barcodeKeysMatch, the re-filter and the tier.
+//       Base returns MATCH_TIER_OTHER (3) for a UPC-E scan against the row
+//       stored as its UPC-A;
+//     * 'pickers that re-filter locally pass barcode as its OWN field' --
+//       TransferModal and NewSupplierReturnModal joined their fields into
+//       one haystack at base;
+//     * the two cross-kernel source guards, which name rules base has not
+//       got.
+//
+//   RED ON 690086ff, GREEN AT BASE -- the keyspace regression this lane
+//   introduced and then closed, which is exactly why the check must stay:
+//     * 'the derived UPC-E spelling never leaks into the padding keyspace'.
+//       Base has no derived key at all, so it cannot leak; 690086ff carried
+//       the derived spelling zero-stripped and made the ordinary 7-digit
+//       code '1234565' the same article as '012345000065'.
+//
+//   ALREADY TRUE AT BASE -- fences, not discriminators. Kept because the
+//   UPC-E rule above is exactly the kind of change that could break them:
+//     * padding in the re-filter and in the tier (base folded both);
+//     * the fold never collapsing two different articles, the '0'
+//       placeholder, the near-miss, the unrelated code;
+//     * searchTermBarcodeKey's single-key contract;
+//     * ordinary word search;
+//     * no numeric coercion on the decode -> search box path.
 //
 // Run: node tests/barcodeLeadingZeroScan.test.ts
 
