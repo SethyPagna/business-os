@@ -127,6 +127,20 @@ for (const key of [...shiftKeys, ...telegramKeys]) {
   assert.notEqual(kmVal, enVal, `km.json '${key}' looks untranslated (identical to the English value)`)
 }
 
+// The stock-in category description must use the canonical glossary term for
+// "received date" (ថ្ងៃចូល), not a rival spelling of "lot/batch" (ឡូត/ឡុត/បាច់)
+// -- khmerRetailVocabulary.test.ts pins the same rule project-wide; this
+// assertion pins it specifically for this key so a future edit here cannot
+// regress it silently.
+assert.ok(
+  (km['telegram_cat_stock_in_desc'] as string).includes('ថ្ងៃចូល'),
+  "km.json 'telegram_cat_stock_in_desc' must use the canonical term ថ្ងៃចូល (received date)",
+)
+assert.ok(
+  !(km['telegram_cat_stock_in_desc'] as string).includes('ឡូត'),
+  "km.json 'telegram_cat_stock_in_desc' must not use the rival spelling ឡូត",
+)
+
 console.log(
   'PASS Settings.tsx shift-registration and Telegram-automation mini-sections route through t() with real Khmer text (i18n:4, i18n:5)',
 )
