@@ -18,9 +18,9 @@ import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
-import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
-import { normalizeProductGroupName, resolveMergedCostDetail, resolveMergedPricing } from '../lib/productDetailRule'
-import type { MergedCostOutlier } from '../lib/productDetailRule'
+import { findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, normalizeProductClusterKey, pickSameIdentityRow, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail, resolveMergedPricing } from '../lib/productDetailRule'
+import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -1501,28 +1501,32 @@ async function findSameProductIdentityProduct(
   env: Env,
   name: string,
   barcode: unknown,
-  costPriceUsd: unknown,
-  costPriceKhr: unknown,
   excludeId: number | null,
 ): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number } | null> {
-  const trimmedBarcode = String(barcode ?? '').trim()
   const nameKey = normalizeProductGroupName(name)
   if (!nameKey) return null
-  const costUsdCents = Math.round((Number(costPriceUsd) || 0) * 100)
-  const costKhrCents = Math.round((Number(costPriceKhr) || 0) * 100)
-  const row = await getDb(env).prepare(`
+  // Cost is NO LONGER part of this guard. It was, and that contradicted the
+  // Sep-4 identity ruling head-on: the form happily minted a second row for
+  // one article bought at a second price, which is the exact duplicate the
+  // merge tool then had to clean up. The inflow is the fix; the merge is the
+  // repair.
+  //
+  // The SQL narrows to the name group and nothing else; the barcode is
+  // compared in JS through identityBarcodeKey, because folding leading zeros
+  // in SQL would mean a THIRD hand-copy of the fold (searchMatch.ts already
+  // carries the deliberately-looser search one) and this codebase has been
+  // bitten by exactly that before.
+  const rows = await getDb(env).prepare(`
     SELECT id, name, barcode, cost_price_usd, cost_price_khr FROM products
     WHERE is_active = 1
-      AND LOWER(TRIM(COALESCE(barcode, ''))) = LOWER(@barcode)
       AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name, '  ', ' '), '  ', ' '), '  ', ' '))) = @nameKey
-      AND ROUND(COALESCE(cost_price_usd, 0) * 100) = @costUsdCents
-      AND ROUND(COALESCE(cost_price_khr, 0) * 100) = @costKhrCents
       AND (@excludeId IS NULL OR id != @excludeId)
-    LIMIT 1
-  `).get<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }>({
-    nameKey, barcode: trimmedBarcode, costUsdCents, costKhrCents, excludeId,
+    ORDER BY id ASC
+    LIMIT 200
+  `).all<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }>({
+    nameKey, excludeId,
   })
-  return row || null
+  return pickSameIdentityRow(rows, barcode)
 }
 
 app.post('/', async (c) => {
@@ -1545,12 +1549,10 @@ app.post('/', async (c) => {
   // Same name with a DIFFERENT (or no) barcode stays a legitimate child row
   // and passes through untouched. Checked before the review queue so a
   // reviewer is never asked to approve a duplicate either.
-  const duplicate = await findSameProductIdentityProduct(
-    c.env, name, body.barcode, body.cost_price_usd, body.cost_price_khr, null,
-  )
+  const duplicate = await findSameProductIdentityProduct(c.env, name, body.barcode, null)
   if (duplicate) {
     return c.json({
-      error: `"${duplicate.name}" already exists with this barcode and cost — same name + barcode + cost is the same product. Edit it or add stock to it instead of creating a duplicate.`,
+      error: `"${duplicate.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Edit it or add stock to it instead of creating a duplicate.`,
       code: 'duplicate_product',
       duplicate,
     }, 409)
@@ -1759,8 +1761,10 @@ app.put('/:id', async (c) => {
 
   // Same identity rule as create: an EDIT must not rename/re-barcode a row
   // into an exact name+barcode twin of another product (excluding itself).
-  // Only runs when the body actually carries a name or barcode change to
-  // judge — an image-only or stock-only edit never reaches the query.
+  // Only runs when the body actually MOVES the row's identity — an image-only,
+  // price-only, cost-only or stock-only edit never reaches the query, and
+  // neither does a full-form save that re-sends the name and barcode the row
+  // already has.
   if (body.barcode !== undefined) {
     const nextBarcodeText = String(body.barcode ?? '').trim()
     if (SCIENTIFIC_NOTATION_BARCODE.test(nextBarcodeText)) {
@@ -1769,20 +1773,31 @@ app.put('/:id', async (c) => {
   }
   let renamedProductIds: number[] = []
   let renamedProductName: string | null = null
-  if (body.name !== undefined || body.barcode !== undefined || body.cost_price_usd !== undefined || body.cost_price_khr !== undefined) {
-    const current = await getDb(c.env).prepare('SELECT name, barcode, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
-      .get<{ name: string; barcode: string | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id })
-    const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
-    const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
-    const nextCostUsd = body.cost_price_usd !== undefined ? body.cost_price_usd : current?.cost_price_usd
-    const nextCostKhr = body.cost_price_khr !== undefined ? body.cost_price_khr : current?.cost_price_khr
-    const duplicate = await findSameProductIdentityProduct(c.env, nextName, nextBarcode, nextCostUsd, nextCostKhr, Number(id))
-    if (duplicate) {
-      return c.json({
-        error: `"${duplicate.name}" already exists with this barcode and cost — same name + barcode + cost is the same product. Merge into it instead of creating a twin.`,
-        code: 'duplicate_product',
-        duplicate,
-      }, 409)
+  if (body.name !== undefined || body.barcode !== undefined) {
+    const current = await getDb(c.env).prepare('SELECT name, barcode FROM products WHERE id = @id')
+      .get<{ name: string; barcode: string | null }>({ id })
+    // Ask whether this edit CHANGES the row's identity, not whether the row's
+    // identity is shared. The editor (ProductForm/Products) posts the WHOLE
+    // form on every save, so `body.name`/`body.barcode` are present even when
+    // only the selling price or the image moved -- and for a pair that already
+    // shares an identity (a leading-zero twin, or two rows the Sep-4 cost
+    // ruling folded together) the unconditional lookup below is a permanent
+    // yes, turning every ordinary save of either row into a 409 merge offer.
+    // Worse, for a cost-outlier pair the merge tool refuses too ("correct
+    // whichever figure is wrong, then merge") -- so the two refusals deadlock
+    // and the operator cannot correct the figure the merge is waiting for.
+    // Cost is not identity (Sep 4), so a cost-only change can never move this
+    // key and no longer reaches this block at all.
+    const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, body)
+    if (changesIdentity) {
+      const duplicate = await findSameProductIdentityProduct(c.env, nextName, nextBarcode, Number(id))
+      if (duplicate) {
+        return c.json({
+          error: `"${duplicate.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Merge into it instead of creating a twin.`,
+          code: 'duplicate_product',
+          duplicate,
+        }, 409)
+      }
     }
     // D6 / 9.1 ("rename does not regroup"): when the operator chose to
     // carry the WHOLE name group to the new name, rename the siblings
@@ -2419,18 +2434,27 @@ export async function readMergeStockImpact(
 }
 
 // The OTHER thing a merge silently changes: foldDuplicateProductInto carries
-// the HIGHER of the two rows' selling and special prices onto the keeper
+// the HIGHER of the two rows' selling and WHOLESALE prices onto the keeper
 // (resolveMergedPricing), so resolving a twin pair can quietly raise the price
 // the shop rings up. That is a defensible rule -- it is not a defensible
 // surprise, so the reviewer is shown it before they confirm, and the audit
 // entry records it after. Fields that do not move are not reported.
+//
+// This list named special_price_usd/khr until 2026-09-06. Migration 0111 moved
+// the discounted tier to wholesale_price_* and ZEROED the old pair, so the
+// preview was wrong twice over one constant: it SELECTed columns that are 0 on
+// every row, and it reported over a list that could never contain a change.
+// The fold had already been repointed at wholesale_* and moves it for real, so
+// the one price change a merge can actually make was the one change the
+// preview could never show -- and with no stock and equal selling prices, the
+// client's confirm dialog was skipped entirely.
 export type MergePricingChange = {
   before: Record<string, number>
   after: Record<string, number>
   changes: Array<{ field: string; from: number; to: number }>
 }
 
-const MERGE_PRICE_FIELDS = ['selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr'] as const
+const MERGE_PRICE_FIELDS = ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
 
 export async function readMergePricingChange(
   db: ReturnType<typeof getDb>,
@@ -2463,6 +2487,122 @@ export async function readMergePricingChange(
 // live but empty carries nothing and is folded/deactivated either way.
 export const mergeStockImpactNeedsChoice = (impact: MergeStockImpact): boolean =>
   impact.branches.some((b) => b.quantity !== 0)
+
+// WHAT THE CLIENT ACTUALLY GATES ON, and what the server never used to send.
+//
+// useMergeStockChoice skips the confirm dialog entirely when there is no stock
+// to move, no price to move, no identity difference and no cost to fill in.
+// The last two read `preview.identity` -- a shape that existed only in the
+// frontend's types. It was never returned, so both were structurally false and
+// an N15 merge that rewrote the kept product's cost to a mean ran with no
+// confirmation at all. Building it here is what makes that gate live.
+export type MergeIdentityDiff = {
+  same: boolean
+  differs: Array<{ field: string; keeper: string; discarded: string }>
+  costVerdict: CostVerdict
+  costFill: Array<{ field: string; value: number }>
+  // The cost the fold WILL write, computed with the same resolveMergedCostDetail
+  // the fold calls, so a preview cannot promise a cost the fold would not set.
+  // Before this the merge preview never mentioned cost at all -- neither the
+  // pair preview nor the whole-catalog dry run -- and the only place the mean
+  // appeared was inside the fold, i.e. after the point of no return.
+  costBefore: Record<string, number>
+  costAfter: Record<string, number>
+  costOutliers: MergedCostOutlier[]
+}
+
+const MERGE_IDENTITY_COST_FIELDS = ['cost_price_usd', 'cost_price_khr'] as const
+
+export async function readMergeIdentityDiff(
+  db: ReturnType<typeof getDb>,
+  keeperId: number,
+  dupId: number,
+): Promise<MergeIdentityDiff> {
+  const columns = 'id, name, barcode, cost_price_usd, cost_price_khr'
+  const [keeper, dup] = await Promise.all([
+    db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, unknown>>({ id: keeperId }),
+    db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, unknown>>({ id: dupId }),
+  ])
+  const differs: Array<{ field: string; keeper: string; discarded: string }> = []
+  if (normalizeProductGroupName(keeper?.name) !== normalizeProductGroupName(dup?.name)) {
+    differs.push({ field: 'name', keeper: String(keeper?.name ?? ''), discarded: String(dup?.name ?? '') })
+  }
+  // identityBarcodeKey, not the raw string: a leading zero is not a different
+  // barcode, so it must not be reported to the reviewer as one.
+  if (identityBarcodeKey(keeper?.barcode) !== identityBarcodeKey(dup?.barcode)) {
+    differs.push({ field: 'barcode', keeper: String(keeper?.barcode ?? ''), discarded: String(dup?.barcode ?? '') })
+  }
+  const costVerdict = compareCosts(keeper || {}, dup || {})
+  const costFill: Array<{ field: string; value: number }> = []
+  const costBefore: Record<string, number> = {}
+  const costAfter: Record<string, number> = {}
+  const { merged, outliers } = resolveMergedCostDetail([keeper || {}, dup || {}])
+  for (const field of MERGE_IDENTITY_COST_FIELDS) {
+    const before = Number(keeper?.[field]) || 0
+    const after = Number(merged[field] ?? before) || 0
+    costBefore[field] = before
+    costAfter[field] = after
+    // The kept row has no cost of its own and takes the discarded row's. Not a
+    // difference (0/NULL is a cost nobody recorded) -- but it changes what the
+    // kept product cost, so it is said out loud rather than done quietly.
+    if (!before && after) costFill.push({ field, value: after })
+  }
+  return {
+    same: differs.length === 0,
+    differs,
+    costVerdict,
+    costFill,
+    costBefore,
+    costAfter,
+    costOutliers: outliers,
+  }
+}
+
+// OWNER RULING (N15, 2026-09-06): two costs more than COST_OUTLIER_RATIO apart
+// are not one product's cost written twice, they are one cost and one probable
+// typo -- so the merge REFUSES rather than averaging or silently keeping the
+// dearer. (Until this change the fold kept the dearer and merely reported it,
+// which meant the stored cost equalled neither row's own figure and nobody had
+// to agree to that.) The refusal is the same on both merge routes.
+export const mergeCostRefusal = (identity: MergeIdentityDiff): MergedCostOutlier | null =>
+  identity.costOutliers[0] ?? null
+
+export function mergeCostRefusalMessage(dupName: string | null, outlier: MergedCostOutlier): string {
+  return `"${dupName}" and the product you are keeping record costs too far apart to be one product's cost `
+    + `(${outlier.min} and ${outlier.max}). Averaging them would store a cost nobody paid, so this merge is refused -- `
+    + 'correct whichever figure is wrong, then merge.'
+}
+
+// A merge rewrites the very rows a stock-in session's undo/redo asserts on:
+// lib/stockSession.ts rebuilds the session postimage through `IN (SELECT
+// product_id FROM stock_session_members WHERE operation_id=@id)` and refuses to
+// replay unless live state still equals it. Folding a member product moves its
+// branch_stock and reparents its movements, so that equality can never hold
+// again and the session's Undo dies -- silently, at the moment someone tries to
+// use it. Reparenting the members row does not help: `members` is itself inside
+// the postimage, so the UPDATE alone breaks the assertion, and the comparison
+// then runs against the KEEPER's rows. So the merge waits instead.
+export async function mergeBlockedByReversibleStockSession(
+  db: ReturnType<typeof getDb>,
+  productIds: number[],
+): Promise<{ operationId: string; status: string } | null> {
+  const ids = productIds.filter((id) => Number.isFinite(id))
+  if (!ids.length) return null
+  const { sql, params } = buildInClause('p', ids)
+  const row = await db.prepare(`
+    SELECT o.id AS operationId, h.status AS status
+    FROM stock_session_operations o
+    JOIN action_history h ON h.id = o.history_id
+    WHERE h.status IN ('undoable', 'redoable')
+      AND EXISTS (SELECT 1 FROM stock_session_members m WHERE m.operation_id = o.id AND m.product_id IN (${sql}))
+    LIMIT 1
+  `).get<{ operationId: string; status: string }>(params)
+  return row || null
+}
+
+export const mergeStockSessionBlockedMessage = (operationId: string): string =>
+  `One of these products is part of stock-in session ${operationId}, which can still be undone. `
+  + 'Merging now would break that session\'s Undo. Undo it or let it settle first, then merge.'
 
 // The ledger line a WRITE-OFF leaves behind, and the fragment that finds it
 // again afterwards. Both live here so the reason text and the id-capture query
@@ -2855,6 +2995,73 @@ export async function foldDuplicateProductInto(
       params: { canonicalId, dupId: dup.id },
     })
   }
+  // promotion_rules.product_ids: a LIVE product link the walk above structurally
+  // cannot reach -- it is a JSON array of ids inside a TEXT column, not an
+  // INTEGER FK, so neither MERGE_REPARENT_TABLES nor the migration sweep that
+  // keeps that list honest can see it. promotionRules.ts decides a rule by
+  // `rule.product_ids.includes(product.id)`, so a rule scoped to the discarded
+  // row stopped applying to anything the instant this fold deactivated that row:
+  // the discount left the catalogue with no trace. Rewrite the id in place,
+  // de-duplicating (a rule scoped to BOTH rows must not end up naming the keeper
+  // twice) and keeping the order and any non-numeric entry untouched. The
+  // previous array is captured verbatim so undo restores the exact string.
+  // The table is small by design (promotionRulesSql.ts reads it whole), so this
+  // is one unfiltered SELECT rather than a LIKE guess at JSON contents.
+  const promotionRuleRows = await db
+    .prepare('SELECT id, product_ids FROM promotion_rules')
+    .all<{ id: number; product_ids: string | null }>({})
+  const promotionRulesBefore: Array<{ id: number; product_ids: string }> = []
+  for (const rule of promotionRuleRows) {
+    const raw = String(rule.product_ids ?? '')
+    let parsed: unknown
+    try { parsed = JSON.parse(raw || '[]') } catch { continue }
+    if (!Array.isArray(parsed)) continue
+    if (!parsed.some((entry) => Number(entry) === dup.id)) continue
+    const seenIds = new Set<number>()
+    const next: unknown[] = []
+    for (const entry of parsed) {
+      const mapped = Number(entry) === dup.id ? canonicalId : entry
+      const asNumber = Number(mapped)
+      if (Number.isFinite(asNumber)) {
+        if (seenIds.has(asNumber)) continue
+        seenIds.add(asNumber)
+      }
+      next.push(mapped)
+    }
+    promotionRulesBefore.push({ id: Number(rule.id), product_ids: raw })
+    statements.push({
+      sql: 'UPDATE promotion_rules SET product_ids = @ids, updated_at = CURRENT_TIMESTAMP WHERE id = @ruleId',
+      params: { ids: JSON.stringify(next), ruleId: Number(rule.id) },
+    })
+  }
+
+  // products.parent_id: the other live product link that is not a *product_id
+  // column. A child variant still pointing at the discarded row would be left
+  // rooted on a row this fold is about to deactivate (familyPagination.ts joins
+  // `parent.id = p.parent_id`), so it falls out of its own family. Move the
+  // children onto the keeper -- except the keeper itself, which cannot become
+  // its own parent: if the keeper WAS a child of the discarded row, that link is
+  // cleared instead (and captured, so undo restores it).
+  const childProductRows = await db
+    .prepare('SELECT id FROM products WHERE parent_id = @id')
+    .all<{ id: number }>({ id: dup.id })
+  const reparentedChildProductIds = childProductRows
+    .map((row) => Number(row.id))
+    .filter((childId) => Number.isFinite(childId) && childId !== canonicalId)
+  const keeperWasChildOfDup = childProductRows.some((row) => Number(row.id) === canonicalId)
+  if (reparentedChildProductIds.length) {
+    statements.push({
+      sql: 'UPDATE products SET parent_id = @canonicalId, updated_at = CURRENT_TIMESTAMP WHERE parent_id = @dupId AND id != @canonicalId',
+      params: { canonicalId, dupId: dup.id },
+    })
+  }
+  if (keeperWasChildOfDup) {
+    statements.push({
+      sql: 'UPDATE products SET parent_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @canonicalId',
+      params: { canonicalId },
+    })
+  }
+
   const byTable = (table: string): number[] => reparentedByTable.find((e) => e.table === table)?.ids ?? []
   const reparentedSaleItemIds = byTable('sale_items')
   const reparentedMovementIds = byTable('inventory_movements')
@@ -2909,6 +3116,11 @@ export async function foldDuplicateProductInto(
     // audit log is where it can still be found months later.
     ...(costOutliers.length ? { costOutliers } : {}),
     returnsReparented,
+    // The two links that are not INTEGER product FKs, so they are named
+    // explicitly rather than hiding inside reparentedTables: a promotion rule
+    // re-scoped onto the survivor, and a child variant reparented.
+    promotionRulesRescoped: promotionRulesBefore.map((rule) => rule.id),
+    childrenReparented: reparentedChildProductIds.length,
     reparentedTables: reparentedByTable.map((e) => `${e.table}:${e.ids.length}`),
   })
 
@@ -2952,6 +3164,9 @@ export async function foldDuplicateProductInto(
       reparentedSaleItemIds,
       reparentedMovementIds,
       reparentedByTable,
+      promotionRulesBefore,
+      reparentedChildProductIds,
+      keeperParentIdBefore: keeperWasChildOfDup ? dup.id : null,
       adjustmentMovementIds,
       stockDisposition,
       mergeContext,
@@ -3025,6 +3240,44 @@ app.get('/merge-duplicates/preview', async (c) => {
         batchCount: batchCountByProductId.get(dup.id) || 0,
       }))
 
+      // WHAT THIS RUN WILL DO TO THE COST, which no preview said before.
+      // A merge averages the distinct costs (owner ruling, 2026-09-04), so
+      // "nothing will change but the row count" was never true and a dry run
+      // that hides it is not a dry run. Folded in the SAME sequential order
+      // the run below applies -- pairwise, keeper first -- because a mean of
+      // means is not the mean, and a preview that promises a cost the fold
+      // would not write is worse than no preview.
+      const costRows = await selectInChunks([group.canonical.id, ...duplicateIds], 0, (chunk) => {
+        const { sql, params } = buildInClause('id', chunk)
+        return db
+          .prepare(`SELECT id, cost_price_usd, cost_price_khr FROM products WHERE id IN (${sql})`)
+          .all<{ id: number; cost_price_usd: number | null; cost_price_khr: number | null }>(params)
+      })
+      const costById = new Map(costRows.map((r) => [r.id, r]))
+      const canonicalCost: { cost_price_usd?: number | null; cost_price_khr?: number | null } = costById.get(group.canonical.id) || {}
+      const costBefore = {
+        cost_price_usd: Number(canonicalCost.cost_price_usd) || 0,
+        cost_price_khr: Number(canonicalCost.cost_price_khr) || 0,
+      }
+      let running: Record<string, unknown> = { ...canonicalCost }
+      const costSkips: Array<{ mergedId: number; field: string; min: number; max: number }> = []
+      for (const dup of group.duplicates) {
+        const detail = resolveMergedCostDetail([running, costById.get(dup.id) || {}])
+        if (detail.outliers.length) {
+          // Reported, and NOT folded into the running figure: the run below
+          // refuses this pair, so the cost it shows must be the cost of the
+          // merges that will actually happen.
+          const o = detail.outliers[0]
+          costSkips.push({ mergedId: dup.id, field: String(o.field), min: o.min, max: o.max })
+          continue
+        }
+        running = { ...running, ...detail.merged }
+      }
+      const costAfter = {
+        cost_price_usd: Number(running.cost_price_usd) || 0,
+        cost_price_khr: Number(running.cost_price_khr) || 0,
+      }
+
       return {
         canonicalId: group.canonical.id,
         canonicalName: group.canonical.name,
@@ -3032,6 +3285,11 @@ app.get('/merge-duplicates/preview', async (c) => {
         duplicates,
         totalQuantityToMove,
         branchBreakdown,
+        costBefore,
+        costAfter,
+        // Pairs this run will REFUSE, named in the dry run rather than
+        // discovered afterwards in the response.
+        costRefusals: costSkips,
       }
     }),
   )
@@ -3041,6 +3299,7 @@ app.get('/merge-duplicates/preview', async (c) => {
     groupCount: previewGroups.length,
     duplicateProductCount: previewGroups.reduce((sum, g) => sum + g.duplicates.length, 0),
     groups: previewGroups,
+    costRefusalCount: previewGroups.reduce((sum, g) => sum + g.costRefusals.length, 0),
   })
 })
 
@@ -3070,6 +3329,12 @@ app.post('/merge-duplicates', async (c) => {
   // rewrote a cost on one row out of hundreds is still visible in the result
   // rather than only in the audit log.
   const costOutlierReports: Array<{ keeperId: number; mergedId: number; field: string; min: number; max: number; kept: number }> = []
+  // Pairs this run REFUSED and left exactly as they were. Same rule as the
+  // pair route's 409s, because "merge these two" cannot mean one thing in the
+  // review dialog and another in the bulk run: a cost pair too far apart to
+  // be one cost needs a person, and a product still inside a reversible
+  // stock-in session must not have that session broken underneath it.
+  const refusals: Array<{ keeperId: number; mergedId: number; mergedName: string | null; code: string; error: string }> = []
   // Every fold's reversal, in application order, so the whole run can be undone
   // (and redone) as ONE action -- see recordBulkMergeUndoSnapshot below. Kept
   // server-side only; never returned in the response (it's large).
@@ -3088,6 +3353,17 @@ app.post('/merge-duplicates', async (c) => {
     // folds into -- batches an earlier one already moved (the same
     // "growing set" the old per-group snapshot provided).
     for (const dup of group.duplicates) {
+      const identity = await readMergeIdentityDiff(db, canonicalId, dup.id)
+      const costOutlier = mergeCostRefusal(identity)
+      if (costOutlier) {
+        refusals.push({ keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'cost_outlier_review', error: mergeCostRefusalMessage(dup.name, costOutlier) })
+        continue
+      }
+      const blockingSession = await mergeBlockedByReversibleStockSession(db, [canonicalId, dup.id])
+      if (blockingSession) {
+        refusals.push({ keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'stock_session_reversible', error: mergeStockSessionBlockedMessage(blockingSession.operationId) })
+        continue
+      }
       const { reversal, costOutliers } = await foldDuplicateProductInto(
         c.env, db, user,
         { id: canonicalId, name: canonicalName },
@@ -3130,6 +3406,9 @@ app.post('/merge-duplicates', async (c) => {
     mergedProducts: mergedProductsCount,
     groups: groupSummaries,
     costOutliers: costOutlierReports,
+    // What this run deliberately did NOT do. An empty array is the normal
+    // answer; a non-empty one is work left for a person, and the UI says so.
+    refusals,
     actionHistoryId: undoRecord?.actionHistoryId ?? null,
   })
 })
@@ -3159,9 +3438,9 @@ app.post('/possible-duplicates/dismiss', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json().catch(() => ({})) as { type?: string; value?: string }
-  const type = body.type === 'barcode' || body.type === 'name' || body.type === 'similar' ? body.type : null
+  const type = body.type === 'leadingzero' || body.type === 'barcode' || body.type === 'name' || body.type === 'similar' ? body.type : null
   const value = type ? normalizeProductClusterKey(type, body.value) : ''
-  if (!type || !value) return c.json({ error: 'type (barcode|name|similar) and value are required' }, 400)
+  if (!type || !value) return c.json({ error: 'type (leadingzero|barcode|name|similar) and value are required' }, 400)
   await getDb(c.env).prepare(`
     INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value, dismissed_by_id, dismissed_by_name, dismissed_at)
     VALUES (@type, @value, @byId, @byName, CURRENT_TIMESTAMP)
@@ -3191,10 +3470,13 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   const db = getDb(c.env)
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
-  const [stockImpact, pricing] = await Promise.all([
+  const [stockImpact, pricing, identity, blockingSession] = await Promise.all([
     readMergeStockImpact(db, mergeId, branchNameById),
     readMergePricingChange(db, keepId, mergeId),
+    readMergeIdentityDiff(db, keepId, mergeId),
+    mergeBlockedByReversibleStockSession(db, [keepId, mergeId]),
   ])
+  const costOutlier = mergeCostRefusal(identity)
   return c.json({
     success: true,
     keepId,
@@ -3202,6 +3484,15 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     stockImpact,
     needsStockChoice: mergeStockImpactNeedsChoice(stockImpact),
     pricing,
+    // The gate the client has always read and the server has never sent.
+    identity,
+    // Read-only warnings, so the reviewer learns BEFORE choosing a keeper that
+    // this pair cannot be merged yet, instead of after pressing Apply.
+    blocked: costOutlier
+      ? { code: 'cost_outlier_review', field: String(costOutlier.field), min: costOutlier.min, max: costOutlier.max }
+      : blockingSession
+        ? { code: 'stock_session_reversible', operationId: blockingSession.operationId }
+        : null,
   })
 })
 
@@ -3240,12 +3531,37 @@ app.post('/possible-duplicates/merge', async (c) => {
   // give opposite inventory answers, so the server must not pick one; an
   // unstocked row needs no answer and proceeds as before.
   const stockImpact = await readMergeStockImpact(db, dup.id, branchNameById)
+  const identity = await readMergeIdentityDiff(db, keeper.id, dup.id)
+  // Cost first: a pair whose costs cannot be one cost is not a merge decision
+  // at all, whatever the operator says about the stock.
+  const costOutlier = mergeCostRefusal(identity)
+  if (costOutlier) {
+    return c.json({
+      success: false,
+      code: 'cost_outlier_review',
+      error: mergeCostRefusalMessage(dup.name, costOutlier),
+      identity,
+      costOutlier: { field: String(costOutlier.field), min: costOutlier.min, max: costOutlier.max },
+    }, 409)
+  }
+  const blockingSession = await mergeBlockedByReversibleStockSession(db, [keeper.id, dup.id])
+  if (blockingSession) {
+    return c.json({
+      success: false,
+      code: 'stock_session_reversible',
+      error: mergeStockSessionBlockedMessage(blockingSession.operationId),
+      operationId: blockingSession.operationId,
+    }, 409)
+  }
   if (!stockChoice && mergeStockImpactNeedsChoice(stockImpact)) {
     return c.json({
       success: false,
       code: 'stock_choice_required',
       error: `"${dup.name}" still holds ${stockImpact.totalQuantity} in stock. Choose whether that stock moves onto the product you are keeping or is written off before this merge can run.`,
       stockImpact,
+      // The 400 refusal carries the same identity read the preview would have,
+      // so the dialog the client is about to open is not blind to it.
+      identity,
     }, 400)
   }
 

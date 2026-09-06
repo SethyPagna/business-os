@@ -5,6 +5,7 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Modal from '../shared/Modal'
+import { costMoveRows } from './mergeConfirmationRule'
 
 type Translate = (key: string, fallback?: string) => string | undefined
 
@@ -21,12 +22,45 @@ export type MergeDuplicatesPreviewGroup = {
   }>
   totalQuantityToMove: number
   branchBreakdown: Array<{ branchId: number; branchName: string | null; quantity: number }>
+  /**
+   * What the run does to the KEPT row's cost. A merge averages the distinct
+   * costs (owner ruling, 2026-09-04), so "nothing changes but the row count"
+   * was never true -- the server has folded these pairwise, in the order the
+   * run applies them, since N15 and this modal is where the operator sees it
+   * BEFORE confirming rather than afterwards on the product.
+   */
+  costBefore?: Record<string, number>
+  costAfter?: Record<string, number>
+  /** Pairs this run will SKIP: two costs too far apart to be one cost. */
+  costRefusals?: Array<{ mergedId: number; field: string; min: number; max: number }>
 }
 
 type PreviewResult = {
   groupCount: number
   duplicateProductCount: number
   groups: MergeDuplicatesPreviewGroup[]
+  /** Total across every group; a dry run that hides it is not a dry run. */
+  costRefusalCount?: number
+}
+
+const COST_FIELD_LABEL: Record<string, [string, string]> = {
+  cost_price_usd: ['cost', 'Cost'],
+  cost_price_khr: ['cost_price_khr', 'Cost (KHR)'],
+}
+
+function formatCost(field: string, value: number): string {
+  const amount = Number(value) || 0
+  return field.endsWith('_khr')
+    ? `${Math.round(amount).toLocaleString('en-US')}\u17db`
+    : `$${amount % 1 === 0 ? amount : amount.toFixed(2)}`
+}
+
+/** The cost fields this group’s fold actually moves, as before -> after. */
+function costMoves(group: MergeDuplicatesPreviewGroup): Array<{ field: string; from: number; to: number }> {
+  // The SAME function the pair dialog uses (mergeConfirmationRule), so the
+  // whole-catalog dry run and the one-pair confirm cannot describe one fold
+  // two different ways.
+  return costMoveRows(group.costBefore, group.costAfter)
 }
 
 interface MergeDuplicatesReviewModalProps {
@@ -89,6 +123,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
 
   const groups = preview?.groups || []
   const duplicateProductCount = preview?.duplicateProductCount || 0
+  const costRefusalCount = preview?.costRefusalCount || 0
   const canMerge = !previewLoading && !previewError && groups.length > 0
 
   return (
@@ -220,6 +255,12 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                   .replace('{groups}', String(groups.length))
                   .replace('{products}', String(duplicateProductCount))}
               </p>
+              {costRefusalCount > 0 && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                  {T('merge_duplicates_preview_cost_refused', '{count} pair(s) will be left alone: their two costs are too far apart to be one product\u2019s cost.')
+                    .replace('{count}', String(costRefusalCount))}
+                </p>
+              )}
               <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                 {groups.map((group) => (
                   <div
@@ -250,6 +291,25 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                         </li>
                       ))}
                     </ul>
+                    {costMoves(group).map((move) => (
+                      <div key={move.field} className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {T(COST_FIELD_LABEL[move.field]?.[0] || move.field, COST_FIELD_LABEL[move.field]?.[1] || move.field)}
+                        </span>
+                        <span className="line-through opacity-60">{formatCost(move.field, move.from)}</span>
+                        <span aria-hidden>{'\u2192'}</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{formatCost(move.field, move.to)}</span>
+                        <span className="text-gray-400">
+                          {T('merge_cost_average_title', 'The kept product\u2019s cost becomes the average')}
+                        </span>
+                      </div>
+                    ))}
+                    {(group.costRefusals || []).length > 0 && (
+                      <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
+                        {T('merge_duplicates_preview_cost_refused_group', '{count} row(s) in this group will be skipped \u2014 their cost is too far from the kept row\u2019s to average.')
+                          .replace('{count}', String((group.costRefusals || []).length))}
+                      </p>
+                    )}
                     {group.branchBreakdown.length > 0 && (
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {group.branchBreakdown.map((b) => (

@@ -1795,12 +1795,17 @@ function ProductsFullEditor() {
       groupCount?: number
       duplicateProductCount?: number
       groups?: MergeDuplicatesPreviewGroup[]
+      costRefusalCount?: number
     } | undefined
     if (result?.success === false) throw new Error(result.error || 'Failed to load merge preview')
     return {
       groupCount: Number(result?.groupCount || 0),
       duplicateProductCount: Number(result?.duplicateProductCount || 0),
       groups: Array.isArray(result?.groups) ? result.groups : [],
+      // Passed straight through: the groups carry costBefore/costAfter and
+      // their own costRefusals, and this is the run-wide total. Dropping them
+      // here is what made the dry run promise "nothing but the row count".
+      costRefusalCount: Number(result?.costRefusalCount || 0),
     }
   }
 
@@ -1808,17 +1813,40 @@ function ProductsFullEditor() {
     if (mergeDuplicatesBusy) return
     setMergeDuplicatesBusy(true)
     try {
-      const result = await productApi.mergeDuplicates() as { success?: boolean; mergedGroups?: number; mergedProducts?: number; error?: string } | undefined
+      const result = await productApi.mergeDuplicates() as {
+        success?: boolean; mergedGroups?: number; mergedProducts?: number; error?: string
+        refusals?: Array<{ mergedId?: number; mergedName?: string | null; code?: string; error?: string }>
+      } | undefined
       if (result?.success === false) throw new Error(result.error || 'Failed to merge duplicate products')
       const mergedGroups = Number(result?.mergedGroups || 0)
       const mergedProducts = Number(result?.mergedProducts || 0)
+      // What the run deliberately did NOT do. A refusal is a DECISION -- two
+      // costs too far apart to be one cost, or a stock-in session that can
+      // still be undone -- and reporting plain success over it tells the
+      // operator the catalog is clean when pairs are still waiting for them.
+      // Same shape the Conflicts tab's bulk merge already reports: the count,
+      // plus the first refusal's own sentence, which is the half that says
+      // what to do about it.
+      const refusals = Array.isArray(result?.refusals) ? result.refusals : []
+      const firstRefusal = refusals.find((r) => r?.error)?.error || ''
+      const refusalNote = refusals.length
+        ? [
+          (t('merge_duplicates_refused_count') || '{count} pair(s) were left alone')
+            .replace('{count}', String(refusals.length)),
+          firstRefusal,
+        ].filter(Boolean).join('. ')
+        : ''
       if (!mergedGroups) {
-        notify(t('no_duplicate_products_found') || 'No duplicate products found')
+        notify(refusalNote || t('no_duplicate_products_found') || 'No duplicate products found', refusals.length ? 'info' : undefined)
       } else {
         notify(
-          (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
-            .replace('{products}', String(mergedProducts))
-            .replace('{groups}', String(mergedGroups)),
+          [
+            (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
+              .replace('{products}', String(mergedProducts))
+              .replace('{groups}', String(mergedGroups)),
+            refusalNote,
+          ].filter(Boolean).join('. '),
+          refusals.length ? 'info' : undefined,
         )
         await load(true)
       }

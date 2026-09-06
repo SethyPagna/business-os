@@ -130,6 +130,34 @@ check('the merge carries the discarded row\'s RETURNS, not just its sales', () =
   assert.ok(/reparentedByTable,/.test(routeSrc), 'undo cannot put back a link the reversal never recorded')
 })
 
+check('the merge carries the links that are NOT integer product FKs', () => {
+  // The walk above can only see INTEGER columns named *product_id, and the
+  // migration sweep that keeps its list honest sweeps for exactly that shape.
+  // Two live links have neither shape, and both were being orphaned:
+  //   * promotion_rules.product_ids -- a JSON id ARRAY in a TEXT column.
+  //     ruleAppliesToProduct does product_ids.includes(product.id), so a rule
+  //     scoped to the discarded row stopped applying to anything at all the
+  //     moment the fold deactivated it: the discount left the catalogue.
+  //   * products.parent_id -- a product FK not named *product_id, on products
+  //     itself. A child variant was left rooted on the deactivated parent.
+  assert.ok(/SELECT id, product_ids FROM promotion_rules/.test(mergeBlock),
+    'the fold must read the promotion scopes it might have to rewrite')
+  assert.ok(/UPDATE promotion_rules SET product_ids = @ids/.test(mergeBlock),
+    'a promotion rule scoped to the discarded row must follow it onto the survivor')
+  assert.ok(/promotionRulesBefore\.push\(/.test(mergeBlock) && /promotionRulesBefore,/.test(routeSrc),
+    'undo must be able to restore the scope list exactly, so the previous array is recorded')
+  assert.ok(/UPDATE products SET parent_id = @canonicalId/.test(mergeBlock),
+    'children of the discarded row must be reparented onto the survivor')
+  assert.ok(/id != @canonicalId/.test(mergeBlock),
+    'and the keeper must never be made its own parent')
+  assert.ok(/reparentedChildProductIds,/.test(routeSrc), 'undo must be able to put the children back')
+  const appliersSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'undoAppliers.ts'), 'utf8')
+  assert.ok(/UPDATE promotion_rules SET product_ids = @ids/.test(appliersSrc),
+    'the undo applier must restore the scope list, not merely record it')
+  assert.ok(/UPDATE products SET parent_id = @dupId/.test(appliersSrc),
+    'the undo applier must put the children back on the discarded row')
+})
+
 check('a WRITE-OFF zeroes the lots in place and leaves a balancing ledger line', () => {
   assert.ok(/const writeOffStock = stockDisposition === 'write_off'/.test(mergeBlock))
   assert.ok(/quantity: -qty,/.test(mergeBlock), 'the write-off must post a NEGATIVE movement, not just delete stock')
@@ -151,11 +179,17 @@ check('a WRITE-OFF zeroes the lots in place and leaves a balancing ledger line',
 check('both merge endpoints route through the ONE shared fold helper -- they can never drift', () => {
   const groupLoopAt = routeSrc.indexOf('for (const dup of group.duplicates)')
   assert.ok(groupLoopAt > 0, 'whole-catalog merge loop not found')
-  // The bulk path now destructures the fold's return ({ reversal, and since
-  // S4-32 costOutliers }) to record one composite undo for the whole run and
-  // report any refused cost average, so allow that optional prefix with any
-  // field list.
-  assert.ok(/for \(const dup of group\.duplicates\) \{\s*\n\s*(?:const \{ reversal(?:, [A-Za-z]+)* \} = )?await foldDuplicateProductInto\(/.test(routeSrc), 'POST /merge-duplicates must fold via the shared helper')
+  // The bulk path destructures the fold's return ({ reversal, and since S4-32
+  // costOutliers }) to record one composite undo for the whole run -- and since
+  // N15 it may REFUSE a pair before folding it at all (an un-averageable cost
+  // pair; a stock-in session that can still be undone). So the loop BODY is
+  // searched for the fold call rather than the fold being pinned to the loop's
+  // first statement, and the refusal is required to come first.
+  const bulkLoop = routeSrc.slice(groupLoopAt, routeSrc.indexOf('mergedProductsCount += 1', groupLoopAt))
+  assert.ok(/const \{ reversal(?:, [A-Za-z]+)* \} = await foldDuplicateProductInto\(/.test(bulkLoop),
+    'POST /merge-duplicates must fold via the shared helper')
+  assert.ok(bulkLoop.indexOf('refusals.push(') > 0 && bulkLoop.indexOf('refusals.push(') < bulkLoop.indexOf('await foldDuplicateProductInto('),
+    'a refused pair must be skipped BEFORE the fold, never reported after the write')
   const pairRouteAt = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
   assert.ok(pairRouteAt > 0, 'the one-pair review merge route must exist')
   assert.ok(routeSrc.indexOf('foldDuplicateProductInto(', pairRouteAt) > pairRouteAt, 'POST /possible-duplicates/merge must fold via the shared helper')
@@ -163,7 +197,9 @@ check('both merge endpoints route through the ONE shared fold helper -- they can
 
 check('the review merge refuses inactive or group rows and recomputes the keeper stock cache', () => {
   const pairRouteAt = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
-  const pairBlock = routeSrc.slice(pairRouteAt, pairRouteAt + 4000)
+  // Wide enough to reach past the two N15 refusals (an un-averageable cost
+  // pair, a still-reversible stock session) that now run before the fold.
+  const pairBlock = routeSrc.slice(pairRouteAt, pairRouteAt + 8000)
   assert.ok(/Both products must be active/.test(pairBlock), 'merging an already-merged row must 409, not double-fold')
   assert.ok(/is_group \|\| dup\.is_group/.test(pairBlock), 'group rows must be refused')
   assert.ok(/SET stock_quantity = \(SELECT COALESCE\(SUM\(quantity\), 0\) FROM branch_stock/.test(pairBlock), 'the keeper\'s denormalized stock cache must be recomputed after the fold')

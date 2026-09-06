@@ -3,7 +3,8 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
-import { normalizeProductGroupName } from './productDetailRule'
+import { identityBarcodeKey, normalizeProductGroupName } from './productDetailRule'
+import { identityBarcodeKeySql } from './productIdentity'
 import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
 import { normalizeMultiValue, planInsertRow, tableColumns, validateProductImageGallery } from './productWrites'
 import { sanitizeMediaPath } from './media'
@@ -471,10 +472,20 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const createLines = request.items.filter((line) => line.kind === 'create_receive')
   const stockCreateLines = createLines.filter((line) => line.quantity > 0)
   const activeBranches = stockCreateLines.length ? await db.prepare('SELECT id FROM branches WHERE is_active=1 ORDER BY id').all<Row>() : []
+  // THE identity rule, as products.ts findSameProductIdentityProduct and the
+  // import path already apply it: normalized name + FOLDED barcode.
+  //
+  // Cost left this guard on 2026-09-06. Keeping it contradicted the Sep-4
+  // ruling head-on -- a second cost for one article is a merge, not a new
+  // child row -- so the fast stock-in session happily minted the cost-forked
+  // twin the merge tool then had to clean up. And the barcode now folds, so a
+  // code retyped with a leading zero ('0123' beside '123') is one product
+  // here too, instead of a second row this session creates and the Conflicts
+  // tab reports the next morning.
   const identityKeys = new Set<string>()
   for (const line of createLines) {
     const product = line.product as CanonicalProduct
-    const key = `${normalizeProductGroupName(product.name)}\u0001${String(product.barcode || '').trim().toLowerCase()}\u0001${Math.round((Number(product.cost_price_usd) || 0) * 100)}\u0001${Math.round((Number(product.cost_price_khr) || 0) * 100)}`
+    const key = `${normalizeProductGroupName(product.name)}\u0001${identityBarcodeKey(product.barcode)}`
     if (identityKeys.has(key)) fail('Two create_receive lines describe the same product identity.', 409, 'duplicate_product')
     identityKeys.add(key)
   }
@@ -485,12 +496,13 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     duplicateCandidates = await db.prepare(`SELECT id,name,barcode,cost_price_usd,cost_price_khr FROM products WHERE is_active=1 AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' '))) IN (${sql})`).all<Row>(params)
     for (const line of createLines) {
       const product = line.product as CanonicalProduct
+      // The SQL above narrows to the name group; the barcode is compared
+      // here, folded, mirroring pickSameIdentityRow. Same rule, same answer
+      // as the manual product form and the CSV import.
       const duplicate = duplicateCandidates.find((row) =>
         normalizeProductGroupName(row.name) === normalizeProductGroupName(product.name)
-        && String(row.barcode || '').trim().toLowerCase() === String(product.barcode || '').trim().toLowerCase()
-        && Math.round((Number(row.cost_price_usd) || 0) * 100) === Math.round((Number(product.cost_price_usd) || 0) * 100)
-        && Math.round((Number(row.cost_price_khr) || 0) * 100) === Math.round((Number(product.cost_price_khr) || 0) * 100))
-      if (duplicate) fail(`"${duplicate.name}" already exists with this barcode and cost.`, 409, 'duplicate_product', { duplicate })
+        && identityBarcodeKey(row.barcode) === identityBarcodeKey(product.barcode))
+      if (duplicate) fail(`"${duplicate.name}" already exists with this barcode.`, 409, 'duplicate_product', { duplicate })
     }
   }
 
@@ -590,14 +602,16 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     if (stockCreateLines.length) statements.push(revisionAssertion('branch_catalog', 'all', '1=1', {}, rev('branch_catalog', 'all')))
     for (const line of createLines) {
       const product = line.product as CanonicalProduct
+      // The commit-time race guard for the JS check above, and it has to ask
+      // the SAME question or it lets through exactly what that check refuses.
+      // It is a SQL predicate inside the batch, so it cannot call the fold --
+      // identityBarcodeKeySql is the one SQL copy of it, pinned against the
+      // real function by test-stock-session-identity-guard-pure.cjs. Cost is
+      // gone from here for the same reason it left the guard above.
       statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE is_active=1
-        AND LOWER(TRIM(COALESCE(barcode,'')))=LOWER(@barcode)
-        AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey
-        AND ROUND(COALESCE(cost_price_usd,0)*100)=@costUsd
-        AND ROUND(COALESCE(cost_price_khr,0)*100)=@costKhr)`, {
-        barcode: String(product.barcode || '').trim(), nameKey: normalizeProductGroupName(product.name),
-        costUsd: Math.round((Number(product.cost_price_usd) || 0) * 100),
-        costKhr: Math.round((Number(product.cost_price_khr) || 0) * 100),
+        AND ${identityBarcodeKeySql('barcode')}=@barcodeKey
+        AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
+        barcodeKey: identityBarcodeKey(product.barcode), nameKey: normalizeProductGroupName(product.name),
       }))
     }
   }
@@ -807,12 +821,15 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       const original = (before[key] || []).find(r => r.id === row.id)
       const created = members.some(m => m.product_created === 1 && m.product_id === (key === 'products' ? row.id : row.product_id))
       if (key === 'products' && created && direction === 'redo') {
+        // Redoing a create must not resurrect a row that is now a duplicate.
+        // Same folded, cost-free identity as the create-time guard: a redo
+        // blocked on a cost the operator has since corrected, or waved
+        // through because someone retyped the barcode with a leading zero,
+        // are both the same bug in opposite directions.
         statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE id<>@product AND is_active=1
-          AND LOWER(TRIM(COALESCE(barcode,'')))=LOWER(@barcode)
-          AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey
-          AND ROUND(COALESCE(cost_price_usd,0)*100)=@costUsd AND ROUND(COALESCE(cost_price_khr,0)*100)=@costKhr)`, {
-          product: row.id, barcode: String(row.barcode || '').trim(), nameKey: normalizeProductGroupName(row.name),
-          costUsd: Math.round((Number(row.cost_price_usd) || 0) * 100), costKhr: Math.round((Number(row.cost_price_khr) || 0) * 100),
+          AND ${identityBarcodeKeySql('barcode')}=@barcodeKey
+          AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
+          product: row.id, barcodeKey: identityBarcodeKey(row.barcode), nameKey: normalizeProductGroupName(row.name),
         }))
       }
       if (key === 'branchStock' && !created && !members.some(m => m.product_id === row.product_id && m.branch_id === row.branch_id)) continue

@@ -149,7 +149,7 @@ export function getPossiblySameProducts(): Promise<unknown> {
   return apiFetch('GET', '/api/products/possible-duplicates')
 }
 
-export function dismissProductDuplicateCluster(type: 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
+export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
   return route(
     'products:dismissDuplicateCluster',
     () => apiFetch('POST', '/api/products/possible-duplicates/dismiss', { type, value }),

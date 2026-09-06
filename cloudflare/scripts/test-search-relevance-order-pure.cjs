@@ -366,21 +366,46 @@ async function main() {
     )
   })
 
-  // 8. the auto-merge identity normalizer must NOT learn this folding ----
-  check('the product-identity normalizer never folds leading zeros', () => {
+  // 8. the identity normalizer folds leading zeros -- but not the way search does
+  //
+  // This check used to assert the OPPOSITE: that identity must never fold, so
+  // the twin pairs stayed two rows for an operator to merge by hand. The owner
+  // reversed that on 2026-09-04 ("for same products same barcode the only
+  // difference is a leading zero... remove the leading zero and merge them"),
+  // and N15 moved the fold into productDetailRule.ts so every comparison site
+  // reaches the same one. What still has to hold is the DIFFERENCE between the
+  // two folds, which is why this check lives in the SEARCH file: search ltrims
+  // zeros unboundedly (finding a row is reversible), identity is bounded
+  // (merging two rows is not).
+  check('the identity fold is the BOUNDED one, never the search fold', () => {
     const a = productDetailRule.productIdentitySignature({ name: 'Twin', barcode: SCANNED, cost_price_usd: 1 })
     const b = productDetailRule.productIdentitySignature({ name: 'Twin', barcode: TWIN, cost_price_usd: 1 })
-    assert.notEqual(a, b,
-      'the GTIN-14/EAN-13 twin pairs are reserved for the operator to merge by hand -- teaching the '
-      + 'IDENTITY normalizer the search fold would silently auto-merge them. Search-only folding belongs '
-      + 'in searchMatch.ts normalizeBarcodeKey, which this file exercises above.')
+    assert.equal(a, b,
+      'one barcode written with an extra leading zero is ONE product (owner ruling, 2026-09-04) -- '
+      + 'identity compares through identityBarcodeKey, so a twin can no longer be two rows on one '
+      + 'screen and one row on the next')
+
+    // The bound is the whole safety argument: fewer than three surviving digits
+    // and the original is kept, so the placeholder codes (238 production rows
+    // carry '0') never collapse into one another or into a blank barcode, and a
+    // non-numeric SKU keeps its zeros because a leading zero there is not a GTIN
+    // artefact. Search may fold all of these; identity may not.
+    assert.equal(productDetailRule.identityBarcodeKey('0'), '0')
+    assert.equal(productDetailRule.identityBarcodeKey('00'), '00')
+    assert.notEqual(productDetailRule.identityBarcodeKey('0012'), productDetailRule.identityBarcodeKey('12'))
+    assert.equal(productDetailRule.identityBarcodeKey('0abc12'), '0abc12')
+    assert.equal(productDetailRule.identityBarcodeKey(TWIN), SCANNED)
+
+    // The fold still lives in ONE named function: normalizedBarcode stays
+    // trim+lowercase, so a future edit cannot smuggle a second, differently
+    // bounded fold into the raw normalizer.
     const src = fs.readFileSync(path.join(root, 'src', 'lib', 'productDetailRule.ts'), 'utf8')
     const fnStart = src.indexOf('function normalizedBarcode')
     assert.ok(fnStart >= 0, 'normalizedBarcode must still exist in lib/productDetailRule.ts')
     const fn = src.slice(fnStart)
     const body = fn.slice(0, fn.indexOf('\n}') + 2)
     assert.ok(!/\^0\+|padStart|checkDigit|check_digit/i.test(body),
-      `normalizedBarcode must stay trim+lowercase only. got:\n${body}`)
+      `normalizedBarcode must stay trim+lowercase only -- the fold belongs to identityBarcodeKey. got:\n${body}`)
   })
 
   console.log(`\n${passed} checks passed`)
