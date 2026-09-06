@@ -46,6 +46,7 @@
   "link_conflicts_hint": "Sales whose customer link disagrees with the phone printed on the receipt, and sales naming a customer that has no contact record. Resolve or dismiss each group.",
   "link_conflicts_failed": "Could not load sale-link conflicts",
   "link_conflicts_empty": "No sale-link conflicts found.",
+  "customer_directory": "Directory",
   "supplier_directory": "Directory",
   "supplier_invoices": "Supplier invoices",
   "supplier_invoices_hint": "Both supplier ledgers in one place. Stock-In lists what was received (product lines, received date, cost, remaining). AP lists the old billing documents (invoice number, due date, VAT, paid, outstanding). They are separate records with no shared invoice number, so each keeps its own full detail rather than being forced into one table.",
