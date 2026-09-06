@@ -347,9 +347,9 @@ await runTest('a 34-character product name fits two lines at 80 mm', () => {
     receiptNameLineCount(LONG_ITEM_NAME.length, { paperWidthMm: 80, fontSizePx: 12 }) <= 2,
     `the name column must hold the owner's example in two lines, got ${receiptNameLineCount(LONG_ITEM_NAME.length, { paperWidthMm: 80, fontSizePx: 12 })}`,
   )
-  // The budget charges every money column its full fit-content limit, so a
-  // real row -- a one-digit qty costs one character, not 1.8em -- has more
-  // room than this, never less.
+  // Every money column costs its floor, on every row -- that is what makes
+  // this ONE width rather than a per-row lower bound. 20 characters a line at
+  // 80mm/12px, so the owner's 34-character example is two lines.
   assert.ok(receiptNameColumnWidthPx({ paperWidthMm: 80, fontSizePx: 12 }) > 140)
 })
 
