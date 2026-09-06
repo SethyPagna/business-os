@@ -836,7 +836,7 @@ export default function CreateProductsSessionModal({
           {/* One close affordance only -- the Modal header X. The footer keeps
               the primary action alone (and disappears entirely on the header
               step, where "Add items" is the primary action). */}
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">{step === 'items' ? <button type="button" className="btn-primary h-10 px-4 text-sm disabled:opacity-50" disabled={saving || idempotencyConflict || (rows.length === 0 && !submittedItems)} onClick={() => void finishSession()}>{saving ? tr('saving_label', 'Saving…') : idempotencyConflict ? tr('failed', 'Failed') : submissionLocked ? tr('retry', 'Retry') : `✓ ${tr('create_products_finish', 'Complete session')}`}</button> : null}</div>
+          {step === 'items' ? <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-3 dark:border-gray-700"><button type="button" className="btn-primary h-10 px-4 text-sm disabled:opacity-50" disabled={saving || idempotencyConflict || (rows.length === 0 && !submittedItems)} onClick={() => void finishSession()}>{saving ? tr('saving_label', 'Saving…') : idempotencyConflict ? tr('failed', 'Failed') : submissionLocked ? tr('retry', 'Retry') : `✓ ${tr('create_products_finish', 'Complete session')}`}</button></div> : null}
         </div>
       </Modal>
 
