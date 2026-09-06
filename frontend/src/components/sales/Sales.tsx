@@ -44,6 +44,7 @@ import {
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'sales-receipt')
 const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale-detail-modal')
+const SaleRecordsFloat = lazyRetry(() => import('./SaleRecordsFloat'), 'sales-sale-records-float')
 const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-cancel-sale-modal')
 // S4-2: the confirmation every sale status change now goes through -- it
 // states the old status, the new one and what happens to stock, and carries
@@ -358,6 +359,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // a legacy row carries no receipt number.
   const [returnForSale, setReturnForSale] = useState<SaleRecord | null>(null)
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
+  // N41: the sale whose Records float is open. Its own state rather than a
+  // mode of detailSale -- the list row's Records line opens it WITHOUT opening
+  // the detail modal, which is the whole point of putting the line on the row.
+  const [recordsSale, setRecordsSale] = useState<SaleRecord | null>(null)
   const [showExport, setShowExport] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -2051,6 +2056,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         selectedIds={selectedIds}
         selectionModeActive={selectionModeActive}
         getSaleLongPressState={getSaleLongPressState}
+        // Not gated by a write permission: the Worker gates GET /records on
+        // READING a sale, so whoever can see this list can see how a row on it
+        // got that way. Same rule as the amendment history in the detail modal.
+        openSaleRecords={(sale) => setRecordsSale(sale as SaleRecord)}
         setDetailSale={(sale) => setDetailSale(sale as SaleRecord)}
         setSelectedSale={(sale) => setSelectedSale(sale as SaleRecord)}
         showSalesActionGroups={showSalesActionGroups}
@@ -2103,6 +2112,17 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             t={t}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
+
+      {recordsSale ? (
+        <Suspense fallback={null}>
+          <SaleRecordsFloat
+            sale={recordsSale}
+            onClose={() => setRecordsSale(null)}
+            t={t}
+            fmtUSD={fmtUSD}
           />
         </Suspense>
       ) : null}
