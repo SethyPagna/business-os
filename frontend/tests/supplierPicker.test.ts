@@ -74,9 +74,17 @@ assert.match(inventoryPage, /supplierName: isStockIn && String\(adjustForm\.supp
 assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity\)/, 'Inventory.tsx derives that from the shared rule, not its own copy')
 ok('Inventory adjust: form cleared on attributed lots, wire is stock-in only')
 
-assert.match(branchAdjuster, /supplierId: row\.type === 'add' && row\.supplierId != null \? row\.supplierId : undefined/, 'BranchStockAdjuster sends supplier only on add rows')
+// N14-D widened "adds only" to "stock-ins only" here for the same reason
+// S4-16 widened it on Inventory.tsx: routes/inventory.ts converts a `set` above
+// the branch's on-hand figure into an add, so it attributes a lot exactly as an
+// add does. This assertion used to pin `row.type === 'add'` -- the very
+// expression that made a raising set unsubmittable (its supplier picker never
+// rendered and its typed name never reached the wire), so the pin was holding
+// the defect in place. tests/branchStockAdjusterSetRaise.test.ts owns the full
+// render/wire pairing; this line keeps the cross-surface rule stated here too.
+assert.match(branchAdjuster, /supplierId: rowIsStockIn\(row\) && row\.supplierId != null \? row\.supplierId : undefined/, 'BranchStockAdjuster sends supplier on every stock-in row, not adds only')
 assert.match(branchAdjuster, /onChange\(\{ supplierId: null, supplierName: '' \}\)/, 'BranchStockAdjuster clears the row when its lot is attributed')
-ok('BranchStockAdjuster: per-row honesty (adds only, attributed lots cleared)')
+ok('BranchStockAdjuster: per-row honesty (stock-ins only, attributed lots cleared)')
 
 // N14-D widened "adds only" here too, and for the same reason S4-16 widened
 // it on Inventory.tsx: routes/inventory.ts converts a 'set' that RAISES a

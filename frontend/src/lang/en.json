@@ -5266,6 +5266,7 @@
   "stock_receipt_free_goods": "Free goods",
   "stock_receipt_free_goods_hint": "Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.",
   "stock_set_down_hint": "This set lowers the quantity, so it takes stock out: it has no supplier and no cost. Choose the batch to take it from, otherwise the oldest lots are drained first.",
+  "stock_set_up_hint": "This set raises the quantity, so it puts stock in: name the supplier it came from and the unit cost you paid, exactly as an add does.",
   "bulk_set_receipt_hint": "A set that raises a product’s stock receives goods, so it needs the supplier and unit cost. Rows where the set lowers stock ignore them.",
   "stock_session_new_product": "New",
   "stock_session_existing_product": "Existing",

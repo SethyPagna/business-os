@@ -14,7 +14,7 @@ import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerM
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 import InfoHint from '../../shared/InfoHint.tsx'
-import { isStockInSubmission, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import { isStockInSubmission, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockReceiptGateCode } from '../../../utils/stockReceiptFields.ts'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
@@ -135,6 +135,50 @@ function parseStockDelta(value: string): number {
   return Number.isFinite(parsed) ? parsed : Number.NaN
 }
 
+// --- ONE rule per question, asked by the fields on screen AND by the wire ---
+//
+// N14-D repair. This form used to ask three different questions about the same
+// row: the submit gate asked isStockInSubmission (add, or a `set` above what
+// the branch holds -- the rule routes/inventory.ts and
+// cloudflare/src/lib/stockReceiptGate.ts apply), the supplier field rendered on
+// `row.type === 'add' && row.batchId !== ''`, and the payload sent the supplier
+// on `row.type === 'add'`. A `set` that RAISED a branch's stock therefore hit a
+// hard dead end: the gate refused it with "Choose the supplier these goods came
+// from." while no supplier field existed anywhere on the row to answer with,
+// and had one existed its value would still have been dropped from the body.
+//
+// Same repair, same reason, as InventoryStockModals.tsx:583 -- a field the gate
+// demands must never be a field the form declines to render. Keeping these as
+// functions the render and the submit both call is what makes that structural
+// rather than a coincidence of two matching expressions.
+
+/** This row is about to be submitted at all: a non-negative quantity typed. */
+function rowIsPending(row: Pick<BranchStockRow, 'delta'>): boolean {
+  return row.delta !== '' && parseStockDelta(row.delta) >= 0
+}
+
+/** This row puts stock IN, so it owes a supplier and a unit cost. */
+function rowIsStockIn(row: Pick<BranchStockRow, 'type' | 'delta' | 'current'>): boolean {
+  return isStockInSubmission(row.type, parseStockDelta(row.delta), row.current)
+}
+
+/** The receipt fields belong on this row: pending, and a stock-in. */
+function rowShowsReceiptFields(row: Pick<BranchStockRow, 'type' | 'delta' | 'current'>): boolean {
+  return rowIsPending(row) && rowIsStockIn(row)
+}
+
+/**
+ * This row creates or date-matches its OWN lot, so the operator may state the
+ * real received date for it -- the same rule the single-target form applies
+ * (Inventory.tsx:1210, InventoryStockModals.tsx:550): a "New batch" add, or a
+ * `set`, which has no batch picker (there is nothing to pick against a total)
+ * and so always creates or date-matches a lot server-side.
+ */
+function rowCreatesLot(row: Pick<BranchStockRow, 'type' | 'delta' | 'current' | 'batchId'>): boolean {
+  if (!rowShowsReceiptFields(row)) return false
+  return row.type === 'set' || row.batchId === 'new'
+}
+
 export default function BranchStockAdjuster({ product, branches, user, onDone, t }: BranchStockAdjusterProps) {
   const [rows, setRows] = useState<BranchStockRow[]>(
     branches.map((branch) => {
@@ -165,6 +209,12 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
   // IN; a remove carries none.
   const [unitCost, setUnitCost] = useState('')
   const [freeGoods, setFreeGoods] = useState(false)
+  // N14-D: which row the receipt gate refused and why, so the sentence can be
+  // shown AT the control that answers it. `supplier_required` belongs to that
+  // row's own supplier picker; the three cost codes belong to the one shared
+  // cost field this form has always had. A refusal printed only at the foot of
+  // the form is how the set-that-raises dead end stayed invisible.
+  const [gateFailure, setGateFailure] = useState<{ branchId: number | string; branchName: string; code: StockReceiptGateCode } | null>(null)
   const [reason, setReason] = useState('')
   // Part 563: the review dialog is open (handleSave validated + opened it;
   // commitBranch runs the per-branch-row writes on confirm).
@@ -240,6 +290,9 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
   ), [])
 
   const setRow = (index: number, patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate' | 'supplierId' | 'supplierName'>>) => {
+    // Any edit answers (or invalidates) the last refusal, so it stops being
+    // shown against a control the operator has since changed.
+    setGateFailure(null)
     setRows((current) => current.map((row, rowIndex) => (
       rowIndex === index ? { ...row, ...patch } : row
     )))
@@ -249,7 +302,14 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
   // owns this so validate, the review summary, and the write all agree.
   const pendingChanges = () => rows
     .map((row, index) => ({ row, index }))
-    .filter(({ row }) => row.delta !== '' && parseStockDelta(row.delta) >= 0)
+    .filter(({ row }) => rowIsPending(row))
+
+  // N14-D: the receipt fields are on screen only when at least one pending row
+  // actually puts stock in. The cost field carries a red `*` and `required`, so
+  // showing it for a form whose every change is a removal promised a rule the
+  // gate does not apply -- and hiding it is the same call
+  // InventoryStockModals.tsx makes with its own `isStockIn`.
+  const receiptRowCount = rows.filter((row) => rowShowsReceiptFields(row)).length
 
   // Part 563: validate, then open the review dialog. commitBranch runs the
   // actual per-row writes once the operator confirms.
@@ -312,7 +372,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     // supplier (first attribution sticks), and only the server can see whether
     // the picked lot is attributed -- so it makes that call, authoritatively.
     for (const { row } of changes) {
-      if (!isStockInSubmission(row.type, parseStockDelta(row.delta), row.current)) continue
+      if (!rowIsStockIn(row)) continue
       const createsLot = row.batchId === '' || row.batchId === 'new'
       const gate = stockReceiptGateCode({
         isStockIn: true,
@@ -323,7 +383,11 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
       })
       if (gate) {
         finishSingleAction(saveInFlightRef)
-        setMsg(`${row.branchName}: ${T(STOCK_RECEIPT_GATE_KEYS[gate], STOCK_RECEIPT_GATE_FALLBACKS[gate], STOCK_RECEIPT_GATE_FALLBACKS[gate])}`)
+        // Shown at the control that answers it, not only down here: the row's
+        // own supplier picker for `supplier_required`, the shared cost field
+        // for the three cost codes.
+        setMsg(null)
+        setGateFailure({ branchId: row.branchId, branchName: row.branchName, code: gate })
         return
       }
     }
@@ -338,25 +402,30 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
           type: row.type,
           quantity: parseStockDelta(row.delta),
           branchId: row.branchId,
-          unitCostUsd: isStockInSubmission(row.type, parseStockDelta(row.delta), row.current) ? Number(unitCost) : undefined,
+          unitCostUsd: rowIsStockIn(row) ? Number(unitCost) : undefined,
           freeGoods: freeGoods ? true : undefined,
           reason: `${reason.trim()} (${row.branchName})`,
           userId: user?.id,
           userName: user?.name,
           batchId: row.type !== 'set' && row.batchId !== '' ? row.batchId : undefined,
-          // Sent only when the date input was actually on screen (add +
-          // "New batch") -- a lingering value must never silently re-date
-          // some other kind of change.
-          receivedDate: row.type === 'add' && row.batchId === 'new' && row.receivedDate ? row.receivedDate : undefined,
-          // D5a: adds only. The row component already cleared these when an
-          // attributed lot was picked, so what's here is exactly what the
-          // person saw on screen.
-          supplierId: row.type === 'add' && row.supplierId != null ? row.supplierId : undefined,
-          supplierName: row.type === 'add' && row.supplierName.trim() ? row.supplierName.trim() : undefined,
+          // Sent only when the date input was actually on screen -- a lingering
+          // value must never silently re-date some other kind of change. Same
+          // predicate the field renders on (rowCreatesLot), which since N14-D
+          // includes a `set` that raises stock: it has no picker, so the add it
+          // becomes always creates or date-matches a lot of its own.
+          receivedDate: rowCreatesLot(row) && row.receivedDate ? row.receivedDate : undefined,
+          // D5a / N14-D: every stock-in row, which is an add AND a `set` above
+          // what the branch holds -- exactly the rows whose supplier picker is
+          // on screen, and exactly the rows the gate above demands one from.
+          // The row component already cleared these when an attributed lot was
+          // picked, so what's here is exactly what the person saw on screen.
+          supplierId: rowIsStockIn(row) && row.supplierId != null ? row.supplierId : undefined,
+          supplierName: rowIsStockIn(row) && row.supplierName.trim() ? row.supplierName.trim() : undefined,
         }), 'Adjust branch product stock')
         if (result?.success === false) throw new Error(result?.error || 'Failed to adjust branch stock')
       }
       setMsg(T('stock_updated', 'Stock updated', 'បានធ្វើបច្ចុប្បន្នភាពស្តុក'))
+      setGateFailure(null)
       setRows((current) => current.map((row) => ({ ...row, delta: '', batchId: '', receivedDate: todayIsoDate(), supplierId: null, supplierName: '' })))
       onDone()
     } catch (error) {
@@ -380,11 +449,14 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
             productId={product.id}
             unit={product.unit}
             onChange={(patch) => setRow(index, patch)}
+            supplierGateError={gateFailure && gateFailure.code === 'supplier_required' && gateFailure.branchId === row.branchId
+              ? T(STOCK_RECEIPT_GATE_KEYS.supplier_required, STOCK_RECEIPT_GATE_FALLBACKS.supplier_required, STOCK_RECEIPT_GATE_FALLBACKS.supplier_required)
+              : null}
             T={T}
           />
         ))}
       </div>
-      {rows.some((row) => row.delta !== '' && parseStockDelta(row.delta) >= 0) ? (
+      {rows.some((row) => rowIsPending(row)) ? (
         <div className="mt-2">
           {/* Same chip-picker + "Manage reasons" pattern as
               InventoryStockModals.tsx's Adjust modal, reading from the
@@ -392,28 +464,41 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
               here, its own separate (smaller) way of doing the same
               thing. */}
           {/* N14-D: one receipt cost for every row that puts stock in, beside
-              the one reason this form has always had. */}
-          <div className="mb-2">
-            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400" htmlFor="branch-stock-adjust-unit-cost">
-              {T('unit_cost_usd', 'Unit cost $', 'តម្លៃដើមក្នុងមួយឯកតា $')} <span className="text-red-500" aria-hidden="true">*</span>
-            </label>
-            <input
-              id="branch-stock-adjust-unit-cost"
-              className="input w-full text-sm"
-              type="number"
-              min="0"
-              step="any"
-              required
-              disabled={freeGoods}
-              value={freeGoods ? '0' : unitCost}
-              onChange={(event) => setUnitCost(event.target.value)}
-            />
-            <span className="mt-1 flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400">
-              <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
-              {T('stock_receipt_free_goods', 'Free goods', 'ទំនិញឥតគិតថ្លៃ')}
-              <InfoHint label={T('stock_receipt_free_goods', 'Free goods', 'ទំនិញឥតគិតថ្លៃ')} text={T('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.', '')} />
-            </span>
-          </div>
+              the one reason this form has always had. Shown only when a pending
+              row IS a stock-in: the field is `required` and carries a red `*`,
+              and a form whose every change is a removal owes no cost at all --
+              the gate loop skips those rows. Same call InventoryStockModals.tsx
+              makes with its own `isStockIn`. */}
+          {receiptRowCount > 0 ? (
+            <div className="mb-2">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400" htmlFor="branch-stock-adjust-unit-cost">
+                {T('unit_cost_usd', 'Unit cost $', 'តម្លៃដើមក្នុងមួយឯកតា $')} <span className="text-red-500" aria-hidden="true">*</span>
+              </label>
+              <input
+                id="branch-stock-adjust-unit-cost"
+                className="input w-full text-sm"
+                type="number"
+                min="0"
+                step="any"
+                required
+                disabled={freeGoods}
+                value={freeGoods ? '0' : unitCost}
+                onChange={(event) => { setGateFailure(null); setUnitCost(event.target.value) }}
+              />
+              <span className="mt-1 flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400">
+                <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setGateFailure(null); setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
+                {T('stock_receipt_free_goods', 'Free goods', 'ទំនិញឥតគិតថ្លៃ')}
+                <InfoHint label={T('stock_receipt_free_goods', 'Free goods', 'ទំនិញឥតគិតថ្លៃ')} text={T('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.', '')} />
+              </span>
+              {/* The cost half of the gate's refusal, said at the field that
+                  answers it and naming the branch row it came from. */}
+              {gateFailure && gateFailure.code !== 'supplier_required' ? (
+                <p role="alert" className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">
+                  {gateFailure.branchName}: {T(STOCK_RECEIPT_GATE_KEYS[gateFailure.code], STOCK_RECEIPT_GATE_FALLBACKS[gateFailure.code], STOCK_RECEIPT_GATE_FALLBACKS[gateFailure.code])}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="mb-1 flex items-center justify-between gap-2">
             <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block" htmlFor="branch-stock-adjust-reason">
               {T('reason', 'Reason', 'មូលហេតុ')}
@@ -446,7 +531,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
         </div>
       ) : null}
       {msg ? <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">{msg}</p> : null}
-      {rows.some((row) => row.delta !== '' && parseStockDelta(row.delta) >= 0) ? (
+      {rows.some((row) => rowIsPending(row)) ? (
         <button
           className="btn-primary mt-2 w-full text-sm"
           onClick={handleSave}
@@ -491,6 +576,8 @@ type StockAdjustBranchRowProps = {
   productId: number | string
   unit?: string
   onChange: (patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate' | 'supplierId' | 'supplierName'>>) => void
+  /** The gate's `supplier_required` sentence, when it was THIS row's refusal. */
+  supplierGateError?: string | null
   T: (key: string, fallbackEn: string, fallbackKm?: string) => string
 }
 
@@ -502,8 +589,15 @@ type StockAdjustBranchRowProps = {
 // container adds create container batches server-side (unconditional
 // auto-routing in routes/inventory.ts), so hiding the picker only hid
 // lots that already existed. Name-grouped rows were always flat here.
-function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjustBranchRowProps) {
+function StockAdjustBranchRow({ row, productId, unit, onChange, supplierGateError, T }: StockAdjustBranchRowProps) {
   const showBatchPicker = (row.type === 'add' || row.type === 'remove') && row.delta !== ''
+  // N14-D: the receipt fields ask the SAME question the submit gate asks
+  // (rowIsStockIn), so a `set` that raises this branch's stock -- which
+  // routes/inventory.ts writes as an add -- can state the supplier the gate
+  // demands. It used to be `row.type === 'add' && row.batchId !== ''`, which
+  // rendered nothing for that case and left it unsubmittable.
+  const showReceiptFields = rowShowsReceiptFields(row)
+  const showReceivedDate = rowCreatesLot(row)
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
 
@@ -605,8 +699,17 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
           onChange={(event) => onChange({ delta: event.target.value })}
         />
         {row.type === 'set' && row.delta !== '' && Number.isFinite(parseStockDelta(row.delta)) ? (
-          <div className="mt-1 text-[10px] tabular-nums text-gray-500 dark:text-gray-400">
-            {T('current_stock', 'Current stock', 'ស្តុកបច្ចុប្បន្ន')}: {row.current} → {T('total', 'Total', 'សរុប')}: {parseStockDelta(row.delta)} (Δ {parseStockDelta(row.delta) - row.current >= 0 ? '+' : ''}{parseStockDelta(row.delta) - row.current})
+          <div className="mt-1 flex items-center gap-1 text-[10px] tabular-nums text-gray-500 dark:text-gray-400">
+            <span>{T('current_stock', 'Current stock', 'ស្តុកបច្ចុប្បន្ន')}: {row.current} → {T('total', 'Total', 'សរុប')}: {parseStockDelta(row.delta)} (Δ {parseStockDelta(row.delta) - row.current >= 0 ? '+' : ''}{parseStockDelta(row.delta) - row.current})</span>
+            {/* The Δ line is the one place the operator can see WHICH WAY this
+                set goes, so it is where the reason the receipt fields appeared
+                belongs -- as a hint, not a paragraph. */}
+            {showReceiptFields ? (
+              <InfoHint
+                label={T('set', 'Set', 'កំណត់')}
+                text={T('stock_set_up_hint', 'This set raises the quantity, so it puts stock in: name the supplier it came from and the unit cost you paid, exactly as an add does.', 'ការកំណត់នេះបង្កើនបរិមាណ ដូច្នេះវាបញ្ចូលស្តុក៖ ត្រូវបញ្ជាក់អ្នកផ្គត់ផ្គង់ និងថ្លៃដើមក្នុងមួយឯកតា ដូចការបន្ថែមដែរ។')}
+              />
+            ) : null}
           </div>
         ) : null}
         <div className="mt-1 flex flex-wrap gap-1">
@@ -655,50 +758,65 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
               ) : null}
             </div>
           )}
-          {/* D4 (11.28): recording stock late may carry the REAL received
-              date -- same field + default ReceiveBatchModal has. Shown only
-              for "New batch": an existing lot keeps its own date. The code
-              preview matters because the date DERIVES the lot code, and a
-              matching code tops up that lot instead of creating a twin --
-              the same rule the Receive Batch modal documents. */}
-          {row.type === 'add' && row.batchId === 'new' ? (
-            <div className="mt-1.5">
-              <label className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">
-                {T('received_date', 'Received date', 'ថ្ងៃទទួលស្តុក')}
-              </label>
-              {/* Typed, not a native picker (Sep 3): this is the add-stock
-                  row's own received date, and it derives the lot code. */}
-              <DateEntryInput
-                className="w-full py-1"
-                // This row only receives the fallback-aware T; hand the field
-                // a bare lookup so its own messages still use the pack.
-                t={(key: string) => T(key, key)}
-                ariaLabel={T('received_date', 'Received date', 'ថ្ងៃទទួលស្តុក')}
-                value={row.receivedDate}
-                onChange={(iso) => onChange({ receivedDate: iso })}
-              />
-              <div className="mt-1 text-[10px] text-gray-400">
-                {T('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(row.receivedDate) || '--'}
-              </div>
-            </div>
-          ) : null}
-          {/* D5a: supplier attribution for the lot this add creates or
-              fills -- same picker, same rules as ReceiveBatchModal and
-              Inventory's Adjust modal. Adds only: a removal has no
-              supplier semantics. */}
-          {row.type === 'add' && row.batchId !== '' ? (
-            <div className="mt-1.5">
-              <SupplierPickerField
-                idPrefix={`branch-stock-${row.branchId}`}
-                value={{ supplierId: row.supplierId, supplierName: row.supplierName }}
-                onChange={(next) => onChange({ supplierId: next.supplierId, supplierName: next.supplierName })}
-                tr={(key, fallbackEn, fallbackKm) => T(key, fallbackEn ?? key, fallbackKm)}
-                lockedName={lotAttributedName}
-                hint={selectedLot && !lotAttributedName
-                  ? T('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.', 'ឡូតនេះមិនទាន់មានអ្នកផ្គត់ផ្គង់ — ជម្រើសរបស់អ្នកនឹងត្រូវកត់ត្រាលើវា។')
-                  : null}
-              />
-            </div>
+        </div>
+      ) : null}
+      {/* D4 (11.28): recording stock late may carry the REAL received date --
+          same field + default ReceiveBatchModal has. Shown when this row makes
+          a lot of its own: a "New batch" add, or a `set` that raises stock
+          (which has no picker, so the add it becomes always creates or
+          date-matches one). An existing lot keeps its own date. The code
+          preview matters because the date DERIVES the lot code, and a matching
+          code tops up that lot instead of creating a twin -- the same rule the
+          Receive Batch modal documents.
+          Outside the batch-picker block since N14-D: a `set` has no picker, and
+          nesting the field inside it was half of why a raising set could state
+          nothing about itself. */}
+      {showReceivedDate ? (
+        <div className="mt-1.5 pl-1">
+          <label className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">
+            {T('received_date', 'Received date', 'ថ្ងៃទទួលស្តុក')}
+          </label>
+          {/* Typed, not a native picker (Sep 3): this is the add-stock
+              row's own received date, and it derives the lot code. */}
+          <DateEntryInput
+            className="w-full py-1"
+            // This row only receives the fallback-aware T; hand the field
+            // a bare lookup so its own messages still use the pack.
+            t={(key: string) => T(key, key)}
+            ariaLabel={T('received_date', 'Received date', 'ថ្ងៃទទួលស្តុក')}
+            value={row.receivedDate}
+            onChange={(iso) => onChange({ receivedDate: iso })}
+          />
+          <div className="mt-1 text-[10px] text-gray-400">
+            {T('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(row.receivedDate) || '--'}
+          </div>
+        </div>
+      ) : null}
+      {/* D5a: supplier attribution for the lot this receipt creates or fills --
+          same picker, same rules as ReceiveBatchModal and Inventory's Adjust
+          modal.
+          N14-D repair: rendered on rowShowsReceiptFields, which is EXACTLY the
+          predicate the gate loop and the payload above apply. It used to be
+          `row.type === 'add' && row.batchId !== ''` and lived inside the
+          add/remove batch-picker block, so a `set` that RAISED the branch's
+          stock -- a receipt the Worker gates like any other -- was refused for
+          a supplier by a row that rendered no supplier field. A field the gate
+          demands must never be a field the form declines to render. */}
+      {showReceiptFields ? (
+        <div className="mt-1.5 pl-1">
+          <SupplierPickerField
+            idPrefix={`branch-stock-${row.branchId}`}
+            value={{ supplierId: row.supplierId, supplierName: row.supplierName }}
+            onChange={(next) => onChange({ supplierId: next.supplierId, supplierName: next.supplierName })}
+            tr={(key, fallbackEn, fallbackKm) => T(key, fallbackEn ?? key, fallbackKm)}
+            lockedName={lotAttributedName}
+            hint={selectedLot && !lotAttributedName
+              ? T('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.', 'ឡូតនេះមិនទាន់មានអ្នកផ្គត់ផ្គង់ — ជម្រើសរបស់អ្នកនឹងត្រូវកត់ត្រាលើវា។')
+              : null}
+          />
+          {/* The gate's own sentence, said at the field that answers it. */}
+          {supplierGateError ? (
+            <p role="alert" className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">{supplierGateError}</p>
           ) : null}
         </div>
       ) : null}
