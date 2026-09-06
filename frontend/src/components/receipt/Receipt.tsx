@@ -15,6 +15,12 @@ import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry }
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import InfoHint from '../shared/InfoHint.tsx'
 import { RECEIPT_CONTRAST_ATTR, normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
+import {
+  RECEIPT_ITEM_COLUMN_GAP_EM,
+  RECEIPT_ITEM_NUMERIC_FONT_EM,
+  RECEIPT_ROW_GRID_TEMPLATE,
+  receiptItemGridTemplate,
+} from '../../utils/receiptItemColumns.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 // N4 (owner, Sep 6 2026): "Open PDF" is removed -- it opened the same document
@@ -309,7 +315,12 @@ function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
 
 function Row({ label, value, subValue, bold = false, tone = '', breakAll = false }: RowProps) {
   return (
-    <div data-receipt-line="true" className={`my-1 grid grid-cols-[minmax(0,1fr)_minmax(4.6rem,auto)] items-start gap-x-3 gap-y-1 ${tone}`}>
+    // The value track comes from utils/receiptItemColumns, the ONE place that
+    // owns the receipt's grid geometry, so printReceipt.ts's paper re-layout
+    // cannot drift from what the screen shows (it carried 4.25rem against this
+    // row's 4.6rem). `em`, not `rem`: a receipt printed at 9px must not pay a
+    // 16px-rooted value column.
+    <div data-receipt-line="true" style={{ gridTemplateColumns: RECEIPT_ROW_GRID_TEMPLATE }} className={`my-1 grid items-start gap-x-3 gap-y-1 ${tone}`}>
       <span className={`min-w-0 overflow-visible whitespace-normal break-words pr-1 leading-snug ${bold ? 'font-semibold' : ''}`}>{label}</span>
       {/* `breakAll` is for identifiers: a receipt number has no spaces to
           wrap at, so on a narrow paper width (or a phone) `break-words`
@@ -438,13 +449,25 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // excludes the per-line cut, and the Total below already has the other two
   // taken off. receiptTotals.test.ts states the size of that gap.
   const totalDiscountUsd = lineSavingsUsd + discountUsd + membershipDiscountUsd
-  // The item table’s column track, defined ONCE so the header and the rows
-  // cannot drift apart. Four columns by default -- item, qty, price, total --
-  // and three when a shop turns the price column off.
+  // The item table’s column track, defined ONCE -- in
+  // utils/receiptItemColumns, which printReceipt.ts reads for the paper
+  // re-layout too -- so the header, the rows and the export cannot drift
+  // apart. Four columns by default (item, qty, price, total), three when a
+  // shop turns the price column off.
+  //
+  // N33 (owner, Sep 6 2026): "for the items, qty, price, total make them
+  // compact... especially name, it is being pushed two rows." See that
+  // module's header for the two causes -- `auto` money tracks taking their
+  // max-content width, and `rem` sizing that ignored the receipt's own font
+  // size -- and why fit-content in em fixes both.
   const showUnitPriceCol = tpl.show_item_unit_price !== false
-  const itemGridCols = showUnitPriceCol
-    ? 'grid-cols-[minmax(0,1fr)_2.2rem_minmax(3.9rem,auto)_minmax(3.4rem,auto)]'
-    : 'grid-cols-[minmax(0,1fr)_2.2rem_minmax(4.6rem,auto)]'
+  const itemGridStyle: CSSProperties = {
+    gridTemplateColumns: receiptItemGridTemplate(showUnitPriceCol),
+    columnGap: `${RECEIPT_ITEM_COLUMN_GAP_EM}em`,
+  }
+  // Qty, Price and Total print a touch smaller than the product name: the
+  // name is what a customer reads, the figures only have to be legible.
+  const itemNumericStyle: CSSProperties = { fontSize: `${RECEIPT_ITEM_NUMERIC_FONT_EM}em` }
   const totalUsd = toNumber(sale.total_usd ?? sale.total)
   const totalKhr = totals.totalKhr
   const paidUsd = totals.paidUsd
@@ -563,11 +586,11 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             columns are narrower than the old single one was, because there
             are now two of them on the same 58mm paper -- the item column
             still takes every pixel the other three leave. */}
-        <div data-receipt-line="true" className={`mb-1 grid ${itemGridCols} gap-x-1.5 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500`}>
+        <div data-receipt-line="true" style={itemGridStyle} className="mb-1 grid border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
           <span data-receipt-cell="name">{labelFor(lang, 'item')}</span>
           <span data-receipt-cell="qty" className="whitespace-normal text-center leading-tight">{labelFor(lang, 'qty')}</span>
-          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right">{labelFor(lang, 'unitPrice')}</span> : null}
-          <span data-receipt-cell="line-total" className="text-right">{labelFor(lang, 'lineTotal')}</span>
+          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right leading-tight">{labelFor(lang, 'unitPrice')}</span> : null}
+          <span data-receipt-cell="line-total" className="text-right leading-tight">{labelFor(lang, 'lineTotal')}</span>
         </div>
         {items.map((item, index) => {
           // Every figure on this line comes from the shared calculation, so the
@@ -604,7 +627,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             : ''
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="py-1.5">
-              <div data-receipt-line="true" className={`grid ${itemGridCols} items-start gap-x-1.5`}>
+              <div data-receipt-line="true" style={itemGridStyle} className="grid items-start">
                 <div data-receipt-cell="name" className="min-w-0 overflow-visible whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
@@ -615,23 +638,28 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
                 </div>
-                <div data-receipt-cell="qty" className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
+                <div data-receipt-cell="qty" style={itemNumericStyle} className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
                 {/* Savings describe the price, so they sit in the Price
                     column -- not as a second block under the product name.
                     A discounted row reads "$28.00 (-$7.00)" at a glance.
                     The old "qty × unit" subline is gone: the unit price is
-                    its own column now, so the subline only repeated it. */}
+                    its own column now, so the subline only repeated it.
+
+                    N33: the CELL may wrap -- that is what lets the column stay
+                    narrow enough for the name to fit two lines -- but each
+                    FIGURE is nowrap, so "(-$3.00)" drops under "$21.00" whole
+                    and no number is ever broken across lines. */}
                 {showUnitPriceCol ? (
-                  <div data-receipt-cell="price" className="min-w-0 whitespace-nowrap text-right leading-snug">
+                  <div data-receipt-cell="price" style={itemNumericStyle} className="min-w-0 text-right leading-snug">
                     <div>
-                      {fmtUSD(unitUsd)}
-                      {hasItemDiscount ? <span className="ml-1 text-[10px] font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</span> : null}
+                      <span className="whitespace-nowrap">{fmtUSD(unitUsd)}</span>
+                      {hasItemDiscount ? <span className="ml-1 whitespace-nowrap font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</span> : null}
                     </div>
                   </div>
                 ) : null}
-                <div data-receipt-cell="line-total" className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
+                <div data-receipt-cell="line-total" style={itemNumericStyle} className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
                   <div>{fmtUSD(lineUsd)}</div>
-                  {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
+                  {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[0.85em] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
               </div>
               {tpl.item_separator && index < items.length - 1 ? <div aria-hidden="true" className="mt-1.5 border-t border-gray-200/80" /> : null}

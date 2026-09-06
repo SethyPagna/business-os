@@ -42,6 +42,18 @@ const renderToStaticMarkup = require('react-dom/server').renderToStaticMarkup as
 const receiptUrl = new URL('../src/components/receipt/Receipt.tsx', import.meta.url)
 const receiptSource = fs.readFileSync(receiptUrl, 'utf8')
 
+// The ONE owner of the receipt's grid geometry -- the component and the
+// print/image/PDF exporter both read it, and so does this test, rather than
+// restating the numbers and pinning a second copy of them.
+const {
+  RECEIPT_ITEM_COLUMN_LIMIT_EM,
+  RECEIPT_ITEM_NUMERIC_FONT_EM,
+  receiptItemGridTemplate,
+  receiptNameColumnWidthPx,
+  receiptNameLineCount,
+  receiptNumericWidthEm,
+} = require('../src/utils/receiptItemColumns.ts') as typeof import('../src/utils/receiptItemColumns.ts')
+
 // The receipt's real collaborators are loaded for real (the money math, the
 // template normalizer, the applied-config merge); only the shell around it --
 // the app context, the icons, the portal menu -- is stubbed, because none of
@@ -249,6 +261,121 @@ await runTest('the per-line qty column is untouched by the row removal', () => {
 await runTest('the retired row leaves no zombie behind', () => {
   assert.doesNotMatch(receiptSource, /totalQty/, 'no totalQty label, const or section may linger')
   assert.doesNotMatch(receiptSource, /total_qty/, 'and no field-order entry for it')
+})
+
+// --- 4. compact item rows: the name column gets the width -----------------
+
+await runTest('a 34-character product name fits two lines at 80 mm', () => {
+  assert.equal(LONG_ITEM_NAME.length, 34)
+  assert.ok(
+    receiptNameLineCount(LONG_ITEM_NAME.length, { paperWidthMm: 80, fontSizePx: 12 }) <= 2,
+    `the name column must hold the owner's example in two lines, got ${receiptNameLineCount(LONG_ITEM_NAME.length, { paperWidthMm: 80, fontSizePx: 12 })}`,
+  )
+  // The budget charges every money column its full fit-content limit, so a
+  // real row -- a one-digit qty costs one character, not 1.8em -- has more
+  // room than this, never less.
+  assert.ok(receiptNameColumnWidthPx({ paperWidthMm: 80, fontSizePx: 12 }) > 140)
+})
+
+await runTest('the money columns cannot claim the name column by growing to max-content', () => {
+  const template = receiptItemGridTemplate(true)
+  assert.match(template, /^minmax\(0,1fr\) /, 'the name column is the flexible one')
+  assert.ok(!template.includes('auto'), 'an auto track takes max-content and squeezes the name')
+  assert.equal((template.match(/fit-content\(/g) || []).length, 3, 'qty, price and total are all capped')
+  const threeCol = receiptItemGridTemplate(false)
+  assert.equal((threeCol.match(/fit-content\(/g) || []).length, 2, 'with the price column off, two money tracks')
+  // em, never rem: rem is the ROOT font size (16px) and knows nothing about
+  // the receipt's own font_size, so a shop printing at 9px paid 16px-rooted
+  // columns. Every track this module hands out is relative to the receipt.
+  assert.ok(!template.includes('rem'), 'the item track must not be rem-sized')
+  assert.ok(!threeCol.includes('rem'))
+})
+
+await runTest('a capped money column still never breaks a figure across lines', () => {
+  // The widest thing the price column prints on a line of its own is the
+  // parenthesised per-unit cut. Its limit has to hold that whole, or the
+  // "compact" columns would win their width by splitting "(-$3.00)" in two.
+  assert.ok(
+    RECEIPT_ITEM_COLUMN_LIMIT_EM.unitPrice >= receiptNumericWidthEm('(-$3.00)'.length),
+    `the price column must hold "(-$3.00)" unbroken, ${RECEIPT_ITEM_COLUMN_LIMIT_EM.unitPrice}em < ${receiptNumericWidthEm(8)}em`,
+  )
+  assert.ok(
+    RECEIPT_ITEM_COLUMN_LIMIT_EM.lineTotal >= receiptNumericWidthEm('$18.00'.length),
+    'and the total column its own figure',
+  )
+  assert.ok(
+    RECEIPT_ITEM_COLUMN_LIMIT_EM.qty >= receiptNumericWidthEm('99'.length),
+    'and the qty column a two-digit quantity',
+  )
+  assert.ok(RECEIPT_ITEM_NUMERIC_FONT_EM < 1, 'the money cells print smaller than the name')
+})
+
+await runTest('the 58 mm and 80x50 templates still leave the name a real column', () => {
+  // 58mm is the narrowest paper the settings offer, and 80x50 prints its full
+  // rendition on the 80mm roll. Both are measured at the smallest font the
+  // receipt settings allow through to the largest, because the tracks are em
+  // -sized and the paper is not.
+  for (const paperWidthMm of [58, 80]) {
+    for (const fontSizePx of [9, 12, 16]) {
+      const width = receiptNameColumnWidthPx({ paperWidthMm, fontSizePx })
+      assert.ok(width > 0, `${paperWidthMm}mm @ ${fontSizePx}px: the name column collapsed to ${Math.round(width)}px`)
+    }
+  }
+  // On 58mm the owner's 34-character example does not fit two lines -- there
+  // is not that much paper -- but it must not be the four it was.
+  assert.ok(
+    receiptNameLineCount(LONG_ITEM_NAME.length, { paperWidthMm: 58, fontSizePx: 12 }) <= 4,
+    'the 58mm name column must still be usable',
+  )
+})
+
+await runTest('the rendered table uses the shared track on the header AND the rows', () => {
+  const html = renderReceipt()
+  const template = receiptItemGridTemplate(true)
+  assert.equal(
+    occurrences(html, `grid-template-columns:${template}`),
+    2,
+    'the header row and the item row must both carry the one shared track',
+  )
+  // The name column takes every pixel the money columns leave.
+  assert.ok(html.includes(LONG_ITEM_NAME))
+  // The numbers never break mid-figure, and the discount keeps its
+  // parentheses beside the price it describes.
+  const rows = html.split('data-receipt-cell="price"')
+  const priceCell = rows[rows.length - 1]
+  assert.ok(priceCell.includes('$21.00'), 'the price cell prints the selling price')
+  assert.ok(priceCell.includes('(-$3.00)'), 'and the cut in parentheses')
+  assert.ok(priceCell.includes('whitespace-nowrap'), 'the figures do not wrap mid-number')
+  assert.ok(html.includes('data-receipt-cell="line-total"'))
+})
+
+await runTest('the narrow templates render the same one table', () => {
+  const template = receiptItemGridTemplate(true)
+  for (const paperSize of ['58mm', '80x50mm']) {
+    const html = renderReceipt({}, { paperSize })
+    assert.equal(
+      occurrences(html, `grid-template-columns:${template}`),
+      2,
+      `${paperSize}: the item table is the same table at every paper width`,
+    )
+    assert.ok(html.includes(LONG_ITEM_NAME), `${paperSize}: the full name still prints`)
+  }
+})
+
+await runTest('the print/image/PDF export reads the same track, not its own copy', () => {
+  const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  assert.match(printSource, /receiptItemGridTemplate/, 'the exporter must call the shared helper')
+  assert.doesNotMatch(
+    printSource,
+    /gridTemplateColumns = 'minmax\(0,1fr\) 2\.2rem/,
+    'the exporter must not carry its own item track -- that copy had already drifted',
+  )
+  assert.doesNotMatch(receiptSource, /grid-cols-\[minmax\(0,1fr\)_2\.2rem/, 'nor the component')
+  // The label/value rows had drifted too -- 4.25rem on paper against 4.6rem
+  // on screen -- so they come from the same module now.
+  assert.match(printSource, /RECEIPT_ROW_GRID_TEMPLATE/, 'and the label/value row track is shared as well')
+  assert.doesNotMatch(printSource, /minmax\(4\.25rem,auto\)/, 'the exporter\'s drifted value column is gone')
+  assert.doesNotMatch(receiptSource, /grid-cols-\[minmax\(0,1fr\)_minmax\(4\.6rem,auto\)\]/, 'and the component\'s rem-sized one with it')
 })
 
 if (failed > 0) {
