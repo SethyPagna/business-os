@@ -102,3 +102,62 @@ assert.deepEqual(
     + unusedExports.join('\n  '),
 )
 console.log(`PASS all ${exportedNames.length} inventoryExport export(s) have a caller`)
+
+// --- 3. the retired strings are gone from BOTH packs ----------------------
+//
+// A dead key is not merely clutter. stock_desc_low was the worst of them:
+// "Shows Low Stock when stock <= 10" states a threshold as fact, while the
+// real threshold is owner-configurable per shop and per product
+// (utils/lowStockSettings.ts). Had anything rendered it, it would have
+// contradicted the list beneath it for every shop that changed the number.
+// Its two siblings, stock_desc_in and stock_desc_out, hardcode the same 10.
+//
+// The other three lost their feature: all_custom_tables and add_table belonged
+// to the deleted custom-tables component, and perm_section_users labelled a
+// permission section removed when the `users` grant was found to be backend-dead
+// (progress.md: the section is admin-only by design, and the label was left
+// behind rather than churn the peer-managed packs).
+//
+// langKeyIntegrity.test.ts is the other half of this: it fails on an OVER-delete
+// (a key the source still asks for), so the two together bound the change from
+// both sides.
+
+const en = JSON.parse(fs.readFileSync(path.join(srcDir, 'lang', 'en.json'), 'utf8')) as Record<string, string>
+const km = JSON.parse(fs.readFileSync(path.join(srcDir, 'lang', 'km.json'), 'utf8')) as Record<string, string>
+
+// positive control: a key that IS live must be present in both packs, so an
+// "absent from both packs" pass cannot come from a mis-read file.
+assert.ok(en.stock_filter_low_stock && km.stock_filter_low_stock, 'positive control: the live Low Stock filter label must exist in both packs')
+
+const retiredKeys = [
+  'add_table',
+  'all_custom_tables',
+  'perm_section_users',
+  'stock_desc_in',
+  'stock_desc_low',
+  'stock_desc_out',
+]
+
+const stillInEn = retiredKeys.filter((key) => key in en)
+const stillInKm = retiredKeys.filter((key) => key in km)
+assert.deepEqual(stillInEn, [], `these retired keys are still in en.json: ${stillInEn.join(', ')}`)
+assert.deepEqual(stillInKm, [], `these retired keys are still in km.json: ${stillInKm.join(', ')}`)
+
+// No stock_desc_* may come back at all: the family exists only to restate a
+// threshold the owner controls, so the right place for that sentence is an
+// InfoHint that reads the configured number, never a fixed string.
+assert.deepEqual(
+  Object.keys(en).filter((key) => key.startsWith('stock_desc_')),
+  [],
+  'a stock_desc_* string hardcodes a threshold the owner configures in lowStockSettings',
+)
+
+// And the source must genuinely still resolve the threshold at runtime -- the
+// reason those strings were wrong in the first place.
+const lowStockSettings = fs.readFileSync(path.join(srcDir, 'utils', 'lowStockSettings.ts'), 'utf8')
+assert.match(lowStockSettings, /export function effectiveLowStockThreshold\(/, 'the low-stock threshold is still resolved per shop and per product')
+assert.match(lowStockSettings, /if \(config\.mode === 'global'\) return global/, 'a per-product override still beats the global number')
+
+console.log(`PASS all ${retiredKeys.length} retired keys are gone from both packs`)
+
+console.log('\ndeadFeatureRetirement tests passed')
