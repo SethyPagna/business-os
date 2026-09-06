@@ -34,8 +34,11 @@ both language packs, per-action permissions, staged user-gated deploys from comm
 cd frontend && npm run test:utils && npm run verify:i18n && npm run build
 ```
 
-`test:utils` chains typecheck + source checks + every test file and **stops at the first red**; when
-hunting, run files individually: `for f in tests/*.test.ts; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done`.
+`test:utils` runs typecheck + source checks + every `tests/*.test.ts` through `tests/runTestChain.ts`,
+which discovers files by reading the directory (a new test is wired in by existing), keeps going after
+a red and lists every red at the end; `--bail` restores stop-at-first and positional terms filter files
+(`node tests/runTestChain.ts receipt`). The per-file loop still works when hunting:
+`for f in tests/*.test.ts; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done`.
 
 ```bash
 cd cloudflare && npx tsc --noEmit && cd scripts && for f in test-*.cjs; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done
