@@ -90,4 +90,85 @@ for (const f of files) {
   }
 }
 
-console.log(`PASS all ${files.length} migrations are LF; ${triggerFiles} contain triggers, ${terminators} bodies wrangler can close`)
+// ---------------------------------------------------------------------------
+// A migration must not open its own transaction.
+//
+// wrangler already refuses this -- badly. `src/d1/trimmer.ts`
+// (node_modules/wrangler/wrangler-dist/cli.js :283352-283370 at the pinned
+// 4.116.0) runs `trimSqlQuery` over every statement it is about to apply:
+//
+//     mayContainTransaction(sql) => sql.includes("BEGIN TRANSACTION")
+//     trimmed = sql.replace("BEGIN TRANSACTION;", "").replace("COMMIT;", "")
+//     if (mayContainTransaction(trimmed)) throw UserError(
+//       "...it contains several transactions.\nD1 runs your SQL in a
+//        transaction for you...")
+//
+// Two things follow, and they are the reason for this assertion rather than
+// for trusting wrangler:
+//
+//   1. wrangler's own error text states the rule: D1 runs the migration in a
+//      transaction for you, so the file must not open one.
+//   2. Its detector matches the literal string "BEGIN TRANSACTION" ONLY. A
+//      bare `BEGIN;` -- SQLite's other spelling of exactly the same statement
+//      -- is neither detected nor stripped. It travels through untouched.
+//
+// From there the two apply paths diverge, and neither is
+// `wrangler d1 execute --local --file` (which hands the whole text to SQLite
+// and runs `BEGIN; ... COMMIT;` happily, so a local run cannot reveal this):
+//
+//   * local `migrations apply` -> `executeLocally` :283576 splits with
+//     `splitSqlQuery` and runs `db.batch(...)` :283611 against miniflare's D1.
+//     `BEGIN;` becomes its own statement inside a batch D1 has already wrapped
+//     in a transaction.
+//   * `--remote` -> `executeRemotely` :283642 with `file: undefined`
+//     (`migrations apply` always passes the SQL as `command`, :286026), so the
+//     raw string is POSTed to D1's `query` endpoint and the SERVER parses it.
+//     What that parser does with a nested BEGIN is not readable from here --
+//     which is the point: it is discovered at deploy time, against production.
+//
+// A third, fully local consequence needs no server: `buildMigrationQuery`
+// :285764 appends `INSERT INTO d1_migrations (name) values ('<file>');` AFTER
+// the file's own text. A migration ending in `COMMIT;` therefore records
+// itself as applied OUTSIDE its own transaction.
+//
+// 0129_sale_actual_delivery_cost_amendment shipped with `BEGIN;`/`COMMIT;` on
+// Sep 6 2026 and was the only migration in the chain ever to carry them; this
+// assertion is why the next one cannot be.
+//
+// Only statement-level transaction control is rejected. A trigger body's
+// `BEGIN` (no semicolon) and its `END;` terminator are untouched, as are the
+// words wherever they appear inside `--` comments or string literals.
+const TRANSACTION_STATEMENT = [
+  // BEGIN; BEGIN TRANSACTION; BEGIN IMMEDIATE; COMMIT; END TRANSACTION;
+  // ROLLBACK; ROLLBACK TO sp;   -- but NOT a bare `END;`, see below.
+  /^(BEGIN|COMMIT|END|ROLLBACK)(\s+(TRANSACTION|WORK|DEFERRED|IMMEDIATE|EXCLUSIVE|TO)\b.*)?;$/i,
+  /^(SAVEPOINT|RELEASE)\s+\S.*;$/i,
+]
+const transactional = []
+for (const f of files) {
+  const text = fs.readFileSync(path.join(dir, f), 'utf8')
+  text.split('\n').forEach((raw, index) => {
+    const line = raw.trim()
+    if (!line || line.startsWith('--')) return
+    // A bare `END;` closes a trigger body and is legitimate -- 120 of them in
+    // this chain. `END TRANSACTION;` is not, and the pattern above still
+    // catches that.
+    if (/^END;$/i.test(line)) return
+    if (TRANSACTION_STATEMENT.some((re) => re.test(line))) transactional.push(`  ${f}:${index + 1}  ${line}`)
+  })
+}
+if (transactional.length) {
+  throw new Error(
+    'These migrations contain statement-level transaction control:\n'
+    + transactional.join('\n')
+    + '\n\nRemove it. In wrangler\'s own words (src/d1/trimmer.ts): "D1 runs your'
+    + '\nSQL in a transaction for you." Its guard only recognises the literal'
+    + '\n"BEGIN TRANSACTION", so a bare BEGIN; slips past it and is discovered at'
+    + '\ndeploy time; and buildMigrationQuery appends the d1_migrations marker'
+    + '\nINSERT after the file, so a trailing COMMIT; records the migration as'
+    + '\napplied outside its own transaction. `wrangler d1 execute --local --file`'
+    + '\nwill not reveal any of this -- that path never splits the statements.',
+  )
+}
+
+console.log(`PASS all ${files.length} migrations are LF; ${triggerFiles} contain triggers, ${terminators} bodies wrangler can close; none opens its own transaction`)
