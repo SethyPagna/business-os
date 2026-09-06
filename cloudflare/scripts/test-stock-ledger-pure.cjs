@@ -24,17 +24,21 @@ function ok(cond, label) {
   console.log(`PASS ${label}`)
 }
 
-// ---- compile the real kernel (only local import: businessDateWindow) -------
+// ---- compile the real kernel (local imports: businessDateWindow, ----------
+// ---- stockInSessionsQuery's receipt-type vocabulary) ----------------------
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-ledger-'))
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockLedgerQuery.ts'), path.join(tmpDir, 'stockLedgerQuery.ts'))
-// stockLedgerQuery.ts imports ./businessDateWindow (the UTC+7 helpers); copy that
-// pure dependency in so the isolated compile resolves and emits it.
+// stockLedgerQuery.ts imports ./businessDateWindow (the UTC+7 helpers) and
+// ./stockInSessionsQuery (STOCK_RECEIPT_MOVEMENT_TYPES, so the shared-lot
+// receipt count and the Stock-in Sessions list agree on what a receipt is);
+// copy those pure dependencies in so the isolated compile resolves and emits.
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), path.join(tmpDir, 'businessDateWindow.ts'))
 // N13: and ./movementBranchName, which resolves a movement row's branch
 // through branch_id when the row carries no branch_name snapshot.
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'movementBranchName.ts'), path.join(tmpDir, 'movementBranchName.ts'))
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockInSessionsQuery.ts'), path.join(tmpDir, 'stockInSessionsQuery.ts'))
 execSync(
-  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" "${path.join(tmpDir, 'movementBranchName.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
+  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" "${path.join(tmpDir, 'movementBranchName.ts')}" "${path.join(tmpDir, 'stockInSessionsQuery.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
   { cwd: cloudflareRoot, stdio: 'pipe' },
 )
 const kernel = require(path.join(tmpDir, 'stockLedgerQuery.js'))

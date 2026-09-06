@@ -45,6 +45,9 @@ export type ReceiveBatchPayload = {
   supplierId?: number | null
   supplierName?: string | null
   unitCostUsd?: number | null
+  // N14-D: the explicit "these goods were free" declaration. POST /api/batches
+  // refuses a $0.00 unit cost without it, exactly as /api/inventory/adjust does.
+  freeGoods?: boolean
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
   sessionId?: number | null
@@ -136,6 +139,7 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
       supplier_id: payload.supplierId ?? null,
       supplier_name: payload.supplierName || null,
       unit_cost_usd: payload.unitCostUsd ?? null,
+      free_goods: payload.freeGoods === true,
       payment_status: payload.paymentStatus || null,
       credit_due_date: payload.creditDueDate || null,
       session_id: payload.sessionId ?? null,

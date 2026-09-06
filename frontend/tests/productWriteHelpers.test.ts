@@ -172,13 +172,20 @@ assert.deepEqual(
     type: 'add',
     quantity: 8,
     branchId: 2,
-    unitCostUsd: 3,
-    unitCostKhr: 12000,
+    // N14-D. This used to read 3 / 12000 -- the product's stored purchase
+    // price, forwarded as though it were the cost of THIS delivery. A receipt
+    // states what was actually paid or it is refused server-side; a stored
+    // catalogue price is not evidence of either.
+    unitCostUsd: undefined,
+    unitCostKhr: undefined,
     reason: 'Bulk add stock',
     userId: 7,
     userName: 'Owner',
+    supplierId: undefined,
+    supplierName: undefined,
+    attribution: undefined,
   },
-  'stock adjustment payload uses product costs, branch id, quantity, and user attribution',
+  'stock adjustment payload forwards branch id, quantity and user attribution -- and invents no cost',
 )
 
 assert.deepEqual(
@@ -211,6 +218,9 @@ assert.deepEqual(
     reason: 'Clear stock',
     userId: 8,
     userName: 'Admin',
+    supplierId: undefined,
+    supplierName: undefined,
+    attribution: undefined,
   },
   'stock adjustment payload accepts explicit product id and unit-cost overrides',
 )
@@ -240,11 +250,16 @@ assert.deepEqual(
     type: 'add',
     quantity: 0,
     branchId: 6,
-    unitCostUsd: 2,
-    unitCostKhr: 8200,
+    // Same rule: cost_price_usd 2 is the catalogue's number, not this
+    // movement's, and no longer leaks onto the wire as one.
+    unitCostUsd: undefined,
+    unitCostKhr: undefined,
     reason: 'Initialize branch',
     userId: 9,
     userName: 'Restorer',
+    supplierId: undefined,
+    supplierName: undefined,
+    attribution: undefined,
   },
   'stock adjustment payload supports snapshot name overrides and zero-quantity branch initialization',
 )

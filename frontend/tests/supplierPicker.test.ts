@@ -6,6 +6,7 @@
 // first-attribution-sticks visible instead of silently ignored.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { bulkStockReceiptWire as bulkReceiptWire } from '../src/utils/stockReceiptFields.ts'
 
 let passed = 0
 function ok(label: string) {
@@ -73,13 +74,37 @@ assert.match(inventoryPage, /supplierName: isStockIn && String\(adjustForm\.supp
 assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity\)/, 'Inventory.tsx derives that from the shared rule, not its own copy')
 ok('Inventory adjust: form cleared on attributed lots, wire is stock-in only')
 
-assert.match(branchAdjuster, /supplierId: row\.type === 'add' && row\.supplierId != null \? row\.supplierId : undefined/, 'BranchStockAdjuster sends supplier only on add rows')
+// N14-D widened "adds only" to "stock-ins only" here for the same reason
+// S4-16 widened it on Inventory.tsx: routes/inventory.ts converts a `set` above
+// the branch's on-hand figure into an add, so it attributes a lot exactly as an
+// add does. This assertion used to pin `row.type === 'add'` -- the very
+// expression that made a raising set unsubmittable (its supplier picker never
+// rendered and its typed name never reached the wire), so the pin was holding
+// the defect in place. tests/branchStockAdjusterSetRaise.test.ts owns the full
+// render/wire pairing; this line keeps the cross-surface rule stated here too.
+assert.match(branchAdjuster, /supplierId: rowIsStockIn\(row\) && row\.supplierId != null \? row\.supplierId : undefined/, 'BranchStockAdjuster sends supplier on every stock-in row, not adds only')
 assert.match(branchAdjuster, /onChange\(\{ supplierId: null, supplierName: '' \}\)/, 'BranchStockAdjuster clears the row when its lot is attributed')
-ok('BranchStockAdjuster: per-row honesty (adds only, attributed lots cleared)')
+ok('BranchStockAdjuster: per-row honesty (stock-ins only, attributed lots cleared)')
 
-assert.match(bulkModal, /supplierId: action === 'add' && supplierId != null \? supplierId : undefined/, 'BulkAddStockModal sends supplier only for adds')
+// N14-D widened "adds only" here too, and for the same reason S4-16 widened
+// it on Inventory.tsx: routes/inventory.ts converts a 'set' that RAISES a
+// row's stock into an add, and this surface -- one figure applied to many
+// products, with no branch quantity in sight -- cannot tell which rows those
+// are. So a bulk set states the supplier too; a remove still states none.
+// Asserted by evaluating the shared rule, not by matching the expression.
+assert.match(bulkModal, /bulkStockReceiptWire\(action, \{/, 'BulkAddStockModal builds its receipt half from the shared rule')
+assert.deepEqual(
+  bulkReceiptWire('remove', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }),
+  {},
+  'a bulk remove carries no supplier and no cost',
+)
+assert.equal(
+  bulkReceiptWire('set', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }).supplierId,
+  9,
+  'a bulk set can raise a row, and a raise is a receipt that names its supplier',
+)
 assert.match(bulkModal, /supplier_bulk_hint/, 'BulkAddStockModal explains the fill-not-rewrite semantics for existing lots')
-ok('BulkAddStockModal: one supplier per bulk event, adds only, semantics explained')
+ok('BulkAddStockModal: one supplier per bulk event, receipts only, semantics explained')
 
 // --- Transport: the lot list carries attribution so the pickers can tell
 // locked from fill; the receive payload carries the id beside the name.

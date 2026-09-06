@@ -75,6 +75,9 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const batchCode = loadReal('lib/batchCode.ts')
+// N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
+// real module has to be in the stub map like every other real dependency.
+const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding })
 const permissions = loadReal('lib/permissions.ts')
@@ -116,6 +119,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/salesAnalytics': salesAnalytics,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
+  '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/sqlBinding': sqlBinding,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },
@@ -171,6 +175,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
+  '../lib/stockReceiptGate': stockReceiptGate,
   // K2 Part 416: routes/batches.ts gained the damaged-lots POS lookup;
   // these tests exercise receive/adjust, so an empty stub is honest.
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
@@ -216,7 +221,7 @@ async function main() {
   await check('adjust add (picked contact): the new lot records supplier_id AND supplier_name', async () => {
     seed()
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 5, reason: 'Receive', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 5, reason: 'Receive', branchId: 1,
       batchId: 'new', supplierId: 7, supplierName: 'Acme Beauty Co',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -230,7 +235,7 @@ async function main() {
     seed()
     const before = supplierCount()
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 3, reason: 'Receive', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 3, reason: 'Receive', branchId: 1,
       batchId: 'new', supplierName: 'Handwritten Vendor',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -242,10 +247,10 @@ async function main() {
 
   await check("top-up of an ATTRIBUTED lot with a different supplier changes NOTHING but quantity (first attribution sticks)", async () => {
     seed()
-    await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 5, reason: 'r', branchId: 1, batchId: 'new', supplierId: 7, supplierName: 'Acme Beauty Co' })
+    await req('POST', '/adjust', { productId: 1, type: 'add', unitCostUsd: 2, quantity: 5, reason: 'r', branchId: 1, batchId: 'new', supplierId: 7, supplierName: 'Acme Beauty Co' })
     const lotId = batchRows()[0].id
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 2, reason: 'top-up', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 2, reason: 'top-up', branchId: 1,
       batchId: lotId, supplierName: 'Somebody Else',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -258,11 +263,21 @@ async function main() {
 
   await check('top-up of an UNATTRIBUTED lot FILLS the blank (COALESCE honors the choice the picker offered)', async () => {
     seed()
-    await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 4, reason: 'r', branchId: 1, batchId: 'new' })
+    // N14-D: the route can no longer MINT an unattributed lot -- a stock-in
+    // must name its supplier. Unattributed lots still exist (legacy imports,
+    // and every lot created before that rule), so the COALESCE fill below is
+    // still the live path for them; the precondition is now built by blanking
+    // the row, and the refusal itself is asserted first so this fixture cannot
+    // quietly become the only way such a lot is made.
+    const refused = await req('POST', '/adjust', { productId: 1, type: 'add', unitCostUsd: 2, quantity: 4, reason: 'r', branchId: 1, batchId: 'new' })
+    assert.strictEqual(refused.status, 400, 'an add with no supplier must be refused outright')
+    assert.strictEqual(refused.json?.code, 'supplier_required')
+    await req('POST', '/adjust', { productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 4, reason: 'r', branchId: 1, batchId: 'new' })
     const lotId = batchRows()[0].id
+    rawDb.prepare('UPDATE product_batches SET supplier_id = NULL, supplier_name = NULL WHERE id = @id').run({ id: lotId })
     assert.strictEqual(batchRows()[0].supplier_name, null, 'precondition: lot starts unattributed')
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 2, reason: 'top-up', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 2, reason: 'top-up', branchId: 1,
       batchId: lotId, supplierId: 7, supplierName: 'Acme Beauty Co',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -274,7 +289,7 @@ async function main() {
   await check('auto-routed add (no batchId -- the BulkAddStockModal wire) attributes the lot it creates', async () => {
     seed()
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 6, reason: 'bulk', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 6, reason: 'bulk', branchId: 1,
       receivedDate: '2025-04-01', supplierId: 7, supplierName: 'Acme Beauty Co',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -286,20 +301,23 @@ async function main() {
 
   await check("remove ignores supplier fields entirely -- a removal has no supplier semantics", async () => {
     seed()
-    await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 5, reason: 'r', branchId: 1, batchId: 'new' })
+    await req('POST', '/adjust', { productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 5, reason: 'r', branchId: 1, batchId: 'new' })
     const lotId = batchRows()[0].id
     const { status, json } = await req('POST', '/adjust', {
       productId: 1, type: 'remove', quantity: 2, reason: 'damage', branchId: 1,
       batchId: lotId, supplierId: 7, supplierName: 'Acme Beauty Co',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
-    assert.strictEqual(batchRows()[0].supplier_name, null, 'the removal did not attribute the lot')
+    // The lot was attributed to 'Fixture Supplier' when it was received (a
+    // stock-in must name its supplier now); what matters here is that the
+    // removal's own supplier fields changed nothing.
+    assert.strictEqual(batchRows()[0].supplier_name, 'Fixture Supplier', 'the removal did not re-attribute the lot')
   })
 
   await check('POST /api/batches (snake_case wire) still records supplier_id + supplier_name on create -- two wires, one rule', async () => {
     seed()
     const { status, json } = await req('POST', '/', {
-      product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10',
+      product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10', unit_cost_usd: 2,
       supplier_id: 7, supplier_name: 'Acme Beauty Co',
     }, batchesApp)
     assert.strictEqual(status, 200, JSON.stringify(json))

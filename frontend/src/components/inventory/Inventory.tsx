@@ -68,7 +68,7 @@ import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire } from '../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import type { QueryParams } from '../../api/query.ts'
@@ -175,6 +175,8 @@ type AdjustForm = {
   // what this stock-in cost per unit and how it was paid. Offered for an 'add'
   // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
   unit_cost_usd: InventoryFormValue
+  // N14-D: the explicit free-goods declaration, mirrored from the shared form.
+  free_goods: boolean
   payment_status: string
   credit_due_date: string
 }
@@ -461,7 +463,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
     cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
     supplier_id: '', supplier_name: '',
-    unit_cost_usd: '', payment_status: 'paid', credit_due_date: '',
+    unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
   })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
@@ -1095,7 +1097,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     { value: '', label: chooseBranchLabel },
     ...branchSelectOptions,
   ], [branchSelectOptions, chooseBranchLabel])
-  const adjustCurrentQuantity = adjustModal ? getStockQty(adjustModal) : 0
+  // The figure every adjust verdict is measured against -- receipt or removal,
+  // picker or no picker, which fields the operator is shown. It is the BRANCH
+  // the form is adjusting, not the page's branch filter: `getStockQty` answers
+  // with the product TOTAL while the list is filtered to "All branches", and
+  // routes/inventory.ts compares the requested total against the branch's own
+  // row. Handing the modal the page figure made it call a receipt a set-down
+  // (see adjustBranchQuantity's own note). One rule now, shared with
+  // StockAdjustModal.tsx and with `previousQuantity` in handleAdjust below, so
+  // what is on screen and what rides the wire cannot disagree.
+  const adjustCurrentQuantity = adjustModal
+    ? adjustBranchQuantity(adjustModal.branch_stock, adjustForm.branch_id, getStockQty(adjustModal))
+    : 0
   // Resolved against the *currently selected* adjust target (not just the
   // row the modal was opened from) so switching the "Adjust target" picker
   // (adjustTargetOptions.length > 1) updates the displayed locked price too
@@ -1131,9 +1144,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       (selectedAdjustProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), entry]),
     )
     const selectedBranchStock = numericBranchId ? selectedBranchStockById.get(numericBranchId) : null
-    const previousQuantity = numericBranchId
-      ? Number(selectedBranchStock?.quantity || 0)
-      : Number(getStockQty(selectedAdjustProduct) || 0)
+    // Same rule, same call, as `adjustCurrentQuantity` above -- the figure the
+    // modal renders its verdicts from and the figure this submission is gated
+    // against must be one number, not two derivations that agree by habit.
+    const previousQuantity = adjustBranchQuantity(
+      selectedAdjustProduct?.branch_stock,
+      numericBranchId,
+      getStockQty(selectedAdjustProduct),
+    )
     // Pricing only ever goes on the wire when it's genuinely unlocked --
     // locked (the default) is the fast add-to-this-row path, matching
     // this endpoint's behavior before the grouping feature existed.
@@ -1155,6 +1173,40 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
       return
     }
+    // The lot this submission actually names, derived from the one shared
+    // rule InventoryStockModals renders the picker by -- a picker that is not
+    // on screen chose nothing, so nothing stale rides the wire (N14-E).
+    // Picking an EXISTING lot blanks the supplier field on purpose: an
+    // attributed lot keeps its first supplier and the picker shows that name
+    // locked instead. This form cannot read the lot from here, so it defers
+    // the supplier half to routes/inventory.ts, which looks the lot up and
+    // refuses an unattributed one. The cost half is never deferred.
+    const batchWire = stockAdjustBatchWire({
+      type: adjustForm.type,
+      quantity: qty,
+      // `adjustCurrentQuantity` is the prop the modal renders the picker by,
+      // and it now resolves to the same branch figure `previousQuantity` and
+      // routes/inventory.ts compare against -- the two used to be different
+      // numbers, which is how the form and its wire came to disagree about
+      // what the operator was looking at.
+      currentQuantity: adjustCurrentQuantity,
+      unlockPricing,
+      branchId: numericBranchId,
+      batchId: adjustForm.batch_id,
+    })
+    // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts),
+    // run here so the operator is told at the form rather than by a 400.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn,
+      supplierName: adjustForm.supplier_name,
+      lotAttributionDeferred: batchWire.lotAttributionDeferred,
+      unitCostUsd: adjustForm.unit_cost_usd,
+      freeGoods: adjustForm.free_goods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
+      return
+    }
     const adjustmentRequest = {
       productId: selectedAdjustProduct.id,
       productName: selectedAdjustProduct.name,
@@ -1165,7 +1217,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       userId: user?.id,
       userName: user?.name || user?.username,
       unlockPricing,
-      batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
+      batchId: batchWire.batchId,
       // D4 (11.28): sent only when the date input was actually on screen
       // (InventoryStockModals.tsx's own visibility condition, recomputed
       // here) -- a value lingering from a hidden input must never re-date
@@ -1250,11 +1302,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
           undo: async () => {
+            // N14-D: an undo puts the branch back to the figure it held before.
+            // It is not a new receipt -- the inverse of a remove is an add with
+            // no supplier and no cost of its own, and the inverse of a set can
+            // raise stock too -- so it declares itself a correction rather than
+            // being handed invented receipt facts.
+            const undoBase = { ...adjustmentRequest, attribution: 'correction' as const }
             const inverseRequest = adjustmentRequest.type === 'set'
-              ? { ...adjustmentRequest, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+              ? { ...undoBase, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
               : adjustmentRequest.type === 'remove'
-                ? { ...adjustmentRequest, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-                : { ...adjustmentRequest, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                ? { ...undoBase, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                : { ...undoBase, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
             const undoResult = await runInventoryMutation(() => getInventoryApi().adjustStock(inverseRequest), 'Undo inventory adjustment')
             if (undoResult?.success === false) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
             await load(true)
@@ -1330,7 +1388,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // for the same reason: a cost or a credit due date from the previous
       // receipt must never ride along into this one.
       supplier_id: '', supplier_name: '',
-      unit_cost_usd: '', payment_status: 'paid', credit_due_date: '',
+      unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
     })
   }
 

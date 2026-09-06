@@ -20,6 +20,9 @@ export type InventoryStockSessionLine = {
   expiry_date?: string | null
   notes?: string | null
   unit_cost_usd?: number | null
+  // A $0.00 receipt is only accepted as a DECLARED gift. The flag is what
+  // distinguishes it from a cost nobody entered (lib/stockReceiptGate.ts).
+  free_goods?: boolean
   payment_status?: 'paid' | 'credit' | null
   credit_due_date?: string | null
 }

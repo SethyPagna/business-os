@@ -2614,6 +2614,11 @@ function ProductsFullEditor() {
           quantity,
           branchId,
           reason,
+          // N14-D: a restore puts a branch back to the figure the snapshot
+          // recorded. It is not a new receipt -- there is no supplier and no
+          // cost to state -- so it declares itself a correction instead of
+          // being handed an invented one.
+          attribution: 'correction',
           user: { id: user?.id, name: user?.name },
         })),
         'Restore product branch stock',
@@ -2780,6 +2785,11 @@ function ProductsFullEditor() {
           quantity: amount,
           branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
           reason,
+          // N14-D: this helper only ever REDOES a bulk add that BulkAddStockModal
+          // already put through the gate with its own supplier and cost. It
+          // cannot restate them (they are not in the redo entry), and it must
+          // not invent them, so it restores the figure as a correction.
+          attribution: 'correction',
           user: { id: user?.id, name: user?.name },
         })),
         'Bulk add product stock',

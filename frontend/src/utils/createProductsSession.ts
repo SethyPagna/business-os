@@ -151,6 +151,9 @@ export function createProductsSessionRow(
     branchId,
     branchName: String(extra.branchName ?? ''),
     quantity: Math.max(0, Math.floor(numeric(payload.stock_quantity))),
+    // N14-D: whatever the caller stated. The clamp stays only as a floor for a
+    // negative figure; a blank never reaches here (CreateProductsSessionModal
+    // refuses it before this row is built) and must never become a silent 0.
     unitCostUsd: Math.max(0, numeric(payload.cost_price_usd)),
     lotCode: '',
     status: 'created',

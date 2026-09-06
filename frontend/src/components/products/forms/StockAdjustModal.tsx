@@ -16,7 +16,7 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
-import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire } from '../../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import {
   applyRowOutcome,
   browserStockStorage,
@@ -73,6 +73,8 @@ type AdjustForm = {
   // what this stock-in cost per unit and how it was paid. Offered for an 'add'
   // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
   unit_cost_usd: InventoryFormValue
+  // N14-D: the explicit free-goods declaration, mirrored from the shared form.
+  free_goods: boolean
   payment_status: string
   credit_due_date: string
 }
@@ -329,6 +331,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     supplier_id: '',
     supplier_name: '',
     unit_cost_usd: '',
+    free_goods: false,
     payment_status: 'paid',
     credit_due_date: '',
   }))
@@ -393,6 +396,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       supplier_id: '',
       supplier_name: '',
       unit_cost_usd: '',
+      free_goods: false,
       payment_status: 'paid',
       credit_due_date: '',
     })
@@ -471,11 +475,42 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
     }
     // Same figure InventoryStockModals shows as "Current" and gates its own
-    // receipt fields on, recomputed here so the wire and the form agree.
-    const currentQuantity = numericBranchId ? Number(selectedBranchStock?.quantity || 0) : stockQtyOf(product)
+    // receipt fields on -- the one shared branch rule, not a second derivation
+    // that happens to agree. (It did not: for a branch with no branch_stock
+    // row this answered 0 while the prop below answered the product total.)
+    const currentQuantity = adjustBranchQuantity(product.branch_stock, numericBranchId, stockQtyOf(product))
     const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
+      return
+    }
+    // The lot this submission actually names, from the one shared rule
+    // InventoryStockModals renders the picker by -- a picker that is not on
+    // screen chose nothing, so nothing stale rides the wire (N14-E). Picking
+    // an EXISTING lot blanks the supplier field on purpose: an attributed lot
+    // keeps its first supplier and the picker shows that name locked instead.
+    // This form cannot read the lot from here, so it defers the supplier half
+    // to routes/inventory.ts, which looks the lot up and refuses an
+    // unattributed one. The cost half is never deferred.
+    const batchWire = stockAdjustBatchWire({
+      type: adjustForm.type,
+      quantity: qty,
+      currentQuantity,
+      unlockPricing,
+      branchId: numericBranchId,
+      batchId: adjustForm.batch_id,
+    })
+    // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts).
+    // The sibling surface on this same shared form runs it identically.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn,
+      supplierName: adjustForm.supplier_name,
+      lotAttributionDeferred: batchWire.lotAttributionDeferred,
+      unitCostUsd: adjustForm.unit_cost_usd,
+      freeGoods: adjustForm.free_goods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
       return
     }
     const adjustmentRequest = {
@@ -488,7 +523,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       userId: user?.id,
       userName: user?.name || user?.username,
       unlockPricing,
-      batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
+      batchId: batchWire.batchId,
       // S4-16: a 'set' above the current figure has no batch picker but
       // always creates or date-matches a lot server-side, so it carries the
       // date, supplier and receipt fields exactly as an explicit add does.
@@ -715,10 +750,9 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
 
   // Step 2: reuse Inventory's own adjust modal, fully wired.
   const product = selectedProduct
-  const numericBranchId = adjustForm.branch_id ? Number(adjustForm.branch_id) : null
-  const branchRows = Array.isArray(product.branch_stock) ? product.branch_stock : []
-  const branchEntry = numericBranchId ? branchRows.find((entry) => Number(entry?.branch_id) === numericBranchId) : null
-  const adjustCurrentQuantity = branchEntry ? Number(branchEntry.quantity || 0) : stockQtyOf(product)
+  // The figure the modal renders every verdict from, resolved by the same
+  // shared rule `onAdjust` gates the submission with above.
+  const adjustCurrentQuantity = adjustBranchQuantity(product.branch_stock, adjustForm.branch_id, stockQtyOf(product))
   const adjustCurrentPricing = {
     selling_price_usd: Number(product.selling_price_usd) || 0,
     selling_price_khr: Number(product.selling_price_khr) || 0,

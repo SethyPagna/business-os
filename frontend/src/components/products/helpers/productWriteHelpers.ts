@@ -75,6 +75,16 @@ interface ProductStockAdjustmentOptions {
   unitCostKhr?: unknown
   reason?: unknown
   user?: UserRecord
+  /**
+   * N14-D. 'correction' marks a movement that restores a figure the ledger
+   * already held -- undo, redo of an undo, a snapshot restore. Those are the
+   * only writes exempt from the supplier + cost a stock-in must carry, and the
+   * exemption is stated on the wire rather than inferred from a reason string,
+   * so routes/inventory.ts can record which it was.
+   */
+  attribution?: 'receipt' | 'correction'
+  supplierId?: unknown
+  supplierName?: unknown
 }
 
 interface ProductBranchInitializePlan {
@@ -231,11 +241,20 @@ export function buildProductStockAdjustmentPayload(product: ProductRecord = {}, 
     type: options.type || 'add',
     quantity: toFiniteNumber(options.quantity, 0),
     branchId: Number.isFinite(branchId) && branchId > 0 ? branchId : null,
-    unitCostUsd: options.unitCostUsd ?? (product?.purchase_price_usd || product?.cost_price_usd || 0),
-    unitCostKhr: options.unitCostKhr ?? (product?.purchase_price_khr || product?.cost_price_khr || 0),
+    // N14-D: NOT `?? (product.purchase_price_usd || product.cost_price_usd || 0)`.
+    // That answered "what did this cost?" with the product's stored price, or
+    // with zero -- a receipt cost that looks entered and is guessed, and a zero
+    // that reads as "free goods" nobody declared. What the caller supplies is
+    // what goes on the wire; a stock-in that supplies nothing is refused by the
+    // gate, on both sides.
+    unitCostUsd: options.unitCostUsd,
+    unitCostKhr: options.unitCostKhr,
     reason: options.reason || '',
     userId: options.user?.id,
     userName: options.user?.name,
+    supplierId: options.supplierId,
+    supplierName: options.supplierName,
+    attribution: options.attribution,
   }
 }
 
