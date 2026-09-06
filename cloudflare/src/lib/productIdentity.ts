@@ -12,6 +12,29 @@ import {
 // hand-copied pair could).
 export { normalizeLeadingZeroBarcodeForCleanup, identityBarcodeKey }
 
+/**
+ * identityBarcodeKey as a SQLite expression, for the ONE place that cannot
+ * fold in JS: the stock-session commit assertions, which are SQL predicates
+ * evaluated inside the batch being committed and so have no JS to run.
+ *
+ * Every other comparison site narrows in SQL and folds in JS on purpose (see
+ * pickSameIdentityRow below) precisely to avoid a second copy of the rule.
+ * This is the exception, so it is written ONCE, here, beside the rule it
+ * mirrors, and cloudflare/scripts/test-stock-session-identity-guard-pure.cjs
+ * runs this expression and the real identityBarcodeKey over the same fixture
+ * set in a real SQLite and asserts they agree -- empty, '0', '000', '0012',
+ * '0123', mixed alphanumerics and mixed case included. If the JS fold moves
+ * and this does not, that test goes red.
+ *
+ *   trim + lowercase; then, for an all-digit code whose stripped form is still
+ *   at least 3 characters long, drop the leading zeros. Anything else is itself.
+ */
+export function identityBarcodeKeySql(column: string): string {
+  const value = `LOWER(TRIM(COALESCE(${column},'')))`
+  return `CASE WHEN ${value} <> '' AND ${value} NOT GLOB '*[^0-9]*' AND LENGTH(LTRIM(${value},'0')) >= 3`
+    + ` THEN LTRIM(${value},'0') ELSE ${value} END`
+}
+
 // Applies THE product identity rule (lib/productDetailRule.ts) at branch-
 // transfer, add-stock and merge-duplicates time, so those paths reach the
 // same verdict CSV import does.
