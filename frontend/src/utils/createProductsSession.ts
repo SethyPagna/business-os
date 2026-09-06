@@ -161,53 +161,6 @@ export function createProductsSessionRow(
   }
 }
 
-/**
- * The opening stock of a created product goes through the SAME kernel every
- * other add-stock surface uses (receiveBatchStock), carrying this session's
- * id as the movement reference -- which is precisely what makes the whole
- * run show up as ONE row in Stock-in Sessions, with this session's supplier,
- * branch, line count and total cost on it. Returns null when the item was
- * created at zero, because there is no receipt to post.
- */
-export function openingStockRequest(
-  row: CreateProductsSessionRow,
-  header: CreateProductsHeader,
-  sessionId: number,
-  receivedDate: string,
-): {
-  productId: number
-  branchId: number
-  quantity: number
-  receivedDate: string | null
-  expiryDate: string | null
-  supplierId: number | null
-  supplierName: string | null
-  unitCostUsd: number | null
-  sessionId: number
-} | null {
-  const productId = Number(row.productId)
-  const branchId = Number(row.branchId)
-  if (!productId || !branchId || row.quantity <= 0) return null
-  // The item form stays editable, so a row may carry a supplier the header
-  // never picked. A supplier CONTACT id only travels with the name it
-  // belongs to -- an overridden name is a deliberate name-only attribution
-  // (the same first-class state the import engine writes), never a silent
-  // re-label of someone else's contact.
-  const rowSupplier = row.supplierName.trim()
-  const sameAsHeader = rowSupplier.toLowerCase() === header.supplierName.trim().toLowerCase()
-  return {
-    productId,
-    branchId,
-    quantity: row.quantity,
-    receivedDate: receivedDate.trim() || null,
-    expiryDate: null,
-    supplierId: sameAsHeader ? header.supplierId : null,
-    supplierName: rowSupplier || null,
-    unitCostUsd: row.unitCostUsd > 0 ? row.unitCostUsd : null,
-    sessionId,
-  }
-}
-
 function collapse(values: string[], headerValue: string, multiple: string, none: string): string {
   const distinct = [...new Set(values.map((value) => value.trim()).filter(Boolean))]
   if (distinct.length > 1) return multiple

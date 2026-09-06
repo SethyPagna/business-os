@@ -50,7 +50,7 @@ assert.ok(
 )
 
 const list = kernel.buildStockInSessionListQuery('')
-assert.doesNotMatch(kernel.STOCK_IN_SESSION_FROM_SQL, /CAST\(rx\.reference_id AS TEXT\)/, 'revert lookup must preserve the reference_id index')
+assert.doesNotMatch(list.groupedSql, /CAST\(rx\.reference_id AS TEXT\)/, 'revert lookup must preserve the reference_id index')
 const groups = db.prepare(`${list.groupedSql} ORDER BY created_at DESC`).bind(list.params).all()
 assert.equal(groups.length, 4, 'two explicit sessions, one legacy-string session and one legacy timestamp group; reverted receipt excluded')
 assert.equal(groups.find((row) => row.session_key === 'session:100').line_count, 2)

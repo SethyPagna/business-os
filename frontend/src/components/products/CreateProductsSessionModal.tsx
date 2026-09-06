@@ -644,14 +644,20 @@ export default function CreateProductsSessionModal({
 
   const sessionLine = (line: SessionLine): InventoryStockSessionLine => {
     if (line.kind === 'create_receive' && Number(line.quantity) === 0) {
-      // Catalog-only creates intentionally carry no receipt/lot/AP fields.
-      // The server still validates branch/date identity, then returns null
-      // batch and movement ids in the immutable session receipt.
+      // Catalog-only creates intentionally carry no receipt/lot/AP fields
+      // (no lot, expiry, note, cost, payment). The server still validates
+      // branch/date identity, then returns null batch and movement ids in the
+      // immutable session receipt. The supplier IS sent: it is who the
+      // delivery came from, and N29's Stock-in Sessions list reads it back
+      // off this line so a session whose items were all created at 0 still
+      // shows its supplier (the same lock rule as a received line).
       return {
         line_id: line.lineId,
         kind: 'create_receive',
         branch_id: Number(line.branchId),
         quantity: 0,
+        supplier_id: line.supplierLocked || line.supplierId == null ? null : Number(line.supplierId),
+        supplier_name: line.supplierLocked ? null : (line.supplierName || null),
         received_date: line.receivedDate,
         product: line.product || {},
       }
