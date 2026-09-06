@@ -400,9 +400,34 @@ export function joinLocalDateTime(isoDate: string | null | undefined, time: stri
   return parsed.value ? `${date}T${parsed.value}` : ''
 }
 
-/** 'YYYY-MM-DDTHH:mm' -> 'DD/MM/YYYY HH:mm' (string surgery only, never a Date). */
-export function localDateTimeToDisplay(local: string | null | undefined): string {
-  const { date, time } = splitLocalDateTime(local)
-  const display = isoToDisplayDate(date)
-  return display && time ? `${display} ${time}` : ''
+/** The two halves of a typed pair, plus whether either is showing text it could not read. */
+export interface LocalDateTimePair {
+  date: string
+  time: string
+  /** True while the date half holds text that did not normalise. */
+  dateUnreadable?: boolean
+  /** True while the time half holds text that did not normalise. */
+  timeUnreadable?: boolean
+}
+
+/**
+ * What a date+time pair may publish upward: 'YYYY-MM-DDTHH:mm', or ''.
+ *
+ * joinLocalDateTime alone answers "are both halves PRESENT". That is not the
+ * whole question for a typed field, because a typed field deliberately keeps
+ * its last committed value while the operator's unreadable text sits on
+ * screen (DateEntryInput never clears what was typed). On a filter box that
+ * is right. On the shift close it is not: a cashier retyping a wrong day and
+ * stopping halfway would leave the OLD timestamp stored, the Save button
+ * live, and the drawer would close at a minute printed nowhere on the
+ * screen -- which is the same class of silent wrong timestamp the native
+ * datetime-local control was removed for.
+ *
+ * So an unreadable half WITHDRAWS the pair. The half keeps its text (the
+ * operator has to see it to fix it) and the owning form's blocker row says
+ * what is missing.
+ */
+export function localDateTimePairValue(pair: LocalDateTimePair): string {
+  if (pair.dateUnreadable || pair.timeUnreadable) return ''
+  return joinLocalDateTime(pair.date, pair.time)
 }

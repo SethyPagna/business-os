@@ -5,11 +5,12 @@ import {
   applyDateEntryMask,
   applyTimeEntryMask,
   isoToDisplayDate,
-  joinLocalDateTime,
+  localDateTimePairValue,
   normalizeDateEntry,
   normalizeTimeEntry,
   splitLocalDateTime,
 } from '../../utils/dateEntry.ts'
+import type { LocalDateTimePair } from '../../utils/dateEntry.ts'
 
 // The app's ONE typed date field.
 //
@@ -455,6 +456,17 @@ export interface DateTimeEntryInputProps {
  * matters on the shift close form, where the value is required: clearing the
  * time must leave the typed date alone and let the submit row say what is
  * still missing, rather than wiping the field or inventing a midnight.
+ *
+ * An UNREADABLE half withdraws the pair the same way -- see
+ * dateEntry.localDateTimePairValue for why banking the last good timestamp
+ * while unreadable text is on screen is the one outcome a shift close cannot
+ * have. The half's own text is never touched; only what the pair publishes.
+ *
+ * The half un-flags itself on the next keystroke (that is how the red box
+ * clears as the operator retypes), which does briefly restore the last good
+ * pair while the new text is still in flight. Nothing can be saved out of
+ * that window: reaching any submit control blurs the half first, and the
+ * blur commit either settles the new text or withdraws the pair again.
  */
 export function DateTimeEntryInput({
   value,
@@ -467,21 +479,34 @@ export function DateTimeEntryInput({
   timeAriaLabel,
 }: DateTimeEntryInputProps) {
   const tr = translator(t)
-  const [date, setDate] = useState(() => splitLocalDateTime(value).date)
-  const [time, setTime] = useState(() => splitLocalDateTime(value).time)
+  const [pair, setPair] = useState<LocalDateTimePair>(() => ({
+    ...splitLocalDateTime(value), dateUnreadable: false, timeUnreadable: false,
+  }))
+  // Both halves and both readable-flags move through ONE ref, because a
+  // single commit fires onChange and then onInvalidChange in the same event:
+  // two handlers reading `pair` out of the render closure would each see the
+  // pre-event value and the second would undo the first.
+  const pairRef = useRef(pair)
   // Set on the way OUT as well as in, so a '' we published ourselves (one
-  // half cleared) never reads as an external reset and wipes the other half.
+  // half cleared or unreadable) never reads as an external reset and wipes
+  // the other half.
   const lastSyncedRef = useRef(value)
 
   if (lastSyncedRef.current !== value) {
     lastSyncedRef.current = value
     const next = splitLocalDateTime(value)
-    if (next.date !== date) setDate(next.date)
-    if (next.time !== time) setTime(next.time)
+    if (next.date !== pair.date || next.time !== pair.time) {
+      const reset: LocalDateTimePair = { ...next, dateUnreadable: false, timeUnreadable: false }
+      pairRef.current = reset
+      setPair(reset)
+    }
   }
 
-  const publish = (nextDate: string, nextTime: string) => {
-    const combined = joinLocalDateTime(nextDate, nextTime)
+  const apply = (patch: Partial<LocalDateTimePair>) => {
+    const next = { ...pairRef.current, ...patch }
+    pairRef.current = next
+    setPair(next)
+    const combined = localDateTimePairValue(next)
     if (combined === value) return
     lastSyncedRef.current = combined
     onChange(combined)
@@ -492,8 +517,9 @@ export function DateTimeEntryInput({
       <span className="min-w-0 flex-1">
         <DateEntryInput
           id={id}
-          value={date}
-          onChange={(iso) => { setDate(iso); publish(iso, time) }}
+          value={pair.date}
+          onChange={(iso) => apply({ date: iso })}
+          onInvalidChange={(unreadable) => apply({ dateUnreadable: unreadable })}
           t={t}
           disabled={disabled}
           ariaLabel={dateAriaLabel || tr('date', 'Date')}
@@ -501,8 +527,9 @@ export function DateTimeEntryInput({
       </span>
       <span className="w-24 shrink-0">
         <TimeEntryInput
-          value={time}
-          onChange={(next) => { setTime(next); publish(date, next) }}
+          value={pair.time}
+          onChange={(next) => apply({ time: next })}
+          onInvalidChange={(unreadable) => apply({ timeUnreadable: unreadable })}
           t={t}
           disabled={disabled}
           ariaLabel={timeAriaLabel || tr('time', 'Time')}

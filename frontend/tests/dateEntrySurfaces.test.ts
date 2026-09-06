@@ -212,11 +212,45 @@ runTest('the time and date+time fields reuse the same typed-entry machinery', ()
   assert.ok(source.includes('export function DateTimeEntryInput'), 'the date+time pair must be exported from the shared module')
   assert.ok(source.includes('applyTimeEntryMask'), 'the time mask must come from the shared helper')
   assert.ok(source.includes('normalizeTimeEntry'), 'the time commit must go through the shared normalizer')
-  assert.ok(source.includes('joinLocalDateTime') && source.includes('splitLocalDateTime'), 'the pair must be split/joined by the shared kernel')
+  assert.ok(source.includes('localDateTimePairValue') && source.includes('splitLocalDateTime'), 'the pair must be split/joined by the shared kernel')
   // The half-filled rule: a date with no time publishes '' rather than a
   // guessed midnight, and both halves stay on screen.
-  assert.ok(/const combined = joinLocalDateTime\(nextDate, nextTime\)/.test(source), 'the pair must be published through joinLocalDateTime')
+  assert.ok(/const combined = localDateTimePairValue\(/.test(source), 'the pair must be published through the one pair rule')
   assert.ok(!/T00:00/.test(source), 'no field may default a missing time to midnight')
+})
+
+runTest('an unreadable half withdraws the shift timestamp instead of banking the last good one', () => {
+  const source = read('components/shared/DateEntryInput.tsx')
+  // A typed field keeps its last COMMITTED value while the operator's
+  // unreadable text sits on screen -- that is DateEntryInput's contract and
+  // it is right for a filter box. On the shift close it is not: the pair
+  // would still hold the previous timestamp, closeReason would stay null,
+  // and Save would write a drawer close at a minute printed nowhere on the
+  // screen. So the pair listens to BOTH halves' invalid state and withdraws.
+  // Two wirings, not the four `onInvalidChange={...}` in the file -- the other
+  // two are DateEntryInput's and TimeEntryInput's pass-through to their own
+  // caller, which is the range picker's box painting and not this rule.
+  assert.equal(
+    (source.match(/onInvalidChange=\{\(unreadable\) => apply\(\{/g) || []).length, 2,
+    'both halves of the pair must report their unreadable state to it',
+  )
+  assert.ok(
+    /dateUnreadable/.test(source) && /timeUnreadable/.test(source),
+    'the pair must track each half\'s unreadable state by name',
+  )
+  // ...and it must NOT do it by clearing the half, which would wipe the very
+  // text the operator has to see to fix.
+  assert.ok(
+    !/onInvalidChange=\{[^}]*set(Date|Time)\(''\)/.test(source),
+    'withdrawing the pair must never clear what the operator typed',
+  )
+  // The blocker the withdrawal hands the work to already exists on both
+  // shift forms; assert it here so the two halves cannot drift apart.
+  const modal = read('components/shifts/ShiftHistoryModal.tsx')
+  assert.ok(
+    /const closeReason = !close\.closedAt \?/.test(modal) && /!edit\.openedAt \?/.test(modal),
+    'both shift forms must print a reason when their timestamp is withdrawn',
+  )
 })
 
 runTest('the shared field is 13px on desktop and >=16px under 768px', () => {

@@ -27,7 +27,7 @@ import {
   daysInMonth,
   isoToDisplayDate,
   joinLocalDateTime,
-  localDateTimeToDisplay,
+  localDateTimePairValue,
   normalizeDateEntry,
   normalizeTimeEntry,
   splitLocalDateTime,
@@ -370,18 +370,35 @@ runTest('split and join round-trip the exact string the shift transport parses',
   }
 })
 
-runTest('localDateTimeToDisplay is day-first string surgery only', () => {
-  assert.equal(localDateTimeToDisplay('2026-09-05T14:30'), '05/09/2026 14:30')
-  assert.equal(localDateTimeToDisplay('2026-03-09T09:00'), '09/03/2026 09:00')
-  assert.equal(localDateTimeToDisplay('2026-09-05'), '')
-  assert.equal(localDateTimeToDisplay(''), '')
+runTest('an unreadable half withdraws the pair instead of leaving the last good one', () => {
+  // THE discriminating rows for the pair field. joinLocalDateTime alone only
+  // knows whether both halves are PRESENT, and a typed field keeps its last
+  // committed value while the operator's unreadable text sits on screen. So a
+  // cashier who fixes a wrong day by retyping it and stops halfway would,
+  // under a join-only rule, still have the OLD timestamp stored and the Save
+  // button live -- and the shift would close at a minute that is nowhere on
+  // the screen. Both rows below return the stale pair under a join-only
+  // implementation and '' under this one.
+  const good = { date: '2026-09-05', time: '14:30' }
+  assert.equal(localDateTimePairValue({ ...good, dateUnreadable: false, timeUnreadable: false }), '2026-09-05T14:30')
+  assert.equal(localDateTimePairValue({ ...good, dateUnreadable: true, timeUnreadable: false }), '')
+  assert.equal(localDateTimePairValue({ ...good, dateUnreadable: false, timeUnreadable: true }), '')
+  assert.equal(localDateTimePairValue({ ...good, dateUnreadable: true, timeUnreadable: true }), '')
+  // The missing-half rule from joinLocalDateTime still holds through it, so
+  // there is one place that decides what a publishable pair is.
+  assert.equal(localDateTimePairValue({ date: '2026-09-05', time: '', dateUnreadable: false, timeUnreadable: false }), '')
+  assert.equal(localDateTimePairValue({ date: '', time: '14:30', dateUnreadable: false, timeUnreadable: false }), '')
+  assert.equal(localDateTimePairValue({ date: '2026-09-05', time: '930', dateUnreadable: false, timeUnreadable: false }), '2026-09-05T09:30')
+  // Absent flags read as readable, so the pair rule is safe to call with the
+  // two halves alone.
+  assert.equal(localDateTimePairValue({ date: '2026-09-05', time: '14:30' }), '2026-09-05T14:30')
 })
 
 runTest('the time half never routes through Date parsing either', () => {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url))
   const raw = fs.readFileSync(path.join(moduleDir, '..', 'src', 'utils', 'dateEntry.ts'), 'utf8')
   const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((line) => !/^\s*(\/\/|\*)/.test(line)).join('\n')
-  for (const exported of ['normalizeTimeEntry', 'applyTimeEntryMask', 'splitLocalDateTime', 'joinLocalDateTime', 'localDateTimeToDisplay']) {
+  for (const exported of ['normalizeTimeEntry', 'applyTimeEntryMask', 'splitLocalDateTime', 'joinLocalDateTime', 'localDateTimePairValue']) {
     assert.ok(code.includes(`export function ${exported}`), `dateEntry.ts must export ${exported}`)
   }
   // Re-asserted after the addition: the whole module is still Date-free apart
