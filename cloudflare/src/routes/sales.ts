@@ -339,7 +339,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'Sale items required' }, 400)
   }
 
-  // Cashier-selectable at checkout (POS.tsx's "Awaiting Payment" / "Awaiting
+  // Cashier-selectable at checkout (POS.tsx's "Credit" / "Awaiting
   // Delivery" flows) -- previously ignored, so the sale was always recorded
   // (and stock always deducted) as 'completed' regardless of what the
   // cashier actually picked.

@@ -189,6 +189,10 @@ const surfaces: [string, string[]][] = [
   ['../src/components/pos/POS.tsx', ['Awaiting Payment']],
   ['../src/components/sales/SaleDetailModal.tsx', ['Credit — awaiting payment']],
   ['../src/components/loyalty-points/LoyaltyPointsPage.tsx', ['Awaiting payment and cancelled sales']],
+  // Not a fallback but a POINTER: routes/sales.ts's checkout comment named the
+  // POS status by its old label, so a reader following it would have found a
+  // picker that no longer says that and "corrected" the picker back.
+  ['../../cloudflare/src/routes/sales.ts', ['POS.tsx\'s "Awaiting Payment"']],
 ]
 for (const [rel, banned] of surfaces) {
   const src = readFileSync(new URL(rel, import.meta.url), 'utf8')
