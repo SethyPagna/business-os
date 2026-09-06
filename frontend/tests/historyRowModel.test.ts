@@ -104,3 +104,55 @@ const modelCalls = (stockChanges.match(/buildHistoryRowModel\(/g) || []).length
 assert.ok(modelCalls >= 3, `Stock Change must build the row model in each renderer, found ${modelCalls}`)
 assert.match(stockChanges, /historyExportField\(/, 'the Stock Change CSV export must use the export placeholder')
 console.log(`PASS Stock Change builds the shared row model in ${modelCalls} renderers`)
+
+// ---- 3. O3 + N8: the shape of the Stock Change row -------------------------
+// The owner's two complaints were about geometry, not data: the barcode sat
+// inline with the product name (wrapping the row and shoving the amount column
+// around on a narrow card), and "Edit reason" / "Revert" were bare text links
+// among real buttons. Both are structural, so they are pinned structurally --
+// a behavioural test cannot see a class name, and these regressions come back
+// through a careless JSX edit rather than through logic.
+const sc = stockChanges.replace(/\r\n/g, '\n')
+
+// (a) Desktop table: the product cell is exactly two stacked single-line
+// cells -- the name, then the barcode on its own muted `dense-id` line.
+assert.match(
+  sc,
+  /<td>\n\s*<span className="block dense-cell-truncate font-semibold[^"]*"[^>]*>\{row\.product_name\}<\/span>\n\s*<span className="block dense-cell-truncate dense-id[^"]*"[^>]*>\{model\.barcode\}<\/span>\n\s*<\/td>/,
+  'the desktop product cell must render two stacked `block dense-cell-truncate` spans, the second carrying `dense-id` for the barcode',
+)
+
+// (b) ...and the barcode is never emitted on the same line as the name, which
+// is the exact shape that used to wrap and stretch the row.
+const inlineBarcode = sc.split('\n')
+  .map((line, index) => [index + 1, line] as [number, string])
+  .filter(([, line]) => /\{row\.product_name\}/.test(line) && /\{model\.barcode\}/.test(line))
+assert.deepEqual(inlineBarcode, [], `the barcode is rendered inline with the product name:\n${inlineBarcode.map(([n, l]) => `  ${n}: ${l.trim()}`).join('\n')}`)
+
+// (c) Mobile card: a dedicated mono barcode line, and it comes BEFORE the
+// branch . user . reason row rather than sharing that wrapping chip row.
+const mobileBarcode = sc.search(/<div className="[^"]*font-mono[^"]*">\{model\.barcode\}<\/div>/)
+assert.ok(mobileBarcode > 0, 'the mobile card must give the barcode its own font-mono line')
+const mobileActor = sc.indexOf('{model.actor}</span>')
+assert.ok(mobileActor > 0, 'the mobile card must show the actor in the branch / user / reason row')
+assert.ok(mobileBarcode < mobileActor, 'the mobile barcode line must come before the branch / user / reason row, not inside it')
+
+// (d) Row actions are real buttons from the app kit, not text links: same
+// height / radius / weight as sibling actions, icon + label on desktop,
+// icon-only with an aria-label below sm.
+const buttons = sc.split('<button').slice(1)
+const ROW_ACTIONS: Array<[string, RegExp]> = [
+  ['Edit reason', /aria-label=\{tr\(t, 'edit_reason'/],
+  ['Revert', /aria-label=\{tr\(t, 'revert'/],
+]
+for (const [label, aria] of ROW_ACTIONS) {
+  const matches = buttons.map((b) => b.slice(0, 900)).filter((head) => aria.test(head))
+  assert.ok(matches.length > 0, `${label} row action must be a <button> carrying an aria-label`)
+  for (const head of matches) {
+    assert.match(head, /className="btn-(secondary|danger)\b/, `${label} must use the shared button kit (btn-secondary / btn-danger), not a text link`)
+    assert.match(head, /<span className="hidden sm:inline">/, `${label} must hide its label below sm and stay icon-only there`)
+    assert.doesNotMatch(head, /\bunderline\b/, `${label} must not be styled as a link`)
+  }
+  console.log(`PASS Stock Change ${label} is a button-kit action (${matches.length} site(s))`)
+}
+console.log('PASS Stock Change barcode has its own line on both the desktop table and the mobile card')
