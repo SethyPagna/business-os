@@ -15,35 +15,50 @@
 // qty, price, total make them compact... especially name, it is being pushed
 // two rows."
 //
-// Two root causes, neither of them padding:
+// THREE root causes, none of them padding:
 //
-// 1. The money tracks were `minmax(x, auto)`, and an `auto` grid track takes
-//    its MAX-CONTENT width. The price cell was `whitespace-nowrap` and holds
-//    "$21.00 (-$3.00)" on one line, so that one column claimed ~95px of an
-//    80mm receipt's ~270px content box -- and the name column, the only
-//    flexible one, was left with whatever remained. A 34-character product
-//    name then wrapped onto four lines.
-// 2. The tracks were sized in `rem`, which is the ROOT font size (16px) and
-//    has nothing to do with the receipt's own `font_size`. A shop printing at
-//    9px still paid 16px-rooted columns and gutters.
+// 1. The money tracks were sized in `rem`, which is the ROOT font size (16px)
+//    and has nothing to do with the receipt's own `font_size`. A shop printing
+//    at 9px still paid 16px-rooted columns and gutters. Every track here is
+//    `em`, so it scales with the receipt.
+// 2. The money tracks were CONTENT-SIZED (`auto`, then `fit-content()`), and
+//    every item row is its OWN grid element -- `<div class="grid">` per line,
+//    not one grid over the whole table. A content-sized track therefore
+//    resolves row by row: with `fit-content(4.4em)` the discounted line's
+//    price column came out 52.8px while the plain line's came out 32.4px on
+//    the same receipt, so the Price figures did not line up down the page and
+//    the name column was a different width on every row. The tracks are now
+//    `minmax(<floor>em, max-content)`, with floors chosen to cover the figures
+//    a receipt actually prints, so every row -- and the header -- resolves the
+//    SAME track from the paper width alone.
+// 3. The per-unit discount was an INLINE span beside the price
+//    (`<span class="ml-1">(-$3.00)</span>`), so that cell's max-content was
+//    "$21.00 (-$3.00)" on one line -- ~95px of an 80mm receipt's ~270px
+//    content box -- and it blew straight past any floor. Receipt.tsx renders
+//    it as its own block under the price, so a money cell's max-content is
+//    the widest SINGLE figure and the floor is what decides the track.
 //
-// The fix is `fit-content(<limit>)` in `em`: the track sits at its content
-// width when that is small (a qty of "1" costs one character, not 1.8em),
-// grows only up to the limit, and the cell wraps BETWEEN its figures beyond
-// it. No figure is ever broken across lines -- fit-content never drops below
-// min-content, so a five-figure price still gets the width it needs.
+// Residual, stated rather than hidden: a floor only makes a column
+// content-independent for figures that fit under it. A per-unit cut wider than
+// the price floor -- "(-$120.00)" at 5.4em against the 4.4em floor -- still
+// grows that one row's track. Widening the floor to cover it would take the
+// width back off the product name, which is the thing the owner asked for, so
+// the trade is deliberate.
 
-export const RECEIPT_ITEM_COLUMN_LIMIT_EM = {
-  // A two-digit quantity, and no more: a three-digit one still gets its width
-  // because fit-content never drops below min-content, and a one-digit one
-  // costs a single character rather than the whole limit.
-  qty: 1.4,
-  // Wide enough for the parenthesised per-unit cut -- "(-$3.00)", the widest
-  // thing this column prints on its own line -- so the discount wraps under
-  // the price instead of breaking mid-figure. receiptNumericWidthEm() below
-  // is how the test states that, rather than trusting the number here.
+// Content-INDEPENDENT floors, in em of the receipt's own font size. Each one
+// covers the widest figure its column prints; tests/receiptCompactRows.test.ts
+// states that against receiptNumericWidthEm() rather than trusting these
+// numbers.
+export const RECEIPT_ITEM_COLUMN_FLOOR_EM = {
+  // "99" -- 1.08em under the Courier model -- with headroom, so a three-digit
+  // quantity grows the track rather than breaking the figure.
+  qty: 1.5,
+  // The parenthesised per-unit cut, "(-$3.00)" (4.32em), is the widest thing
+  // this column prints on a line of its own, and "$120.00" (3.78em) is the
+  // widest plain price this shop rings up.
   unitPrice: 4.4,
-  lineTotal: 3.4,
+  // "$120.00" -- 3.78em.
+  lineTotal: 3.8,
 } as const
 
 // Column gap, in em of the receipt's own font size, so a shop that prints at
@@ -73,19 +88,108 @@ export const RECEIPT_MONOSPACE_ADVANCE_EM = 0.6
 
 // The width a money figure of this many characters needs inside a numeric
 // cell, in em of the RECEIPT font (the cell itself prints at
-// RECEIPT_ITEM_NUMERIC_FONT_EM). Used to prove a fit-content limit is wide
-// enough that the figure never has to break mid-number.
+// RECEIPT_ITEM_NUMERIC_FONT_EM). Used to prove a floor is wide enough that the
+// figure never has to break mid-number.
 export function receiptNumericWidthEm(characters: number): number {
   return characters * RECEIPT_MONOSPACE_ADVANCE_EM * RECEIPT_ITEM_NUMERIC_FONT_EM
 }
 
+// A run of text under the same Courier model, in px. Array.from, not .length:
+// a Khmer label is counted in code points, not UTF-16 units.
+export function receiptTextWidthPx(text: string, fontSizePx: number): number {
+  return Array.from(text).length * RECEIPT_MONOSPACE_ADVANCE_EM * fontSizePx
+}
+
+// The printable box inside the receipt shell, in px.
+export function receiptContentWidthPx(paperWidthMm: number): number {
+  return paperWidthMm * PX_PER_MM - RECEIPT_SHELL_HORIZONTAL_PADDING_PX
+}
+
 export function receiptItemGridTemplate(showUnitPriceCol: boolean): string {
-  const { qty, unitPrice, lineTotal } = RECEIPT_ITEM_COLUMN_LIMIT_EM
+  const { qty, unitPrice, lineTotal } = RECEIPT_ITEM_COLUMN_FLOOR_EM
   // The name column is the flexible one and may shrink before any money
-  // column gives up a pixel -- minmax(0,1fr), never `auto`.
+  // column gives up a pixel -- minmax(0,1fr), never `auto`. The money columns
+  // are FLOORED, never capped: `fit-content()` and bare `auto` both resolve
+  // per row, and each item line is its own grid element.
   return showUnitPriceCol
-    ? `minmax(0,1fr) fit-content(${qty}em) fit-content(${unitPrice}em) fit-content(${lineTotal}em)`
-    : `minmax(0,1fr) fit-content(${qty}em) fit-content(${unitPrice + lineTotal}em)`
+    ? `minmax(0,1fr) minmax(${qty}em,max-content) minmax(${unitPrice}em,max-content) minmax(${lineTotal}em,max-content)`
+    // Turning the price column off RETURNS its budget to the name rather than
+    // merging it into the total column: the cell that is gone prints nothing,
+    // so charging for it would take width off the name for no reason.
+    : `minmax(0,1fr) minmax(${qty}em,max-content) minmax(${lineTotal}em,max-content)`
+}
+
+export interface ReceiptItemTrackInput {
+  paperWidthMm: number
+  /** The receipt's own font_size -- the em base an item ROW inherits. */
+  fontSizePx: number
+  showUnitPriceCol?: boolean
+  /**
+   * The font-size of the GRID ELEMENT being resolved. `em` tracks and the `em`
+   * column gap resolve against the element's own font-size, so a header that
+   * carried `text-[10px]` on the grid CONTAINER resolved 4.4em to 44px while
+   * the item rows resolved it to 52.8px -- the header sat on different tracks
+   * than the rows under it. Defaults to `fontSizePx`, which is what every grid
+   * on the receipt inherits once that class is on the CELLS instead.
+   */
+  gridFontSizePx?: number
+  /** The font-size the FIGURES print at. Defaults to the numeric cell size. */
+  figureFontSizePx?: number
+  /** Every figure the cell prints, ONE PER BLOCK LINE. */
+  qtyFigures?: string[]
+  unitPriceFigures?: string[]
+  lineTotalFigures?: string[]
+}
+
+export interface ReceiptItemTracksPx {
+  gapPx: number
+  namePx: number
+  qtyPx: number
+  unitPricePx: number
+  lineTotalPx: number
+  /** Where the centred Qty cell's midline lands, measured from the content box. */
+  qtyCentrePx: number
+  /** Where the right-aligned figures land. NaN when the price column is off. */
+  unitPriceRightEdgePx: number
+  lineTotalRightEdgePx: number
+}
+
+function maxContentPx(figures: string[] | undefined, figureFontSizePx: number): number {
+  if (!figures || figures.length === 0) return 0
+  // Each figure is its own block line and each is nowrap, so the cell's
+  // max-content is the widest ONE of them -- not their sum.
+  return Math.max(...figures.map((figure) => receiptTextWidthPx(figure, figureFontSizePx)))
+}
+
+// Resolve `minmax(<floor>em, max-content)` for the money columns and the
+// remaining 1fr for the name, under the module's Courier model. This is how a
+// test states that two item rows and their header land on the SAME tracks
+// without a browser -- the property the owner's photo was missing.
+export function receiptResolveItemTracksPx(input: ReceiptItemTrackInput): ReceiptItemTracksPx {
+  const showUnitPriceCol = input.showUnitPriceCol !== false
+  const gridFontSizePx = input.gridFontSizePx ?? input.fontSizePx
+  const figureFontSizePx = input.figureFontSizePx ?? input.fontSizePx * RECEIPT_ITEM_NUMERIC_FONT_EM
+  const gapPx = RECEIPT_ITEM_COLUMN_GAP_EM * gridFontSizePx
+  const track = (floorEm: number, figures?: string[]): number =>
+    Math.max(floorEm * gridFontSizePx, maxContentPx(figures, figureFontSizePx))
+  const qtyPx = track(RECEIPT_ITEM_COLUMN_FLOOR_EM.qty, input.qtyFigures)
+  const unitPricePx = showUnitPriceCol ? track(RECEIPT_ITEM_COLUMN_FLOOR_EM.unitPrice, input.unitPriceFigures) : 0
+  const lineTotalPx = track(RECEIPT_ITEM_COLUMN_FLOOR_EM.lineTotal, input.lineTotalFigures)
+  const gapCount = showUnitPriceCol ? 3 : 2
+  const namePx = receiptContentWidthPx(input.paperWidthMm) - qtyPx - unitPricePx - lineTotalPx - gapCount * gapPx
+  const qtyStartPx = namePx + gapPx
+  const unitPriceStartPx = qtyStartPx + qtyPx + gapPx
+  const lineTotalStartPx = showUnitPriceCol ? unitPriceStartPx + unitPricePx + gapPx : unitPriceStartPx
+  return {
+    gapPx,
+    namePx,
+    qtyPx,
+    unitPricePx,
+    lineTotalPx,
+    qtyCentrePx: qtyStartPx + qtyPx / 2,
+    unitPriceRightEdgePx: showUnitPriceCol ? unitPriceStartPx + unitPricePx : Number.NaN,
+    lineTotalRightEdgePx: lineTotalStartPx + lineTotalPx,
+  }
 }
 
 export interface ReceiptNameColumnInput {
@@ -94,23 +198,12 @@ export interface ReceiptNameColumnInput {
   showUnitPriceCol?: boolean
 }
 
-// The width the product name is GUARANTEED, in px, on a receipt of this paper
-// width and font size. Conservative: it charges every money column its full
-// fit-content LIMIT, while a real row usually pays less (a one-digit qty costs
-// one character). The real name column is therefore never narrower than this.
-export function receiptNameColumnWidthPx({
-  paperWidthMm,
-  fontSizePx,
-  showUnitPriceCol = true,
-}: ReceiptNameColumnInput): number {
-  const contentPx = paperWidthMm * PX_PER_MM - RECEIPT_SHELL_HORIZONTAL_PADDING_PX
-  const { qty, unitPrice, lineTotal } = RECEIPT_ITEM_COLUMN_LIMIT_EM
-  // Turning the price column off merges its budget into the total column
-  // rather than returning it, so the money side costs the same either way and
-  // only the gutter count changes.
-  const columnEm = qty + unitPrice + lineTotal
-  const gapEm = (showUnitPriceCol ? 3 : 2) * RECEIPT_ITEM_COLUMN_GAP_EM
-  return contentPx - (columnEm + gapEm) * fontSizePx
+// The width the product name gets, in px, on a receipt of this paper width and
+// font size. With floored (rather than content-sized) money tracks this is the
+// width on EVERY row, not a conservative lower bound: only a figure wider than
+// its column's floor moves it, and the floors cover what a receipt prints.
+export function receiptNameColumnWidthPx(input: ReceiptNameColumnInput): number {
+  return receiptResolveItemTracksPx(input).namePx
 }
 
 export function receiptNameCharsPerLine(input: ReceiptNameColumnInput): number {

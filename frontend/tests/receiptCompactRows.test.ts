@@ -46,12 +46,13 @@ const receiptSource = fs.readFileSync(receiptUrl, 'utf8')
 // print/image/PDF exporter both read it, and so does this test, rather than
 // restating the numbers and pinning a second copy of them.
 const {
-  RECEIPT_ITEM_COLUMN_LIMIT_EM,
+  RECEIPT_ITEM_COLUMN_FLOOR_EM,
   RECEIPT_ITEM_NUMERIC_FONT_EM,
   receiptItemGridTemplate,
   receiptNameColumnWidthPx,
   receiptNameLineCount,
   receiptNumericWidthEm,
+  receiptResolveItemTracksPx,
 } = require('../src/utils/receiptItemColumns.ts') as typeof import('../src/utils/receiptItemColumns.ts')
 
 // The receipt's real collaborators are loaded for real (the money math, the
@@ -92,6 +93,13 @@ const Receipt = loadReceiptComponent(receiptSource)
 
 const LONG_ITEM_NAME = 'Girlactik Matte Liquid Flirtatious'
 
+// TWO items, deliberately: one discounted line and one plain one. Every money
+// column has to resolve the SAME track on both -- each item row is its own
+// grid element, so a content-sized track made the discounted row's Price
+// column wider than the plain row's and the figures stopped lining up.
+const DISCOUNTED_LINE = { price: '$21.00', cut: '(-$3.00)', total: '$18.00', qty: '1' }
+const PLAIN_LINE = { price: '$5.00', total: '$60.00', qty: '12' }
+
 const saleFixture = {
   receipt_number: '20260906-101500',
   created_at: '2026-09-06T03:15:00Z',
@@ -104,13 +112,14 @@ const saleFixture = {
   delivery_fee_usd: 2,
   delivery_fee_khr: 8130,
   delivery_fee_paid_by: 'customer',
-  subtotal_usd: 18,
+  subtotal_usd: 78,
   discount_usd: 0,
   tax_usd: 0,
-  total_usd: 20,
-  amount_paid_usd: 20,
+  total_usd: 80,
+  amount_paid_usd: 80,
   items: [
     { product_name: LONG_ITEM_NAME, quantity: 1, base_price_usd: 21, price_usd: 21, applied_price_usd: 18 },
+    { product_name: 'Lip Balm', quantity: 12, base_price_usd: 5, price_usd: 5, applied_price_usd: 5 },
   ],
 }
 
@@ -277,13 +286,18 @@ await runTest('a 34-character product name fits two lines at 80 mm', () => {
   assert.ok(receiptNameColumnWidthPx({ paperWidthMm: 80, fontSizePx: 12 }) > 140)
 })
 
-await runTest('the money columns cannot claim the name column by growing to max-content', () => {
+await runTest('every money track has a content-INDEPENDENT floor, not a content-sized cap', () => {
   const template = receiptItemGridTemplate(true)
   assert.match(template, /^minmax\(0,1fr\) /, 'the name column is the flexible one')
-  assert.ok(!template.includes('auto'), 'an auto track takes max-content and squeezes the name')
-  assert.equal((template.match(/fit-content\(/g) || []).length, 3, 'qty, price and total are all capped')
+  // Each item row is its OWN grid element, so a content-sized track resolves
+  // per row: `fit-content()` gave the discounted line a 52.8px price column
+  // and the plain line a 32.4px one. Neither spelling may come back.
+  assert.ok(!template.includes('fit-content('), 'a fit-content track resolves per row, not per table')
+  assert.ok(!/(^|[ ,(])auto([ ,)]|$)/.test(template), 'an auto track takes max-content and squeezes the name')
+  assert.equal((template.match(/minmax\(/g) || []).length, 4, 'name + three floored money tracks')
   const threeCol = receiptItemGridTemplate(false)
-  assert.equal((threeCol.match(/fit-content\(/g) || []).length, 2, 'with the price column off, two money tracks')
+  assert.ok(!threeCol.includes('fit-content('))
+  assert.equal((threeCol.match(/minmax\(/g) || []).length, 3, 'with the price column off, two money tracks')
   // em, never rem: rem is the ROOT font size (16px) and knows nothing about
   // the receipt's own font_size, so a shop printing at 9px paid 16px-rooted
   // columns. Every track this module hands out is relative to the receipt.
@@ -291,23 +305,133 @@ await runTest('the money columns cannot claim the name column by growing to max-
   assert.ok(!threeCol.includes('rem'))
 })
 
-await runTest('a capped money column still never breaks a figure across lines', () => {
-  // The widest thing the price column prints on a line of its own is the
-  // parenthesised per-unit cut. Its limit has to hold that whole, or the
-  // "compact" columns would win their width by splitting "(-$3.00)" in two.
+await runTest('each floor holds the widest figure its column prints, unbroken', () => {
+  // Stated against the Courier model, not against the numbers in the module:
+  // a floor narrower than its widest figure would win the name its width by
+  // splitting "(-$3.00)" or "$120.00" in two.
   assert.ok(
-    RECEIPT_ITEM_COLUMN_LIMIT_EM.unitPrice >= receiptNumericWidthEm('(-$3.00)'.length),
-    `the price column must hold "(-$3.00)" unbroken, ${RECEIPT_ITEM_COLUMN_LIMIT_EM.unitPrice}em < ${receiptNumericWidthEm(8)}em`,
+    RECEIPT_ITEM_COLUMN_FLOOR_EM.qty >= receiptNumericWidthEm('99'.length),
+    `the qty floor must hold a two-digit quantity, ${RECEIPT_ITEM_COLUMN_FLOOR_EM.qty}em`,
   )
   assert.ok(
-    RECEIPT_ITEM_COLUMN_LIMIT_EM.lineTotal >= receiptNumericWidthEm('$18.00'.length),
-    'and the total column its own figure',
+    RECEIPT_ITEM_COLUMN_FLOOR_EM.unitPrice >= receiptNumericWidthEm('$120.00'.length),
+    `the price floor must hold "$120.00", ${RECEIPT_ITEM_COLUMN_FLOOR_EM.unitPrice}em`,
   )
   assert.ok(
-    RECEIPT_ITEM_COLUMN_LIMIT_EM.qty >= receiptNumericWidthEm('99'.length),
-    'and the qty column a two-digit quantity',
+    RECEIPT_ITEM_COLUMN_FLOOR_EM.unitPrice >= receiptNumericWidthEm(DISCOUNTED_LINE.cut.length),
+    `and the parenthesised cut on its own line, ${RECEIPT_ITEM_COLUMN_FLOOR_EM.unitPrice}em`,
+  )
+  assert.ok(
+    RECEIPT_ITEM_COLUMN_FLOOR_EM.lineTotal >= receiptNumericWidthEm('$120.00'.length),
+    `the total floor must hold "$120.00", ${RECEIPT_ITEM_COLUMN_FLOOR_EM.lineTotal}em`,
   )
   assert.ok(RECEIPT_ITEM_NUMERIC_FONT_EM < 1, 'the money cells print smaller than the name')
+})
+
+await runTest('the header and BOTH item rows resolve the same tracks', () => {
+  // The header prints its captions at 10px; the item cells print their
+  // figures at RECEIPT_ITEM_NUMERIC_FONT_EM of the receipt font. What must
+  // agree is the GRID em base -- which is why `text-[10px]` may not sit on
+  // the header's grid container -- and the floors, which is why no track may
+  // be content-sized. The model resolves minmax(floor,max-content) exactly.
+  const fontSizePx = 12
+  const grids = {
+    header: receiptResolveItemTracksPx({
+      paperWidthMm: 80,
+      fontSizePx,
+      figureFontSizePx: 10,
+      qtyFigures: ['Qty'],
+      unitPriceFigures: ['Price'],
+      lineTotalFigures: ['Total'],
+    }),
+    discountedRow: receiptResolveItemTracksPx({
+      paperWidthMm: 80,
+      fontSizePx,
+      qtyFigures: [DISCOUNTED_LINE.qty],
+      // Two BLOCK lines, so max-content is the widest one of them.
+      unitPriceFigures: [DISCOUNTED_LINE.price, DISCOUNTED_LINE.cut],
+      lineTotalFigures: [DISCOUNTED_LINE.total],
+    }),
+    plainRow: receiptResolveItemTracksPx({
+      paperWidthMm: 80,
+      fontSizePx,
+      qtyFigures: [PLAIN_LINE.qty],
+      unitPriceFigures: [PLAIN_LINE.price],
+      lineTotalFigures: [PLAIN_LINE.total],
+    }),
+  }
+  const reference = grids.header
+  for (const [name, resolved] of Object.entries(grids)) {
+    assert.equal(
+      resolved.unitPriceRightEdgePx,
+      reference.unitPriceRightEdgePx,
+      `${name}: the Price figures must share one right edge (${resolved.unitPriceRightEdgePx} vs ${reference.unitPriceRightEdgePx})`,
+    )
+    assert.equal(resolved.qtyCentrePx, reference.qtyCentrePx, `${name}: the Qty cells must share one centre line`)
+    assert.equal(resolved.lineTotalRightEdgePx, reference.lineTotalRightEdgePx, `${name}: and the Total figures one right edge`)
+    assert.equal(resolved.namePx, reference.namePx, `${name}: so the name column is one width on every row`)
+  }
+  // Inline, the discounted cell's max-content was "$21.00 (-$3.00)" on one
+  // line -- past the floor, and past the plain row's track.
+  const inlineDiscount = receiptResolveItemTracksPx({
+    paperWidthMm: 80,
+    fontSizePx,
+    qtyFigures: [DISCOUNTED_LINE.qty],
+    unitPriceFigures: [`${DISCOUNTED_LINE.price} ${DISCOUNTED_LINE.cut}`],
+    lineTotalFigures: [DISCOUNTED_LINE.total],
+  })
+  // The right edge is structurally fixed (the Total column is last and its
+  // track is floored), so what an over-wide price cell actually moves is the
+  // NAME column and, with it, the Qty centre line -- a different name width on
+  // every row, which is what the owner photographed.
+  assert.notEqual(
+    inlineDiscount.namePx,
+    reference.namePx,
+    'sanity: an inline cut is what used to break the alignment, so the model must see it',
+  )
+  assert.notEqual(inlineDiscount.qtyCentrePx, reference.qtyCentrePx)
+  // And the other half: a header that sets its own 10px em base resolves the
+  // SAME template against 10px -- 4.4em becomes 44px, the gap becomes 2px --
+  // so its captions sat on tracks nothing below them used.
+  const tenPxHeader = receiptResolveItemTracksPx({
+    paperWidthMm: 80,
+    fontSizePx,
+    gridFontSizePx: 10,
+    figureFontSizePx: 10,
+    qtyFigures: ['Qty'],
+    unitPriceFigures: ['Price'],
+    lineTotalFigures: ['Total'],
+  })
+  assert.notEqual(
+    tenPxHeader.unitPriceRightEdgePx,
+    reference.unitPriceRightEdgePx,
+    'sanity: text-[10px] on the header GRID is the second way the columns drifted',
+  )
+})
+
+await runTest('the header grid carries no font size of its own', () => {
+  const html = renderReceipt()
+  const headerGrid = html.split('data-receipt-line="true"').find((chunk) => chunk.includes('data-receipt-cell="name"'))
+  assert.ok(headerGrid, 'the item header row renders')
+  const headerClass = (headerGrid.match(/class="([^"]*)"/) || [])[1] || ''
+  assert.doesNotMatch(
+    headerClass,
+    /text-\[\d+(?:\.\d+)?px\]/,
+    `the header grid must not set its own em base (${headerClass})`,
+  )
+  // ...and the caption size did not simply vanish: it moved onto the cells.
+  assert.ok(headerGrid.includes('text-[10px]'), 'the header captions still print small')
+})
+
+await runTest('the per-unit cut is a block under the price, never an inline span beside it', () => {
+  const html = renderReceipt()
+  const priceCell = html.split('data-receipt-cell="price"').find((chunk) => chunk.includes(DISCOUNTED_LINE.cut))
+  assert.ok(priceCell, 'the discounted price cell renders')
+  const cellBody = priceCell.slice(0, priceCell.indexOf('data-receipt-cell="line-total"'))
+  assert.ok(cellBody.includes(DISCOUNTED_LINE.price), 'the price prints')
+  assert.doesNotMatch(cellBody, /<span[^>]*class="ml-1/, 'an inline cut grows the cell past its floor')
+  assert.doesNotMatch(cellBody, /<span/, 'both figures are their own block line')
+  assert.equal((cellBody.match(/whitespace-nowrap/g) || []).length, 2, 'and each figure is nowrap on its own line')
 })
 
 await runTest('the 58 mm and 80x50 templates still leave the name a real column', () => {
@@ -321,11 +445,16 @@ await runTest('the 58 mm and 80x50 templates still leave the name a real column'
       assert.ok(width > 0, `${paperWidthMm}mm @ ${fontSizePx}px: the name column collapsed to ${Math.round(width)}px`)
     }
   }
-  // On 58mm the owner's 34-character example does not fit two lines -- there
-  // is not that much paper -- but it must not be the four it was.
+  // 58mm is 187px of content and the floored money columns take ~124px of it
+  // at the default 12px font, so the owner's 34-character example runs to five
+  // lines there. That is paper, not layout: the floors are what make every row
+  // and the header share one track, and at the 9px font a 58mm roll actually
+  // wants, the same name is two lines again. Both halves are pinned so a later
+  // change cannot quietly make the narrow paper worse.
+  assert.equal(receiptNameLineCount(LONG_ITEM_NAME.length, { paperWidthMm: 58, fontSizePx: 12 }), 5)
   assert.ok(
-    receiptNameLineCount(LONG_ITEM_NAME.length, { paperWidthMm: 58, fontSizePx: 12 }) <= 4,
-    'the 58mm name column must still be usable',
+    receiptNameLineCount(LONG_ITEM_NAME.length, { paperWidthMm: 58, fontSizePx: 9 }) <= 2,
+    'a smaller font is a real remedy on 58mm paper',
   )
 })
 
@@ -334,18 +463,19 @@ await runTest('the rendered table uses the shared track on the header AND the ro
   const template = receiptItemGridTemplate(true)
   assert.equal(
     occurrences(html, `grid-template-columns:${template}`),
-    2,
-    'the header row and the item row must both carry the one shared track',
+    3,
+    'the header row and BOTH item rows must carry the one shared track',
   )
   // The name column takes every pixel the money columns leave.
   assert.ok(html.includes(LONG_ITEM_NAME))
   // The numbers never break mid-figure, and the discount keeps its
-  // parentheses beside the price it describes.
-  const rows = html.split('data-receipt-cell="price"')
-  const priceCell = rows[rows.length - 1]
-  assert.ok(priceCell.includes('$21.00'), 'the price cell prints the selling price')
-  assert.ok(priceCell.includes('(-$3.00)'), 'and the cut in parentheses')
+  // parentheses under the price it describes.
+  const priceCell = html.split('data-receipt-cell="price"').find((chunk) => chunk.includes(DISCOUNTED_LINE.cut))
+  assert.ok(priceCell, 'the discounted price cell renders')
+  assert.ok(priceCell.includes(DISCOUNTED_LINE.price), 'the price cell prints the selling price')
   assert.ok(priceCell.includes('whitespace-nowrap'), 'the figures do not wrap mid-number')
+  assert.ok(html.includes(PLAIN_LINE.price), 'and the undiscounted line prints its own price')
+  assert.ok(html.includes(PLAIN_LINE.total))
   assert.ok(html.includes('data-receipt-cell="line-total"'))
 })
 
@@ -355,7 +485,7 @@ await runTest('the narrow templates render the same one table', () => {
     const html = renderReceipt({}, { paperSize })
     assert.equal(
       occurrences(html, `grid-template-columns:${template}`),
-      2,
+      3,
       `${paperSize}: the item table is the same table at every paper width`,
     )
     assert.ok(html.includes(LONG_ITEM_NAME), `${paperSize}: the full name still prints`)

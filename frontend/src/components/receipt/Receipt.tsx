@@ -586,11 +586,17 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             columns are narrower than the old single one was, because there
             are now two of them on the same 58mm paper -- the item column
             still takes every pixel the other three leave. */}
-        <div data-receipt-line="true" style={itemGridStyle} className="mb-1 grid border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
-          <span data-receipt-cell="name">{labelFor(lang, 'item')}</span>
-          <span data-receipt-cell="qty" className="whitespace-normal text-center leading-tight">{labelFor(lang, 'qty')}</span>
-          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right leading-tight">{labelFor(lang, 'unitPrice')}</span> : null}
-          <span data-receipt-cell="line-total" className="text-right leading-tight">{labelFor(lang, 'lineTotal')}</span>
+        {/* `text-[10px]` sits on the CELLS, never on this grid container. The
+            tracks and the column gap are `em`, so a 10px container resolved
+            them against 10px while the item rows below resolved the same
+            template against the receipt's own font size -- the header lined up
+            with nothing underneath it. One em base for the header and the rows
+            is what gives the Price figures a shared right edge down the page. */}
+        <div data-receipt-line="true" style={itemGridStyle} className="mb-1 grid border-b border-dashed border-gray-300 pb-1 font-semibold text-gray-500">
+          <span data-receipt-cell="name" className="text-[10px]">{labelFor(lang, 'item')}</span>
+          <span data-receipt-cell="qty" className="whitespace-normal text-center text-[10px] leading-tight">{labelFor(lang, 'qty')}</span>
+          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right text-[10px] leading-tight">{labelFor(lang, 'unitPrice')}</span> : null}
+          <span data-receipt-cell="line-total" className="text-right text-[10px] leading-tight">{labelFor(lang, 'lineTotal')}</span>
         </div>
         {items.map((item, index) => {
           // Every figure on this line comes from the shared calculation, so the
@@ -645,16 +651,18 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                     The old "qty × unit" subline is gone: the unit price is
                     its own column now, so the subline only repeated it.
 
-                    N33: the CELL may wrap -- that is what lets the column stay
-                    narrow enough for the name to fit two lines -- but each
-                    FIGURE is nowrap, so "(-$3.00)" drops under "$21.00" whole
-                    and no number is ever broken across lines. */}
+                    N33: the cut is its own BLOCK under the price, not an
+                    inline span beside it. Inline, this cell's max-content was
+                    "$21.00 (-$3.00)" on one line -- ~95px of an 80mm receipt's
+                    ~270px content box -- so the discounted row's price track
+                    grew past its floor and stopped matching the plain rows and
+                    the header. As a block the cell's max-content is the widest
+                    SINGLE figure, both figures are nowrap, and no number is
+                    ever broken across lines. */}
                 {showUnitPriceCol ? (
                   <div data-receipt-cell="price" style={itemNumericStyle} className="min-w-0 text-right leading-snug">
-                    <div>
-                      <span className="whitespace-nowrap">{fmtUSD(unitUsd)}</span>
-                      {hasItemDiscount ? <span className="ml-1 whitespace-nowrap font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</span> : null}
-                    </div>
+                    <div className="whitespace-nowrap">{fmtUSD(unitUsd)}</div>
+                    {hasItemDiscount ? <div className="whitespace-nowrap font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</div> : null}
                   </div>
                 ) : null}
                 <div data-receipt-cell="line-total" style={itemNumericStyle} className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
