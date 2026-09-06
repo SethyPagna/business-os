@@ -212,12 +212,17 @@ await runTest('every product picker mounts the shared option sheet', () => {
     2,
     'both the add-items picker and the Replace picker must open the shared sheet',
   )
-  assert.match(saleDetail, /onClick=\{\(\) => setAddSheetGroup\(candidate\)\}/, 'a result row opens the sheet, never the line form directly')
-  assert.doesNotMatch(saleDetail, /onClick=\{\(\) => setAddPicking\(candidate\)\}/, 'the old straight-to-the-line-form path must be gone')
-  // What is left behind is the line FORM (quantity, unit price), which is not
-  // a picker -- and it must be seeded with what the sheet already resolved.
-  assert.match(saleDetail, /presetBatchId=\{addPicking\.batchId\}/)
-  assert.match(saleDetail, /branchId=\{addPicking\.branchId \?\? sale\.branch_id \?\? null\}/)
+  // N19: the two result lists are ONE shared row component now (they used to
+  // render differently), so the handler travels as onSelect. The rule is
+  // unchanged -- a result row OPENS the sheet and does nothing else.
+  assert.match(saleDetail, /onSelect=\{\(\) => setAddSheetGroup\(candidate\)\}/, 'a result row opens the sheet, never a line form directly')
+  // N19: there is no line form left to seed. The second modal that used to
+  // re-ask the received date, the quantity and the price with a layout the
+  // POS has never rendered is deleted; the sheet's own received-date step
+  // answers it, which is why the tracked ids now reach the sheet.
+  assert.doesNotMatch(saleDetail, /addPicking/, 'the private line-form modal must be gone, not merely unused')
+  assert.equal(fs.existsSync(new URL('../src/components/sales/SaleDetailProductPicker.tsx', import.meta.url)), false)
+  assert.match(saleDetail, /trackedBatchProductIds=\{trackedBatchProductIds\}/, 'the sheet must be able to ask the received-date question itself')
   // The branch the sheet resolved has to survive all the way onto the wire.
   // It reached the line form and stopped there: the lots were loaded at ONE
   // branch and the batch was then posted with no branch at all, so the Worker
@@ -225,8 +230,12 @@ await runTest('every product picker mounts the shared option sheet', () => {
   // sale.branch_id)`) -- a batch drawn from a shelf nobody chose, and on a
   // branchless sale no shelf at all. The selling-branch guard reads the same
   // field, so carrying it is also what makes the warehouse refusal reachable.
-  assert.match(saleDetail, /branchId: number \| null/, 'the staged line must carry a branch')
-  assert.match(saleDetail, /stageAddLine\(choice, addPicking\.branchId\)/, 'the pick\'s branch reaches the staged line')
+  assert.match(
+    src('components', 'sales', 'saleAddLines.ts'),
+    /branchId: number \| null/,
+    'the staged line must carry a branch',
+  )
+  assert.match(saleDetail, /stageAddLineFromPick\(picked as unknown as AddProductCandidate, selection as SaleAddSheetSelection\)/, 'the pick reaches the staged line whole')
   assert.match(
     saleDetail,
     /\.\.\.\(line\.branchId != null \? \{ branch_id: line\.branchId \} : \{\}\)/,
