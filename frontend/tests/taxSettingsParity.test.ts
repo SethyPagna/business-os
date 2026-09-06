@@ -49,13 +49,20 @@ const workerResolveTaxSettings = moduleObj.exports.resolveTaxSettings
 assert.equal(typeof workerResolveTaxSettings, 'function', 'resolveTaxSettings must extract to a callable function')
 
 // One case table shared by both implementations: every off-token the switch
-// itself recognizes, plus on-tokens, the absent/blank key, and rates given
-// as a whole percent, a fraction, blank, garbage, and negative.
+// itself recognizes, plus on-tokens, unrecognised near-miss tokens that MUST
+// still read as on on both sides (a side quietly learning one of these as a
+// new off-token is exactly the drift this pairing exists to prevent), the
+// absent/blank key, and rates given as a whole percent, a fraction, blank,
+// garbage, negative, and above-100% (a one-sided clamp must not go unnoticed).
 const enabledCases: unknown[] = [
   '0', 'false', 'off', 'no', // exact off-tokens
   'FALSE', 'Off', 'NO', ' no ', // case- and whitespace-insensitive off-tokens
   '', // absent key -> falls back to the rate
   'true', 'TRUE', '1', 'yes', 'enabled', // anything else reads as on
+  // Unrecognised tokens that are near-misses for "off" but are NOT in either
+  // side's off-token list -- both sides must read these as ON. If one side
+  // ever grows a wider off-token list than the other, these are what catch it.
+  'disabled', 'none', 'n', 'DISABLED',
   undefined, null,
 ]
 const rateCases: unknown[] = [
@@ -65,6 +72,8 @@ const rateCases: unknown[] = [
   'abc', // garbage
   '-5', // negative
   ' 12 ', // padded
+  '150', // above 100% -- a one-sided clamp to 100 must be caught
+  '0.5', '10.005', // sub-1-percent and fractional-percent precision
   undefined, null,
 ]
 
@@ -82,6 +91,10 @@ for (const rawEnabled of enabledCases) {
     compared += 1
   }
 }
-assert.equal(compared, enabledCases.length * rateCases.length, 'every case in the table was actually compared')
+// A literal floor, not `enabledCases.length * rateCases.length` -- comparing
+// the loop counter against the product of the very arrays the loop walks can
+// never fail, even if the case table is gutted to one entry. This number
+// must be updated deliberately if the table is intentionally narrowed.
+assert.ok(compared >= 160, `only ${compared} combinations compared -- the case table was narrowed`)
 
 console.log(`PASS tax settings parity: till and Worker agree on ${compared} enabled/rate combinations`)
