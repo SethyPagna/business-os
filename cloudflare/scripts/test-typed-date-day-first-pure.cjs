@@ -227,6 +227,43 @@ assert.ok(
 assert.ok(read('routes/promotions.ts').includes('Start date is not a real date (use dd/mm/yyyy)'))
 assert.ok(read('routes/promotions.ts').includes('End date is not a real date (use dd/mm/yyyy)'))
 assert.ok(read('lib/stockSession.ts').includes('must be a valid date (dd/mm/yyyy)'))
+
+// Parity, swept rather than remembered. The four asserts above name the
+// messages this lane happened to rewrite; a FIFTH typed-date surface that
+// refuses a date without naming an order is the same defect and no assert
+// above would notice it. So every refusal on every typed-date file must
+// carry the order -- which is how routes/batches.ts's bare "received_at is
+// not a valid date" was caught: it parses day-first like its siblings, but
+// told the operator nothing about which order to retype in, on the one
+// screen (Manage Batches) where getting it wrong moves stock into the wrong
+// lot.
+const REFUSAL = /(?:not a (?:valid|real|readable) date|must be a (?:valid|readable) date)/
+const silentRefusals = []
+let sweptRefusals = 0
+for (const [rel] of TYPED_DATE_SITES) {
+  for (const line of read(rel).split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue
+    if (!REFUSAL.test(trimmed)) continue
+    sweptRefusals += 1
+    if (!trimmed.includes('dd/mm/yyyy')) silentRefusals.push(rel + ': ' + trimmed)
+  }
+}
+assert.ok(sweptRefusals >= 4, 'the refusal sweep must have found real messages to judge, saw ' + sweptRefusals)
+assert.deepStrictEqual(
+  silentRefusals, [],
+  'a typed-date surface refuses a date without saying which order to retype it in:\n' + silentRefusals.join('\n'),
+)
+// Positive control: the detector must be able to report a negative. Handed
+// the exact string this sweep was written to catch, it has to catch it.
+assert.ok(
+  REFUSAL.test("return c.json({ error: 'received_at is not a valid date' }, 400)"),
+  'control: the refusal pattern matches the bare message this sweep exists for',
+)
+assert.equal(
+  REFUSAL.test("params.received_at = resolvedIso"), false,
+  'control: and does not match an ordinary line',
+)
 // The importer's warning quotes the column it read and that column's order,
 // instead of asserting one fixed order for every header.
 assert.ok(

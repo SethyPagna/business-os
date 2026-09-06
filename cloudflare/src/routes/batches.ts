@@ -282,7 +282,12 @@ app.patch('/:id', async (c) => {
   // distinct batch rows into one.
   if (body.received_at !== undefined) {
     const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
-    if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date' }, 400)
+    // Name the order, like every other typed-date refusal in the Worker.
+    // This parses day-first (normalizeTypedDate, above) but used to say only
+    // "not a valid date" -- and an operator whose entry was just rejected
+    // cannot tell an impossible date from one typed the other way round, on
+    // the screen where that answer decides which lot the stock lands in.
+    if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date (use dd/mm/yyyy)' }, 400)
     const resolvedIso = iso || new Date().toISOString().slice(0, 10)
     const code = dateToBatchCode(resolvedIso) as string
     updates.push('received_at = @received_at', 'batch_key = @batch_key', 'lot_code = @lot_code')
