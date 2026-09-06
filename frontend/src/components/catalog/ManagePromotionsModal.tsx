@@ -5,6 +5,7 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Modal from '../shared/Modal'
+import InfoHint from '../shared/InfoHint'
 import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { useApp } from '../../AppContext.tsx'
@@ -135,7 +136,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
       const rows = await getPromotions()
       if (aliveRef.current) setPromotions(Array.isArray(rows) ? rows : [])
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to load promotions'), 'error')
+      notify(getErrorMessage(error, copy('loadPromotionsFailed', 'Failed to load promotions')), 'error')
     } finally {
       if (aliveRef.current) setLoading(false)
     }
@@ -177,10 +178,10 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
         userName: user?.name != null ? String(user.name) : null,
         onProgress: ({ percent }: { percent: number }) => setUploadProgress(percent),
       }) as { public_path?: string; error?: string }
-      if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
+      if (!uploaded?.public_path) throw new Error(uploaded?.error || copy('image_upload_failed', 'Image upload failed'))
       setForm((prev) => ({ ...prev, image_path: uploaded.public_path as string }))
     } catch (error) {
-      notify(getErrorMessage(error, 'Image upload failed'), 'error')
+      notify(getErrorMessage(error, copy('image_upload_failed', 'Image upload failed')), 'error')
     } finally {
       if (aliveRef.current) {
         setUploadBusy(false)
@@ -190,10 +191,10 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
   }
 
   const validate = (): string | null => {
-    if (!form.title.trim()) return 'Title is required'
-    if (form.link_type === 'product' && !form.link_product_id) return 'Choose a product to link to'
-    if (form.link_type === 'url' && !form.link_url.trim()) return 'Enter a link URL'
-    if (form.starts_at && form.ends_at && form.starts_at > form.ends_at) return 'End date must be after start date'
+    if (!form.title.trim()) return copy('titleRequired', 'Title is required')
+    if (form.link_type === 'product' && !form.link_product_id) return copy('chooseProductToLink', 'Choose a product to link to')
+    if (form.link_type === 'url' && !form.link_url.trim()) return copy('enterLinkUrl', 'Enter a link URL')
+    if (form.starts_at && form.ends_at && form.starts_at > form.ends_at) return copy('endDateAfterStart', 'End date must be after start date')
     return null
   }
 
@@ -208,28 +209,28 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
       const payload = toSavePayload(form)
       if (editingId === 'new') {
         await createPromotion(payload)
-        notify('Promotion created', 'success')
+        notify(copy('promotionCreated', 'Promotion created'), 'success')
       } else if (editingId != null) {
         await updatePromotion(editingId, payload)
-        notify('Promotion updated', 'success')
+        notify(copy('promotionUpdated', 'Promotion updated'), 'success')
       }
       cancelEdit()
       await loadPromotions()
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save promotion'), 'error')
+      notify(getErrorMessage(error, copy('savePromotionFailed', 'Failed to save promotion')), 'error')
     } finally {
       if (aliveRef.current) setSaving(false)
     }
   }
 
   const handleDelete = async (promo: Promotion) => {
-    if (!window.confirm(`Delete "${promo.title}"? This can't be undone.`)) return
+    if (!window.confirm(copy('deletePromotionConfirm', 'Delete "{name}"? This can\'t be undone.').replace('{name}', promo.title))) return
     try {
       await deletePromotion(promo.id)
-      notify('Promotion deleted', 'success')
+      notify(copy('promotionDeleted', 'Promotion deleted'), 'success')
       await loadPromotions()
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to delete promotion'), 'error')
+      notify(getErrorMessage(error, copy('deletePromotionFailed', 'Failed to delete promotion')), 'error')
     }
   }
 
@@ -238,7 +239,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
       await updatePromotion(promo.id, { ...promo, is_active: promo.is_active ? 0 : 1 })
       await loadPromotions()
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to update promotion'), 'error')
+      notify(getErrorMessage(error, copy('updatePromotionFailed', 'Failed to update promotion')), 'error')
     }
   }
 
@@ -262,7 +263,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     try {
       await reorderPromotions(current.map((p) => p.id))
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save new order'), 'error')
+      notify(getErrorMessage(error, copy('saveOrderFailed', 'Failed to save new order')), 'error')
       await loadPromotions()
     }
   }
@@ -272,22 +273,18 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
   return (
     <Modal title={copy('announcementStrip', 'Announcement Strip')} onClose={onClose} size="lg" unsavedChanges={{ dirty: editingId !== null }}>
       <div className="flex flex-col gap-4 overflow-y-auto p-5">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Small, quick banner cards that scroll horizontally at the very top of the public catalog page —
-          for short sale/announcement callouts. This is separate from the larger "Promotions and posts"
-          cards editor further down the Studio editor, which is better suited for longer campaign posts
-          with full descriptions. Drag cards below to reorder them; the order here is the order customers see.
-        </p>
-
         {!isEditing && (
-          <button
-            type="button"
-            onClick={startCreate}
-            className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 hover:shadow"
-          >
-            <Plus className="h-4 w-4" />
-            {copy('newPromotion', 'New promotion')}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={startCreate}
+              className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 hover:shadow"
+            >
+              <Plus className="h-4 w-4" />
+              {copy('newPromotion', 'New promotion')}
+            </button>
+            <InfoHint label={copy('announcementStrip', 'Announcement Strip')} text={copy('announcementStripIntro', 'Small, quick banner cards that scroll horizontally at the very top of the public catalog page — for short sale/announcement callouts. This is separate from the larger "Promotions and posts" cards editor further down the Studio editor, which is better suited for longer campaign posts with full descriptions. Drag cards below to reorder them; the order here is the order customers see.')} />
+          </div>
         )}
 
         {isEditing && (
@@ -302,7 +299,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   type="text"
                   value={form.title}
                   onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-                  placeholder="Summer Sale"
+                  placeholder={copy('promotionTitlePlaceholder', 'Summer Sale')}
                   maxLength={120}
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
                 />
@@ -314,7 +311,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   type="text"
                   value={form.subtitle}
                   onChange={(e) => setForm((p) => ({ ...p, subtitle: e.target.value }))}
-                  placeholder="20% off all skincare this week"
+                  placeholder={copy('promotionSubtitlePlaceholder', '20% off all skincare this week')}
                   maxLength={240}
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
                 />
@@ -363,7 +360,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   type="text"
                   value={form.badge_text}
                   onChange={(e) => setForm((p) => ({ ...p, badge_text: e.target.value }))}
-                  placeholder="SALE"
+                  placeholder={copy('badgeTextPlaceholder', 'SALE')}
                   maxLength={40}
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
                 />
@@ -406,7 +403,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                     value={form.link_product_id}
                     buttonClassName="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-normal dark:border-gray-700 dark:bg-gray-900"
                     options={[
-                      { value: '', label: 'Select a product…' },
+                      { value: '', label: copy('selectProduct', 'Select a product…') },
                       ...productOptions.map((p) => ({ value: p.id, label: p.name })),
                     ]}
                     onChange={(value) => setForm((p) => ({ ...p, link_product_id: value }))}
@@ -421,7 +418,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                     type="text"
                     value={form.link_url}
                     onChange={(e) => setForm((p) => ({ ...p, link_url: e.target.value }))}
-                    placeholder="/catalog?category=Skincare or https://…"
+                    placeholder={copy('linkUrlPlaceholder', '/catalog?category=Skincare or https://…')}
                     className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
                   />
                 </label>
@@ -433,7 +430,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 <DateEntryInput
                   bare
                   t={t}
-                  ariaLabel="Show from"
+                  ariaLabel={copy('showFromAria', 'Show from')}
                   value={form.starts_at}
                   onChange={(iso) => setForm((p) => ({ ...p, starts_at: iso }))}
                   className="rounded-lg border border-gray-300 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
@@ -445,7 +442,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 <DateEntryInput
                   bare
                   t={t}
-                  ariaLabel="Show until"
+                  ariaLabel={copy('showUntilAria', 'Show until')}
                   value={form.ends_at}
                   onChange={(iso) => setForm((p) => ({ ...p, ends_at: iso }))}
                   className="rounded-lg border border-gray-300 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
@@ -469,7 +466,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 onClick={cancelEdit}
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
               >
-                Cancel
+                {copy('cancel', 'Cancel')}
               </button>
               <button
                 type="button"
@@ -477,7 +474,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 onClick={handleSave}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {saving ? 'Saving…' : 'Save promotion'}
+                {saving ? copy('saving', 'Saving…') : copy('savePromotion', 'Save promotion')}
               </button>
             </div>
           </div>
@@ -541,10 +538,10 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   <div className="truncate text-xs text-gray-500 dark:text-gray-400">
                     {promo.subtitle || (
                       promo.link_type === 'product'
-                        ? `Links to: ${productNameById.get(promo.link_product_id || 0) || 'a product'}`
+                        ? `${copy('linksTo', 'Links to')}: ${productNameById.get(promo.link_product_id || 0) || copy('genericProductLabel', 'a product')}`
                         : promo.link_type === 'url'
-                          ? `Links to: ${promo.link_url}`
-                          : 'No link'
+                          ? `${copy('linksTo', 'Links to')}: ${promo.link_url}`
+                          : copy('noLink', 'No link')
                     )}
                   </div>
                 </div>
@@ -557,7 +554,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                       : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
                   }`}
                 >
-                  {promo.is_active ? 'Active' : 'Hidden'}
+                  {promo.is_active ? copy('active', 'Active') : copy('hiddenBadge', 'Hidden')}
                 </button>
                 {/* Same icon+label-on-large/icon-only-on-small treatment as
                     the Products detail actions pane (ProductDetailModal.tsx)
@@ -566,22 +563,22 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 <button
                   type="button"
                   onClick={() => startEdit(promo)}
-                  title="Edit"
-                  aria-label={`Edit ${promo.title}`}
+                  title={copy('edit', 'Edit')}
+                  aria-label={copy('editItemAria', 'Edit {name}').replace('{name}', promo.title)}
                   className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                 >
                   <Pencil className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Edit</span>
+                  <span className="hidden sm:inline">{copy('edit', 'Edit')}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleDelete(promo)}
-                  title="Delete"
-                  aria-label={`Delete ${promo.title}`}
+                  title={copy('delete', 'Delete')}
+                  aria-label={copy('deleteItemAria', 'Delete {name}').replace('{name}', promo.title)}
                   className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Delete</span>
+                  <span className="hidden sm:inline">{copy('delete', 'Delete')}</span>
                 </button>
               </div>
             ))}
