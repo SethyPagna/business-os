@@ -603,6 +603,7 @@ export default function CatalogPreviewSurface({
               next: copy('nextImage', 'Next'),
               imageCount: copy('imageCount', '{current}/{total}'),
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+              close: copy('close', 'Close'),
             }}
             renderImage={(src, alt, className) => (
               <CatalogProductImage src={src} alt={alt} className={className} />
@@ -644,6 +645,7 @@ export default function CatalogPreviewSurface({
               next: copy('nextImage', 'Next'),
               imageCount: copy('imageCount', '{current}/{total}'),
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+              close: copy('close', 'Close'),
             }}
           />
         ) : null}

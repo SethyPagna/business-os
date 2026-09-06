@@ -1,4 +1,9 @@
 import { fmtBusinessIsoDateTime } from './formatters.ts'
+// N21: sales.customer_address may still hold the Contact Options JSON that
+// customers.address stores, so the export resolves it the same way every
+// on-screen reader does -- a CSV cell full of machine text is the same defect
+// in a different container.
+import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
 
 export const SALES_IMPORT_COLUMNS = [
   'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency', 'exchange_rate',
@@ -55,7 +60,7 @@ function headerFields(sale: DataRow): DataRow {
     branch: value(sale, 'branch_name'),
     customer_name: value(sale, 'customer_name'),
     customer_phone: value(sale, 'customer_phone'),
-    customer_address: value(sale, 'customer_address'),
+    customer_address: contactDisplayAddress(value(sale, 'customer_address')),
     cashier_name: value(sale, 'cashier_name'),
     discount_usd: value(sale, 'discount_usd', 0),
     discount_khr: value(sale, 'discount_khr', 0),

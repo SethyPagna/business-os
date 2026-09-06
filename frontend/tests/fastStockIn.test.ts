@@ -59,7 +59,7 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   assert.match(modalSource, /status: 'queued'/)
   assert.match(modalSource, /const editLine = \(line: ReceivedLine\)/)
   assert.match(modalSource, /const removeLine = \(key: string\)/)
-  assert.match(modalSource, /status: 'saved', detail: result\?\.lotCode/)
+  assert.match(modalSource, /status: 'saved', detail: line\.mode === 'remove'[\s\S]*result\?\.lotCode/)
   assert.match(modalSource, /status: 'error', detail: message/)
   // Add clears the line and refocuses for the next product
   assert.match(modalSource, /const resetLine = \(\) => \{/)
@@ -77,6 +77,14 @@ runTest('changed cost offers and uses the existing price-variant path', () => {
   assert.match(modalSource, /sessionId: sessionIdRef\.current/, 'variant receipts remain in the same stock-in session')
   assert.match(modalSource, /const sessionCostTotal = received\.reduce/, 'the shipment exposes its total recorded cost')
   assert.match(modalSource, /Total cost'\)}: \$\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
+})
+
+runTest('known zero catalog cost is prefetched and session cost keeps zero distinct from missing', () => {
+  assert.match(modalSource, /candidate\.cost_price_usd != null[\s\S]*candidate\.purchase_price_usd/)
+  assert.match(modalSource, /Number\.isFinite\(cost\) && cost >= 0/)
+  assert.match(modalSource, /tr\('cost_price_usd', 'Cost price \$'\)/)
+  assert.match(sessionsSource, /movementTotal != null && Number\.isFinite\(movementTotal\) && movementTotal >= 0/)
+  assert.match(stockSessionQuerySource, /SUM\(CASE WHEN m\.total_cost_usd IS NOT NULL THEN 0 ELSE 1 END\) AS lines_without_movement_cost/)
 })
 
 runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only after real writes', () => {

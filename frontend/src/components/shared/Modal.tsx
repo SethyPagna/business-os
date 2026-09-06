@@ -1,10 +1,16 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import type { DraftPreservingMinimize, UnsavedChangesDeclaration } from '../../utils/closeGuard.ts'
 import { ModalCloseContext } from './modalCloseContext.ts'
 import UnsavedChangesPrompt from './UnsavedChangesPrompt.tsx'
+
+// Same cast UnsavedChangesPrompt.tsx uses next to this file -- Modal is
+// rendered from every admin surface, all of which sit under the one
+// AppProvider, so useApp() is always safe here.
+const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -49,6 +55,11 @@ type ModalProps = {
 }
 
 export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, layer = 'default', unsavedChanges }: ModalProps) {
+  const { t } = useApp()
+  const tr = (key: string, fallback: string): string => {
+    const value = t(key)
+    return value && value !== key ? value : fallback
+  }
   const closeGuard = useCloseGuard(unsavedChanges, onClose, onMinimize)
   const widthClass =
     size === 'sm' ? 'max-w-lg' :
@@ -165,7 +176,7 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           <button
             type="button"
             onClick={closeGuard.requestClose}
-            aria-label="Close"
+            aria-label={tr('close', 'Close')}
             /* Z5: the ✕ was text-gray-400 (~2.5:1 on white, fails WCAG AA);
                gray-600/gray-300 gives a legible close affordance in both
                themes. */

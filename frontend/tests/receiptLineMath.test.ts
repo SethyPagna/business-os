@@ -198,25 +198,24 @@ const sale16433 = {
   // Total column = the NET line, matching the photo’s 21.00.
   assert.match(src, /const lineUsd = figures\.chargedUnitUsd \* qty/)
   assert.match(src, /const lineKhr = figures\.chargedUnitKhr \* qty/)
-  // The two named discount rows, and the qty total under the table.
+  // The two named discount rows. The qty TOTAL that used to print under the
+  // table is gone (N33, owner, Sep 6 2026: "no need say total items"); its
+  // absence is pinned by rendering the receipt, in receiptCompactRows.test.ts.
   assert.match(src, /labelFor\(lang, 'itemDiscount'\)/)
   assert.match(src, /labelFor\(lang, 'totalDiscount'\)/)
-  assert.match(src, /labelFor\(lang, 'totalQty'\)/)
   // ...registered in the field order, or they never render.
   assert.match(src, /fieldOrder\.push\('item_discount'\)/)
   assert.match(src, /fieldOrder\.push\('total_discount'\)/)
-  assert.match(src, /fieldOrder\.push\('total_qty'\)/)
   // Both label packs carry every new key, or a Khmer receipt prints blanks.
-  for (const key of ['item', 'unitPrice', 'lineTotal', 'totalQty', 'itemDiscount', 'totalDiscount']) {
+  for (const key of ['item', 'unitPrice', 'lineTotal', 'itemDiscount', 'totalDiscount']) {
     assert.equal(
       (src.match(new RegExp(`^\\s+${key}: '`, 'gm')) || []).length,
       2,
       `${key} must be defined in BOTH LABELS.en and LABELS.km`,
     )
   }
-  // The Khmer wording is read off the owner’s photo; pin the two that name
-  // the new rows so a future edit cannot quietly paraphrase them.
-  assert.match(src, /totalQty: 'សរុបចំនួនទំនិញ:'/)
+  // The Khmer wording is read off the owner’s photo; pin the one that names
+  // the new row so a future edit cannot quietly paraphrase it.
   assert.match(src, /itemDiscount: 'សរុបបញ្ចុះលើទំនិញ:'/)
   assert.doesNotMatch(
     src,

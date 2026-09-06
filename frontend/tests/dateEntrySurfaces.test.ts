@@ -38,7 +38,6 @@ const SURFACES: Array<{ file: string; what: string }> = [
   { file: 'components/inventory/ManageBatchesModal.tsx', what: 'batch date (the lot code) and expiry' },
   { file: 'components/inventory/FastStockInModal.tsx', what: 'fast stock-in received date, expiry, credit due' },
   { file: 'components/inventory/InventoryStockModals.tsx', what: 'the add / remove / set stock dialog received date' },
-  { file: 'components/products/forms/BranchStockAdjuster.tsx', what: 'per-branch add-stock received date' },
   { file: 'components/products/forms/BulkAddStockModal.tsx', what: 'bulk add-stock received date' },
   { file: 'components/products/forms/ProductForm.tsx', what: 'product expiry date' },
   { file: 'components/products/StockInSessionsSection.tsx', what: 'stock-in session received date and credit due date' },
@@ -47,7 +46,6 @@ const SURFACES: Array<{ file: string; what: string }> = [
   { file: 'components/sales/ExportModal.tsx', what: 'the sales export custom range' },
   { file: 'components/promotions/PromotionsPage.tsx', what: 'promotion and discount start/end' },
   { file: 'components/catalog/ManagePromotionsModal.tsx', what: 'storefront promo show-from / show-until' },
-  { file: 'components/custom-tables/CustomTables.tsx', what: "the custom-table row editor's date columns" },
 ]
 
 for (const surface of SURFACES) {
@@ -61,50 +59,25 @@ for (const surface of SURFACES) {
   })
 }
 
-// The one surface whose column the app does NOT own.
+// The one surface whose column the app did NOT own -- and which turned out
+// not to be a surface at all.
 //
-// Every other entry in SURFACES writes a validated ISO date, so the typed
-// field is a pure display change there. A custom-table `date` column is TEXT
-// with no format check in the Worker or in the row write, so a cell can
-// already hold '20260309', '2026-03-09 00:00:00' or 'Q3 batch'.
-// DateEntryInput commits on blur: handed one of those it would rewrite the
-// cell on a tab THROUGH the row, with no keystroke -- and '03/09/2026' would
-// come back as 2026-09-03, a DIFFERENT DAY, because the typed reader is
-// day-first and whoever wrote that cell may not have been.
+// Every entry in SURFACES above writes a validated ISO date, so the typed
+// field is a pure entry change there. A custom-table `date` column was not:
+// TEXT with no format check in the Worker or in the row write, so a cell
+// could already hold '20260309', '2026-03-09 00:00:00' or 'Q3 batch'.
+// DateEntryInput commits on BLUR, so adopting it there would have rewritten
+// the cell on a tab THROUGH the row, with no keystroke -- and '03/09/2026'
+// would have come back as 2026-09-03, a DIFFERENT DAY, because the typed
+// reader is day-first and whoever wrote the cell may not have been.
 //
-// So the adoption there is GATED on dateEntry.isRoundTrippableDateEntryValue.
-// That gate is the only thing between this surface and a silent data rewrite,
-// which makes it exactly the kind of line a later edit drops as redundant.
-runTest('the custom-table row editor adopts the typed field only where it cannot rewrite the cell', () => {
-  const source = read('components/custom-tables/CustomTables.tsx')
-  assert.ok(
-    source.includes('isRoundTrippableDateEntryValue'),
-    'CustomTables must import isRoundTrippableDateEntryValue -- an ungated adoption rewrites free-text cells',
-  )
-  // Both halves: importing the predicate and never consulting it would pass a
-  // check on the import alone.
-  assert.ok(
-    source.includes('eligible[column.name] = isRoundTrippableDateEntryValue('),
-    'CustomTables must ask the predicate about the value the row opened with',
-  )
-  assert.ok(
-    source.includes("column.type === 'date' && typedDateColumns[column.name] ?"),
-    'the <DateEntryInput> branch must be gated on the per-column decision',
-  )
-  // The decision is taken from the values the row OPENED with and held for
-  // the life of the modal. Re-deciding per render would swap the control out
-  // from under the operator the moment their free text looked like an ISO
-  // date, taking focus and caret with it.
-  assert.ok(
-    source.includes('setTypedDateColumns(typedDateColumnsFor(activeSchema, initial))'),
-    'both row openers must latch the decision from the row they opened',
-  )
-  // And the fallback is a plain text box, not the native picker coming back.
-  assert.ok(
-    source.includes("type={column.type === 'number' || column.type === 'decimal' ? 'number' : 'text'}"),
-    'the non-typed branch must render a plain text input',
-  )
-})
+// The component was deleted instead (df29dda1): it had zero importers, no
+// route, no permission key and its Worker router was never mounted, so the
+// native picker the widened pattern below finally revealed was in code no
+// one could open. deadFeatureRetirement.test.ts is the lock that keeps it
+// gone. The rule the episode leaves behind, for the next adoption: a field
+// that normalises on blur may only take a column whose values it hands back
+// unchanged -- on free text, adopting it IS a write.
 
 // Surfaces that type a date AND a 24-hour time. Until Sep 6 2026 these three
 // shift fields were the app's last native <input type="datetime-local">: the

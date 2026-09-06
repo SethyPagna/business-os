@@ -5,6 +5,7 @@ import {
 } from './receiptAppliedConfig'
 import type { ReceiptPrintSettings } from '../types/receiptContracts'
 import { computeFixedSheetFit, computeImagePdfLayout, isSingleSheetHeight } from './receiptPdfLayout.ts'
+import { RECEIPT_ITEM_COLUMN_GAP_EM, RECEIPT_ROW_GRID_TEMPLATE, receiptItemGridTemplate } from './receiptItemColumns.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
 const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
@@ -230,12 +231,21 @@ export function normalizeReceiptContentWidth<T>(root: T): T {
       // total) unless a shop has turned the price column off, and a track count
       // that disagrees with the cell count silently wraps a cell onto its own
       // row on paper while looking perfect on screen.
+      //
+      // The tracks themselves come from utils/receiptItemColumns, the ONE
+      // owner of the receipt's grid geometry. This block used to carry its own
+      // copy, and that copy had already drifted from what Receipt.tsx renders
+      // (3.6rem/3.2rem here against 3.9rem/3.4rem there, 4.25rem against
+      // 4.6rem on the label rows) -- so a column change made in the component
+      // reached the screen and never reached print, image or PDF.
       if (hasQty && hasPrice && hasLineTotal) {
-        line.style.gridTemplateColumns = 'minmax(0,1fr) 2.2rem minmax(3.6rem,auto) minmax(3.2rem,auto)'
+        line.style.gridTemplateColumns = receiptItemGridTemplate(true)
+        line.style.columnGap = `${RECEIPT_ITEM_COLUMN_GAP_EM}em`
       } else if (hasQty && (hasPrice || hasLineTotal)) {
-        line.style.gridTemplateColumns = 'minmax(0,1fr) 2.5rem minmax(4.25rem,auto)'
+        line.style.gridTemplateColumns = receiptItemGridTemplate(false)
+        line.style.columnGap = `${RECEIPT_ITEM_COLUMN_GAP_EM}em`
       } else if (line.children.length === 2) {
-        line.style.gridTemplateColumns = 'minmax(0,1fr) minmax(4.25rem,auto)'
+        line.style.gridTemplateColumns = RECEIPT_ROW_GRID_TEMPLATE
       }
     })
 

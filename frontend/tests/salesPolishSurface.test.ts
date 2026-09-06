@@ -10,7 +10,12 @@ const suppliers = readFileSync(new URL('../src/components/contacts/SuppliersTab.
 const delivery = readFileSync(new URL('../src/components/contacts/DeliveryTab.tsx', import.meta.url), 'utf8')
 const promotions = readFileSync(new URL('../src/components/promotions/PromotionsPage.tsx', import.meta.url), 'utf8')
 
-assert.match(salesSurface, /useColumnPreferences\('sales', SALES_OPTIONAL_COLUMNS\)/)
+// N23: the surface key and the column list moved into salesListColumns.ts, and
+// the key was bumped once so a preference written before the Driver column
+// existed stops hiding it (tests/salesDriverColumn.test.ts owns that
+// behavior). What this file pins is unchanged: the columns are read through
+// the shared preference hook rather than hand-rolled on this surface.
+assert.match(salesSurface, /useColumnPreferences\(SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS\)/)
 assert.match(salesSurface, /<ColumnChooser[\s\S]*columns=\{chooserColumns\}/)
 assert.match(salesSurface, /cols\.isVisible\('cashier'\)/)
 assert.match(salesSurface, /cols\.isVisible\('branch'\)/)

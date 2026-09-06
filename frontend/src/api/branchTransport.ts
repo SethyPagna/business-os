@@ -93,6 +93,15 @@ export function getTransfers(params: QueryParams = {}): Promise<unknown> {
   )
 }
 
+// Both transfer endpoints REQUIRE a non-empty `reason` in the payload: every
+// Worker route that moves stock refuses a reasonless one (branches.ts POST
+// /transfer and /transfer-bulk, inventory.ts POST /transfer and /move-row),
+// and TransferModal will not submit without one.
+//
+// Both are queued offline (the trailing `true`), so a request written by an
+// older build can still arrive after this one shipped. Those payloads carry
+// the old optional `note` instead; the Worker accepts a non-empty `note` as
+// the reason for exactly that reason. Nothing new should send `note`.
 export function transferStock(payload: BranchPayload = {}): Promise<unknown> {
   return route(
     'branches:transfer',

@@ -172,7 +172,11 @@ runTest('every field the sale detail used to show is still rendered', () => {
     'sale.branch_name', 'sale.source_return_id',
     'sale.customer_name', 'sale.customer_phone', 'sale.customer_address',
     'sale.customer_membership_number', 'sale.notes',
-    'sale.delivery_contact_name', 'sale.delivery_contact_phone', 'sale.delivery_contact_address',
+    // N21 (owner, Sep 6 2026): the Customer card's second address row is gone,
+    // so sale.delivery_contact_address is deliberately NOT in this list any
+    // more. It is still on the sale record, still exported and still printed
+    // under the receipt template's delivery toggles.
+    'sale.delivery_contact_name', 'sale.delivery_contact_phone',
     'sale.cancel_reason', 'sale.cancel_note', 'sale.cancelled_by_name', 'sale.cancelled_at',
     'sale.cancel_fee_id', 'sale.credit_due_date', 'sale.receipt_number', 'sale.created_at',
     'item.branch_name', 'item.returned_quantity',
@@ -254,9 +258,9 @@ runTest('the sale detail has no separate Delivery card', () => {
   // The user's own correction, same day: "delivery only needs phone and driver
   // name...this is driver info, for customer name, phone and address keep it
   // same in customer section... make them compact...". So the two driver
-  // fields are ordinary compact rows in the SALE card, and the drop address --
-  // the one delivery field that can differ from what Customer already shows --
-  // is a row in the CUSTOMER card, rendered only when it actually differs.
+  // fields are ordinary compact rows in the SALE card. (The drop address then
+  // lived in the CUSTOMER card when it differed; N21 removed that row on the
+  // owner's Sep 6 instruction -- see the end of this test.)
   assert.ok(
     !/SectionCard title=\{translateOr\('delivery'/.test(saleDetail),
     'delivery must not be its own card any more',
@@ -294,23 +298,27 @@ runTest('the sale detail has no separate Delivery card', () => {
     /\{isDelivery \|\| deliveryFeeUsd > 0 \|\| deliveryFeeKhr > 0 \?/,
     'the fee row still renders for a delivery whose fee is zero',
   )
-  // Nothing was dropped: all three fields are still read.
+  // The two DRIVER fields are still read.
   const builder = saleDetail.slice(saleDetail.indexOf('const deliveryDriverName'), saleDetail.indexOf('const paymentDetails ='))
   assert.ok(builder.length > 80, 'expected to find the delivery field derivation')
-  for (const field of ['delivery_contact_name', 'delivery_contact_phone', 'delivery_contact_address']) {
+  for (const field of ['delivery_contact_name', 'delivery_contact_phone']) {
     assert.ok(builder.includes(field), `the delivery derivation lost ${field}`)
   }
-  // The drop address is shown in the Customer card and ONLY when it differs
-  // from the customer's own address -- printing the same street twice under
-  // two labels is the duplication the user asked to stop.
+  // N21 SUPERSEDES the drop-address row. The earlier reading of "keep it same
+  // in customer section" put the delivery address in the Customer card
+  // whenever it differed from the customer's own; the owner then said plainly
+  // (Sep 6 2026): "i see the customer show delivery address and address. just
+  // keep address ... because in sales only show address." So the Customer card
+  // carries ONE address row. The drop address is not lost -- it is still on
+  // the sale, still exported, and still printed under the receipt template's
+  // own delivery toggles -- this screen simply stops repeating it.
   assert.ok(
-    saleDetail.includes("translateOr('delivery_address', 'Delivery address'"),
-    'the drop address must still be reachable, in the Customer card',
+    !saleDetail.includes("translateOr('delivery_address', 'Delivery address'"),
+    'the Customer card must not carry a second, Delivery address row',
   )
-  assert.match(
-    builder,
-    /!sameAddressText\(deliveryAddress, String\(sale\.customer_address \|\| ''\)\)/,
-    'the drop address must render only when it differs from the customer address',
+  assert.ok(
+    !saleDetail.includes('sameAddressText') && !saleDetail.includes('deliveryAddressToShow'),
+    'the difference-only derivation must be gone with the row it fed',
   )
 })
 

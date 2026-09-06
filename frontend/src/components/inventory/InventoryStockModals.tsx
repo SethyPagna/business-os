@@ -402,6 +402,14 @@ export default function InventoryStockModals({
                     {isSetDown ? (
                       <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_down_hint') || 'This set lowers the quantity, so it takes stock out: it has no supplier and no cost. Choose the batch to take it from, otherwise the oldest lots are drained first.'} />
                     ) : null}
+                    {/* N14-D: the mirror image -- a set that RAISES the figure is a
+                        receipt (routes/inventory.ts converts it into an add of the
+                        difference), which is why the supplier and cost fields appear
+                        below. Same isStockIn predicate those fields render on, so
+                        the hint can never show for a submission that owes neither. */}
+                    {isStockIn ? (
+                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_up_hint') || 'This set raises the quantity, so it puts stock in: name the supplier it came from and the unit cost you paid, exactly as an add does.'} />
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="mt-1.5 flex flex-wrap gap-1">
@@ -568,8 +576,7 @@ export default function InventoryStockModals({
                 </div>
               ) : null}
               {/* D5a: supplier attribution for the lot this receipt creates or
-                  fills -- the same picker, same rules, as ReceiveBatchModal
-                  and BranchStockAdjuster.
+                  fills -- the same picker, same rules, as ReceiveBatchModal.
                   N14-D repair: shown on `isStockIn`, which is EXACTLY the
                   predicate the receipt gate applies (here and in
                   lib/stockReceiptGate.ts). It used to be narrowed to "this

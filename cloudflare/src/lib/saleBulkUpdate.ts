@@ -17,6 +17,7 @@ import {
 } from './saleBulkStatus'
 import type { StockStatement } from './saleTransitions'
 import { actorSnapshot } from './actorSnapshot'
+import { contactDisplayAddress } from './contactOptions'
 
 export const BULK_UPDATE_KIND = 'sale.fields.bulk'
 export const BULK_CUSTOMER_UPDATE_KIND = 'sale.customer.bulk'
@@ -373,7 +374,11 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
         customer_id: targetCustomer?.id ?? null,
         customer_name: targetCustomer?.name ?? null,
         customer_phone: targetCustomer?.phone ?? null,
-        customer_address: targetCustomer?.address ?? null,
+        // N21: the sale stores the DISPLAY address, not the Contact Options
+        // JSON in customers.address. referenceState/referenceGuard above keep
+        // using the RAW column: they assert the customer row has not changed
+        // under us, which is a different question.
+        customer_address: contactDisplayAddress(targetCustomer?.address) || null,
         search_normalized: searchSnapshot(sale, { customerName: targetCustomer?.name ?? null, customerPhone: targetCustomer?.phone ?? null }),
       } : { ...before }
       returnsAfter = returnsBefore.map((row, index) => {

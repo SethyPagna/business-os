@@ -51,6 +51,7 @@ interface OptionEditorProps {
   total: number
   onChange: (option: ContactOption) => void
   onRemove: () => void
+  t?: TranslateFn
 }
 
 function tr(t: TranslateFn | undefined, key: string, fallback: string): string {
@@ -62,7 +63,7 @@ function parseContactOptions(raw: unknown): ContactOption[] {
   return parseStoredContactOptions(raw, { legacyField: 'address' })
 }
 
-function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditorProps) {
+function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEditorProps) {
   const setField = (key: keyof ContactOption, value: string) => onChange({ ...option, [key]: value })
   const fieldId = (suffix: string) => `customer-option-${index}-${suffix}`
 
@@ -75,33 +76,33 @@ function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditor
           name={fieldId('label')}
           autoComplete="off"
           className="input flex-1 text-xs py-1"
-          placeholder="Option label"
+          placeholder={tr(t, 'contact_option_label', 'Option label')}
           value={option.label}
           onChange={(event) => setField('label', event.target.value)}
         />
         {total > 1 ? (
           <button type="button" onClick={onRemove} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">
-            Remove
+            {tr(t, 'remove', 'Remove')}
           </button>
         ) : null}
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
-          <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">Name</label>
-          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder="Contact name" value={option.name} onChange={(event) => setField('name', event.target.value)} />
+          <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'name', 'Name')}</label>
+          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder={tr(t, 'contact_option_name', 'Contact name')} value={option.name} onChange={(event) => setField('name', event.target.value)} />
         </div>
         <div>
-          <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">Phone</label>
-          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" className="input text-xs py-1" placeholder="Phone number" value={option.phone} onChange={(event) => setField('phone', event.target.value)} />
+          <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'phone', 'Phone')}</label>
+          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" className="input text-xs py-1" placeholder={tr(t, 'phone_number', 'Phone number')} value={option.phone} onChange={(event) => setField('phone', event.target.value)} />
         </div>
       </div>
       <div>
-        <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">Email</label>
-        <input id={fieldId('email')} name={fieldId('email')} autoComplete="email" className="input text-xs py-1" type="email" placeholder="Email address" value={option.email} onChange={(event) => setField('email', event.target.value)} />
+        <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'email', 'Email')}</label>
+        <input id={fieldId('email')} name={fieldId('email')} autoComplete="email" className="input text-xs py-1" type="email" placeholder={tr(t, 'contact_option_email', 'Email address')} value={option.email} onChange={(event) => setField('email', event.target.value)} />
       </div>
       <div>
-        <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">Address</label>
-        <input id={fieldId('address')} name={fieldId('address')} autoComplete="street-address" className="input text-xs py-1" placeholder="Delivery or billing address" value={option.address} onChange={(event) => setField('address', event.target.value)} />
+        <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'address', 'Address')}</label>
+        <input id={fieldId('address')} name={fieldId('address')} autoComplete="street-address" className="input text-xs py-1" placeholder={tr(t, 'customer_option_address', 'Delivery or billing address')} value={option.address} onChange={(event) => setField('address', event.target.value)} />
       </div>
     </div>
   )
@@ -286,6 +287,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
                 total={options.length}
                 onChange={(nextOption) => updateOption(index, nextOption)}
                 onRemove={() => removeOption(index)}
+                t={t}
               />
             ))}
           </div>

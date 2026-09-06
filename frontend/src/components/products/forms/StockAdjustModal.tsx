@@ -32,11 +32,10 @@ import {
 
 // Full-featured "Adjust stock" flow for the Products page "Stock Changes"
 // ledger. It REUSES Inventory's own presentational adjust modal
-// (InventoryStockModals) verbatim rather than reimplementing it (and
-// deliberately NOT the leaner BranchStockAdjuster), so this entry point
-// looks and behaves exactly like the Inventory page's adjust modal -- same
-// batch picker, same pricing lock, same supplier attribution, same saved-
-// reason catalog. Two steps: pick a product, then adjust it.
+// (InventoryStockModals) verbatim rather than reimplementing it, so this
+// entry point looks and behaves exactly like the Inventory page's adjust
+// modal -- same batch picker, same pricing lock, same supplier attribution,
+// same saved-reason catalog. Two steps: pick a product, then adjust it.
 
 type InventoryId = number | string
 type InventoryFormValue = string | number
@@ -79,10 +78,8 @@ type AdjustForm = {
   credit_due_date: string
 }
 
-// 4-union reason type -- matches BranchStockAdjuster.tsx and
-// InventoryReasonManagerModal.tsx (which renders a 'delete' tab). The
-// saved-reason catalog handling below is cribbed verbatim in shape from
-// BranchStockAdjuster.tsx. The narrower Stock* aliases beneath exist only
+// 4-union reason type -- matches InventoryReasonManagerModal.tsx (which
+// renders a 'delete' tab). The narrower Stock* aliases beneath exist only
 // for the two casts at the InventoryStockModals boundary, whose own reason
 // union has three members and no 'delete'.
 type InventoryReasonType = 'adjust' | 'transfer' | 'move' | 'delete'
@@ -253,7 +250,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     [branches],
   )
 
-  // --- saved-reason catalog (cribbed verbatim in shape from BranchStockAdjuster.tsx) ---
+  // --- saved-reason catalog (same shape as Inventory.tsx's own) ---
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')

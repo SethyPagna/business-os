@@ -421,7 +421,7 @@ export function ContactTable<T extends ContactRow>({
                       ref={selectAllRef}
                       id="contacts-select-all"
                       name="contacts_select_all"
-                      aria-label="Select all contacts"
+                      aria-label={t?.('select_all') || 'Select all contacts'}
                       type="checkbox"
                       className="h-4 w-4 rounded"
                       checked={!!selectAll?.checked}

@@ -257,6 +257,13 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
 
   return (
     <div className="space-y-3 p-3">
+      {/* The filter + date row pins while the supplier-day groups scroll --
+          the app-wide "search bar row and the date both can be pinned and
+          stick ... for all sections and pages" convention, at the same
+          `sticky top-2` offset the Customers/Suppliers/Delivery search rows
+          use one level up. Outside the overflow-x-auto row on purpose: a
+          horizontally scrolling box cannot itself be the sticky element. */}
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
       {/* The report's standard filter row: branch · supplier · date range.
           Part 567: kept to a single scrollable line (user: "the filters
           options one row") rather than wrapping to two. */}
@@ -303,6 +310,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             {tr('clear', 'Clear')}
           </button>
         ) : null}
+      </div>
       </div>
 
       {error ? (

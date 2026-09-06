@@ -49,12 +49,22 @@ function QrTile({ entry }: { entry: ReceiptQrEntry }) {
     return () => { cancelled = true }
   }, [entry.url])
 
+  // N33 (owner, Sep 6 2026, reading a printed 80mm receipt): "for the qr code
+  // and the qr code name, keep them closer to each other, less margin." They
+  // sat 8px apart -- 4px of padding inside the white box plus a 4px flex gap
+  // -- which on a thermal print reads as two unrelated things. The box is now
+  // exactly the size of the code it holds, so the 2px gap is all that is left
+  // between the image and the name it belongs to.
+  //
+  // The tile is `w-full max-w-[80px]` rather than a fixed 80px, because three
+  // fixed 80px tiles plus their gutters overflow a 58mm receipt -- and a
+  // column that has run off the paper is not an evenly spaced one.
   return (
-    <div className="flex w-[80px] flex-col items-center gap-1 text-center">
-      <div className="flex h-[76px] w-[76px] items-center justify-center bg-white p-1">
+    <div className="flex w-full max-w-[80px] flex-col items-center gap-0.5 text-center">
+      <div className="flex w-full max-w-[68px] items-center justify-center bg-white">
         {dataUrl
-          ? <img src={dataUrl} alt={entry.label} width={68} height={68} className="h-[68px] w-[68px]" />
-          : <div className="h-[68px] w-[68px] animate-pulse bg-gray-100" />}
+          ? <img src={dataUrl} alt={entry.label} width={68} height={68} className="h-auto w-full" />
+          : <div className="h-[68px] w-full animate-pulse bg-gray-100" />}
       </div>
       <div className="w-full truncate text-[9px] font-medium leading-tight text-gray-600">{entry.label}</div>
     </div>
@@ -73,8 +83,12 @@ export default function ReceiptQrCodes({ entries, scanLabel }: ReceiptQrCodesPro
   if (!visible.length) return null
   return (
     <div key="qr_codes" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-      {scanLabel ? <div className="mb-1.5 text-center text-[10px] font-medium text-gray-500">{scanLabel}</div> : null}
-      <div className="grid grid-cols-3 justify-items-center gap-x-1.5 gap-y-3">
+      {scanLabel ? <div className="mb-1 text-center text-[10px] font-medium text-gray-500">{scanLabel}</div> : null}
+      {/* Three equal 1fr columns with each tile centred in its own -- the
+          spacing between the codes is the same wherever the receipt is cut,
+          and the row gap no longer has to carry the padding the tiles used to
+          add underneath themselves (N33). */}
+      <div className="grid grid-cols-3 justify-items-center gap-x-1 gap-y-2">
         {visible.map((entry) => <QrTile key={entry.key} entry={entry} />)}
       </div>
     </div>

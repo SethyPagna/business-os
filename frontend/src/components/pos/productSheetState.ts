@@ -235,6 +235,35 @@ export function defaultDisplayStock(product: SheetProductLike | undefined): numb
   return toNumber(product?.stock_quantity)
 }
 
+/**
+ * Units of ONE product row at ONE branch, read from `branch_stock` -- the
+ * ledger that answers "how many are at this branch".
+ *
+ * `null` means the row's payload does not mention that branch at all, which
+ * is not the same answer as zero: a branch-agnostic row (no branch_stock)
+ * still has its own `stock_quantity`, and only the caller knows whether that
+ * cross-branch total is a legitimate fallback for what it is about to do.
+ *
+ * Exported because more than the sheet needs it: staging an added sale line
+ * has to cap the line by the shelf the sheet was read at, and it used to cap
+ * by `stock_quantity` -- a CROSS-BRANCH total, so a product with 2 at the
+ * shop and 30 at the warehouse staged a shop line with a cap of 32.
+ */
+export function branchStockQuantity(
+  // Structural on purpose: the only thing this reads is the branch_stock
+  // ledger, so a caller that holds a narrower row shape (a sale-detail search
+  // result, say) does not have to pretend to be a full sheet product.
+  product: { branch_stock?: BranchStockRow[] } | null | undefined,
+  branchId: unknown,
+): number | null {
+  const key = branchId == null ? '' : String(branchId)
+  if (!key) return null
+  for (const entry of Array.isArray(product?.branch_stock) ? product.branch_stock : []) {
+    if (String(entry?.branch_id) === key) return toNumber(entry?.quantity)
+  }
+  return null
+}
+
 export function deriveProductSheetState(input: ProductSheetStateInput): ProductSheetState {
   const {
     product,
@@ -281,10 +310,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
 
   const stockAtBranch = (row: SheetProductLike | null, branchId: string | null): number => {
     if (!row) return 0
-    if (branchIds.length && branchId != null) {
-      return toNumber((Array.isArray(row.branch_stock) ? row.branch_stock : [])
-        .find((entry) => String(entry?.branch_id) === branchId)?.quantity)
-    }
+    if (branchIds.length && branchId != null) return branchStockQuantity(row, branchId) ?? 0
     return toNumber(getDisplayStock(row))
   }
 
