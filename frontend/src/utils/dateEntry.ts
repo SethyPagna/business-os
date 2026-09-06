@@ -440,10 +440,9 @@ export function localDateTimePairValue(pair: LocalDateTimePair): string {
  * same reader Enter uses. Anything neither shape is handed back untouched --
  * the field then shows it as the unreadable text it is rather than guessing.
  *
- * It lives here rather than inside the component because the question "what
- * would that field do to this value" has to be answerable BEFORE the field
- * is rendered (see isRoundTrippableDateEntryValue), and answering it from a
- * second copy of the rule is how the two answers drift apart.
+ * It lives here rather than inside the component because the display rule
+ * and the commit rule are one rule, and a second copy of it inside the
+ * component is how the two drift apart.
  */
 export function dateEntryDisplayValue(value: string | null | undefined, today?: Date): string {
   const raw = String(value ?? '').trim()
@@ -452,47 +451,4 @@ export function dateEntryDisplayValue(value: string | null | undefined, today?: 
   if (iso) return iso
   const parsed = normalizeDateEntry(raw, today)
   return parsed.value || raw
-}
-
-/**
- * What DateEntryInput would STORE for a value if the operator focused the
- * field and left it again without typing anything: show the value, then
- * commit that display exactly as Enter and blur do.
- *
- * Unreadable text is returned unchanged, because the field's commit refuses
- * it and keeps what is on screen.
- */
-export function dateEntryPublishedValue(value: string | null | undefined, today?: Date): string {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  const settled = normalizeDateEntry(dateEntryDisplayValue(raw, today), today)
-  return settled.iso || raw
-}
-
-/**
- * True when DateEntryInput can hold `value` and hand back the SAME string.
- *
- * A caller whose column is a validated ISO date never needs to ask. A caller
- * whose column is free text does: the custom-table row editor stores a
- * `date` column as plain TEXT (cloudflare/src/routes/customTables.ts maps
- * `date` to TEXT and the row write validates no format), so a cell can
- * already hold '20260309', '2026-03-09 00:00:00' or 'Q3 batch'. Rendering
- * the typed field over one of those turns a tab through the row into a
- * rewrite the operator never asked for -- '20260309' commits back as
- * '2026-03-09', and '03/09/2026' as '2026-09-03', a DIFFERENT day, because
- * the typed reader is day-first and whoever wrote the cell may not have
- * been. Neither round trip is recoverable once saved.
- *
- * So the adoption is gated on this instead: values the field returns
- * untouched get the field, everything else keeps a plain text box showing
- * the stored string as it is.
- */
-export function isRoundTrippableDateEntryValue(value: string | null | undefined, today?: Date): boolean {
-  const raw = String(value ?? '')
-  if (raw === '') return true
-  // Readable AND identical. Text the field cannot read at all round-trips
-  // by value (the commit refuses it and keeps it on screen) but must still
-  // be kept away from the field: it would paint a permanent red error over
-  // a cell whose column never promised to hold a date.
-  return normalizeDateEntry(dateEntryDisplayValue(raw, today), today).iso === raw
 }

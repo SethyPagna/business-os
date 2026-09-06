@@ -25,9 +25,7 @@ import {
   applyDateEntryMask,
   applyTimeEntryMask,
   dateEntryDisplayValue,
-  dateEntryPublishedValue,
   daysInMonth,
-  isRoundTrippableDateEntryValue,
   isoToDisplayDate,
   joinLocalDateTime,
   localDateTimePairValue,
@@ -397,68 +395,17 @@ runTest('an unreadable half withdraws the pair instead of leaving the last good 
   assert.equal(localDateTimePairValue({ date: '2026-09-05', time: '14:30' }), '2026-09-05T14:30')
 })
 
-/**
- * The custom-table row editor's value contract, modelled.
- *
- * That editor hands a `date` cell to DateEntryInput ONLY where the field
- * returns the value unchanged, and otherwise renders a plain text box that
- * publishes exactly what is in it. This is what a focus-and-leave with no
- * keystroke stores back into the cell.
- */
-function customTablePublishedValue(stored: string): string {
-  return isRoundTrippableDateEntryValue(stored, TODAY) ? dateEntryPublishedValue(stored, TODAY) : stored
-}
-
-runTest('a free-text column is only handed to the typed field when the field gives the value back unchanged', () => {
-  // The custom-table row editor stores a `date` column as plain TEXT and
-  // validates no format on either side (cloudflare/src/routes/customTables.ts
-  // maps `date` -> TEXT; the row write passes the string straight through).
-  // So a cell can already hold any of the shapes below -- written by an
-  // import, by the API, or by a month-first hand.
-  //
-  // Rendering the typed field over one of those does not just re-display it:
-  // the field commits on blur, so a TAB THROUGH THE ROW, with no keystroke,
-  // stores whatever the reader made of it. The left column is what is in the
-  // cell; the right column is what an untouched focus-and-leave would write.
-  const rewritten: Array<[string, string]> = [
-    ['2026-03-09T00:00:00', '2026-03-09'],
-    ['2026-03-09 00:00:00', '2026-03-09'],
-    ['20260309', '2026-03-09'],
-    // The dangerous one: not a truncation but a DIFFERENT DAY. The typed
-    // reader is day-first, so it reads this as 3 September; whoever wrote
-    // '03/09/2026' into a free-text cell may well have meant 9 March.
-    ['03/09/2026', '2026-09-03'],
-  ]
-  for (const [stored, wouldBecome] of rewritten) {
-    // Positive control: without the guard these four really are rewritten.
-    // If this ever stops being true the guard below is testing nothing.
-    assert.equal(dateEntryPublishedValue(stored, TODAY), wouldBecome, `${stored} is rewritten by the typed field`)
-    assert.notEqual(wouldBecome, stored)
-    assert.equal(isRoundTrippableDateEntryValue(stored, TODAY), false, `${stored} must not be handed to the typed field`)
-    // And the contract the row editor actually implements: gated on the
-    // predicate, the value it publishes back is the value it was given.
-    assert.equal(customTablePublishedValue(stored), stored, `${stored} must survive the row editor untouched`)
-  }
-
-  // What the field MAY hold: its own storage shape, and an empty cell (which
-  // is every new row, so the 9032026 typing win is kept where it is safe).
-  for (const safe of ['', '2026-03-09', '2026-09-05']) {
-    assert.equal(isRoundTrippableDateEntryValue(safe, TODAY), true, `${safe} round-trips`)
-    assert.equal(customTablePublishedValue(safe), safe)
-  }
-
-  // Free text that reads as no date at all keeps its value either way (the
-  // commit refuses it), but it must not reach the field: it would paint a
-  // permanent red error over a cell whose column never promised a date.
-  assert.equal(isRoundTrippableDateEntryValue('Q3 batch', TODAY), false)
-  assert.equal(customTablePublishedValue('Q3 batch'), 'Q3 batch')
-  // Whitespace is not "empty": the field would settle it to '' and drop it.
-  assert.equal(isRoundTrippableDateEntryValue('   ', TODAY), false)
-
-  // The display half is the same rule DateEntryInput renders with, so the
-  // predicate cannot answer for a field that shows something else.
+runTest('the display rule the field renders with is the one in the kernel', () => {
+  // DateEntryInput.toDisplay is one line calling this, so the text on screen
+  // and the text the commit re-reads cannot drift apart.
   assert.equal(dateEntryDisplayValue('2026-03-09', TODAY), '09/03/2026')
   assert.equal(dateEntryDisplayValue('', TODAY), '')
+  assert.equal(dateEntryDisplayValue(null, TODAY), '')
+  // A legacy slash-form value is tolerated on the way in...
+  assert.equal(dateEntryDisplayValue('09/03/2026', TODAY), '09/03/2026')
+  // ...and text that reads as no date at all is handed back untouched rather
+  // than guessed at, which is what lets the field show it and go red instead
+  // of quietly replacing it.
   assert.equal(dateEntryDisplayValue('Q3 batch', TODAY), 'Q3 batch')
 })
 
