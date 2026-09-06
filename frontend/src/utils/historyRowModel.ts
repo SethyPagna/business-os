@@ -131,3 +131,25 @@ export function buildHistoryRowModel(row: HistoryRowSource | null | undefined): 
     isBare: branch === HISTORY_EMPTY && actor === HISTORY_EMPTY && reason === HISTORY_EMPTY && !reference.label,
   }
 }
+
+/**
+ * The record a GROUP of movement rows names.
+ *
+ * The Inventory drill collapses one action into a single row and the CSV
+ * exports that same group, so both must answer "which record is this" the same
+ * way, and both must read across the WHOLE group rather than its visible page:
+ * an ambiguous movement type is resolved per product server-side
+ * (cloudflare/src/lib/movementReference.ts), so a group whose first row is a
+ * product the receipt does not contain still belongs to that receipt, and the
+ * row that names it can be on page 2.
+ *
+ * Defined here rather than inline at each reader because two copies of "which
+ * row of the group names the record" are two rules: the drill header and the
+ * export column would be free to pick different rows of the same group.
+ */
+export function historyGroupReference(
+  items: ReadonlyArray<HistoryRowSource | null | undefined> | null | undefined,
+): HistoryReference {
+  if (!Array.isArray(items)) return { kind: null, label: '' }
+  return items.map(historyReference).find((entry) => entry.label) || { kind: null, label: '' }
+}

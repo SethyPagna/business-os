@@ -263,3 +263,40 @@ const bareId = report.split('\n').filter((line) => (
 ))
 assert.deepEqual(bareId, [], `the detail report still prints a bare reference id with no receipt in front of it:\n${bareId.join('\n')}`)
 console.log('PASS the product detail report names the receipt and keeps the raw id only as a fallback')
+
+// The /movements CSV is the fifth reader, and it is the one that silently
+// dropped the receipt: buildMovementRows shipped {Date, Activity, Products,
+// Records, Qty, Total_Cost_USD, Branch, Reason, User} -- every column the
+// drill header shows EXCEPT the record the group belongs to. A ledger export
+// that cannot be matched back to a receipt is the owner's complaint in a
+// spreadsheet, so the export composes it from the SAME two functions the drill
+// header uses, never from a fourth wording of its own.
+const movementExport = read('components/inventory/inventoryExport.ts').replace(/\r\n/g, '\n')
+const movementRows = movementExport.match(/function buildMovementRows\([\s\S]*?\n\}/)
+assert.ok(movementRows, 'inventoryExport must build the movement CSV rows in one place')
+assert.match(movementRows[0], /\bReceipt:/, 'the /movements CSV must carry the receipt column the drill header shows')
+assert.match(
+  movementRows[0],
+  /Receipt: formatHistoryReference\(/,
+  'the export must compose the receipt through the shared composition, not re-word it',
+)
+assert.match(
+  movementExport,
+  /from '(\.\.\/)+utils\/historyRowModel\.ts'/,
+  'the export must take the composition from the shared row model',
+)
+
+// ...and the group-level pick ("read across the WHOLE group, not the visible
+// page") is itself one implementation, not a lambda copied into each reader:
+// the drill's copy and the export's copy would be free to disagree about which
+// row of a mixed group names the record.
+assert.match(movementExport, /historyGroupReference\(/, 'the export must pick the group reference through the shared helper')
+const drill = read('components/inventory/InventoryMovementsSurface.tsx').replace(/\r\n/g, '\n')
+assert.match(drill, /historyGroupReference\(group\.items\)/, 'the drill header must pick the group reference through the same shared helper')
+for (const [label, source] of [['drill', drill], ['export', movementExport]] as Array<[string, string]>) {
+  assert.ok(
+    !/\.map\(historyReference\)\s*\.find\(/.test(source),
+    `${label} still inlines its own group-reference pick instead of the shared helper`,
+  )
+}
+console.log('PASS the /movements CSV names the record from the same composition as the drill header')

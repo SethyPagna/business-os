@@ -15,7 +15,7 @@ import { translateMovementType } from './movementGroups'
 // The same model now answers a fourth question -- WHICH RECORD the row
 // belongs to -- so "Sale 20260901-193100" reads identically here and in the
 // Stock Change ledger instead of this drill printing a bare reference id.
-import { formatHistoryReference, historyActor, historyField, historyReference } from '../../utils/historyRowModel.ts'
+import { formatHistoryReference, historyActor, historyField, historyGroupReference } from '../../utils/historyRowModel.ts'
 
 type Translator = (key: string) => string | undefined
 type TranslationWithFallback = (key: string, fallback?: string, altFallback?: string) => string
@@ -252,8 +252,11 @@ export default function InventoryMovementsSurface({
             // Read across the WHOLE group, not the visible page: an ambiguous
             // movement type resolves per product (a row whose product is in
             // neither the sale nor the return is left unlabelled), so the row
-            // that names the record can be on page 2.
-            const reference = group.items.map(historyReference).find((entry) => entry.label) || { kind: null, label: '' }
+            // that names the record can be on page 2. That pick is shared with
+            // the /movements CSV export (utils/historyRowModel.ts's
+            // historyGroupReference), so the header and the spreadsheet column
+            // can never name different rows of the same group.
+            const reference = historyGroupReference(group.items)
             const receipt = formatHistoryReference(reference, {
               sale: t('sale') || 'Sale',
               return: t('return') || 'Return',
