@@ -49,7 +49,10 @@ await runTest('visible auth and diagnostics copy no longer mentions Supabase', (
 })
 
 await runTest('owned Google auth test is part of the utility suite', () => {
-  assert.match(packageSource, /ownedGoogleAuth\.test\.ts/)
+  // test:utils now runs every tests/*.test.ts through the discovery runner, so
+  // this file is in the suite by existing; pin the runner instead of a name in
+  // a hand-maintained list (that list stopped launching at 8188 characters).
+  assert.match(packageSource, /"test:utils": "node tests\/runTestChain\.ts"/)
 })
 
 if (failed > 0) {
