@@ -221,6 +221,33 @@ runTest('the marker still has something to unlock', () => {
   assert.match(portalCss, /body\[data-public-portal='true'\] \{\n  top: 0 !important;/, "the Google-Translate banner's downward shove of <body> is undone only under the marker")
 })
 
+runTest('the body marker is what gives a portalled overlay its 44px touch floor', () => {
+  // The second thing the missing marker cost, found while auditing tap
+  // targets. public-portal.css sizes every public control to 44px on a coarse
+  // pointer under TWO selectors: `body[data-public-portal='true']` and
+  // `[data-public-media-protection='true']`. The shipped shop's root carries
+  // the media-protection attribute (PublicCatalogPage.tsx:1827), so its own
+  // buttons -- the h-7 cart quantity steppers, the h-7 wishlist remove -- were
+  // always 44px on a phone despite their class, and are NOT a defect. But that
+  // is a descendant selector, and a menu rendered with
+  // createPortal(..., document.body) is not a descendant of anything in the
+  // page. PageSizeSelect's option list is exactly that, and it is what the
+  // storefront pager's per-page menu opens. With the body marker never set,
+  // its options had no touch floor at all on the shipped storefront.
+  //
+  // So this is not a second fix; it is the rest of the first one. The chain is
+  // pinned here so dropping the marker again cannot look free.
+  const portalCss = read('../src/styles/public-portal.css')
+  assert.match(
+    portalCss,
+    /@media \(pointer: coarse\) \{\n  body\[data-public-portal='true'\] button,[\s\S]*?min-height: 44px;/,
+    'the coarse-pointer floor must still be reachable through the body marker',
+  )
+  const pageSizeSelect = read('../src/components/shared/PageSizeSelect.tsx')
+  assert.match(pageSizeSelect, /createPortal\(/, 'the per-page menu is portalled out of the page')
+  assert.match(pageSizeSelect, /document\.body,/, '...straight onto document.body, past every descendant selector but the marker')
+})
+
 if (failed > 0) {
   console.error(`\n${failed} storefront scroll-owner check(s) failed`)
   process.exit(1)
