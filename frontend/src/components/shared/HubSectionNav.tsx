@@ -1,6 +1,5 @@
 import { Fragment, useEffect, type ComponentType, type ReactNode, type SVGProps } from 'react'
 import { useApp as useAppCore } from '../../app/AppContextCore.tsx'
-import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import { sealRootHubSection } from './hubNavigation.ts'
 // The chip row below is chrome, and wears the same design language as the
@@ -79,7 +78,6 @@ export default function HubSectionNav({
   children,
 }: HubSectionNavProps) {
   const { settings, page } = useAppCore() as { settings?: Record<string, unknown>; page: string }
-  const isCompact = useIsCompactViewport()
   const layered = useLayeredSectionNav(settings?.ui_mobile_section_nav)
   const visible = sections.filter((section) => !section.hidden)
   useEffect(() => { writeStoredActive(storageKey, active) }, [storageKey, active])

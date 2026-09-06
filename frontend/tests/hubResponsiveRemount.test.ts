@@ -17,7 +17,6 @@ const load = (id: string) => {
   if (id === 'react') return { ...React, useEffect: () => {} }
   if (id === 'react/jsx-runtime') return require(id)
   if (id.includes('AppContextCore')) return { useApp: () => ({ settings: {}, page: 'sales' }) }
-  if (id.includes('useViewport')) return { useIsCompactViewport: () => compact }
   // useLayeredSectionNav is the shared "the compact home sheet owns section
   // switching" decision (utils/sectionNavPreference.ts) that HubSectionNav
   // and Products both read; its own composition is pinned in
@@ -56,5 +55,15 @@ for (const testCase of [
   assert.equal(nodes.filter((node: any) => node.type === 'nav').length, 0,
     'a host cannot inject its own desktop chip row and bypass the shared one')
 }
+// Positive control for the whitelist itself. It is a WHITELIST -- an id it
+// does not name has to fail loudly, or "no unexpected dependency" would be a
+// property of this harness rather than of the component. useViewport is the
+// case that proves it: HubSectionNav no longer imports it (the compact-vs-
+// desktop hook existed only for the desktopNavigation escape hatch), so its
+// stub is gone and asking for it now throws.
+assert.throws(() => load('../../utils/useViewport.ts'), /Unexpected dependency/,
+  'a real module id the whitelist does not name still stops the harness')
+assert.throws(() => load('react-dom'), /Unexpected dependency/,
+  'and so does one that was never stubbed at all')
 assert.equal(changes, 0, 'viewport renders must not invoke navigation or dirty Back callbacks')
 console.log('PASS hub responsive content identity across pages/legacy/custom/single-section branches')

@@ -459,6 +459,8 @@ runTest('the chip row wears the chrome, not grey-on-white with a per-hub hue', (
   assert.doesNotMatch(code(hubNav), /desktopNavigation/, 'the escape hatch is gone from the shared component')
   assert.doesNotMatch(code(hubNav), /if \(!isCompact && desktopNavigation\)/,
     'and with it the early return that shipped a host row instead of the chrome')
+  assert.doesNotMatch(code(hubNav), /useIsCompactViewport|isCompact/,
+    'the viewport hook went with the escape hatch it existed for')
   // The escape hatch existed for one row-wide behaviour -- sideways scrolling
   // for Review's long "Deleted sales (old system)" label. The shared row wraps
   // instead (the standing "no horizontal overflow at 375" rule), so there is
