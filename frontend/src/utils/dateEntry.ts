@@ -262,3 +262,69 @@ export function applyDateEntryMask(raw: string, options?: { deleting?: boolean; 
   if (digits.length <= 4) return options?.deleting ? `${day}/${month}` : `${day}/${month}/`
   return `${day}/${month}/${digits.slice(4)}`
 }
+
+/**
+ * Loosely typed 24-hour time -> 'HH:MM'.
+ *
+ * Accepts what staff actually type on a keypad -- '14:30', '1430', '930',
+ * '9', '9:5' -- and returns '' for empty (a real clear) or null when the text
+ * cannot be read, so the caller can snap the field back to its stored value
+ * rather than store garbage.
+ *
+ * There is no am/pm branch and there never should be. This lived privately
+ * inside DateTimeRangePicker, which dropped `<input type="time">` because the
+ * native field renders 12-hour AM/PM under the pinned en-US locale; the shift
+ * fields need exactly the same reading, and a second copy of a clock is how
+ * two rows of the same screen end up disagreeing about what '930' means.
+ */
+export function normalizeTimeEntry(raw: string): string | null {
+  const text = String(raw ?? '').trim()
+  if (!text) return ''
+  let hour: number
+  let minute: number
+  const colon = /^(\d{1,2}):(\d{1,2})$/.exec(text)
+  if (colon) {
+    hour = Number(colon[1])
+    minute = Number(colon[2])
+  } else if (/^\d{3,4}$/.test(text)) {
+    const padded = text.padStart(4, '0')
+    hour = Number(padded.slice(0, 2))
+    minute = Number(padded.slice(2))
+  } else if (/^\d{1,2}$/.test(text)) {
+    hour = Number(text)
+    minute = 0
+  } else {
+    return null
+  }
+  if (hour > 23 || minute > 59) return null
+  return `${pad2(hour)}:${pad2(minute)}`
+}
+
+/**
+ * Split the stored local-datetime shape 'YYYY-MM-DDTHH:mm' into the two halves
+ * DateTimeEntryInput edits. Seconds are tolerated on the way in (some server
+ * rows carry them) and dropped, because the field shows HH:mm.
+ *
+ * String surgery only -- never `new Date(value)`, which would re-interpret the
+ * string in the device's zone and can move the day west of UTC.
+ */
+export function splitLocalDateTime(value: string | null | undefined): { date: string; time: string } {
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::\d{2})?/.exec(String(value ?? '').trim())
+  if (!match) return { date: '', time: '' }
+  return { date: match[1], time: `${match[2]}:${match[3]}` }
+}
+
+/**
+ * The inverse: an ISO date and an 'HH:MM' back into 'YYYY-MM-DDTHH:mm'.
+ *
+ * Returns '' unless BOTH halves are present. Defaulting a missing time to
+ * midnight would write a shift boundary the operator never chose -- silently,
+ * and into a row that decides a day's cash reconciliation. Empty keeps the
+ * existing loud refusal (api/shiftTransport.ts's shiftLocalDateTimeToIso).
+ */
+export function joinLocalDateTime(date: string | null | undefined, time: string | null | undefined): string {
+  const iso = String(date ?? '').trim()
+  const clock = String(time ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || !/^\d{2}:\d{2}$/.test(clock)) return ''
+  return `${iso}T${clock}`
+}

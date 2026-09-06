@@ -168,7 +168,17 @@ ok(/expectedRevision: shift\.revision/.test(modal) && /expectedRevision: edit\.e
 // 2026-09-06: blank is 0 through the shared shiftCountOrZero rule (executed
 // in tests/shiftGateUx.test.ts); an INVALID count is still never coerced.
 ok(/shiftCountOrZero\(edit\.openingUsd\)/.test(modal) && !/Number\((?:edit|close|reopen)\.[^)]+\) \|\| 0/.test(modal), 'amend/close/reopen forms record a blank count as 0 through the shared rule and never coerce an invalid one')
-ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /required value=\{close\.closedAt\}/.test(modal), 'historic close starts without a guessed timestamp and requires user entry')
+// 2026-09-06 (N31): the close-time field is no longer <input
+// type="datetime-local">, which took its day/month ORDER and its 12-vs-24-hour
+// clock from the viewer's browser locale. The markup half of this assertion
+// moved to the shared DateTimeEntryInput; the half that MATTERS -- that nothing
+// pre-fills a close timestamp and that the submit stays blocked until the
+// operator enters one -- is now pinned on the guard that actually fires rather
+// than on an HTML attribute that never did (these fields sit in no <form>).
+ok(/useState<CloseDraft>\(blankClose\)/.test(modal), 'historic close starts without a guessed timestamp')
+ok(/<DateTimeEntryInput t=\{t\} required [^>]*value=\{close\.closedAt\}/.test(modal), 'the close time is typed through the shared day-first 24-hour field, marked required')
+ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'an empty close timestamp blocks the submit row rather than leaning on a native required attribute')
+ok(!/type="datetime-local"/.test(modal), 'no native datetime field returns -- its order and clock come from the device locale')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
 ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')
 ok((modal.match(/await refreshDetails\(result\.shift\)/g) || []).length >= 4 && !/setAmendments\(\[\]\)[\s\S]{0,180}shift_reopen_saved/.test(modal), 'all lifecycle saves reload amendments, including close and reopen')
