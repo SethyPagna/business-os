@@ -13,6 +13,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
+import TruncatedText from '../shared/TruncatedText.tsx'
 import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
 
 type DayMovement = {
@@ -330,10 +331,11 @@ export default function ManageBatchesModal({
                           silently meant two different things and you could not
                           tell which. Same facts, same order, same shared
                           placeholder as every other history surface -- with the
-                          receipt in front when the row names a record. */}
-                      <span className="min-w-0 flex-1 truncate text-gray-400" title={factLine}>
-                        {factLine}
-                      </span>
+                          receipt in front when the row names a record.
+                          Through TruncatedText, like the ledger's own receipt
+                          line: the line now LEADS with a receipt id, and a
+                          `title` on a clipped span is unreachable by tap. */}
+                      <TruncatedText text={factLine} className="min-w-0 flex-1 text-gray-400" />
                     </div>
                   )
                 })}

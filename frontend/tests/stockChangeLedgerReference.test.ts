@@ -225,6 +225,33 @@ for (const [label, path] of SIBLINGS) {
   console.log(`PASS ${label} names the record through the same shared composition`)
 }
 
+// ...and a surface that CLIPS the line it puts the receipt into owes the same
+// reveal the ledger owes (section 3d): a receipt id is what a person copies
+// out of a history row, so a `title` on a `truncate` span is a dead end on
+// touch. Only the two surfaces that clip with no other way out are listed --
+// the movements drill wraps its receipt in a full-width header line, and the
+// product detail report's collapsed line expands into a "Source" row that
+// prints the receipt in full, so neither hides anything.
+const CLIPPED_RECEIPT_LINES: Array<[string, string, string]> = [
+  ['Batch day movements', 'components/inventory/ManageBatchesModal.tsx', 'factLine'],
+  ['Product history preview', 'components/inventory/ProductHistoryPreviewModal.tsx', 'factLine'],
+]
+for (const [label, path, expr] of CLIPPED_RECEIPT_LINES) {
+  const source = read(path).replace(/\r\n/g, '\n')
+  const deadEnd = source.split('\n').filter((line) => (
+    new RegExp(`title=\\{${expr}\\}`).test(line) &&
+    /\btruncate\b|line-clamp/.test(line)
+  ))
+  assert.deepEqual(deadEnd, [], `${label} clips the line carrying the receipt behind a dead-end title:\n${deadEnd.join('\n')}`)
+  assert.match(
+    source,
+    new RegExp(`<TruncatedText\\s+text=\\{${expr}\\}`),
+    `${label} must reveal its clipped receipt line through the shared TruncatedText`,
+  )
+  console.log(`PASS ${label} reveals the clipped line that carries the receipt`)
+}
+
+
 // The product detail report's "Source" row is the one that printed the raw
 // sales.id -- "Sale #742", a number that identifies nothing to a person and
 // is not what they would search for. The raw id may only survive as the

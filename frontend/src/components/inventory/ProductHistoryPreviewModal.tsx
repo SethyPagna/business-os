@@ -9,6 +9,7 @@ import { translateMovementType } from './movementGroups'
 // movement drill do -- this line used to read "13:22 · james · " with nothing
 // on it identifying the sale.
 import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
+import TruncatedText from '../shared/TruncatedText.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 type TimeFormatter = (value: unknown) => string
@@ -108,9 +109,10 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
                     </span>
                     <span className="truncate text-gray-500 dark:text-gray-400" title={model.branch}>{model.branch}</span>
                   </div>
-                  <div className="mt-0.5 truncate text-[11px] text-gray-400" title={factLine}>
-                    {factLine}
-                  </div>
+                  {/* Through TruncatedText, like the ledger's own receipt
+                      line: this line now carries a receipt id, and a `title`
+                      on a clipped span is unreachable by tap. */}
+                  <TruncatedText text={factLine} className="mt-0.5 text-[11px] text-gray-400" />
                 </div>
                 <div className={`flex-shrink-0 text-sm font-bold ${qty > 0 ? 'text-green-600' : qty < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                   {signed} {product?.unit || ''}
