@@ -413,3 +413,57 @@ export function resolveMergedPricing(rows: MergeablePricing[]): Partial<Record<k
   }
   return merged
 }
+// ---------------------------------------------------------------------------
+// THE EDIT-IDENTITY KERNEL -- "does this edit MOVE the row's identity?"
+// ---------------------------------------------------------------------------
+// This lived in cloudflare/src/lib/productIdentity.ts, a Worker-only module the
+// client cannot import, so the client had NO pre-check at all: the Products
+// form asked its identity question only in CREATE mode
+// (classifyCreateMatches), and an EDIT that renamed or re-barcoded a row onto
+// another product's identity was discovered only by the server's 409, after
+// the operator had already pressed Save. One rule, one implementation: the
+// question now lives in the module both packages carry verbatim, so the
+// pre-check and the guard cannot answer it differently.
+//
+// The identity a single row HAS, as one comparable string: its name group and
+// its folded barcode, joined by a delimiter that can occur in neither (U+0001,
+// an ASCII control character). The delimiter is REQUIRED -- plain
+// concatenation makes name 'ab' + barcode 'cde' indistinguishable from name
+// 'abc' + barcode 'de'.
+const IDENTITY_KEY_DELIM = String.fromCharCode(1)
+
+export function productRowIdentityKey(name: unknown, barcode: unknown): string {
+  return `${normalizeProductGroupName(name)}${IDENTITY_KEY_DELIM}${identityBarcodeKey(barcode)}`
+}
+
+/**
+ * The edit guard's decision, as a pure function: what name/barcode the row will
+ * HAVE after this body is applied, and whether that is a different identity
+ * from the one it has now.
+ *
+ * `changesIdentity` false means the twin lookup must be SKIPPED entirely -- the
+ * row is staying exactly where it is, whatever else the body carries (price,
+ * cost, image, stock). Asking "does another row already have this identity?" on
+ * every save is the wrong question: for a pair that ALREADY shares one -- a
+ * leading-zero twin, or the cost-forked siblings the Sep-4 ruling folded
+ * together -- the answer is permanently yes, so re-asking it on a
+ * selling-price, cost or image edit refuses a save that changes no identity at
+ * all, and for a cost-outlier pair it deadlocks against the merge tool's own
+ * refusal ("correct whichever figure is wrong, then merge").
+ *
+ * Note the asymmetry between the two fields, which is deliberate and is what
+ * the Worker's UPDATE actually does: a `name` the body carries is TRIMMED
+ * before it is stored, a `barcode` is not (the stored column keeps whatever
+ * spelling was typed -- only the comparison folds). An absent field keeps the
+ * row's current value.
+ */
+export function resolveProductIdentityEdit(
+  current: { name?: unknown; barcode?: unknown } | null | undefined,
+  body: { name?: unknown; barcode?: unknown },
+): { nextName: string; nextBarcode: unknown; changesIdentity: boolean } {
+  const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
+  const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
+  const changesIdentity = productRowIdentityKey(nextName, nextBarcode)
+    !== productRowIdentityKey(current?.name, current?.barcode)
+  return { nextName, nextBarcode, changesIdentity }
+}
