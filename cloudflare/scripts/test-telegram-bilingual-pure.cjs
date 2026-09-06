@@ -239,7 +239,13 @@ const saleLines = assertAllBilingual(telegram.formatSaleTelegramLines({
   subtotalUsd: 1, discountUsd: 0.2, totalUsd: 0.8, totalKhr: 0, paidUsd: 0, paidKhr: 0,
 }), 'sale receipt summary')
 assert.ok(saleLines.includes('Status / ស្ថានភាព: awaiting payment / រង់ចាំការទូទាត់'), 'sale status value is translated too')
-assert.ok(saleLines.includes('Paid / បានបង់: unpaid / មិនទាន់បង់'), 'the unpaid marker is translated')
+// REDESIGNED Sep 6 2026. The unsettled sale used to end on
+// `Paid / បានបង់: unpaid / មិនទាន់បង់` -- a label saying "paid", a value
+// saying "not paid", and the amount owed nowhere on the line. It now names
+// the owner's word and the positive figure, in both languages.
+assert.ok(saleLines.includes('Credit / ឥណទាន: $0.80'), `the unsettled amount is one positive Credit line:\n${saleLines.join('\n')}`)
+assert.ok(!saleLines.some((line) => line.startsWith('Paid')), 'no Paid line survives on a wholly unpaid sale')
+assert.ok(!saleLines.join('\n').includes('មិនទាន់បង់'), 'and no "unpaid" marker either')
 assert.ok(saleLines.some((line) => line.startsWith('• Coca Cola 330ml')), 'the product name is left exactly as entered')
 assert.ok(!saleLines.some((line) => line.startsWith('• Coca Cola 330ml') && KHMER.test(line)), 'an item bullet must not be rewritten')
 
@@ -307,8 +313,19 @@ for (const doc of lang.TELEGRAM_COMMANDS) {
   assert.ok(reference.includes(`${doc.icon} ${doc.command}`), `${doc.command} is missing from the reference`)
   assert.ok(reference.includes(doc.en), `${doc.command} has no English description`)
   assert.ok(reference.includes(doc.km), `${doc.command} has no Khmer description`)
-  assert.ok(reference.includes(`▸ ${doc.example}`), `${doc.command} has no example`)
   assert.ok(KHMER.test(doc.km) && !KHMER.test(doc.en), `${doc.command} descriptions are in the wrong scripts`)
+  // SHORTENED Sep 6 2026: a dated command carries the `[date]` marker on its
+  // own usage line. The per-command `▸ /report 09/01/2026` example line is
+  // gone -- seven of them said the same thing the one footer date line says.
+  assert.ok(!doc.example, `${doc.command} still carries a per-command example`)
+}
+assert.ok(!reference.includes('▸'), 'no example lines survive in the reference')
+// Two lines per command (usage + Khmer), one rule for the whole block, a
+// two-line header and a four-line footer: 7 * 2 + 3 + 5 = 22, against the 45
+// the owner called "so long".
+assert.ok(reference.split('\n').length <= 24, `the reference must stay at a glance; it is ${reference.split('\n').length} lines`)
+for (const doc of lang.TELEGRAM_COMMANDS) {
+  assert.ok(reference.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — ${doc.en}`), `${doc.command} has no usage line`)
 }
 assert.ok(reference.includes('dd/mm/yyyy'), 'the reference states the project date convention')
 // The refusal inverted on Sep 4 2026 rather than loosening: exactly ONE
