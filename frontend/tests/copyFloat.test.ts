@@ -25,7 +25,8 @@ import {
   nextFloatState,
   resolveAffordanceTarget,
 } from '../src/components/shared/textAffordances.ts'
-import { buildClickableRow, buildPlainBlock, installAffordanceDom } from './affordanceDomStub.ts'
+import { LONG_PRESS_THRESHOLD_MS } from '../src/utils/longPress.ts'
+import { buildClickableRow, buildPlainBlock, installAffordanceDom, wait } from './affordanceDomStub.ts'
 
 const read = (path: string): string => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const controller = read('components/shared/textAffordances.ts')
@@ -251,6 +252,36 @@ assert.equal(modalClick.stopped, true, 'with nothing underneath, the copy field 
 assert.equal(host.hidden, false, 'and a plain click opens the panel in the detail modals')
 assert.equal(String(host.childNodes[0]?.textContent || ''), '8850123456789')
 dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true)
+
+// PRESS AND HOLD, on a pointer device.
+//
+// Every trigger carries the hint "Double-click or hold to copy" as its
+// native title. `press.onMouseDown` existed in the controller but was never
+// called -- only its parameter type was referenced -- so on a pointer device
+// the hold half of that promise did nothing at all, while the mousedown
+// handler swallowed the press that would otherwise have reached the surface
+// underneath. Where the copy field owns the press (a detail modal, nothing
+// clickable underneath) the hold must open the panel on its own, with no
+// click involved.
+const held = dom.el('span', { [COPY_ATTR]: 'Sok Heng Trading Co., Ltd.' })
+buildPlainBlock(dom, held)
+const holdPress = dom.fire('mousedown', { target: held, clientX: 40, clientY: 12 })
+assert.equal(holdPress.stopped, true, 'with nothing underneath, the copy field takes the press')
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, false, 'press-and-hold opens the copy panel on a pointer device')
+assert.equal(String(host.childNodes[0]?.textContent || ''), 'Sok Heng Trading Co., Ltd.')
+dom.fire('mouseup', { target: held })
+assert.equal(host.hidden, false, 'releasing the hold leaves the panel up')
+dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true)
+
+// A release before the threshold is a click, not a hold: no gesture fires,
+// and the panel opens through the ordinary click path instead.
+dom.fire('mousedown', { target: held, clientX: 40, clientY: 12 })
+dom.fire('mouseup', { target: held })
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, true, 'a released press must not open the panel later, on the hold timer')
 
 dom.restore()
 

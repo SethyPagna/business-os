@@ -13,6 +13,13 @@
 // in a single `useRef` at the page component's top level, see
 // Products.tsx) and passes that row's slot in here; everything below
 // just reads/writes plain fields on it, no hooks involved.
+// The one hold duration in the app. Exported because more than one
+// surface now depends on it meaning the same thing -- the Products row's
+// select-mode hold and the shared copy float's press-and-hold are the same
+// gesture on the same element, so they cannot disagree about how long a
+// hold is.
+export const LONG_PRESS_THRESHOLD_MS = 500
+
 export interface LongPressState {
   timerId: number | null
   startX: number
@@ -109,7 +116,7 @@ interface LongPressOptions {
 // same, while giving an ordinary tap enough slack to register.
 export function createLongPressHandlers(
   state: LongPressState,
-  { onLongPress, onClick, thresholdMs = 500, moveTolerancePx = 18, disabled = false }: LongPressOptions,
+  { onLongPress, onClick, thresholdMs = LONG_PRESS_THRESHOLD_MS, moveTolerancePx = 18, disabled = false }: LongPressOptions,
 ): LongPressHandlers {
   const clearTimer = () => {
     if (state.timerId != null) {

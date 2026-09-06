@@ -386,6 +386,19 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   installed = true
   buildHost()
 
+  // ONE press detector for both input kinds -- the same utils/longPress.ts
+  // the Products row uses, so "press and hold" means the same duration and
+  // the same move tolerance whether it lands on a copy field or on the row
+  // around it. Declared before the listeners because `mouseout` cancels a
+  // press that has wandered off its trigger.
+  const press = createLongPressHandlers(pressState, {
+    onLongPress: () => {
+      if (pressElement) apply({ type: 'gesture', element: pressElement, kind: 'copy' })
+    },
+  })
+  type MouseArg = Parameters<typeof press.onMouseDown>[0]
+  type TouchArg = Parameters<typeof press.onTouchStart>[0]
+
   // Capture phase throughout: React attaches its listeners on the root
   // container, so stopping propagation here is what keeps a claimed tap from
   // ALSO firing the surface's own click handler, and what keeps a press on a
@@ -428,23 +441,22 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   })
 
   document.addEventListener('mouseout', (event) => {
-    if (insideFloat(event.relatedTarget)) return
+    const to = event.relatedTarget
+    // A pointer that leaves the element it is pressing is dragging, not
+    // holding, so the pending hold dies with it (the same call the Products
+    // row makes from its own onMouseLeave).
+    if (pressElement && !(to instanceof Node && pressElement.contains(to))) {
+      press.onMouseLeave()
+      pressElement = null
+    }
+    if (insideFloat(to)) return
     const found = targetFrom(event.target)
     if (!found) return
     // Moving onto a child of the same trigger is not leaving it.
-    const to = event.relatedTarget
     if (to instanceof Node && found.element.contains(to)) return
     cancelHover()
     apply({ type: 'hover-out', element: found.element })
   })
-
-  const press = createLongPressHandlers(pressState, {
-    onLongPress: () => {
-      if (pressElement) apply({ type: 'gesture', element: pressElement, kind: 'copy' })
-    },
-  })
-  type MouseArg = Parameters<typeof press.onMouseDown>[0]
-  type TouchArg = Parameters<typeof press.onTouchStart>[0]
 
   document.addEventListener('mousedown', (event) => {
     if (insideFloat(event.target)) return
@@ -465,13 +477,28 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     // So the press goes to whoever owns the click: `pressWillOpenFloat` is
     // that same rule, and inside a clickable surface it is false, which
     // leaves the row every event it had before this lane existed.
-    if (found?.kind === 'copy' && pressWillOpenFloat(found)) { event.stopPropagation(); return }
+    //
+    // Where it DOES take the press, it has to do something with it: the hint
+    // on every trigger ("Double-click or hold to copy") promises a hold, and
+    // a pointer device only gets one if the press is armed here. Touch
+    // already routed through the same detector below.
+    if (found?.kind === 'copy' && pressWillOpenFloat(found)) {
+      event.stopPropagation()
+      pressElement = found.element
+      press.onMouseDown(event as unknown as MouseArg)
+      return
+    }
+    pressElement = null
     if (state && !pressWillOpenFloat(found)) apply({ type: 'dismiss' })
   }, true)
 
   document.addEventListener('mouseup', (event) => {
-    const found = targetFrom(event.target)
-    if (found?.kind === 'copy' && pressWillOpenFloat(found)) event.stopPropagation()
+    if (!pressElement) return
+    event.stopPropagation()
+    // A release before the threshold cancels the pending hold; the `click`
+    // that follows opens the panel through the ownership rule instead.
+    press.onMouseUp()
+    pressElement = null
   }, true)
 
   document.addEventListener('touchstart', (event) => {
