@@ -3,12 +3,18 @@
 // F14: the Inventory products list styled a NEGATIVE profit that the detail
 // pane opened from the same row clamped to 0. Both surfaces read ONE row
 // object (Inventory.tsx hands the list row straight to the pane via
-// `onOpenDetail={setDetailProduct}`), so they can only disagree when the
-// server sends a negative revenue or COGS. The owner rule (N6) is that such a
-// figure is a scoping defect to root-cause, never a display floor, so the fix
-// is in the Worker's per-product ledger and this file pins BOTH ends of it:
-// the Worker's guarantee, and this surface not quietly acquiring a clamp of
-// its own once the guarantee exists.
+// `onOpenDetail={setDetailProduct}`), so a disagreement is never two payloads:
+// it is the pane clamping a figure the list renders raw. The pane clamps FOUR
+// cells -- Net sold, Revenue, COGS (`Math.max(0, ...)` each) and the profit
+// built on the last two -- and the list renders all four as they come, so the
+// two surfaces disagree on any cell the server can send negative. All four are
+// pinned below; pinning only three is how the uncapped qty_sold column
+// survived a round of this lane.
+//
+// The owner rule (N6) is that such a figure is a scoping defect to root-cause,
+// never a display floor, so the fix is in the Worker's per-product ledger and
+// this file pins BOTH ends of it: the Worker's guarantee, and this surface not
+// quietly acquiring a clamp of its own once the guarantee exists.
 //
 // F15: the Dashboard carried a FOURTH profit definition -- cost_out - cost_in,
 // stock movement valued at cost -- that nothing read, so a reader comparing
@@ -55,21 +61,23 @@ assert.match(inventory, /onOpenDetail=\{setDetailProduct\}/,
   'the pane opens on the very row object the list rendered, so any disagreement is arithmetic, not two payloads')
 
 // Profit was not the only cell that disagreed. The pane clamps the two
-// OPERANDS as well, and the list renders both of those raw (they are
+// OPERANDS as well, and Net sold, and the list renders all three raw (they are
 // InventoryProductRow metrics in their own right), so on the old ledger a
-// product read "-$100" for Revenue in the list and "$0" in the pane. The same
-// one fix settles all three cells; pin the pane's other two clamps so the
-// no-op claim covers the whole row rather than just its last column.
+// product read "-$100" for Revenue in the list and "$0" in the pane. Pin every
+// one of the pane's four clamps: the no-op claim has to cover the whole
+// Performance row, not the columns that happened to get fixed first.
 assert.match(pane, /fmtUSD\(Math\.max\(0, p\.revenue_usd \|\| 0\)\)/,
   'the pane clamps Revenue too')
 assert.match(pane, /fmtUSD\(Math\.max\(0, p\.cogs_usd \|\| 0\)\)/,
   'the pane clamps COGS too')
-for (const metric of ['revenue_usd', 'cogs_usd'] as const) {
+assert.match(pane, /Math\.max\(0, p\.qty_sold \|\| 0\)/,
+  'the pane clamps Net sold too -- the unit count is a cell of the same row and carries the same invariant as the money')
+for (const metric of ['revenue_usd', 'cogs_usd', 'qty_sold'] as const) {
   assert.ok(surface.includes(`'${metric}'`),
     `the list renders ${metric} as its own cell, so it had to agree with the pane's clamp of it as well`)
 }
-assert.doesNotMatch(stripComments(surface), /Math\.max\(0,[^)]*(revenue|cogs)/,
-  'and the list still must not floor either operand on its own account')
+assert.doesNotMatch(stripComments(surface), /Math\.max\(0,[^)]*(revenue|cogs|qty_sold)/,
+  'and the list still must not floor an operand, or the unit count, on its own account')
 
 // The two formulas over the domain the Worker now guarantees, and over the one
 // it used to allow. This is the whole finding in four lines: identical wherever
@@ -99,5 +107,7 @@ assert.match(workerLedger, /MIN\(sold\.net_usd, COALESCE\(ret\.refund_usd, 0\)\)
   'a reversal is capped at what the sale recognised for that product, so revenue_usd >= 0 by construction')
 assert.match(workerLedger, /MAX\(0, sold\.cogs_usd - COALESCE\(ret\.cogs_returned_usd, 0\)\)/,
   'and returned cost cannot drive COGS below zero')
+assert.match(workerLedger, /MIN\(sold\.qty_sold, COALESCE\(ret\.qty_returned, 0\)\)/,
+  'the UNIT reversal carries the same cap as the money -- without it a sale split across branches reported Net sold -2 in the list while the pane showed 0')
 
 console.log('profit floor parity (list vs pane, one Dashboard formula) tests passed')
