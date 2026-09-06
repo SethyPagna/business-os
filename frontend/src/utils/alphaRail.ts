@@ -47,20 +47,75 @@ export function railPointerDownAction(expanded: boolean, pointerType: string | n
   return (pointerType || 'mouse') === 'mouse' ? 'jump' : 'open'
 }
 
-/** How far the finger must travel before a press that only OPENED the rail
- * turns into a scrub. A tap emits jitter of a pixel or two between pointerdown
- * and pointerup; without a floor, that jitter would emit a jump from the very
- * gesture that was supposed to open the rail and nothing else. */
-export const RAIL_OPEN_SCRUB_THRESHOLD_PX = 8
+/** The whole of one pointer gesture on the rail, as data.
+ *
+ * `openedOnly` marks a gesture whose FIRST press did nothing but open a
+ * collapsed rail (see railPointerDownAction). Such a gesture is finished as
+ * far as the index is concerned: it may never emit a jump, however far the
+ * finger then travels.
+ *
+ * A distance threshold was tried here and does not work. Both engines deliver
+ * touch moves BEFORE they claim the gesture for a page pan -- iOS WebKit
+ * dispatches touchmoves through its ~10pt pan slop, and Chrome delivers the
+ * moves that exceed its 8dp slop before GestureScrollBegin, i.e. before the
+ * pointercancel that tells us the page took the gesture. So any threshold low
+ * enough to feel like a scrub is also crossed by a plain edge swipe: the swipe
+ * applied a brand filter and, because the move had cleared `openedOnly`, the
+ * cancel that followed no longer closed the rail. A scrub now needs a fresh
+ * press on the (already expanded, 20px-tall) letters -- which is the press
+ * that can actually see what it is aiming at. */
+export interface RailGestureState {
+  /** A pointer is down on the rail. */
+  active: boolean
+  /** ...and that press only opened the rail. */
+  openedOnly: boolean
+}
 
-/** Whether a pointermove inside the current gesture may emit a jump.
- * `openedOnly` is true while the gesture has so far only opened the rail. */
-export function railGestureScrubs(openedOnly: boolean, startY: number, clientY: number): boolean {
-  if (!openedOnly) return true
-  const start = Number(startY)
-  const current = Number(clientY)
-  if (!Number.isFinite(start) || !Number.isFinite(current)) return false
-  return Math.abs(current - start) >= RAIL_OPEN_SCRUB_THRESHOLD_PX
+export const RAIL_GESTURE_IDLE: RailGestureState = { active: false, openedOnly: false }
+
+export type RailGestureEvent =
+  | { type: 'down'; expanded: boolean; pointerType?: string | null }
+  | { type: 'move' }
+  | { type: 'up' }
+  /** The browser took the gesture for a page scroll -- which the collapsed
+   * rail now permits (railTouchActionClass). */
+  | { type: 'cancel' }
+
+export interface RailGestureOutcome {
+  state: RailGestureState
+  /** Expand the rail. */
+  open: boolean
+  /** Hit-test the pointer and emit that key. */
+  jump: boolean
+  /** Collapse the rail again. */
+  close: boolean
+}
+
+/** The rail's gesture reducer: one rule set for pointerdown/move/up/cancel,
+ * so "this press only opened the rail" cannot be true in one handler and
+ * false in the next. */
+export function railGestureStep(state: RailGestureState, event: RailGestureEvent): RailGestureOutcome {
+  const still = { state, open: false, jump: false, close: false }
+  if (event.type === 'down') {
+    const action = railPointerDownAction(event.expanded, event.pointerType)
+    return {
+      state: { active: true, openedOnly: action === 'open' },
+      open: action === 'open',
+      jump: action === 'jump',
+      close: false,
+    }
+  }
+  if (event.type === 'move') {
+    if (!state.active || state.openedOnly) return still
+    return { ...still, jump: true }
+  }
+  if (event.type === 'cancel') {
+    // A cancelled press that had only opened the rail was never a tap on the
+    // index -- undo the open rather than leaving it hanging over the page
+    // after every swipe that starts on the right edge.
+    return { state: RAIL_GESTURE_IDLE, open: false, jump: false, close: state.openedOnly }
+  }
+  return { state: RAIL_GESTURE_IDLE, open: false, jump: false, close: false }
 }
 
 /** The rail's `touch-action`.

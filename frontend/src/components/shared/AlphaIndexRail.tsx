@@ -2,18 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 import {
+  RAIL_GESTURE_IDLE,
   RAIL_SPECIAL_KEY,
   nearestRailKey,
   nextRailFocusKey,
   railFocusKey,
-  railGestureScrubs,
+  railGestureStep,
   railIndexAtOffset,
-  railPointerDownAction,
   railRendersThroughPortal,
   railTouchActionClass,
   sortRailKeys,
 } from '../../utils/alphaRail.ts'
-import type { RailFocusMove } from '../../utils/alphaRail.ts'
+import type { RailFocusMove, RailGestureState } from '../../utils/alphaRail.ts'
 
 export interface AlphaIndexRailProps {
   /** Letters/section keys that actually have data right now -- the rail only
@@ -109,10 +109,10 @@ export default function AlphaIndexRail({
   // every gesture, so re-picking the same key later always emits.
   const lastEmittedRef = useRef<string | null>(null)
   const lastPointerTypeRef = useRef<string>('mouse')
-  // The gesture in progress. `openedOnly` marks the press that did nothing but
-  // OPEN a collapsed rail: until the finger has actually travelled, that
-  // gesture must not emit a jump (see railGestureScrubs).
-  const gestureRef = useRef<{ openedOnly: boolean; startY: number } | null>(null)
+  // The gesture in progress, owned by railGestureStep. `openedOnly` marks the
+  // press that did nothing but OPEN a collapsed rail; that gesture can never
+  // emit a jump afterwards, and a pointercancel on it closes the rail again.
+  const gestureRef = useRef<RailGestureState>(RAIL_GESTURE_IDLE)
 
   const items = useMemo(() => sortRailKeys(letters), [letters])
   // The reset entry takes part in hit-testing and keyboard movement, but
@@ -166,8 +166,10 @@ export default function AlphaIndexRail({
     if (activeKey === undefined) setInternalActive(null)
   }, [activeKey])
 
-  // The FIRST press of a gesture either opens a collapsed rail or jumps -- see
-  // railPointerDownAction. On touch it can never do both: the collapsed
+  // Every pointer phase goes through the one reducer, so "this press only
+  // opened the rail" cannot be true in the down handler and false by the time
+  // the cancel arrives. The FIRST press either opens a collapsed rail or jumps
+  // -- see railPointerDownAction. On touch it can never do both: the collapsed
   // entries are ~2px dashes, so hit-testing the press that was meant to open
   // the rail produced an essentially random key (on the storefront, a random
   // brand filter).
@@ -175,24 +177,24 @@ export default function AlphaIndexRail({
     const pointerType = event.pointerType || 'mouse'
     lastPointerTypeRef.current = pointerType
     lastEmittedRef.current = null
-    const action = railPointerDownAction(expanded, pointerType)
-    gestureRef.current = { openedOnly: action === 'open', startY: event.clientY }
+    const step = railGestureStep(gestureRef.current, { type: 'down', expanded, pointerType })
+    gestureRef.current = step.state
     setDragging(true)
     event.currentTarget.setPointerCapture?.(event.pointerId)
-    if (action === 'open') {
-      setStickyOpen(true)
-      return
-    }
-    jumpTo(keyAtPoint(event.clientY))
+    if (step.open) setStickyOpen(true)
+    if (step.jump) jumpTo(keyAtPoint(event.clientY))
   }, [expanded, jumpTo, keyAtPoint])
 
+  // A gesture that only opened the rail never scrubs, at any distance: both
+  // engines deliver the moves that exceed their pan slop BEFORE they hand the
+  // gesture to the page, so a distance threshold let an ordinary edge swipe
+  // apply a brand filter and then suppressed the cancel that would have closed
+  // the rail. Scrubbing needs a fresh press on the laid-out letters.
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragging) return
-    const gesture = gestureRef.current
-    if (gesture) {
-      if (!railGestureScrubs(gesture.openedOnly, gesture.startY, event.clientY)) return
-      gesture.openedOnly = false
-    }
+    const step = railGestureStep(gestureRef.current, { type: 'move' })
+    gestureRef.current = step.state
+    if (!step.jump) return
     jumpTo(keyAtPoint(event.clientY))
   }, [dragging, jumpTo, keyAtPoint])
 
@@ -201,7 +203,7 @@ export default function AlphaIndexRail({
   const releaseDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.currentTarget.releasePointerCapture?.(event.pointerId)
     lastEmittedRef.current = null
-    gestureRef.current = null
+    gestureRef.current = railGestureStep(gestureRef.current, { type: 'up' }).state
     setDragging(false)
   }, [])
 
@@ -211,9 +213,10 @@ export default function AlphaIndexRail({
   // undo the open rather than leaving the rail hanging over the page after
   // every swipe that happens to start on the right edge.
   const handlePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const openedOnly = gestureRef.current?.openedOnly === true
+    const step = railGestureStep(gestureRef.current, { type: 'cancel' })
     releaseDrag(event)
-    if (openedOnly) closeRail()
+    gestureRef.current = step.state
+    if (step.close) closeRail()
   }, [closeRail, releaseDrag])
 
   // Hover-to-open, mouse only. A tap emits a pointerenter with pointerType

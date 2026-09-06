@@ -23,11 +23,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
   RAIL_ALL_KEY,
-  RAIL_OPEN_SCRUB_THRESHOLD_PX,
+  RAIL_GESTURE_IDLE,
   nearestRailKey,
   nextRailFocusKey,
   railFocusKey,
-  railGestureScrubs,
+  railGestureStep,
   railIndexAtOffset,
   railPointerDownAction,
   railRendersThroughPortal,
@@ -37,6 +37,7 @@ import {
   resolveBrandJump,
   sortRailKeys,
 } from '../src/utils/alphaRail.ts'
+import type { RailGestureEvent } from '../src/utils/alphaRail.ts'
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -178,20 +179,113 @@ runTest('a mouse keeps press-to-jump, because it opened the rail before pressing
   assert.equal(railPointerDownAction(false, undefined), 'jump', 'a missing pointerType is the mouse default, as everywhere else in this component')
 })
 
-runTest('the press that only opened the rail does not turn into a scrub on tap jitter', () => {
-  // A finger resting on the glass emits pointermove events of a pixel or
-  // two before pointerup. Without a floor, that jitter re-creates the exact
-  // defect above through the move handler instead of the down handler.
-  assert.equal(railGestureScrubs(true, 400, 400), false, 'a still finger is not a scrub')
-  assert.equal(railGestureScrubs(true, 400, 403), false, `${3}px of jitter is not a scrub`)
-  assert.equal(
-    railGestureScrubs(true, 400, 400 + RAIL_OPEN_SCRUB_THRESHOLD_PX),
-    true,
-    'a deliberate drag off the opening press still scrubs the (now laid-out) letters',
+// Drives a whole pointer gesture through the reducer the component uses, and
+// reports what the rail did: which effects fired, in order, and whether the
+// rail is open at the end. `expanded` starts collapsed and follows the
+// open/close effects, exactly as `dragging || stickyOpen` does in the
+// component.
+function runGesture(events: readonly RailGestureEvent[], startExpanded = false): { effects: string[]; expanded: boolean } {
+  let state = RAIL_GESTURE_IDLE
+  let expanded = startExpanded
+  const effects: string[] = []
+  for (const event of events) {
+    const step = railGestureStep(state, event.type === 'down' ? { ...event, expanded } : event)
+    state = step.state
+    if (step.open) {
+      effects.push('open')
+      expanded = true
+    }
+    if (step.jump) effects.push('jump')
+    if (step.close) {
+      effects.push('close')
+      expanded = false
+    }
+  }
+  return { effects, expanded }
+}
+
+runTest('a swipe that starts on the collapsed rail emits nothing and leaves nothing open', () => {
+  // The defect this pins, and why a distance threshold could not fix it: both
+  // engines deliver the moves that exceed their pan slop BEFORE they claim the
+  // gesture (iOS WebKit dispatches touchmoves through its ~10pt slop; Chrome
+  // sends the move past its 8dp slop before GestureScrollBegin). So the
+  // pointercancel that says "the page took this" arrives AFTER the move -- and
+  // with a threshold of 8px that move had already emitted a brand filter and
+  // cleared `openedOnly`, so the cancel no longer closed the rail.
+  //
+  // Discriminating on purpose: with the shipped 8px threshold this sequence
+  // answered ['open', 'jump'] and stayed expanded.
+  const swipe = runGesture([
+    { type: 'down', expanded: false, pointerType: 'touch' },
+    { type: 'move' },
+    { type: 'cancel' },
+  ])
+  assert.deepEqual(swipe.effects, ['open', 'close'], 'an edge swipe must not apply a brand filter on its way past')
+  assert.equal(swipe.expanded, false, 'and must not leave the index hanging over the page')
+
+  // A longer drag is the same gesture, not a scrub that earned its way in.
+  const longSwipe = runGesture([
+    { type: 'down', expanded: false, pointerType: 'touch' },
+    { type: 'move' },
+    { type: 'move' },
+    { type: 'move' },
+    { type: 'cancel' },
+  ])
+  assert.deepEqual(longSwipe.effects, ['open', 'close'], 'distance travelled cannot promote an opening press into a scrub')
+})
+
+runTest('the press that only opened the rail never emits, however it ends', () => {
+  const tap = runGesture([
+    { type: 'down', expanded: false, pointerType: 'touch' },
+    { type: 'move' },
+    { type: 'up' },
+  ])
+  assert.deepEqual(tap.effects, ['open'], 'a tap with jitter opens the rail and picks nothing')
+  assert.equal(tap.expanded, true, 'a completed tap leaves the letters open to aim at')
+
+  const pen = runGesture([
+    { type: 'down', expanded: false, pointerType: 'pen' },
+    { type: 'move' },
+    { type: 'cancel' },
+  ])
+  assert.deepEqual(pen.effects, ['open', 'close'], 'a pen has no hover either')
+})
+
+runTest('the second press, on the laid-out letters, is the one that picks and scrubs', () => {
+  const openThenPick = runGesture([
+    { type: 'down', expanded: false, pointerType: 'touch' },
+    { type: 'up' },
+    { type: 'down', expanded: true, pointerType: 'touch' },
+    { type: 'move' },
+    { type: 'move' },
+    { type: 'up' },
+  ])
+  assert.deepEqual(
+    openThenPick.effects,
+    ['open', 'jump', 'jump', 'jump'],
+    'once the rail is open a press picks a letter and the drag scrubs it',
   )
-  assert.equal(railGestureScrubs(true, 400, 400 - RAIL_OPEN_SCRUB_THRESHOLD_PX), true, 'upwards counts the same')
-  assert.equal(railGestureScrubs(false, 400, 400), true, 'a gesture that already jumped keeps scrubbing with no floor')
-  assert.equal(railGestureScrubs(true, Number.NaN, 400), false, 'an unmeasured start must not scrub by accident')
+
+  // A mouse never loses press-to-jump: it either opened on hover already, or
+  // (on the admin rails, which do not open on hover) has always opened and
+  // jumped in one click.
+  assert.deepEqual(
+    runGesture([{ type: 'down', expanded: false, pointerType: 'mouse' }, { type: 'move' }, { type: 'up' }]).effects,
+    ['jump', 'jump'],
+    'taking press-to-jump away would cost the admin rails a click per jump',
+  )
+  // A cancelled MOUSE drag (the browser claiming it for a text selection, say)
+  // must not collapse a rail the user opened deliberately.
+  assert.equal(
+    runGesture([{ type: 'down', expanded: true, pointerType: 'mouse' }, { type: 'cancel' }], true).expanded,
+    true,
+    'only the opening press is undone by a cancel',
+  )
+})
+
+runTest('a stray pointermove outside any gesture emits nothing', () => {
+  assert.equal(railGestureStep(RAIL_GESTURE_IDLE, { type: 'move' }).jump, false, 'pointer capture can deliver moves after the gesture ended')
+  assert.deepEqual(railGestureStep(RAIL_GESTURE_IDLE, { type: 'cancel' }).close, false, 'and a cancel with nothing open must not close anything')
 })
 
 // ---------------------------------------------------------------------------
@@ -236,32 +330,33 @@ runTest('arrow keys walk the rail and clamp at both ends instead of wrapping', (
 // ---------------------------------------------------------------------------
 
 runTest('the component wires the collapsed-tap and touch-action rules to the tested kernel', () => {
-  assert.match(
-    rail,
-    /const action = railPointerDownAction\(expanded, pointerType\)/,
-    'the first press of a gesture must ask the kernel what it is allowed to do',
-  )
+  // Every pointer phase must go through the ONE reducer above. Split rules
+  // are how "this press only opened the rail" ended up true in the down
+  // handler and false by the time the cancel arrived.
   const down = /const handlePointerDown = useCallback\(\(event[\s\S]*?\n  \}, \[/.exec(rail)
   assert.ok(down, 'handlePointerDown must stay one readable callback')
   assert.match(
     down![0],
-    /if \(action === 'open'\) \{\s*setStickyOpen\(true\)\s*return\s*\}/,
-    'the open action must RETURN before jumpTo -- opening the rail is not picking a letter',
+    /railGestureStep\(gestureRef\.current, \{ type: 'down', expanded, pointerType \}\)/,
+    'the first press of a gesture must ask the kernel what it is allowed to do',
   )
-  assert.ok(
-    down![0].indexOf("if (action === 'open')") < down![0].indexOf('jumpTo(keyAtPoint('),
-    'the guard has to come before the jump, not after it',
-  )
-  assert.match(rail, /railGestureScrubs\(gesture\.openedOnly, gesture\.startY, event\.clientY\)/, 'tap jitter must not scrub the rail it just opened')
+  assert.match(down![0], /if \(step\.jump\) jumpTo\(keyAtPoint\(/, 'and may only jump when the kernel says so')
+  const move = /const handlePointerMove = useCallback\(\(event[\s\S]*?\n  \}, \[/.exec(rail)
+  assert.ok(move, 'handlePointerMove must stay one readable callback')
+  assert.match(move![0], /railGestureStep\(gestureRef\.current, \{ type: 'move' \}\)/, 'a move is a gesture phase, not its own rule')
+  assert.match(move![0], /if \(!step\.jump\) return/, 'the opening press must not emit through the move handler either')
+  assert.doesNotMatch(rail, /openedOnly = false/, 'nothing may clear openedOnly mid-gesture -- that is what disarmed the cancel')
   assert.match(rail, /\$\{railTouchActionClass\(expanded\)\}/, 'the container must take its touch-action from the kernel')
   // Letting the page scroll through the collapsed rail means a swipe that
   // starts on the right edge now reaches the rail's own pointerdown first.
   // Opening on that and never closing would leave the index hanging over the
   // page after every such swipe.
   assert.match(rail, /onPointerCancel=\{handlePointerCancel\}/, 'a gesture the browser turns into a page scroll needs its own ending')
+  const cancel = /const handlePointerCancel = useCallback\(\(event[\s\S]*?\n  \}, \[/.exec(rail)
+  assert.ok(cancel, 'handlePointerCancel must stay one readable callback')
   assert.match(
-    rail,
-    /const openedOnly = gestureRef\.current\?\.openedOnly === true[\s\S]{0,120}if \(openedOnly\) closeRail\(\)/,
+    cancel![0],
+    /railGestureStep\(gestureRef\.current, \{ type: 'cancel' \}\)[\s\S]{0,200}if \(step\.close\) closeRail\(\)/,
     'a cancelled press that had only opened the rail must close it again',
   )
   const container = /className=\{`flex select-none flex-col[\s\S]*?\$\{className\}`\}/.exec(rail)
