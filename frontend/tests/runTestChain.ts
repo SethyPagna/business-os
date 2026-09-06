@@ -59,6 +59,12 @@ if (files.length === 0) {
   console.log(`test:utils: no test file matches ${JSON.stringify(terms)}`)
   process.exit(1)
 }
+// A near-empty discovery means the directory read or the cwd broke, not that
+// the suite shrank; refuse to report a false green on a handful of files.
+if (terms.length === 0 && files.length < 50) {
+  console.log(`test:utils: found only ${files.length} tests/*.test.ts files, expected the full suite (50+); refusing to report a false green`)
+  process.exit(1)
+}
 
 const reds: string[] = []
 const startedAll = Date.now()
