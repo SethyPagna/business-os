@@ -79,6 +79,14 @@ runTest('changed cost offers and uses the existing price-variant path', () => {
   assert.match(modalSource, /Total cost'\)}: \$\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
 })
 
+runTest('known zero catalog cost is prefetched and session cost keeps zero distinct from missing', () => {
+  assert.match(modalSource, /candidate\.cost_price_usd != null[\s\S]*candidate\.purchase_price_usd/)
+  assert.match(modalSource, /Number\.isFinite\(cost\) && cost >= 0/)
+  assert.match(modalSource, /tr\('cost_price_usd', 'Cost price \$'\)/)
+  assert.match(sessionsSource, /movementTotal != null && Number\.isFinite\(movementTotal\) && movementTotal >= 0/)
+  assert.match(stockSessionQuerySource, /CASE WHEN m\.total_cost_usd IS NOT NULL THEN 0 ELSE 1 END AS cost_missing/)
+})
+
 runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only after real writes', () => {
   assert.match(modalSource, /return createPortal\(/)
   assert.match(modalSource, /const closeIfIdle = \(\) => \{ if \(!saving\) \{ if \(successCount > 0\) onDone\(\); onClose\(\) \} \}/)
