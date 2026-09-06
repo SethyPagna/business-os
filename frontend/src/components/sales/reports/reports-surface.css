@@ -242,7 +242,11 @@
     --ui-size-body: 14px;
     --ui-size-meta: 13px;
     --ui-receipt-lh: 24px;
-    padding-inline: clamp(20px, 3vw, 48px);
+    /* O9 names >=1024 too: the old clamp(20px, 3vw, 48px) gave 30.7px at
+       1024, indistinguishable from the tablet gutter. 3.5vw with a 28px floor
+       reads as a real margin from 1024 and hands over smoothly to the 1280
+       tier (44.8px at 1279 -> 51.2px at 1280). */
+    padding-inline: clamp(28px, 3.5vw, 56px);
   }
   [data-reports-hub] .reports-overview-statement {
     max-width: 34rem;
