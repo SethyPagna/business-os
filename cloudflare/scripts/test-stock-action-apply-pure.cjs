@@ -38,6 +38,12 @@ const REAL = new Set([
   // fold the bounded catalog query narrows with. Stubbed, this harness would
   // green over a query that never folds.
   'productIdentity',
+  // N14-D's receipt gate is REAL here on purpose. Left to the inert `{}` stub
+  // the resolver falls back to, every add row would call an undefined
+  // stockReceiptGateCode and fail with a TypeError recorded as the row's
+  // reason -- and a stub that returned '' instead would be worse: the suite
+  // would green while proving nothing about the gate this wire now runs.
+  'stockReceiptGate',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
 ])
@@ -110,6 +116,11 @@ function makeDb() {
       created_at TEXT, updated_at TEXT);
     CREATE UNIQUE INDEX ux_products_crid ON products(client_request_id) WHERE client_request_id IS NOT NULL;
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+    -- The supplier column on an add row is match-only (migration 0062): the
+    -- engine looks the as-entered name up here and keeps the text with a NULL
+    -- id when it matches nothing. Every add row carries a supplier now that the
+    -- receipt gate requires one, so this lookup is on the hot path.
+    CREATE TABLE suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0, UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER DEFAULT 1,
@@ -215,7 +226,7 @@ async function test(name, fn) {
     const { sqlite, db } = makeDb()
     seedProduct(sqlite, { id: 10, name: 'Serum', barcode: 'S10', cost: 4, sell: 12 })
     seedJob(sqlite, 'job-add', [
-      { _rowNumber: 2, name: 'Serum', barcode: 'S10', shop: '5', warehouse: '', date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: 'AUG' },
+      { _rowNumber: 2, name: 'Serum', barcode: 'S10', shop: '5', warehouse: '', date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: 'AUG' },
     ], { stock_action_mode: 'direct' })
     const { out } = await runJobToCompletion(db, 'job-add', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.deepStrictEqual(out, { applied: 1, failed: 0 })
@@ -229,7 +240,7 @@ async function test(name, fn) {
   await test('a create row inserts the product and seeds its initial stock', async () => {
     const { sqlite, db } = makeDb()
     seedJob(sqlite, 'job-new', [
-      { _rowNumber: 2, name: 'Brand New Balm', barcode: 'BNB1', shop: '7', warehouse: '', date: '2026-08-27', action: 'create', selling_price: '9', vip_price: '', cost_price: '3', batch: '' },
+      { _rowNumber: 2, name: 'Brand New Balm', barcode: 'BNB1', shop: '7', warehouse: '', date: '2026-08-27', action: 'create', selling_price: '9', vip_price: '', cost_price: '3', supplier: 'Bong Long', batch: '' },
     ], { stock_action_mode: 'direct' })
     const { out } = await runJobToCompletion(db, 'job-new', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.deepStrictEqual(out, { applied: 1, failed: 0 })
@@ -278,7 +289,7 @@ async function test(name, fn) {
       // sale1: oversell (wants 5, only 1) -> whole group fails
       { _rowNumber: 2, name: 'Toner', barcode: 'T30', shop: '5', warehouse: '', date: '08/27/2026', action: 'sale1', selling_price: '8', vip_price: '', cost_price: '', batch: '' },
       // an independent add of a different product -> must still apply
-      { _rowNumber: 3, name: 'Mist', barcode: 'M31', shop: '4', warehouse: '', date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: '' },
+      { _rowNumber: 3, name: 'Mist', barcode: 'M31', shop: '4', warehouse: '', date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: '' },
     ]
     seedJob(sqlite, 'job-mix', rows, { stock_action_mode: 'direct' })
     const { out } = await runJobToCompletion(db, 'job-mix', JSON.stringify({ stock_action_mode: 'direct' }))
@@ -321,7 +332,7 @@ async function test(name, fn) {
     const rows = Array.from({ length: CONTINUE_UNITS }, (_, index) => ({
       _rowNumber: index + 2, name: 'Bounded', barcode: 'B50', shop: '1', warehouse: '',
       date: `2026-0${1 + (index % 6)}-${String(1 + (index % 27)).padStart(2, '0')}`,
-      action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: `L${index}`,
+      action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: `L${index}`,
     }))
     seedJob(sqlite, 'job-continue', rows, { stock_action_mode: 'direct' })
     const { out, invocations } = await runJobToCompletion(db, 'job-continue', JSON.stringify({ stock_action_mode: 'direct' }))
@@ -339,7 +350,7 @@ async function test(name, fn) {
     seedProduct(sqlite, { id: 51, name: 'Resumed', barcode: 'R51' })
     const rows = Array.from({ length: 75 }, (_, index) => ({
       _rowNumber: index + 2, name: 'Resumed', barcode: 'R51', shop: '1', warehouse: '',
-      date: '2026-03-05', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: `R${index}`,
+      date: '2026-03-05', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: `R${index}`,
     }))
     seedJob(sqlite, 'job-resume', rows, { stock_action_mode: 'direct' })
     const policy = JSON.stringify({ stock_action_mode: 'direct' })
@@ -376,7 +387,7 @@ async function test(name, fn) {
     seedProduct(sqlite, { id: 52, name: 'Bounded', barcode: 'B52' })
     const rows = Array.from({ length: STOCK_ACTION_MAX_UNITS + 1 }, (_, index) => ({
       _rowNumber: index + 2, name: 'Bounded', barcode: 'B52', shop: String(index + 1), warehouse: '',
-      date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: '',
+      date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: '',
     }))
     seedJob(sqlite, 'job-units-bound', rows, { stock_action_mode: 'reconcile' })
     await assert.rejects(
@@ -406,7 +417,7 @@ async function test(name, fn) {
     const { sqlite, db } = makeDb()
     seedProduct(sqlite, { id: 60, name: 'Cancelled', barcode: 'C60' })
     seedJob(sqlite, 'job-cancel', [
-      { _rowNumber: 2, name: 'Cancelled', barcode: 'C60', shop: '5', warehouse: '', date: '08/27/2026', action: 'add' },
+      { _rowNumber: 2, name: 'Cancelled', barcode: 'C60', shop: '5', warehouse: '', date: '08/27/2026', action: 'add', cost_price: '4', supplier: 'Bong Long' },
     ], { stock_action_mode: 'direct' })
     sqlite.prepare(`UPDATE import_jobs SET cancel_requested=1, status='applying', phase='applying' WHERE id='job-cancel'`).run()
     const out = await runImportApply({ ...env, DB: db }, 'job-cancel')
@@ -414,6 +425,59 @@ async function test(name, fn) {
     assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-cancel'`).get().status, 'cancelled')
     assert.strictEqual(sqlite.prepare(`SELECT lease_token FROM import_jobs WHERE id='job-cancel'`).get().lease_token, null)
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=60 AND branch_id=1`).get().quantity, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
+  })
+
+  // 9) N14-D on the FOURTH wire, end to end --------------------------------
+  // The three interactive wires refuse a stock-in that names no supplier and
+  // carries no cost. This one did not, and it is the only wire that can write
+  // 20,000 such receipts unattended. The refusal must reach the row's own
+  // reason (failed-action-keeps-the-form: the operator reads it in the
+  // finished report and re-uploads the fixed sheet), the job must finish
+  // instead of aborting, and the refused row must leave the ledger untouched.
+  await test('an import add with no supplier and no cost is refused, and the sheet keeps going', async () => {
+    const { sqlite, db } = makeDb()
+    seedProduct(sqlite, { id: 70, name: 'Ungated', barcode: 'U70' })
+    seedProduct(sqlite, { id: 71, name: 'Complete', barcode: 'C71' })
+    seedJob(sqlite, 'job-gate', [
+      // no supplier column, no cost column -- the receipt every other wire refuses
+      { _rowNumber: 2, name: 'Ungated', barcode: 'U70', shop: '5', warehouse: '', date: '08/27/2026', action: 'add' },
+      // a complete receipt on the same sheet still lands: one bad row is one bad row
+      { _rowNumber: 3, name: 'Complete', barcode: 'C71', shop: '4', warehouse: '', date: '08/27/2026', action: 'add', cost_price: '6', supplier: 'Bong Long' },
+    ], { stock_action_mode: 'direct' })
+    const { out } = await runJobToCompletion(db, 'job-gate', JSON.stringify({ stock_action_mode: 'direct' }))
+    assert.deepStrictEqual(out, { applied: 1, failed: 1 })
+    const refused = JSON.parse(sqlite.prepare(`SELECT result_json FROM import_job_rows WHERE job_id='job-gate' AND row_number=2`).get().result_json)
+    assert.strictEqual(refused.action, 'error')
+    // The SAME sentence POST /adjust, POST /api/batches and the stock-in
+    // session return -- not an import-only paraphrase.
+    assert.match(refused.message, /A stock-in must name the supplier the goods came from/)
+    // Nothing of the refused receipt reached the ledger.
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=70 AND branch_id=1`).get().quantity, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT stock_quantity FROM products WHERE id=70`).get().stock_quantity, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=70`).get().n, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements WHERE product_id=70`).get().n, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM import_stock_action_commits WHERE row_number=2`).get().n, 0)
+    // ...and the complete row on the same sheet is untouched by its neighbour.
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=71 AND branch_id=1`).get().quantity, 4)
+    assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-gate'`).get().status, 'completed_with_errors')
+  })
+
+  // 10) ...and the gate stops at the receipts. A create row whose branch
+  // columns are an explicit 0 registers a product and writes NO stock: there
+  // is no receipt, so there is nothing for a supplier or a cost to describe.
+  // Refusing it would make the gate reject rows that put nothing in.
+  await test('a create row with zero stock is not a receipt, so the gate lets it through', async () => {
+    const { sqlite, db } = makeDb()
+    seedJob(sqlite, 'job-zero', [
+      { _rowNumber: 2, name: 'Catalog Only', barcode: 'CO72', shop: '0', warehouse: '0', date: '2026-08-27', action: 'create', selling_price: '9' },
+    ], { stock_action_mode: 'direct' })
+    const { out } = await runJobToCompletion(db, 'job-zero', JSON.stringify({ stock_action_mode: 'direct' }))
+    assert.deepStrictEqual(out, { applied: 1, failed: 0 })
+    const created = sqlite.prepare(`SELECT id, stock_quantity FROM products WHERE barcode='CO72'`).get()
+    assert.ok(created && created.id > 0, 'the product is registered')
+    assert.strictEqual(created.stock_quantity, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches`).get().n, 0, 'no lot, because no receipt')
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
   })
 

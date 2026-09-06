@@ -1,6 +1,37 @@
 import type { D1Compat } from './db'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
+import { stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
+
+/**
+ * The FOURTH receipt wire (N14-D).
+ *
+ * routes/inventory.ts POST /adjust, routes/batches.ts and lib/stockSession.ts
+ * each run stockReceiptGateCode before they write a receipt. This file did
+ * not, and it INSERTs a product_batches row carrying supplier_id,
+ * supplier_name and unit_cost_usd -- so a stock-action import could mint the
+ * one receipt every interactive surface refuses: no supplier, no cost, and a
+ * lot whose blank cost then reads as free goods nobody declared. A gate on
+ * three of the four wires is not a gate.
+ *
+ * Exported because the import dispatcher must ask the SAME question before it
+ * creates a product for a row it is about to refuse: one kernel, four call
+ * sites, not a second implementation.
+ */
+export function unifiedStockReceiptRefusal(
+  input: Pick<StockReceiptGateInput, 'supplierName' | 'lotSupplierName' | 'lotAttributionDeferred' | 'unitCostUsd'>,
+): string | null {
+  return stockReceiptGateMessage(stockReceiptGateCode({
+    isStockIn: true,
+    supplierName: input.supplierName,
+    lotSupplierName: input.lotSupplierName,
+    lotAttributionDeferred: input.lotAttributionDeferred,
+    unitCostUsd: input.unitCostUsd,
+    // An import row is always a new receipt. 'correction' is the undo/restore
+    // exemption and no import can claim it.
+    attribution: 'receipt',
+  }))
+}
 
 export interface UnifiedStockAddInput {
   jobId: string
@@ -182,16 +213,34 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // next batch_number are independent scalars, so read them together. Across
   // a 20k+ row migration this saves a full D1 latency per unit (collapses the
   // separate existing-check and MAX(batch_number) reads into one).
+  // lot_supplier_name rides along for the gate below: this add may top up a
+  // lot that is ALREADY attributed, and first attribution sticks (the UPDATE
+  // further down only COALESCE-fills a blank). Demanding the sheet retype a
+  // supplier the writer cannot change would refuse a complete receipt.
   const pre = await db.prepare(`
     SELECT
       (SELECT status FROM import_stock_action_commits WHERE job_id = @jobId AND action_key = @actionKey) AS status,
-      (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId) AS next_batch
-  `).get<{ status: string | null; next_batch: number }>({ jobId, actionKey, productId })
+      (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId) AS next_batch,
+      (SELECT supplier_name FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey) AS lot_supplier_name
+  `).get<{ status: string | null; next_batch: number; lot_supplier_name: string | null }>({ jobId, actionKey, productId, batchKey })
+  // A redelivery of a row that already landed stays idempotent: the gate runs
+  // on receipts this call would WRITE, never on one the ledger already holds.
   if (pre?.status === 'applied') return { actionKey, applied: true, alreadyApplied: true }
   const batchNumber = Math.max(1, Number(pre?.next_batch || 1))
   const guard = pendingGuard()
   const supplierName = String(input.supplierName || '').trim().replace(/\s{2,}/g, ' ').slice(0, 120) || null
   const supplierId = Number.isSafeInteger(Number(input.supplierId)) && Number(input.supplierId) > 0 ? Number(input.supplierId) : null
+  // The same refusal, with the same words, that POST /adjust, POST /api/batches
+  // and the stock-in session return. Thrown before the first write, so a
+  // refused row leaves no pending commit, no lot and no movement behind --
+  // applyStockActionsJob records the message on the row and the operator sees
+  // it in the finished report.
+  const refusal = unifiedStockReceiptRefusal({
+    supplierName,
+    lotSupplierName: pre?.lot_supplier_name ?? null,
+    unitCostUsd: input.costPriceUsd,
+  })
+  if (refusal) throw new Error(refusal)
   const params = {
     jobId, actionKey, rowNumber, productId, productName, branchId, branchName,
     quantity, batchKey, lotCode, receivedAt, batchNumber, supplierName, supplierId,

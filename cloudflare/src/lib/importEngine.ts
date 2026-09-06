@@ -78,7 +78,7 @@ import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchC
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
-import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, type UnifiedStockSaleLine } from './stockActionCommit'
+import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
@@ -4354,6 +4354,21 @@ async function dispatchStockActionSingle(
   const plan = resolved.plan!
   if (plan.kind === 'noop') { r.action = 'skip'; return }
   const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
+  const supplierName = String(resolved.supplier || '').trim() || null
+  // applyUnifiedStockAdd is the wire and runs the gate for every add; this
+  // asks the SAME question early for one case only -- a CREATE that also
+  // receives stock. Refused inside the writer, that row would already have
+  // inserted its product, and the re-import that follows the fix carries a
+  // new job id, so the orphan becomes a duplicate rather than being reused.
+  // A create has no lot yet, so nothing can be inherited and both halves of
+  // the gate apply in full. A create whose branch columns are an explicit 0
+  // writes no receipt at all, so there is nothing here for a supplier or a
+  // cost to describe and the gate must not touch it.
+  const receivesStock = plan.branchActions.some((a) => a.direction === 'add' && a.quantity > 0)
+  if (plan.kind === 'create' && receivesStock) {
+    const refusal = unifiedStockReceiptRefusal({ supplierName, unitCostUsd: resolved.costPriceUsd })
+    if (refusal) throw new Error(refusal)
+  }
   let productId = resolved.productId ?? 0
   if (plan.kind === 'create') {
     const ensured = await ensureUnifiedStockProduct(db, {
@@ -4372,7 +4387,6 @@ async function dispatchStockActionSingle(
   // A create is an add that also inserts the product; both dispatch the
   // row's positive per-branch quantities through the same atomic writer.
   const adds = plan.branchActions.filter((a) => a.direction === 'add' && a.quantity > 0)
-  const supplierName = String(resolved.supplier || '').trim() || null
   const supplierId = supplierName ? await resolveSupplierId(supplierName) : null
   for (const add of adds) {
     await applyUnifiedStockAdd(db, {
