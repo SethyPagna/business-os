@@ -786,8 +786,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               <div className="max-h-40 space-y-1 overflow-y-auto">
                 {received.map((line) => (
                   <div key={line.key} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
-                    <span className="min-w-0 truncate text-gray-700 dark:text-gray-300">
-                      {line.status === 'saved' ? '✅' : line.status === 'error' ? '⚠️' : line.status === 'saving' ? '⏳' : '•'} {line.productName} × {line.quantity} · {line.batchLabel}
+                    {/* N26 sibling: the full name wraps -- never "…" on the one
+                        thing a queued line is read by; barcode under it. */}
+                    <span className="min-w-0 flex-1 text-gray-700 dark:text-gray-300">
+                      <span className="block break-words">{line.status === 'saved' ? '✅' : line.status === 'error' ? '⚠️' : line.status === 'saving' ? '⏳' : '•'} {line.productName} <span className="whitespace-nowrap">× {line.quantity} · {line.batchLabel}</span></span>
+                      {line.product.barcode ? <span className="block break-all dense-id text-[10px] text-gray-400">{line.product.barcode}</span> : null}
                     </span>
                     <span className="flex min-w-0 flex-wrap items-center justify-end gap-1">
                       {/* A server error reason wraps rather than being squeezed
