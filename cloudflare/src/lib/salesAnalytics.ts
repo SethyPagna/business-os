@@ -425,9 +425,14 @@ function round2(n: number): number {
 // header and the Reports kernel can never disagree:
 //   revenue = SUM over RECOGNIZED sales of (subtotal - store discount -
 //             membership discount) - customer refunds
-// A RECOGNIZED sale is neither cancelled nor awaiting_payment. Tax and delivery
-// fees are excluded from revenue; unpaid credit (awaiting_payment) is surfaced
-// separately as pending_revenue and only becomes revenue once paid. These are
+// A RECOGNIZED sale is one that is NOT CANCELLED -- clause 4 of the scoping
+// rule above, restated so this block cannot drift from it: the
+// awaiting_payment cohort is INSIDE revenue, COGS, profit and delivery
+// (recognizedExpr is `<> 'cancelled'`, lineage commit fd7c49ba) and is
+// ADDITIONALLY reported as pending_*. That block is a subset, not a
+// complement; nothing may add the two together, and nothing may describe the
+// cohort as becoming revenue later -- it is already in. Tax and delivery fees
+// are excluded from revenue on both sides of the split. These are
 // SQL-fragment builders (never user input) so string-building them is safe.
 // `p` is the table-alias prefix for the `sales` row, e.g. '', 's.' or 'sales.'.
 //
