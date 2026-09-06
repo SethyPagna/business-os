@@ -4,7 +4,7 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 import {
   applyDateEntryMask,
   applyTimeEntryMask,
-  isoToDisplayDate,
+  dateEntryDisplayValue,
   localDateTimePairValue,
   normalizeDateEntry,
   normalizeTimeEntry,
@@ -126,14 +126,16 @@ function businessToday(): Date {
   return new Date(year, (month || 1) - 1, day || 1)
 }
 
-/** Tolerates either storage shape on the way in. */
+/**
+ * Tolerates either storage shape on the way in.
+ *
+ * The rule itself lives in dateEntry.dateEntryDisplayValue, because a caller
+ * deciding whether it may adopt this field at all has to be able to ask what
+ * the field would do to a value BEFORE rendering it, and a second copy of the
+ * rule here is exactly how that answer drifts from this one.
+ */
 function toDisplay(value: string): string {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  const iso = isoToDisplayDate(raw)
-  if (iso) return iso
-  const parsed = normalizeDateEntry(raw, businessToday())
-  return parsed.value || raw
+  return dateEntryDisplayValue(value, businessToday())
 }
 
 function translator(t?: (key: string) => string | undefined) {
