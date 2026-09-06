@@ -16,8 +16,9 @@
 //      it is invisible on a desktop mouse.
 //   3. EVERY product-name cell uses that one class -- the Products desktop
 //      row and mobile card, both group titles, Inventory / Branches >
-//      Products desktop and mobile rows, and the image-only view -- and none
-//      of those files carries scroll CSS of its own.
+//      Products desktop and mobile rows, the image-only view, and the
+//      expanded branch's own stock cards and group titles on the Branches
+//      page -- and none of those files carries scroll CSS of its own.
 //
 // Run: node tests/productNameScrollCells.test.ts
 
@@ -116,6 +117,13 @@ const NAME_CELLS: Array<[string, string, string]> = [
   ['Inventory / Branches > Products desktop row', 'components/inventory/InventoryProductsSurface.tsx', 'font-medium text-slate-800 dark:text-slate-100'],
   ['Inventory / Branches > Products mobile row', 'components/inventory/InventoryProductsSurface.tsx', '{product.name || \'—\'}</span><strong>'],
   ['Products image-only view', 'components/products/ProductsImageOnlyView.tsx', 'text-sm font-medium text-gray-800 dark:text-gray-100'],
+  // The expanded branch's own stock grid on the Branches page. This is a
+  // SECOND "Branches > Products" surface, separate from the
+  // InventoryProductsSurface rows above, and it is the one the owner reaches
+  // by expanding a branch card -- it was still on break-words after the first
+  // pass, which is exactly the sibling gap this list exists to catch.
+  ['Branch stock card', 'components/branches/Branches.tsx', '{product.name}</div>'],
+  ['Branch stock group title', 'components/branches/Branches.tsx', '{group.name}</span>'],
 ]
 
 runTest('every product-name cell carries the one shared class', () => {
