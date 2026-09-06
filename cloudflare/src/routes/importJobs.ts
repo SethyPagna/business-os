@@ -15,6 +15,7 @@ import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus }
 import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from '../lib/importRetention'
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -108,7 +109,7 @@ function safeJsonParse<T>(text: string | null | undefined, fallback: T): T {
 
 async function auditImportEvent(c: any, action: string, jobId: string, before: Record<string, unknown> | null, after: Record<string, unknown> | null, extra: Record<string, unknown> = {}) {
   const user = c.get('user')
-  await audit(c.env, user?.id ?? null, user?.name ?? null, action, 'import_job', jobId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), action, 'import_job', jobId, {
     jobId,
     jobType: (after?.type || before?.type) ?? null,
     oldStatus: before?.status ?? null,
@@ -246,7 +247,7 @@ app.post('/', async (c) => {
     id, type,
     policy_json: JSON.stringify(body?.policy || {}),
     created_by_id: user?.id ?? null,
-    created_by_name: user?.name ?? null,
+    created_by_name: actorSnapshot(user),
   })
   const job = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_create', id, null, job || null, { source: body?.source || 'api' })
@@ -746,7 +747,7 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
       media_type: mediaType,
       byte_size: bytes.byteLength,
       created_by_id: user?.id ?? null,
-      created_by_name: user?.name ?? null,
+      created_by_name: actorSnapshot(user),
       optimization_status: mediaType === 'image' ? 'not_applicable_no_sharp' : 'not_applicable',
     })
     fileAssetId = Number(assetInsert.lastInsertRowid)

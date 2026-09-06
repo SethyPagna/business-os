@@ -140,7 +140,10 @@ const broadcastStub = {
 // Real, pure -- loaded first since everything else depends on it.
 const permissions = loadReal('lib/permissions.ts')
 const pendingActions = loadReal('lib/pendingActions.ts', { ...dbStub, '../index': {} })
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const reviewGate = loadReal('lib/reviewGate.ts', {
+  './actorSnapshot': actorSnapshotKernel,
   './permissions': permissions,
   './pendingActions': pendingActions,
   '../index': {},
@@ -208,6 +211,7 @@ const feesRoute = loadReal('routes/fees.ts', {
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', CURRENT_USER); return next() } },
   '../lib/permissions': permissions,
   ...auditStub,

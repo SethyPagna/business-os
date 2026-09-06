@@ -118,8 +118,8 @@ for (const file of EXPECTED_READ_ONLY) {
 // Rule 3 -- the specific new coverage, pinned by shape so a refactor that
 // drops the call (or its key detail) fails loudly.
 const backups = fs.readFileSync(path.join(routesDir, 'backups.ts'), 'utf8')
-ok(/audit\([^)]*'create',\s*'backup'/.test(backups), 'backups.ts audits backup creation')
-ok(/audit\([^)]*'restore',\s*'backup'/.test(backups), 'backups.ts audits the destructive restore')
+ok(/audit\((?:[^()]|\([^()]*\))*'create',\s*'backup'/.test(backups), 'backups.ts audits backup creation')
+ok(/audit\((?:[^()]|\([^()]*\))*'restore',\s*'backup'/.test(backups), 'backups.ts audits the destructive restore')
 // The call gained a progress callback (slice C, Part 543) -- match the
 // call-site prefix, and assert it was actually FOUND so a future rename
 // can't turn this into a vacuous indexOf(-1) comparison.
@@ -129,20 +129,20 @@ ok(backups.indexOf("'restore', 'backup'") > restoreCallAt,
   'backups.ts restore audit sits after the restore actually ran')
 
 const filesRoute = fs.readFileSync(path.join(routesDir, 'files.ts'), 'utf8')
-ok(/audit\([^)]*'upload',\s*'file'/.test(filesRoute), 'files.ts audits uploads')
-ok(/audit\([^)]*'rename',\s*'file'/.test(filesRoute), 'files.ts audits renames with from/to')
+ok(/audit\((?:[^()]|\([^()]*\))*'upload',\s*'file'/.test(filesRoute), 'files.ts audits uploads')
+ok(/audit\((?:[^()]|\([^()]*\))*'rename',\s*'file'/.test(filesRoute), 'files.ts audits renames with from/to')
 ok(/from:\s*existing\.original_name/.test(filesRoute), 'files.ts rename audit carries the before value')
-ok(/audit\([^)]*'delete',\s*'file'/.test(filesRoute), 'files.ts audits deletes')
+ok(/audit\((?:[^()]|\([^()]*\))*'delete',\s*'file'/.test(filesRoute), 'files.ts audits deletes')
 ok(/forced:\s*usageCount > 0/.test(filesRoute), 'files.ts delete audit records the CONFIRM DELETE override')
 
 const notes = fs.readFileSync(path.join(routesDir, 'notes.ts'), 'utf8')
-ok(/audit\([^)]*'create',\s*'note',[^)]*,\s*null\)/.test(notes), 'notes.ts audits create with NO content in details')
+ok(/audit\((?:[^()]|\([^()]*\))*'create',\s*'note',(?:[^()]|\([^()]*\))*,\s*null\)/.test(notes), 'notes.ts audits create with NO content in details')
 
 const telegram = fs.readFileSync(path.join(routesDir, 'telegram.ts'), 'utf8')
-ok(/audit\([^)]*'test',\s*'telegram'/.test(telegram), 'telegram.ts audits the test message')
-ok(/audit\([^)]*'send',\s*'telegram_summary'/.test(telegram), 'telegram.ts audits manual daily summaries')
-ok(/audit\([^)]*'connect',\s*'telegram_webhook'/.test(telegram), 'telegram.ts audits command webhook setup')
-ok(/audit\([^)]*'delete',\s*'note',[^)]*,\s*null\)/.test(notes), 'notes.ts audits delete with NO content in details')
+ok(/audit\((?:[^()]|\([^()]*\))*'test',\s*'telegram'/.test(telegram), 'telegram.ts audits the test message')
+ok(/audit\((?:[^()]|\([^()]*\))*'send',\s*'telegram_summary'/.test(telegram), 'telegram.ts audits manual daily summaries')
+ok(/audit\((?:[^()]|\([^()]*\))*'connect',\s*'telegram_webhook'/.test(telegram), 'telegram.ts audits command webhook setup')
+ok(/audit\((?:[^()]|\([^()]*\))*'delete',\s*'note',(?:[^()]|\([^()]*\))*,\s*null\)/.test(notes), 'notes.ts audits delete with NO content in details')
 const notesPutBody = notes.slice(notes.indexOf("app.put('/:id'"), notes.indexOf("app.patch('/reorder'"))
 ok(notesPutBody.length > 0 && !notesPutBody.includes('audit('),
   'notes.ts autosave PUT is deliberately unaudited (per-keystroke flood guard)')
@@ -151,7 +151,7 @@ const sync = fs.readFileSync(path.join(routesDir, 'sync.ts'), 'utf8')
 const outboxBody = sync.slice(sync.indexOf("app.post('/outbox'"), sync.indexOf("app.post('/files/chunks/init'"))
 ok(outboxBody.length > 0 && !outboxBody.includes('audit('),
   'sync.ts outbox is deliberately unaudited (replayed routes audit; no double-log)')
-ok(/audit\([^)]*'upload',\s*'file'/.test(sync), 'sync.ts audits the chunked-upload complete')
+ok(/audit\((?:[^()]|\([^()]*\))*'upload',\s*'file'/.test(sync), 'sync.ts audits the chunked-upload complete')
 ok(/via:\s*'offline_sync'/.test(sync), 'sync.ts chunked-upload audit is marked offline_sync')
 
 console.log(`\nAll ${checks} audit-coverage checks passed.`)

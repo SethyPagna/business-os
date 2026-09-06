@@ -29,6 +29,7 @@ import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type 
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 // Customers, suppliers, and delivery contacts, ported from
 // backend/src/routes/contacts.ts. This never had a real route on Cloudflare
@@ -769,7 +770,7 @@ function registerContactRoutes(config: ContactConfig) {
     const value = String(body.value || '').trim()
     if (!type || !value) return c.json({ error: 'type ("phone" or "name") and value are required' }, 400)
     const db = getDb(c.env)
-    await dismissDuplicateCluster(db, config.table, type, value, { id: user?.id ?? null, name: user?.name ?? null })
+    await dismissDuplicateCluster(db, config.table, type, value, { id: user?.id ?? null, name: actorSnapshot(user) })
     return c.json({ ok: true })
   })
 
@@ -946,7 +947,7 @@ function registerContactRoutes(config: ContactConfig) {
     }
 
     await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id: mergeId })
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'merge', config.entity, keepId, { mergedId: mergeId, mergedName: merged.name, backfilled: Object.keys(backfill) })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'merge', config.entity, keepId, { mergedId: mergeId, mergedName: merged.name, backfilled: Object.keys(backfill) })
     const mergeVersions: string[] = [config.table]
     // A merge changes more than the contact picker: linked operational rows
     // feed other versioned read caches. Advance those dependency namespaces
@@ -1026,7 +1027,7 @@ function registerContactRoutes(config: ContactConfig) {
       })
       : await runContactInsert()
     const id = result.lastInsertRowid
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', config.entity, id, { name })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, { name })
     await bumpVersion(c.env, config.table)
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'create', id }))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
@@ -1056,7 +1057,7 @@ function registerContactRoutes(config: ContactConfig) {
       await db.prepare('UPDATE portal_accounts SET password_hash = @h, updated_at = CURRENT_TIMESTAMP WHERE id = @aid')
         .run({ h: bcrypt.hashSync(tempPassword, 10), aid: account.id })
       await revokePortalSessionsForAccount(c.env, account.id)
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'portal_reset', config.entity, id, {})
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'portal_reset', config.entity, id, {})
       return c.json({ ok: true, temporaryPassword: tempPassword })
     })
   }
@@ -1226,14 +1227,14 @@ function registerContactRoutes(config: ContactConfig) {
     }
     if (statements.length) await db.batch(statements)
     if (config.table === 'suppliers' && nameChanged && snapshotCarry) {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'supplier_cascade', id, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'supplier_cascade', id, {
         from: String(current.name || '').trim(),
         to: name,
         scope: 'linked_live_records',
         historical_snapshots_preserved: true,
       })
     }
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', config.entity, id, { name })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, { name })
     const updateVersions: string[] = [config.table]
     if (nameChanged && snapshotCarry) {
       if (config.table === 'customers') {
@@ -1298,7 +1299,7 @@ function registerContactRoutes(config: ContactConfig) {
     }
 
     await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', config.entity, id, { name: current.name })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', config.entity, id, { name: current.name })
     await bumpVersion(c.env, config.table)
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'delete', id }))
     return c.json({})
@@ -1334,7 +1335,7 @@ function registerContactRoutes(config: ContactConfig) {
     if (rawIds.length > 50000) return c.json({ error: `Select 50,000 or fewer ${config.entity}s per bulk delete` }, 400)
 
     try {
-      const { jobId, totalCount } = await createBulkDeleteJob(c.env, contactBulkDeleteEntityType(config), rawIds as number[], reason, { id: user?.id ?? null, name: user?.name ?? null })
+      const { jobId, totalCount } = await createBulkDeleteJob(c.env, contactBulkDeleteEntityType(config), rawIds as number[], reason, { id: user?.id ?? null, name: actorSnapshot(user) })
       return c.json({ success: true, jobId, totalCount }, 202)
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : 'Failed to start bulk delete' }, 400)
@@ -2085,7 +2086,7 @@ app.post('/customers/link-conflicts/relink', async (c) => {
     WHERE customer_id = @currentId AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
   `).run({ targetId, currentId, phoneKey })
   const changed = Number((result as { meta?: { changes?: number } })?.meta?.changes ?? (result as { changes?: number })?.changes ?? 0)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'relink_sales', 'customer', targetId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'relink_sales', 'customer', targetId, {
     fromCustomerId: currentId, phoneKey, salesRelinked: changed,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'relink', id: targetId }))
@@ -2129,7 +2130,7 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
       AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
   `).run({ targetId, name, phoneKey })
   const changed = Number((result as { meta?: { changes?: number } })?.meta?.changes ?? (result as { changes?: number })?.changes ?? 0)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, created ? 'create_and_link_sales' : 'link_sales', 'customer', targetId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), created ? 'create_and_link_sales' : 'link_sales', 'customer', targetId, {
     name, phone, salesLinked: changed, createdContact: created,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: created ? 'create' : 'update', id: targetId }))
@@ -2153,7 +2154,7 @@ app.post('/customers/link-conflicts/dismiss', async (c) => {
     VALUES ('customers', @kind, @value, @byId, @byName, CURRENT_TIMESTAMP)
     ON CONFLICT(contact_table, cluster_type, cluster_value) DO UPDATE SET
       dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
-  `).run({ kind, value, byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ kind, value, byId: user?.id ?? null, byName: actorSnapshot(user) })
   return c.json({ ok: true })
 })
 

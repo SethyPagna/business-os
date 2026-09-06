@@ -17,6 +17,7 @@ import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incre
 import { branchUpdateStatements } from '../lib/branchWrites'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
@@ -253,7 +254,7 @@ app.post('/stock-integrity/repair', async (c) => {
 
   const remaining = await readStockIntegrityIssues(db)
   const repairedRows = Math.max(0, issues.length - remaining.length)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'repair', 'branch_stock_integrity', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'repair', 'branch_stock_integrity', null, {
     repairedRows,
     beforeIssues: issues.length,
     remainingIssues: remaining.length,
@@ -394,7 +395,7 @@ app.post('/transfer', async (c) => {
     {
       sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at)
             VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @note, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, note: combinedNote, userId: user?.id ?? null, userName: user?.name ?? null },
+      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, note: combinedNote, userId: user?.id ?? null, userName: actorSnapshot(user) },
     },
     {
       // 0084: a lot-scoped transfer stamps its lot on both legs (out = the
@@ -402,7 +403,7 @@ app.post('/transfer', async (c) => {
       // transfer touched no specific lot and stays NULL.
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: sourceBatch?.id ?? null },
+      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: sourceBatch?.id ?? null },
     },
     {
       // Recorded against destProductId -- this is a real per-product stock
@@ -411,7 +412,7 @@ app.post('/transfer', async (c) => {
       // the quantity, not necessarily the row the operator picked.
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${productId})` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: destBatchId },
+      params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${productId})` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: destBatchId },
     },
   ]
   // Track A/C audit (part 53) found this was missing: when the transfer
@@ -476,7 +477,7 @@ app.post('/transfer', async (c) => {
 
   await db.batch(statements)
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId, mergedIntoProductId: mergeTarget?.id ?? null, batchId: sourceBatch?.id ?? null, destBatchId })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId, mergedIntoProductId: mergeTarget?.id ?? null, batchId: sourceBatch?.id ?? null, destBatchId })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   if (mergeTarget) c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: destProductId }))
@@ -493,7 +494,7 @@ app.post('/transfer', async (c) => {
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
       lines: formatTransferTelegramLines({
-        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: user?.name || user?.username || null,
+        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: actorSnapshot(user),
         items: [{
           product: product.name, quantity, lot: sourceBatch?.lot_code || null, mergedInto: mergeTarget ? destProductName : null,
           fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
@@ -695,12 +696,12 @@ app.post('/transfer-bulk', async (c) => {
       {
         sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at)
               VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @note, @userId, @userName, CURRENT_TIMESTAMP)`,
-        params: { productId: item.productId, productName: product.name, fromBranchId, toBranchId, quantity: item.quantity, note: combinedNote, userId: user?.id ?? null, userName: user?.name ?? null },
+        params: { productId: item.productId, productName: product.name, fromBranchId, toBranchId, quantity: item.quantity, note: combinedNote, userId: user?.id ?? null, userName: actorSnapshot(user) },
       },
       {
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
               VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: item.productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity: item.quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: sourceBatchForItem?.id ?? null },
+        params: { productId: item.productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity: item.quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: sourceBatchForItem?.id ?? null },
       },
       {
         // Recorded against destProductId, same as the single-item route --
@@ -709,7 +710,7 @@ app.post('/transfer-bulk', async (c) => {
         // quantity, not necessarily the row the operator selected.
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
               VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity: item.quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${item.productId})` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: destBatchIdForItem },
+        params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity: item.quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${item.productId})` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: destBatchIdForItem },
       },
     )
 
@@ -767,7 +768,7 @@ app.post('/transfer-bulk', async (c) => {
   await Promise.all(items.map((item) => audit(
     c.env,
     user?.id ?? null,
-    user?.name ?? null,
+    actorSnapshot(user),
     'transfer',
     'stock',
     item.productId,
@@ -798,7 +799,7 @@ app.post('/transfer-bulk', async (c) => {
     }))
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
-      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: user?.name || user?.username || null, items: lines }),
+      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: actorSnapshot(user), items: lines }),
     })
   })().catch((error) => console.error('[telegram] bulk transfer notification failed', error)))
   return c.json({ success: true, transferredCount: items.length, merges })
@@ -1053,7 +1054,7 @@ app.post('/', async (c) => {
 
   const created = await db.prepare('SELECT id FROM branches WHERE name = ? ORDER BY id DESC LIMIT 1').get<{ id: number }>([name])
   if (created) {
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'branch', created.id, { name })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'branch', created.id, { name })
     // Real, confirmed gap: a brand-new branch previously got zero
     // branch_stock rows for the catalog that already existed -- only
     // products created AFTER this branch (via seedBranchStockForNewProduct
@@ -1122,7 +1123,7 @@ app.put('/:id', async (c) => {
   // lib/branchWrites.ts for why this is one definition, not two.
   await db.batch(branchUpdateStatements(id, body))
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'branch', id, { name: body.name })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: body.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
   return c.json({})
 })
@@ -1183,7 +1184,7 @@ app.delete('/:id', async (c) => {
     { sql: 'DELETE FROM branch_stock WHERE branch_id = ?', params: [id] },
     { sql: 'DELETE FROM branches WHERE id = ?', params: [id] },
   ])
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', 'branch', id, { name: branch.name })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'branch', id, { name: branch.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'delete', id }))
   return c.json({})
 })

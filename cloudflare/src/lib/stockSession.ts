@@ -11,6 +11,7 @@ import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from './importIm
 import { buildInClause, chunkForBinding, D1_MAX_BOUND_PARAMS } from './sqlBinding'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { actorSnapshot } from './actorSnapshot'
 
 export const STOCK_SESSION_KIND = 'stock.session'
 export const STOCK_SESSION_MAX_LINES = 25
@@ -601,11 +602,11 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     }
   }
   statements.push({ sql: 'INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json) VALUES(@id,@actor,@request,\'stock_in\',@canonical)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical } })
-  statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: STOCK_SESSION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: user.name } })
+  statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: STOCK_SESSION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE stock_session_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
     SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_inventory_adjust',@adjusts,'snapshot_version',2),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_inventory_adjust',@adjusts,'snapshot_version',2),@actor,@name
-    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: user.name, creates: createLines.length ? 1 : 0, adjusts: requiresInventoryAdjust ? 1 : 0 } })
+    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: actorSnapshot(user), creates: createLines.length ? 1 : 0, adjusts: requiresInventoryAdjust ? 1 : 0 } })
   statements.push({ sql: 'UPDATE stock_session_operations SET history_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
 
   for (const line of request.items) {
@@ -640,7 +641,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
       SELECT m.product_id,p.name,m.branch_id,b.name,'stock_in',m.quantity,COALESCE(m.unit_cost_usd,0),0,COALESCE(m.unit_cost_usd,0)*m.quantity,0,@reason,o.rowid,@actor,@actorName,m.batch_id
       FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
-      WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: `Stock-in session ${operationId}`, actor: user.id, actorName: user.name, operationId, lineId: line.line_id } })
+      WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id } })
     statements.push({ sql: 'UPDATE stock_session_members SET movement_id=last_insert_rowid() WHERE operation_id=@operationId AND line_id=@lineId', params: { operationId, lineId: line.line_id } })
   }
   statements.push({ sql: `UPDATE stock_session_operations SET receipt_json=json_object(
@@ -660,7 +661,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     WHERE id=@id`, params: { id: operationId } })
   statements.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
     SELECT @actor,@name,'stock_session_create','stock_session',id,receipt_json,'stock_session_operations',id,receipt_json
-    FROM stock_session_operations WHERE id=@id`, params: { actor: user.id, name: user.name, id: operationId } })
+    FROM stock_session_operations WHERE id=@id`, params: { actor: user.id, name: actorSnapshot(user), id: operationId } })
   statements.push({ sql: 'DELETE FROM stock_session_guards', params: {} })
   const replayStateSql = await stockReplayStateSql(env)
   statements.push(...captureReplayState(operationId, replayStateSql, true))
@@ -847,13 +848,13 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
     SELECT m.product_id,p.name,m.branch_id,b.name,@movement,m.quantity*@sign,COALESCE(m.unit_cost_usd,0),0,m.quantity*COALESCE(m.unit_cost_usd,0)*@sign,0,@reason,o.rowid,@actor,@name,m.batch_id
     FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
-    WHERE m.operation_id=@id AND m.quantity>0`, params: { id: op.id, movement: direction === 'undo' ? 'remove' : 'add', sign: direction === 'undo' ? -1 : 1, reason: `Stock session ${op.id} ${direction} generation ${generation + 1}`, actor: user.id, name: user.name } })
+    WHERE m.operation_id=@id AND m.quantity>0`, params: { id: op.id, movement: direction === 'undo' ? 'remove' : 'add', sign: direction === 'undo' ? -1 : 1, reason: `Stock session ${op.id} ${direction} generation ${generation + 1}`, actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE stock_session_operations SET generation=generation+1 WHERE id=@id', params: { id: op.id } })
   statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot', params: { status: direction === 'undo' ? 'reversed' : 'applied', snapshot: op.snapshot_id } })
   statements.push({ sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=CURRENT_TIMESTAMP,
     undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@history`, params: { status: targetStatus, generation: generation + 1, history: historyId } })
   statements.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details)
-    VALUES(@actor,@name,@action,'stock_session',@id,@details)`, params: { actor: user.id, name: user.name, action: `stock_session_${direction}`, id: op.id, details: JSON.stringify({ operationId: op.id, actionHistoryId: historyId, generation: generation + 1 }) } })
+    VALUES(@actor,@name,@action,'stock_session',@id,@details)`, params: { actor: user.id, name: actorSnapshot(user), action: `stock_session_${direction}`, id: op.id, details: JSON.stringify({ operationId: op.id, actionHistoryId: historyId, generation: generation + 1 }) } })
   statements.push(...captureReplayState(String(op.id), stateSql))
   checkBounds(statements, snapshot)
   try { await db.batch(statements) } catch (error) {

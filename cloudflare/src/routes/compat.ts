@@ -13,6 +13,7 @@ import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -648,7 +649,7 @@ app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
     deleted += n
     if (n < 5000) break
   }
-  await audit(c.env, user?.id ?? null, user?.name ?? user?.username ?? null, 'audit_log_retention_delete', 'audit_log', null, { olderThanDays, cutoffDate: cutoff, deleted })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'audit_log_retention_delete', 'audit_log', null, { olderThanDays, cutoffDate: cutoff, deleted })
   return c.json({ ok: true, deleted })
 })
 // The legacy deleted-sale audit ledger (migration 0088): every line the old

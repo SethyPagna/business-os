@@ -21,6 +21,7 @@ import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
 import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -752,7 +753,7 @@ app.post('/reason-presets', async (c) => {
     INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `).run({ key: RETURN_REASON_PRESETS_KEY, value: JSON.stringify(presets) })
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'return_reason_presets', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'return_reason_presets', null, {
     customerCount: presets.customer.length,
     supplierCount: presets.supplier.length,
   })
@@ -828,7 +829,7 @@ app.post('/reasons/replace', async (c) => {
   }
   const results = await db.batch(statements)
   const linkedChanged = replaceScope === 'linked' ? Number(results[1]?.meta?.changes || 0) : 0
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'return_reason', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'replace', 'return_reason', null, {
     from, to, returnScope, scope: replaceScope, linkedChanged,
   })
   await Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'returns')])
@@ -1126,7 +1127,7 @@ app.post('/', async (c) => {
     sale_id: body.sale_id || null,
     receipt_number: body.receipt_number || saleMeta.receipt_number || null,
     cashier_id: user?.id ?? null,
-    cashier_name: user?.name ?? null,
+    cashier_name: actorSnapshot(user),
     customer_id: body.customer_id || saleMeta.customer_id || null,
     customer_name: body.customer_name || saleMeta.customer_name || null,
     branch_id: branchId,
@@ -1237,7 +1238,7 @@ app.post('/', async (c) => {
         receipt_number: replacementReceiptNumber,
         client_request_id: replacementClientRequestId,
         cashier_id: user?.id ?? null,
-        cashier_name: user?.name || user?.username || null,
+        cashier_name: actorSnapshot(user),
         branch_id: branchId,
         branch_name: branchName,
         customer_id: body.customer_id || saleMeta.customer_id || null,
@@ -1274,7 +1275,7 @@ app.post('/', async (c) => {
           replacementReceiptNumber,
           returnNumber,
           body.receipt_number || saleMeta.receipt_number,
-          user?.name || user?.username,
+          actorSnapshot(user),
           body.customer_name || saleMeta.customer_name,
           branchName,
           ...replacementLines.map((line) => line.productName),
@@ -1291,7 +1292,7 @@ app.post('/', async (c) => {
         status: 'completed',
         createdAt: null,
         receiptNumber: replacementReceiptNumber,
-        cashier: user?.name || user?.username || null,
+        cashier: actorSnapshot(user),
         customer: body.customer_name || saleMeta.customer_name || null,
         phone: saleMeta.customer_phone || null,
         branch: branchName,
@@ -1416,7 +1417,7 @@ app.post('/', async (c) => {
             reason: `Return: ${body.reason}`,
             reference_id: returnId,
             user_id: user?.id ?? null,
-            user_name: user?.name ?? null,
+            user_name: actorSnapshot(user),
             // 0084: attributable only when the WHOLE restock landed on one
             // lot; a multi-lot split or a plain-bump remainder stays NULL
             // (the per-lot detail is in return_item_batch_allocations).
@@ -1440,7 +1441,7 @@ app.post('/', async (c) => {
           quantity,
           reason: body.reason,
           userId: user?.id ?? null,
-          userName: user?.name ?? null,
+          userName: actorSnapshot(user),
         })
         statements.push({
           sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
@@ -1455,7 +1456,7 @@ app.post('/', async (c) => {
             reason: `Return (damaged): ${body.reason}`,
             reference_id: returnId,
             user_id: user?.id ?? null,
-            user_name: user?.name ?? null,
+            user_name: actorSnapshot(user),
             // 0084: the ORIGINAL sale lot these units belonged to -- the
             // same attribution the damaged lot itself records.
             batch_id: originalBatchId,
@@ -1509,7 +1510,7 @@ app.post('/', async (c) => {
         returnId,
         returnNumber,
         userId: user?.id ?? null,
-        userName: user?.name ?? null,
+        userName: actorSnapshot(user),
       })
       appliedReplacements.push({ productId: line.productId, productName: line.productName, branchId: lineBranchId, batchId: line.batchId, quantity: line.quantity })
       if (!replacementSaleId) throw new Error('Replacement sale header was not created')
@@ -1693,7 +1694,7 @@ app.post('/', async (c) => {
     await db.prepare('DELETE FROM damaged_stock_lots WHERE return_id = ?').run([returnId])
     await db.prepare('DELETE FROM return_replacement_items WHERE return_id = ?').run([returnId])
     if (unreversed.length) {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'return_rollback_incomplete', 'return', returnId, { unreversed })
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'return_rollback_incomplete', 'return', returnId, { unreversed })
     }
     return c.json({
       error: `Failed to record return items: ${(error as Error).message}`
@@ -1703,7 +1704,7 @@ app.post('/', async (c) => {
     }, 500)
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'return', returnId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'return', returnId, {
     returnNumber,
     saleId: body.sale_id || null,
     replacementSaleId,
@@ -1725,7 +1726,7 @@ app.post('/', async (c) => {
     kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta.receipt_number || null,
     party: body.customer_name || saleMeta.customer_name || null, branch: branchName, reason: body.reason || null,
     returnType: body.return_type || 'restock', refundUsd: totalRefundUsd, refundKhr: totalRefundKhr,
-    by: user?.name || user?.username || null,
+    by: actorSnapshot(user),
   }).catch((error) => console.error('[telegram] return notification failed', error)))
   // ...and the replacement sale announces itself as the ordinary sale it is,
   // on the SAME 'sales' channel and through the SAME shared formatter
@@ -1833,7 +1834,7 @@ app.post('/supplier', async (c) => {
     return_number: returnNumber,
     client_request_id: clientRequestId,
     cashier_id: user?.id ?? null,
-    cashier_name: user?.name ?? null,
+    cashier_name: actorSnapshot(user),
     branch_id: body.branch_id || null,
     branch_name: branchName,
     return_scope: SUPPLIER_SCOPE,
@@ -1975,7 +1976,7 @@ app.post('/supplier', async (c) => {
           reason: `Supplier return (${settlement}): ${body.reason}`,
           reference_id: returnId,
           user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
+          user_name: actorSnapshot(user),
           // 0084: attributable only when one lot covered the whole deduction.
           batch_id: supplierReturnTakes.length === 1 && supplierReturnTakes[0].quantity === qty ? supplierReturnTakes[0].batchId : null,
         },
@@ -2014,7 +2015,7 @@ app.post('/supplier', async (c) => {
     return c.json({ error: `Failed to record supplier return items: ${(error as Error).message}` }, status)
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(Promise.all([
@@ -2027,7 +2028,7 @@ app.post('/supplier', async (c) => {
     kind: 'supplier', returnNumber, party: body.supplier_name || null,
     branch: body.branch_id ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null : null,
     reason: body.reason || null, settlement, compensationUsd: supplierCompensationUsd, compensationKhr: supplierCompensationKhr,
-    lossUsd: supplierLossUsd, lossKhr: supplierLossKhr, by: user?.name || user?.username || null,
+    lossUsd: supplierLossUsd, lossKhr: supplierLossKhr, by: actorSnapshot(user),
   }).catch((error) => console.error('[telegram] supplier return notification failed', error)))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
   return c.json({ id: returnId, returnNumber })
@@ -2193,7 +2194,7 @@ app.patch('/:id', async (c) => {
           reason: `Return #${existing.return_number} updated - reversing damaged stock`,
           reference_id: id,
           user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
+          user_name: actorSnapshot(user),
           // 0084: the original sale lot the damaged units belonged to.
           batch_id: lot.batch_id,
         },
@@ -2278,7 +2279,7 @@ app.patch('/:id', async (c) => {
         reason: `Return #${existing.return_number} updated - reversing previous restock`,
         reference_id: id,
         user_id: user?.id ?? null,
-        user_name: user?.name ?? null,
+        user_name: actorSnapshot(user),
         // 0084: attributable only when one lot covered the whole reversal.
         batch_id: reversalLots.length === 1 && reversalLots[0].quantity === (Number(item.quantity) || 0) ? reversalLots[0].batchId : null,
       },
@@ -2347,7 +2348,7 @@ app.patch('/:id', async (c) => {
         quantity,
         reason: String(body.reason || existing.reason || '') || null,
         userId: user?.id ?? null,
-        userName: user?.name ?? null,
+        userName: actorSnapshot(user),
       })
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
@@ -2362,7 +2363,7 @@ app.patch('/:id', async (c) => {
           reason: `Return #${existing.return_number} updated (damaged): ${body.reason || existing.reason}`,
           reference_id: id,
           user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
+          user_name: actorSnapshot(user),
           // 0084: the original sale lot, same as the create path.
           batch_id: originalBatchId,
         },
@@ -2405,7 +2406,7 @@ app.patch('/:id', async (c) => {
           reason: `Return #${existing.return_number} updated: ${body.reason || existing.reason}`,
           reference_id: id,
           user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
+          user_name: actorSnapshot(user),
           // 0084: same single-lot-covers-all rule as the create path.
           batch_id: itemSplits.length === 1 && itemSplits[0].quantity === quantity ? itemSplits[0].batchId : null,
         },
@@ -2493,7 +2494,7 @@ app.patch('/:id', async (c) => {
       }
     }
     if (unreversed.length) {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'return_rollback_incomplete', 'return', id, { via: 'edit', unreversed })
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'return_rollback_incomplete', 'return', id, { via: 'edit', unreversed })
     }
     return c.json({
       error: `Failed to update return: ${(error as Error).message}`
@@ -2525,7 +2526,7 @@ app.patch('/:id', async (c) => {
       sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run([newStatus, existing.sale_id])
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'return', id, { reason: body.reason })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'return', id, { reason: body.reason })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(Promise.all([

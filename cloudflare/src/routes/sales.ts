@@ -99,6 +99,7 @@ import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { formatSaleTelegramLines, sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import type { Env } from '../index'
+import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -252,7 +253,11 @@ app.post('/', async (c) => {
   // PAGE_PERMISSIONS) and, potentially, a manual entry from the Sales page
   // itself ('sales' permission) -- so either grant is accepted here rather
   // than requiring both.
-  if (!hasAnyPermission(c.get('user'), ['pos', 'sales'])) {
+  // N13: one binding for the actor snapshot below -- the sale header, its
+  // movement rows, the search blob and the Telegram line all name the SAME
+  // authenticated account, resolved here and never read out of the body.
+  const user = c.get('user')
+  if (!hasAnyPermission(user, ['pos', 'sales'])) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
@@ -750,8 +755,18 @@ app.post('/', async (c) => {
       receipt_number: receiptNumber,
       created_at: clientCreatedAt,
       client_request_id: clientRequestId,
-      cashier_id: body.cashier_id || null,
-      cashier_name: body.cashier_name || null,
+      // N13: the cashier snapshot is the AUTHENTICATED session's account, not
+      // whatever the client put in the body. Before this, POST /api/sales was
+      // the one history writer that trusted a client string outright
+      // (`cashier_name: body.cashier_name`), so the actor stored on a sale was
+      // whatever the caller sent -- and the frontend call sites disagreed about
+      // whether to send the username or the full name. Both halves of the pair
+      // come from the session so the id and the name can never describe two
+      // different people (the rename cascade in lib/userIdentity.ts joins them
+      // on cashier_id). body.cashier_id survives only as the fallback for a
+      // request that somehow arrives without a session user.
+      cashier_id: actorId(user) ?? (body.cashier_id || null),
+      cashier_name: actorSnapshot(user),
       branch_id: body.branch_id || null,
       branch_name: branchRow?.name || null,
       customer_id: customer?.id || null,
@@ -764,7 +779,7 @@ app.post('/', async (c) => {
       // by buildSalesSearchWhere; membership_number is joined from customers
       // at read time, so it stays out of this per-row blob.
       search_normalized: normalizeSearchText(
-        [receiptNumber, body.cashier_name, body.customer_name || customer?.name, body.customer_phone, branchRow?.name, paymentMethod]
+        [receiptNumber, actorSnapshot(user), body.customer_name || customer?.name, body.customer_phone, branchRow?.name, paymentMethod]
           .filter(Boolean)
           .join(' '),
       ),
@@ -912,8 +927,8 @@ app.post('/', async (c) => {
             unit_cost_usd: item.costPriceUsd,
             unit_cost_khr: item.costPriceKhr,
             reference_id: saleId,
-            user_id: body.cashier_id || null,
-            user_name: body.cashier_name || null,
+            user_id: actorId(user),
+            user_name: actorSnapshot(user),
           },
         })
       }
@@ -966,8 +981,8 @@ app.post('/', async (c) => {
             unit_cost_usd: item.costPriceUsd,
             unit_cost_khr: item.costPriceKhr,
             reference_id: saleId,
-            user_id: body.cashier_id || null,
-            user_name: body.cashier_name || null,
+            user_id: actorId(user),
+            user_name: actorSnapshot(user),
             batch_id: movementBatchId,
           },
         })
@@ -1076,7 +1091,7 @@ app.post('/', async (c) => {
       status: saleStatus,
       createdAt: clientCreatedAt,
       receiptNumber,
-      cashier: body.cashier_name || c.get('user')?.name || c.get('user')?.username || null,
+      cashier: actorSnapshot(user),
       customer: body.customer_name || customer?.name || null,
       phone: body.customer_phone || null,
       branch: branchRow?.name || null,
@@ -1401,7 +1416,7 @@ app.patch('/:id/status', async (c) => {
     returnedByItem,
     reason: movementReason,
     userId: user?.id ?? null,
-    userName: user?.name ?? null,
+    userName: actorSnapshot(user),
     skipStock,
   })
   const totalSkippedUnits = plan.skippedUnits + skippedDamagedUnits
@@ -1598,7 +1613,7 @@ app.patch('/:id/status', async (c) => {
         branch_id: sale.branch_id ?? null,
         notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
         created_by: user?.id ?? null,
-        created_by_name: user?.name ?? null,
+        created_by_name: actorSnapshot(user),
       },
     })
     updates.push('cancel_fee_id = last_insert_rowid()')
@@ -1632,7 +1647,7 @@ app.patch('/:id/status', async (c) => {
         reason: movementReason,
         reference_id: id,
         user_id: user?.id ?? null,
-        user_name: user?.name ?? null,
+        user_name: actorSnapshot(user),
       },
     })
   }
@@ -1659,7 +1674,7 @@ app.patch('/:id/status', async (c) => {
         redoLabel: `Redo settlement of sale ${sale.receipt_number || `#${id}`}`,
         payload: historyPayload,
         actor: user.id,
-        actorName: user.name,
+        actorName: actorSnapshot(user),
       },
     })
     statements.push({
@@ -1690,7 +1705,7 @@ app.patch('/:id/status', async (c) => {
             VALUES(@actor,@actorName,'sale_settlement','sale',@saleId,@details,'sale',@saleId,@details)`,
       params: {
         actor: user.id,
-        actorName: user.name,
+        actorName: actorSnapshot(user),
         saleId: String(id),
         details: JSON.stringify({
           operationId: settlementOperationId,
@@ -1734,7 +1749,7 @@ app.patch('/:id/status', async (c) => {
     throw error
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', id, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', id, {
     oldStatus,
     newStatus: saleStatus,
     ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
@@ -1770,7 +1785,7 @@ app.patch('/:id/status', async (c) => {
   // omit-the-line-if-unknown idiom `by` already uses in
   // formatStockChangeTelegramLines/formatTransferTelegramLines/
   // formatReturnTelegramLines, rather than printing "By: undefined".
-  const actorName = user?.name || user?.username || null
+  const actorName = actorSnapshot(user)
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'status',
     lines: [
@@ -1878,7 +1893,7 @@ app.patch('/:id/customer', async (c) => {
     throw error
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', saleId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
     previous_customer_id: sale.customer_id ?? null,
     next_customer_id: customer?.id ?? null,
     membership_number: customer?.membership_number ?? null,
@@ -2121,7 +2136,7 @@ app.post('/:id/items', async (c) => {
     lines: planned,
     exchangeRate,
     userId: user?.id ?? null,
-    userName: user?.name ?? null,
+    userName: actorSnapshot(user),
   })
 
   // ---- Pre-flight availability, plain reads, exactly like POST /'s step 2:
@@ -2230,7 +2245,7 @@ app.post('/:id/items', async (c) => {
       stockSkipped: skipStock,
       note: String(body.notes || '').trim().slice(0, 500) || null,
       userId: user?.id ?? null,
-      userName: user?.name ?? null,
+      userName: actorSnapshot(user),
     })
   })
 
@@ -2334,7 +2349,7 @@ app.post('/:id/items', async (c) => {
       {
         sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
               VALUES('sale.add_items','applied',${snapshotExpression},@byId,@byName)`,
-        params: { payload: JSON.stringify(reversal), operation: addItemsOperationId, saleId, byId: user.id, byName: user.name },
+        params: { payload: JSON.stringify(reversal), operation: addItemsOperationId, saleId, byId: user.id, byName: actorSnapshot(user) },
       },
       {
         sql: `INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal)
@@ -2354,7 +2369,7 @@ app.post('/:id/items', async (c) => {
         label: `Added ${lineCount} item${lineCount === 1 ? '' : 's'} to sale ${saleLabel}`,
         undoLabel: `Undo items added to sale ${saleLabel}`,
         redoLabel: `Redo items added to sale ${saleLabel}`,
-        byId: user.id, byName: user.name,
+        byId: user.id, byName: actorSnapshot(user),
       },
     })
     atomicStatements.push(
@@ -2368,7 +2383,7 @@ app.post('/:id/items', async (c) => {
       {
         sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
               VALUES(@userId,@userName,'update','sale',@saleId,@details,'sale',@saleId,@details)`,
-        params: { userId: user.id, userName: user.name, saleId: String(saleId), details: auditDetails },
+        params: { userId: user.id, userName: actorSnapshot(user), saleId: String(saleId), details: auditDetails },
       },
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
@@ -2646,7 +2661,7 @@ app.post('/:id/amendments', async (c) => {
           totalAfterUsd: money.totalUsd,
           note,
           userId: user?.id ?? null,
-          userName: user?.name ?? null,
+          userName: actorSnapshot(user),
         }),
         saleMutationReceiptStatement({
           operationId: mutationOperationId,
@@ -2725,7 +2740,7 @@ app.post('/:id/amendments', async (c) => {
     }
     const plan = planLineQuantityIncrease({
       saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
-      userId: user?.id ?? null, userName: user?.name ?? null,
+      userId: user?.id ?? null, userName: actorSnapshot(user),
     })
     statements.push(...plan.statements)
     subtotalDeltaUsd += plan.subtotalDeltaUsd
@@ -2735,7 +2750,7 @@ app.post('/:id/amendments', async (c) => {
       saleItemId: line.id, productId: line.product_id, productName: line.product_name,
       quantityBefore: plan.quantityBefore, quantityAfter: plan.quantityAfter,
       totalBeforeUsd, totalAfterUsd: 0, unitsMoved: plan.unitsMoved, stockSkipped,
-      note, userId: user?.id ?? null, userName: user?.name ?? null,
+      note, userId: user?.id ?? null, userName: actorSnapshot(user),
     })
   }
 
@@ -2753,7 +2768,7 @@ app.post('/:id/amendments', async (c) => {
       reason: kind === 'line_replaced'
         ? `Line replaced on sale #${saleId}`
         : `Line ${kind === 'line_removed' ? 'removed from' : 'reduced on'} sale #${saleId}`,
-      userId: user?.id ?? null, userName: user?.name ?? null,
+      userId: user?.id ?? null, userName: actorSnapshot(user),
     })
     statements.push(...plan.statements)
     subtotalDeltaUsd += plan.subtotalDeltaUsd
@@ -2765,7 +2780,7 @@ app.post('/:id/amendments', async (c) => {
       saleItemId: line.id, productId: line.product_id, productName: line.product_name,
       quantityBefore: plan.quantityBefore, quantityAfter: plan.quantityAfter,
       totalBeforeUsd, totalAfterUsd: 0, unitsMoved: plan.unitsMoved, stockSkipped,
-      note, userId: user?.id ?? null, userName: user?.name ?? null,
+      note, userId: user?.id ?? null, userName: actorSnapshot(user),
     })
   }
 
@@ -2824,7 +2839,7 @@ app.post('/:id/amendments', async (c) => {
     // no second sentinel.
     const additionPlan = planSaleLineAddition({
       saleId, saleStatus, lines: plannedLines,
-      exchangeRate, userId: user?.id ?? null, userName: user?.name ?? null,
+      exchangeRate, userId: user?.id ?? null, userName: actorSnapshot(user),
     })
     statements.push(...additionPlan.statements)
     subtotalDeltaUsd += additionPlan.addedSubtotalUsd
@@ -2834,7 +2849,7 @@ app.post('/:id/amendments', async (c) => {
       productId, productName: product.name,
       quantityBefore: 0, quantityAfter: quantity,
       totalBeforeUsd, totalAfterUsd: 0, unitsMoved: -additionPlan.deductedUnits || 0, stockSkipped,
-      note, userId: user?.id ?? null, userName: user?.name ?? null,
+      note, userId: user?.id ?? null, userName: actorSnapshot(user),
     })
   }
 
@@ -3138,7 +3153,7 @@ async function auditAmendment(
   sale: { receipt_number?: unknown; sale_status?: unknown },
   details: Record<string, unknown>,
 ): Promise<void> {
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', saleId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
     action: 'amend',
     receipt_number: sale.receipt_number ?? null,
     sale_status: sale.sale_status ?? null,

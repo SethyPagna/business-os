@@ -16,6 +16,7 @@ import {
   saleRevisionGuard,
 } from './saleBulkStatus'
 import type { StockStatement } from './saleTransitions'
+import { actorSnapshot } from './actorSnapshot'
 
 export const BULK_UPDATE_KIND = 'sale.fields.bulk'
 export const BULK_CUSTOMER_UPDATE_KIND = 'sale.customer.bulk'
@@ -195,7 +196,7 @@ function saleUpdateStatement(member: BulkUpdateMember, action: SaleBulkUpdateAct
 function auditStatement(user: SessionUser, operationId: string, direction: string, action: SaleBulkUpdateAction, count: number): StockStatement {
   return {
     sql: "INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@event,'sale',@id,@details,'sales',@id,@details)",
-    params: { uid: user.id, name: user.name, event: direction, id: operationId, details: JSON.stringify({ kind: BULK_UPDATE_KIND, action: action.kind, count }) },
+    params: { uid: user.id, name: actorSnapshot(user), event: direction, id: operationId, details: JSON.stringify({ kind: BULK_UPDATE_KIND, action: action.kind, count }) },
   }
 }
 
@@ -441,7 +442,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
   for (const member of members) statements.push(...saleUpdateStatement(member, request.action, 1, stamp))
-  statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_UPDATE_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: user.name } })
+  statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_UPDATE_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE sale_bulk_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   const historyIndex = statements.length
   statements.push({
@@ -450,7 +451,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
             json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'action',@action),
             json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'action',@action),@actor,@name
           FROM sale_bulk_operations WHERE id=@id`,
-    params: { id: operationId, label: `${changedIds.length} sales: ${request.action.kind}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: applier, action: request.action.kind, actor: user.id, name: user.name },
+    params: { id: operationId, label: `${changedIds.length} sales: ${request.action.kind}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: applier, action: request.action.kind, actor: user.id, name: actorSnapshot(user) },
   })
   statements.push({ sql: "UPDATE sale_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } })
   for (const member of members.filter((candidate) => candidate.changed)) {

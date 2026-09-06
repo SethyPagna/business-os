@@ -4,6 +4,7 @@ import { audit } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { configureTelegramWebhook, getTelegramStatus, handleTelegramWebhook, isTelegramWebhookRequest, sendTelegramTest, sendTelegramTodaySummary } from '../lib/telegram'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -37,7 +38,7 @@ app.post('/test', async (c) => {
   try {
     await sendTelegramTest(c.env)
     const user = c.get('user')
-    await audit(c.env, user.id, user.name || user.username, 'test', 'telegram', null, { target: 'configured_chat' })
+    await audit(c.env, user.id, actorSnapshot(user), 'test', 'telegram', null, { target: 'configured_chat' })
     return c.json({ success: true })
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Telegram test failed' }, 400)
@@ -48,7 +49,7 @@ app.post('/today-summary', async (c) => {
   try {
     await sendTelegramTodaySummary(c.env)
     const user = c.get('user')
-    await audit(c.env, user.id, user.name || user.username, 'send', 'telegram_summary', null, { range: 'today' })
+    await audit(c.env, user.id, actorSnapshot(user), 'send', 'telegram_summary', null, { range: 'today' })
     return c.json({ success: true })
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Telegram summary failed' }, 400)
@@ -59,7 +60,7 @@ app.post('/connect-commands', async (c) => {
   try {
     await configureTelegramWebhook(c.env)
     const user = c.get('user')
-    await audit(c.env, user.id, user.name || user.username, 'connect', 'telegram_webhook', null)
+    await audit(c.env, user.id, actorSnapshot(user), 'connect', 'telegram_webhook', null)
     return c.json({ success: true })
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Telegram commands could not be connected' }, 400)

@@ -34,6 +34,7 @@ import { chunkForBinding, selectInChunks } from './sqlBinding'
 import { runD1BatchInChunks } from './importEngine'
 import { bumpVersion } from './cache'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
+import { actorSnapshot } from './actorSnapshot'
 
 export type BulkDeleteEntityType = 'products' | 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -112,7 +113,7 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
               VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
         params: {
           productId: row.productId, productName: row.productName, branchId: row.branchId, branchName: row.branchName,
-          quantity: row.quantity, reason, userId: user.id, userName: user.name,
+          quantity: row.quantity, reason, userId: user.id, userName: actorSnapshot(user),
         },
       }))
     },
@@ -175,7 +176,7 @@ export async function createBulkDeleteJob(
     VALUES (@id, @entityType, 'pending', @reason, @idsJson, @totalCount, @userId, @userName)
   `).run({
     id: jobId, entityType, reason, idsJson: JSON.stringify(uniqueIds), totalCount: uniqueIds.length,
-    userId: user.id, userName: user.name,
+    userId: user.id, userName: actorSnapshot(user),
   })
   await env.IMPORT_QUEUE.send({ jobId, kind: 'bulk-delete' })
   return { jobId, totalCount: uniqueIds.length }
@@ -250,7 +251,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       const auditStatements: D1Statement[] = chunk.map((id) => ({
         sql: `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value)
               VALUES (@userId, @userName, 'delete', @entity, @entityId, @details, @entity, @entityId, NULL)`,
-        params: { userId: user.id, userName: user.name, entity: config.auditEntity, entityId: id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
+        params: { userId: user.id, userName: actorSnapshot(user), entity: config.auditEntity, entityId: id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
       }))
       await runD1BatchInChunks(db, auditStatements)
 

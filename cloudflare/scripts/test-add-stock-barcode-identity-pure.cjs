@@ -112,7 +112,13 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+// N13: the shared actor / branch kernels these routes now import.
+const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/movementBranchName': movementBranchNameKernel,
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/salesAnalytics': salesAnalytics,

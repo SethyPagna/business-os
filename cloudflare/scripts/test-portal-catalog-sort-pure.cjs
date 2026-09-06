@@ -71,7 +71,10 @@ function loadReal(relPath, requireOverrides = {}) {
 
 const searchMatch = loadReal('lib/searchMatch.ts')
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => db },
   // Real, pure -- its chunking is what keeps these reads inside D1's

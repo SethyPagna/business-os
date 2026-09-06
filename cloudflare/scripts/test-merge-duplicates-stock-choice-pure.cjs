@@ -103,8 +103,13 @@ function dbAdapter(d1) {
 
 function loadProductsRoute(d1) {
   const adapter = dbAdapter(d1)
+  // N13: the actor snapshot kernel. Pure, no imports of its own, so it loads
+  // for REAL -- a stub would be testing the stub, and the whole point of the
+  // kernel is which identity it picks.
+  const realActorSnapshot = loadTs(path.join('lib', 'actorSnapshot.ts'), {})
   const realDetailRule = loadTs(path.join('lib', 'productDetailRule.ts'), {})
   const realUndoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
+    './actorSnapshot': realActorSnapshot,
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
@@ -112,6 +117,7 @@ function loadProductsRoute(d1) {
   })
   const auditCalls = []
   const mod = loadTs(path.join('routes', 'products.ts'), {
+    '../lib/actorSnapshot': realActorSnapshot,
     hono: { Hono: FakeHono },
     '../lib/db': { getDb: () => adapter },
     '../lib/audit': { audit: async (_env, _uid, _uname, action, entity, id, detail) => { auditCalls.push({ action, entity, id, detail }) } },
@@ -200,7 +206,7 @@ async function main() {
     const d1 = seed()
     const { mod, adapter, auditCalls } = loadProductsRoute(d1)
     const stats = await mod.foldDuplicateProductInto(
-      {}, adapter, { id: 42, name: 'Reviewer' },
+      {}, adapter, { id: 42, username: 'reviewer', name: 'Reviewer' },
       { id: KEEPER, name: 'Anastasia Dipbrow Pomade Dark Brown' },
       { id: DUP, name: 'Anastasia Dipbrow Pomade Dark Brown', image_path: null },
       branchNames, 'possible-duplicates review merge', 'merge',
@@ -296,7 +302,7 @@ async function main() {
     const d1 = seed()
     const { mod, adapter, auditCalls } = loadProductsRoute(d1)
     const stats = await mod.foldDuplicateProductInto(
-      {}, adapter, { id: 42, name: 'Reviewer' },
+      {}, adapter, { id: 42, username: 'reviewer', name: 'Reviewer' },
       { id: KEEPER, name: 'Anastasia Dipbrow Pomade Dark Brown' },
       { id: DUP, name: 'Anastasia Dipbrow Pomade Dark Brown', image_path: null },
       branchNames, 'possible-duplicates review merge', 'write_off',
@@ -333,7 +339,8 @@ async function main() {
         assert.match(String(r.reason), /removed -- stock written off/, 'the ledger line must say WHY the stock left')
         assert.match(String(r.reason), new RegExp(`\\(#${DUP}\\)`), 'the ledger line must name the removed record')
         assert.equal(r.user_id, 42, 'the ledger line must name WHO')
-        assert.equal(r.user_name, 'Reviewer')
+        assert.equal(r.user_name, 'reviewer', 'the ledger line stores the account USERNAME')
+        assert.notEqual(r.user_name, 'Reviewer', 'never the display name -- the two differ in this fixture on purpose')
       }
       const stamped = q(d1, `SELECT created_at FROM inventory_movements WHERE movement_type = 'adjustment'`)
       for (const r of stamped) assert.ok(String(r.created_at || '').length > 0, 'the ledger line must be stamped WHEN')
@@ -432,7 +439,7 @@ async function main() {
 
     await check('and folds with the parameter omitted entirely', async () => {
       const stats = await mod.foldDuplicateProductInto(
-        {}, adapter, { id: 42, name: 'Reviewer' },
+        {}, adapter, { id: 42, username: 'reviewer', name: 'Reviewer' },
         { id: KEEPER, name: 'Twin' }, { id: DUP, name: 'Twin', image_path: null },
         branchNames, 'possible-duplicates review merge',
       )

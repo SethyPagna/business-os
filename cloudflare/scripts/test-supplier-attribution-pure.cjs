@@ -90,7 +90,13 @@ const conflictControl = loadReal('lib/conflictControl.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+// N13: the shared actor / branch kernels these routes now import.
+const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/movementBranchName': movementBranchNameKernel,
   '../lib/db': { getDb: () => db },
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
@@ -143,6 +149,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
 const app = inventoryRoute.default
 
 const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },

@@ -6,6 +6,7 @@ import { getDb, type D1Compat } from './db'
 import { financialCalculationValue } from './financialPrecision'
 import type { SettlementPlan } from './paymentSettlement'
 import { normalizeSearchText } from './searchMatch'
+import { actorSnapshot } from './actorSnapshot'
 
 export const SALE_SETTLEMENT_ACTION_KIND = 'sale.settlement'
 
@@ -186,7 +187,7 @@ function replayAuditStatement(user: SessionUser, saleId: number, direction: 'und
           VALUES(@userId,@userName,@action,'sale',@saleId,@details,'sale',@saleId,@details)`,
     params: {
       userId: user.id,
-      userName: user.name,
+      userName: actorSnapshot(user),
       action: `action_${direction}`,
       saleId: String(saleId),
       details: JSON.stringify({ applier: SALE_SETTLEMENT_ACTION_KIND, operationId, direction }),

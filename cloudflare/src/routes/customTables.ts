@@ -5,6 +5,7 @@ import { audit } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -161,7 +162,7 @@ app.post('/', async (c) => {
       columns: JSON.stringify(normalizedSchema),
       updated_at: now,
     })
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'custom_table', inserted.lastInsertRowid, { name: tableName, display_name: displayName })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'custom_table', inserted.lastInsertRowid, { name: tableName, display_name: displayName })
     return c.json({
       id: inserted.lastInsertRowid,
       name: tableName,
@@ -209,7 +210,7 @@ app.post('/:name/rows', async (c) => {
   try {
     const safeTable = escapeIdentifier(table.name)
     const inserted = await db.prepare(`INSERT INTO "${safeTable}" (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`).run(params)
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'custom_table_row', inserted.lastInsertRowid, { table_name: table.name })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'custom_table_row', inserted.lastInsertRowid, { table_name: table.name })
     const row = await db.prepare(`SELECT * FROM "${safeTable}" WHERE id = ?`).get([inserted.lastInsertRowid])
     return c.json(row)
   } catch (error) {
@@ -251,7 +252,7 @@ app.put('/:name/rows/:id', async (c) => {
 
   try {
     await db.prepare(`UPDATE "${safeTable}" SET ${sets.join(', ')} WHERE id = @id`).run(params)
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'custom_table_row', rowId, { table_name: table.name })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'custom_table_row', rowId, { table_name: table.name })
     const row = await db.prepare(`SELECT * FROM "${safeTable}" WHERE id = ?`).get([rowId])
     return c.json(row)
   } catch (error) {
@@ -283,7 +284,7 @@ app.delete('/:name/rows/:id', async (c) => {
   }
 
   await db.prepare(`DELETE FROM "${safeTable}" WHERE id = ?`).run([rowId])
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', 'custom_table_row', rowId, { table_name: table.name })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'custom_table_row', rowId, { table_name: table.name })
   return c.json({})
 })
 

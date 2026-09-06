@@ -23,6 +23,7 @@ import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/dated
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1128,7 +1129,7 @@ app.post('/reasons/replace', async (c) => {
   const results = await db.batch(statements)
   const linkedResult = results[1] as unknown as { changes?: number; meta?: { changes?: number } } | undefined
   const changed = scope === 'linked' ? Number(linkedResult?.meta?.changes ?? linkedResult?.changes ?? 0) : 0
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'inventory_reason', null, { type, from, to, scope, changed })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'replace', 'inventory_reason', null, { type, from, to, scope, changed })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reasons_replace', type, from, to, scope }))
   return c.json({ success: true, items: next, scope, changed })
 })
@@ -1167,7 +1168,7 @@ app.put('/reasons', async (c) => {
     INSERT INTO settings (key, value, updated_at) VALUES ('inventory_saved_reasons', @value, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `).run({ value: JSON.stringify(items) })
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'inventory_reason', null, { count: items.length })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'inventory_reason', null, { count: items.length })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reasons_update' }))
   return c.json({ items })
 })
@@ -1706,7 +1707,7 @@ app.post('/adjust', async (c) => {
         : setToNote ? `${reason} (${setToNote})` : reason,
       referenceId: sessionId,
       userId: user?.id ?? null,
-      userName: user?.name ?? null,
+      userName: actorSnapshot(user),
       // 0084: the lot this adjust touched -- the received/topped lot on
       // add, the explicit pick or fully-covering single auto-drained lot
       // on remove; NULL when no single lot owns the whole movement.
@@ -1718,7 +1719,7 @@ app.post('/adjust', async (c) => {
   // above), so the audit action must key off `originalType` -- keying off
   // `type` would make 'stock_set' unreachable and misreport every "Set
   // stock to X" as a plain add/remove in the audit log.
-  await audit(c.env, user?.id ?? null, user?.name ?? null, originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: targetProductId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
@@ -1741,7 +1742,7 @@ app.post('/adjust', async (c) => {
           lot: type === 'add' ? lotCode : null,
           branchOnHand: branchRow ? num(branchRow.quantity) : null,
           totalOnHand: productRow ? num(productRow.stock_quantity) : null,
-          by: user?.name || user?.username || null,
+          by: actorSnapshot(user),
         }),
       })
     })().catch((error) => console.error('[telegram] stock adjustment notification failed', error)))
@@ -1812,7 +1813,7 @@ app.post('/dated-stock-count/resolve', async (c) => {
   const { resolved, unresolved, branchesCreated } = await resolveDatedStockCountRows(getDb(c.env), parsed.rows)
 
   if (branchesCreated.length) {
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'dated_stock_count_resolve_branch_create', 'inventory', null, { branchesCreated })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_branch_create', 'inventory', null, { branchesCreated })
     c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update' }))
   }
 
@@ -1845,7 +1846,7 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
   const result = await applyDatedStockCountDecisions(db, resolvedIn as any, unresolvedIn as any, decisionsIn as DatedCountDecision[])
 
   if (result.productsCreated.length) {
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'dated_stock_count_resolve_products_created', 'inventory', null, { productsCreated: result.productsCreated })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_products_created', 'inventory', null, { productsCreated: result.productsCreated })
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   }
 
@@ -1880,9 +1881,9 @@ app.post('/dated-stock-count/apply', async (c) => {
   const built = await buildDatedStockCountPlan(db, parsed.entries)
   if ('error' in built) return c.json({ success: false, error: built.error }, built.status)
 
-  const result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: user?.name ?? null })
+  const result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: actorSnapshot(user) })
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'dated_stock_count_import', 'inventory', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_import', 'inventory', null, {
     entryCount: parsed.entries.length,
     movementsApplied: result.movementsApplied,
     movementsDeleted: result.movementsDeleted,
@@ -1961,21 +1962,21 @@ app.post('/transfer', async (c) => {
     {
       sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at)
             VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, reason, userId: user?.id ?? null, userName: user?.name ?? null },
+      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user) },
     },
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: movementBatchId },
+      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
     },
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: movementBatchId },
+      params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
     },
   ])
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId, lotsMoved: takes.length, uncoveredQuantity: uncovered || undefined })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId, lotsMoved: takes.length, uncoveredQuantity: uncovered || undefined })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'transfer', id: productId }))
@@ -1991,7 +1992,7 @@ app.post('/transfer', async (c) => {
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
       lines: formatTransferTelegramLines({
-        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: user?.name || user?.username || null,
+        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user),
         items: [{
           product: product.name, quantity, lot: takes.length === 1 ? takes[0].lotCode || null : null,
           fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
@@ -2070,16 +2071,16 @@ app.post('/move-row', async (c) => {
       // receiveBatchStock resolved.
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved to ${destination.name} - ${reason}` : `Moved to ${destination.name}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: moveDrained.batchIds.length === 1 && moveDrained.remainder === 0 ? moveDrained.batchIds[0] : null },
+      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved to ${destination.name} - ${reason}` : `Moved to ${destination.name}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveDrained.batchIds.length === 1 && moveDrained.remainder === 0 ? moveDrained.batchIds[0] : null },
     },
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved from ${source.name} - ${reason}` : `Moved from ${source.name}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: moveReceived.batchId },
+      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved from ${source.name} - ${reason}` : `Moved from ${source.name}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveReceived.batchId },
     },
   ])
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'move', 'stock', sourceProductId, { toProductId: destinationProductId, quantity, branchId, reason })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'move', 'stock', sourceProductId, { toProductId: destinationProductId, quantity, branchId, reason })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'move_row' }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
@@ -2107,10 +2108,10 @@ app.post('/movements/:id/revert', async (c) => {
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
-  const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: user?.name ?? null })
+  const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
   if (!result.ok) return c.json({ error: result.error }, result.status)
   const productId = Number(mv.product_id) || 0
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'stock_revert', 'product', productId || null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_revert', 'product', productId || null, {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,
     branchId: Number(mv.branch_id) || null, batchId: mv.batch_id ?? null,
   })
@@ -2137,7 +2138,7 @@ app.patch('/movements/:id/reason', async (c) => {
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
   await db.prepare('UPDATE inventory_movements SET reason = @reason WHERE id = @id').run({ id, reason })
   const productId = Number(mv.product_id) || 0
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'stock_movement_reason_edit', 'product', productId || null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_movement_reason_edit', 'product', productId || null, {
     movementId: id, from: mv.reason ?? null, to: reason,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))

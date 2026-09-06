@@ -12,6 +12,7 @@ import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -272,7 +273,7 @@ app.post('/upload', async (c) => {
     media_type: mediaType,
     byte_size: storedBuffer.byteLength,
     created_by_id: user?.id ?? null,
-    created_by_name: user?.name ?? null,
+    created_by_name: actorSnapshot(user),
     optimization_status: mediaType === 'image'
       ? (normalizedInline ? 'optimized_inline' : 'queued_for_normalization')
       : 'not_applicable',

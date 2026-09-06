@@ -14,6 +14,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
 // hard ceiling on how many it may make. A catalog of ~6,700 products with
@@ -294,7 +295,7 @@ app.post('/reset-data', async (c) => {
       if (includeSales) productResetLabelParts.push('sales and returns deleted')
       if (includeImages) productResetLabelParts.push(`${imagesDeleted} image file(s) deleted`)
 
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, {
         label: `Products reset - ${productResetLabelParts.join('; ')}`,
         mode,
         includeMovements,
@@ -472,7 +473,7 @@ app.post('/reset-data', async (c) => {
     const label = mode === 'all'
       ? 'Full data reset - sales, returns, products, and contacts cleared'
       : 'Sales reset - sales, returns, and stock cleared'
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined })
 
     // Notify every connected page/device (Dashboard, Products, Inventory,
     // Sales, POS, Branches, Returns) that their data just changed out from
@@ -578,7 +579,7 @@ app.post('/reset-section', async (c) => {
   try {
     await db.batch(config.tables.map((table) => ({ sql: `DELETE FROM "${table}"` })))
 
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, {
       label: `${config.label} reset - ${config.tables.join(', ')} cleared`,
       mode: `section:${section}`,
     })
@@ -643,7 +644,7 @@ app.get('/legacy-subtotal-repair/preview', async (c) => {
   const repair = await import('../lib/legacySubtotalRepair')
   const user = c.get('user')
   try {
-    return c.json(await repair.previewLegacySubtotalRepair(getDb(c.env), { id: user?.id, name: user?.name }))
+    return c.json(await repair.previewLegacySubtotalRepair(getDb(c.env), { id: user?.id, name: actorSnapshot(user) }))
   } catch (error) {
     if (error instanceof repair.LegacySubtotalRepairValidationError || error instanceof repair.LegacySubtotalRepairConflictError) {
       return c.json({ success: false, error: 'The fixed 22-sale cohort is not in the expected unrepaired state. No data was changed; inspect the recorded repair and current sale data.' }, 409)
@@ -674,7 +675,7 @@ app.post('/finalize-migration', async (c) => {
     const repair = await import('../lib/legacySubtotalRepair')
     let plan
     try {
-      plan = await repair.prepareLegacySubtotalRepair(body, { id: user?.id, name: user?.name })
+      plan = await repair.prepareLegacySubtotalRepair(body, { id: user?.id, name: actorSnapshot(user) })
     } catch (error) {
       if (error instanceof repair.LegacySubtotalRepairValidationError) {
         return c.json({ success: false, error: error.message }, 400)
@@ -741,7 +742,7 @@ app.post('/finalize-migration', async (c) => {
       ])
       const affected = { branch_stock: branchRows?.n ?? 0, products: productRows?.n ?? 0 }
 
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'finalize_migration', 'system', null, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'finalize_migration', 'system', null, {
         label: `Migration finalize: zeroed live stock (${affected.branch_stock} branch-stock rows, ${affected.products} products)`,
         step,
       })
@@ -766,7 +767,7 @@ app.post('/finalize-migration', async (c) => {
     ).run()
     const affected = { branch_batch_stock: parkable?.n ?? 0 }
 
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'finalize_migration', 'system', null, {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'finalize_migration', 'system', null, {
       label: `Migration finalize: parked ${affected.branch_batch_stock} historical lot rows`,
       step,
     })
@@ -844,7 +845,7 @@ app.post('/factory-reset', async (c) => {
       }
     }
 
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'factory_reset', 'system', null, {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'factory_reset', 'system', null, {
       label: 'Factory reset completed',
       droppedCustomTables: droppedCustomTables.length,
       deletedObjectCount,
@@ -888,7 +889,7 @@ app.post('/import-retention/orphans', async (c) => {
   const apply = body?.dry_run === false && body?.force === true
   const report = await cleanOrphanImportStaging(c.env, { apply })
   if (apply) {
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'import_orphan_staging_clean', 'system', null, {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'import_orphan_staging_clean', 'system', null, {
       tables: report.tables,
       r2Keys: report.r2Keys,
       r2Deleted: report.r2Deleted,
@@ -927,7 +928,7 @@ app.post('/repair-integrity', async (c) => {
   try {
     const result = await runDataIntegrityCheck(c.env, true)
     if (result.repairs > 0) {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'repair', 'data-integrity', null, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'repair', 'data-integrity', null, {
         repairs: result.repairs,
         errors: result.errors.length,
       })

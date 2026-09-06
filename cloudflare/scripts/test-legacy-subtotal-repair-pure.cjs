@@ -93,7 +93,10 @@ db.batch = async (statements) => {
 
 const permissions = loadReal('lib/permissions.ts')
 const media = loadReal('lib/media.ts')
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const systemRoute = loadReal('routes/system.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': {
     requireAuth: async (c, next) => {
@@ -315,7 +318,10 @@ async function main() {
       assert.strictEqual(preview.state, 'ready')
       assert.deepStrictEqual(preview.summary, { sale_count: 22, subtotal_usd: '3462.0000', item_discount_usd: '66.0000' })
       assert.strictEqual(preview.request.manifest_sha256, planner.manifestDigest(preview.request.manifest))
-      assert.strictEqual(preview.request.manifest.operator_name, RESTORE_USER.name)
+      // N13: the recorded operator is the account USERNAME, never the display
+    // name (the fixture account has both, and they differ).
+    assert.strictEqual(preview.request.manifest.operator_name, RESTORE_USER.username)
+    assert.notStrictEqual(preview.request.manifest.operator_name, RESTORE_USER.name)
       assert.deepStrictEqual(preview.request.manifest.sales, planner.canonicalizeManifest(fixtureManifest()).sales)
       assert.strictEqual(backupCalls, 0)
       assert.strictEqual(batchCalls, 0)
@@ -440,7 +446,7 @@ async function main() {
     assert.strictEqual(row("SELECT COUNT(*) AS n FROM action_history WHERE entity='sep23_subtotal_repair' AND reversible=0 AND status='recorded'").n, 1)
     assert.strictEqual(row("SELECT COUNT(*) AS n FROM audit_logs WHERE action='repair_subtotal_usd'").n, 1)
     assert.strictEqual(row("SELECT user_id FROM audit_logs WHERE action='repair_subtotal_usd'").user_id, RESTORE_USER.id)
-    assert.strictEqual(row("SELECT user_name FROM audit_logs WHERE action='repair_subtotal_usd'").user_name, RESTORE_USER.name)
+    assert.strictEqual(row("SELECT user_name FROM audit_logs WHERE action='repair_subtotal_usd'").user_name, RESTORE_USER.username)
     assert.deepStrictEqual(protectedSnapshot(), before)
   })
 

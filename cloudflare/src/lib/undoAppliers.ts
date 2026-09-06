@@ -25,6 +25,7 @@ import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, replaySaleBulkUpdate } fro
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAction'
 import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
+import { actorSnapshot } from './actorSnapshot'
 
 export const SALE_ADD_ITEMS_ACTION_KIND = 'sale.add_items'
 
@@ -302,7 +303,7 @@ function saleAddItemsAuditStatement(
           VALUES(@userId,@userName,@action,'sale',@saleId,@details,'sale',@saleId,@details)`,
     params: {
       userId: user.id,
-      userName: user.name,
+      userName: actorSnapshot(user),
       action: direction === 'undo' ? 'action_undo' : 'action_redo',
       saleId,
       details,
@@ -408,7 +409,7 @@ async function replayAtomicSaleAddItems(
       lines,
       reason: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
       userId: ctx.user.id,
-      userName: ctx.user.name,
+      userName: actorSnapshot(ctx.user),
     })
     const undoGroupId = crypto.randomUUID()
     statements.push(
@@ -422,7 +423,7 @@ async function replayAtomicSaleAddItems(
         totalBeforeUsd: reversal.moneyAfter.total_usd, totalAfterUsd: reversal.moneyBefore.total_usd,
         unitsMoved: line.heldUnits, via: 'undo',
         note: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
-        userId: user.id, userName: user.name,
+        userId: user.id, userName: actorSnapshot(user),
       })),
     )
   } else {
@@ -433,7 +434,7 @@ async function replayAtomicSaleAddItems(
       lines: plannedLines,
       exchangeRate: Number(reversal.moneyAfter.exchange_rate ?? reversal.exchangeRate) || 4100,
       userId: ctx.user.id,
-      userName: ctx.user.name,
+      userName: actorSnapshot(ctx.user),
     })
     const redoGroupId = crypto.randomUUID()
     const ordinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
@@ -457,7 +458,7 @@ async function replayAtomicSaleAddItems(
         totalBeforeUsd: reversal.moneyBefore.total_usd, totalAfterUsd: reversal.moneyAfter.total_usd,
         unitsMoved: -line.heldUnits || 0, via: 'redo',
         note: `Redo: items re-added to sale ${reversal.receiptNumber || `#${saleId}`}`,
-        userId: user.id, userName: user.name,
+        userId: user.id, userName: actorSnapshot(user),
       })),
     )
   }
@@ -514,7 +515,7 @@ export async function recordMergeUndoSnapshot(
   const snap = await db.prepare(`
     INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
     VALUES ('product.merge', 'applied', @payload, @byId, @byName)
-  `).run({ payload: JSON.stringify(stored), byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ payload: JSON.stringify(stored), byId: user?.id ?? null, byName: actorSnapshot(user) })
   const snapshotId = Number(snap.lastInsertRowid ?? 0)
   const payload = JSON.stringify({ applier: 'product.merge', snapshot_id: snapshotId })
   const keeperName = reversal.keeperName || `#${reversal.keeperId}`
@@ -532,7 +533,7 @@ export async function recordMergeUndoSnapshot(
     redoLabel: `Redo merge of "${dupName}"`,
     payload,
     byId: user?.id ?? null,
-    byName: user?.name ?? null,
+    byName: actorSnapshot(user),
   })
   return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
 }
@@ -559,7 +560,7 @@ export async function recordBulkMergeUndoSnapshot(
   const snap = await db.prepare(`
     INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
     VALUES ('product.merge.bulk', 'applied', @payload, @byId, @byName)
-  `).run({ payload: JSON.stringify({ reversals: list, mergedStateFingerprint }), byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ payload: JSON.stringify({ reversals: list, mergedStateFingerprint }), byId: user?.id ?? null, byName: actorSnapshot(user) })
   const snapshotId = Number(snap.lastInsertRowid ?? 0)
   const payload = JSON.stringify({ applier: 'product.merge.bulk', snapshot_id: snapshotId })
   const n = list.length
@@ -577,7 +578,7 @@ export async function recordBulkMergeUndoSnapshot(
     redoLabel: `Redo merge of ${n} ${noun}`,
     payload,
     byId: user?.id ?? null,
-    byName: user?.name ?? null,
+    byName: actorSnapshot(user),
   })
   return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
 }
@@ -864,7 +865,7 @@ export async function recordSupplierBackfillSnapshot(
   const snap = await db.prepare(`
     INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
     VALUES ('supplier.backfill', 'applied', @payload, @byId, @byName)
-  `).run({ payload: JSON.stringify({ ...reversal, lots }), byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ payload: JSON.stringify({ ...reversal, lots }), byId: user?.id ?? null, byName: actorSnapshot(user) })
   const snapshotId = Number(snap.lastInsertRowid ?? 0)
   const payload = JSON.stringify({ applier: 'supplier.backfill', snapshot_id: snapshotId })
   const supplierName = reversal.supplierName || `#${reversal.supplierId}`
@@ -883,7 +884,7 @@ export async function recordSupplierBackfillSnapshot(
     redoLabel: `Redo supplier attribution of ${n} ${noun}`,
     payload,
     byId: user?.id ?? null,
-    byName: user?.name ?? null,
+    byName: actorSnapshot(user),
   })
   return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
 }
@@ -958,7 +959,7 @@ export async function recordSaleAddItemsUndoSnapshot(
   const snap = await db.prepare(`
     INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
     VALUES ('sale.add_items', 'applied', @payload, @byId, @byName)
-  `).run({ payload: JSON.stringify(stored), byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ payload: JSON.stringify(stored), byId: user?.id ?? null, byName: actorSnapshot(user) })
   const snapshotId = Number(snap.lastInsertRowid ?? 0)
   const payload = JSON.stringify({ applier: 'sale.add_items', snapshot_id: snapshotId })
   const saleLabel = reversal.receiptNumber || `#${reversal.saleId}`
@@ -976,7 +977,7 @@ export async function recordSaleAddItemsUndoSnapshot(
     redoLabel: `Redo items added to sale ${saleLabel}`,
     payload,
     byId: user?.id ?? null,
-    byName: user?.name ?? null,
+    byName: actorSnapshot(user),
   })
   return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
 }
@@ -1081,7 +1082,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           lines: reversal.lines || [],
           reason: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
           userId: ctx.user?.id ?? null,
-          userName: ctx.user?.name ?? null,
+          userName: actorSnapshot(ctx.user),
         })
         // S4-30: the Undo button writes INTO the amendment ledger rather than
         // around it. Without this, a sale's detail view would show "added 2 x
@@ -1113,7 +1114,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             via: 'undo',
             note: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
             userId: ctx.user?.id ?? null,
-            userName: ctx.user?.name ?? null,
+            userName: actorSnapshot(ctx.user),
           })),
         ])
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
@@ -1131,7 +1132,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           lines,
           exchangeRate: Number(reversal.moneyAfter.exchange_rate ?? reversal.exchangeRate) || 4100,
           userId: ctx.user?.id ?? null,
-          userName: ctx.user?.name ?? null,
+          userName: actorSnapshot(ctx.user),
         })
         // The mirror of the undo branch above: a redo appends its own
         // `line_added` entries marked via 'redo', so the trail reads "added,
@@ -1158,7 +1159,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             via: 'redo',
             note: `Redo: items re-added to sale ${reversal.receiptNumber || `#${saleId}`}`,
             userId: ctx.user?.id ?? null,
-            userName: ctx.user?.name ?? null,
+            userName: actorSnapshot(ctx.user),
           })),
         ]) as Array<{ meta?: { last_row_id?: number } }>
         const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
@@ -1187,7 +1188,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
 
       if (!atomicReplay) {
         await audit(
-          ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+          ctx.env, ctx.user?.id ?? null, actorSnapshot(ctx.user),
           ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
           'sale', saleId,
           { via: 'undo_applier', applier: SALE_ADD_ITEMS_ACTION_KIND, lines: (reversal.lines || []).length },
@@ -1291,7 +1292,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       }
 
       await audit(
-        ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+        ctx.env, ctx.user?.id ?? null, actorSnapshot(ctx.user),
         ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
         'product', reversal.dupId,
         { via: 'undo_applier', applier: 'product.merge', keeperId: reversal.keeperId },
@@ -1343,7 +1344,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       }
 
       await audit(
-        ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+        ctx.env, ctx.user?.id ?? null, actorSnapshot(ctx.user),
         ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
         'product', reversals[0]?.keeperId ?? null,
         { via: 'undo_applier', applier: 'product.merge.bulk', count: reversals.length },
@@ -1393,7 +1394,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       }
 
       await audit(
-        ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+        ctx.env, ctx.user?.id ?? null, actorSnapshot(ctx.user),
         ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
         'product', reversal.productId ?? null,
         { via: 'undo_applier', applier: 'supplier.backfill', supplierId: reversal.supplierId, lots: (reversal.lots || []).length },

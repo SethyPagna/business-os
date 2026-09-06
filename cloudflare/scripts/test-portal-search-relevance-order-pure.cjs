@@ -102,7 +102,10 @@ const { paginateProductFamilies } = familyPagination
 const { loadActivePromotionRules, productPromotedSql } = promotionRulesSql
 const { normalizeSearchText } = searchMatch
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),

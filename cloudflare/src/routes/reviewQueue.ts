@@ -13,6 +13,7 @@ import {
 } from '../lib/pendingActions'
 import { applyApprovedPendingAction, NoReviewApplierError } from '../lib/reviewApply'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 // The Review/Approval page itself -- see progress.md's "Permissions UI
 // redesign" item. Gated Full Access only, same pattern Users already
@@ -99,7 +100,7 @@ app.post('/:id/resubmit', async (c) => {
   if (!ok) return c.json({ error: 'That request is not yours, or is not awaiting resubmission.' }, 404)
 
   const row = await getPendingAction(c.env, id)
-  await audit(c.env, user.id, user.name || user.username, 'resubmit', 'pending_action', id, row)
+  await audit(c.env, user.id, actorSnapshot(user), 'resubmit', 'pending_action', id, row)
   // Same channel the approve/reject handlers broadcast on, so an admin with
   // the Review page open sees it return to their queue without a refresh.
   await broadcast(c.env, 'pendingActions', { id, status: 'open' })
@@ -149,7 +150,7 @@ app.post('/:id/approve', async (c) => {
   if (row.status !== 'open') return c.json({ error: 'Already reviewed' }, 409)
 
   try {
-    await applyApprovedPendingAction(c.env, row, { id: user.id, name: user.name || user.username || null })
+    await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) })
   } catch (err) {
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)
@@ -159,11 +160,11 @@ app.post('/:id/approve', async (c) => {
 
   const ok = await markPendingActionApproved(c.env, id, {
     reviewedBy: user.id,
-    reviewedByName: user.name || user.username,
+    reviewedByName: actorSnapshot(user),
   })
   if (!ok) return c.json({ error: 'Already reviewed or not found' }, 409)
   const updatedRow = await getPendingAction(c.env, id)
-  await audit(c.env, user.id, user.name || user.username, 'approve', 'pending_action', id, updatedRow)
+  await audit(c.env, user.id, actorSnapshot(user), 'approve', 'pending_action', id, updatedRow)
   await broadcast(c.env, 'pendingActions', { id, status: 'approved' })
   return c.json({ success: true, data: updatedRow })
 })
@@ -183,12 +184,12 @@ app.post('/:id/reject', async (c) => {
   }
   const ok = await markPendingActionRejected(c.env, id, {
     reviewedBy: user.id,
-    reviewedByName: user.name || user.username,
+    reviewedByName: actorSnapshot(user),
     rejectReason: reason,
   })
   if (!ok) return c.json({ error: 'Already reviewed or not found' }, 409)
   const row = await getPendingAction(c.env, id)
-  await audit(c.env, user.id, user.name || user.username, 'reject', 'pending_action', id, row)
+  await audit(c.env, user.id, actorSnapshot(user), 'reject', 'pending_action', id, row)
   await broadcast(c.env, 'pendingActions', { id, status: 'rejected' })
   return c.json({ success: true, data: row })
 })

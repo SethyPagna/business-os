@@ -9,6 +9,7 @@ import { normalizePromotionRule, isRuleActive } from '../lib/promotionRules'
 import { normalizeToIsoDate } from '../lib/batchCode'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -275,7 +276,7 @@ app.post('/', requireKey('products'), async (c) => {
       @badge_text, @badge_color, @is_active, @sort_order, @starts_at, @ends_at, CURRENT_TIMESTAMP)
   `).run(input)
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'promotion', insert.lastInsertRowid, { title: input.title })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'promotion', insert.lastInsertRowid, { title: input.title })
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'create', id: insert.lastInsertRowid }))
   const created = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([insert.lastInsertRowid])
   return c.json(created)
@@ -308,7 +309,7 @@ app.put('/:id', requireKey('products'), async (c) => {
     WHERE id=@id
   `).run({ ...input, id })
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'promotion', id, { title: input.title })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'promotion', id, { title: input.title })
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'update', id }))
   const updated = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([id])
   return c.json(updated)
@@ -327,7 +328,7 @@ app.put('/reorder/all', requireKey('products'), async (c) => {
     params: [index, Number(id)],
   })))
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'reorder', 'promotion', null, { order })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reorder', 'promotion', null, { order })
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'reorder' }))
   const rows = await db.prepare('SELECT * FROM promotions ORDER BY sort_order ASC, id ASC').all()
   return c.json(rows)
@@ -342,7 +343,7 @@ app.delete('/:id', requireKey('products'), async (c) => {
   if (!current) return c.json({ error: 'Promotion not found' }, 404)
 
   await db.prepare('DELETE FROM promotions WHERE id = ?').run([id])
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', 'promotion', id, { title: current.title })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'promotion', id, { title: current.title })
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'delete', id }))
   return c.json({ deleted: true })
 })

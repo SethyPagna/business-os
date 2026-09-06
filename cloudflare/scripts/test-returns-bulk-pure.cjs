@@ -6,7 +6,7 @@ const ts = require('typescript')
 const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 const cache = new Map()
-const actual = new Set(['db', 'permissions', 'returnBulkAction'])
+const actual = new Set(['actorSnapshot','movementBranchName','db', 'permissions', 'returnBulkAction'])
 
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

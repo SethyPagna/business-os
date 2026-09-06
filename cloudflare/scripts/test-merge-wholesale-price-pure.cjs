@@ -138,7 +138,10 @@ function loadReal(relPath, requireOverrides = {}) {
 // ---------------------------------------------------------------------------
 const productDetailRule = loadReal('lib/productDetailRule.ts')
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const undoAppliers = loadReal('lib/undoAppliers.ts', {
+  './actorSnapshot': actorSnapshotKernel,
   '../index': {},
   './auth': {},
   './db': { getDb: () => db },
@@ -176,6 +179,7 @@ const inertSearch = {
 }
 
 const productsRoute = loadReal('routes/products.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/audit': { audit: async () => {} },

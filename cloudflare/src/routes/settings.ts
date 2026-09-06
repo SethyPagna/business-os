@@ -23,6 +23,7 @@ import {
 import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -538,7 +539,7 @@ app.post('/payment-methods/backfill', async (c) => {
     `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
   ).run({ value: JSON.stringify(merged.methods) })
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'settings', 'pos_payment_methods', {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', 'pos_payment_methods', {
     action: 'payment_methods_backfill',
     added: merged.added,
   })
@@ -698,7 +699,7 @@ app.post('/payment-methods/replace', async (c) => {
               (SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
               (SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
               @stamp`,
-      params: { userId: user?.id ?? null, userName: user?.name ?? null, operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp },
+      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp },
     },
     {
       sql: `INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_methods',@value,@stamp)
@@ -934,7 +935,7 @@ app.post('/', async (c) => {
   }
 
   const updatedAt = await getSettingsUpdatedAt(c.env)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'settings', null, { keys: attemptedKeys })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: attemptedKeys })
   // 6.3 (reproduced live by the Part-400 sweep): the portal caches its
   // config/catalog responses keyed on a version this route never bumped,
   // so every customer_portal_* save -- map embed included, the user's
