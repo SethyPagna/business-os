@@ -75,6 +75,64 @@ check('every audited paginated consumer is inventoried', () => {
   }
 })
 
+// An inventory is not evidence if it can certify a file nothing renders.
+// ArInvoicesSection.tsx sat in the list above -- paging correctly, clamping
+// correctly, counting correctly -- while the only references to its name in
+// the whole frontend were its own `export default` and this file's two path
+// strings. docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md had asked for it to be
+// mounted into the Customers tab; nothing was, so the audited behavior was
+// unreachable and this test's green was about a file no user could open.
+//
+// So the inventory now also proves each entry is REACHED: some other module
+// under src/ names it in a static or dynamic import. That is the weakest true
+// statement available from source alone -- it does not prove a route renders
+// it -- but it is exactly the gap that let an orphan through, and it is
+// mechanical rather than a hand-kept list of "these ones are really mounted".
+function importedBasenames(): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>()
+  for (const file of walk(path.join(frontendRoot, 'src')).filter((f) => /\.(ts|tsx)$/.test(f))) {
+    const source = fs.readFileSync(file, 'utf8')
+    // `from './X'`, `from './X.tsx'` and `import('./X')` alike.
+    for (const match of source.matchAll(/(?:from\s*|import\s*\(\s*)['"]([^'"]+)['"]/g)) {
+      const spec = match[1]
+      if (!spec.startsWith('.')) continue
+      const base = path.basename(spec).replace(/\.(tsx|ts|js)$/, '')
+      if (!map.has(base)) map.set(base, new Set())
+      map.get(base)!.add(relative(file))
+    }
+  }
+  return map
+}
+
+check('every inventoried paginated surface is reachable from the app', () => {
+  const imports = importedBasenames()
+  const importersOf = (file: string): string[] => {
+    const base = path.basename(file).replace(/\.tsx$/, '')
+    return [...(imports.get(base) || [])].filter((importer) => importer !== file).sort()
+  }
+
+  const orphans = expectedConsumers.filter((file) => importersOf(file).length === 0)
+  assert.deepStrictEqual(
+    orphans,
+    [],
+    'a paginated surface no module imports cannot be opened, so auditing its paging proves nothing -- mount it or drop it',
+  )
+
+  // Positive control. A resolver that silently matched everything (a bad
+  // regex, an empty walk) would report zero orphans forever and the assertion
+  // above would be a green that means nothing. So the same resolver is asked
+  // about a name that is deliberately absent, and must say "nothing".
+  assert.deepStrictEqual(
+    importersOf('src/components/contacts/NoSuchPaginatedSurface.tsx'),
+    [],
+    'the reachability resolver must report a name nothing imports as unimported',
+  )
+  assert.ok(
+    importersOf('src/components/contacts/ArInvoicesSection.tsx').includes('src/components/contacts/CustomersTab.tsx'),
+    'the AR ledger is mounted by the Customers tab, mirroring how SuppliersTab mounts the supplier ledgers',
+  )
+})
+
 check('no page-local Previous/Next paginator remains', () => {
   const manualPager = /(tr|t)\('previous'|>Previous<|>Next<|(tr|t)\('next'/
   const allowed = new Set([

@@ -65,11 +65,9 @@ export default function ProductDescriptionDetailModal({
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[85vh] sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800"
+        className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[85vh] sm:max-w-2xl sm:rounded-2xl sm:pb-0 dark:bg-gray-800"
         onClick={(event) => event.stopPropagation()}
       >
-        {/* Top close button, per the site-wide "top+bottom close" pattern
-            the public flyout already uses. */}
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 pr-4">
             <p className="break-words text-base font-semibold text-gray-900 dark:text-white">{productName}</p>
@@ -119,18 +117,6 @@ export default function ProductDescriptionDetailModal({
           {!parsed.intro && !parsed.sections.length ? (
             <p className="text-sm text-gray-400 dark:text-gray-500">{T('no_description', 'No description available.')}</p>
           ) : null}
-        </div>
-
-        {/* Bottom close button, matching the top one -- same "top+bottom
-            close" convention as the public flyout. */}
-        <div className="border-t border-gray-200 p-4 dark:border-gray-700">
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            {T('close', 'Close')}
-          </button>
         </div>
       </div>
     </div>
