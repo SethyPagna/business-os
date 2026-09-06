@@ -1,0 +1,213 @@
+// N36 -- "the qty unit is being pushed to next row if selling price, wholesale
+// price, cost price is fully there. 2 digits, if 3 even worse ... keep it
+// visible compact one line" (owner, Sep 6 2026).
+//
+// There is no layout engine here, so the row is judged two ways, and BOTH have
+// to hold or the file is red:
+//
+//   1. Shape. The Products mobile card's price strip must be a single named
+//      container that declares nowrap, and no child on it may re-declare a
+//      wrap-enabling class. A row that can wrap is the defect.
+//   2. Arithmetic. A pure width model of the strip, run at the widths the
+//      report is about (375 standalone, 375 in select mode, 360 Android), on
+//      the worst case the owner described: three-digit USD prices in all three
+//      slots plus a four-digit quantity and a unit chip. The model is fed the
+//      OLD gap/size numbers as a negative control, so a model that stopped
+//      discriminating fails here instead of blessing the row.
+//
+// Run: node tests/productRowPriceStrip.test.ts
+
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+
+const products = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+const css = fs.readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
+
+let failures = 0
+function runTest(name: string, fn: () => void) {
+  try {
+    fn()
+    console.log(`PASS ${name}`)
+  } catch (error) {
+    failures++
+    console.error(`FAIL ${name}`)
+    console.error(String((error as Error).message))
+  }
+}
+
+// The declaration block of a CSS rule, by exact selector.
+function block(selector: string): string {
+  const at = css.indexOf(`\n${selector} {`)
+  assert.ok(at > 0, `no CSS rule for selector: ${selector}`)
+  const open = css.indexOf('{', at)
+  const close = css.indexOf('}', open)
+  return css.slice(open + 1, close)
+}
+
+// The strip element in the mobile card: the div carrying the strip class, and
+// everything up to its closing </div> at the same indent.
+function stripMarkup(): string {
+  const at = products.indexOf('<div className="price-strip mt-1">')
+  assert.ok(at > 0, 'the Products mobile card must render its price row through one named .price-strip container')
+  const end = products.indexOf('\n            </div>', at)
+  assert.ok(end > at, 'could not find the end of the price strip element')
+  return products.slice(at, end)
+}
+
+// ---------------------------------------------------------------------------
+// 1. Shape
+// ---------------------------------------------------------------------------
+
+runTest('the price strip container declares nowrap and never wraps', () => {
+  const strip = block('.price-strip')
+  assert.match(strip, /flex-wrap:\s*nowrap/, '.price-strip must declare flex-wrap: nowrap')
+  assert.match(strip, /display:\s*flex/, '.price-strip must be a flex row')
+  assert.match(strip, /white-space:\s*nowrap/, '.price-strip must declare white-space: nowrap')
+  // The residual overflow (a promotion label beside a long Khmer unit) has to
+  // go somewhere that is neither a second row nor a clipped value.
+  assert.match(strip, /overflow-x:\s*auto/, '.price-strip must scroll rather than wrap or clip when it truly cannot fit')
+  assert.match(strip, /scrollbar-width:\s*none/, 'the strip\'s own scrollbar must stay invisible')
+  assert.match(block('.price-strip::-webkit-scrollbar'), /display:\s*none/, 'webkit scrollbar must be hidden too')
+})
+
+runTest('the strip spends divider blanks and one step of digit size, not a second line', () => {
+  const strip = block('.price-strip')
+  // gap: the row used gap-x-1.5 (.375rem). Anything at or above that has not
+  // paid for the fix.
+  const gap = /gap:\s*0\s+([\d.]+)rem/.exec(strip)
+  assert.ok(gap, '.price-strip must declare an explicit column gap')
+  assert.ok(Number(gap[1]) < 0.375, `strip gap must be tighter than the old gap-x-1.5 (.375rem), got ${gap[1]}rem`)
+  // font-size: the row used text-xs (.75rem).
+  const size = /font-size:\s*([\d.]+)rem/.exec(strip)
+  assert.ok(size, '.price-strip must own its font size')
+  assert.ok(Number(size[1]) < 0.75 && Number(size[1]) >= 0.65, `strip digits must step down a small amount from .75rem, got ${size[1]}rem`)
+  assert.match(strip, /font-variant-numeric:\s*tabular-nums/, 'prices must use tabular figures so the columns do not jitter')
+  assert.match(strip, /letter-spacing:\s*-/, 'tracking must be tightened, not loosened')
+  assert.match(block('.price-strip .price-strip-divider'), /margin:\s*0\s+-/, 'the blank either side of "|" is what gets spent first')
+})
+
+runTest('no value on the strip is hidden, clipped or dropped', () => {
+  const strip = stripMarkup()
+  for (const marker of ['fmtUSD(sellingUsd)', 'fmtUSD(wholesaleUsd)', 'fmtUSD(costUsd)', 'String(qty || 0)', 'renderUnitChip(unitName)']) {
+    assert.ok(strip.includes(marker), `the strip must still render ${marker}`)
+  }
+  assert.equal((strip.match(/price-strip-divider/g) || []).length, 3, 'all three "|" dividers stay visible')
+  assert.doesNotMatch(strip, /\btruncate\b/, 'no value on the strip may be ellipsised away')
+  assert.doesNotMatch(strip, /\bhidden\b/, 'no value on the strip may be hidden at a breakpoint')
+})
+
+runTest('nothing inside the strip re-enables wrapping', () => {
+  const strip = stripMarkup()
+  assert.doesNotMatch(strip, /flex-wrap/, 'the strip element must not carry a Tailwind wrap class')
+  assert.doesNotMatch(strip, /gap-y-/, 'a row gap only exists to space wrapped lines')
+  assert.doesNotMatch(strip, /\bflex\b\s+flex-wrap/, 'the strip must not re-declare the old wrapping flex row')
+  assert.match(block('.price-strip > *'), /flex:\s*0 0 auto/, 'strip children must not shrink their digits away')
+})
+
+runTest('the unit chip inside the strip is not left larger than the prices', () => {
+  // renderUnitChip's uncoloured variant is text-xs; after the step-down that
+  // would render bigger than the prices next to it.
+  assert.match(products, /price-strip-qty/, 'the qty+unit cell must be addressable from CSS')
+  const qty = block('.price-strip-qty > span')
+  assert.match(qty, /font-size:\s*[\d.]+rem/, 'the unit chip must be pinned to the strip\'s scale')
+})
+
+// ---------------------------------------------------------------------------
+// 2. Arithmetic
+// ---------------------------------------------------------------------------
+// Advance widths at 1rem for the app's sans stack, rounded conservatively
+// (measured against Inter/system-ui digits: digits and "$" ~0.556em, "." and
+// "|" ~0.28em). The model is intentionally generous to the row -- if it says
+// the row overflows, it overflows.
+
+const EM_DIGIT = 0.556
+const EM_THIN = 0.28
+
+function textWidth(text: string, rem: number, trackingEm: number, boldFactor = 1): number {
+  let em = 0
+  for (const ch of text) em += /[.,|]/.test(ch) ? EM_THIN : EM_DIGIT
+  em += trackingEm * text.length
+  return em * rem * 16 * boldFactor
+}
+
+type StripModel = {
+  gapRem: number
+  fontRem: number
+  trackingEm: number
+  unitChipRem: number
+  // Negative inline margin on the "|" itself, which eats into the gap on BOTH
+  // of its sides -- this is the "reduce space between digit and the dividing
+  // |" half of the ask, and it is real width, so the model counts it.
+  dividerMarginRem: number
+}
+
+// Worst case the owner named: three-digit USD in every slot, four-digit qty.
+function stripWidth(m: StripModel): number {
+  const price = '$123.45'
+  const selling = textWidth(price, m.fontRem, m.trackingEm, 1.03) // font-semibold
+  const wholesale = textWidth(price, m.fontRem, m.trackingEm, 1.01)
+  const cost = textWidth(price, m.fontRem, m.trackingEm)
+  const qty = textWidth('1234', m.fontRem, m.trackingEm, 1.01)
+  const dividers = 3 * textWidth('|', m.fontRem, m.trackingEm)
+  // Coloured unit chip: ml-1 (4px) + px-2 (16px) + a 3-character label.
+  const unit = 4 + 16 + textWidth('pcs', m.unitChipRem, 0, 1.03)
+  const gaps = 6 * m.gapRem * 16
+  const dividerPull = 6 * m.dividerMarginRem * 16 // 3 dividers, both sides
+  return selling + wholesale + cost + qty + dividers + unit + gaps - dividerPull
+}
+
+// Text column available to the strip. Page px-3 + card px-3 + (for a
+// standalone card) the w-16 thumbnail and its gap-3.
+function textColumn(viewport: number, opts: { selectMode?: boolean } = {}): number {
+  return viewport - 24 - 24 - 64 - 12 - (opts.selectMode ? 28 : 0)
+}
+
+const OLD: StripModel = { gapRem: 0.375, fontRem: 0.75, trackingEm: 0, unitChipRem: 0.625, dividerMarginRem: 0 }
+
+function currentModel(): StripModel {
+  const strip = block('.price-strip')
+  const gap = /gap:\s*0\s+([\d.]+)rem/.exec(strip)
+  const font = /font-size:\s*([\d.]+)rem/.exec(strip)
+  const track = /letter-spacing:\s*(-?[\d.]+)em/.exec(strip)
+  const chip = /font-size:\s*([\d.]+)rem/.exec(block('.price-strip-qty > span'))
+  const pull = /margin:\s*0\s+-([\d.]+)rem/.exec(block('.price-strip .price-strip-divider'))
+  assert.ok(gap && font && track && chip && pull, 'the strip must declare gap, font-size, letter-spacing, a chip size and a divider pull')
+  return {
+    gapRem: Number(gap[1]),
+    fontRem: Number(font[1]),
+    trackingEm: Number(track[1]),
+    unitChipRem: Number(chip[1]),
+    dividerMarginRem: Number(pull[1]),
+  }
+}
+
+runTest('NEGATIVE CONTROL: the old gap/size numbers do overflow the cases in the report', () => {
+  // If this ever passes, the width model has stopped discriminating and every
+  // assertion below is worthless.
+  assert.ok(stripWidth(OLD) > textColumn(375, { selectMode: true }), 'model must reproduce the reported overflow at 375 in select mode')
+  assert.ok(stripWidth(OLD) > textColumn(360), 'model must reproduce the reported overflow on a 360px Android')
+})
+
+runTest('the shipped strip fits on one line in every case in the report', () => {
+  const m = currentModel()
+  const w = stripWidth(m)
+  for (const [label, avail] of [
+    ['375 standalone card', textColumn(375)],
+    ['375 in select mode', textColumn(375, { selectMode: true })],
+    ['360 Android', textColumn(360)],
+    ['360 Android in select mode', textColumn(360, { selectMode: true })],
+  ] as Array<[string, number]>) {
+    assert.ok(w <= avail, `${label}: strip needs ${w.toFixed(1)}px but only ${avail}px is available`)
+  }
+})
+
+runTest('the fix is a real saving, not a rounding artefact', () => {
+  const saved = stripWidth(OLD) - stripWidth(currentModel())
+  assert.ok(saved >= 25, `expected the compaction to buy back real width, got ${saved.toFixed(1)}px`)
+})
+
+if (failures) {
+  console.error(`${failures} failing check(s)`)
+  process.exit(1)
+}
+console.log('PASS productRowPriceStrip')

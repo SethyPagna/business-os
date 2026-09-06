@@ -936,6 +936,90 @@ body.lang-km .compact-analytics-legend {
   line-height: var(--km-line-height, 1.6);
 }
 
+/* Product rows: one-line price strip, horizontally scrolling names ----------
+   Owner, Sep 6 2026: "the qty unit is being pushed to next row if selling
+   price, wholesale price, cost price is fully there ... keep it visible
+   compact one line", and "for product names, make it horizontal scroll
+   instead of pushing rows ... clean no need show the scroll bar".
+
+   .scroll-x-clean is ONE class for every product-name cell (Products desktop
+   table row, Products mobile card, both group titles in ProductsListSurface,
+   Inventory / Branches > Products desktop + mobile rows, ProductsImageOnly).
+   Deliberately NO `touch-action: pan-x` -- unlike .compact-action-row above,
+   a name cell sits inside a vertically scrolling LIST, and pinning the axis
+   would make a vertical swipe that happens to start on a product name do
+   nothing at all. Default `touch-action` lets the browser pick the axis from
+   the gesture, which is what "smooth ios pwa and android pwa" means here.
+   overscroll-behavior-inline stops a horizontal fling chaining out to the
+   page/PWA back-swipe. */
+.scroll-x-clean {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-x-clean::-webkit-scrollbar { width: 0; height: 0; display: none; }
+/* A Khmer cluster carries ~1.6em of ink and `overflow-y: hidden` cannot be
+   given an overflow-clip-margin, so without this floor every coeng subscript
+   in a scrolling name would be sheared off -- the same defect the dense-table
+   block below restates this floor for. */
+body.lang-km .scroll-x-clean,
+.scroll-x-clean.khmer-text { line-height: var(--km-line-height, 1.6); }
+
+/* .price-strip -- selling | wholesale | cost | qty+unit on ONE line.
+   Arithmetic for the reported wrap, at 375px on the Products mobile card:
+   page px-3 + card px-3 + the w-16 thumbnail and its gap-3 leave 375 - 24 -
+   24 - 64 - 12 = 251px of text column. Three "$123.45" figures at .75rem are
+   ~131px, a 4-digit qty ~27px, a coloured unit chip ~37px and three "|"
+   ~10px = 205px of ink -- but the old row also spent six `gap-x-1.5` gaps,
+   36px, for 241px. That clears 251px only when nothing else is on the line,
+   and loses as soon as select mode adds its checkbox (-28px -> 223px) or the
+   viewport is a 360px Android (-15px -> 236px). Hence the wrap.
+   This class spends .1875rem per gap instead of .375rem (-18px), steps the
+   digits down one notch to .7rem (-9px) and tightens tracking (-3px):
+   ~211px, which clears 375px in select mode and 360px without it.
+   Nothing is hidden and nothing wraps: flex-wrap is nowrap, and the residual
+   overflow a promotion label plus a long Khmer unit can still produce
+   scrolls cleanly instead of pushing the qty to a second row. */
+.price-strip {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0 .1875rem;
+  font-size: .7rem;
+  line-height: 1rem;
+  letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+.price-strip::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.price-strip > * { flex: 0 0 auto; white-space: nowrap; }
+/* The blank either side of "|" is the cheapest width on the row, so it is
+   spent first -- the digits stay legible and the divider stays visible. */
+.price-strip .price-strip-divider { margin: 0 -.0625rem; }
+/* The qty cell's unit chip: renderUnitChip's uncoloured variant is text-xs,
+   which after the step-down would render LARGER than the prices beside it.
+   Class+type beats Tailwind's single class, so both variants sit at the 10px
+   the coloured chip already uses. */
+.price-strip-qty > span { font-size: .625rem; }
+body.lang-km .price-strip { line-height: var(--km-line-height, 1.6); }
+
 .dense-data-shell {
   overflow:hidden;
   border:1px solid #e2e8f0;

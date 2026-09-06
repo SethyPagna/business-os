@@ -3617,10 +3617,18 @@ function ProductsFullEditor() {
                 keeps its bigger weight so it still reads first; special/
                 discount figures ride beside it; then cost (red) and the
                 status-colored qty+unit, "|"-separated like before.
-                flex-wrap stays purely as overflow protection for genuinely
-                too-narrow cards -- the default render is one line. */}
-            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
-              <span className="whitespace-nowrap font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
+
+                N36 (owner, Sep 6 2026): "the qty unit is being pushed to next
+                row if selling price, wholesale price, cost price is fully
+                there. 2 digits, if 3 even worse ... keep it visible compact
+                one line." flex-wrap WAS the overflow protection, and at 375px
+                with three full prices it is what fires -- see the width
+                arithmetic on `.price-strip` in styles/main.css. The row is
+                now nowrap and pays for it in divider blanks and one step of
+                digit size (tabular-nums, tighter tracking) rather than in a
+                second line; no value is dropped or hidden. */}
+            <div className="price-strip mt-1">
+              <span className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
               {wholesaleUsd > 0 ? (
                 // The wholesale price (wholesale_price_usd). This used to read
                 // special_price_usd and be labelled "VIP"; the 2026-09-04
@@ -3635,24 +3643,24 @@ function ProductsFullEditor() {
                 // beside it, matching the cost/qty dividers on this same row
                 // (user, Aug 31). The desktop table row keeps its own labelling.
                 <>
-                  <span className="text-gray-300 dark:text-gray-600">|</span>
-                  <span className="whitespace-nowrap font-medium text-primary-700 dark:text-primary-400">
+                  <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+                  <span className="font-medium text-primary-700 dark:text-primary-400">
                     {fmtUSD(wholesaleUsd)}
                   </span>
                 </>
               ) : null}
               {promotion.active ? (
-                <span className="whitespace-nowrap font-medium text-rose-600 dark:text-rose-300">
+                <span className="font-medium text-rose-600 dark:text-rose-300">
                   {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
                 </span>
               ) : null}
-              <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span className="whitespace-nowrap text-red-600">{fmtUSD(costUsd)}</span>
-              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+              <span className="text-red-600">{fmtUSD(costUsd)}</span>
+              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
               {/* Colored by stock status (red/yellow/green) instead of the
                   separate "In"/"Low"/"Out" badge this row used to show up
                   in its header line -- see stockStatusTextClass above. */}
-              <span className={withKhmerTextClass(unitName, `inline-flex min-w-0 max-w-full items-center whitespace-nowrap font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
+              <span className={withKhmerTextClass(unitName, `price-strip-qty inline-flex items-center font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
             </div>
             <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
             {/* Description is intentionally NOT shown on the small-screen list
