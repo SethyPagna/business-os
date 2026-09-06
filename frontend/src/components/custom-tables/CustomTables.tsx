@@ -8,6 +8,7 @@ import DateEntryInput from '../shared/DateEntryInput.tsx'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import { isRoundTrippableDateEntryValue } from '../../utils/dateEntry.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import {
@@ -140,6 +141,32 @@ function normalizeRowValue(column: CustomColumn | undefined, value: unknown): un
   return value ?? ''
 }
 
+/**
+ * Which `date` columns of an open row may use the typed date field.
+ *
+ * A `date` column is TEXT with no format check on either side (the Worker
+ * maps it to TEXT and the row write passes the string through), so a cell
+ * can hold '20260309', '2026-03-09 00:00:00' or 'Q3 batch'. DateEntryInput
+ * commits on blur, so handing it one of those would rewrite the cell on a
+ * tab THROUGH the row -- '03/09/2026' would come back as 2026-09-03, a
+ * different day. It gets the cell only where it hands the value back
+ * unchanged; everything else keeps a plain text box showing the stored
+ * string as it is.
+ *
+ * Decided once, from the values the row OPENED with, and held for as long
+ * as the modal is open: deciding per render would swap the control out from
+ * under the operator the moment their free text happened to look like an
+ * ISO date, taking the focus and the caret with it.
+ */
+function typedDateColumnsFor(schema: CustomColumn[], form: Record<string, unknown>): Record<string, boolean> {
+  const eligible: Record<string, boolean> = {}
+  schema.forEach((column) => {
+    if (column.type !== 'date') return
+    eligible[column.name] = isRoundTrippableDateEntryValue(String(toInputValue(form[column.name])))
+  })
+  return eligible
+}
+
 function normalizeCustomTable(value: unknown): CustomTable | null {
   if (!value || typeof value !== 'object') return null
   const table = value as Record<string, unknown>
@@ -203,6 +230,7 @@ export default function CustomTables() {
   const [createModal, setCreateModal] = useState(false)
   const [rowModal, setRowModal] = useState<RowModalState>(null)
   const [rowForm, setRowForm] = useState<Record<string, unknown>>({})
+  const [typedDateColumns, setTypedDateColumns] = useState<Record<string, boolean>>({})
   const [newTable, setNewTable] = useState<NewTableDraft>({ display_name: '', schema: [] })
   const [loadingTables, setLoadingTables] = useState(true)
   const [loadingRows, setLoadingRows] = useState(false)
@@ -522,11 +550,14 @@ export default function CustomTables() {
     const initial: Record<string, unknown> = {}
     activeSchema.forEach((column) => { initial[column.name] = column.type === 'boolean' ? '0' : '' })
     setRowForm(initial)
+    setTypedDateColumns(typedDateColumnsFor(activeSchema, initial))
     setRowModal('create')
   }
 
   const openEditRow = (row: CustomRow) => {
-    setRowForm(buildRowPayload(activeSchema, row))
+    const initial = buildRowPayload(activeSchema, row)
+    setRowForm(initial)
+    setTypedDateColumns(typedDateColumnsFor(activeSchema, initial))
     setRowModal(row)
   }
 
@@ -722,15 +753,20 @@ export default function CustomTables() {
                       value={toInputValue(rowForm[column.name])}
                       onChange={(event) => setRowForm((current) => ({ ...current, [column.name]: event.target.value }))}
                     />
-                  ) : column.type === 'date' ? (
+                  ) : column.type === 'date' && typedDateColumns[column.name] ? (
                     // The row editor's LAST native picker. It reached the DOM
                     // through `type={... ? 'date' : 'text'}` rather than a
                     // quoted attribute, which is the only reason it outlived
-                    // the sweep in tests/dateEntrySurfaces.test.ts. Same
-                    // storage on both sides -- ISO 'YYYY-MM-DD' in, ISO out --
-                    // so only the entry changes: a keypad run like 9032026
-                    // settles to 09/03/2026, which the browser's segmented
-                    // widget refuses outright.
+                    // the sweep in tests/dateEntrySurfaces.test.ts.
+                    //
+                    // Only for cells the typed field gives back UNCHANGED
+                    // (typedDateColumnsFor above): those are ISO or empty, so
+                    // the storage is identical on both sides and only the
+                    // entry changes -- a keypad run like 9032026 settles to
+                    // 09/03/2026, which the browser's segmented widget
+                    // refuses outright. A cell holding anything else falls
+                    // through to the plain text box below, which shows the
+                    // stored string as it is and never rewrites it.
                     <DateEntryInput
                       id={`custom-table-row-${column.name}`}
                       name={`custom_table_row_${column.name}`}
