@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
   revenueTerms, profitTerms, equationResidual, equationCloses, buildEquation,
+  isRevenueCountedSale, saleListRevenueUsd,
   type FormulaTerm, type StatsFormulaTotals,
 } from '../src/utils/statsFormulas.ts'
 
@@ -218,6 +219,98 @@ test('the Not Paid memo line and its pack key say the same thing', () => {
   assert.ok(fallback, 'the memo line still passes a fallback for rpt_hint_pending')
   assert.equal(denies(fallback!), null, 'the fallback does not deny it either')
   assert.equal(en.rpt_hint_pending, fallback, 'pack and fallback are one sentence, not two')
+})
+
+// ---- The Sales page footer's OWN revenue, when /stats is unavailable -------
+//
+// Sales.tsx shows `salesStats.revenue_usd` (the kernel, over every matching
+// row) and falls back to reducing over the rows it has when that request
+// fails. The fallback used to state a THIRD revenue definition:
+//
+//   sum of (net_total_usd ?? total_usd) over sales that are neither
+//   cancelled nor awaiting_payment
+//
+// which is wrong twice over. total_usd folds tax and the customer-paid
+// delivery fee in (neither is revenue), net_total_usd subtracts the CHARGED
+// refund rather than the share apportioned onto the net basis, and dropping
+// awaiting_payment contradicts clause 4 of the scoping rule -- unpaid credit
+// is INSIDE revenue and reported additionally as pending.
+//
+// This fixture is the one cloudflare/scripts/test-sales-revenue-convergence-
+// pure.cjs builds in SQLite, row for row, so the number asserted here is the
+// number the kernel and GET /api/sales/stats produce for the same window
+// ($351.00); that test evaluates this very module against its DB rows and
+// asserts the three agree. It carries an awaiting_payment sale (S4, taxed and
+// refunded), taxed completed sales (S1, S2), a blank and a NULL status, a
+// cancelled sale and a sale with two returns.
+const LIST_ROWS: Array<Record<string, unknown>> = [
+  // net 85, refund 20 charged -> 20 * 85/100 = 17 on the net basis -> 68
+  { id: 1, sale_status: 'completed', subtotal_usd: 100, discount_usd: 10, membership_discount_usd: 5, tax_usd: 8, total_usd: 93, refund_usd: 20, net_total_usd: 73 },
+  // blank status means completed; its only return is SUPPLIER scope, so the
+  // list endpoint reports refund_usd 0 for it -> 50
+  { id: 2, sale_status: '', subtotal_usd: 50, discount_usd: 0, membership_discount_usd: 0, tax_usd: 4, total_usd: 54, refund_usd: 0, net_total_usd: 54 },
+  // NULL status means completed -> 35
+  { id: 3, sale_status: null, subtotal_usd: 40, discount_usd: 5, membership_discount_usd: 0, tax_usd: 0, total_usd: 35, refund_usd: 0, net_total_usd: 35 },
+  // awaiting_payment: INSIDE revenue. net 180, refund 30 -> 30 * 180/200 = 27 -> 153
+  { id: 4, sale_status: 'awaiting_payment', subtotal_usd: 200, discount_usd: 20, membership_discount_usd: 0, tax_usd: 10, total_usd: 190, refund_usd: 30, net_total_usd: 160 },
+  // cancelled: 0 on both sides
+  { id: 5, sale_status: 'cancelled', subtotal_usd: 999, discount_usd: 0, membership_discount_usd: 0, tax_usd: 50, total_usd: 1049, refund_usd: 0, net_total_usd: 1049 },
+  // two customer returns summing to 20 on a sale that netted 60 -> 15 -> 45
+  { id: 6, sale_status: 'completed', subtotal_usd: 80, discount_usd: 0, membership_discount_usd: 20, tax_usd: 0, total_usd: 60, refund_usd: 20, net_total_usd: 40 },
+]
+const KERNEL_REVENUE = 351
+
+test('footer fallback: the row reduction equals the kernel revenue for the same rows', () => {
+  assert.equal(saleListRevenueUsd(LIST_ROWS), KERNEL_REVENUE)
+})
+
+test('footer fallback: the OLD reduction gave a different number on these very rows', () => {
+  // Reproduced verbatim from the shipped Sales.tsx, so a green result above is
+  // a fixture the two implementations actually disagree about.
+  const oldCounted = (s: Record<string, unknown>) => !['cancelled', 'awaiting_payment'].includes(String(s.sale_status || 'completed'))
+  const oldRevenue = LIST_ROWS.filter(oldCounted)
+    .reduce((sum, s) => sum + ((s.net_total_usd as number) ?? (s.total_usd as number) ?? 0), 0)
+  assert.equal(oldRevenue, 202)
+  assert.notEqual(oldRevenue, KERNEL_REVENUE)
+  // and it was wrong in both directions at once: tax and delivery folded IN,
+  // the whole awaiting-payment cohort left OUT.
+  assert.ok(oldRevenue < KERNEL_REVENUE)
+})
+
+test('footer count: only cancelled is excluded, matching /stats revenue_count', () => {
+  assert.deepEqual(LIST_ROWS.filter(isRevenueCountedSale).map((s) => s.id), [1, 2, 3, 4, 6])
+  // The old predicate dropped the awaiting-payment sale from the count too, so
+  // the footer read "4 sales" beside a revenue that had 5 sales in it.
+  assert.equal(LIST_ROWS.filter(isRevenueCountedSale).length, 5)
+})
+
+test('footer fallback: a zero-subtotal receipt with a refund contributes 0, never a minus', () => {
+  const broken = [{ sale_status: 'completed', subtotal_usd: 0, discount_usd: 0, membership_discount_usd: 0, refund_usd: 25 }]
+  assert.equal(saleListRevenueUsd(broken), 0)
+  // discounts recorded larger than the subtotal they come off: still 0.
+  assert.equal(saleListRevenueUsd([{ sale_status: 'completed', subtotal_usd: 10, discount_usd: 30, refund_usd: 0 }]), 0)
+})
+
+// The sentence the page shipped above isCountedSale, exactly as it was, so the
+// predicate below is proven able to see the thing it forbids before it is
+// pointed at the current file. A negative assertion with no positive control
+// is a green light that means nothing.
+const SHIPPED_CLAIM = `  // A sale "counts" toward the headline figures only when it contributes to
+  // the money shown: cancelled and awaiting-payment sales are excluded from
+  // revenue, so they must be excluded from the "N sales" count too (user,`
+const claimsAwaitingIsOut = (src: string): boolean =>
+  /cancelled and awaiting-payment sales are excluded[\s\S]{0,40}revenue/i.test(src)
+
+test('POSITIVE CONTROL: the predicate catches the comment that actually shipped', () => {
+  assert.equal(claimsAwaitingIsOut(SHIPPED_CLAIM), true)
+  assert.equal(claimsAwaitingIsOut('// only a cancelled sale is out of revenue'), false)
+})
+
+test('footer fallback: no comment on the page claims awaiting-payment is out of revenue', () => {
+  const source = read('src/components/sales/Sales.tsx')
+  assert.equal(claimsAwaitingIsOut(source), false, 'the isCountedSale comment still denies the cohort is counted')
+  assert.match(source, /saleListRevenueUsd\(filtered\)/, 'the fallback goes through the shared kernel mirror')
+  assert.equal(/net_total_usd \?\? sale\.total_usd/.test(source), false, 'the third revenue definition is gone')
 })
 
 if (failed) { console.error(`\n${failed} test(s) failed`); process.exit(1) }

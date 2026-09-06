@@ -7,7 +7,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
-import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
+import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd } from '../../utils/statsFormulas'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -1404,15 +1404,26 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   }, [canViewFees, feeStripData, fmtKHR, fmtUSD, stripData, stripHasTime, stripStatus, t, translateOr])
 
   // A sale "counts" toward the headline figures only when it contributes to
-  // the money shown: cancelled and awaiting-payment sales are excluded from
-  // revenue, so they must be excluded from the "N sales" count too (user,
-  // Aug 31: "count only what the money counts"). Those rows still render in
-  // the list — they just don't inflate the count.
-  const isCountedSale = useCallback((sale: SaleRecord) => !['cancelled', 'awaiting_payment'].includes(String(sale?.sale_status || 'completed')), [])
+  // the money shown (user, Aug 31: "count only what the money counts"), and
+  // what the money counts is the kernel's rule, not a second opinion: ONLY a
+  // cancelled sale is out. Unpaid credit (awaiting_payment) is INSIDE revenue
+  // and reported additionally as pending — clause 4 of the scoping rule in
+  // cloudflare/src/lib/salesAnalytics.ts, lineage commit fd7c49ba — so it is
+  // inside this count too, which is what GET /api/sales/stats returns as
+  // revenue_count. Every row still renders in the list either way.
+  const isCountedSale = useCallback((sale: SaleRecord) => isRevenueCountedSale(sale), [])
 
+  // The server figure covers every matching row; this fallback can only see
+  // the page that was fetched, so it is a degraded ANSWER — but not a
+  // different QUESTION. saleListRevenueUsd is the client mirror of the kernel
+  // fragments (net of both discounts, refund apportioned onto that same net
+  // basis and capped at it, tax and delivery excluded). It used to sum
+  // `net_total_usd ?? total_usd`, which folded tax and delivery in and took
+  // the refund off on the charged basis: a third revenue definition on the
+  // one page whose header exists to agree with the Dashboard.
   const revenue = salesStats
     ? salesStats.revenue_usd
-    : filtered.filter(isCountedSale).reduce((sum, sale) => sum + (sale.net_total_usd ?? sale.total_usd ?? 0), 0)
+    : saleListRevenueUsd(filtered)
 
   // The headline count must reconcile with `revenue`: count only the sales
   // that contribute to it, so the footer never reads "12 sales | $67.47" when

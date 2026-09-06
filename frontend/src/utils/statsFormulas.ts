@@ -148,3 +148,80 @@ export function buildEquation(
     .join(' ')
   return `${tr(result.key, result.fallback)} ${fmtUSD(result.usd)} = ${body}`
 }
+
+// ---- The Sales page footer's fallback revenue ------------------------------
+//
+// GET /api/sales/stats returns the kernel's revenue over EVERY matching row;
+// the Sales page list is capped at a page, so the footer reads that aggregate.
+// When the request fails it still has to say something, and what it said was a
+// third revenue definition -- `net_total_usd ?? total_usd` summed over sales
+// that were neither cancelled nor awaiting_payment. That folded tax and the
+// customer-paid delivery fee INTO revenue, took the refund off on the CHARGED
+// basis instead of the apportioned one, and dropped the awaiting-payment
+// cohort that clause 4 of the scoping rule puts inside revenue.
+//
+// These three functions are the client mirror of the kernel's SQL fragments
+// (cloudflare/src/lib/salesAnalytics.ts: recognizedExpr, netSaleExpr,
+// netRefundExpr), reading the columns GET /api/sales already returns on every
+// row -- subtotal_usd, discount_usd, membership_discount_usd, and the
+// refund_usd it attaches from non-cancelled CUSTOMER returns. The fallback is
+// still a fallback (it can only see the rows that were fetched), but it is now
+// the same DEFINITION, so it cannot disagree with the header it replaces about
+// what revenue means.
+//
+// cloudflare/scripts/test-sales-revenue-convergence-pure.cjs evaluates this
+// module against its own SQLite fixture and asserts saleListRevenueUsd equals
+// getSalesTotals().revenue_usd to the cent.
+
+/**
+ * One row as the sales list endpoint returns it. Only the five money/status
+ * columns below are read; everything else on the row is ignored, so this
+ * accepts the page's own record type without a cast.
+ */
+export type SaleRevenueRow = Record<string, unknown>
+
+/** `COALESCE(NULLIF(sale_status, ''), 'completed')` -- blank and NULL are completed. */
+function saleStatus(sale: SaleRevenueRow): string {
+  const raw = sale?.sale_status
+  return raw == null || raw === '' ? 'completed' : String(raw)
+}
+
+/**
+ * `recognizedExpr`: every sale that is not cancelled. The awaiting_payment
+ * cohort is INSIDE revenue (lineage commit fd7c49ba) and is reported
+ * additionally as pending -- it is a subset, never a complement.
+ */
+export function isRevenueCountedSale(sale: SaleRevenueRow): boolean {
+  return saleStatus(sale) !== 'cancelled'
+}
+
+/** `netSaleExpr`: MAX(0, subtotal - store discount - membership discount). */
+export function saleNetSalesUsd(sale: SaleRevenueRow): number {
+  return Math.max(0, num(sale?.subtotal_usd) - num(sale?.discount_usd) - num(sale?.membership_discount_usd))
+}
+
+/**
+ * `netRefundExpr`: the refund scaled onto the net basis revenue is measured
+ * on, capped at what that sale ever recognised. A zero-subtotal receipt has no
+ * basis to scale against and no value to give back, so its refund contributes
+ * 0 rather than turning the row -- and the footer -- negative.
+ */
+export function saleNetRefundUsd(sale: SaleRevenueRow): number {
+  const net = saleNetSalesUsd(sale)
+  const subtotal = num(sale?.subtotal_usd)
+  const charged = num(sale?.refund_usd)
+  return Math.min(net, subtotal > 0 ? charged * (net / subtotal) : charged)
+}
+
+/**
+ * The footer figure: `SUM over recognized rows of (net - net refund)`, rounded
+ * once at the end exactly as GET /api/sales/stats rounds its aggregate.
+ */
+export function saleListRevenueUsd(rows: readonly SaleRevenueRow[]): number {
+  let total = 0
+  for (const sale of rows || []) {
+    if (!isRevenueCountedSale(sale)) continue
+    total += saleNetSalesUsd(sale) - saleNetRefundUsd(sale)
+  }
+  return round2(total)
+}

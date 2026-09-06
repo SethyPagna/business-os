@@ -281,12 +281,22 @@ test('Sales statistics keep COGS, gross profit, and permitted expenses visible',
 })
 
 test('Part 564: headline + day-group counts count only what the money counts', () => {
-  // User, Aug 31: "count only what the money counts." Cancelled (and, for
-  // sales, awaiting-payment) records still appear in the list but are excluded
-  // from every count shown, so the count reconciles with the money and with
-  // the stats strip (which already excludes them).
+  // User, Aug 31: "count only what the money counts." Cancelled records still
+  // appear in the list but are excluded from every count shown, so the count
+  // reconciles with the money and with the stats strip.
+  //
+  // CORRECTED Sep 6 2026 (owner ask N6). This used to pin a predicate that
+  // dropped awaiting_payment too, and the money it was meant to reconcile with
+  // never did: recognizedExpr is `<> 'cancelled'`, so unpaid credit is INSIDE
+  // revenue and inside GET /api/sales/stats's revenue_count. The footer read
+  // "4 sales" beside a revenue built out of 5. What is pinned now is that the
+  // page takes the rule from ONE place -- the shared kernel mirror in
+  // utils/statsFormulas.ts -- rather than restating it in a local list.
   const sales = read('src/components/sales/Sales.tsx')
-  assert.ok(/isCountedSale[\s\S]{0,160}cancelled[\s\S]{0,60}awaiting_payment/.test(sales), 'Sales defines the money-counting predicate')
+  assert.ok(/isCountedSale = useCallback\(\(sale: SaleRecord\) => isRevenueCountedSale\(sale\)/.test(sales),
+    'Sales takes the money-counting predicate from the shared kernel mirror')
+  assert.ok(!/isCountedSale[\s\S]{0,200}'awaiting_payment'/.test(sales),
+    'and no longer restates it as a local list that drops the cohort the kernel counts')
   assert.ok(/revenueCount[\s\S]{0,60}filter\(isCountedSale\)/.test(sales), 'Sales computes the reconciled headline count')
   const salesSurface = read('src/components/sales/SalesListSurface.tsx')
   assert.ok(salesSurface.includes('{revenueCount}'), 'the Sales footer shows the money-counting count')

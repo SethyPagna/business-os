@@ -296,6 +296,41 @@ check(`both surfaces equal the hand-computed net-sales revenue (${EXPECT.revenue
 check(`CONVERGENCE: the header's refund is apportioned too -- the charged basis would have given ${230 - EXPECT.refundsChargedBasis}`,
   statsRevenue !== 230 - EXPECT.refundsChargedBasis)
 
+// ---- 8b. THE THIRD SURFACE: the Sales page's own fallback ------------------
+// Sales.tsx shows salesStats.revenue_usd (the /stats aggregate proved equal
+// above) and, when that request fails, reduces over the rows it already has.
+// That reduction used to be a THIRD definition -- `net_total_usd ?? total_usd`
+// over sales that were neither cancelled nor awaiting_payment -- so the one
+// page whose header exists to agree with the Dashboard disagreed with itself
+// the moment the network hiccuped. frontend/src/utils/statsFormulas.ts now
+// mirrors the kernel's fragments, and this runs the SHIPPED frontend module
+// over the rows GET /api/sales would have returned for the same window.
+const frontendSrc = path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'statsFormulas.ts')
+const frontendTs = path.join(tmpDir, 'statsFormulas.ts')
+fs.writeFileSync(frontendTs, '// @ts-nocheck\n' + fs.readFileSync(frontendSrc, 'utf8'))
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${frontendTs}`, { cwd: tmpDir, stdio: 'inherit' })
+const front = require(path.join(tmpDir, 'statsFormulas.js'))
+
+// Exactly the columns routes/sales.ts's list handler returns: the sale row
+// itself plus the refund_usd it attaches from non-cancelled CUSTOMER returns.
+const listRows = db.prepare(`
+  SELECT s.*, COALESCE(rf.refund_usd, 0) AS refund_usd,
+    COALESCE(s.total_usd, 0) - COALESCE(rf.refund_usd, 0) AS net_total_usd
+  FROM sales s ${lib.CUSTOMER_REFUND_JOIN}s.id
+  WHERE date(s.created_at, '+7 hours') BETWEEN '2026-08-01' AND '2026-08-31'
+`).all()
+const fallbackRevenue = front.saleListRevenueUsd(listRows)
+check(`the fallback sees every row of the window (${listRows.length})`, listRows.length === 6)
+check(`CONVERGENCE: the Sales page fallback (${fallbackRevenue}) == kernel revenue (${kernel.revenue_usd}) == /stats (${statsRevenue})`,
+  fallbackRevenue === kernel.revenue_usd && fallbackRevenue === statsRevenue)
+check('the fallback counts the rows /stats counts as revenue_count -- cancelled out, awaiting_payment IN',
+  listRows.filter(front.isRevenueCountedSale).length === 5)
+const oldFallback = listRows
+  .filter((r) => !['cancelled', 'awaiting_payment'].includes(String(r.sale_status || 'completed')))
+  .reduce((sum, r) => sum + (r.net_total_usd ?? r.total_usd ?? 0), 0)
+check(`POSITIVE CONTROL: the old fallback gave ${oldFallback} on these very rows, not ${EXPECT.revenue}`,
+  oldFallback === 202 && oldFallback !== EXPECT.revenue)
+
 // ---- 9. NO SIXTH COPY: sweep every route and lib for the raw refund --------
 // The double-minus is not a bug in one query, it is a phrasing that reads as
 // obviously correct -- "revenue minus what we refunded" -- and so gets retyped.
