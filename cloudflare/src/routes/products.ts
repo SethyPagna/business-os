@@ -17,7 +17,7 @@ import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
-import { findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, normalizeProductClusterKey, pickSameIdentityRow } from '../lib/productIdentity'
+import { findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, normalizeProductClusterKey, pickSameIdentityRow, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail, resolveMergedPricing } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
@@ -1755,8 +1755,10 @@ app.put('/:id', async (c) => {
 
   // Same identity rule as create: an EDIT must not rename/re-barcode a row
   // into an exact name+barcode twin of another product (excluding itself).
-  // Only runs when the body actually carries a name or barcode change to
-  // judge — an image-only or stock-only edit never reaches the query.
+  // Only runs when the body actually MOVES the row's identity — an image-only,
+  // price-only, cost-only or stock-only edit never reaches the query, and
+  // neither does a full-form save that re-sends the name and barcode the row
+  // already has.
   if (body.barcode !== undefined) {
     const nextBarcodeText = String(body.barcode ?? '').trim()
     if (SCIENTIFIC_NOTATION_BARCODE.test(nextBarcodeText)) {
@@ -1765,20 +1767,31 @@ app.put('/:id', async (c) => {
   }
   let renamedProductIds: number[] = []
   let renamedProductName: string | null = null
-  if (body.name !== undefined || body.barcode !== undefined || body.cost_price_usd !== undefined || body.cost_price_khr !== undefined) {
-    const current = await getDb(c.env).prepare('SELECT name, barcode, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
-      .get<{ name: string; barcode: string | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id })
-    const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
-    const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
-    const nextCostUsd = body.cost_price_usd !== undefined ? body.cost_price_usd : current?.cost_price_usd
-    const nextCostKhr = body.cost_price_khr !== undefined ? body.cost_price_khr : current?.cost_price_khr
-    const duplicate = await findSameProductIdentityProduct(c.env, nextName, nextBarcode, Number(id))
-    if (duplicate) {
-      return c.json({
-        error: `"${duplicate.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Merge into it instead of creating a twin.`,
-        code: 'duplicate_product',
-        duplicate,
-      }, 409)
+  if (body.name !== undefined || body.barcode !== undefined) {
+    const current = await getDb(c.env).prepare('SELECT name, barcode FROM products WHERE id = @id')
+      .get<{ name: string; barcode: string | null }>({ id })
+    // Ask whether this edit CHANGES the row's identity, not whether the row's
+    // identity is shared. The editor (ProductForm/Products) posts the WHOLE
+    // form on every save, so `body.name`/`body.barcode` are present even when
+    // only the selling price or the image moved -- and for a pair that already
+    // shares an identity (a leading-zero twin, or two rows the Sep-4 cost
+    // ruling folded together) the unconditional lookup below is a permanent
+    // yes, turning every ordinary save of either row into a 409 merge offer.
+    // Worse, for a cost-outlier pair the merge tool refuses too ("correct
+    // whichever figure is wrong, then merge") -- so the two refusals deadlock
+    // and the operator cannot correct the figure the merge is waiting for.
+    // Cost is not identity (Sep 4), so a cost-only change can never move this
+    // key and no longer reaches this block at all.
+    const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, body)
+    if (changesIdentity) {
+      const duplicate = await findSameProductIdentityProduct(c.env, nextName, nextBarcode, Number(id))
+      if (duplicate) {
+        return c.json({
+          error: `"${duplicate.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Merge into it instead of creating a twin.`,
+          code: 'duplicate_product',
+          duplicate,
+        }, 409)
+      }
     }
     // D6 / 9.1 ("rename does not regroup"): when the operator chose to
     // carry the WHOLE name group to the new name, rename the siblings

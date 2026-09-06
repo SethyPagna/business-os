@@ -91,6 +91,43 @@ export type ProductIdentityRow = {
 // into a third language -- the drift trap this whole module exists to close --
 // so the SQL narrows to the name group and the fold is applied here, over the
 // same identityBarcodeKey every other comparison site uses.
+// The identity a single row HAS, as one comparable string: its name group and
+// its folded barcode, joined by a delimiter that can occur in neither (U+0001,
+// the same delimiter the dismissal keys below use, and for the same reason --
+// plain concatenation makes name 'ab' + barcode 'cde' indistinguishable from
+// name 'abc' + barcode 'de').
+//
+// The edit guard is the caller this exists for. "Does another row already have
+// this identity?" is the wrong question to ask on every save: for a pair that
+// ALREADY shares one -- a leading-zero twin, or the cost-forked siblings the
+// Sep-4 ruling folded together -- the answer is permanently yes, so re-asking it
+// on a selling-price, cost or image edit refuses a save that changes no
+// identity at all, and for a cost-outlier pair it deadlocks against the merge
+// tool's own refusal ("correct whichever figure is wrong, then merge"). The
+// question the guard must ask is "does this edit MOVE the row onto somebody
+// else's identity?", i.e. compare this key before and after and only look for a
+// twin when it actually changed.
+const IDENTITY_KEY_DELIM = String.fromCharCode(1)
+export function productRowIdentityKey(name: unknown, barcode: unknown): string {
+  return `${normalizeProductGroupName(name)}${IDENTITY_KEY_DELIM}${identityBarcodeKey(barcode)}`
+}
+
+// The edit guard's decision, as a pure function so it can be tested for real:
+// what name/barcode the row will HAVE after this body is applied, and whether
+// that is a different identity from the one it has now. `changesIdentity` false
+// means the lookup must be skipped entirely -- the row is staying exactly where
+// it is, whatever else the body carries (price, cost, image, stock).
+export function resolveProductIdentityEdit(
+  current: { name?: unknown; barcode?: unknown } | null | undefined,
+  body: { name?: unknown; barcode?: unknown },
+): { nextName: string; nextBarcode: unknown; changesIdentity: boolean } {
+  const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
+  const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
+  const changesIdentity = productRowIdentityKey(nextName, nextBarcode)
+    !== productRowIdentityKey(current?.name, current?.barcode)
+  return { nextName, nextBarcode, changesIdentity }
+}
+
 export function pickSameIdentityRow<T extends { barcode?: string | null }>(
   rows: T[],
   barcode: unknown,

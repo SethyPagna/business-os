@@ -42,12 +42,13 @@ function loadTs(relPath, requireShim) {
   return mod.exports
 }
 const detailRule = loadTs('lib/productDetailRule.ts', {})
-const { pickSameIdentityRow } = loadTs('lib/productIdentity.ts', {
+const { pickSameIdentityRow, resolveProductIdentityEdit } = loadTs('lib/productIdentity.ts', {
   './db': {},
   './sqlBinding': { buildInClause: () => ({ sql: '', params: {} }), selectInChunks: async () => [] },
   './productDetailRule': detailRule,
 })
 assert.equal(typeof pickSameIdentityRow, 'function', 'productIdentity must export pickSameIdentityRow')
+assert.equal(typeof resolveProductIdentityEdit, 'function', 'productIdentity must export resolveProductIdentityEdit')
 
 // ---- 1. The guard's SQL against the real schema, then the real comparison ----
 const sqlMatch = source.match(/`\s*\n\s*(SELECT id, name, barcode, cost_price_usd, cost_price_khr FROM products[\s\S]*?LIMIT 200)\s*\n\s*`/)
@@ -96,6 +97,80 @@ assert.equal(run('Retired Twin', '3348901', null), null, 'inactive products neve
 assert.equal(run('Dior Lip Glow 001', '3348901', 1), null, 'a product never collides with itself on edit')
 assert.equal(run('No Barcode', '', null)?.id, 4, 'blank barcode is still an exact detail value')
 
+// ---- 1b. The EDIT guard asks whether the edit MOVES the row's identity ----
+// DISCRIMINATING, and the reason this section exists: the guard used to run the
+// lookup on every save that carried a name, barcode OR COST, and the editor
+// (ProductForm.tsx / Products.tsx) posts the whole form every time. So for a
+// pair that ALREADY shares an identity -- a pre-existing leading-zero twin, or
+// the cost-forked siblings the Sep-4 ruling folded into one identity -- the
+// lookup was a permanent yes and every ordinary save of either row came back
+// 409 "Merge into it instead". For a cost-outlier pair that deadlocked outright:
+// the merge tool refuses ("correct whichever figure is wrong, then merge") and
+// the edit that would correct the figure was refused too.
+//
+// The rows below are a real twin pair (same name, '0601'/'601') and a real
+// cost-forked pair (same name, same barcode, different cost).
+sqlite.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, is_active) VALUES
+  (10, 'Mac Lipstick 601', '0601', 6, 0, 1),
+  (11, 'Mac Lipstick 601', '601', 9, 0, 1),
+  (12, 'Fork Cost', '778899', 3, 0, 1),
+  (13, 'Fork Cost', '778899', 12, 0, 1)`).run()
+
+// The route, reproduced exactly: resolve the edit, and only look for a twin
+// when the resolution says the identity moved.
+const edit = (currentId, body) => {
+  const current = sqlite.prepare('SELECT name, barcode FROM products WHERE id = ?').get(currentId)
+  const resolved = resolveProductIdentityEdit(current, body)
+  if (!resolved.changesIdentity) return { queried: false, duplicate: null }
+  return { queried: true, duplicate: run(resolved.nextName, resolved.nextBarcode, currentId) }
+}
+
+// The whole form, unchanged identity, new selling price / cost / image.
+const wholeForm = (extra) => ({ name: 'Mac Lipstick 601', barcode: '0601', ...extra })
+assert.equal(edit(10, wholeForm({ selling_price_usd: 21 })).queried, false,
+  'editing the selling price on one row of an EXISTING twin pair must not even ask')
+assert.equal(edit(10, wholeForm({ cost_price_usd: 7.5 })).queried, false,
+  'cost is not identity, so correcting a cost-outlier figure must not be refused')
+assert.equal(edit(10, wholeForm({ image_path: '/img/601.jpg' })).queried, false,
+  'an image edit on a twin row is not an identity change')
+assert.equal(edit(13, { name: 'Fork Cost', barcode: '778899', cost_price_usd: 3 }).queried, false,
+  'the cost-forked sibling can be corrected -- otherwise edit and merge deadlock')
+assert.equal(edit(11, { cost_price_usd: 4 }).queried, false, 'a cost-only body never reaches the lookup')
+// ...and the rule it must still enforce: moving ONTO another row's identity.
+const renamed = edit(2, { name: 'Dior Lip Glow 001', barcode: '3348901' })
+assert.equal(renamed.queried, true, 're-barcoding into another row IS an identity change')
+assert.equal(renamed.duplicate?.id, 1, 'and the twin it would create is refused')
+const zeroPadded = edit(2, { name: 'Dior Lip Glow 001', barcode: '03348901' })
+assert.equal(zeroPadded.queried, true, 'a folded-equal barcode still moves this row off 9999999')
+assert.equal(zeroPadded.duplicate?.id, 1, 'a leading zero does not buy a way past the guard')
+const renamedIntoTwin = edit(12, { name: 'Mac Lipstick 601', barcode: '601' })
+assert.equal(renamedIntoTwin.queried, true, 'renaming into an existing name+barcode is judged')
+assert.ok(renamedIntoTwin.duplicate, 'and refused')
+// Whitespace/case-only edits are not identity changes either.
+assert.equal(edit(10, { name: '  Mac   Lipstick 601 ', barcode: '0601' }).queried, false,
+  'the key is the NORMALIZED name, so re-spacing is not a move')
+assert.equal(edit(10, { name: 'Mac Lipstick 601', barcode: '00601' }).queried, false,
+  'and the FOLDED barcode, so adding a zero to your own code is not a move')
+
+// POSITIVE CONTROL: the fixtures above are only meaningful if the OLD rule
+// actually answers differently on them -- a test whose cases both rules pass is
+// indistinguishable from a broken one. This is the pre-fix decision, written out
+// (query whenever the body carries name, barcode OR cost), and it must 409 the
+// very saves the assertions above let through.
+const preFixEdit = (currentId, body) => {
+  if (body.name === undefined && body.barcode === undefined
+    && body.cost_price_usd === undefined && body.cost_price_khr === undefined) return null
+  const current = sqlite.prepare('SELECT name, barcode FROM products WHERE id = ?').get(currentId)
+  const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
+  const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
+  return run(nextName, nextBarcode, currentId)
+}
+assert.ok(preFixEdit(10, wholeForm({ selling_price_usd: 21 })), 'control: the old rule 409d a price edit on a twin')
+assert.ok(preFixEdit(10, wholeForm({ cost_price_usd: 7.5 })), 'control: the old rule 409d the cost correction')
+assert.ok(preFixEdit(13, { name: 'Fork Cost', barcode: '778899', cost_price_usd: 3 }),
+  'control: the old rule 409d the cost-forked sibling, deadlocking it against the merge tool')
+assert.ok(preFixEdit(11, { cost_price_usd: 4 }), 'control: the old rule even queried on a cost-only body')
+
 // ---- 2. Wiring: both routes, guard before the review queue, no override ----
 const createAt = source.indexOf("app.post('/', async (c) => {")
 const createGuardAt = source.indexOf('findSameProductIdentityProduct(', createAt)
@@ -103,6 +178,17 @@ const createQueueAt = source.indexOf("actionType: 'create'", createAt)
 assert.ok(createAt > 0 && createGuardAt > createAt && createQueueAt > createGuardAt,
   'create: the identity guard runs BEFORE maybeQueueForReview so reviewers never approve duplicates')
 assert.match(source, /findSameProductIdentityProduct\(c\.env, nextName, nextBarcode, Number\(id\)\)/, 'edit: name/barcode changes are judged too')
+// The edit guard's trigger, pinned at the source: it resolves the edit first and
+// only queries when the identity actually moved, and cost is nowhere in it.
+const editGuardAt = source.indexOf('const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, body)')
+assert.ok(editGuardAt > 0, 'edit: the guard resolves the edit through the shared helper')
+const editTriggerAt = source.lastIndexOf('if (body.name !== undefined', editGuardAt)
+const editTrigger = source.slice(editTriggerAt, editGuardAt)
+assert.ok(!/cost_price_(usd|khr)/.test(editTrigger),
+  'edit: cost stopped being identity on Sep 4 2026, so a cost change must not trigger the duplicate lookup')
+const editLookupAt = source.indexOf('findSameProductIdentityProduct(c.env, nextName, nextBarcode, Number(id))', editGuardAt)
+assert.match(source.slice(editGuardAt, editLookupAt), /if \(changesIdentity\) \{/,
+  'edit: the lookup runs ONLY when the edit moves the row onto a different identity')
 assert.match(source, /return pickSameIdentityRow\(rows, barcode\)/, 'the guard compares through the shared fold, not a local one')
 assert.match(source, /code: 'duplicate_product'/, 'refusal carries a machine-readable code')
 assert.ok(!/confirm_duplicate/.test(source), 'no override flag: the identity rule is absolute on this path')
