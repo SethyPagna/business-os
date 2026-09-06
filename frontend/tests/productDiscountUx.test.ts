@@ -32,13 +32,19 @@ await runTest('products table separates product identity from operational detail
 
 await runTest('POS product cards expose discount badges before opening details', () => {
   const source = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+  // N19 round 3: the card body is components/pos/ProductCard.tsx now -- one
+  // component, mounted by the POS grid and by the sale screen's add-items and
+  // Replace searches. The badge rule is asserted in its new home, plus the
+  // POS grid still mounting it, which together is what this lock was after.
+  const card = fs.readFileSync(new URL('../src/components/pos/ProductCard.tsx', import.meta.url), 'utf8')
   const detailSheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
-  assert.match(source, /ProductDiscountBadge/)
+  assert.match(card, /ProductDiscountBadge/)
   // G1 (Part 391): the badge evaluates the shared promotion kernel
   // (promotionBadgeForProduct -- product discount OR rule, including
   // buy->=X hints), no longer bare calculateProductDiscount.
-  assert.match(source, /promotionBadgeForProduct\(product,\s*promotionRules\)/)
-  assert.match(source, /pagedProductCards\.map[\s\S]*<ProductDiscountBadge/)
+  assert.match(card, /promotionBadgeForProduct\(product,\s*promotionRules\)/)
+  assert.match(card, /<ProductDiscountBadge/)
+  assert.match(source, /pagedProductCards\.map[\s\S]*<ProductCard/)
   // Component uses the "effective" naming convention for whichever variant
   // the branch+barcode pickers currently resolve to (effectiveVariant,
   // effectiveVariantStock, effectiveVariantInStock, effectiveVariantPromotion)

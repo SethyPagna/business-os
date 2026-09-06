@@ -25,6 +25,10 @@ import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '
 import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+// N21: sales.customer_address holds the DISPLAY address; the replacement sale
+// below copies the SOURCE sale's snapshot, which for a row written before that
+// fix is still the Contact Options JSON.
+import { contactDisplayAddress } from '../lib/contactOptions'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -1274,7 +1278,7 @@ app.post('/', async (c) => {
         customer_id: body.customer_id || saleMeta.customer_id || null,
         customer_name: body.customer_name || saleMeta.customer_name || null,
         customer_phone: saleMeta.customer_phone || null,
-        customer_address: saleMeta.customer_address || null,
+        customer_address: contactDisplayAddress(saleMeta.customer_address) || null,
         payment_method: replacementPaymentMethod,
         payment_details: JSON.stringify(customerTenderUsd > 0
           ? [{ method: replacementPaymentMethod, amount_usd: customerTenderUsd, amount_khr: 0 }]

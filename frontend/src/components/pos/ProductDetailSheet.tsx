@@ -14,7 +14,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
-import { deriveProductSheetState, type SheetIntent } from './productSheetState.ts'
+import { branchStockQuantity, deriveProductSheetState, type SheetIntent } from './productSheetState.ts'
 import ProductImage from './ProductImage'
 
 type ProductGroupMeta = {
@@ -380,10 +380,7 @@ export default function ProductDetailSheet({
   // cross-branch number), so the pills and the Stock row cannot disagree.
   const getVariantStockForBranch = (variant: ProductRecord | null, branchId: string | null): number => {
     if (!variant) return 0
-    if (branchOptions.length && branchId != null) {
-      return Number((Array.isArray(variant.branch_stock) ? variant.branch_stock : [])
-        .find((entry) => String(entry?.branch_id) === branchId)?.quantity || 0)
-    }
+    if (branchOptions.length && branchId != null) return branchStockQuantity(variant, branchId) ?? 0
     return getDisplayStock(variant)
   }
 
@@ -578,6 +575,9 @@ export default function ProductDetailSheet({
       batchId: selectedBatch.id,
       batchLabel: formatBatchLabel(selectedBatch, batchWord),
       batchExpiryDate: selectedBatch.expiry_date ?? null,
+      // Carried for the hosts that SHOW which intake was picked. The POS
+      // ignores it (its cart line keeps label + expiry), so this is additive.
+      batchReceivedAt: selectedBatch.received_at ?? null,
       quantity: Number(selectedBatch.quantity || 0),
     }
   }
