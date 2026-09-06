@@ -225,10 +225,10 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
   }
 
   // Back from mapping/review always restarts at upload -- the mode itself
-  // (this whole component) is locked in from ImportModeWizard, and per the
-  // user's own instruction a change of heart on the FILE means starting
-  // over, not editing the mapping of a file that's already been resolved
-  // against the database.
+  // (this whole component) is locked in once BulkImportModal's dated-count
+  // banner opens it, and per the user's own instruction a change of heart
+  // on the FILE means starting over, not editing the mapping of a file
+  // that's already been resolved against the database.
   function restartUpload(): void {
     setFileName('')
     setCsvText('')

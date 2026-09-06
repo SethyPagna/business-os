@@ -184,6 +184,10 @@ await runTest('DatedStockReconciliationModal documents its real launcher and Bac
   const header = dsrm.slice(0, dsrm.indexOf('\nimport'))
   assert.doesNotMatch(header, /Launched from ImportModeWizard/, 'that launch path does not exist')
   assert.match(header, /BulkImportModal/, 'the header must name its real launcher')
+  // The same residue survived outside the header, in restartUpload's own
+  // comment ("...is locked in from ImportModeWizard") -- the fake launch
+  // path must not appear anywhere in the file, not just its top comment.
+  assert.doesNotMatch(dsrm, /locked in from ImportModeWizard/, 'that launch path does not exist anywhere in the file')
 })
 
 if (failed > 0) {
