@@ -21,11 +21,15 @@ const at = (needle: string) => {
 }
 const controls = at('className="reports-mobile-controls"')
 const body = at('{body}')
-const shift = at('<CurrentShiftSummary showHistory={false} />')
+// Matched by PREFIX, not by the whole self-closing tag: the block is now
+// wrapped in a `.report-segment` and passes `summaryClassName` to strip the
+// private card ShiftSummary draws for itself. What this file pins is ORDER
+// and a SINGLE mount, neither of which the prop list can change.
+const shift = at('<CurrentShiftSummary showHistory={false}')
 const history = at('<ShiftHistoryPanel compact limit={50} />')
 assert.ok(controls < body, 'controls come before the report')
 assert.ok(body < shift && shift < history, 'the shift summary and shift history sit below the report')
-assert.equal((hub.match(/<CurrentShiftSummary showHistory=\{false\} \/>/g) || []).length, 1, 'one shift summary mount')
+assert.equal((hub.match(/<CurrentShiftSummary\b/g) || []).length, 1, 'one shift summary mount')
 
 // Compact tier: Show folds the card; the folded line is a handle that
 // unfolds it, names the view and the range, and keeps the Filters button
