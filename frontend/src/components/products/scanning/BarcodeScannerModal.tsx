@@ -146,6 +146,11 @@ export default function BarcodeScannerModal({
   const [manualValue, setManualValue] = useState('')
   const [status, setStatus] = useState<ScannerStatus>('idle')
   const statusRef = useRef<ScannerStatus>('idle')
+  // A decoder can report the same barcode more than once, and a native
+  // detector promise may resolve after the modal has already been closed.
+  // Keep completion as a single guarded transition so every successful path
+  // delivers one value and one close intent.
+  const completionRef = useRef(false)
   const [error, setError] = useState('')
   const [permissionState, setPermissionState] = useState<ScannerPermissionState>('unknown')
   const [photoBusy, setPhotoBusy] = useState(false)
@@ -221,28 +226,47 @@ export default function BarcodeScannerModal({
     }
   }, [])
 
+  const completeDetection = useCallback((value: unknown, expectedStartToken?: number): void => {
+    const nextValue = String(value || '').trim()
+    if (!nextValue || completionRef.current) return
+    if (expectedStartToken !== undefined && startTokenRef.current !== expectedStartToken) return
+
+    completionRef.current = true
+    setManualValue(nextValue)
+    cleanup()
+    try {
+      onDetected(nextValue)
+    } finally {
+      // Modal callers do not all own their open state (ProductForm keeps the
+      // modal mounted), so successful detection must close it here as well as
+      // notifying the caller.
+      onClose()
+    }
+  }, [cleanup, onClose, onDetected])
+
   const scanFrame = useCallback(async (): Promise<void> => {
     const detector = detectorRef.current
     const video = videoRef.current
-    if (!detector || !video) return
+    const scanToken = startTokenRef.current
+    if (!detector || !video || !scanToken || completionRef.current) return
 
     try {
       const now = Date.now()
       if (video.readyState >= 2 && (now - lastScanAtRef.current) > 250) {
         lastScanAtRef.current = now
         const results = await detector.detect(video)
+        if (completionRef.current || startTokenRef.current !== scanToken) return
         const raw = String(results?.[0]?.rawValue || '').trim()
         if (raw) {
-          setManualValue(raw)
-          cleanup()
-          onDetected(raw)
+          completeDetection(raw, scanToken)
           return
         }
       }
     } catch (_) {}
 
+    if (completionRef.current || startTokenRef.current !== scanToken) return
     frameRef.current = requestAnimationFrame(scanFrame)
-  }, [cleanup, onDetected])
+  }, [completeDetection])
 
   const startCamera = useCallback(async ({ preserveManualValue = false }: { preserveManualValue?: boolean } = {}): Promise<void> => {
     const startToken = ++startSequenceRef.current
@@ -272,6 +296,18 @@ export default function BarcodeScannerModal({
 
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
+    const permissionWasDenied = nextPermissionState === 'denied'
+
+    // A browser-denied permission cannot be repaired by calling getUserMedia
+    // again. Leave the scanner blocked until the user changes the site
+    // setting; the permission watcher will update the UI, and the next tap
+    // can then make one fresh request.
+    if (permissionWasDenied) {
+      cleanup()
+      setStatus('blocked')
+      setError(labels.cameraPermissionBlocked)
+      return
+    }
 
     try {
       const video = await waitForVideoElement(startToken)
@@ -327,9 +363,7 @@ export default function BarcodeScannerModal({
         (result) => {
           const raw = String(result?.getText?.() || '').trim()
           if (!raw) return
-          setManualValue(raw)
-          cleanup()
-          onDetected(raw)
+          completeDetection(raw, startToken)
         },
       )
       if (startTokenRef.current !== startToken) {
@@ -344,7 +378,7 @@ export default function BarcodeScannerModal({
       const scanErrorText = getScanErrorText(scanError)
       const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
       const denied = /denied|permission|notallowed/i.test(scanErrorText)
-      const blocked = documentBlocked || (denied && nextPermissionState === 'denied')
+      const blocked = documentBlocked || (denied && permissionWasDenied)
       const dismissed = denied && !blocked
       cleanup()
       setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
@@ -366,6 +400,7 @@ export default function BarcodeScannerModal({
     labels.scanFailed,
     labels.scanPermissionDenied,
     labels.scanUnsupported,
+    completeDetection,
     scanFrame,
     tr,
     waitForVideoElement,
@@ -402,6 +437,7 @@ export default function BarcodeScannerModal({
   }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported])
 
   const closeScanner = useCallback((): void => {
+    completionRef.current = true
     cleanup()
     onClose()
   }, [cleanup, onClose])
@@ -422,8 +458,7 @@ export default function BarcodeScannerModal({
       const value = await scanBarcodeFromImageFile(file)
       const nextValue = String(value || '').trim()
       if (!nextValue) throw new Error(labels.scanPhotoFailed)
-      setManualValue(nextValue)
-      onDetected(nextValue)
+      completeDetection(nextValue)
     } catch (scanError) {
       setStatus('manual')
       setError(scanError instanceof Error ? scanError.message : labels.scanPhotoFailed)
@@ -431,12 +466,14 @@ export default function BarcodeScannerModal({
       if (event?.target) event.target.value = ''
       setPhotoBusy(false)
     }
-  }, [labels.scanPhotoFailed, onDetected])
+  }, [completeDetection, labels.scanPhotoFailed])
 
   useEffect(() => {
     if (!open) return undefined
+    completionRef.current = false
     prepareScanner()
     return () => {
+      completionRef.current = true
       cleanup()
       setStatus('idle')
       setError('')
@@ -543,7 +580,7 @@ export default function BarcodeScannerModal({
             }
 
   return (
-    <Modal title={title} onClose={closeScanner} size="lg">
+    <Modal title={title} onClose={closeScanner} size="lg" layer="nested">
       <div className="space-y-3">
         {/* Sized off the viewport instead of a fixed 4:3 ratio, and with a
             bigger guide box relative to the frame -- the old fixed ratio
@@ -650,8 +687,7 @@ export default function BarcodeScannerModal({
               onClick={() => {
                 const nextValue = String(manualValue || '').trim()
                 if (!nextValue) return
-                cleanup()
-                onDetected(nextValue)
+                completeDetection(nextValue)
               }}
             >
               {labels.useValue}
