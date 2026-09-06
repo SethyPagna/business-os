@@ -32,9 +32,25 @@ await (async function selectAllCheckboxUsesTheExistingSelectAllKey() {
 })()
 
 await (async function bothPacksCarryTheKeysThisFileNowDependsOn() {
-  for (const key of ['export_selected_logs', 'select_all']) {
+  for (const key of ['export_selected_logs', 'select_all', 'selected']) {
     assert.ok(typeof en[key] === 'string' && en[key], `en.json missing "${key}"`)
     assert.ok(typeof km[key] === 'string' && km[key], `km.json missing "${key}"`)
   }
-  console.log('PASS both language packs carry export_selected_logs and select_all')
+  console.log('PASS both language packs carry export_selected_logs, select_all and selected')
+})()
+
+// Round 2 (adversarial verifier): the same bulk-toolbar block hardcoded a
+// second English string one line above the button fixed above -- the
+// "{n} selected" chip. Reuse the existing "selected" key, matching the
+// convention Returns.tsx:1163 and Products.tsx:2376 already follow for
+// their own selection-count chips.
+await (async function bulkToolbarSelectionCountChipReusesTheExistingLocalizedCopy() {
+  assert.doesNotMatch(source, /\{selectedLogs\.length\} selected</,
+    'selection-count chip must not hardcode "selected" in English')
+  assert.match(
+    source,
+    /\{selectedLogs\.length\} \{copy\('selected', 'Selected', 'បានជ្រើស'\)\}/,
+    'selection-count chip must render via the existing copy(\'selected\', ...) call',
+  )
+  console.log('PASS selection-count chip reuses the existing localized copy')
 })()
