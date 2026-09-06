@@ -19,6 +19,11 @@ import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from
 import { useMergeStockChoice } from '../useMergeStockChoice.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
+import { resolveProductIdentityEdit } from '../../../utils/productDetailRule.ts'
+import {
+  identityCollisionFrom, identityEditMovesOnto, withKeepSeparateDecision, type IdentityMatch,
+} from '../helpers/identityLinkOver.ts'
+import { useIdentityLinkOver } from '../useIdentityLinkOver.tsx'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
@@ -33,18 +38,12 @@ import { getPermissionTierFromMap, parsePermissionMap } from '../../../utils/per
 import { actionAllowed, isActionOverriddenOff } from '../../../utils/permissionActions.ts'
 
 // The server's "same name + same barcode (leading zeros folded) is the same
-// product -- merge into it instead of creating a twin" 409, unpacked into the
-// row it is pointing at. classifyCreateMatches asks this same question on the
-// client, so this 409 should now only be reachable on a genuine race.
-// Returns null for any other failure, so an unrelated error can never be
-// mistaken for an invitation to merge two products together.
-function duplicateCollisionFrom(error: unknown): { id: number; name: string | null } | null {
-  const err = error as { code?: unknown; duplicate?: { id?: unknown; name?: unknown } } | null
-  if (String(err?.code || '') !== 'duplicate_product') return null
-  const id = Number(err?.duplicate?.id)
-  if (!Number.isInteger(id) || id <= 0) return null
-  return { id, name: err?.duplicate?.name == null ? null : String(err.duplicate.name) }
-}
+// product" 409, unpacked, now lives in helpers/identityLinkOver.ts
+// (identityCollisionFrom) -- shared with the in-place Resolve editor in
+// Products → Conflicts, the other surface that can write a product's name or
+// barcode. The local copy that used to sit here read only the FIRST colliding
+// row out of `duplicate` and knew nothing about which answers the door accepts,
+// so it could offer a merge and nothing else.
 
 const BarcodeScannerModal = lazyRetry(() => import('../scanning/BarcodeScannerModal'), 'product-form-barcode-scanner-modal')
 const PRODUCT_SUPPLIERS_TIMEOUT_MS = 8000
@@ -828,6 +827,10 @@ export default function ProductForm({
   // it goes through the SAME flow (and the same stock question) the Conflicts
   // review uses -- one answer to "the other row also has stock", everywhere.
   const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
+  // N34. The prompt itself -- "This matches <product>. Link this product's
+  // records over to it?" -- shared with the Conflicts in-place editor so both
+  // identity writers ask with the same words and the same three answers.
+  const { askIdentityLinkOver, identityLinkOverDialog } = useIdentityLinkOver(t)
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   const saveConfirmResolveRef = useRef<((ok: boolean) => void) | null>(null)
   const askSaveConfirm = () => new Promise<boolean>((resolve) => {
@@ -911,6 +914,73 @@ export default function ProductForm({
     const resolve = createVerdictResolveRef.current
     createVerdictResolveRef.current = null
     resolve?.(choice)
+  }
+
+  // N34. "Does this edit move the row onto another product's identity, and what
+  // does the operator want done about it?" -- asked BEFORE the write.
+  //
+  // 'none'          nothing moved, or nothing to move onto. The overwhelmingly
+  //                 common answer, and it costs one cheap kernel call: the
+  //                 search below only runs when the identity actually moved.
+  // 'linked'        the records were folded onto the matched product through
+  //                 the existing carry-all merge kernel. There is nothing left
+  //                 to save -- this row no longer exists as itself.
+  // 'keep_separate' write the edit anyway; the pair goes to Conflicts.
+  // 'back'          return to the form, everything intact.
+  //
+  // A failed candidate search returns 'none' on purpose: the client pre-check
+  // is an improvement on the operator's experience, never the enforcement. The
+  // Worker's guard is the enforcement, and its 409 is still handled below.
+  async function resolveIdentityMove(
+    current: { id: number; name?: unknown; barcode?: unknown },
+    next: { name?: unknown; barcode?: unknown },
+  ): Promise<'none' | 'linked' | 'keep_separate' | 'back'> {
+    // The kernel decides whether there is anything to ask about at all. False
+    // here means the row is staying exactly where it is, so no search runs.
+    const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, next)
+    if (!changesIdentity) return 'none'
+    let candidates: IdentityMatch[] = []
+    try {
+      const queries = [String(nextName || '').trim(), String(nextBarcode ?? '').trim()]
+        .filter((query) => query.length >= 2)
+      const rows: IdentityMatch[] = []
+      for (const query of queries) {
+        const payload = await searchProductsForMatch({ query, pageSize: 20 }) as { items?: IdentityMatch[] }
+        if (Array.isArray(payload?.items)) rows.push(...payload.items)
+      }
+      candidates = rows
+    } catch {
+      return 'none'
+    }
+    const matches = identityEditMovesOnto(current, next, candidates)
+    if (!matches.length) return 'none'
+    const choice = await askIdentityLinkOver({
+      subjectName: String(next.name ?? current.name ?? ''),
+      matches,
+      canLinkOver: true,
+      canKeepSeparate: true,
+    })
+    if (choice === 'back') return 'back'
+    if (choice === 'keep_separate') return 'keep_separate'
+    // Link over: fold THIS row onto the matched one, through the shared merge
+    // flow -- the same one the Conflicts review uses, so the "the other row
+    // still holds stock" question is asked here exactly as it is asked there.
+    try {
+      const outcome = await mergeWithChoice(
+        { id: matches[0].id, name: matches[0].name },
+        { id: current.id, name: String(current.name || '') },
+      )
+      if (outcome === 'merged') {
+        clearCurrentProductDraft()
+        onClose()
+        return 'linked'
+      }
+    } catch (mergeError) {
+      alert(getErrorMessage(mergeError, tr('failed', 'Failed', 'បរាជ័យ')))
+    }
+    // Cancelled or refused -- back to the form rather than silently writing an
+    // edit the operator asked to be a merge.
+    return 'back'
   }
 
   useEffect(() => {
@@ -1108,6 +1178,26 @@ export default function ProductForm({
         createMatchAckRef.current = ackKey
       }
     }
+    // N34, THE EDIT-SIDE PROMPT. Everything above is the CREATE-mode identity
+    // question -- the only one this form has ever asked. An EDIT that renames
+    // or re-barcodes a row onto another product's identity was discovered by
+    // the server's 409 AFTER Save had been pressed, and the only way forward
+    // was a merge. Ask it here instead, before anything is written, through the
+    // same kernel the Worker's guard uses (identityEditMovesOnto ->
+    // resolveProductIdentityEdit), so the pre-check and the guard cannot answer
+    // differently. It costs nothing on an ordinary save: changesIdentity is
+    // false whenever the name group and the folded barcode stay put, so a
+    // price, cost or image edit never reaches the search below.
+    let keepSeparate = false
+    if (isEditMode && product?.id) {
+      const decided = await resolveIdentityMove(
+        { id: Number(product.id), name: initialForm.name, barcode: initialForm.barcode },
+        { name: form.name, barcode: form.barcode },
+      )
+      if (decided === 'back') return
+      keepSeparate = decided === 'keep_separate'
+      if (decided === 'linked') return
+    }
     if (isCreateMode && branches.length > 0 && !form.branch_id) {
       alert(tr('branch_required_alert', 'Please choose a branch for this product.', 'សូមជ្រើសរើសសាខាសម្រាប់ផលិតផលនេះ។'))
       return
@@ -1197,37 +1287,64 @@ export default function ProductForm({
     const confirmedSave = await askSaveConfirm()
     if (!confirmedSave) { saveInFlightRef.current = false; return }
     setSaving(true)
+    // N34: the operator answered "these really are two different articles" in
+    // front of the named candidates, so the save carries that decision. Without
+    // it the Worker refuses -- correctly: a decision this consequential is
+    // never inferred from a default.
+    const outgoing = keepSeparate ? withKeepSeparateDecision(payload as unknown as Record<string, unknown>) : payload
     try {
       await clearAfterSuccessfulProductSave(
-        () => onSave(payload),
+        () => onSave(outgoing as unknown as typeof payload),
         () => {
           // Saved for real -- the autosaved draft is now history (Part 388).
           clearCurrentProductDraft()
         },
       )
     } catch (error) {
-      // "Merge into it instead of creating a twin" used to be a dead end: the
-      // server's 409 arrived as a bare alert and the operator was left to find
-      // the Conflicts review by hand. Offer the merge right here instead --
-      // through the SAME shared flow the Conflicts tab uses, so a row that
-      // still holds stock is asked the same merge-or-write-off question rather
-      // than having it answered for it. Only on an EDIT: in create mode there
-      // is no saved row yet to fold into the twin.
-      const collision = duplicateCollisionFrom(error)
+      // The pre-check above asks this question before anything is written, so
+      // reaching here means the client's candidate list did not contain the row
+      // the server found -- a race, a row outside the search page, or an
+      // offline queue replayed later. The refusal is still not a dead end: it
+      // now names EVERY colliding row and the answers this door accepts, so the
+      // same three-way prompt is offered rather than a bare alert.
+      const collision = identityCollisionFrom(error)
       if (collision && product?.id) {
-        try {
-          const outcome = await mergeWithChoice({ id: collision.id, name: collision.name }, { id: Number(product.id), name: String(form.name || '') })
-          if (outcome === 'merged') {
-            clearCurrentProductDraft()
-            onClose()
+        const choice = await askIdentityLinkOver({
+          subjectName: String(form.name || ''),
+          matches: collision.matches,
+          canLinkOver: collision.canLinkOver,
+          canKeepSeparate: collision.canKeepSeparate,
+        })
+        if (choice === 'link_over' && collision.canLinkOver) {
+          try {
+            const outcome = await mergeWithChoice(
+              { id: collision.matches[0].id, name: collision.matches[0].name },
+              { id: Number(product.id), name: String(form.name || '') },
+            )
+            if (outcome === 'merged') {
+              clearCurrentProductDraft()
+              onClose()
+              return
+            }
+          } catch (mergeError) {
+            alert(getErrorMessage(mergeError, tr('failed', 'Failed', 'បរាជ័យ')))
             return
           }
-        } catch (mergeError) {
-          alert(getErrorMessage(mergeError, tr('failed', 'Failed', 'បរាជ័យ')))
-          return
+        } else if (choice === 'keep_separate' && collision.canKeepSeparate) {
+          try {
+            await clearAfterSuccessfulProductSave(
+              () => onSave(withKeepSeparateDecision(payload as unknown as Record<string, unknown>) as unknown as typeof payload),
+              () => { clearCurrentProductDraft() },
+            )
+            return
+          } catch (keepError) {
+            alert(getErrorMessage(keepError, tr('failed', 'Failed', 'បរាជ័យ')))
+            return
+          }
         }
-        // Cancelled the merge -- fall through to the message so the operator
-        // knows the save did not go through and can edit the name instead.
+        // Back, or an answer this door cannot honour -- fall through to the
+        // message so the operator knows the save did not go through. The form
+        // stays open with every typed value intact.
       }
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
@@ -1274,7 +1391,7 @@ export default function ProductForm({
     onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
   } : undefined
   const childSurfaceOpen = Boolean(
-    filePickerOpen || scannerField || renameRequest || mergeStockChoiceDialog || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
+    filePickerOpen || scannerField || renameRequest || mergeStockChoiceDialog || identityLinkOverDialog || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
   )
   useEffect(() => {
     const dialog = productFormContentRef.current?.closest('[role="dialog"]')
@@ -1976,6 +2093,7 @@ export default function ProductForm({
       {/* Saving into an existing twin offers the merge here; a twin that still
           holds stock is asked merge-or-write-off before anything is written. */}
       {mergeStockChoiceDialog}
+      {identityLinkOverDialog}
       {saveConfirmOpen ? (
         <ConfirmDialog
           t={t}

@@ -11,6 +11,8 @@ import { getPossiblySameProducts, dismissProductDuplicateCluster, updateProduct 
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
 import { identityBarcodeKey, normalizeLeadingZeroBarcodeForCleanup, resolveMergedCostDetail } from '../../utils/productDetailRule.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
+import { useIdentityLinkOver } from './useIdentityLinkOver.tsx'
+import { identityCollisionFrom, identityEditMovesOnto, withKeepSeparateDecision } from './helpers/identityLinkOver.ts'
 import Modal from '../shared/Modal'
 
 // Products → Duplicates: the human-review residue the identity rule can't
@@ -405,6 +407,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
   // The one shared "keep this, what happens to the other's stock?" flow, used
   // by every surface that resolves a twin (see useMergeStockChoice).
   const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
+  // N34: the in-place Resolve editor below writes name and barcode, so it is an
+  // identity writer exactly as the product form is, and asks the same question
+  // with the same three answers through the same shared prompt.
+  const { askIdentityLinkOver, identityLinkOverDialog } = useIdentityLinkOver(t)
 
   // Apply the group's explicit decisions (ONE keeper + the rows marked
   // Remove); one pair per call, stopping on the first failure so nothing
@@ -462,18 +468,101 @@ export default function ProductDuplicatesTab({ t, notify }: {
   }
   const saveEdit = async () => {
     if (!editTarget || editSaving) return
+    const body = {
+      name: editForm.name.trim(),
+      barcode: editForm.barcode.trim(),
+      cost_price_usd: Number(editForm.cost) || 0,
+      selling_price_usd: Number(editForm.price) || 0,
+    }
+    // N34. This editor writes name and barcode, so a save here can move the row
+    // onto another product's identity exactly as the product form's can -- and
+    // on THIS surface it is the likeliest thing to happen, because the rows on
+    // screen are the ones the sweep already thinks might be the same product.
+    // Re-spelling one twin's barcode to match the other is the single most
+    // natural action here, and it used to end in a bare error toast.
+    //
+    // Candidates come from the clusters already loaded -- the sweep has done
+    // the grouping, so no extra request is needed. A row outside every cluster
+    // is still caught by the Worker's 409, handled below.
+    const candidates = clusters
+      .flatMap((cluster) => cluster.products)
+      .filter((product) => product.id !== editTarget.id)
+    const matches = identityEditMovesOnto(editTarget, body, candidates)
+    let keepSeparate = false
+    if (matches.length) {
+      const choice = await askIdentityLinkOver({
+        subjectName: body.name || String(editTarget.name || ''),
+        matches,
+        canLinkOver: true,
+        canKeepSeparate: true,
+      })
+      if (choice === 'back') return
+      if (choice === 'link_over') {
+        setEditSaving(true)
+        try {
+          const outcome = await mergeWithChoice(
+            { id: matches[0].id, name: matches[0].name },
+            { id: editTarget.id, name: String(editTarget.name || '') },
+          )
+          if (outcome === 'merged') {
+            notify(t('product_duplicate_merged') || 'Merged -- stock, lots and images were carried onto the kept product')
+            setEditTarget(null)
+            void load()
+          }
+        } catch (e: unknown) {
+          notify(e instanceof Error ? e.message : (t('update_failed') || 'Could not save changes'), 'error')
+        } finally {
+          setEditSaving(false)
+        }
+        return
+      }
+      keepSeparate = true
+    }
     setEditSaving(true)
     try {
-      await updateProduct(editTarget.id, {
-        name: editForm.name.trim(),
-        barcode: editForm.barcode.trim(),
-        cost_price_usd: Number(editForm.cost) || 0,
-        selling_price_usd: Number(editForm.price) || 0,
-      })
+      await updateProduct(editTarget.id, keepSeparate ? withKeepSeparateDecision(body) : body)
       notify(t('product_updated') || 'Product updated')
       setEditTarget(null)
       void load()
     } catch (e: unknown) {
+      // The pre-check only sees the loaded clusters, so a collision with a row
+      // outside them still arrives as the Worker's refusal. It names every
+      // colliding row and the answers this door accepts, so offer the same
+      // prompt rather than the bare message this used to end at.
+      const collision = identityCollisionFrom(e)
+      if (collision) {
+        const choice = await askIdentityLinkOver({
+          subjectName: body.name || String(editTarget.name || ''),
+          matches: collision.matches,
+          canLinkOver: collision.canLinkOver,
+          canKeepSeparate: collision.canKeepSeparate,
+        })
+        try {
+          if (choice === 'link_over' && collision.canLinkOver) {
+            const outcome = await mergeWithChoice(
+              { id: collision.matches[0].id, name: collision.matches[0].name },
+              { id: editTarget.id, name: String(editTarget.name || '') },
+            )
+            if (outcome === 'merged') {
+              notify(t('product_duplicate_merged') || 'Merged -- stock, lots and images were carried onto the kept product')
+              setEditTarget(null)
+              void load()
+            }
+            return
+          }
+          if (choice === 'keep_separate' && collision.canKeepSeparate) {
+            await updateProduct(editTarget.id, withKeepSeparateDecision(body))
+            notify(t('product_updated') || 'Product updated')
+            setEditTarget(null)
+            void load()
+            return
+          }
+        } catch (retryError: unknown) {
+          notify(retryError instanceof Error ? retryError.message : (t('update_failed') || 'Could not save changes'), 'error')
+          return
+        }
+      }
+      // The float stays open with every typed value intact.
       notify(e instanceof Error ? e.message : (t('update_failed') || 'Could not save changes'), 'error')
     } finally {
       setEditSaving(false)
@@ -745,6 +834,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
           review grid; the Apply and bulk flows AWAIT it (the shared
           ConfirmDialog, never window.confirm). */}
       {mergeStockChoiceDialog}
+      {identityLinkOverDialog}
     </div>
   )
 }

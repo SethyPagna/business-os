@@ -1,4 +1,11 @@
 {
+  "identity_keep_separate_action": "Keep them separate",
+  "identity_keep_separate_only_note": "There is no saved row yet to link over. Open the existing product instead, or keep them separate — the pair is then listed in Conflicts, where you can still merge them either way.",
+  "identity_link_over_action": "Link records over",
+  "identity_link_over_message": "This matches \"{name}\". Link this product’s records over to it?",
+  "identity_link_over_message_many": "This matches {count} existing products. Link this product’s records over to the first?",
+  "identity_link_over_note": "Linking over moves every record — sales, returns, stock movements, batches, branch stock and discount scopes — onto the matched product. Keeping them separate writes your change and lists the pair in Conflicts, where you can still merge them either way.",
+  "identity_link_over_title": "This matches another product",
   "sale_bulk_limit": "Select at most 25 sales for one status change.",
   "sale_bulk_pending": "A previous request has an unknown outcome. Retry the original request or discard it before starting another.",
   "sale_bulk_retry": "Retry original request",

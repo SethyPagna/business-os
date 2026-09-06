@@ -306,6 +306,17 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // can offer to SELECT the existing contact instead of dead-ending on the
   // 409 -- see routes/contacts.ts's duplicateErrorResponse.
   error.duplicate = parsed?.duplicate || null
+  // N34. `duplicate` is the FIRST colliding row and nothing else, which is all
+  // the product identity guard used to send. It now sends every row the save
+  // collides with (`matches`) and the answers this door actually accepts
+  // (`resolutions`: link_over / keep_separate / open_existing) -- and a
+  // transport that copies a fixed allowlist onto the Error drops any field not
+  // named here, silently. Dropped, the link-over prompt could name only one of
+  // three colliding rows and could never learn that "keep them separate" is on
+  // offer, so the operator would meet the plain refusal forever. Carried, so
+  // what reaches the caller is what the server actually said.
+  error.matches = parsed?.matches || null
+  error.resolutions = parsed?.resolutions || null
   // Carry the per-branch/per-lot breakdown a 400 stock_choice_required returns,
   // so the caller can open the merge/remove dialog with the real numbers
   // instead of a bare error toast -- see routes/products.ts's merge guard.
