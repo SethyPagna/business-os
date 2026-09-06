@@ -67,7 +67,7 @@ import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire } from '../../utils/stockReceiptFields.ts'
+import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import type { QueryParams } from '../../api/query.ts'
 import {
@@ -173,6 +173,8 @@ type AdjustForm = {
   // what this stock-in cost per unit and how it was paid. Offered for an 'add'
   // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
   unit_cost_usd: InventoryFormValue
+  // N14-D: the explicit free-goods declaration, mirrored from the shared form.
+  free_goods: boolean
   payment_status: string
   credit_due_date: string
 }
@@ -462,7 +464,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
     cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
     supplier_id: '', supplier_name: '',
-    unit_cost_usd: '', payment_status: 'paid', credit_due_date: '',
+    unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
   })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
@@ -1137,6 +1139,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
       return
     }
+    // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts),
+    // run here so the operator is told at the form rather than by a 400.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn,
+      supplierName: adjustForm.supplier_name,
+      unitCostUsd: adjustForm.unit_cost_usd,
+      freeGoods: adjustForm.free_goods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
+      return
+    }
     const adjustmentRequest = {
       productId: selectedAdjustProduct.id,
       productName: selectedAdjustProduct.name,
@@ -1232,11 +1246,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
           undo: async () => {
+            // N14-D: an undo puts the branch back to the figure it held before.
+            // It is not a new receipt -- the inverse of a remove is an add with
+            // no supplier and no cost of its own, and the inverse of a set can
+            // raise stock too -- so it declares itself a correction rather than
+            // being handed invented receipt facts.
+            const undoBase = { ...adjustmentRequest, attribution: 'correction' as const }
             const inverseRequest = adjustmentRequest.type === 'set'
-              ? { ...adjustmentRequest, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+              ? { ...undoBase, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
               : adjustmentRequest.type === 'remove'
-                ? { ...adjustmentRequest, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-                : { ...adjustmentRequest, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                ? { ...undoBase, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                : { ...undoBase, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
             const undoResult = await runInventoryMutation(() => getInventoryApi().adjustStock(inverseRequest), 'Undo inventory adjustment')
             if (undoResult?.success === false) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
             await load(true)
@@ -1312,7 +1332,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // for the same reason: a cost or a credit due date from the previous
       // receipt must never ride along into this one.
       supplier_id: '', supplier_name: '',
-      unit_cost_usd: '', payment_status: 'paid', credit_due_date: '',
+      unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
     })
   }
 

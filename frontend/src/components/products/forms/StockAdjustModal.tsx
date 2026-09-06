@@ -14,7 +14,7 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
-import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire } from '../../../utils/stockReceiptFields.ts'
+import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import {
   applyRowOutcome,
   browserStockStorage,
@@ -71,6 +71,8 @@ type AdjustForm = {
   // what this stock-in cost per unit and how it was paid. Offered for an 'add'
   // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
   unit_cost_usd: InventoryFormValue
+  // N14-D: the explicit free-goods declaration, mirrored from the shared form.
+  free_goods: boolean
   payment_status: string
   credit_due_date: string
 }
@@ -321,6 +323,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     supplier_id: '',
     supplier_name: '',
     unit_cost_usd: '',
+    free_goods: false,
     payment_status: 'paid',
     credit_due_date: '',
   }))
@@ -383,6 +386,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       supplier_id: '',
       supplier_name: '',
       unit_cost_usd: '',
+    free_goods: false,
       payment_status: 'paid',
       credit_due_date: '',
     })
@@ -466,6 +470,18 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
+      return
+    }
+    // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts).
+    // The sibling surface on this same shared form runs it identically.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn,
+      supplierName: adjustForm.supplier_name,
+      unitCostUsd: adjustForm.unit_cost_usd,
+      freeGoods: adjustForm.free_goods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
       return
     }
     const adjustmentRequest = {

@@ -27,6 +27,8 @@
 export type StockReceiptDraft = {
   /** Per-unit cost for THIS receipt. '' when the operator left it blank. */
   unit_cost_usd: string | number
+  /** The operator's explicit "these goods were free" declaration (N14-D). */
+  free_goods?: boolean
   payment_status: string
   credit_due_date: string
 }
@@ -36,6 +38,7 @@ export type StockReceiptWire = {
   paymentStatus?: 'paid' | 'credit'
   creditDueDate?: string
   sessionId?: number
+  freeGoods?: true
 }
 
 /**
@@ -90,5 +93,80 @@ export function stockReceiptWire(
     }
   }
   if (Number.isSafeInteger(Number(sessionId)) && Number(sessionId) > 0) wire.sessionId = Number(sessionId)
+  // Only ever sent as `true`: the flag is a claim the operator made, and an
+  // explicit `false` on the wire would read as a claim they did not make.
+  if (draft.free_goods) wire.freeGoods = true
   return wire
+}
+
+// ---------------------------------------------------------------------------
+// N14-D: what a stock-IN must say about itself before it may be submitted.
+//
+// The browser-side mirror of cloudflare/src/lib/stockReceiptGate.ts. The rule
+// is enforced on the server -- this copy exists so the operator is told at the
+// field rather than by a 400 after the round trip. The two implementations are
+// held together by the shared case table in
+// cloudflare/scripts/fixtures/stock-receipt-gate-cases.json: tests/
+// stockReceiptFields.test.ts runs every case through this one and
+// cloudflare/scripts/test-stock-receipt-gate-pure.cjs runs the same cases
+// through the other, and both assert the same codes. Change one side alone and
+// both suites go red.
+//
+// Codes, not sentences: the sentence differs per language here and is English
+// on the server, but the verdict must not.
+// ---------------------------------------------------------------------------
+
+export type StockReceiptGateCode =
+  | 'supplier_required'
+  | 'cost_required'
+  | 'cost_negative'
+  | 'free_goods_required'
+
+export const STOCK_RECEIPT_GATE_CODES: readonly StockReceiptGateCode[] = [
+  'supplier_required',
+  'cost_required',
+  'cost_negative',
+  'free_goods_required',
+]
+
+/** The pack key each refusal is shown with. Both packs carry all four. */
+export const STOCK_RECEIPT_GATE_KEYS: Record<StockReceiptGateCode, string> = {
+  supplier_required: 'stock_receipt_supplier_required',
+  cost_required: 'stock_receipt_cost_required',
+  cost_negative: 'stock_receipt_cost_negative',
+  free_goods_required: 'stock_receipt_free_goods_required',
+}
+
+export type StockReceiptGateInput = {
+  isStockIn: boolean
+  supplierName?: string | null
+  /** The supplier the target lot already carries (first attribution sticks). */
+  lotSupplierName?: string | null
+  /** "Not visible here -- let the server decide": defers only the supplier half. */
+  lotAttributionDeferred?: boolean
+  unitCostUsd?: number | string | null
+  freeGoods?: boolean | null
+  attribution?: string | null
+}
+
+/** '' when the receipt may be submitted, otherwise the reason it may not. */
+export function stockReceiptGateCode(input: StockReceiptGateInput): '' | StockReceiptGateCode {
+  if (!input.isStockIn) return ''
+  if (input.attribution === 'correction') return ''
+  if (!String(input.supplierName ?? '').trim() && !String(input.lotSupplierName ?? '').trim() && !input.lotAttributionDeferred) return 'supplier_required'
+  const typed = typeof input.unitCostUsd === 'string' ? input.unitCostUsd.trim() : input.unitCostUsd
+  if (typed === '' || typed == null) return 'cost_required'
+  const cost = Number(typed)
+  if (!Number.isFinite(cost)) return 'cost_required'
+  if (cost < 0) return 'cost_negative'
+  if (cost === 0 && !input.freeGoods) return 'free_goods_required'
+  return ''
+}
+
+/** English fallbacks for tr(), so a missing pack entry still says something real. */
+export const STOCK_RECEIPT_GATE_FALLBACKS: Record<StockReceiptGateCode, string> = {
+  supplier_required: 'Choose the supplier these goods came from.',
+  cost_required: 'Enter the unit cost you paid. A blank cost is not recorded as zero.',
+  cost_negative: 'Unit cost cannot be negative.',
+  free_goods_required: 'A $0.00 unit cost needs the Free goods box ticked.',
 }

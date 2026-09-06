@@ -20,6 +20,8 @@ import { buildProductGroups, type ProductGroup, type ProductRecord } from '../..
 import { getPermissionTierFromMap, parsePermissionMap } from '../../utils/permissions.ts'
 import { isActionOverriddenOff } from '../../utils/permissionActions.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import InfoHint from '../shared/InfoHint.tsx'
 import {
   canStartCreateProductsSession,
   createProductsSessionDefaults,
@@ -74,6 +76,10 @@ type SessionLine = {
   batchLabel: string
   quantity: number
   unitCostUsd: number
+  // Frozen at queue time, per line: the session-level declaration can be
+  // toggled again for later lines, and each queued line must keep the answer
+  // that was true when it was added.
+  freeGoods: boolean
   status: 'queued' | 'saved'
   detail: string
 }
@@ -84,6 +90,7 @@ type UnifiedSessionDraft = Omit<CreateProductsSessionDraft, 'rows'> & {
   mode?: AddProductsMode
   query?: string
   clientRequestId?: string
+  freeGoods?: boolean
   submittedItems?: InventoryStockSessionLine[] | null
   submissionErrorCode?: string
 }
@@ -208,6 +215,9 @@ function legacyLines(rows: CreateProductsSessionRow[] = []): SessionLine[] {
     batchLabel: row.lotCode,
     quantity: row.quantity,
     unitCostUsd: row.unitCostUsd,
+    // A pre-N14-D draft never declared it, and a resumed draft must not
+    // acquire a declaration nobody made.
+    freeGoods: false,
     status: 'saved',
     detail: row.detail,
   }))
@@ -257,6 +267,10 @@ export default function CreateProductsSessionModal({
     ? { ...draft.header, branchId: draft.header.branchId || resolvedDefaultBranchId }
     : emptyCreateProductsHeader(resolvedDefaultBranchId))
   const [receivedDate, setReceivedDate] = useState(draft?.receivedDate || todayStr())
+  // Free goods is a fact about the DELIVERY, so it lives with the other
+  // once-entered shared details rather than being asked per line. Each queued
+  // line still freezes its own copy.
+  const [freeGoods, setFreeGoods] = useState(draft?.freeGoods === true)
   const [rows, setRows] = useState<SessionLine[]>(() => draft?.lines || legacyLines(draft?.rows))
   const [submittedItems, setSubmittedItems] = useState<InventoryStockSessionLine[] | null>(() => draft?.submittedItems || null)
   const [submissionErrorCode, setSubmissionErrorCode] = useState(draft?.submissionErrorCode || '')
@@ -324,8 +338,8 @@ export default function CreateProductsSessionModal({
 
   useEffect(() => scheduleWorkDraftWrite<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
-    step, receivedDate, mode, query, submittedItems, submissionErrorCode,
-  }), [draftKey, header, rows, step, receivedDate, mode, query, submittedItems, submissionErrorCode])
+    step, receivedDate, freeGoods, mode, query, submittedItems, submissionErrorCode,
+  }), [draftKey, header, rows, step, receivedDate, freeGoods, mode, query, submittedItems, submissionErrorCode])
 
   useEffect(() => {
     if (!resolvedDefaultBranchId) return
@@ -441,6 +455,18 @@ export default function CreateProductsSessionModal({
     }
     const chosenBatch = typeof batchChoice === 'number' ? batchOptions.find((batch) => Number(batch.id) === batchChoice) || null : null
     const lotAttributedName = chosenBatch?.supplier_name?.trim() || ''
+    // N14-D, same kernel the session writer runs. An attributed lot answers
+    // the supplier half; nothing answers the cost half but the operator.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn: quantity > 0,
+      supplierName: lineSupplier.supplierName,
+      lotSupplierName: lotAttributedName,
+      unitCostUsd: unitCostText,
+      freeGoods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error'); return
+    }
     const row: SessionLine = {
       lineId: replaceLineId || `receive_${productId}_${Date.now()}_${rows.length}`, kind: 'receive', productId, product: null,
       name: String(selectedProduct.name || `#${productId}`), barcode: String(selectedProduct.barcode || ''), brand: String(selectedProduct.brand || ''),
@@ -451,7 +477,7 @@ export default function CreateProductsSessionModal({
       branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: lineReceivedDate || receivedDate,
       expiryDate: lineExpiryDate, batchId: chosenBatch ? Number(chosenBatch.id) : null,
       batchLabel: chosenBatch ? batchDisplayLabel(chosenBatch, tr('batch', 'Batch')) : tr('new_batch', '+ New batch'),
-      quantity, unitCostUsd,
+      quantity, unitCostUsd, freeGoods,
       status: 'queued', detail: tr('ready_to_receive', 'Ready'),
     }
     setRows((prev) => replaceLineId ? prev.map((entry) => entry.lineId === replaceLineId ? row : entry) : [row, ...prev])
@@ -504,10 +530,20 @@ export default function CreateProductsSessionModal({
     const branchId = Number(payload.branch_id ?? header.branchId)
     const name = String(payload.name || '').trim()
     const barcode = String(payload.barcode || '').trim()
-    const costValue = payload.cost_price_usd == null || payload.cost_price_usd === '' ? 0 : Number(payload.cost_price_usd)
-    if (!Number.isFinite(costValue) || costValue < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
+    // N14-D: a blank cost is NOT zero. It used to become 0 here, which records
+    // the goods as free -- a claim nobody made -- and the session writer then
+    // filled its own blank from the product's cost_price_usd. Both guesses are
+    // gone; a receipt states its cost or it is refused, here and on the wire.
+    const costText = payload.cost_price_usd == null ? '' : String(payload.cost_price_usd).trim()
+    const costValue = Number(costText)
+    if (costText === '' || !Number.isFinite(costValue) || costValue < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
     const cost = costValue
     if (!name || !branchId) throw new Error(tr('create_products_branch_required', 'Choose the branch this delivery goes to.'))
+    // The same supplier the session writer now requires on every line that
+    // moves stock. A zero-quantity create is catalogue work and carries none.
+    const receiptSupplier = String(payload.supplier ?? header.supplierName ?? '').trim()
+    const receiptGate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName: receiptSupplier, unitCostUsd: costText, freeGoods })
+    if (receiptGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]))
     const queuedTwin = rows.find((row) => row.kind === 'create_receive' && row.name.trim().toLowerCase() === name.toLowerCase()
       && row.barcode.trim() === barcode && Math.round(row.unitCostUsd * 10000) === Math.round((Number.isFinite(cost) ? cost : 0) * 10000))
     if (queuedTwin) throw new Error(tr('create_match_twin_title', 'Product already exists'))
@@ -523,7 +559,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: null,
           supplierName: String(payload.supplier ?? header.supplierName ?? '').trim(), branchId: String(branchId), branchName: branchNameFor(String(branchId)),
           receivedDate: String(payload.received_date || receivedDate), expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: '', quantity: 0,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, status: 'saved', detail: tr('product_created', 'Product created'),
+          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, status: 'saved', detail: tr('product_created', 'Product created'),
         }
         setRows((prev) => [row, ...prev]); onDone()
       } else {
@@ -539,7 +575,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: sameSupplier ? header.supplierId : null,
           supplierName, branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: String(payload.received_date || receivedDate),
           expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: quantity > 0 ? tr('new_batch', '+ New batch') : '', quantity,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, status: 'queued', detail: tr('ready_to_receive', 'Ready'),
+          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, status: 'queued', detail: tr('ready_to_receive', 'Ready'),
         }
         setRows((prev) => [row, ...prev])
       }
@@ -625,8 +661,9 @@ export default function CreateProductsSessionModal({
       supplier_name: line.supplierLocked ? null : (line.supplierName || null),
       received_date: line.receivedDate,
       expiry_date: line.expiryDate || null,
-      notes: tr('create_products_session_title', 'Create products session'),
+      notes: tr('create_products_session_title', 'Add/Create Products Session'),
       unit_cost_usd: Number(line.unitCostUsd),
+      free_goods: line.freeGoods === true,
       payment_status: null,
       credit_due_date: null,
     }
@@ -739,18 +776,27 @@ export default function CreateProductsSessionModal({
 
   return (
     <>
-      <Modal title={step === 'header' ? tr('create_products_session_title', 'Create products session') : `${tr('create_products_session_title', 'Create products session')} · ${summary.items}`} onClose={requestClose} size="lg" unsavedChanges={{ dirty: closeIsGuarded }}>
+      <Modal title={step === 'header' ? tr('create_products_session_title', 'Add/Create Products Session') : `${tr('create_products_session_title', 'Add/Create Products Session')} · ${summary.items}`} onClose={requestClose} size="lg" unsavedChanges={{ dirty: closeIsGuarded }}>
         <div ref={parentContentRef} className="space-y-4">
             <div className={`rounded-xl border p-3 ${step === 'header' ? 'border-blue-200 bg-blue-50/40 dark:border-blue-800 dark:bg-blue-900/10' : 'border-gray-200 dark:border-gray-700'}`}>
-              <div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{tr('create_products_header_step', 'Shared details (entered once)')}</span>{step === 'items' ? <button type="button" disabled={submissionLocked} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50" onClick={() => setStep('header')}>{tr('create_products_edit_header', 'Edit shared details')}</button> : null}</div>
+              {/* N1: the explanation used to be a paragraph under this title,
+                  costing three lines of the fold before the first field. It is
+                  the same sentence, moved behind the info affordance beside the
+                  title, so the section opens on its inputs. */}
+              <div className="mb-2 flex items-center justify-between gap-2"><span className="flex min-w-0 items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"><span className="truncate">{tr('create_products_header_step', 'Shared details (entered once)')}</span><InfoHint label={tr('create_products_header_step', 'Shared details (entered once)')} text={tr('create_products_header_hint', 'Brand, supplier and branch apply to every product you add in this session — type them once.')} /></span>{step === 'items' ? <button type="button" disabled={submissionLocked} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50" onClick={() => setStep('header')}>{tr('create_products_edit_header', 'Edit shared details')}</button> : null}</div>
             {step === 'header' ? (
               <>
-                <p className="mb-3 text-xs text-gray-500">{tr('create_products_header_hint', 'Brand, supplier and branch apply to every product you add in this session — type them once.')}</p>
+                {/* Brand+Supplier on row one, Branch+Received date on row two.
+                    The modal is max-w-3xl (768px), so from the 640px breakpoint
+                    up its content box is always wide enough for two columns --
+                    these four fields never fall into four separate rows above
+                    that width. Below it they stack one per row on purpose. */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('brand', 'Brand')}</span><input className="input w-full text-sm" value={header.brand} list="create-products-brand-options" aria-label={tr('brand', 'Brand')} placeholder={tr('optional', 'Optional')} onChange={(event) => setHeader((prev) => ({ ...prev, brand: event.target.value }))} /><datalist id="create-products-brand-options">{brandOptions.map((brand) => <option key={brand} value={brand} />)}</datalist></label>
                   <SupplierPickerField value={{ supplierId: header.supplierId, supplierName: header.supplierName }} onChange={(next) => setHeader((prev) => ({ ...prev, supplierId: next.supplierId, supplierName: next.supplierName }))} tr={(key, fallback) => tr(key, fallback || key)} idPrefix="create-products-session" hint={tr('create_products_supplier_hint', 'Recorded on the opening stock of every product this session creates.')} hintDisplay="tooltip" />
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('branch', 'Branch')}</span><AppSelect value={header.branchId} onChange={(next) => setHeader((prev) => ({ ...prev, branchId: next }))} ariaLabel={tr('branch', 'Branch')} buttonClassName="h-9 w-full text-sm" options={branchSelectOptions} /></label>
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={receivedDate} onChange={setReceivedDate} /></label>
+                  <label className="flex items-center gap-2 text-xs text-gray-600 sm:col-span-2 dark:text-gray-300"><input type="checkbox" className="h-4 w-4" checked={freeGoods} onChange={(event) => setFreeGoods(event.target.checked)} /><span>{tr('stock_receipt_free_goods', 'Free goods (no cost)')}</span><InfoHint label={tr('stock_receipt_free_goods', 'Free goods (no cost)')} text={tr('stock_receipt_free_goods_hint', 'Tick this only when the goods really arrived at no cost. It is the declaration that lets a $0.00 unit cost be recorded; without it a blank or zero cost is refused.')} /></label>
                 </div>
                 <div className="mt-3 flex justify-end"><button type="button" className="btn-primary flex h-10 items-center gap-1.5 px-4 text-sm disabled:opacity-50" disabled={!canStart || (!allowNew && !allowExisting) || submissionLocked} onClick={() => setStep('items')}><PackagePlus className="h-4 w-4" />{tr('create_products_start', 'Add items')}</button></div>
               </>
@@ -776,7 +822,10 @@ export default function CreateProductsSessionModal({
               {idempotencyConflict ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{commitError ? `${commitError} · ` : ''}idempotency_conflict · {tr('resolve', 'Resolve')}</p> : commitError ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{commitError}{submissionLocked ? ` · ${tr('retry', 'Retry')}` : ''}</p> : null}
             </div>
           ) : null}
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-3 dark:border-gray-700"><button type="button" className="btn-secondary h-10 px-4 text-sm" disabled={saving} onClick={requestClose}>{tr('close', 'Close')}</button>{step === 'items' ? <button type="button" className="btn-primary h-10 px-4 text-sm disabled:opacity-50" disabled={saving || idempotencyConflict || (rows.length === 0 && !submittedItems)} onClick={() => void finishSession()}>{saving ? tr('saving_label', 'Saving…') : idempotencyConflict ? tr('failed', 'Failed') : submissionLocked ? tr('retry', 'Retry') : `✓ ${tr('create_products_finish', 'Complete session')}`}</button> : null}</div>
+          {/* One close affordance only -- the Modal header X. The footer keeps
+              the primary action alone (and disappears entirely on the header
+              step, where "Add items" is the primary action). */}
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">{step === 'items' ? <button type="button" className="btn-primary h-10 px-4 text-sm disabled:opacity-50" disabled={saving || idempotencyConflict || (rows.length === 0 && !submittedItems)} onClick={() => void finishSession()}>{saving ? tr('saving_label', 'Saving…') : idempotencyConflict ? tr('failed', 'Failed') : submissionLocked ? tr('retry', 'Retry') : `✓ ${tr('create_products_finish', 'Complete session')}`}</button> : null}</div>
         </div>
       </Modal>
 

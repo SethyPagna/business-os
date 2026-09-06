@@ -13,6 +13,8 @@ import { dateToBatchCode } from '../../../utils/batchCode.ts'
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
+import InfoHint from '../../shared/InfoHint.tsx'
+import { isStockInSubmission, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
@@ -93,8 +95,11 @@ type AdjustStockPayload = {
   type: StockAdjustmentType
   quantity: number
   branchId: number | string
-  unitCostUsd: number
-  unitCostKhr: number
+  // N14-D: optional, and absent for a remove. Never the product's stored
+  // cost_price_usd -- that answered "what did this receipt cost?" with the
+  // catalogue, and `|| 0` recorded free goods nobody declared.
+  unitCostUsd?: number
+  freeGoods?: boolean
   reason: string
   userId?: number | string
   userName?: string
@@ -155,6 +160,11 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
   // already existed -- just now sourced from the same saved-reason catalog
   // and picker UI as Inventory's own "Adjust stock" modal, instead of a
   // plain datalist.
+  // N14-D: one typed receipt cost for this form's whole batch of row changes,
+  // exactly like the single reason below it. Applied to the rows that put stock
+  // IN; a remove carries none.
+  const [unitCost, setUnitCost] = useState('')
+  const [freeGoods, setFreeGoods] = useState(false)
   const [reason, setReason] = useState('')
   // Part 563: the review dialog is open (handleSave validated + opened it;
   // commitBranch runs the per-branch-row writes on confirm).
@@ -296,6 +306,28 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     if (!changes.length) return
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
 
+    // N14-D: the same rule routes/inventory.ts enforces, checked before the
+    // first row is submitted. Only rows creating a NEW lot are gated on the
+    // supplier here: a row topping up an existing lot inherits that lot's
+    // supplier (first attribution sticks), and only the server can see whether
+    // the picked lot is attributed -- so it makes that call, authoritatively.
+    for (const { row } of changes) {
+      if (!isStockInSubmission(row.type, parseStockDelta(row.delta), row.current)) continue
+      const createsLot = row.batchId === '' || row.batchId === 'new'
+      const gate = stockReceiptGateCode({
+        isStockIn: true,
+        supplierName: row.supplierName,
+        lotAttributionDeferred: !createsLot,
+        unitCostUsd: unitCost,
+        freeGoods,
+      })
+      if (gate) {
+        finishSingleAction(saveInFlightRef)
+        setMsg(`${row.branchName}: ${T(STOCK_RECEIPT_GATE_KEYS[gate], STOCK_RECEIPT_GATE_FALLBACKS[gate], STOCK_RECEIPT_GATE_FALLBACKS[gate])}`)
+        return
+      }
+    }
+
     setSaving(true)
     setMsg(null)
     try {
@@ -306,8 +338,8 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
           type: row.type,
           quantity: parseStockDelta(row.delta),
           branchId: row.branchId,
-          unitCostUsd: product.cost_price_usd || 0,
-          unitCostKhr: product.cost_price_khr || 0,
+          unitCostUsd: isStockInSubmission(row.type, parseStockDelta(row.delta), row.current) ? Number(unitCost) : undefined,
+          freeGoods: freeGoods ? true : undefined,
           reason: `${reason.trim()} (${row.branchName})`,
           userId: user?.id,
           userName: user?.name,
@@ -359,6 +391,29 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
               same saved-reason catalog -- was previously a plain datalist
               here, its own separate (smaller) way of doing the same
               thing. */}
+          {/* N14-D: one receipt cost for every row that puts stock in, beside
+              the one reason this form has always had. */}
+          <div className="mb-2">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400" htmlFor="branch-stock-adjust-unit-cost">
+              {T('unit_cost_usd', 'Unit cost $', 'តម្លៃដើមក្នុងមួយឯកតា $')} <span className="text-red-500" aria-hidden="true">*</span>
+            </label>
+            <input
+              id="branch-stock-adjust-unit-cost"
+              className="input w-full text-sm"
+              type="number"
+              min="0"
+              step="any"
+              required
+              disabled={freeGoods}
+              value={freeGoods ? '0' : unitCost}
+              onChange={(event) => setUnitCost(event.target.value)}
+            />
+            <span className="mt-1 flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400">
+              <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
+              {T('stock_receipt_free_goods', 'Free goods', 'ទំនិញឥតគិតថ្លៃ')}
+              <InfoHint label={T('stock_receipt_free_goods', 'Free goods', 'ទំនិញឥតគិតថ្លៃ')} text={T('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.', '')} />
+            </span>
+          </div>
           <div className="mb-1 flex items-center justify-between gap-2">
             <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block" htmlFor="branch-stock-adjust-reason">
               {T('reason', 'Reason', 'មូលហេតុ')}

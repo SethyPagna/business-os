@@ -25,6 +25,8 @@ import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
+import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import InfoHint from '../shared/InfoHint.tsx'
 
 // Keep product creation inside this receiving flow rather than sending the
 // operator to a separate page. The standard ProductForm and create transport
@@ -62,6 +64,9 @@ interface ReceivedLine {
   productName: string
   quantity: number
   unitCost: string
+  // N14-D: frozen with the line, like everything else here -- the declaration
+  // belongs to THIS receipt, not to whatever the form shows when it commits.
+  freeGoods: boolean
   createPriceVariant: boolean
   expiryDate: string
   // The lot this line lands in, frozen when it was queued. 'new' means
@@ -155,6 +160,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [picked, setPicked] = useState<ProductCandidate | null>(draft?.picked || null)
   const [quantity, setQuantity] = useState(draft?.quantity || '1')
   const [unitCost, setUnitCost] = useState(draft?.unitCost || '')
+  const [freeGoods, setFreeGoods] = useState(false)
   const [createPriceVariant, setCreatePriceVariant] = useState(Boolean(draft?.createPriceVariant))
   const [expiryDate, setExpiryDate] = useState(draft?.expiryDate || '')
   const [scannedBarcode, setScannedBarcode] = useState(draft?.scannedBarcode || '')
@@ -329,6 +335,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setQuery('')
     setQuantity('1')
     setUnitCost('')
+    setFreeGoods(false)
     setCreatePriceVariant(false)
     setExpiryDate('')
     setScannedBarcode('')
@@ -387,6 +394,19 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
       return
     }
+    // N14-D: the same rule POST /api/batches and /api/inventory/adjust enforce
+    // (cloudflare/src/lib/stockReceiptGate.ts), checked as the line is queued
+    // so a whole session is not typed up before the first refusal.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn: true,
+      supplierName: supplier.supplierName,
+      unitCostUsd: unitCost,
+      freeGoods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
+      return
+    }
     const lineName = String(picked.name || `#${picked.id}`)
     // Unlocked pricing always creates a fresh lot server-side, so a chosen
     // lot must not ride along with it -- same rule the adjust surfaces use.
@@ -401,6 +421,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         productName: lineName,
         quantity: qty,
         unitCost,
+        freeGoods,
         createPriceVariant: variantWins,
         expiryDate,
         batchChoice: effectiveBatchChoice,
@@ -422,6 +443,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setQuery(line.productName)
     setQuantity(String(line.quantity))
     setUnitCost(line.unitCost)
+    setFreeGoods(line.freeGoods)
     setCreatePriceVariant(line.createPriceVariant)
     setExpiryDate(line.expiryDate)
     // Parked rather than set: the options effect is about to re-key on this
@@ -468,7 +490,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               unlockPricing: true,
               receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
               supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-              unitCostUsd: Number(line.unitCost), paymentStatus,
+              unitCostUsd: Number(line.unitCost), freeGoods: line.freeGoods, paymentStatus,
               creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
               sessionId: sessionIdRef.current,
               pricing: pricingForVariant(line.product, Number(line.unitCost)),
@@ -483,6 +505,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               expiryDate: line.expiryDate.trim() || null,
               supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
               unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
+              freeGoods: line.freeGoods,
               paymentStatus, creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
               sessionId: sessionIdRef.current,
             })
@@ -661,11 +684,17 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               )}
               <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-[5rem_6rem_8rem_1fr] sm:items-end">
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('quantity', 'Qty')}</span><input type="number" min="1" step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
-                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost $')}</span><input type="number" min="0" step="0.01" className="input text-sm" value={unitCost} onChange={(event) => {
+                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.01" className="input text-sm" required disabled={freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
                   const next = event.target.value
                   setUnitCost(next)
                   setCreatePriceVariant(costChanged(picked, next))
-                }} /></label>
+                }} />
+                  {/* N14-D: $0.00 is a claim the operator makes, never a default. */}
+                  <span className="mt-1 flex items-center gap-1 text-[10px] text-gray-600 dark:text-gray-400">
+                    <input type="checkbox" className="h-3 w-3" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) { setUnitCost('0'); setCreatePriceVariant(costChanged(picked, '0')) } }} />
+                    {tr('stock_receipt_free_goods', 'Free goods')}
+                    <InfoHint label={tr('stock_receipt_free_goods', 'Free goods')} text={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')} />
+                  </span></label>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={expiryDate} onChange={(iso) => setExpiryDate(iso)} /></label>
                 <div className="flex min-w-0 items-end gap-1.5">
                   <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: ${(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span>

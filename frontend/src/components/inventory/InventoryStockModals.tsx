@@ -9,6 +9,7 @@ import { dateToBatchCode } from '../../utils/batchCode.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { isStockInSubmission } from '../../utils/stockReceiptFields.ts'
+import InfoHint from '../shared/InfoHint.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt, { type UnsavedChangesPromptItem } from '../shared/UnsavedChangesPrompt.tsx'
@@ -91,6 +92,10 @@ type AdjustForm = {
   // Blank cost stays blank: the Sessions list reports "no receipt-level cost"
   // honestly rather than borrowing the product's stored cost price.
   unit_cost_usd: InventoryFormValue
+  // N14-D: the operator's explicit "these goods were free" declaration. A
+  // $0.00 receipt cost is refused without it, on this form and on the server,
+  // because a defaulted zero and a declared zero used to be the same row.
+  free_goods: boolean
   payment_status: string
   credit_due_date: string
 }
@@ -212,7 +217,13 @@ export default function InventoryStockModals({
   // selected. In practice `openAdjust` always pre-fills the default
   // branch, so this only matters if the person explicitly clears it.
   const adjustBranchId = adjustForm.branch_id ? Number(adjustForm.branch_id) : null
-  const showBatchPicker = (adjustForm.type === 'add' || adjustForm.type === 'remove')
+  // N14-E: a 'set' BELOW the current figure takes stock OUT. routes/inventory.ts
+  // turns it into a remove of the difference, and with no batch named that
+  // remove drains the oldest lots FIFO -- the form was silently choosing which
+  // lot the loss came out of. A set-down now offers the same batch picker an
+  // explicit remove does, so the operator says which lot it leaves.
+  const isSetDown = adjustForm.type === 'set' && setDifference != null && setDifference < 0
+  const showBatchPicker = (adjustForm.type === 'add' || adjustForm.type === 'remove' || isSetDown)
     && !unlockPricing
     && Boolean(adjustBranchId)
   // S4-16: a 'set' above the current figure IS a receipt -- routes/inventory.ts
@@ -243,7 +254,7 @@ export default function InventoryStockModals({
     // just bounce off removeStockFromBatch's InsufficientBatchStockError
     // server-side; 'add' shows every active batch, including empty ones,
     // since topping one back up is a normal receipt.
-    getProductBatches(adjustTargetId, adjustBranchId, adjustForm.type === 'remove')
+    getProductBatches(adjustTargetId, adjustBranchId, adjustForm.type === 'remove' || isSetDown)
       .then((res) => { if (!cancelled) setBatchOptions(res?.batches || []) })
       // getProductBatches no longer resolves a failed request as an empty
       // list (see batchesTransport.ts), so this needs a real handler --
@@ -257,7 +268,7 @@ export default function InventoryStockModals({
       })
       .finally(() => { if (!cancelled) setBatchLoading(false) })
     return () => { cancelled = true }
-  }, [showBatchPicker, adjustTargetId, adjustBranchId, adjustForm.type])
+  }, [showBatchPicker, adjustTargetId, adjustBranchId, adjustForm.type, isSetDown])
   // Default to "new batch" the first time the picker has something to
   // show for an add -- matches the decided default ("Default batch
   // `n+1: mm/dd/yyyy` stays the default for add stock"). That quote is from
@@ -369,8 +380,14 @@ export default function InventoryStockModals({
                   value={adjustForm.quantity}
                   onChange={e => setAdjustForm(f=>({...f, quantity:e.target.value}))} />
                 {adjustForm.type === 'set' && setDifference != null ? (
-                  <div className="mt-1 text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-                    {t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} → {t('total') || 'Total'}: {requestedSetTotal} (Δ {setDifference >= 0 ? '+' : ''}{setDifference})
+                  <div className="mt-1 flex items-center gap-1 text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+                    <span>{t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} → {t('total') || 'Total'}: {requestedSetTotal} (Δ {setDifference >= 0 ? '+' : ''}{setDifference})</span>
+                    {/* N14-E: the one place the operator can see that this set is a
+                        REMOVAL, so it is also where the reason the receipt fields
+                        vanished belongs -- as a hint, not a paragraph. */}
+                    {isSetDown ? (
+                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_down_hint') || 'This set lowers the quantity, so it takes stock out: it has no supplier and no cost. Choose the batch to take it from, otherwise the oldest lots are drained first.'} />
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="mt-1.5 flex flex-wrap gap-1">
@@ -565,7 +582,9 @@ export default function InventoryStockModals({
                 <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label htmlFor="inventory-adjust-unit-cost" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('receipt_cost', 'Receipt cost')} ({usdSymbol}/{tr('unit', 'unit')})</label>
+                      <label htmlFor="inventory-adjust-unit-cost" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                        {tr('receipt_cost', 'Receipt cost')} ({usdSymbol}/{tr('unit', 'unit')}) <span className="text-red-500" aria-hidden="true">*</span>
+                      </label>
                       <input
                         id="inventory-adjust-unit-cost"
                         name="inventory_adjust_unit_cost"
@@ -573,10 +592,24 @@ export default function InventoryStockModals({
                         type="number"
                         step="any"
                         min="0"
-                        placeholder={tr('not_recorded', 'Not recorded')}
-                        value={adjustForm.unit_cost_usd}
+                        required
+                        disabled={adjustForm.free_goods}
+                        value={adjustForm.free_goods ? 0 : adjustForm.unit_cost_usd}
                         onChange={e => setAdjustForm(f => ({ ...f, unit_cost_usd: e.target.value }))}
                       />
+                      {/* N14-D: $0.00 is a claim, not a default. Ticking this is the
+                          only way a zero cost is accepted, here and on the server,
+                          and the declaration is written onto the receipt. */}
+                      <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-400">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5"
+                          checked={adjustForm.free_goods}
+                          onChange={e => setAdjustForm(f => ({ ...f, free_goods: e.target.checked, unit_cost_usd: e.target.checked ? 0 : f.unit_cost_usd }))}
+                        />
+                        <span>{tr('stock_receipt_free_goods', 'Free goods')}</span>
+                        <InfoHint label={tr('stock_receipt_free_goods', 'Free goods')} text={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')} />
+                      </label>
                     </div>
                     <div>
                       <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('payment', 'Payment')}</span>

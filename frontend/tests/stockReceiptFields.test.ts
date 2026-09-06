@@ -16,6 +16,9 @@ import {
   isStockInSubmission,
   isStockReceiptCreditIncomplete,
   stockReceiptWire,
+  stockReceiptGateCode,
+  STOCK_RECEIPT_GATE_CODES,
+  STOCK_RECEIPT_GATE_KEYS,
 } from '../src/utils/stockReceiptFields.ts'
 
 let failed = 0
@@ -124,7 +127,102 @@ runTest('both adjust surfaces send the receipt fields and a grouping session id'
   // cost or credit due date can never attribute the next lot.
   const inventory = source('components/inventory/Inventory.tsx')
   assert.match(inventory, /receiptSessionIdRef\.current = Date\.now\(\)/)
-  assert.match(inventory, /unit_cost_usd: '', payment_status: 'paid', credit_due_date: '',/)
+  assert.match(inventory, /unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',/)
+})
+
+// ---------------------------------------------------------------------------
+// N14-D: supplier + unit cost are REQUIRED on a stock-in, and the browser must
+// reach the same verdict as the server.
+//
+// The table is the CONTRACT, not a copy of one: cloudflare/scripts/
+// test-stock-receipt-gate-pure.cjs runs the very same file through
+// cloudflare/src/lib/stockReceiptGate.ts. Neither implementation can be
+// relaxed, tightened or typo'd alone without one of the two suites going red.
+// Every case here is a case the OLD code answered "" to -- there was no gate
+// at all -- so this file fails wholesale on the previous implementation.
+// ---------------------------------------------------------------------------
+runTest('the stock-in receipt gate agrees, case for case, with the server kernel', () => {
+  const table = JSON.parse(readFileSync(new URL('../../cloudflare/scripts/fixtures/stock-receipt-gate-cases.json', import.meta.url), 'utf8')) as {
+    cases: Array<{ name: string; input: Record<string, unknown>; code: string }>
+  }
+  assert.ok(table.cases.length >= 15, 'the shared table must actually exercise the rule')
+  for (const testCase of table.cases) {
+    assert.equal(stockReceiptGateCode(testCase.input as never), testCase.code, testCase.name)
+  }
+
+  // The server's own copy, read as text: same branch order, same thresholds.
+  // A rule that reads differently here is a rule that will disagree on some
+  // input the table has not thought of yet.
+  const server = readFileSync(new URL('../../cloudflare/src/lib/stockReceiptGate.ts', import.meta.url), 'utf8')
+  const client = readFileSync(new URL('../src/utils/stockReceiptFields.ts', import.meta.url), 'utf8')
+  const gateBody = (text: string): string => {
+    const at = text.indexOf('export function stockReceiptGateCode(')
+    assert.notEqual(at, -1, 'both sides must export stockReceiptGateCode')
+    const close = text.indexOf(String.fromCharCode(10) + '}', at)
+    assert.notEqual(close, -1, 'stockReceiptGateCode must be a top-level function')
+    return text.slice(at, close)
+      .split(String.fromCharCode(10))
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(' ')
+  }
+  assert.equal(gateBody(client), gateBody(server), 'the two gate bodies must be the same rule, character for character')
+
+  // Every code the operator can meet has a pack key, in BOTH packs.
+  const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  for (const code of STOCK_RECEIPT_GATE_CODES) {
+    const key = STOCK_RECEIPT_GATE_KEYS[code]
+    assert.ok(key, `${code} has no pack key`)
+    assert.ok(en[key], `en.json is missing ${key}`)
+    assert.ok(km[key], `km.json is missing ${key}`)
+    assert.notEqual(en[key], km[key], `${key} must be really translated`)
+  }
+  for (const key of ['stock_receipt_free_goods', 'stock_receipt_free_goods_hint', 'stock_set_down_hint']) {
+    assert.ok(en[key] && km[key], `both packs need ${key}`)
+    assert.notEqual(en[key], km[key], `${key} must be really translated`)
+  }
+})
+
+runTest('nothing invents a receipt cost any more', () => {
+  // The four call sites that used to answer "cost?" with a number the operator
+  // never typed. Each `|| 0` silently recorded free goods nobody declared,
+  // which is exactly the claim the gate now demands be made explicitly.
+  // Plain substring checks, not regexes: the literals being hunted contain
+  // `||` and `?.`, which a regex would read as alternation and a quantifier
+  // -- an escaping slip there produces a pattern that matches anything and a
+  // test that can never fail.
+  const noFabrication: Array<[string, string]> = [
+    ['components/products/forms/BranchStockAdjuster.tsx', 'unitCostUsd: product.cost_price_usd || 0'],
+    ['components/products/forms/BulkAddStockModal.tsx', 'unitCostUsd: product.purchase_price_usd || 0'],
+    ['components/products/helpers/productWriteHelpers.ts', 'unitCostUsd: options.unitCostUsd ?? ('],
+    ['components/products/CreateProductsSessionModal.tsx', "cost_price_usd === '' ? 0"],
+  ]
+  for (const [path, literal] of noFabrication) {
+    assert.ok(!source(path).includes(literal), `${path} must stop inventing a receipt cost: ${literal}`)
+  }
+  // ...and the surfaces that submit a receipt must run the gate before they do.
+  for (const path of [
+    'components/products/forms/StockAdjustModal.tsx',
+    'components/inventory/Inventory.tsx',
+    'components/inventory/FastStockInModal.tsx',
+    'components/products/forms/BulkAddStockModal.tsx',
+    'components/products/forms/BranchStockAdjuster.tsx',
+    'components/inventory/ReceiveBatchModal.tsx',
+    // Both of its line paths: the new product built through ProductForm and
+    // the existing product queued from the picker.
+    'components/products/CreateProductsSessionModal.tsx',
+  ]) {
+    assert.match(source(path), /stockReceiptGateCode/, `${path} must check the receipt gate before submitting`)
+  }
+
+  // The only exemption is explicit and auditable: a correction restores a
+  // figure the ledger already held. It must be spelled on the wire, never
+  // inferred from a reason string.
+  const products = source('components/products/Products.tsx')
+  assert.match(products, /attribution: 'correction'/, 'the snapshot-restore path must declare itself a correction')
+  const inventory2 = source('components/inventory/Inventory.tsx')
+  assert.match(inventory2, /attribution: 'correction'/, 'undo must declare itself a correction rather than carrying a fake supplier')
 })
 
 if (failed > 0) {

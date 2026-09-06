@@ -22,6 +22,8 @@ import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.
 // behavior visible/confirmable instead of leaving it silent.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
+import InfoHint from '../../shared/InfoHint.tsx'
+import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import UnsavedChangesPrompt from '../../shared/UnsavedChangesPrompt.tsx'
 import { useCloseGuard } from '../../../utils/useCloseGuard.ts'
@@ -84,8 +86,10 @@ type AdjustStockPayload = {
   type: StockAction
   quantity: number
   branchId: number | null
-  unitCostUsd: number
-  unitCostKhr: number
+  // N14-D: optional, and absent for a remove. Nothing here substitutes the
+  // product's stored price for a cost the operator did not type.
+  unitCostUsd?: number
+  freeGoods?: boolean
   reason: string
   userId?: number | string
   userName?: string
@@ -175,6 +179,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   // deliberate name-only attribution.
   const [supplierId, setSupplierId] = useState<number | null>(null)
   const [supplierName, setSupplierName] = useState('')
+  // N14-D: what this bulk receipt cost per unit. It used to be taken from each
+  // product's stored purchase_price_usd (or 0), so a bulk add recorded a cost
+  // nobody entered -- and, for anything with no stored price, recorded the
+  // goods as free. One typed figure for the whole event, like the supplier and
+  // the received date above it.
+  const [unitCost, setUnitCost] = useState('')
+  const [freeGoods, setFreeGoods] = useState(false)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [reason, setReason] = useState('')
@@ -295,6 +306,20 @@ export default function BulkAddStockModal({ productIds, products, branches, user
       setMsg('Enter a valid quantity')
       return
     }
+    // N14-D: the same rule routes/inventory.ts enforces on every row this loop
+    // submits (cloudflare/src/lib/stockReceiptGate.ts). Checked once, up front:
+    // a bulk add that would be refused row by row should not start at all.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn: action === 'add',
+      supplierName,
+      unitCostUsd: unitCost,
+      freeGoods,
+    })
+    if (receiptGate) {
+      finishSingleAction(saveInFlightRef)
+      setMsg(t(STOCK_RECEIPT_GATE_KEYS[receiptGate]) || STOCK_RECEIPT_GATE_FALLBACKS[receiptGate])
+      return
+    }
     setSaving(true)
     setMsg(null)
     try {
@@ -323,8 +348,12 @@ export default function BulkAddStockModal({ productIds, products, branches, user
             type: action,
             quantity: amount,
             branchId: normalizeBranchId(branchId),
-            unitCostUsd: product.purchase_price_usd || 0,
-            unitCostKhr: product.purchase_price_khr || 0,
+            // N14-D: the cost the operator typed for THIS receipt. Never
+            // `product.purchase_price_usd || 0` -- that answered "what did this
+            // cost?" with the catalogue's price, or with a zero that reads as
+            // free goods nobody declared.
+            unitCostUsd: action === 'add' ? Number(unitCost) : undefined,
+            freeGoods: action === 'add' && freeGoods ? true : undefined,
             reason: reason.trim(),
             userId: user?.id,
             userName: user?.name,
@@ -502,6 +531,29 @@ export default function BulkAddStockModal({ productIds, products, branches, user
               {/* D5a: the same supplier picker every other add surface has.
                   One choice for the whole bulk event; lots that already
                   carry a supplier keep theirs (fill-only server-side). */}
+              {/* N14-D: one typed receipt cost for the whole bulk event, beside
+                  the one supplier and the one received date it already had. */}
+              <div className="mt-3">
+                <label htmlFor="bulk-add-stock-unit-cost" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('unit_cost_usd') || 'Unit cost $'} <span className="text-red-500" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="bulk-add-stock-unit-cost"
+                  className="input w-full text-sm"
+                  type="number"
+                  min="0"
+                  step="any"
+                  required
+                  disabled={freeGoods}
+                  value={freeGoods ? '0' : unitCost}
+                  onChange={(event) => setUnitCost(event.target.value)}
+                />
+                <span className="mt-1 flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400">
+                  <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
+                  {t('stock_receipt_free_goods') || 'Free goods'}
+                  <InfoHint label={t('stock_receipt_free_goods') || 'Free goods'} text={t('stock_receipt_free_goods_hint') || 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.'} />
+                </span>
+              </div>
               <div className="mt-3">
                 <SupplierPickerField
                   idPrefix="bulk-add-stock"

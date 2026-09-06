@@ -466,5 +466,70 @@ runTest('every new string is in BOTH packs', () => {
   assert.deepEqual(missing, [], `keys missing from a pack: ${missing.join(', ')}`)
 })
 
+function flattenPack(input: unknown, target: Record<string, string> = {}): Record<string, string> {
+  if (!input || typeof input !== 'object') return target
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (value == null || Array.isArray(value)) continue
+    if (typeof value === 'object') { flattenPack(value, target); continue }
+    target[key] = String(value)
+  }
+  return target
+}
+
+// ---------------------------------------------------------------------------
+// 7. N14-D: the session's own two fabricated costs are gone
+// ---------------------------------------------------------------------------
+
+runTest('a blank unit cost is refused here rather than becoming a silent $0 receipt', () => {
+  const newItemBlock = modalSource.slice(modalSource.indexOf('const saveNewItem ='), modalSource.indexOf('const removeLine ='))
+  // The old shape read `payload.cost_price_usd == null || payload.cost_price_usd === '' ? 0 : Number(...)`,
+  // so leaving the field empty recorded goods as free -- a claim nobody made.
+  assert.doesNotMatch(newItemBlock, /cost_price_usd === ''\s*\?\s*0/, 'a blank cost must never default to 0')
+  assert.match(newItemBlock, /costText === '' \|\| !Number\.isFinite\(costValue\) \|\| costValue < 0/)
+  // ...and the same gate the Worker runs, so the browser verdict and the
+  // server verdict are the same verdict.
+  assert.match(newItemBlock, /stockReceiptGateCode\(\{ isStockIn: quantity > 0, supplierName: receiptSupplier, unitCostUsd: costText \}\)/)
+  assert.match(newItemBlock, /STOCK_RECEIPT_GATE_KEYS\[receiptGate\], STOCK_RECEIPT_GATE_FALLBACKS\[receiptGate\]/)
+  assert.match(modalSource, /from '\.\.\/\.\.\/utils\/stockReceiptFields\.ts'/)
+})
+
+// ---------------------------------------------------------------------------
+// 8. N1: the header step's chrome
+// ---------------------------------------------------------------------------
+
+runTest('the modal is titled for what it does: add OR create products', () => {
+  assert.equal(flattenPack(en).create_products_session_title, 'Add/Create Products Session')
+  const kmTitle = flattenPack(km).create_products_session_title
+  assert.ok(kmTitle && kmTitle !== flattenPack(en).create_products_session_title, 'the Khmer title must be a real translation')
+  assert.doesNotMatch(modalSource, /'Create products session'/, 'the stale fallback must not survive the rename')
+})
+
+runTest('the shared-details explanation is an InfoHint, not a paragraph above the fields', () => {
+  assert.match(modalSource, /import InfoHint from '\.\.\/shared\/InfoHint\.tsx'/)
+  assert.doesNotMatch(modalSource, /<p className="mb-3 text-xs text-gray-500">\{tr\('create_products_header_hint'/,
+    'the hint paragraph must not still occupy the top of the fold')
+  assert.match(modalSource, /<InfoHint label=\{tr\('create_products_header_step'[\s\S]{0,160}?create_products_header_hint/,
+    'the same sentence must be reachable from beside the section title')
+})
+
+runTest('the footer carries the primary action alone -- the header X is the only close', () => {
+  const footer = modalSource.slice(modalSource.indexOf('border-t border-gray-200 pt-3'))
+  const footerRow = footer.slice(0, footer.indexOf('</div>'))
+  assert.doesNotMatch(footerRow, /tr\('close', 'Close'\)/, 'a footer Close duplicates the header X')
+  assert.match(footerRow, /create_products_finish/, 'the primary action stays')
+})
+
+runTest('brand+supplier and branch+received date pair from 640px up', () => {
+  const headerBlock = modalSource.slice(modalSource.indexOf("step === 'header' ? ("), modalSource.indexOf('create_products_start'))
+  // Two columns from the 640px breakpoint. The modal is max-w-3xl (768px),
+  // so its content box is never the constraint above that width -- these four
+  // fields cannot fall into four separate rows at 768.
+  assert.match(headerBlock, /grid grid-cols-1 gap-3 sm:grid-cols-2/)
+  assert.doesNotMatch(headerBlock, /sm:grid-cols-1|md:grid-cols-1/)
+  const modalSizes = readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
+  assert.match(modalSizes, /size === 'lg' \? 'max-w-3xl'/, 'the pairing argument above depends on this width')
+  assert.match(modalSource, /size="lg"/)
+})
+
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
 console.log('createProductsSession: all tests passed')
