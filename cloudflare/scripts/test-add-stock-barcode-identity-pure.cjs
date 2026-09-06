@@ -127,6 +127,12 @@ const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
 // N13: and the actor / receipt kernels the movement readers now import.
 const movementActorNameKernel = loadReal('lib/movementActorName.ts')
 const movementReferenceKernel = loadReal('lib/movementReference.ts')
+// N13 (round 2): the /movements search haystack is built from those same two
+// expressions, so the route imports the haystack kernel too.
+const movementSearchKernel = loadReal('lib/movementSearch.ts', {
+  './movementActorName': movementActorNameKernel,
+  './movementBranchName': movementBranchNameKernel,
+})
 const inventoryRoute = loadReal('routes/inventory.ts', {
   // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
   // move through this guard, so the fixtures here run through the rejection
@@ -136,6 +142,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/movementBranchName': movementBranchNameKernel,
   '../lib/movementActorName': movementActorNameKernel,
   '../lib/movementReference': movementReferenceKernel,
+  '../lib/movementSearch': movementSearchKernel,
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/salesAnalytics': salesAnalytics,
