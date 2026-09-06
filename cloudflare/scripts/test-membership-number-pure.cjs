@@ -177,6 +177,33 @@ async function main() {
   assert.equal(membership.isMembershipCollision(new Error('no such column: membership_number')), false)
   checks += 4
 
+  // --- the SQL glob has to agree with parseMembershipSequence about
+  // whitespace (verifier finding, 2026-09-06). parseMembershipSequence trims
+  // before it parses, and every lookup compares lower(trim(...)), so a
+  // hand-typed " LC-00001 " IS taken. Without trim() inside membershipGlob the
+  // SQL filter alone disagreed: the padded row dropped out of the taken set,
+  // gap-fill handed LC-00001 straight back out, the INSERT succeeded (the
+  // 0015 index keys on lower(), not trim()), and the trim-equal membership
+  // lookup then returned two rows. Fresh database so this padded seed cannot
+  // perturb the sequence the assertions above pin.
+  const paddedRaw = openDb(loadAll())
+  const paddedDb = {
+    prepare(sql) {
+      const stmt = paddedRaw.prepare(sql)
+      return { get: async (p) => stmt.get(p), all: async (p) => stmt.all(p) || [], run: async (p) => stmt.run(p) }
+    },
+  }
+  paddedRaw.prepare("INSERT INTO customers (name, membership_number) VALUES ('Padded', ' LC-00001 '), ('Plain', 'LC-00002')").run()
+  assert.equal(
+    await membership.mintMembershipNumber(paddedDb), 'LC-00003',
+    'a whitespace-padded " LC-00001 " is taken -- the glob trims exactly like parseMembershipSequence',
+  )
+  paddedRaw.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES (' lc-00003 ', 'Padded Portal', '099222333', 'x')").run()
+  assert.equal(
+    await membership.mintMembershipNumber(paddedDb), 'LC-00004',
+    'the same trim covers portal_accounts.membership_id -- ONE glob, both columns',
+  )
+  checks += 2
   // Every number in the table is unique and every house number parses.
   const all = await db.prepare('SELECT membership_number FROM customers').all()
   const seen = new Set()

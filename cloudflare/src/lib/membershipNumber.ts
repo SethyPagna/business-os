@@ -16,6 +16,20 @@
 // so a number freed by a deleted/merged customer is reused before the
 // sequence grows.
 //
+// DECISION (owner, 2026-09-06): gap-fill deliberately reuses a number freed
+// by a hard delete, and an undo/redo of that delete must NOT fail because of
+// it. Customers/suppliers/delivery_contacts are hard-deleted (bulkDeleteEngine.ts,
+// routes/contacts.ts's single-row DELETE), and their undo/redo replays the
+// exact original membership_number byte-for-byte (CustomersTab.tsx's
+// buildCustomerPayload feeds it back into POST /customers). Between the
+// delete and the undo, that freed slot is fair game for the next brand-new
+// signup or manual add — gap-filling on purpose is the whole point of this
+// file — so a same-number collision on restore is a real, if rare, race, not
+// a bug in the caller. routes/contacts.ts's create route treats that one
+// case (a body carrying `isUndoRestore: true`) by minting a fresh number
+// instead of the flat 400 a normal manual add gets for the same collision
+// (which stays a hard reject — that path IS a real typo/duplicate signal).
+//
 // Two tables share this ONE sequence: customers.membership_number (the CRM)
 // and portal_accounts.membership_id (the storefront -- a signup mints from
 // here too, see portalAccounts.ts). mintMembershipNumber() reads both before
@@ -56,10 +70,23 @@ export const MEMBERSHIP_PLACEHOLDER = 'LC-00001'
  * upper-casing; this glob has to agree, or gap-fill would keep handing out
  * a number that only fails at INSERT time via the case-insensitive UNIQUE
  * index, exhausting withMintedMembershipNumber's retry budget on a number
- * it could have skipped up front).
+ * it could have skipped up front). Also trimmed on both sides: `trim()`
+ * matches parseMembershipSequence's own `String(value).trim().toUpperCase()`
+ * (:108) and the lookup queries elsewhere (`lower(trim(membership_number)) =
+ * lower(trim(@m))`), so a hand-typed ` LC-00001 ` with stray whitespace is
+ * recognised as taken by every caller identically -- without it this glob
+ * disagreed with parseMembershipSequence, so a padded row could pass the SQL
+ * filter as untaken, get handed out again by gap-fill, and only fail at
+ * INSERT time via the trim-agnostic UNIQUE index.
+ *
+ * Exported so every caller that needs to query a differently-named column
+ * for the same house format (mintMembershipNumber's own portal_accounts
+ * read below, and lib/importEngine.ts's classifyContacts, which unions
+ * portal_accounts.membership_id into its customers-only allocator seed)
+ * shares this ONE glob rather than hand-rolling their own and drifting.
  */
-function membershipGlob(column: string): string {
-  return `lower(${column}) GLOB 'lc-[0-9]*' AND lower(${column}) NOT GLOB 'lc-*[^0-9]*'`
+export function membershipGlob(column: string): string {
+  return `lower(trim(${column})) GLOB 'lc-[0-9]*' AND lower(trim(${column})) NOT GLOB 'lc-*[^0-9]*'`
 }
 
 /** SQLite GLOB that selects rows whose number is `LC-` followed by digits only. */
@@ -143,10 +170,14 @@ export function allocateMembershipSequences(taken: Iterable<number>, count: numb
  * membership numbers. The import engine holds every existing customer row in
  * memory already, so it mints from this rather than paying a D1 round trip per
  * row. Numbers it hands out are added to the snapshot, so two blank rows in
- * one file can't collide with each other. (Customers-only snapshot: a bulk
- * import never writes portal_accounts, so there is nothing there for it to
- * consult -- see mintMembershipNumber below for the DB-facing minter that
- * unions both tables.)
+ * one file can't collide with each other. The caller (lib/importEngine.ts's
+ * classifyContacts) is responsible for folding in every other store that
+ * shares this sequence before calling this -- a bulk import never WRITES
+ * portal_accounts, but a portal signup can reserve a slot in it with no
+ * matching customer row yet (a fold failure), so that slot is still real and
+ * must not be handed out twice; see mintMembershipNumber below for the
+ * DB-facing minter that unions both tables on every call instead of relying
+ * on a caller-supplied snapshot.
  */
 export function createMembershipNumberAllocator(existingNumbers: Iterable<unknown>): () => string {
   const takenSequences = new Set<number>()
