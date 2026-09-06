@@ -62,4 +62,51 @@ assert.equal(findUnifiedStockCostBatchConflicts(shortCodes.rows).size, 0)
 const invalidUnified = parseUnifiedStockRows([{ name: '', barcode: '', shop: '-1', warehouse: '', date: '31/12/2026', selling_price: 'nope' }])
 assert.deepEqual(invalidUnified.issues.map((issue) => issue.code), ['missing_identity', 'invalid_quantity', 'invalid_date', 'invalid_price'])
 assert.equal(invalidUnified.rows.length, 1, 'invalid rows stay visible for review instead of disappearing')
-console.log('PASS unified §12 stock contract: headers, optional supplier, strict parsing, conflict gating')
+// ---- N14-D, the fourth wire: the receipt gate, mirrored ---------------------
+// cloudflare/src/lib/stockActionCommit.ts refuses a stock-in that carries no
+// unit cost, exactly as POST /adjust, POST /api/batches and the stock-in
+// session do. This screen has to say so BEFORE the upload, or the operator
+// meets the refusal only in the finished report.
+const noCost = parseUnifiedStockRows([
+  { name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: 'add', supplier: 'Bong Long' },
+])
+assert.deepEqual(noCost.issues.map((issue) => issue.code), ['receipt_gate'])
+assert.equal(noCost.issues[0].gateCode, 'cost_required')
+assert.equal(noCost.rows.length, 1, 'a gated row stays visible for review with its reason')
+
+// $0.00 is the claim "these goods were free", and the sheet has no column to
+// declare it -- so it is refused rather than recorded as a free receipt.
+const zeroCost = parseUnifiedStockRows([
+  { name: 'A', barcode: '1', warehouse: '3', date: '08/27/2026', action: 'add', cost_price: '0', supplier: 'Bong Long' },
+])
+assert.deepEqual(zeroCost.issues.map((issue) => issue.gateCode), ['free_goods_required'])
+
+// A sale takes stock OUT and carries no receipt facts...
+const saleRow = parseUnifiedStockRows([
+  { name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: 'sale2' },
+])
+assert.equal(saleRow.issues.length, 0, 'a sale is not a receipt')
+
+// ...and neither does a RECONCILE row, whose number is a counted total: only
+// the server, holding live stock, knows whether it moves stock in at all.
+// Flagging it here would refuse rows the import accepts.
+const reconcileRow = parseUnifiedStockRows([
+  { name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: '' },
+], 'reconcile')
+assert.equal(reconcileRow.issues.length, 0, 'reconcile totals are gated server-side, never guessed here')
+// The same row in direct mode IS an add, and is gated.
+assert.deepEqual(
+  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: '' }], 'direct')
+    .issues.map((issue) => issue.gateCode),
+  ['cost_required'],
+  'a blank action in direct mode is an add, so the cost is required',
+)
+
+// One unreadable cost cell is one row needing attention, not two.
+assert.deepEqual(
+  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: 'add', cost_price: 'nope' }])
+    .issues.map((issue) => issue.code),
+  ['invalid_price'],
+)
+
+console.log('PASS unified §12 stock contract: headers, optional supplier, strict parsing, conflict gating, receipt gate mirrored')

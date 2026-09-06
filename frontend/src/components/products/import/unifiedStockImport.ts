@@ -7,6 +7,11 @@
 // the review screen reads a leading-zero pair as two products while the import
 // that follows treats them as one.
 import { identityBarcodeKey } from '../../../utils/productDetailRule.ts'
+// The pre-submit half of the stock-in receipt gate (N14-D) -- the same kernel
+// FastStockInModal, ReceiveBatchModal and the adjust forms run. The Worker's
+// lib/stockActionCommit.ts enforces it on the wire; this only lets the operator
+// see the refusal before the upload instead of in the report afterwards.
+import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, type StockReceiptGateCode } from '../../../utils/stockReceiptFields.ts'
 
 export type UnifiedStockMode = 'direct' | 'reconcile'
 
@@ -51,8 +56,11 @@ export interface UnifiedStockParsedRow {
 
 export interface UnifiedStockRowIssue {
   rowNumber: number
-  code: 'missing_identity' | 'missing_quantity' | 'invalid_quantity' | 'invalid_date' | 'invalid_price'
+  code: 'missing_identity' | 'missing_quantity' | 'invalid_quantity' | 'invalid_date' | 'invalid_price' | 'receipt_gate'
   message: string
+  /** Set on a 'receipt_gate' issue: the shared refusal code, so a renderer can
+   *  translate it through STOCK_RECEIPT_GATE_KEYS instead of the English text. */
+  gateCode?: StockReceiptGateCode
 }
 
 export interface UnifiedStockParseResult {
@@ -126,7 +134,13 @@ export function normalizeUnifiedStockDate(value: unknown): string | null {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
-export function parseUnifiedStockRows(sourceRows: readonly UnifiedStockSourceRow[]): UnifiedStockParseResult {
+/** Mirrors the resolver's SALE_ACTION_RE: 'sale', 'sale2', 'Sale 3'. */
+const SHEET_SALE_ACTION = /^sale\s*\d*$/i
+
+export function parseUnifiedStockRows(
+  sourceRows: readonly UnifiedStockSourceRow[],
+  mode: UnifiedStockMode = 'direct',
+): UnifiedStockParseResult {
   const headers = sourceRows.length ? Object.keys(sourceRows[0]) : []
   const headerMap = mapUnifiedStockHeaders(headers)
   const rows: UnifiedStockParsedRow[] = []
@@ -150,8 +164,31 @@ export function parseUnifiedStockRows(sourceRows: readonly UnifiedStockSourceRow
       issues.push({ rowNumber, code: 'invalid_quantity', message: 'Shop and warehouse must be non-negative numbers.' })
     }
     if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.' })
-    if ([sellingPrice, wholesalePrice, costPrice].some((value) => value === 'invalid' || (typeof value === 'number' && value < 0))) {
+    const priceInvalid = [sellingPrice, wholesalePrice, costPrice].some((value) => value === 'invalid' || (typeof value === 'number' && value < 0))
+    if (priceInvalid) {
       issues.push({ rowNumber, code: 'invalid_price', message: 'Prices must be non-negative numbers.' })
+    }
+
+    // The receipt gate, DIRECT mode only. A reconcile row's number is a
+    // counted TOTAL, so whether it puts stock in is a function of live stock
+    // this screen has not read -- guessing would flag rows the server accepts.
+    // The Worker gates every mode; this half only warns early, and it defers
+    // the SUPPLIER question the same way the import dispatcher does, because a
+    // row may top up a lot that is already attributed and only the server can
+    // see that. What it can settle here is this receipt's own cost.
+    // An unreadable price is already reported above; re-reporting it as a gate
+    // refusal would count one bad cell as two rows needing attention.
+    const action = clean(read('action'))
+    const putsStockIn = mode === 'direct' && !priceInvalid && !SHEET_SALE_ACTION.test(action)
+      && ((typeof shop === 'number' && shop > 0) || (typeof warehouse === 'number' && warehouse > 0))
+    if (putsStockIn) {
+      const gate = stockReceiptGateCode({
+        isStockIn: true,
+        lotAttributionDeferred: true,
+        unitCostUsd: costPrice,
+        attribution: 'receipt',
+      })
+      if (gate) issues.push({ rowNumber, code: 'receipt_gate', message: STOCK_RECEIPT_GATE_FALLBACKS[gate], gateCode: gate })
     }
 
     rows.push({
@@ -161,7 +198,7 @@ export function parseUnifiedStockRows(sourceRows: readonly UnifiedStockSourceRow
       shop: typeof shop === 'number' && shop >= 0 ? shop : null,
       warehouse: typeof warehouse === 'number' && warehouse >= 0 ? warehouse : null,
       date: date || '',
-      action: clean(read('action')),
+      action,
       sellingPrice: typeof sellingPrice === 'number' && sellingPrice >= 0 ? sellingPrice : null,
       wholesalePrice: typeof wholesalePrice === 'number' && wholesalePrice >= 0 ? wholesalePrice : null,
       costPrice: typeof costPrice === 'number' && costPrice >= 0 ? costPrice : null,

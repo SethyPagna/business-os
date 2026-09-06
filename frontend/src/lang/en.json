@@ -641,6 +641,7 @@
   "stock_import_help": "One sheet for add, sale, and reconciliation. The system decides what each row does from its numbers, date and the action column — no separate templates.",
   "stock_import_issue_count": "{count} row(s) need attention",
   "stock_import_issue_note": "they are skipped with a reason in the finished report; the rest import normally.",
+  "stock_import_receipt_gate_note": "{count} row(s) add stock with no cost in the file — fill the cost column so each stock-in records what you paid.",
   "stock_import_mode": "How to read the numbers",
   "stock_import_mode_direct": "Direct — the number IS the change",
   "stock_import_mode_direct_help": "shop/warehouse are how much to add or sell; the action column says which.",

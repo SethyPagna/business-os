@@ -70,6 +70,10 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   const [fileName, setFileName] = useState('')
   const [rowCount, setRowCount] = useState(0)
   const [issueCount, setIssueCount] = useState(0)
+  // Rows the stock-in receipt gate will refuse (N14-D). Counted apart from the
+  // generic issues because the remedy is its own -- fill the cost column --
+  // and it can be done before the file is ever uploaded.
+  const [gateCount, setGateCount] = useState(0)
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -78,6 +82,32 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   const aliveRef = useRef(true)
 
   useEffect(() => () => { aliveRef.current = false }, [])
+
+  // The sheet is re-read whenever the file OR the mode changes: the receipt
+  // gate is a DIRECT-mode question (a reconcile number is a counted total, not
+  // a change, so only the server knows which way it moves stock), and the
+  // counts must follow the operator's current choice rather than whichever
+  // mode happened to be selected when the file was picked.
+  useEffect(() => {
+    if (!csvText.trim()) { setRowCount(0); setIssueCount(0); setGateCount(0); return }
+    try {
+      const result = parseUnifiedStockRows(parseCsvRows(csvText) as Record<string, unknown>[], mode)
+      setRowCount(result.rows.length)
+      // The two amber lines PARTITION the issues: a missing cost has its own
+      // remedy (fill one column) and its own line, so counting it in "rows
+      // need attention" as well would report the same rows twice and make a
+      // one-column fix look like two problems.
+      setIssueCount(result.issues.filter((issue) => issue.code !== 'receipt_gate').length)
+      setGateCount(result.issues.filter((issue) => issue.code === 'receipt_gate').length)
+    } catch (err) {
+      setRowCount(0)
+      setIssueCount(0)
+      setGateCount(0)
+      setError(err instanceof Error ? err.message : tr('stock_import_read_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។'))
+    }
+    // tr is stable enough for a message string; the parse depends only on these.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvText, mode])
 
   const readFile = async (file: File) => {
     setError('')
@@ -88,10 +118,6 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
       if (!content.trim()) { setError(tr('stock_import_empty_file', 'That file has no rows.', 'ឯកសារនោះគ្មានជួរទេ។')); return }
       setCsvText(content)
       setFileName(String(parsed?.name || file.name || 'stock-actions.csv'))
-      const rows = parseCsvRows(content)
-      const result = parseUnifiedStockRows(rows as Record<string, unknown>[])
-      setRowCount(result.rows.length)
-      setIssueCount(result.issues.length)
     } catch (err) {
       setError(err instanceof Error ? err.message : tr('stock_import_read_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។'))
     } finally {
@@ -199,6 +225,19 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
             previewHeadingLabel={tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', String(rowCount))}
           />
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.xlsx,.xls,.xlsm" className="hidden" onChange={handlePick} />
+
+          {gateCount > 0 ? (
+            <div className="inline-flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {tr(
+                  'stock_import_receipt_gate_note',
+                  '{count} row(s) add stock with no cost in the file — fill the cost column so each stock-in records what you paid.',
+                  '{count} ជួរដេកបន្ថែមស្តុកដោយគ្មានថ្លៃដើមក្នុងឯកសារ — សូមបំពេញជួរឈរថ្លៃដើម ដើម្បីឲ្យស្តុកចូលនីមួយៗកត់ត្រាថ្លៃដែលអ្នកបានបង់។',
+                ).replace('{count}', String(gateCount))}
+              </span>
+            </div>
+          ) : null}
 
           {issueCount > 0 ? (
             <div className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
