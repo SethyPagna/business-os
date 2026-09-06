@@ -160,7 +160,15 @@ check('the fully client-side pickers rank their own results', () => {
   const supplierReturn = read('../src/components/returns/NewSupplierReturnModal.tsx')
   assert.match(supplierReturn, /sortBySearchRelevance\(/,
     'the supplier-return picker reads /api/inventory/summary, which takes no search term and answers name-A-Z')
-  assert.match(supplierReturn, /normalizeBarcodeKey\(product\.barcode\)/,
+  // Was `normalizeBarcodeKey(product.barcode) === barcodeKey` -- ONE key
+  // compared against ONE key, which folds padding only. It cannot see the
+  // UPC-E/UPC-A pair, whose two spellings of one article share no substring
+  // at all (2026-09-06 leading-zero scan report). barcodeKeysMatch compares
+  // the full key SETS, so this box matches whichever spelling the decoder
+  // happens to hand back. Behaviour is pinned in
+  // tests/barcodeLeadingZeroScan.test.ts; this stays a source-shape guard
+  // that the picker probes the barcode through the shared kernel at all.
+  assert.match(supplierReturn, /barcodeKeysMatch\(raw, product\.barcode\)/,
     'a scan into the supplier-return box must be able to match a barcode at all')
   assert.match(supplierReturn, /\$\{product\.barcode \|\| ''\}/,
     'barcode must be in that picker haystack, not just in its exact-match probe')

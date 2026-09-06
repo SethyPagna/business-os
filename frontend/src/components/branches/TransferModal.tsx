@@ -665,7 +665,13 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     // ordering contract (utils/searchMatch.ts), so this picker and the
     // single-mode server-backed one above now agree on what comes first.
     return sortBySearchRelevance(
-      inStock.filter((product) => fuzzyTextMatches([product.name, product.sku, product.barcode].join(' '), query)),
+      // Fields passed SEPARATELY, never pre-joined. A barcode only means
+      // anything as a whole code: flattened into one "name sku barcode"
+      // sentence it stops being a discrete code, and the leading-zero /
+      // UPC-E fold in searchMatch.ts can no longer see it. That is how a
+      // scan of '0885909950805' silently dropped the row this picker holds
+      // as '885909950805' -- the server matched it, the client threw it away.
+      inStock.filter((product) => fuzzyTextMatches([product.name, product.sku, product.barcode], query)),
       query,
     )
   }, [multiProducts, debouncedSearch, showAllProducts, showSelectedOnly, selectedQuantities])

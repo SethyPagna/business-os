@@ -157,7 +157,14 @@ for (const [name, source] of endOfPanelPrimaries.map(([n, s]) => [n, s] as [stri
   )
 }
 assert.doesNotMatch(transfer, /role="tablist" aria-label="Transfer mode"/, 'branch transfers must not restore separate single and multiple modes')
-assert.match(transfer, /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\]\.join\(' '\), query\)/, 'the unified transfer picker must search product name, SKU, and barcode')
+// The three fields are still the haystack, but they are now handed over
+// SEPARATELY rather than pre-joined into one string. A barcode only means
+// anything as a whole code: flattened into a "name sku barcode" sentence it
+// stops being a discrete code and the leading-zero / UPC-E fold in
+// searchMatch.ts can no longer see it (2026-09-06 leading-zero scan
+// report -- a UPC-E scan matched nothing through the joined form).
+assert.match(transfer, /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\], query\)/, 'the unified transfer picker must search product name, SKU, and barcode')
+assert.doesNotMatch(transfer, /fuzzyTextMatches\(\[[^\]]*\]\.join\(/, 'the transfer picker must not pre-join its haystack -- that hides the barcode from the shared code fold')
 assert.match(transfer, /const catalogRequested = Boolean\(debouncedSearch\.trim\(\)\) \|\| showAllProducts[\s\S]*if \(!catalogRequested\) return undefined/, 'the transfer picker must not load the entire catalog before search or Show all products')
 assert.match(transfer, /Search products, or use Show all products to list the whole branch/, 'the initially empty transfer picker must explain how to reveal products')
 assert.match(transfer, /entireBranchAfterLoadRef\.current = true/, 'Transfer entire branch must still work when the catalog has not loaded yet')
