@@ -14,7 +14,7 @@
 // The table is discriminating by construction: every prior implementation
 // answered "" for the whole of it (there was no gate at all), and the three
 // fabricating implementations this change removes -- `product.cost_price_usd
-// || 0` (BranchStockAdjuster), `product.purchase_price_usd || 0`
+// || 0` (the old per-branch adjust form), `product.purchase_price_usd || 0`
 // (BulkAddStockModal) and `expanded('unit_cost_usd') ?? product?.
 // cost_price_usd` (lib/stockSession.ts) -- would each turn the four
 // cost_required rows into a silent 0, i.e. into free goods nobody declared.

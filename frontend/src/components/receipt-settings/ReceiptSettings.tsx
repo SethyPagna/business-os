@@ -299,7 +299,7 @@ function ReceiptQrSettingsTab({ tpl, setT, t }: ReceiptQrSettingsTabProps) {
       <Section title={t('sales_receipt_title') || '80 × 50mm ABA Sales Receipt'}>
         <Toggle
           label={t('sales_receipt_enabled') || 'Use compact 80 × 50mm sales receipt'}
-          desc={t('sales_receipt_enabled_desc') || 'Shows shop and customer details, item count, total, ABA payment details, and an optional payment note.'}
+          desc={t('sales_receipt_enabled_desc') || 'Shows shop and customer details, total, ABA payment details, and an optional payment note.'}
           value={tpl.sales_receipt_enabled === true}
           onChange={(value) => setT('sales_receipt_enabled', value)}
         />

@@ -1003,8 +1003,8 @@ export default function AuditLog() {
 
         {selectedLogs.length > 0 ? (
           <div className="bulk-toolbar flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm shadow-sm">
-            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedLogs.length} selected</span>
-            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportRows(selectedLogs, 'audit-log-selected')}>Export selected</button>
+            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedLogs.length} {copy('selected', 'Selected', 'បានជ្រើស')}</span>
+            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportRows(selectedLogs, 'audit-log-selected')}>{copy('export_selected_logs', 'Export selected logs', 'នាំចេញកំណត់ហេតុដែលបានជ្រើស')}</button>
             <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
               {t('clear') || 'Clear'}
             </button>
@@ -1040,7 +1040,7 @@ export default function AuditLog() {
                     className="h-4 w-4 rounded"
                     checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
                     onChange={(event) => toggleSelectAll(event.target.checked)}
-                    aria-label="Select all audit logs"
+                    aria-label={t('select_all') || 'Select all'}
                   />
                 </th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{copy('entry', 'Entry', 'លំដាប់')}</th>
