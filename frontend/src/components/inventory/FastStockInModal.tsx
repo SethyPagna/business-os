@@ -348,8 +348,14 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setPicked(candidate)
     setCandidates([])
     setQuery(String(candidate.name || ''))
-    const cost = Number(candidate.cost_price_usd)
-    if (Number.isFinite(cost) && cost > 0) setUnitCost(String(cost))
+    // A catalog cost of zero is a known value (free goods), not an unknown
+    // value. Keep the canonical cost field first, with the legacy purchase
+    // field as a compatibility fallback for older products.
+    const rawCost = candidate.cost_price_usd != null
+      ? candidate.cost_price_usd
+      : candidate.purchase_price_usd
+    const cost = Number(rawCost)
+    if (rawCost != null && Number.isFinite(cost) && cost >= 0) setUnitCost(String(cost))
     setCreatePriceVariant(false)
     setScannedBarcode('')
   }
@@ -804,7 +810,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode === 'remove' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_6rem_8rem_1fr]'}`}>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('set_to', 'Set to') : tr('quantity', 'Qty')}</span><input type="number" min="1" step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
                 {mode !== 'remove' ? <>
-                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.01" className="input text-sm" required disabled={freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
+                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('cost_price_usd', 'Cost price $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.01" className="input text-sm" required disabled={freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
                   const next = event.target.value
                   setUnitCost(next)
                   setCreatePriceVariant(costChanged(picked, next))
