@@ -146,7 +146,11 @@ await test('ready cards retain existing financial formulas and distinct expense 
   // The hint is the sentence PLUS the equation with this period's numbers,
   // and the equation has to close on the value the card shows.
   const profitHint = card(view, 'profit').hint!
-  assert.match(profitHint, /^Gross profit = revenue − COGS \+ delivery fees charged − courier cost \(including Not Paid\)\./)
+  // ONE WORD (owner, Sep 6 2026): this parenthetical used to read "(including
+  // Not Paid)" -- a fifth name for the credit cohort, printed on the very hint
+  // whose job is to say the cohort is inside this figure.
+  assert.match(profitHint, /^Gross profit = revenue − COGS \+ delivery fees charged − courier cost \(credit sales included\)\./)
+  assert.doesNotMatch(profitHint, /not paid|unpaid|pending|awaiting/i)
   assert.equal(profitHint.split('\n').pop(), 'Gross profit $28.00 = Revenue $42.00 − COGS $12.00 − Delivery paid to couriers $2.00')
   assert.equal(equationResidual(28, profitTerms(sales().totals)), 0, 'the printed profit equation foots')
   const revenueHint = card(view, 'revenue').hint!

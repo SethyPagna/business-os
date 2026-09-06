@@ -1077,7 +1077,7 @@ export default function SaleDetailModal({
                   <DetailRow label={t('payment_method') || 'Payment method'}>
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">
-                        {translateOr('credit_awaiting_payment', 'Credit — awaiting payment', 'ឥណទាន — រង់ចាំការទូទាត់')}
+                        {translateOr('credit_awaiting_payment', 'Credit', 'ឥណទាន')}
                       </span>
                       <button
                         type="button"

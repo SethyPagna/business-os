@@ -803,7 +803,12 @@ function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): Statem
  */
 function pendingLines(t: ReportTotals, line: LineFactory): StatementLine[] {
   if (num(t.pending_tx_count) <= 0 && t.pending_revenue_usd === 0) return []
-  return [line('pending_revenue', 'rpt_pending_credit', 'Not Paid', 'memo', 'pending', ['rpt_hint_pending', 'Included in sales, revenue, and profit, but excluded from collected cash.'])]
+  // ONE WORD (owner, Sep 6 2026). Only THIS line's two fallbacks are updated
+  // here: tests/statsFormulas.test.ts binds `rpt_hint_pending`'s fallback to
+  // the pack value byte for byte, so leaving it behind would ship two
+  // sentences for one figure. The other 'Not Paid' fallbacks in this folder
+  // belong to the reports lane and are handed off, not taken.
+  return [line('pending_revenue', 'rpt_pending_credit', 'Credit', 'memo', 'pending', ['rpt_hint_pending', 'Credit is already inside sales, revenue and profit. It is left out of collected cash only.'])]
 }
 
 /**

@@ -12,7 +12,7 @@ export const STATUS_COLORS: Record<SaleStatus, string> = {
 
 export const STATUS_LABELS: Record<SaleStatus, string> = {
   completed: 'Completed',
-  awaiting_payment: 'Awaiting Payment',
+  awaiting_payment: 'Credit',
   awaiting_delivery: 'Awaiting Delivery',
   cancelled: 'Cancelled',
   partial_return: 'Partial Return',
