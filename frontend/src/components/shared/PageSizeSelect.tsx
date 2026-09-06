@@ -38,6 +38,20 @@ export interface PageSizeSelectProps {
   // options when tapped -- passes the label here. Selection behaviour is
   // unchanged: picking an option still calls onChange with the size.
   buttonContent?: ReactNode
+  // Drop the default boxed chrome (border, background, radius, padding,
+  // shadow, text size) and keep only the layout + disabled behaviour, so the
+  // caller's own buttonClassName is the whole appearance. Needed by the
+  // storefront pager, whose per-page trigger IS the "/ 72" count printed
+  // inline inside the pill: a second bordered white box on that row is
+  // exactly what the owner struck out.
+  //
+  // This has to be a prop rather than more classes on buttonClassName.
+  // Appending `border-0 bg-transparent text-xs` does not reliably beat
+  // `border bg-white text-sm`: two Tailwind utilities for the same property
+  // have equal specificity and resolve by CSS source order, which is the
+  // generated stylesheet's order, not the order they appear in the class
+  // attribute. Removing the defaults is the only deterministic form.
+  unstyled?: boolean
 }
 
 export default function PageSizeSelect({
@@ -57,6 +71,7 @@ export default function PageSizeSelect({
   allowCustom = true,
   buttonContent,
   hideCaret = false,
+  unstyled = false,
 }: PageSizeSelectProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0, width: 160 })
@@ -173,7 +188,9 @@ export default function PageSizeSelect({
       <button
         id={id}
         type="button"
-        className={`inline-flex min-w-0 items-center justify-between gap-2 rounded-[0.95rem] border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-900 dark:focus:border-blue-500 dark:focus:ring-blue-950 ${buttonClassName}`.trim()}
+        className={`${unstyled
+          ? 'inline-flex min-w-0 items-center justify-center outline-none transition disabled:cursor-not-allowed disabled:opacity-50'
+          : 'inline-flex min-w-0 items-center justify-between gap-2 rounded-[0.95rem] border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-900 dark:focus:border-blue-500 dark:focus:ring-blue-950'} ${buttonClassName}`.trim()}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}

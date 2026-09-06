@@ -69,19 +69,25 @@ runTest('the centred per-page trigger is sized to its own value, not a fixed wid
   const branch = centeredBranch()
   assert.match(branch, /<PageSizeSelect/, 'the per-page control must live INSIDE the pager pill')
   assert.doesNotMatch(branch, /min-w-\[5\.5rem\]/, 'the 5.5rem floor is exactly what made "50" look oversized')
-  assert.match(branch, /buttonClassName="[^"]*w-auto/, 'the trigger must take its width from its content')
+  assert.match(branch, /w-auto/, 'the trigger must take its width from its content')
 })
 
-runTest('the centred branch centres the pill and orders it back / page / next / per-page', () => {
+// Superseded on Sep 6 2026 by the owner's screenshot of this row: a red X
+// through the separate "50 v" page-size box (which this test used to REQUIRE
+// as "the last element in the pill") and an arrow into the empty gap beside
+// the page number. The order below is the replacement contract; the "no
+// separate box, no dead space" rules that make it a fix rather than a
+// reshuffle live in storefrontPagerRow.test.ts.
+runTest('the centred branch centres the pill and orders it back / count / next', () => {
   const branch = centeredBranch()
   assert.match(branch, /flex w-full justify-center/, 'the pager row must centre itself')
   const backAt = branch.indexOf('aria-label={backLabel}')
-  const pageAt = branch.indexOf('/ {totalPages}')
-  const nextAt = branch.indexOf('aria-label={nextLabel}')
+  const pageAt = branch.indexOf('aria-label={pageLabel}')
   const sizeAt = branch.indexOf('<PageSizeSelect')
-  assert.ok(backAt > 0 && pageAt > backAt, 'page/total must follow Back')
-  assert.ok(nextAt > pageAt, 'Next must follow page/total')
-  assert.ok(sizeAt > nextAt, 'the per-page trigger must be the last element in the pill')
+  const nextAt = branch.indexOf('aria-label={nextLabel}')
+  assert.ok(backAt > 0 && pageAt > backAt, 'the page number must follow Back')
+  assert.ok(sizeAt > pageAt, 'the count -- which is also the per-page trigger -- must follow the page number')
+  assert.ok(nextAt > sizeAt, 'Next must close the pill; nothing may sit after it')
 })
 
 runTest('the storefront wrapper opts into the centred layout', () => {

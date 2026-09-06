@@ -149,18 +149,46 @@ export default function PaginationControls({
   if (!state.visible) return null
 
   if (layout === 'centered') {
-    // Storefront pager: [< Back] [page / total] [Next >] [50 v], centred, and
-    // mounted identically above and below the grid.
+    // Storefront pager: ONE centred pill, "< Back  1 / 72  Next >", mounted
+    // identically above and below the grid.
     //
-    // The per-page trigger carries no width floor and no separate caption --
-    // the "per page" wording survives as its accessible name, which is where
-    // it belongs for a control whose visible value is already the number of
-    // items. Nothing here prints the item range, so the retired "Showing"
-    // string has no remaining consumer.
-    const arrowButtonClass = 'inline-flex h-8 shrink-0 items-center gap-0.5 px-2.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    // Owner, Sep 6 2026, with a phone screenshot of this row: a red X through
+    // the separate "50 v" page-size box that used to sit after Next, and an
+    // arrow from it into the empty gap left between "< back" and "1 / 72".
+    // Two defects on one row, and this branch fixes both at their causes.
+    //
+    // 1. THE BOX. The page size is no longer a control of its own. It is a
+    //    small menu opened FROM THE COUNT: the "/ 72" IS the trigger, drawn
+    //    as plain inline text (`unstyled`, no caret) so the row carries one
+    //    pill and not a pill plus a box. That is the idiom the compact
+    //    `rangeAsPageSize` branch below already uses, where the "1-20" item
+    //    range is itself the per-page dropdown. Nothing is lost: "per page"
+    //    remains the trigger's accessible name, the options are still the
+    //    caller's presets, and the chosen size still flows out through
+    //    onPageSizeChange, so the storefront keeps persisting it exactly as
+    //    before. A caller that passes no onPageSizeChange gets the same
+    //    count as static text.
+    //
+    // 2. THE GAP. It was structural, not cosmetic: a fixed `w-9` page input
+    //    (36px of box around a one-character page number), a `gap-1` and a
+    //    `px-1` around it, and a `pr-1` on the pill reserving room for the
+    //    box that has now gone. The input is sized from its own digit count
+    //    instead, so "1" and "108" both sit snug, and the pill's padding is
+    //    carried by the elements themselves. Nothing on the row can wrap:
+    //    every child is shrink-0 or min-w-0, and the Back/Next words collapse
+    //    to icons below sm.
+    //
+    // Rows are h-10 (40px) rather than the admin's 32: this is the phone-
+    // first shopping surface, and 36px arrows were under the tap-target
+    // floor on the one page the whole catalogue is browsed through.
+    const arrowButtonClass = 'inline-flex h-10 shrink-0 items-center gap-0.5 px-3 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    const countClass = 'h-10 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-10 text-slate-500 dark:text-slate-400'
+    // The page box takes its width from what it prints. `ch` is the width of
+    // "0" in the current font, which is the right unit for a numeric field.
+    const pageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
     return (
       <div className={`flex w-full justify-center ${className}`}>
-        <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white pr-1 text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+        <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
           <button
             type="button"
             className={`${arrowButtonClass} rounded-l-full`}
@@ -171,7 +199,7 @@ export default function PaginationControls({
             <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
             <span className="hidden sm:inline">{backLabel}</span>
           </button>
-          <div className="inline-flex min-w-0 shrink items-center gap-1 px-1">
+          <div className="inline-flex min-w-0 shrink items-center">
             {editablePageInput ? (
               <>
                 <span className="sr-only">{pageLabel}</span>
@@ -179,7 +207,8 @@ export default function PaginationControls({
                   type="text"
                   inputMode="numeric"
                   aria-label={pageLabel}
-                  className="h-7 w-9 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                  style={{ width: `calc(${pageDigits}ch + 0.5rem)` }}
+                  className="h-10 min-w-0 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
                   value={pageDraft}
                   onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                   onBlur={(event) => commitPageDraft(event.currentTarget.value)}
@@ -187,13 +216,30 @@ export default function PaginationControls({
                 />
               </>
             ) : (
-              <span className="px-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
+              <span className="px-1 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
             )}
-            <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">/ {totalPages}</span>
+            {onPageSizeChange ? (
+              <PageSizeSelect
+                value={safePageSize}
+                options={pageSizeOptions}
+                onChange={(nextValue) => onPageSizeChange?.(nextValue)}
+                ariaLabel={perPageLabel}
+                allowCustom={editablePageSizeInput}
+                hideCaret
+                unstyled
+                buttonContent={`/ ${totalPages}`}
+                className="shrink-0"
+                buttonClassName={`${countClass} w-auto rounded-full hover:bg-slate-100 dark:hover:bg-slate-800`}
+                menuClassName="min-w-[7rem]"
+                optionClassName="text-xs"
+              />
+            ) : (
+              <span className={countClass}>/ {totalPages}</span>
+            )}
           </div>
           <button
             type="button"
-            className={arrowButtonClass}
+            className={`${arrowButtonClass} rounded-r-full`}
             disabled={nextDisabled}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
@@ -201,19 +247,6 @@ export default function PaginationControls({
             <span className="hidden sm:inline">{nextLabel}</span>
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
-          {onPageSizeChange ? (
-            <PageSizeSelect
-              value={safePageSize}
-              options={pageSizeOptions}
-              onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-              ariaLabel={perPageLabel}
-              allowCustom={editablePageSizeInput}
-              className="shrink-0"
-              buttonClassName="h-7 w-auto gap-1 rounded-full border-slate-200 bg-slate-100 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              menuClassName="min-w-[7rem]"
-              optionClassName="text-xs"
-            />
-          ) : null}
         </div>
       </div>
     )
