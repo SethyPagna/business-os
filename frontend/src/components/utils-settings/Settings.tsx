@@ -36,6 +36,15 @@ import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+// The one low-stock rule -- the switch/amount/scope this page writes are read
+// back by every badge, count, filter and alert through this module (and its
+// byte-identical Worker twin), including the validator both sides run.
+import {
+  DEFAULT_LOW_STOCK_THRESHOLD,
+  MAX_LOW_STOCK_THRESHOLD,
+  resolveLowStockConfig,
+  validateLowStockSettingsWrite,
+} from '../../utils/lowStockSettings.ts'
 import { useMobileSectionNavMode, writeMobileSectionNavMode, MOBILE_SECTION_NAV_SETTINGS_KEY, type MobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -627,6 +636,13 @@ export default function Settings() {
     }
   }, [user])
 
+  // The low-stock alert switch/amount/scope, resolved through the one rule the
+  // rest of the app reads them by, so this form can never render a state the
+  // badges would disagree with (an absent switch is ON, an unparsable amount
+  // falls back to the constant default).
+  const lowStockConfig = useMemo(() => resolveLowStockConfig(form), [form])
+  const lowStockAlertEnabled = lowStockConfig.enabled
+
   useEffect(() => {
     if (!isAdmin) return
     void getTelegramStatus().then(setTelegramStatus).catch(() => setTelegramStatus(null))
@@ -954,6 +970,23 @@ export default function Settings() {
     const sanitizedForm = {
       ...form,
       ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, toStringValue(settings.ui_app_favicon_image)),
+    }
+    // Frontend half of the low-stock write guard: the SAME function the Worker
+    // runs on POST /api/settings (lowStockSettings.ts twins), so a bad amount
+    // is named here against the field the owner just typed in instead of
+    // bouncing back as a 400 with the whole form unsaved. Not a clamp -- the
+    // wrong number is refused, never quietly turned into a plausible one.
+    const lowStockError = validateLowStockSettingsWrite(sanitizedForm)
+    if (lowStockError) {
+      finishSingleAction(settingsSaveInFlightRef)
+      setSavingSettings(false)
+      notify(
+        lowStockError === 'invalid_low_stock_threshold'
+          ? t('low_stock_threshold_invalid')
+          : t('low_stock_alert_invalid'),
+        'error',
+      )
+      return
     }
     try {
       const result = await saveSettings(sanitizedForm, {
@@ -1304,6 +1337,77 @@ export default function Settings() {
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('pos_wholesale_auto_min_qty_desc')}</p>
             </div>
           ) : null}
+        </SettingsSection>
+        ) : null}
+
+        {/* The owner's low-quantity alert (Sep 6 2026). One row: the switch,
+            the amount it alerts at, and which products that amount applies to.
+            Every explanation is an InfoHint rather than a paragraph, and the
+            amount/scope grey out while the alert is off instead of vanishing,
+            so the row never changes height as it is toggled. The same three
+            values are read by the Dashboard card, the Products/Inventory/
+            Branches badges and filters, the POS grid, the bell and Telegram
+            (utils/lowStockSettings.ts and its Worker twin).
+
+            Gated on canEditSettings, not isAdmin: these three keys carry no
+            settings bucket of their own, so the Worker admits them on the
+            plain "settings" grant (routes/settings.ts's POST falls back to
+            hasPermission(user, 'settings')). Gating the row on isAdmin would
+            hide from a manager holding full Settings a control the API would
+            accept from them -- the same rule the Shift registration row
+            above already follows. isAdmin implies tier 'full', so an admin
+            keeps it. */}
+        {canEditSettings && showSettingsSection('business') ? (
+        <SettingsSection title={t('stock_alerts')}>
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <label className="flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 dark:border-gray-700 dark:bg-gray-800/70">
+              <input
+                type="checkbox"
+                checked={lowStockAlertEnabled}
+                onChange={(event) => setValue('low_stock_alert_enabled', event.target.checked ? 'true' : 'false')}
+              />
+              <span className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('low_stock_alert_enabled')}</span>
+              <InfoHint label={t('low_stock_alert_enabled')} text={t('low_stock_alert_enabled_hint')} />
+            </label>
+            <div className="min-w-0">
+              <label htmlFor="settings-low-stock-threshold" className="mb-1 flex items-center gap-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+                {t('low_stock_threshold_default')}
+                <InfoHint label={t('low_stock_threshold_default')} text={t('low_stock_threshold_default_hint')} />
+              </label>
+              <input
+                id="settings-low-stock-threshold"
+                name="low_stock_threshold_default"
+                className="input h-10 w-24"
+                type="number"
+                min="0"
+                max={MAX_LOW_STOCK_THRESHOLD}
+                step="1"
+                disabled={!lowStockAlertEnabled}
+                value={form.low_stock_threshold_default ?? String(DEFAULT_LOW_STOCK_THRESHOLD)}
+                onChange={(event) => setValue('low_stock_threshold_default', event.target.value)}
+              />
+            </div>
+            <div className="min-w-0">
+              <label htmlFor="settings-low-stock-mode" className="mb-1 flex items-center gap-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+                {t('low_stock_threshold_mode')}
+                <InfoHint label={t('low_stock_threshold_mode')} text={t('low_stock_threshold_mode_hint')} />
+              </label>
+              <AppSelect
+                id="settings-low-stock-mode"
+                name="low_stock_threshold_mode"
+                value={lowStockConfig.mode}
+                onChange={(nextValue) => setValue('low_stock_threshold_mode', nextValue)}
+                ariaLabel={t('low_stock_threshold_mode')}
+                disabled={!lowStockAlertEnabled}
+                buttonClassName="h-10"
+                menuClassName="min-w-[14rem]"
+                options={[
+                  { value: 'product', label: t('low_stock_threshold_mode_product') },
+                  { value: 'global', label: t('low_stock_threshold_mode_global') },
+                ]}
+              />
+            </div>
+          </div>
         </SettingsSection>
         ) : null}
 

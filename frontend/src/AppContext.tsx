@@ -28,12 +28,13 @@ import {
   SyncContext,
   isBrokenLocalizedString,
   useApp,
+  useLowStockConfig,
   useSync,
   useT,
   type AppContextCoreValue,
 } from './app/AppContextCore.tsx'
 
-export { isBrokenLocalizedString, useApp, useSync, useT }
+export { isBrokenLocalizedString, useApp, useLowStockConfig, useSync, useT }
 
 /**
  * Global application context.
@@ -65,6 +66,12 @@ type AppSettings = AppRecord & {
   exchange_rate?: string | number
   language?: string
   login_session_duration?: string
+  // The owner's low-stock alert switch/amount/scope (utils/lowStockSettings.ts).
+  // Riding on this map is what puts them in the offline snapshot too, so the
+  // till colours its grid the same way with no connection.
+  low_stock_alert_enabled?: string
+  low_stock_threshold_default?: string | number
+  low_stock_threshold_mode?: string
   theme?: string
   ui_accent_color?: string
   ui_border_radius?: string

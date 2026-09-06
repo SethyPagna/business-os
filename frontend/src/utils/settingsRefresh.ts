@@ -61,6 +61,15 @@ const SETTINGS_CHANNEL_RULES: SettingsChannelRule[] = [
     channels: ['settings', 'dashboard', 'users'],
   },
   {
+    // The low-stock switch/amount/scope re-colour a badge, a count and a
+    // filter on five open pages at once -- the till included, same reasoning
+    // as the wholesale rule above. Without these channels an owner would turn
+    // the alert off in Settings and watch the Dashboard card, the Products
+    // list and the POS grid keep showing amber until each was reloaded.
+    keys: ['low_stock_alert_enabled', 'low_stock_threshold_mode', 'low_stock_threshold_default'],
+    channels: ['settings', 'products', 'inventory', 'branches', 'pos', 'dashboard', 'notifications'],
+  },
+  {
     keys: ['login_session_duration'],
     channels: ['settings', 'users'],
   },

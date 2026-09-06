@@ -98,8 +98,17 @@ const productWrites = loadReal('lib/productWrites.ts', {
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ products: true }) }
 
+// Sep 6 2026: the owner's low-stock alert setting reaches this module through
+// lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
+// asserted below are the ones it composes -- while the settings READ answers
+// the shipped default, there being no settings row in this harness. The rule
+// itself is proven in scripts/test-low-stock-settings-pure.cjs.
+const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
+const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
+
 const productsRoute = loadReal('routes/products.ts', {
   '../lib/db': { getDb: () => dbShim },
+  '../lib/lowStockSettings': lowStockStub,
   // routes/products.ts buckets the sales drill-down in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),

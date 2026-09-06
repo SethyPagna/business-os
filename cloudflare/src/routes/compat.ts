@@ -12,6 +12,7 @@ import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
+import { loadLowStockConfig, lowStockThresholdSql } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
@@ -220,6 +221,12 @@ function emptyAnalytics() {
 
 async function dashboardSummary(env: Env, query: Record<string, string>) {
   const db = getDb(env)
+  // The owner's low-stock switch/amount/scope, read once and used by BOTH the
+  // badge counts (getFamilyStockStats) and the card's list below them -- the
+  // two are rendered together on Dashboard.tsx, so they must be built from
+  // the same number or the card contradicts its own heading.
+  const lowStockConfig = await loadLowStockConfig(env)
+  const lowThresholdSql = lowStockThresholdSql(lowStockConfig, 'p.low_stock_threshold')
   const { startDate, endDate } = dateRange(query)
   const branchId = query.branchId || null
   const params = branchId ? { startDate, endDate, branchId } : { startDate, endDate }
@@ -266,6 +273,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     `).get(params),
     getFamilyStockStats({
       db,
+      lowStock: lowStockConfig,
       joinSql: '',
       whereSql: 'WHERE p.is_active = 1',
       params,
@@ -274,7 +282,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     db.prepare(`
       SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
       FROM products p
-      WHERE p.is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)
+      WHERE p.is_active = 1 AND COALESCE(stock_quantity, 0) <= ${lowThresholdSql} AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)
       ORDER BY stock_quantity ASC, lower(name) ASC
       LIMIT 10
     `).all(params),

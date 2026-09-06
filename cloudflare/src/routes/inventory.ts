@@ -5,6 +5,7 @@ import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
+import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
@@ -285,7 +286,7 @@ export async function attachInventoryProductMetrics(
   }
 }
 
-function appendInventoryProductFilters(query: InventoryFilterQuery) {
+function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: LowStockConfig) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = {}
   const joins: string[] = []
@@ -356,7 +357,7 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
 
   const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
   const stockState = String(query.stockState || query.stock_state || '').toLowerCase()
-  if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)
+  if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
   if (stockState === 'out') where.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)
   if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
 
@@ -415,6 +416,7 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
 
 async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery) {
   const db = getDb(env)
+  const lowStock = await loadLowStockConfig(env)
   // Metadata (brand list + initials bar) always reflects "all initials" --
   // only the initial filter itself is excluded so the bar doesn't collapse
   // to a single letter once one is selected, matching the legacy behavior.
@@ -439,9 +441,9 @@ async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery
   // function doesn't itself track for re-fetch timing.
   const { query: _searchTerm, q: _searchTermAlt, ...structuralQuery } = query
   const metaBase: InventoryFilterQuery = { ...structuralQuery, initial: 'all' }
-  const brandMetaFilters = appendInventoryProductFilters({ ...metaBase, brand: '' })
-  const categoryMetaFilters = appendInventoryProductFilters({ ...metaBase, category: '' })
-  const initialMetaFilters = appendInventoryProductFilters(metaBase)
+  const brandMetaFilters = appendInventoryProductFilters({ ...metaBase, brand: '' }, lowStock)
+  const categoryMetaFilters = appendInventoryProductFilters({ ...metaBase, category: '' }, lowStock)
+  const initialMetaFilters = appendInventoryProductFilters(metaBase, lowStock)
   const sql = (f: ReturnType<typeof appendInventoryProductFilters>) => `WHERE ${f.where.join(' AND ')}`
   const joinSql = (f: ReturnType<typeof appendInventoryProductFilters>) => f.joins.join('\n')
 
@@ -505,7 +507,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
   const includeMetadata = String(query.metadata ?? '1') !== '0'
   const metadataOnly = ['1', 'true', 'yes'].includes(String(query.metadataOnly ?? query.metadata_only ?? '').trim().toLowerCase())
   const db = getDb(env)
-  const filters = appendInventoryProductFilters(query)
+  const filters = appendInventoryProductFilters(query, await loadLowStockConfig(env))
   const { where, joins, params, matchRankSql, matchTierSql } = filters
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
@@ -608,6 +610,7 @@ app.get('/bootstrap', async (c) => {
   const [familyStats, movements, brands, categories, branchRows] = await Promise.all([
     getFamilyStockStats({
       db,
+      lowStock: await loadLowStockConfig(c.env),
       joinSql: '',
       whereSql: 'WHERE p.is_active = 1',
       params: {},
@@ -884,7 +887,8 @@ function buildInventoryFinancialJoinSql(branchScoped: boolean): string {
 // unfiltered totals, just under the field names the frontend expects.
 app.get('/stats', async (c) => {
   const query = c.req.query() as InventoryFilterQuery
-  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query)
+  const lowStock = await loadLowStockConfig(c.env)
+  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query, lowStock)
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
   const branchScoped = Number.isFinite(Number(params.branchId))
@@ -900,7 +904,7 @@ app.get('/stats', async (c) => {
   // per-row (unchanged) since those are real per-variant transaction
   // totals, not a "how many products" count.
   const [familyStats, financialRow] = await Promise.all([
-    getFamilyStockStats({ db, joinSql, whereSql, params, qtyExpr: stockExpr }),
+    getFamilyStockStats({ db, lowStock, joinSql, whereSql, params, qtyExpr: stockExpr }),
     db.prepare(`
       SELECT
         COALESCE(SUM(COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0)), 0) AS net_sold_qty,

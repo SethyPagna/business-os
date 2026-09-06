@@ -121,7 +121,15 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  // Exercise the real bounded grouped shift-expense query, not a D1 stub.
  // Both SQLite and ISO timestamps belong to the same half-open shift.
  sql.exec('ALTER TABLE fees ADD COLUMN created_by INTEGER; UPDATE fees SET created_by=7')
- const telegram=load('lib/telegram.ts',{'./db':{getDb:()=>db},'./businessDateWindow':dates,
+ // Sep 6 2026: the owner's low-stock alert setting reaches this module through
+ // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
+ // asserted below are the ones it composes -- while the settings READ answers
+ // the shipped default, there being no settings row in this harness. The rule
+ // itself is proven in scripts/test-low-stock-settings-pure.cjs.
+ const lowStockRule = load('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
+ const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
+
+ const telegram=load('lib/telegram.ts',{'./lowStockSettings':lowStockStub,'./db':{getDb:()=>db},'./businessDateWindow':dates,
    './salesAnalytics':analytics,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,'./telegramLang':load('lib/telegramLang.ts')})
  const shift={user_id:7,branch_id:2,scope_mode:'per_account',opened_at:'2026-09-04T02:00:00.000Z',closed_at:'2026-09-04T04:00:00.000Z'}
  const initial=await telegram.shiftExpenses({},shift,0)

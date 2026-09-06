@@ -7,9 +7,10 @@
 // /stats endpoint -- all kept computing total_products/in_stock/low_stock/
 // out_of_stock as a plain `COUNT(*) FROM products`, counting every variant
 // row separately (and even counting group-header placeholder rows, which
-// aren't sellable products at all -- see businessMetrics.ts's
-// sellableProductWhere for the same exclusion, applied there but never to
-// these three live endpoints). Net effect: any catalog with grouped/variant
+// aren't sellable products at all -- the same exclusion the dead
+// lib/businessMetrics.ts applied in its own sellableProductWhere, and never
+// to these three live endpoints; that file is gone, this helper is the one
+// place it lives now). Net effect: any catalog with grouped/variant
 // products shows a bigger "total products" on Dashboard/Inventory stat
 // cards than the pagination footer on the listing right below them, and
 // stakeholders comparing the two pages get two different answers to
@@ -33,9 +34,17 @@
 // from the count entirely.
 import type { D1Compat } from './db'
 import { FAMILY_ROOT_KEY_SQL } from './familyPagination'
+import { lowStockThresholdSql, type LowStockConfig } from './lowStockSettings'
 
 export interface FamilyStockStatsOptions {
   db: D1Compat
+  // The owner's low-stock switch/amount/scope (lowStockSettings.ts), read
+  // once per request by the route. REQUIRED rather than defaulted on purpose:
+  // this one helper feeds the Dashboard tile, the Inventory stats block and
+  // the Branches stats, and a default here is exactly how one of those three
+  // would go on counting by the old hardcoded 10 while the list beside it
+  // counted by the owner's number.
+  lowStock: LowStockConfig
   // Extra JOINs beyond the family self-join this helper already adds
   // (e.g. a branch_stock join used by filters). Must only reference `p.`.
   joinSql: string
@@ -61,7 +70,11 @@ export interface FamilyStockStats {
 }
 
 export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promise<FamilyStockStats> {
-  const { db, joinSql, whereSql, params, qtyExpr } = opts
+  const { db, joinSql, whereSql, params, qtyExpr, lowStock } = opts
+  // Alerts off yields '-1' here, so `qty <= low_threshold` matches nothing and
+  // `qty > low_threshold` matches everything: the low_stock bucket empties into
+  // healthy without this query growing a branch, and out_of_stock is untouched.
+  const lowThresholdSql = lowStockThresholdSql(lowStock, 'p.low_stock_threshold')
   const row = await db.prepare(`
     WITH matched AS (
       SELECT
@@ -70,7 +83,7 @@ export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promis
         COALESCE(p.parent_id, 0) AS parent_id,
         ${qtyExpr} AS qty,
         COALESCE(p.out_of_stock_threshold, 0) AS out_threshold,
-        COALESCE(p.low_stock_threshold, 10) AS low_threshold,
+        ${lowThresholdSql} AS low_threshold,
         COALESCE(p.cost_price_usd, 0) AS unit_cost_usd,
         COALESCE(p.cost_price_khr, 0) AS unit_cost_khr
       FROM products p

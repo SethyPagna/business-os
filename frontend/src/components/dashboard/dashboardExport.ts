@@ -3,6 +3,7 @@ import { downloadXLSX } from '../../utils/xlsxExport.ts'
 import { buildStandaloneReportHtml } from '../../utils/exportReports.tsx'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage.ts'
 import { formatPriceNumber } from '../../utils/pricing.ts'
+import { effectiveLowStockThreshold, type LowStockConfig } from '../../utils/lowStockSettings.ts'
 
 type MetricMap = Record<string, number | undefined>
 type Row = Record<string, unknown>
@@ -74,6 +75,11 @@ export interface DashboardExportContext {
   fmtUSD: (value: unknown) => string
   grossSalesLabel: string
   lowStockCount: number
+  // Settings > Stock Alerts, so an exported "Threshold" column is the number
+  // the row was actually judged by -- under 'All products' the per-product
+  // column is not that number, and printing it would explain the colour with
+  // a figure that did not decide it.
+  lowStock: LowStockConfig
   netRevenueLabel: string
   outOfStockCount: number
   periodKpis: SummaryCard[]
@@ -233,7 +239,7 @@ function buildDashboardLowStockRows(ctx: DashboardExportContext): Row[] {
   return (ctx.summary?.low_stock || []).map((p) => ({
     Product: p.name || '',
     Stock: p.stock_quantity || 0,
-    Threshold: p.low_stock_threshold || 0,
+    Threshold: effectiveLowStockThreshold(ctx.lowStock, p.low_stock_threshold),
   }))
 }
 

@@ -72,7 +72,16 @@ const analytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
 })
+// Sep 6 2026: the owner's low-stock alert setting reaches this module through
+// lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
+// asserted below are the ones it composes -- while the settings READ answers
+// the shipped default, there being no settings row in this harness. The rule
+// itself is proven in scripts/test-low-stock-settings-pure.cjs.
+const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
+const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
+
 const telegram = loadReal('lib/telegram.ts', {
+  './lowStockSettings': lowStockStub,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
@@ -484,6 +493,7 @@ const stubDb = {
   },
 }
 const wired = loadReal('lib/telegram.ts', {
+  './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
   './telegramLang': lang,
@@ -528,6 +538,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   statements.length = 0
   const emptyDb = { prepare: (sql) => ({ async all() { return [] }, async get() { return {} } }) }
   const wiredEmpty = loadReal('lib/telegram.ts', {
+    './lowStockSettings': lowStockStub,
     './db': { getDb: () => emptyDb },
     './businessDateWindow': businessDateWindow,
     './telegramLang': lang,
@@ -606,6 +617,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     },
   }
   const wiredMapping = loadReal('lib/telegram.ts', {
+    './lowStockSettings': lowStockStub,
     './db': { getDb: () => mappingDb },
     './businessDateWindow': businessDateWindow,
     './telegramLang': lang,
@@ -649,7 +661,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './db': { getDb: () => ({prepare:()=>({all:async()=>[
       {key:'telegram_chat_id',value:'123'}, {key:'telegram_automation_enabled',value:'1'},
     ]})}) },
-    './businessDateWindow':businessDateWindow,'./telegramLang':lang,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,'./salesAnalytics':analytics,
+    './businessDateWindow':businessDateWindow,'./telegramLang':lang,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,'./salesAnalytics':analytics,'./lowStockSettings':lowStockStub,
   })
   const originalFetch=global.fetch; const sent=[]
   try {

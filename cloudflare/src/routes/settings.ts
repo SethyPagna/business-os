@@ -21,6 +21,11 @@ import {
   saleMethodsUsed,
 } from '../lib/paymentMethodRegistry'
 import { renameSalePaymentMethod } from '../lib/paymentSettlement'
+// The owner's low-stock alert switch/threshold (Sep 6 2026). The route runs
+// the SAME validator the Settings form runs -- twin modules whose shared block
+// is byte-identical and pinned by a test -- so frontend validation and backend
+// enforcement cannot drift apart.
+import { MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 
@@ -846,6 +851,25 @@ app.post('/', async (c) => {
         ? `You do not have permission to change "${missingBucket}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
         : 'You do not have permission to perform this action',
     }, 403)
+  }
+
+  // The low-stock alert switch and its threshold decide what the WHOLE
+  // catalog is coloured by (Dashboard card, Inventory/Products/Branches
+  // badges and filters, the POS grid, the bell, the Telegram report), so
+  // unlike most keys here they are validated on write instead of trusted.
+  // Rejected, never clamped: a threshold quietly rounded or capped is how a
+  // shop ends up alerting on a number nobody chose. The validated whole
+  // number is also what makes lowStockThresholdSql safe to inline.
+  const lowStockError = validateLowStockSettingsWrite(body)
+  if (lowStockError) {
+    return c.json({
+      error: lowStockError === 'invalid_low_stock_threshold'
+        ? `Low stock alert amount must be a whole number between 0 and ${MAX_LOW_STOCK_THRESHOLD}.`
+        : lowStockError === 'invalid_low_stock_threshold_mode'
+          ? 'Low stock alert scope must be "product" or "global".'
+          : 'Low stock alert switch must be on or off.',
+      code: lowStockError,
+    }, 400)
   }
 
   // The ordinary Settings save may add, remove, or reorder methods, but it

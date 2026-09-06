@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { resolveLowStockConfig, type LowStockConfig } from '../utils/lowStockSettings.ts'
 
 type PlainRecord = Record<string, unknown>
 type NotificationKind = 'success' | 'error' | 'warning' | 'info'
@@ -134,6 +135,27 @@ export const SyncContext = createContext<SyncContextCoreValue | null>(null)
 
 export const useApp = (): unknown => useContext(AppContext) || FALLBACK_APP_CONTEXT
 export const useSync = (): unknown => useContext(SyncContext) || FALLBACK_SYNC_CONTEXT
+
+/**
+ * The owner's low-quantity alert switch/amount/scope (Settings > Stock
+ * Alerts), resolved through the one rule the Worker also applies.
+ *
+ * Every surface that colours, counts or filters by "low stock" reads it from
+ * here rather than re-typing the old literal 10: the Products/Inventory/
+ * Branches badges and filters, the POS grid and its detail sheet, the
+ * Dashboard card and its export. It rides the settings map, so it is already
+ * in the offline snapshot -- the till colours its grid the same way with no
+ * connection -- and settingsRefresh.ts pushes a change to every open page
+ * without a reload.
+ *
+ * Outside a provider this falls back to {}, which resolves to exactly the old
+ * behaviour (on, per product, 10).
+ */
+export const useLowStockConfig = (): LowStockConfig => {
+  const ctx = useContext(AppContext)
+  const settings = ctx?.settings
+  return useMemo(() => resolveLowStockConfig(settings as Record<string, unknown> | null | undefined), [settings])
+}
 
 export const useT = (keys: string[] = []): Record<string, string> => {
   const ctx = useContext(AppContext)

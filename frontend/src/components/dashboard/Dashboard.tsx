@@ -2,7 +2,8 @@ import { Suspense, useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
@@ -632,6 +633,9 @@ function normalizeDashboardAnalyticsPayload(value: unknown): DashboardAnalytics 
 
 export default function Dashboard() {
   const { t, fmtUSD, fmtKHR, navigateTo, user, hasPermission } = useApp()
+  // Settings > Stock Alerts -- the number the low-stock card's rows were
+  // judged by, shown in the drill panel and carried into the export.
+  const lowStockConfig = useLowStockConfig()
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('dashboard')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -1434,6 +1438,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     exportStamp,
     fmtUSD,
     grossSalesLabel,
+    lowStock: lowStockConfig,
     lowStockCount,
     netRevenueLabel,
     outOfStockCount,
@@ -1457,6 +1462,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     exportStamp,
     fmtUSD,
     grossSalesLabel,
+    lowStockConfig,
     lowStockCount,
     netRevenueLabel,
     outOfStockCount,
@@ -2199,7 +2205,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                     ? [
                         { label: translateOr('current_stock', 'Current stock'), value: `${productDetail.stock_quantity || 0} ${productDetail.unit || ''}`.trim(), cls:'text-blue-600', bg:'bg-blue-50 dark:bg-blue-900/20' },
                         { label: translateOr('stock_status', 'Stock status'), value: productDetail.insightType === 'low_stock' ? translateOr('low_stock', 'Low stock') : translateOr('out_of_stock', 'Out of stock'), cls: productDetail.insightType === 'low_stock' ? 'text-amber-600' : 'text-red-600', bg: productDetail.insightType === 'low_stock' ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-red-50 dark:bg-red-900/20' },
-                        { label: translateOr('low_stock_threshold', 'Low threshold'), value: productDetail.low_stock_threshold ?? 0, cls:'text-slate-700 dark:text-slate-200', bg:'bg-slate-100 dark:bg-slate-800' },
+                        { label: translateOr('low_stock_threshold', 'Low threshold'), value: effectiveLowStockThreshold(lowStockConfig, productDetail.low_stock_threshold), cls:'text-slate-700 dark:text-slate-200', bg:'bg-slate-100 dark:bg-slate-800' },
                         { label: translateOr('out_of_stock_threshold', 'Out threshold'), value: productDetail.out_of_stock_threshold ?? 0, cls:'text-slate-700 dark:text-slate-200', bg:'bg-slate-100 dark:bg-slate-800' },
                       ]
                     : [
