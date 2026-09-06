@@ -140,8 +140,10 @@ export function ProductDetailsCell({
   // Supplier is the one of the four copyable product fields (name, brand,
   // supplier, barcode) that renders in THIS cell -- the Products list keeps
   // name and brand in its name cell and dropped barcode from here when it
-  // moved to that cell's meta line. The other three are wired on the two
-  // product detail modals; the POS product sheet is another lane's file.
+  // moved to that cell's meta line. Those three are wired where they are
+  // actually drawn: Products.tsx for the desktop row and the mobile card,
+  // and both product detail modals. The POS product sheet is another
+  // lane's file and is handed over as an addendum.
   const copy = useCopyFloat(tr)
   const detailPills: MetaPill[] = []
   const branchRows = selectedBranchName

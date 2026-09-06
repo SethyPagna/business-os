@@ -15,6 +15,13 @@ export type CopyFloatProps = Record<string, string> | Record<string, never>
 // double-click on a pointer device, press-and-hold on touch, both opening
 // the one shared float with the full value and a Copy button.
 //
+// Whether a PLAIN click also opens it depends on the surface, not on this
+// hook: the controller gives the click to whatever is underneath when
+// something underneath wants it (see `claimsClick`). In the two product
+// detail modals nothing does, so a click opens the panel. On the Products
+// list the value sits inside a row whose click toggles selection, so the
+// row keeps it and the two gestures above are how the panel opens there.
+//
 // This hook hands back a props SPREAD rather than a wrapper component on
 // purpose. The values it marks are a header <div>, a middot-separated
 // <span> on a wrap line, a label/value row and a meta pill -- wrapping each
