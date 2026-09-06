@@ -81,6 +81,7 @@ const telegramHardcodedLiterals = [
   "telegramAction === 'summary' ? 'Sending summary...' : \"Send today's summary\"",
   'Save the chat ID and switches first.',
   '<span className="font-medium">Owner / manager commands:</span>',
+  '</code>, and <code>/help</code>',
 ]
 for (const literal of telegramHardcodedLiterals) {
   assert.ok(!src.includes(literal), `Settings.tsx still hardcodes Telegram-automation text: ${JSON.stringify(literal)}`)
@@ -110,6 +111,7 @@ const telegramKeys = [
   'telegram_help_paragraph',
   'telegram_help_commands_label',
   'telegram_help_commands_desc',
+  'telegram_help_commands_and',
   'telegram_help_commands_note',
 ]
 
