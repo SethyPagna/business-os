@@ -194,6 +194,14 @@ export type SaleItemAddition = {
  * stock and changes what the customer owes against a row whose current state
  * only the server knows. A replay from an outbox minutes later could deduct
  * units a different sale has since taken.
+ *
+ * N18: `review.client_request_id` is CHECKED here rather than assumed. The
+ * Worker rejects a body without one, and the caller's id must be the STABLE
+ * per-user-action id (SaleDetailModal's addRequestIdRef) -- minting one here
+ * would make every retry a fresh request and re-add the same lines. So a
+ * caller that lost the id fails locally, immediately and by name, instead of
+ * spending a round trip to earn an opaque 400. (This is the guard; the actual
+ * loss was api/methods.ts's registry wrapper dropping the fourth argument.)
  */
 export async function addSaleItems(
   id: number | string,
@@ -201,6 +209,9 @@ export async function addSaleItems(
   notes = '',
   review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string },
 ): Promise<unknown> {
+  if (!String(review?.client_request_id || '').trim()) {
+    throw new Error("addSaleItems needs the caller's stable client_request_id; it must never be generated per request.")
+  }
   const body = await withExpectedUpdatedAt('sales', id, {
     ...getDevicePayload(),
     items,
@@ -248,8 +259,15 @@ export interface SaleAmendmentRequest {
  * deliberately NOT queued offline -- it moves stock in BOTH directions against
  * a row whose current state only the server knows, and a replay from an outbox
  * minutes later could hand back units another sale has since taken.
+ *
+ * Carries the same client_request_id guard as addSaleItems, for the same
+ * reason: POST /amendments refuses a body without one (routes/sales.ts), and
+ * the id must be the caller's stable per-action id, never a per-request mint.
  */
 export async function amendSale(id: number | string, request: SaleAmendmentRequest): Promise<unknown> {
+  if (!String(request?.client_request_id || '').trim()) {
+    throw new Error("amendSale needs the caller's stable client_request_id; it must never be generated per request.")
+  }
   const body = await withExpectedUpdatedAt('sales', id, {
     ...getDevicePayload(),
     ...request,

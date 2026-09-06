@@ -3921,6 +3921,7 @@
   "refresh_app": "Refresh / check for update",
   "app_update_ready": "A new version is ready.",
   "restart_now": "Restart now",
+  "write_failed_app_out_of_date": "This app is out of date, so nothing was saved. Use Restart now in the top bar, or reload the page, to update - then try again.",
   "restarting_app": "Restarting...",
   "refresh_status": "Refresh status",
   "refreshing": "Refreshing...",
