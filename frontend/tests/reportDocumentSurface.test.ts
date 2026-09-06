@@ -108,6 +108,42 @@ assert.match(base, /overflow-x:\s*clip/, 'the hub still clips rather than scroll
 assert.match(denseTable, /overflow-x-auto rounded-\[var\(--ui-radius\)\] border border-\[var\(--ui-line\)\]/, 'wide tables scroll inside their own bordered frame, never the page')
 
 // ---------------------------------------------------------------------------
+// 1a-bis. THE SAFE-AREA FLOOR HAS TO SURVIVE EVERY TIER.
+//
+// The base rule floors its gutter with the inset, but each wider tier
+// RE-DECLARES `padding-inline` -- and re-declared it as a bare `clamp()`, which
+// drops the inset again from 768px up. That is not a theoretical width: <main>
+// (App.tsx:1943) carries `pl-[env(safe-area-inset-left)]
+// pr-[env(safe-area-inset-right)] ... md:pl-0 md:pr-0`, so the SHELL stops
+// paying the inset at exactly the same 768px breakpoint, and every modern
+// iPhone in landscape -- the orientation in which the left/right inset is
+// non-zero at all -- is >=812px wide. From md up NOTHING paid the inset and the
+// report went back under the notch: the very defect the base rule exists to fix,
+// restated one media query higher.
+//
+// Each tier is therefore `max(clamp(...), env(..., 0px))`: the design gutter
+// normally, the physical inset when that is larger. Still a floor, never a sum
+// -- below md the shell pays the inset and a `+` would double-count it.
+// ---------------------------------------------------------------------------
+const GUTTER_TIERS: Array<[string, string]> = [
+  ['@media (min-width: 768px)', 'clamp(12px, 2vw, 24px)'],
+  ['@media (min-width: 1024px)', 'clamp(28px, 3.5vw, 56px)'],
+  ['@media (min-width: 1280px)', 'clamp(40px, 4vw, 64px)'],
+  ['@media (min-width: 1536px)', 'clamp(56px, 4vw, 80px)'],
+]
+for (const [tierAt, gutter] of GUTTER_TIERS) {
+  const tier = ruleBody(css, '[data-reports-hub]', css.indexOf(tierAt))
+  assert.match(
+    tier,
+    /padding-inline:\s*max\(clamp\([^)]*\),\s*env\(safe-area-inset-left, 0px\)\)\s+max\(clamp\([^)]*\),\s*env\(safe-area-inset-right, 0px\)\)/,
+    `${tierAt}: the gutter keeps the safe-area inset as a floor -- <main> stops paying it at md, and an iPhone in landscape is >=812px`,
+  )
+  assert.ok(tier.includes(gutter), `${tierAt} keeps its design gutter ${gutter} inside the max()`)
+  assert.doesNotMatch(tier, /padding-inline:\s*clamp\(/, `${tierAt} must not re-declare a bare clamp(); that is what drops the inset the base rule established`)
+  assert.doesNotMatch(tier, /padding-inline:[^;]*calc\([^;]*env\(safe-area-inset/, `${tierAt} floors the inset, never adds it`)
+}
+
+// ---------------------------------------------------------------------------
 // 1b. The dead `embedded` padding fork is gone (root cause, not a patch).
 // ---------------------------------------------------------------------------
 assert.doesNotMatch(hubCode, /embedded \? 'space-y-2' : 'space-y-2 p-2 sm:p-3'/, 'the padding fork that never ran is removed')

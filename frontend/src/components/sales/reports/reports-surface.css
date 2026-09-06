@@ -328,10 +328,20 @@
 }
 
 /* Embedded reports need a gutter beside the sidebar at tablet widths too.
-   Keep phone density unchanged; wider desktops retain the larger gutter below. */
+   Keep phone density unchanged; wider desktops retain the larger gutter below.
+
+   EVERY tier repeats the `max(..., env(...))` floor, and that repetition is
+   load-bearing rather than defensive. `padding-inline` is a single property:
+   a tier that re-states it as a bare `clamp()` REPLACES the base rule's
+   floored value, so the safe-area inset would be paid below 768px and dropped
+   above it. And 768px is exactly where <main> stops paying it too
+   (App.tsx:1943 `pl-[env(safe-area-inset-left)] ... md:pl-0 md:pr-0`), while
+   the only orientation with a non-zero left/right inset -- landscape -- puts
+   every modern iPhone at >=812px. Bare clamps here reproduced the
+   "very left edged" report one media query higher up. */
 @media (min-width: 768px) {
   [data-reports-hub] {
-    padding-inline: clamp(12px, 2vw, 24px);
+    padding-inline: max(clamp(12px, 2vw, 24px), env(safe-area-inset-left, 0px)) max(clamp(12px, 2vw, 24px), env(safe-area-inset-right, 0px));
   }
 }
 
@@ -363,7 +373,7 @@
        1024, indistinguishable from the tablet gutter. 3.5vw with a 28px floor
        reads as a real margin from 1024 and hands over smoothly to the 1280
        tier (44.8px at 1279 -> 51.2px at 1280). */
-    padding-inline: clamp(28px, 3.5vw, 56px);
+    padding-inline: max(clamp(28px, 3.5vw, 56px), env(safe-area-inset-left, 0px)) max(clamp(28px, 3.5vw, 56px), env(safe-area-inset-right, 0px));
     /* THE CENTRED DOCUMENT COLUMN (owner, Sep 6: "in small and large screens
        move them more to the center...compact them").
 
@@ -398,7 +408,7 @@
    fix, so tablet and the existing desktop floor are unchanged. */
 @media (min-width: 1280px) {
   [data-reports-hub] {
-    padding-inline: clamp(40px, 4vw, 64px);
+    padding-inline: max(clamp(40px, 4vw, 64px), env(safe-area-inset-left, 0px)) max(clamp(40px, 4vw, 64px), env(safe-area-inset-right, 0px));
   }
 }
 
@@ -410,7 +420,7 @@
        tier already establishes. What still belongs at this tier is the
        gutter: the last of the padding ladder, so the widest monitors keep a
        visible inset between the centred column's border and its own edge. */
-    padding-inline: clamp(56px, 4vw, 80px);
+    padding-inline: max(clamp(56px, 4vw, 80px), env(safe-area-inset-left, 0px)) max(clamp(56px, 4vw, 80px), env(safe-area-inset-right, 0px));
   }
 }
 

@@ -35,7 +35,7 @@ for (const now of [new Date(2026, 0, 1), new Date(2026, 8, 5), new Date(2026, 3,
 // silently overwritten at >=1024 by an equally specific flat px. The Latin
 // value is unchanged -- the boost is 1 unless `body.lang-km` raises it.
 assert.match(css, /@media \(min-width: 1024px\)[\s\S]*?\[data-reports-hub\][\s\S]*?--ui-size-body: calc\(14px \* var\(--ui-km-boost, 1\)\)/)
-assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(12px, 2vw, 24px\);/)
+assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: max\(clamp\(12px, 2vw, 24px\), env\(safe-area-inset-left, 0px\)\)/)
 assert.ok(css.indexOf('@media (min-width: 768px)') < css.indexOf('@media (min-width: 1024px)'), 'desktop gutter overrides tablet gutter; phones remain unchanged')
 assert.match(css, /\[data-reports-hub\] \.reports-overview-statement\s*\{[^}]*max-width: 34rem/)
 assert.match(overview, /className="reports-overview-statement"/)
@@ -71,8 +71,8 @@ for (const lang of ['en', 'km']) {
 // blocks (that would let a wide-screen rule lose to a narrower one at equal
 // specificity) and must never touch the tablet gutter (61237948) or the
 // rounding fix (c999e909) already on this line.
-assert.match(css, /@media \(min-width: 1280px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(40px, 4vw, 64px\);/, '1280px gets its own, larger gutter')
-assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[\s\S]*?padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ keeps the last rung of the gutter ladder')
+assert.match(css, /@media \(min-width: 1280px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: max\(clamp\(40px, 4vw, 64px\), env\(safe-area-inset-left, 0px\)\)/, '1280px gets its own, larger gutter, still floored by the safe-area inset')
+assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[\s\S]*?padding-inline: max\(clamp\(56px, 4vw, 80px\), env\(safe-area-inset-left, 0px\)\)/, '1536px+ keeps the last rung of the gutter ladder, still floored by the safe-area inset')
 // SUPERSEDED, Sep 6 (owner: "in small and large screens move them more to the
 // center...compact them"). The width cap and its auto margins used to live
 // HERE, at 96rem, so 1024-1535 ran the full content width and 1920 still
@@ -98,9 +98,9 @@ for (let i = 1; i < gutterOrder.length; i += 1) {
 // The 1024 desktop tier gains its own, larger gutter (O9 names >=1024): 3.5vw
 // with a 28px floor, handing over to the 1280 tier without a step down. The
 // old declaration must be gone as a declaration (a comment may still cite it).
-assert.match(tier1024, /\[data-reports-hub\]\s*\{[^}]*padding-inline: clamp\(28px, 3\.5vw, 56px\);/, '1024px gets a larger gutter than the tablet tier')
+assert.match(tier1024, /\[data-reports-hub\]\s*\{[^}]*padding-inline: max\(clamp\(28px, 3\.5vw, 56px\), env\(safe-area-inset-left, 0px\)\)/, '1024px gets a larger gutter than the tablet tier')
 assert.doesNotMatch(css, /padding-inline: clamp\(20px, 3vw, 48px\);/, 'the old 1024 gutter declaration is gone')
-assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(12px, 2vw, 24px\);/, 'tablet gutter (61237948) is unchanged')
+assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: max\(clamp\(12px, 2vw, 24px\), env\(safe-area-inset-left, 0px\)\)/, 'tablet gutter (61237948) is unchanged apart from the safe-area floor')
 
 // The excel-style income statement must hug its own columns like every other
 // report table (ReportTable already asks DenseTable for `fit`); without it,
