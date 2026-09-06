@@ -43,16 +43,33 @@ ok('all four manual add surfaces render the ONE shared SupplierPickerField (cros
 // --- The picker itself: typing always breaks the contact link (an id may
 // only ever come from an explicit pick), and picks land on mousedown so
 // the input's blur can't swallow them.
-assert.match(picker, /onChange\(\{ supplierId: null, supplierName: event\.target\.value \}\)/, 'typing clears supplierId')
-assert.match(picker, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(row\) \}\}/, 'suggestion picks beat blur via mousedown')
+// The input + floating list is now the ONE shared SuggestionTextInput (the
+// same control the product form's Category/Brand/Unit/Supplier and the
+// create-products header's Brand render), so the field keeps only what is
+// supplier-specific. The GUARANTEES are unchanged and asserted in both
+// places: the id semantics here, the mousedown/touchstart safety there.
+const suggestionInput = read('components/shared/SuggestionTextInput.tsx')
+assert.match(picker, /import SuggestionTextInput/, 'the picker wraps the shared control instead of copying it')
+assert.match(
+  picker,
+  /if \(option\) onChange\(\{ supplierId: Number\(option\.payload\), supplierName: option\.value \}\)/,
+  'an id may only ever come from an explicit pick',
+)
+assert.match(
+  picker,
+  /else onChange\(\{ supplierId: null, supplierName: next \}\)/,
+  'typing clears supplierId -- an edited name can never ride on a stale id',
+)
+assert.match(suggestionInput, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'suggestion picks beat blur via mousedown')
+assert.match(suggestionInput, /onTouchStart=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'and on touch, where mousedown never precedes blur')
 assert.match(picker, /fields: ['"]names['"]/, 'suggestions come from the permission-free name-only suppliers read')
-ok('picker: free text stays name-only, picks are mousedown-safe, list is the names-only read')
+ok('picker: free text stays name-only, picks are mousedown/touch-safe, list is the names-only read')
 
 // --- Locked variant: when the lot is already attributed the field is
 // read-only -- no input element in that branch, so no choice can be
 // collected that the server would ignore.
 {
-  const lockedBlock = picker.slice(picker.indexOf('if (lockedName)'), picker.indexOf('const query'))
+  const lockedBlock = picker.slice(picker.indexOf('if (lockedName)'), picker.indexOf('const suggestionOptions'))
   assert.ok(lockedBlock.includes('supplier_first_attribution'), 'locked variant explains first-attribution-sticks')
   assert.ok(!lockedBlock.includes('<input'), 'locked variant renders NO input')
   ok('picker: attributed lots render read-only, never a dead input')

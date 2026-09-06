@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import InfoHint from './InfoHint.tsx'
+import SuggestionTextInput, { type SuggestionOption } from './SuggestionTextInput.tsx'
 
 // D5a: the one supplier picker every manual add-stock/receive surface
 // shares (ReceiveBatchModal, InventoryStockModals, BranchStockAdjuster,
@@ -96,7 +97,6 @@ export default function SupplierPickerField({
   disabled,
   idPrefix,
 }: SupplierPickerFieldProps) {
-  const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<SupplierNameRow[]>([])
   const [loading, setLoading] = useState(false)
   const aliveRef = useRef(true)
@@ -143,58 +143,49 @@ export default function SupplierPickerField({
     )
   }
 
-  const query = value.supplierName.trim().toLowerCase()
-  const matches = (query === '' ? rows : rows.filter((row) => row.name.toLowerCase().includes(query))).slice(0, 8)
-
-  const pick = (row: SupplierNameRow) => {
-    onChange({ supplierId: row.id, supplierName: row.name })
-    setOpen(false)
-  }
+  // The input + floating list is the ONE shared SuggestionTextInput -- the
+  // same control ProductForm's Category/Brand/Unit/Supplier and the
+  // create-products header's Brand render. This field adds only what is
+  // supplier-specific: the contact id a pick carries, and the locked variant
+  // above. Before this, four supplier surfaces and the product form each had
+  // their own copy of "input plus a dropdown", and they disagreed (the
+  // product form's showed nothing until something was typed).
+  const suggestionOptions = useMemo<SuggestionOption[]>(
+    () => rows.map((row) => ({
+      value: row.name,
+      key: `supplier-${row.id}`,
+      selected: value.supplierId === row.id,
+      payload: row.id,
+    })),
+    [rows, value.supplierId],
+  )
 
   return (
-    <div className="relative block">
+    <div className="block">
       <span className="mb-1 flex items-center gap-1 text-[11px] font-medium text-gray-600 dark:text-gray-400">
         <label htmlFor={`${idPrefix}-supplier`}>{label}</label>
         {hint && hintDisplay === 'tooltip' ? <InfoHint text={hint} label={label} /> : null}
       </span>
-      <input
+      <SuggestionTextInput
         id={`${idPrefix}-supplier`}
-        className="input w-full text-sm"
         value={value.supplierName}
+        options={suggestionOptions}
+        limit={8}
         disabled={disabled}
-        onFocus={() => { setOpen(true); ensureLoaded() }}
-        onChange={(event) => {
-          // Typing breaks any contact link -- the id only ever comes from an
-          // explicit pick, so a edited name can't ride on a stale id.
-          onChange({ supplierId: null, supplierName: event.target.value })
-          setOpen(true)
-          ensureLoaded()
-        }}
-        onBlur={() => setOpen(false)}
-        onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false) }}
+        loading={loading}
+        loadingLabel={tr('loading', 'Loading...')}
+        onRequestOptions={ensureLoaded}
+        ariaLabel={label}
+        inputClassName="input min-h-11 w-full text-sm"
         placeholder={tr('supplier_optional_placeholder', 'Who this lot was bought from')}
-        autoComplete="off"
+        onChange={(next, option) => {
+          // A pick carries the contact id; anything else is typing, and
+          // typing breaks the link -- the id only ever comes from an explicit
+          // pick, so an edited name can't ride on a stale id.
+          if (option) onChange({ supplierId: Number(option.payload), supplierName: option.value })
+          else onChange({ supplierId: null, supplierName: next })
+        }}
       />
-      {open && (loading || matches.length > 0) ? (
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-40 overflow-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-zinc-600 dark:bg-zinc-800">
-          {loading && !matches.length ? (
-            <div className="px-3 py-2 text-[11px] text-gray-400">{tr('loading', 'Loading...')}</div>
-          ) : null}
-          {matches.map((row) => (
-            <button
-              key={row.id}
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20"
-              // Mousedown so the pick lands before the input's blur closes
-              // the menu (click would fire after blur and be lost).
-              onMouseDown={(event) => { event.preventDefault(); pick(row) }}
-            >
-              <span className="font-medium text-gray-800 dark:text-gray-200">{row.name}</span>
-              {value.supplierId === row.id ? <span className="text-xs text-blue-500">✓</span> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
       {hint && hintDisplay === 'inline' ? <span className="mt-1 block text-[11px] text-gray-400">{hint}</span> : null}
       {value.supplierName.trim() !== '' ? (
         <span className="mt-1 block text-[11px] text-gray-400">

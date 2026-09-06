@@ -6,6 +6,7 @@ import Modal from '../shared/Modal.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import {
   createInventorySession,
@@ -798,7 +799,14 @@ export default function CreateProductsSessionModal({
                     these four fields never fall into four separate rows above
                     that width. Below it they stack one per row on purpose. */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label><span className="mb-1 block text-[11px] text-gray-500">{tr('brand', 'Brand')}</span><input className="input w-full text-sm" value={header.brand} list="create-products-brand-options" aria-label={tr('brand', 'Brand')} placeholder={tr('optional', 'Optional')} onChange={(event) => setHeader((prev) => ({ ...prev, brand: event.target.value }))} /><datalist id="create-products-brand-options">{brandOptions.map((brand) => <option key={brand} value={brand} />)}</datalist></label>
+                  {/* Was a native HTML datalist. Browsers render those at their
+                      own discretion -- Android/iOS webviews routinely show
+                      nothing -- so 203 brands existed here and the operator
+                      saw a plain empty box (the owner's report). The shared
+                      SuggestionTextInput is the SAME control the item form's
+                      Brand uses, fed by the SAME brandOptions list, so the
+                      header and the item can never offer different brands. */}
+                  <div><span className="mb-1 block text-[11px] text-gray-500">{tr('brand', 'Brand')}</span><SuggestionTextInput id="create-products-brand" value={header.brand} options={brandOptions} ariaLabel={tr('brand', 'Brand')} inputClassName="input min-h-11 w-full min-w-0 text-sm" placeholder={tr('type_or_select_brand', 'Type or select brand…')} emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.')} onChange={(value) => setHeader((prev) => ({ ...prev, brand: value }))} /></div>
                   <SupplierPickerField value={{ supplierId: header.supplierId, supplierName: header.supplierName }} onChange={(next) => setHeader((prev) => ({ ...prev, supplierId: next.supplierId, supplierName: next.supplierName }))} tr={(key, fallback) => tr(key, fallback || key)} idPrefix="create-products-session" hint={tr('create_products_supplier_hint', 'Recorded on the opening stock of every product this session creates.')} hintDisplay="tooltip" />
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('branch', 'Branch')}</span><AppSelect value={header.branchId} onChange={(next) => setHeader((prev) => ({ ...prev, branchId: next }))} ariaLabel={tr('branch', 'Branch')} buttonClassName="h-9 w-full text-sm" options={branchSelectOptions} /></label>
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={receivedDate} onChange={setReceivedDate} /></label>

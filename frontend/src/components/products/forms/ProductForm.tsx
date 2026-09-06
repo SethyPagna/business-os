@@ -12,6 +12,7 @@ import Modal from '../../shared/Modal'
 import MinimizeButton from '../../shared/MinimizeButton.tsx'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
+import SuggestionTextInput, { type SuggestionOption } from '../../shared/SuggestionTextInput.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
@@ -19,6 +20,12 @@ import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from
 import { useMergeStockChoice } from '../useMergeStockChoice.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
+import {
+  PRODUCT_MATCH_DEBOUNCE_MS,
+  buildProductNameSuggestions,
+  productMatchQueries,
+  shouldSearchProductMatches,
+} from '../helpers/productNameSuggestions.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
@@ -56,14 +63,23 @@ type ProductFormTab = 'basic' | 'pricing' | 'stock' | 'expiry'
 type ScannerField = 'barcode'
 type Translate = (key: string) => string
 
+// `source` is set by GET /api/categories and /api/units: 'lookup' for a real
+// row in the lookup table, 'products' for a name that only exists because
+// products carry it (cloudflare/src/lib/lookupSuggestions.ts). Both are
+// suggestible; only 'lookup' rows are manageable, and only a 'lookup' unit
+// may become a new product's DEFAULT unit -- see initialForm below.
+export type LookupSuggestionSource = 'lookup' | 'products'
+
 export interface CategoryOption {
   id: EntityId
   name: string
+  source?: LookupSuggestionSource
 }
 
 export interface UnitOption {
   id: EntityId
   name: string
+  source?: LookupSuggestionSource
 }
 
 export interface BranchOption {
@@ -239,69 +255,6 @@ interface PickImageFilesOptions {
 interface NumericInputOptions {
   allowDecimal?: boolean
   allowNegative?: boolean
-}
-
-interface SuggestionTextInputProps {
-  id: string
-  name: string
-  value: string
-  options: string[]
-  onChange: (value: string) => void
-  placeholder?: string
-  ariaLabel: string
-}
-
-// Free-text catalog field with the same interaction model as Supplier:
-// operators may type a brand/category/unit that does not exist yet, while
-// existing values remain one-tap suggestions. This deliberately avoids a
-// select-only control because catalog detail values are not closed enums.
-function SuggestionTextInput({ id, name, value, options, onChange, placeholder, ariaLabel }: SuggestionTextInputProps) {
-  const [open, setOpen] = useState(false)
-  const normalized = String(value || '').trim().toLowerCase()
-  const matches = useMemo(() => {
-    const seen = new Set<string>()
-    const unique: string[] = []
-    for (const raw of options || []) {
-      const option = String(raw || '').trim()
-      const key = option.toLowerCase()
-      if (!option || seen.has(key)) continue
-      seen.add(key)
-      if (!normalized || key.includes(normalized)) unique.push(option)
-    }
-    return unique
-  }, [normalized, options])
-
-  return (
-    <div className="relative">
-      <input
-        id={id}
-        name={name}
-        className="input min-h-11 w-full min-w-0"
-        value={value}
-        onFocus={() => setOpen(true)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-        onChange={(event) => { onChange(event.target.value); setOpen(true) }}
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        autoComplete="off"
-      />
-      {open && matches.length ? (
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-44 overflow-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-zinc-600 dark:bg-zinc-800">
-          {matches.map((option) => (
-            <button
-              key={option.toLowerCase()}
-              type="button"
-              className="block min-h-11 w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-blue-50 dark:text-gray-200 dark:hover:bg-blue-900/20"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => { onChange(option); setOpen(false) }}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
 }
 
 const FilePickerModal = lazyRetry(async () => ({
@@ -584,7 +537,18 @@ export default function ProductForm({
       out_of_stock_threshold: 0,
       expiry_date: '',
       expiry_alert_days: 30,
-      unit: units[0]?.name || 'pcs',
+      // The default unit must come from the MANAGED list, not from whatever
+      // unit string happens to sort first among the ones products carry: the
+      // units read now returns both (see LookupSuggestionSource above), and
+      // an unmanaged 'btl' silently becoming every new product's default
+      // would be a behaviour change nobody asked for.
+      //
+      // Checked BOTH ways because a caller may narrow the rows before handing
+      // them over: FastStockInModal's normalizeLookupOptions keeps only
+      // {id, name} and drops `source`, so the synthetic 'used:' id is the
+      // tell that survives there. A row with neither marker (offline mirror,
+      // older payloads) counts as managed -- exactly the pre-union behaviour.
+      unit: units.find((option) => option.source !== 'products' && !String(option.id).startsWith('used:'))?.name || 'pcs',
       supplier: '',
       tag_label: '',
       image_path: '',
@@ -611,7 +575,6 @@ export default function ProductForm({
   const lastTabResetKeyRef = useRef<string>(`${draftKey}:${initialTab || 'basic'}`)
   const [supplierList, setSupplierList] = useState<SupplierOption[]>([])
   const [supplierReferenceVersion, setSupplierReferenceVersion] = useState(0)
-  const [supplierDrop, setSupplierDrop] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [scannerField, setScannerField] = useState<ScannerField | ''>('')
   const [scannerLaunchingField, setScannerLaunchingField] = useState<ScannerField | ''>('')
@@ -704,9 +667,29 @@ export default function ProductForm({
     return isKhmer ? fallbackKm : fallbackEn
   }
 
+  // Category/Unit arrive from GET /api/categories and /api/units, which now
+  // return the lookup table UNION the values products actually carry (see
+  // cloudflare/src/lib/lookupSuggestions.ts). Before that union, production's
+  // empty `categories` table meant this list was empty on a catalog with 42
+  // categories in use -- the owner's report. Brand's union is built
+  // client-side by buildProductBrandOptions (products in use + the curated
+  // settings library) and reaches every host through the brandOptions prop.
   const categorySuggestionOptions = useMemo(() => categories.map((category) => String(category.name || '').trim()).filter(Boolean), [categories])
   const unitSuggestionOptions = useMemo(() => units.map((unit) => String(unit.name || '').trim()).filter(Boolean), [units])
   const brandSuggestionOptions = useMemo(() => (brandOptions || []).map((brand) => String(brand || '').trim()).filter(Boolean), [brandOptions])
+  // Supplier rows keep their company as the second line so two contacts with
+  // the same personal name are distinguishable. Free text stays legal: this
+  // form records a supplier NAME on the product, it does not link a contact.
+  const supplierSuggestionOptions = useMemo<SuggestionOption[]>(
+    () => supplierList
+      .map((supplier) => ({
+        value: String(supplier.name || '').trim(),
+        key: `supplier-${supplier.id}`,
+        meta: String(supplier.company || '').trim() || undefined,
+      }))
+      .filter((option) => option.value !== ''),
+    [supplierList],
+  )
 
   const initialBranchOptions = useMemo<AppSelectOption[]>(() => {
     const currentBranchId = form.branch_id ? String(form.branch_id) : ''
@@ -874,11 +857,15 @@ export default function ProductForm({
     if (!isCreateMode) return
     const name = String(form.name || '').trim()
     const barcode = String(form.barcode || '').trim()
-    if (name.length < 2 && !barcode) { setCreateMatches([]); return }
+    // The min-length and debounce live in helpers/productNameSuggestions.ts
+    // because the Name field's suggestion list is fed by THIS lookup: one
+    // gate, so the dropdown and the identity hint can never disagree about
+    // when the catalog has been asked.
+    if (!shouldSearchProductMatches(name, barcode)) { setCreateMatches([]); return }
     const seq = ++createMatchSeqRef.current
     const timer = window.setTimeout(async () => {
       try {
-        const queries = [name, barcode].filter((query) => query.length >= 2)
+        const queries = productMatchQueries(name, barcode)
         const results: CreateMatchCandidate[] = []
         for (const query of queries) {
           const payload = await searchProductsForMatch({ query, pageSize: 10 }) as { items?: CreateMatchCandidate[] }
@@ -893,7 +880,7 @@ export default function ProductForm({
           return true
         }))
       } catch { /* live match is advisory -- a failed search never blocks typing */ }
-    }, 350)
+    }, PRODUCT_MATCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreateMode, form.name, form.barcode])
@@ -1262,9 +1249,15 @@ export default function ProductForm({
     { id: 'expiry', label: tr('expiry', 'Expiry', 'ផុតកំណត់') },
   ]
 
-  const supplierMatches = form.supplier
-    ? supplierList.filter((supplier) => String(supplier.name || '').toLowerCase().includes(String(form.supplier || '').toLowerCase()))
-    : []
+  // The name suggestions are built from the SAME debounced existing-product
+  // lookup that already feeds the identity hint under the field -- no second
+  // read. The row currently being edited is excluded (offering a product its
+  // own name back is noise), and picking a row fills the NAME ONLY: it never
+  // loads or switches to that product, per the owner's no-auto-pick rule.
+  const nameSuggestionOptions = useMemo(
+    () => (isCreateMode && !nameLocked ? buildProductNameSuggestions(createMatches, { excludeId: product?.id }) : []),
+    [isCreateMode, nameLocked, createMatches, product?.id],
+  )
   const preserveAndMinimize = isCreateMode && onMinimize ? () => {
     // The shared unsaved prompt may offer Minimize only through an explicit
     // preservation capability. Finish this form's pending debounce before the
@@ -1446,17 +1439,40 @@ export default function ProductForm({
             <div className="min-w-0 sm:col-span-2 lg:col-span-4">
               <label htmlFor="product-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
               <div className="relative">
-                <input
-                  id="product-name"
-                  name="product_name"
-                  ref={nameInputRef}
-                  className={`input min-h-11 min-w-0 ${nameLocked ? 'cursor-pointer bg-gray-50 pr-11 dark:bg-zinc-800/60' : ''}`}
-                  value={form.name || ''}
-                  onChange={(event) => setField('name', event.target.value)}
-                  readOnly={nameLocked}
-                  onClick={() => { if (nameLocked) setNameUnlockConfirmOpen(true) }}
-                  onFocus={(event) => { if (nameLocked) { event.currentTarget.blur(); setNameUnlockConfirmOpen(true) } }}
-                />
+                {nameLocked ? (
+                  // A grouped product's name is a lock, not a text field: it
+                  // asks for confirmation before it may be edited at all, so
+                  // it gets no suggestion list (there is nothing to type).
+                  <input
+                    id="product-name"
+                    name="product_name"
+                    ref={nameInputRef}
+                    className="input min-h-11 min-w-0 cursor-pointer bg-gray-50 pr-11 dark:bg-zinc-800/60"
+                    value={form.name || ''}
+                    onChange={(event) => setField('name', event.target.value)}
+                    readOnly
+                    onClick={() => setNameUnlockConfirmOpen(true)}
+                    onFocus={(event) => { event.currentTarget.blur(); setNameUnlockConfirmOpen(true) }}
+                  />
+                ) : (
+                  // Suggestions are the EXISTING products this name already
+                  // matches (name + barcode + brand on the row, so the
+                  // operator recognises a duplicate before creating one).
+                  // filter="none": the server searched by name AND barcode,
+                  // so re-filtering here would drop every barcode hit.
+                  // Picking fills the name text only -- no auto-add, no
+                  // switch to editing that product.
+                  <SuggestionTextInput
+                    id="product-name"
+                    name="product_name"
+                    inputRef={nameInputRef}
+                    value={form.name || ''}
+                    options={nameSuggestionOptions}
+                    filter="none"
+                    onChange={(value) => setField('name', value)}
+                    ariaLabel={t('name') || 'Name'}
+                  />
+                )}
                 {nameLocked ? (
                   <button
                     type="button"
@@ -1569,6 +1585,7 @@ export default function ProductForm({
                 onChange={(value) => setField('category', value)}
                 placeholder={tr('type_or_select_category', 'Type or select category...', 'វាយ ឬជ្រើសរើសប្រភេទ...')}
                 ariaLabel={tr('category', 'Category', 'ប្រភេទ')}
+                emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
               />
             </div>
             <div className="min-w-0">
@@ -1581,6 +1598,7 @@ export default function ProductForm({
                 onChange={(value) => setField('brand', value)}
                 placeholder={tr('type_or_select_brand', 'Type or select brand...', 'វាយ ឬជ្រើសរើសម៉ាក...')}
                 ariaLabel={tr('brand', 'Brand', 'ម៉ាក')}
+                emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
               />
             </div>
             <div className="min-w-0">
@@ -1593,40 +1611,27 @@ export default function ProductForm({
                 onChange={(value) => setField('unit', value)}
                 placeholder={tr('type_or_select_unit', 'Type or select unit...', 'វាយ ឬជ្រើសរើសឯកតា...')}
                 ariaLabel={t('unit') || 'Unit'}
+                emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
               />
             </div>
-            <div className="relative min-w-0">
+            <div className="min-w-0">
               <label htmlFor="product-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}</label>
-              <input
+              {/* Was a private copy of this control whose match list was
+                  `form.supplier ? filter(...) : []` -- so focusing the empty
+                  field produced no dropdown at all and the operator had to
+                  guess a first letter before the app would admit it knew any
+                  suppliers. The shared component treats an empty query as
+                  "show everything", exactly like Category/Brand/Unit. */}
+              <SuggestionTextInput
                 id="product-supplier"
                 name="product_supplier"
-                className="input min-h-11 min-w-0"
                 value={form.supplier || ''}
-                onFocus={() => setSupplierDrop(true)}
-                onChange={(event) => {
-                  setField('supplier', event.target.value)
-                  setSupplierDrop(true)
-                }}
+                options={supplierSuggestionOptions}
+                onChange={(value) => setField('supplier', value)}
                 placeholder={tr('type_or_select_supplier', 'Type or select supplier...', 'វាយឈ្មោះ ឬជ្រើសរើសអ្នកផ្គត់ផ្គង់...')}
+                ariaLabel={tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}
+                emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
               />
-              {supplierDrop && supplierMatches.length ? (
-                <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-40 overflow-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-zinc-600 dark:bg-zinc-800">
-                  {supplierMatches.map((supplier) => (
-                    <button
-                      key={supplier.id}
-                      type="button"
-                      className="flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                      onClick={() => {
-                        setField('supplier', supplier.name)
-                        setSupplierDrop(false)
-                      }}
-                    >
-                      <span className="font-medium text-gray-800 dark:text-gray-200">{supplier.name}</span>
-                      {supplier.company ? <span className="text-xs text-gray-400">{supplier.company}</span> : null}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </div>
             <div className="min-w-0 sm:col-span-2 lg:col-span-4">
               <label htmlFor="product-description" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('description')}</label>

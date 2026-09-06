@@ -5763,5 +5763,6 @@
   "sale_settlement_rows_limit": "This sale has {count} recorded payment rows. Settlement supports at most {max}; no recorded rows were removed. Repair the record before completing it.",
   "sale_mutation_rate_changed": "The exchange rate changed. Review the updated KHR rate, then confirm again.",
   "add_products": "Add products",
+  "suggestions_none_yet": "Nothing saved yet — type a new one.",
   "add_products_button_hint": "Add new products or receive stock for products you already have."
 }
