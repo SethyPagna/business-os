@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useCopyFloat } from '../../shared/CopyFloat.tsx'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
@@ -136,6 +137,12 @@ export function ProductDetailsCell({
   tr,
   fmtUSD,
 }: ProductDetailsCellProps) {
+  // Supplier is the one of the four copyable product fields (name, brand,
+  // supplier, barcode) that renders in THIS cell -- the Products list keeps
+  // name and brand in its name cell and dropped barcode from here when it
+  // moved to that cell's meta line. The other three are wired on the two
+  // product detail modals; the POS product sheet is another lane's file.
+  const copy = useCopyFloat(tr)
   const detailPills: MetaPill[] = []
   const branchRows = selectedBranchName
     ? [String(selectedBranchName)]
@@ -166,7 +173,15 @@ export function ProductDetailsCell({
         </div>
       ) : null}
       <div className="flex min-w-0 flex-wrap items-center gap-1">
-        {detailPills.map((item) => renderMetaPill(item))}
+        {detailPills.map((item) => (item.key === 'supplier' ? (
+          // The pill itself is drawn by the caller's renderMetaPill (which
+          // stringifies its label, so the affordance cannot go inside it);
+          // this wrapper carries the gesture attributes and no box of its
+          // own beyond the inline-flex the pill already sat in.
+          <span key="supplier-copy" className="inline-flex min-w-0 max-w-full" {...copy(product.supplier)}>
+            {renderMetaPill(item)}
+          </span>
+        ) : renderMetaPill(item)))}
         <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'Discounts')} />
         {!branchRows.length && !detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
       </div>

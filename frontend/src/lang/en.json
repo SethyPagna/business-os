@@ -1378,6 +1378,7 @@
   "cooldown_seconds": "Cooldown (seconds)",
   "copied": "Copied",
   "copy": "Copy",
+  "copy_hint": "Double-click or hold to copy",
   "copyList": "Copy list",
   "copy_failed": "Copy failed",
   "copy_links": "Copy links",

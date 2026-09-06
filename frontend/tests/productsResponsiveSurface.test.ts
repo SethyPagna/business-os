@@ -100,10 +100,15 @@ assert.match(detail, /import \{ createPortal \} from 'react-dom'/, 'the product 
 assert.match(detail, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*overflow-y-auto/, 'the product detail overlay must sit above fixed app bars and remain scrollable')
 assert.match(detail, /modal-panel-safe flex w-full flex-col/, 'the product detail panel must remain within the usable viewport and safe areas')
 assert.match(detail, /return createPortal\(modal, document\.body\)/, 'the product detail sheet must portal to the document body')
-assert.match(detail, /break-words font-bold text-gray-900 dark:text-white">\{productName\}/, 'product detail titles must wrap in full')
-assert.match(detail, /whitespace-nowrap text-left font-mono/, 'product detail barcodes must remain on one line without truncation')
-assert.match(inventoryDetail, /break-words font-bold text-gray-900 dark:text-white">\{p\.name\}/, 'inventory product-detail titles must wrap in full')
-assert.match(inventoryDetail, /shrink-0 whitespace-nowrap font-mono text-xs text-gray-400">&middot; \{p\.barcode\}/, 'inventory product-detail barcodes must remain on one line')
+// `[^>]*` between the class list and the `>`: name, brand, supplier and
+// barcode now also carry the copy-float gesture attributes (see
+// tests/copyFloat.test.ts). The layout property each line pins -- the title
+// wraps in full, the barcode stays on one line -- is unchanged, and is
+// still the class list itself.
+assert.match(detail, /break-words font-bold text-gray-900 dark:text-white"[^>]*>\{productName\}/, 'product detail titles must wrap in full')
+assert.match(detail, /whitespace-nowrap font-mono"[^>]*>\{p\.barcode\}/, 'product detail barcodes must remain on one line without truncation')
+assert.match(inventoryDetail, /break-words font-bold text-gray-900 dark:text-white"[^>]*>\{p\.name\}/, 'inventory product-detail titles must wrap in full')
+assert.match(inventoryDetail, /shrink-0 whitespace-nowrap font-mono text-xs text-gray-400"[^>]*>&middot; \{p\.barcode\}/, 'inventory product-detail barcodes must remain on one line')
 // S4-20: the primary action belongs at the END of the panel, never beside the
 // ✕. These lines used to pin the exact opposite -- a phone-only Save copied
 // into each fixed header -- and they were not wrong at the time: the reason
