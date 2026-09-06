@@ -14,7 +14,9 @@
 // so the branch/option/received-date steps, the pill styling, the stock
 // derivation (components/pos/productSheetState.ts) and the warehouse rule
 // are literally the same code on every surface.
+import { useCallback } from 'react'
 import ProductDetailSheet from '../pos/ProductDetailSheet.tsx'
+import { useApp } from '../../AppContext.tsx'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
 import type { SheetIntent } from '../pos/productSheetState.ts'
 
@@ -44,6 +46,9 @@ interface ProductOptionSheetProps {
   intent?: SheetIntent
   activeBranchId?: string | number | null
   trackedBatchProductIds?: Set<number>
+  // For a host whose write cannot carry a received date -- see
+  // ProductDetailSheet's hideReceivedDates.
+  hideReceivedDates?: boolean
   pickLabel?: string
   onPick: (product: ProductOptionRow, selection: ProductOptionSelection) => void
   onClose: () => void
@@ -63,10 +68,22 @@ export default function ProductOptionSheet({
   intent = 'stock',
   activeBranchId = null,
   trackedBatchProductIds,
+  hideReceivedDates = false,
   pickLabel,
   onPick,
   onClose,
 }: ProductOptionSheetProps) {
+  // The sheet still owns a handful of bilingual literals (the pager's
+  // Back/Next, the option-step title, the damaged-lot labels). Handing it
+  // `(english) => english` -- as this adapter first did -- silently shipped
+  // English into a Khmer session on every surface EXCEPT the POS, which is
+  // the one place the pair was ever resolved. The language comes from the
+  // same setting POS.tsx reads, so both halves answer identically.
+  const { language } = useApp() as { language?: string }
+  const posCopy = useCallback(
+    (english: string, khmer = english) => ((language || 'en') === 'km' ? khmer : english),
+    [language],
+  )
   const rows = (choices && choices.length ? choices : product.__groupChoices) || []
   const variantChoices = rows.length > 1 ? [...rows] : []
   return (
@@ -77,11 +94,10 @@ export default function ProductOptionSheet({
       fmtUSD={fmtUSD}
       fmtKHR={fmtKHR || ((value: number) => String(value))}
       asNumber={asNumber}
-      // Non-POS surfaces read the packs directly; posCopy survives only for
-      // the pager's Back/Next, which the sheet still owns.
-      posCopy={(english: string) => english}
+      posCopy={posCopy}
       activeBranchId={activeBranchId}
       trackedBatchProductIds={trackedBatchProductIds}
+      hideReceivedDates={hideReceivedDates}
       // No POS cart here, so there is no cross-branch cart-line number to
       // prefer: the branch_stock row IS the answer.
       getDisplayStock={(row) => asNumber((row as { stock_quantity?: unknown } | undefined)?.stock_quantity)}

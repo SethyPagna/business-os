@@ -237,6 +237,12 @@ interface ProductDetailSheetProps {
   // button. See components/shared/ProductOptionSheet.tsx.
   onPick?: (product: ProductRecord, selection: { branchId: string | null; batch?: BatchSelection }) => void
   pickLabel?: string
+  // Drop the received-date step on a host whose write cannot carry one (the
+  // sale-line REPLACEMENT: the Worker plans it with batchId null and draws by
+  // FIFO). Showing a step whose answer is discarded is worse than not showing
+  // it -- it reads as a batch-identity guarantee the write does not make. See
+  // productSheetState.ts's receivedDateStepHidden.
+  hideReceivedDates?: boolean
   // Render through a portal above the modal that opened it. Modal.tsx tops
   // out at z-[1070] for a nested modal and App's toasts own z-[1100], so a
   // sheet opened from inside a modal has to sit between the two -- the
@@ -265,6 +271,7 @@ export default function ProductDetailSheet({
   intent = 'sell',
   onPick,
   pickLabel,
+  hideReceivedDates = false,
   portal = false,
 }: ProductDetailSheetProps) {
   const variants = getVariantChoices(product)
@@ -340,6 +347,7 @@ export default function ProductDetailSheet({
     activeBranchId,
     selectedVariantId,
     trackedBatchProductIds,
+    receivedDateStepHidden: hideReceivedDates,
     batches,
     selectedBatchId,
     damagedLots,
@@ -575,9 +583,16 @@ export default function ProductDetailSheet({
   // Non-POS surfaces confirm a choice instead of pricing a cart line. The
   // gate is the same one the price buttons use, so a picker can never hand
   // back a row/branch/received-date combination the POS would refuse.
+  //
+  // DISMISSED and PICKED are not the same event, and this must not collapse
+  // them: `onClose` is what a host uses to throw the whole selection away.
+  // Calling it after a successful `onPick` fired the host's discard path on
+  // top of its accept path -- in CreateProductsSessionModal that was
+  // resetExistingCandidate() nulling the product the pick had just set, so
+  // the line form it gates never opened and the pick appeared to do nothing.
+  // The host closes the sheet from inside its own onPick.
   const confirmPick = (nextProduct: ProductRecord) => {
     onPick?.(nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection() })
-    onClose()
   }
   const pickButtonLabel = pickLabel || t('select') || 'Select'
   const renderPickButton = (row: ProductRecord, inStock: boolean) => (
@@ -821,7 +836,7 @@ export default function ProductDetailSheet({
                       ) : batchesError ? (
                         <div className="text-xs font-medium text-red-500">{batchesError}</div>
                       ) : orderedBatches.length === 0 ? (
-                        <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
+                        <div className="text-xs text-gray-400">{t('received_dates_none') || 'No received dates at this branch'}</div>
                       ) : (
                         <>
                           <button
@@ -917,7 +932,7 @@ export default function ProductDetailSheet({
                 ) : batchesError ? (
                   <div className="text-xs font-medium text-red-500">{batchesError}</div>
                 ) : orderedBatches.length === 0 ? (
-                  <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
+                  <div className="text-xs text-gray-400">{t('received_dates_none') || 'No received dates at this branch'}</div>
                 ) : (
                   <>
                     <button

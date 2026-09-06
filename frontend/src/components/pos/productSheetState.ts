@@ -71,6 +71,14 @@ export type ProductSheetStateInput = {
   activeBranchId?: string | number | null
   selectedVariantId?: string | null
   trackedBatchProductIds?: Set<number> | null
+  // Some hosts cannot honour a received date at all: a sale line's
+  // REPLACEMENT is planned server-side with batchId null and drawn by FIFO
+  // (cloudflare/src/routes/sales.ts, the line_replaced branch), so offering
+  // the step there would let a cashier choose an intake the write then
+  // ignores -- a silent break of the batch-identity rule. Hiding it makes the
+  // sheet say what the surface can actually do rather than gating the pick on
+  // a question with no effect. On-hand still comes from branch_stock.
+  receivedDateStepHidden?: boolean
   batches?: readonly SheetBatchLike[]
   selectedBatchId?: number | null
   damagedLots?: readonly SheetDamagedLotLike[]
@@ -115,6 +123,96 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+/**
+ * The branch NAME this product's own branch_stock payload carries for an id,
+ * or null when the payload does not mention that branch.
+ *
+ * The name is the only discriminator the two canonical roles have in this
+ * lineage (utils/branchRoles.ts), and every product row already ships one per
+ * active branch -- so nothing has to be looked up to know whether an id is
+ * the warehouse.
+ */
+export function branchNameFromProduct(product: SheetProductLike | null | undefined, branchId: unknown): string | null {
+  const key = branchId == null ? '' : String(branchId)
+  if (!key) return null
+  for (const entry of Array.isArray(product?.branch_stock) ? product.branch_stock : []) {
+    if (String(entry?.branch_id) === key) return String(entry?.branch_name ?? '')
+  }
+  return null
+}
+
+/**
+ * Whether a SALE line may resolve to this branch.
+ *
+ * POS resolved a cart line's branch from the active branch filter, else from
+ * whichever branch held the most units -- neither of which knew the warehouse
+ * does not sell. Filter to the warehouse, or hold stock only there, and the
+ * one-tap add booked a warehouse line that the checkout then refused with a
+ * 400 the cashier could do nothing about. The branch is decided here now, on
+ * the same predicate the sheet greys the pill with and the Worker rejects on.
+ *
+ * A branch the payload does not name is left alone: an unrecognised id is not
+ * evidence of a stock-only branch.
+ */
+export function branchAllowsSale(product: SheetProductLike | null | undefined, branchId: unknown): boolean {
+  const name = branchNameFromProduct(product, branchId)
+  return name == null ? true : branchCanSell(name)
+}
+
+// `blocked` means: there is stock, but only where a sale may not be rung.
+// The caller opens the sheet -- which shows the warehouse pill greyed WITH
+// its quantity and says why -- instead of booking a line the checkout would
+// refuse with a 400 the cashier can do nothing about.
+export type SaleBranchDecision = { branchId: number | null; blocked: boolean }
+
+/**
+ * Which branch a POS cart line resolves to.
+ *
+ * POS used to answer this as `primaryBranchFilterId ?? pickBestBranchId()`,
+ * and neither half knew the warehouse does not sell: filtering the grid to
+ * the warehouse booked warehouse lines outright, and a product held ONLY at
+ * the warehouse resolved there through the highest-stock loop -- which is the
+ * normal state of a product waiting to be transferred. Both now come back
+ * `blocked` instead.
+ *
+ * `defaultBranchId` is a preselection preference, never a role: a deployment
+ * whose default branch is the warehouse must not turn every sale into a
+ * warehouse sale, so it is honoured only when it may sell.
+ */
+export function resolveSaleBranch(
+  product: SheetProductLike | null | undefined,
+  options: { activeBranchFilterId?: unknown; defaultBranchId?: unknown } = {},
+): SaleBranchDecision {
+  const active = options.activeBranchFilterId
+  if (active != null && String(active) !== '') {
+    const id = Number(active)
+    if (Number.isFinite(id)) {
+      return branchAllowsSale(product, id) ? { branchId: id, blocked: false } : { branchId: null, blocked: true }
+    }
+  }
+
+  const rawPreferred = options.defaultBranchId
+  const preferred = rawPreferred == null || String(rawPreferred) === '' ? null : Number(rawPreferred)
+  let best: number | null = null
+  let bestQuantity = 0
+  let unsellableStock = false
+  for (const entry of Array.isArray(product?.branch_stock) ? product.branch_stock : []) {
+    const id = Number(entry?.branch_id)
+    const quantity = toNumber(entry?.quantity)
+    if (!Number.isFinite(id) || quantity <= 0) continue
+    if (!branchAllowsSale(product, id)) { unsellableStock = true; continue }
+    if (preferred != null && Number.isFinite(preferred) && id === preferred) return { branchId: id, blocked: false }
+    if (quantity > bestQuantity) { best = id; bestQuantity = quantity }
+  }
+
+  if (best != null) return { branchId: best, blocked: false }
+  if (unsellableStock) return { branchId: null, blocked: true }
+  if (preferred != null && Number.isFinite(preferred) && branchAllowsSale(product, preferred)) {
+    return { branchId: preferred, blocked: false }
+  }
+  return { branchId: null, blocked: false }
+}
+
 export function defaultDisplayStock(product: SheetProductLike | undefined): number {
   return toNumber(product?.stock_quantity)
 }
@@ -127,7 +225,8 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     selectedBranchId = null,
     activeBranchId = null,
     selectedVariantId = null,
-    trackedBatchProductIds = null,
+    trackedBatchProductIds: trackedBatchProductIdsInput = null,
+    receivedDateStepHidden = false,
     batches = [],
     selectedBatchId = null,
     damagedLots = [],
@@ -135,6 +234,10 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     intent = 'sell',
     getDisplayStock = defaultDisplayStock,
   } = input
+  // A hidden step is an ABSENT step, not an unanswered one: with no tracked
+  // ids the received-date gate never engages, so the pick is not blocked on a
+  // question this surface deliberately refuses to ask.
+  const trackedBatchProductIds = receivedDateStepHidden ? null : trackedBatchProductIdsInput
 
   // A flat product is a one-row group. Every derivation below walks THIS
   // pool, never `variants` directly -- the old code walked `variants` for

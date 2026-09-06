@@ -123,11 +123,13 @@ check('the lot picker distinguishes a load failure from an empty result', () => 
     /\) : batchesError \? \(/.test(sheet),
     'the picker should render the error branch before the "No lots available" branch',
   )
-  // Count render SITES via the posCopy key (the English first argument).
-  // The old `/ 2` accounted for posCopy('X', 'X') duplicating the literal
-  // per site; the Khmer no-op fix made the second argument real Khmer, so
-  // the literal now appears exactly once per site.
-  const noLots = (sheet.match(/posCopy\('No lots available at this branch'/g) || []).length
+  // Count render SITES via the empty state's pack key. This counted the
+  // posCopy English literal until that bilingual pair became a pack key --
+  // the sheet now mounts outside the POS too, where posCopy was stubbed to
+  // an English identity, so the string had to come from the packs. One
+  // occurrence per site either way.
+  const noLots = (sheet.match(/t\('received_dates_none'\)/g) || []).length
+  assert.ok(noLots > 0, 'the empty state must still be rendered somewhere')
   const errorBranches = (sheet.match(/\) : batchesError \? \(/g) || []).length
   assert.equal(
     errorBranches, noLots,
