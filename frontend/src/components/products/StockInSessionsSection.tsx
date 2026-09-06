@@ -58,7 +58,7 @@ function sessionCost(rows: Row[]): { costUsd: number | null; linesWithoutCost: n
   const fallbackBatches = new Set<number>()
   for (const row of rows) {
     const movementTotal = row.total_cost_usd == null ? null : Number(row.total_cost_usd)
-    if (movementTotal != null && Number.isFinite(movementTotal) && movementTotal > 0) {
+    if (movementTotal != null && Number.isFinite(movementTotal) && movementTotal >= 0) {
       total += movementTotal; known = true; continue
     }
     const batchId = Number(row.batch_id) || 0
@@ -318,11 +318,11 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
           </table></div>
         </div>
         <div className="mobile-cards-only space-y-1">{selected.rows.map((row) => {
-          const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) > 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
+          const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) >= 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
           const originTag = productOriginTag(row, tr)
           return <div key={row.id} className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2.5 py-1.5 ${selectedLine?.id === row.id ? 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20' : 'border-gray-100 dark:border-gray-700'}`}>
             <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}{originTag ? <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block truncate text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
-            <span className="shrink-0 text-right"><b className="block text-sm text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</b><span className="block text-[11px] text-gray-400">{unitCost == null || Number(unitCost) <= 0 ? '—' : `$${Number(unitCost).toFixed(2)} / ${row.unit || tr('unit', 'unit')}`}</span></span>
+            <span className="shrink-0 text-right"><b className="block text-sm text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</b><span className="block text-[11px] text-gray-400">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)} / ${row.unit || tr('unit', 'unit')}`}</span></span>
             <button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-4 w-4" /></button>
           </div>
         })}</div>
