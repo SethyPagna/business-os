@@ -179,39 +179,105 @@ for (let i = 1; i < ladder.length; i += 1) {
 }
 
 // ---------------------------------------------------------------------------
-// 1d. SIBLING PARITY: every view's detail Fold joins the boosted scope.
+// 1d. SIBLING PARITY: every view's detail Fold joins the boosted scope --
+//     and it joins it at the PANEL ROOT, not at the fold body.
 //
 // A `Fold` is PORTALLED to document.body, so it lands outside
 // `[data-reports-hub]` and inherits none of this surface's tokens. Only the
 // options fold carried the hook, which left the six report views' own
 // detail/breakdown folds reading at the app-wide compacted size while the
 // report behind them read at the boosted one -- exactly the sibling drift this
-// lane exists to remove. Every `<Fold>` in every view now opens on a body that
-// carries the hook.
+// lane exists to remove.
+//
+// Putting the hook on the div each view passes as CHILDREN fixed six sevenths
+// of that and left the seventh in place, one level up: the panel's own header
+// `<h3>` (Fold.tsx, both branches, `text-[length:var(--ui-size-h3)]`) is
+// rendered by Fold, not by the caller, so it stayed OUTSIDE the scope. That
+// title then had an undeclared `--ui-size-h3` (invalid at computed-value time
+// -> inherited body size), no Khmer boost and none of the 1.62 line-height
+// floor, sitting directly above body content that had all three. A report's
+// own title reading smaller and tighter than the numbers under it is the same
+// compaction/clipping drift this surface exists to remove.
+//
+// So the hook moves UP, onto the panel root, behind an OPT-IN `surface` flag
+// -- Fold is the kit's level-2 container for the whole app and must not gain a
+// report surface everywhere. Moving it cannot disturb the panel's geometry,
+// and that is a property of the CSS rather than a hope: nothing scoped to
+// `[data-reports-fold]` sets layout. Asserted, not trusted, at the end of this
+// section.
 //
 // Split on the tag rather than a fixed character window: two of the seven
 // folds (GroupedReport's grouped-row fold, PeriodReport's period fold) carry a
 // multi-line `actions` prop, so their body starts ~480 chars past `<Fold`. The
-// split form is also strictly stronger -- it proves the hook is inside THAT
-// fold, not merely nearby in the file.
+// split form is also strictly stronger -- it proves the flag is on THAT fold,
+// not merely nearby in the file.
 // ---------------------------------------------------------------------------
-let foldBodies = 0
+const fold = read('src/components/shared/kit/Fold.tsx')
+assert.match(fold, /surface\?: boolean/, 'Fold declares the opt-in flag; a caller cannot reach the panel root any other way')
+
+// The opening tag ends at the first `>` OUTSIDE any `{...}` expression --
+// `onClose={() => setOpen(null)}` puts a bare `>` inside the tag on almost
+// every one of these call sites, so a plain indexOf('>') would cut the tag in
+// half and the assertion below would read only part of the props.
+const openingTag = (afterTag: string): string => {
+  let depth = 0
+  for (let i = 0; i < afterTag.length; i += 1) {
+    const ch = afterTag[i]
+    if (ch === '{') depth += 1
+    else if (ch === '}') depth -= 1
+    else if (ch === '>' && depth === 0) return afterTag.slice(0, i)
+  }
+  throw new Error('unterminated <Fold opening tag')
+}
+const CARRIES_FLAG = /(^|\s)surface(\s|$)/
+
+const panels = fold.split('role="dialog"').slice(1)
+assert.equal(panels.length, 2, 'Fold has exactly two panel roots -- the mobile bottom sheet and the desktop floating panel')
+for (const [i, panel] of panels.entries()) {
+  const attrs = panel.slice(0, panel.indexOf('className={'))
+  assert.match(
+    attrs,
+    /data-reports-fold=\{surface \? '' : undefined\}/,
+    `Fold panel root ${i + 1} of 2 must carry the hook, or that branch's header title renders outside the report surface`,
+  )
+}
+assert.doesNotMatch(fold, /data-reports-fold=""/, 'and never unconditionally -- every non-report Fold in the app stays exactly as it was')
+
+let foldTags = 0
 for (const view of VIEWS) {
   const parts = viewSource[view].split(/<Fold[\s>]/).slice(1)
   assert.ok(parts.length > 0, `${view} opens at least one detail Fold`)
   for (const part of parts) {
-    const end = part.indexOf('</Fold>')
-    const body = end >= 0 ? part.slice(0, end) : part
     assert.match(
-      body,
-      /<div className="p-2" data-reports-fold="">/,
-      `${view}: this Fold's body must carry data-reports-fold, or a portalled fold keeps the app-wide compacted Khmer while the report behind it is boosted`,
+      openingTag(part),
+      CARRIES_FLAG,
+      `${view}: this Fold must be opened with \`surface\`, or its header title reads at the app-wide compacted size directly above boosted body content`,
     )
-    foldBodies += 1
+    foldTags += 1
   }
 }
-assert.equal(foldBodies, 7, 'all seven view folds are accounted for (GroupedReport has two)')
-assert.match(optionsFold, /data-reports-fold=""/, 'and the options fold, which already had the hook, keeps it')
+assert.equal(foldTags, 7, 'all seven view folds are accounted for (GroupedReport has two)')
+assert.match(openingTag(optionsFold.split(/<Fold[\s>]/)[1]), CARRIES_FLAG, 'and the options fold, whose Group titles are the same shape, opts in too')
+
+// The move is safe BY CONSTRUCTION, and this is the construction: every rule
+// scoped to `[data-reports-fold]` declares custom properties and line-height
+// and nothing else. If a later change ever adds a width, a margin, a padding
+// or a display to that scope, it would silently re-shape every report fold's
+// panel -- so it fails here first.
+// `/* ... *​/` comments inside these blocks carry prose with semicolons and
+// colons in it, so they are stripped before the declarations are split.
+const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, '')
+const foldScopedBodies = [...cssCode.matchAll(/\[data-reports-fold\][^{}]*\{([^}]*)\}/g)].map((m) => m[1])
+assert.ok(foldScopedBodies.length >= 4, 'the fold scope is real (base tokens, the >=1024 tier and the Khmer rules)')
+for (const body of foldScopedBodies) {
+  for (const decl of body.split(';').map((d) => d.trim()).filter(Boolean)) {
+    const prop = decl.slice(0, decl.indexOf(':')).trim()
+    assert.ok(
+      prop.startsWith('--') || prop === 'line-height',
+      `[data-reports-fold] may only declare custom properties and line-height, so hoisting the hook to the panel root cannot move the panel -- found "${prop}"`,
+    )
+  }
+}
 
 // The DESKTOP tier has to name the fold too, or a fold opened at >=1024 falls
 // back to the 12px/11px root tokens while the hub behind it is at 14px/13px.

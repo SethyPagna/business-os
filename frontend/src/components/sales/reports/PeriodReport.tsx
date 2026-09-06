@@ -162,6 +162,7 @@ export default function PeriodReport(p: ReportViewProps) {
         maxHeight="70vh"
       />
       <Fold
+        surface
         open={!!openRow}
         onClose={() => setOpenRow(null)}
         anchorRef={anchorRef}
@@ -174,7 +175,7 @@ export default function PeriodReport(p: ReportViewProps) {
           ) : null
         }
       >
-        <div className="p-2" data-reports-fold="">
+        <div className="p-2">
           {openRow ? (
             <ReceiptSheet
               blocks={[

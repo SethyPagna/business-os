@@ -76,6 +76,7 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
   const isDefault = resetDisabled ?? optionsAreDefault
   return (
     <Fold
+      surface
       open={open}
       onClose={onClose}
       anchorRef={anchorRef}
@@ -86,7 +87,7 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
         </Button>
       }
     >
-      <div className="space-y-2.5 p-2.5" data-reports-fold="">
+      <div className="space-y-2.5 p-2.5">
         {filterControls ? (
           <Group title={tr('filters', 'Filters')}>
             <div className="flex w-full flex-col gap-1.5">{filterControls}</div>

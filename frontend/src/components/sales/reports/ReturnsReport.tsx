@@ -212,8 +212,8 @@ export default function ReturnsReport(p: ReportViewProps) {
           {...common}
         />
       ) : null}
-      <Fold open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('rpt_return_no', 'Return #')} ${openRow.return_number}` : ''}>
-        <div className="p-2" data-reports-fold="">
+      <Fold surface open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('rpt_return_no', 'Return #')} ${openRow.return_number}` : ''}>
+        <div className="p-2">
           {openRow ? (
             <ReceiptSheet
               blocks={[{

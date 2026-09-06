@@ -19,6 +19,23 @@ export type FoldProps = {
   /** Desktop panel width: 'md' (20rem, default) for a single receipt/detail,
    *  'lg' (28rem) when the body is a multi-column table. Ignored on the mobile sheet. */
   size?: 'md' | 'lg'
+  /** Opt the WHOLE panel -- Fold's own header title included -- into the
+   *  reports type surface, by putting `data-reports-fold` on the panel root.
+   *
+   *  A caller can only decorate what it passes as `children`, so a report view
+   *  that marked its fold body left this component's `<h3>` outside the scope:
+   *  it asked for `--ui-size-h3`, which only reports-surface.css declares, and
+   *  an undeclared custom property is invalid at computed-value time -- so the
+   *  title fell back to inherited size, with no Khmer boost and none of the
+   *  1.62 line-height floor, sitting directly above body content that had all
+   *  three.
+   *
+   *  Opt-in, never on by default: Fold is the kit's level-2 container for the
+   *  whole app and most of its callers are nowhere near a report. Everything
+   *  scoped to `[data-reports-fold]` declares custom properties and
+   *  line-height only (pinned by reportDocumentSurface.test.ts), so this hook
+   *  changes type, never the panel's geometry. */
+  surface?: boolean
   className?: string
 }
 
@@ -75,7 +92,7 @@ function placeAnchored(rect: DOMRect, panelWidth: number): CSSProperties {
   return { ...base, bottom: window.innerHeight - rect.top + gap, maxHeight: Math.max(120, spaceAbove) }
 }
 
-export default function Fold({ open, onClose, title, actions, children, anchorRef, size = 'md', className = '' }: FoldProps) {
+export default function Fold({ open, onClose, title, actions, children, anchorRef, size = 'md', surface = false, className = '' }: FoldProps) {
   const panelWidth = size === 'lg' ? 448 : 320
   const panelRef = useRef<HTMLDivElement>(null)
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
@@ -181,6 +198,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : undefined}
+        data-reports-fold={surface ? '' : undefined}
         tabIndex={-1}
         className={['w-full rounded-t-[var(--ui-radius-lg)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow-3)] flex flex-col', 'max-h-[85dvh]', className].join(' ').trim()}
       >
@@ -203,6 +221,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
       role="dialog"
       aria-modal="true"
       aria-label={typeof title === 'string' ? title : undefined}
+      data-reports-fold={surface ? '' : undefined}
       tabIndex={-1}
       style={panelStyle}
       className={[size === 'lg' ? 'w-[28rem]' : 'w-80', 'max-h-[70vh] flex flex-col rounded-[var(--ui-radius-lg)] border border-[var(--ui-line)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow-3)]', className].join(' ').trim()}

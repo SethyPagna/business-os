@@ -243,8 +243,8 @@ export default function SalesListReport(p: ReportViewProps) {
           ) : null
         }
       />
-      <Fold open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('receipt', 'Receipt')} ${openRow.receipt_number}` : ''}>
-        <div className="p-2" data-reports-fold="">
+      <Fold surface open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('receipt', 'Receipt')} ${openRow.receipt_number}` : ''}>
+        <div className="p-2">
           {openRow ? (
             <ReceiptSheet
               blocks={[

@@ -789,7 +789,13 @@ test('Khmer keeps a line box tall enough that truncating cells cannot shear it',
   // The fold is portalled to document.body, i.e. OUTSIDE [data-reports-hub],
   // so it needs its own hook or the menu keeps clipping.
   assert.ok(css.includes('[data-reports-fold]'), 'the portalled fold is covered too')
-  assert.ok(read('src/components/sales/reports/ReportOptionsFold.tsx').includes('data-reports-fold'), 'the fold carries that hook')
+  // That hook moved UP on Sep 6, from the div the caller passes as children to
+  // Fold's own panel root, because the caller cannot decorate the panel header
+  // it does not render -- so the fold's title was reading at the app-wide
+  // compacted size above boosted body text. The guard follows it: the caller
+  // now opts in with `surface`, Fold places the attribute.
+  assert.match(read('src/components/sales/reports/ReportOptionsFold.tsx'), /<Fold\s+surface\b/, 'the fold opts into that hook')
+  assert.match(read('src/components/shared/kit/Fold.tsx'), /data-reports-fold=\{surface \? '' : undefined\}/, 'and Fold is what places it, on the panel root')
   // Scoped, not global: the app-wide fix is a separate board item.
   assert.ok(!/^body\.lang-km\s*[,{]/m.test(kmBlocks.replace(/\[data-reports-(hub|fold)\]/g, 'X')), 'the Khmer fix stays scoped to this surface')
 })

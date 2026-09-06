@@ -354,8 +354,8 @@ export default function OverviewReport(p: ReportViewProps) {
           ))}
         </div>
       ) : null}
-      <Fold open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
-        <div className="p-2" data-reports-fold="">
+      <Fold surface open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
+        <div className="p-2">
           {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
           {open === 'couriers' ? <ReportTable surfaceKey="reports-overview-couriers" columns={courierColumns} rows={couriers} rowKey={(r) => String(r.delivery_contact_id ?? r.delivery_contact_name)} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
           {open === 'reasons' ? <ReportTable surfaceKey="reports-overview-reasons" columns={reasonColumns} rows={reasons} rowKey={(r) => r.reason || '—'} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
