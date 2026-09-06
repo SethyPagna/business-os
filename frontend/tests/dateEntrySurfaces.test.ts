@@ -47,6 +47,7 @@ const SURFACES: Array<{ file: string; what: string }> = [
   { file: 'components/sales/ExportModal.tsx', what: 'the sales export custom range' },
   { file: 'components/promotions/PromotionsPage.tsx', what: 'promotion and discount start/end' },
   { file: 'components/catalog/ManagePromotionsModal.tsx', what: 'storefront promo show-from / show-until' },
+  { file: 'components/custom-tables/CustomTables.tsx', what: "the custom-table row editor's date columns" },
 ]
 
 for (const surface of SURFACES) {
@@ -103,7 +104,23 @@ for (const surface of DATE_TIME_SURFACES) {
 // '9032026' for exactly the same reason 'date' does, and 'time' renders
 // 12-hour AM/PM under the pinned en-US locale (the reason
 // DateTimeRangePicker dropped it too).
+//
+// Sep 7 2026: and it now reads the JSX EXPRESSION form as well. A quoted
+// literal directly after `type=` was still the only shape the pattern could
+// see, so a picker chosen at RENDER time -- the custom-table row editor's
+// `type={... column.type === 'date' ? 'date' : 'text'}` -- was invisible to
+// the one check whose whole job is to notice. Same hole, one level down: the
+// rule was right, the instrument only looked at one spelling of it. A banned
+// literal anywhere inside `type={...}` on the line now counts. A bare
+// identifier (`type={dateKind}`) still does not: what it resolves to is not
+// on the line, and flagging it would be guesswork rather than evidence.
 const NATIVE_TEMPORAL_TYPES = ['date', 'datetime-local', 'time', 'month', 'week']
+
+/** Matches `type="date"` AND a banned literal inside `type={...}`. */
+function nativeTemporalPattern(): RegExp {
+  const types = NATIVE_TEMPORAL_TYPES.join('|')
+  return new RegExp(`type=(?:(["'])(?:${types})\\1|\\{[^}]*(["'])(?:${types})\\2[^}]*\\})`)
+}
 
 const NATIVE_DATE_ALLOW_LIST: string[] = []
 
@@ -129,7 +146,7 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 runTest(`no source file renders a native <input type="${NATIVE_TEMPORAL_TYPES.join('|')}">`, () => {
-  const native = new RegExp(`type=(["'])(${NATIVE_TEMPORAL_TYPES.join('|')})\\1`)
+  const native = nativeTemporalPattern()
   const offenders: string[] = []
   for (const file of walk(SRC)) {
     const relative = path.relative(SRC, file).split(path.sep).join('/')
@@ -149,11 +166,24 @@ runTest('the widened sweep can still see a native control (positive control)', (
   // broken instrument -- which is exactly how the datetime-local fields
   // survived it. So the pattern is exercised here on known-offending text,
   // in the same file as the sweep it guards.
-  const native = new RegExp(`type=(["'])(${NATIVE_TEMPORAL_TYPES.join('|')})\\1`)
-  for (const offending of ['<input type="date" />', "<input type='datetime-local' />", '<input className="input" type="datetime-local" required />', '<input type="time" />']) {
+  //
+  // The ternary row is the one that mattered: it is the exact shape of the
+  // live offender the pattern used to walk straight past, so it sits in the
+  // OFFENDING list rather than in a comment about it. `type={dateKind}` stays
+  // innocent to keep the widening honest -- catching every `type={...}` would
+  // pass this control while flagging every select and text input in the app.
+  const native = nativeTemporalPattern()
+  for (const offending of [
+    '<input type="date" />',
+    "<input type='datetime-local' />",
+    '<input className="input" type="datetime-local" required />',
+    '<input type="time" />',
+    "<input type={column.type === 'date' ? 'date' : 'text'} />",
+    '<input type={kind === "month" ? "month" : "text"} />',
+  ]) {
     assert.ok(native.test(offending), `the sweep must catch ${offending}`)
   }
-  for (const innocent of ['<input type="text" />', '<input type="number" />', '<input type="datetime" />', 'type={dateKind}']) {
+  for (const innocent of ['<input type="text" />', '<input type="number" />', '<input type="datetime" />', 'type={dateKind}', "<input type={numeric ? 'number' : 'text'} />"]) {
     assert.ok(!native.test(innocent), `the sweep must not flag ${innocent}`)
   }
   // And the comment blanking keeps its line numbering, so an offender report

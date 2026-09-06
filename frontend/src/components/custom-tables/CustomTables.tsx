@@ -4,6 +4,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, useSync } from '../../AppContext.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import AppSelect from '../shared/AppSelect.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -721,12 +722,29 @@ export default function CustomTables() {
                       value={toInputValue(rowForm[column.name])}
                       onChange={(event) => setRowForm((current) => ({ ...current, [column.name]: event.target.value }))}
                     />
+                  ) : column.type === 'date' ? (
+                    // The row editor's LAST native picker. It reached the DOM
+                    // through `type={... ? 'date' : 'text'}` rather than a
+                    // quoted attribute, which is the only reason it outlived
+                    // the sweep in tests/dateEntrySurfaces.test.ts. Same
+                    // storage on both sides -- ISO 'YYYY-MM-DD' in, ISO out --
+                    // so only the entry changes: a keypad run like 9032026
+                    // settles to 09/03/2026, which the browser's segmented
+                    // widget refuses outright.
+                    <DateEntryInput
+                      id={`custom-table-row-${column.name}`}
+                      name={`custom_table_row_${column.name}`}
+                      value={String(toInputValue(rowForm[column.name]))}
+                      onChange={(iso) => setRowForm((current) => ({ ...current, [column.name]: iso }))}
+                      t={t}
+                      ariaLabel={column.name}
+                    />
                   ) : (
                     <input
                       id={`custom-table-row-${column.name}`}
                       name={`custom_table_row_${column.name}`}
                       className="input"
-                      type={column.type === 'number' || column.type === 'decimal' ? 'number' : column.type === 'date' ? 'date' : 'text'}
+                      type={column.type === 'number' || column.type === 'decimal' ? 'number' : 'text'}
                       value={toInputValue(rowForm[column.name])}
                       onChange={(event) => setRowForm((current) => ({ ...current, [column.name]: event.target.value }))}
                     />
