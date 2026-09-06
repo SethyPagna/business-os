@@ -59,22 +59,27 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 1196,
+    line: 1257,
     reason:
       'Filter-metadata effect. Re-runs INDIRECTLY: filterMetaScope (a useMemo over all '
-      + 'six filters) changes -> the effect at :1181 resets filterMetaLoadedRef and '
-      + 'filterMetaReady -> load()\'s loading cycle re-triggers :1187 -> this effect runs '
-      + 'again with a fresh closure. Verified 2026-09-03; no path found where a filter '
-      + 'changes without load() running. FRAGILE: it depends on `loading` cycling, so if '
-      + 'that chain is ever refactored this entry must be re-verified, not trusted.',
+      + 'six filters, :1234) changes -> the effect at :1242 resets filterMetaLoadedRef '
+      + 'and filterMetaReady -> load()\'s loading cycle re-triggers :1252 -> this effect '
+      + 'runs again with a fresh closure. Verified 2026-09-03; re-verified 2026-09-06 '
+      + 'when a text-affordance import shifted the file by one line and tipped the pin '
+      + 'past DRIFT: the four-hook chain above is unchanged and the prose line numbers, '
+      + 'stale since some earlier shift, are repinned with it. FRAGILE: it depends on '
+      + '`loading` cycling, so if that chain is ever refactored this entry must be '
+      + 're-verified, not trusted.',
   },
   {
     file: 'components/products/Products.tsx',
     names: ['stockFilter'],
-    line: 2168,
+    line: 2228,
     reason:
       'False-positive class 3. `stockFilter:` here is an OBJECT KEY -- the value read is '
-      + 'effectiveStockState, which IS in the deps. Nothing to fix.',
+      + 'effectiveStockState, which IS in the deps. Nothing to fix. Re-verified and '
+      + 'repinned 2026-09-06 (the `filtered` useMemo); the old pin had drifted to the '
+      + 'edge of DRIFT, one inserted line from reporting itself stale.',
   },
 ]
 
