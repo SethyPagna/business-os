@@ -83,6 +83,17 @@ import {
 } from '../lib/saleAmendments'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
+import {
+  buildSaleRecords,
+  buildSaleRecordsCountSql,
+  saleRecordsCountBinds,
+  SALE_RECORDS_COUNT_BINDS_PER_ID,
+  SALE_RECORDS_SELF_COUNT,
+  type SaleRecordAuditRow,
+  type SaleRecordBulkRow,
+  type SaleRecordLedgerRow,
+  type SaleRecordSaleRow,
+} from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -2495,6 +2506,75 @@ app.get('/:id/amendments', async (c) => {
 })
 
 // ---------------------------------------------------------------------------
+// GET /api/sales/:id/records -- every change anybody ever made to this sale, as
+// ONE list (N41).
+//
+// The owner, Sep 6 2026: "one line called Records with total records when press
+// it pops up a float with who made changes in this sales record".
+//
+// This is NOT GET /:id/amendments with a different name. That endpoint reads
+// one table and answers "how was this sale corrected". A sale is changed by
+// four writers that each record themselves somewhere else -- the amendment
+// ledger, audit_logs, the bulk-operation receipt, and the act of ringing the
+// sale up at all -- and a reader who only sees the ledger is told nothing about
+// the sale that was cancelled in a bulk action, which is precisely the change
+// they came to ask about. lib/saleRecords.ts holds the meaning and every
+// classification rule; this route holds only the four reads.
+//
+// Read-gated exactly like /:id/amendments: whoever may view the sale may see
+// how it got that way. Hiding the trail from the people who reconcile the books
+// would defeat the feature.
+// ---------------------------------------------------------------------------
+app.get('/:id/records', async (c) => {
+  const db = getDb(c.env)
+  if (!canReadSales(c.get('user'))) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const saleId = Number(c.req.param('id'))
+  if (!Number.isFinite(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
+
+  const sale = await db.prepare(`
+    SELECT id, receipt_number, sale_status, cashier_name, total_usd, created_at
+    FROM sales WHERE id = ?
+  `).get<SaleRecordSaleRow>([saleId])
+  if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  const ledger = await db.prepare(`
+    SELECT id, kind, group_id, product_name,
+      quantity_before, quantity_after, amount_before_usd, amount_after_usd,
+      total_before_usd, total_after_usd, units_moved, stock_skipped, via,
+      note, user_name, created_at
+    FROM sale_amendments WHERE sale_id = ? ORDER BY id ASC
+  `).all<SaleRecordLedgerRow>([saleId])
+
+  // entity_id is a TEXT column; binding the integer id matches nothing. Same
+  // trap the count query documents, and the reason both sides go through
+  // saleRecordsCountBinds / this explicit String().
+  const auditRows = await db.prepare(`
+    SELECT id, action, details, user_name, created_at
+    FROM audit_logs WHERE entity = 'sale' AND entity_id = ? ORDER BY id ASC
+  `).all<SaleRecordAuditRow>([String(saleId)])
+
+  // The bulk gap: a bulk status change or field update writes ONE audit row
+  // keyed by the OPERATION id, so the query above cannot see it. Membership in
+  // sale_bulk_members is what says this sale actually moved (both bulk writers
+  // insert a member only when `changed`), and the operation's action_history
+  // row is the only place its timestamp and actor live -- sale_bulk_members has
+  // neither column.
+  const bulk = await db.prepare(`
+    SELECT o.id AS operation_id, o.request_json, o.receipt_json, o.history_id,
+      h.created_at AS created_at, h.created_by_name AS created_by_name, h.label AS label
+    FROM sale_bulk_members m
+    JOIN sale_bulk_operations o ON o.id = m.operation_id
+    LEFT JOIN action_history h ON h.id = o.history_id
+    WHERE m.sale_id = ?
+  `).all<SaleRecordBulkRow>([saleId])
+
+  const records = buildSaleRecords({ sale, ledger, audit: auditRows, bulk })
+  return c.json({ saleId, records, count: records.length })
+})
+
+// ---------------------------------------------------------------------------
 // POST /api/sales/:id/amendments -- change a recorded sale (S4-30).
 //
 // The shop owner's ask: "sometimes we input wrong delivery cost, or customers
@@ -3652,6 +3732,19 @@ app.get('/', async (c) => {
     `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(chunk))
     const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
 
+    // "Records n" on every row. ONE statement per chunk over three tables
+    // rather than a query per sale -- a 500-row page would otherwise fire 500
+    // reads. chunkForBinding is told the real cost (each id is bound into
+    // three IN lists, not one) so a full page cannot trip D1's 100-parameter
+    // ceiling the way GET /api/products once did.
+    const recordsBySale = new Map<number, number>()
+    for (const chunk of chunkForBinding(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID)) {
+      const placeholders = chunk.map(() => '?').join(',')
+      const countRows = await db.prepare(buildSaleRecordsCountSql(placeholders))
+        .all<{ sale_id: number; n: number }>(saleRecordsCountBinds(chunk))
+      for (const row of countRows) recordsBySale.set(Number(row.sale_id), Number(row.n) || 0)
+    }
+
     return sales.map((sale) => {
       const { linked_driver_name, linked_driver_phone, ...snapshot } = sale
       const refund = refundsBySale.get(sale.id)
@@ -3665,6 +3758,9 @@ app.get('/', async (c) => {
         refund_usd: refundUsd,
         refund_khr: refundKhr,
         return_count: refund?.return_count || 0,
+        // Never 0: a sale always has at least the fact that it happened, and
+        // that is the record every later one is relative to.
+        records_count: (recordsBySale.get(sale.id) || 0) + SALE_RECORDS_SELF_COUNT,
         total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
         total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
         net_total_usd: (sale.total_usd || 0) - refundUsd,
