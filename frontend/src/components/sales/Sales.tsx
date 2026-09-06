@@ -199,10 +199,11 @@ interface SaleItemAddition {
 // the row shape is migration 0115's, shared with utils/saleAmendments.ts so
 // the renderer and the caller cannot drift.
 interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed'
   sale_item_id?: number
   quantity?: number
   delivery_fee_usd?: number
+  delivery_actual_cost_usd?: number | string | null
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
   client_request_id: string
