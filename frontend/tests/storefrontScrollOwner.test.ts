@@ -172,15 +172,23 @@ runTest('the storefront shell still clips its horizontal axis', () => {
   assert.match(shell, /min-h-screen/, 'the shell still fills at least the viewport')
 })
 
-runTest('the sticky storefront chrome now resolves against the document', () => {
-  // The two sticky surfaces that were dead while the shell was a scrollport.
+runTest('every sticky surface on the public route, and the shell it sits in', () => {
+  // The surfaces whose scrollport this whole file is about. Naming them
+  // here is not the assertion -- the assertion is the ANCESTOR chain below
+  // and in the CSS section: a sticky element is only as good as the nearest
+  // scrollport above it, and both the shell AND <body> are in that chain.
   assert.match(previewSurface, /publicView \? 'sticky top-1 z-40 sm:top-2' : ''/, 'the public section nav is sticky-positioned')
   const products = read('../src/components/catalog/CatalogProductsSection.tsx')
   assert.match(products, /sticky top-16 z-20/, 'the products search/filter row is sticky-positioned')
+  assert.match(products, /lg:sticky lg:top-20/, 'the desktop filter rail is sticky-positioned')
   // ...and the live storefront never arms the JS pinning fallback, so CSS
-  // sticky is the ONLY mechanism holding that nav in place there.
+  // sticky is the ONLY mechanism holding any of them in place there.
   assert.match(publicPage, /publicPortalNavPinned=\{false\}/, "the live storefront relies on CSS sticky, not the admin preview's JS pin")
+  // Ancestor 1 of 2: the shell.
   assert.equal(isScrollContainer(declaredOverflow(portalRootBlocks(previewSurface)[0])), false)
+  // Ancestor 2 of 2 is <body>, and it is CSS, not JSX -- see
+  // "the marker leaves <body> out of the scroll chain" below. Asserting only
+  // the shell here is what let this check pass while the claim was false.
 })
 
 // ---------------------------------------------------------------------------
@@ -214,7 +222,7 @@ runTest('the marker is restored, not blindly removed, on unmount', () => {
 runTest('the marker still has something to unlock', () => {
   assert.match(
     mainCss,
-    /html\[data-public-portal='true'\],\nbody\[data-public-portal='true'\] \{[\s\S]*?overflow-y: auto !important;/,
+    /html\[data-public-portal='true'\] \{[^}]*?overflow-y: auto !important;/,
     'the CSS the marker exists to switch on must still be there -- otherwise setting it is cargo cult',
   )
   const portalCss = read('../src/styles/public-portal.css')
@@ -246,6 +254,190 @@ runTest('the body marker is what gives a portalled overlay its 44px touch floor'
   const pageSizeSelect = read('../src/components/shared/PageSizeSelect.tsx')
   assert.match(pageSizeSelect, /createPortal\(/, 'the per-page menu is portalled out of the page')
   assert.match(pageSizeSelect, /document\.body,/, '...straight onto document.body, past every descendant selector but the marker')
+})
+
+// ---------------------------------------------------------------------------
+// The other half of the chain: the CSS the marker switches on
+// ---------------------------------------------------------------------------
+//
+// Setting `data-public-portal` on <html> and <body> is only half a fix. What
+// the marker SWITCHES ON decides whether <body> is a scrollport, and <body>
+// sits between every sticky storefront surface and the viewport. This lane is
+// the first thing that ever activates these rules on the live shop, so a
+// scrollport here is a defect this lane would have SHIPPED.
+//
+// The two rules that make it non-obvious:
+//   * root propagation: overflow declared on <html> moves to the viewport and
+//     <html>'s own used value becomes `visible`, so <html> is never the
+//     scrollport itself.
+//   * body propagation is only a FALLBACK, and only when the root's own
+//     overflow is `visible`. main.css declares `html { overflow-x: hidden }`,
+//     so it never fires -- a non-visible overflow on <body> applies to
+//     <body>, and `height: auto` makes that a scrollport that can never
+//     scroll: the exact shape this lane removed from the shell.
+
+// main.css is one file, and the declarations that reach <html>/<body> under
+// the marker all live inside its `@layer base` block. Slice that block by
+// brace matching rather than by line number, so the parser survives edits
+// above it -- after stripping comments, because this stylesheet explains
+// itself in prose that quotes CSS, and a brace inside a comment desynchronises
+// both the brace matcher and the rule reader. (Found the hard way: with the
+// comments left in, the reader silently reported <html> as having no overflow
+// at all.)
+function stripCssComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, '')
+}
+
+function layerBaseBlock(rawCss: string): string {
+  const css = stripCssComments(rawCss)
+  const open = css.indexOf('@layer base {')
+  assert.ok(open >= 0, 'main.css must still declare its base layer')
+  let depth = 0
+  for (let i = css.indexOf(String.fromCharCode(123), open); i < css.length; i += 1) {
+    const ch = css[i]
+    if (ch === String.fromCharCode(123)) depth += 1
+    else if (ch === String.fromCharCode(125)) {
+      depth -= 1
+      if (depth === 0) return css.slice(open, i + 1)
+    }
+  }
+  throw new Error('unbalanced braces in main.css @layer base')
+}
+
+type Decl = { prop: string; value: string; important: boolean; specificity: number; order: number }
+
+// Which selectors reach `<html data-public-portal='true'>` /
+// `<body data-public-portal='true'>`, and how specific each is. Type selector
+// = 1, type + attribute = 10 (an attribute selector outranks any number of
+// type selectors, which is the whole reason the marker rules win).
+function selectorSpecificity(selector: string, element: string): number | null {
+  const sel = selector.trim()
+  if (sel === element) return 1
+  if (sel === `${element}[data-public-portal='true']`) return 10
+  return null
+}
+
+// Cascade the declarations that reach one element and return the winners.
+// Longhands only: `overflow: X` is expanded, since that is how the browser
+// resolves it against a competing `overflow-x`.
+function cascade(rawCss: string, element: string): Record<string, string> {
+  const css = stripCssComments(rawCss)
+  const decls: Decl[] = []
+  let order = 0
+  const ruleRe = /([^{}]+)\{([^{}]*)\}/g
+  let match: RegExpExecArray | null
+  while ((match = ruleRe.exec(css)) !== null) {
+    const selectors = match[1].split(',')
+    const body = match[2]
+    for (const selector of selectors) {
+      const specificity = selectorSpecificity(selector, element)
+      if (specificity === null) continue
+      for (const raw of body.split(';')) {
+        const colon = raw.indexOf(':')
+        if (colon < 0) continue
+        const prop = raw.slice(0, colon).trim()
+        let value = raw.slice(colon + 1).trim()
+        const important = /!important$/.test(value)
+        if (important) value = value.replace(/!important$/, '').trim()
+        order += 1
+        if (prop === 'overflow') {
+          decls.push({ prop: 'overflow-x', value, important, specificity, order })
+          decls.push({ prop: 'overflow-y', value, important, specificity, order })
+        } else {
+          decls.push({ prop, value, important, specificity, order })
+        }
+      }
+    }
+  }
+  const winners: Record<string, Decl> = {}
+  for (const decl of decls) {
+    const held = winners[decl.prop]
+    if (!held) { winners[decl.prop] = decl; continue }
+    const beats = decl.important !== held.important
+      ? decl.important
+      : decl.specificity !== held.specificity
+        ? decl.specificity > held.specificity
+        : decl.order > held.order
+    if (beats) winners[decl.prop] = decl
+  }
+  const flat: Record<string, string> = {}
+  for (const [prop, decl] of Object.entries(winners)) flat[prop] = decl.value
+  return flat
+}
+
+function cascadedOverflow(css: string, element: string): OverflowPair {
+  const won = cascade(css, element)
+  return { x: won['overflow-x'] || 'visible', y: won['overflow-y'] || 'visible' }
+}
+
+runTest('the cascade reader reproduces the defect it is here to catch (positive control)', () => {
+  // The exact shape main.css shipped before this fix: ONE selector list for
+  // html and body. If the reader below cannot report THAT as a body
+  // scrollport, its all-clear on the real file means nothing.
+  const before = [
+    '@layer base {',
+    '  html { overflow-x: hidden; }',
+    '  body { overflow-x: hidden; }',
+    "  html[data-public-portal='true'],",
+    "  body[data-public-portal='true'] {",
+    '    height: auto;',
+    '    overflow-y: auto !important;',
+    '    overflow-x: hidden;',
+    '  }',
+    '}',
+  ].join('\n')
+  assert.deepEqual(cascadedOverflow(before, 'body'), { x: 'hidden', y: 'auto' })
+  assert.equal(isScrollContainer(cascadedOverflow(before, 'body')), true, 'the reader must SEE the old body scrollport')
+  // ...and the fixed shape, read by the same code, must come back clean.
+  const after = [
+    '@layer base {',
+    '  html { overflow-x: hidden; }',
+    '  body { overflow-x: hidden; }',
+    "  html[data-public-portal='true'] { overflow-y: auto !important; overflow-x: hidden; }",
+    "  body[data-public-portal='true'] { overflow: visible; }",
+    '}',
+  ].join('\n')
+  assert.deepEqual(cascadedOverflow(after, 'body'), { x: 'visible', y: 'visible' })
+  assert.equal(isScrollContainer(cascadedOverflow(after, 'body')), false)
+})
+
+runTest('the marker leaves <body> out of the scroll chain', () => {
+  const base = layerBaseBlock(mainCss)
+  const body = cascadedOverflow(base, 'body')
+  assert.equal(
+    isScrollContainer(body),
+    false,
+    `main.css gives <body data-public-portal> overflow ${JSON.stringify(body)}. <html> already propagates its own overflow to the viewport, so body-to-viewport propagation does not fire and this applies to <body> itself: a height:auto scrollport that can never scroll, and the nearest scrollport for the sticky section nav, the sticky products search row and the sticky desktop filter rail.`,
+  )
+})
+
+runTest('...while <html> keeps the unlock and the horizontal containment', () => {
+  const base = layerBaseBlock(mainCss)
+  const html = cascadedOverflow(base, 'html')
+  assert.equal(html.y, 'auto', 'the vertical unlock must stay on the root, which propagates it to the viewport')
+  assert.equal(html.x, 'hidden', 'and horizontal containment with it -- this is what body no longer has to carry')
+  // Root propagation is the reason this is not the same defect one level up:
+  // the root's own used overflow becomes `visible`, so <html> is not itself
+  // the scrollport. Pinned as the rule, so a future reader can check it.
+  assert.equal(isScrollContainer({ x: 'visible', y: 'visible' }), false)
+})
+
+runTest('nothing re-declares html/body overflow outside the base layer', () => {
+  // The cascade above reads only `@layer base`. That is only sound while no
+  // later rule targets these two elements, so check the claim instead of
+  // assuming it -- in main.css outside the block, and in public-portal.css,
+  // which is where every other marker rule lives.
+  const outside = stripCssComments(mainCss).replace(layerBaseBlock(mainCss), "")
+  const portalCss = read('../src/styles/public-portal.css')
+  for (const [name, css] of [['main.css (outside @layer base)', outside], ['public-portal.css', portalCss]] as const) {
+    for (const element of ['html', 'body'] as const) {
+      const declared = cascadedOverflow(css, element)
+      assert.deepEqual(
+        declared, { x: 'visible', y: 'visible' },
+        `${name} declares overflow on ${element} -- the reader above would miss it`,
+      )
+    }
+  }
 })
 
 if (failed > 0) {

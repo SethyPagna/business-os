@@ -58,14 +58,54 @@
     font: inherit;
     font-family: inherit;
   }
-html[data-public-portal='true'],
-body[data-public-portal='true'] {
+/* The public storefront's ONE scroll owner is the document, and the box a
+   document scrolls in is the VIEWPORT -- which is also what every
+   `position: sticky` descendant resolves against. Getting that right takes
+   two DIFFERENT rules, not one selector list.
+
+   ROOT. `overflow` declared on the root element is propagated to the
+   viewport, and the root's own used value becomes `visible`. So html is
+   where the portal's scroll unlock and its horizontal containment belong:
+   the viewport scrolls vertically and clips horizontally, and html itself
+   never becomes a scrollport.
+
+   BODY. Body-to-viewport propagation is the FALLBACK that only applies when
+   the root's own overflow is `visible` -- and here it is not (html is
+   `overflow-x: hidden` in the base rule above and again just below). With
+   the root already propagating, a non-visible overflow on body applies to
+   BODY, making body a scroll container. Body is `height: auto`, so that
+   container's scrollHeight can never exceed its clientHeight: a scrollport
+   that can never scroll -- exactly the shape this lane removed from the
+   storefront shell -- while still capturing the scrollport of every sticky
+   descendant (the section nav's `sticky top-1`, the products search/filter
+   row's `sticky top-16`, the desktop filter rail's `lg:sticky lg:top-20`).
+   The live shop passes publicPortalNavPinned={false}, so CSS sticky is the
+   only mechanism it has and all three simply scroll away.
+
+   Hence `overflow: visible` on body, which also has to beat the base
+   `body { overflow-x: hidden }` above -- the attribute selector's higher
+   specificity is what does that. Horizontal containment is not lost: it
+   lives on html (propagated to the viewport) and on the shell's own
+   `overflow-x-clip`.
+
+   BOTH attributes stay set (PublicCatalogPage and CatalogPage set html AND
+   body): public-portal.css keys every one of its rules off body, and so do
+   the Khmer weight rules further down this file. */
+html[data-public-portal='true'] {
   height: auto;
   min-height: 100%;
   overflow-y: auto !important;
   overflow-x: hidden;
   overscroll-behavior-y: auto;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y pinch-zoom;
+}
+
+body[data-public-portal='true'] {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  overscroll-behavior-y: auto;
   touch-action: pan-y pinch-zoom;
 }
 
