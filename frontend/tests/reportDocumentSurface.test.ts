@@ -267,6 +267,27 @@ assert.doesNotMatch(sheetCode, /md:rounded-\[var\(--ui-radius\)\] md:border md:b
 // (-mx-1) that used to reach outside the tape must not survive it.
 assert.doesNotMatch(sheetCode, /-mx-1/, 'no negative margins pulling a card back out through its own border')
 
+// ...and the sheet's own WRAPPER is a layout container, not a third frame.
+//
+// VERIFIER DEFECT (compactness). Making every receipt block a `.report-segment`
+// (bordered, padded, on a surface) at the same time as giving the sheet wrapper
+// a border/background/padding of its own produced THREE nested rectangles for
+// one list: ReportFrame's segment, the sheet wrapper, then each card. The
+// wrapper's `px-2 py-1.5` is also the most expensive padding in the layout --
+// at 375px it took the receipt grid from 359px down to 301px, spending
+// compactness on a rectangle that carries no information.
+//
+// The owner asked for line borders on every SEGMENT, and after this lane every
+// segment has them on all four sides at every width: the view's ReportFrame
+// outside the sheet, and each block's own card inside it. The wrapper between
+// them is pure layout -- the centred 420px statement column, and the md+ card
+// grid -- so it keeps only its width and grid classes.
+assert.doesNotMatch(sheetCode, /max-w-\[(26rem|420px)\][^'\n]*\bborder\b/, 'the sheet wrapper must not add a third border between ReportFrame and the cards')
+assert.doesNotMatch(sheetCode, /max-w-\[(26rem|420px)\][^'\n]*px-2 py-1\.5/, 'nor a third inset -- at 375px that padding cost the receipt grid 18px of content width')
+assert.doesNotMatch(sheetCode, /max-w-\[(26rem|420px)\][^'\n]*bg-\[var\(--ui-surface\)\]/, 'nor a third surface fill')
+assert.match(sheetCode, /\? 'mx-auto w-full max-w-\[420px\]'/, 'the centred statement wrapper is width + centring only')
+assert.match(sheetCode, /: 'w-full max-w-\[26rem\] md:max-w-none md:grid md:grid-cols-2 md:gap-1\.5 xl:grid-cols-3'/, 'the tape/grid wrapper is width + grid only')
+
 // A segment that paints its own background creates an ORDER hazard for the
 // two state tints: a `bg-[var(--ui-*-soft)]` utility is 0-1-0, exactly like
 // `.report-segment`, and this file ships in the lazily loaded ReportsHub CSS

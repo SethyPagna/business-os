@@ -68,8 +68,19 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
         // `truncate` box. Mono now rides the VALUE span only (where it earns
         // its keep by aligning digits); labels keep the app font.
         'text-[length:var(--ui-size-body,12px)] leading-[var(--ui-receipt-lh,16px)] text-[var(--ui-ink)] [font-variant-numeric:tabular-nums]',
+        // BOTH branches are LAYOUT ONLY -- no border, no background, no inset.
+        //
+        // Every block below is a `.report-segment` (bordered on all four sides
+        // at every width) and the whole sheet already renders inside
+        // ReportFrame, which is itself a `.report-segment`. A frame on this
+        // wrapper as well would draw THREE nested rectangles around one list,
+        // and its `px-2 py-1.5` was the most expensive padding in the layout:
+        // at 375px it took the receipt content from 359px to 301px. The owner
+        // asked for line borders on every segment and for the report to stay
+        // compact; the lines come from the frame and the cards, and the space
+        // this wrapper was spending goes back to the content.
         centered
-          ? 'mx-auto w-full max-w-[420px] rounded-[var(--ui-radius)] border border-[var(--ui-line)] bg-[var(--ui-surface)] px-2 py-1.5'
+          ? 'mx-auto w-full max-w-[420px]'
           // One tape below 768px; from 768px each block becomes its own card in a
           // grid so a wide screen shows several receipts side by side instead of
           // one full-width column of mostly empty space.
@@ -80,13 +91,7 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
           // width of nothing between them (user, Part 586: "the fields and
           // value can be closer much closer"). The cap is lifted at md, where
           // the grid already bounds each card.
-          //
-          // The frame stays at md+ too. It used to be dropped there
-          // (`md:border-0 md:bg-transparent md:p-0`), which left the card grid
-          // floating with no outer line at exactly the widths the owner reads
-          // reports on -- "use borders for all segments like up down, left and
-          // right, so see line borders" (Sep 6).
-          : 'w-full max-w-[26rem] rounded-[var(--ui-radius)] border border-[var(--ui-line)] bg-[var(--ui-surface)] px-2 py-1.5 md:max-w-none md:grid md:grid-cols-2 md:gap-1.5 xl:grid-cols-3',
+          : 'w-full max-w-[26rem] md:max-w-none md:grid md:grid-cols-2 md:gap-1.5 xl:grid-cols-3',
         className,
       ].join(' ').trim()}
     >
