@@ -221,6 +221,28 @@ runTest('the shipped strip fits on one line in every case in the report', () => 
   }
 })
 
+runTest('the comment beside the class quotes the model, not a hand-computed guess', () => {
+  // The first pass hand-added the levers in the CSS comment, forgot the
+  // divider pull entirely and under-counted the font step, and shipped
+  // "241px -> ~211px" beside a model that computes 242.1 -> 203.7. Prose that
+  // disagrees with the executable model next to it is worse than no prose --
+  // the lane report then repeated the wrong pair as a fact, including a
+  // "3px over" degradation this file's own 360+select case proves does not
+  // happen. So the two figures are machine-readable and answerable to the
+  // model, and any drift between them is red.
+  const quoted = /OLD ([\d.]+)px,\s*\n?\s*NEW ([\d.]+)px/.exec(css)
+  assert.ok(quoted, 'the .price-strip comment must quote its model as "OLD <n>px, NEW <n>px"')
+  for (const [label, claimed, actual] of [
+    ['OLD', Number(quoted[1]), stripWidth(OLD)],
+    ['NEW', Number(quoted[2]), stripWidth(currentModel())],
+  ] as Array<[string, number, number]>) {
+    assert.ok(
+      Math.abs(claimed - actual) <= 0.1,
+      `the comment claims ${label} = ${claimed}px but the model computes ${actual.toFixed(1)}px`,
+    )
+  }
+})
+
 runTest('the fix is a real saving, not a rounding artefact', () => {
   const saved = stripWidth(OLD) - stripWidth(currentModel())
   assert.ok(saved >= 25, `expected the compaction to buy back real width, got ${saved.toFixed(1)}px`)

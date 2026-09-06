@@ -978,16 +978,22 @@ body.lang-km .scroll-x-clean,
    page px-3 + card px-3 + the w-16 thumbnail and its gap-3 leave 375 - 24 -
    24 - 64 - 12 = 251px of text column. Three "$123.45" figures at .75rem are
    ~131px, a 4-digit qty ~27px, a coloured unit chip ~37px and three "|"
-   ~10px = 205px of ink -- but the old row also spent six `gap-x-1.5` gaps,
-   36px, for 241px. That clears 251px only when nothing else is on the line,
-   and loses as soon as select mode adds its checkbox (-28px -> 223px) or the
-   viewport is a 360px Android (-15px -> 236px). Hence the wrap.
-   This class spends .1875rem per gap instead of .375rem (-18px), steps the
-   digits down one notch to .7rem (-9px) and tightens tracking (-3px):
-   ~211px, which clears 375px in select mode and 360px without it.
-   Nothing is hidden and nothing wraps: flex-wrap is nowrap, and the residual
-   overflow a promotion label plus a long Khmer unit can still produce
-   scrolls cleanly instead of pushing the qty to a second row. */
+   ~10px = 206px of ink -- but the old row also spent six `gap-x-1.5` gaps,
+   36px. That clears 251px only when nothing else is on the line, and loses as
+   soon as select mode adds its checkbox (-28px -> 223px) or the viewport is a
+   360px Android (-15px -> 236px). Hence the wrap.
+   Four levers, and all four are spent: .1875rem per gap instead of .375rem
+   (-18.0px), the digits one notch down to .7rem (-11.3px), tightened tracking
+   (-3.2px) and the negative margin either side of "|" (-6.0px).
+   Model (tests/productRowPriceStrip.test.ts is the AUTHORITY over this
+   comment; these two figures are asserted against it): OLD 242.1px,
+   NEW 203.7px. That clears all four cases -- 251, 236, 223 and the tightest,
+   208px on a 360px Android in select mode.
+   The model excludes a promotion label and a long Khmer unit, and the
+   tightest Latin case has only ~4px of headroom, so the browser is still the
+   authority over the model. Nothing is hidden and nothing wraps: flex-wrap is
+   nowrap, and any residual overflow scrolls cleanly instead of pushing the
+   qty to a second row. */
 .price-strip {
   display: flex;
   min-width: 0;
