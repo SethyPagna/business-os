@@ -262,3 +262,147 @@ export function applyDateEntryMask(raw: string, options?: { deleting?: boolean; 
   if (digits.length <= 4) return options?.deleting ? `${day}/${month}` : `${day}/${month}/`
   return `${day}/${month}/${digits.slice(4)}`
 }
+
+// ---------------------------------------------------------------------------
+// The TIME half of the same kernel.
+//
+// A shift is amended and closed at a date AND a wall-clock minute, and until
+// Sep 6 2026 those three fields were the app's last native
+// <input type="datetime-local"> -- the very control DateEntryInput.tsx exists
+// to replace. The native control rejects the keypad run this project's staff
+// actually type ('9032026'), and it renders the date part in the DEVICE
+// locale, so a phone set to en-US silently swaps day and month on a
+// historical shift close that a cashier cannot skip.
+//
+// So the time is typed as bare digits too, on the same terms as the date:
+// '930' is 09:30, '1430' is 14:30, '9' is 09:00. 24-hour throughout -- the
+// app's stated convention, and the one reading that has no am/pm to lose.
+//
+// Timezone safety is inherited: nothing here constructs a Date either. The
+// pair is joined as the plain local string 'YYYY-MM-DDTHH:mm', which is the
+// exact shape shiftTransport.shiftLocalDateTimeToIso already consumes and
+// stamps with the shop's +07:00 offset, so the one place that decides what a
+// typed wall clock MEANS is still that function and not this one.
+// ---------------------------------------------------------------------------
+
+export interface TimeEntryResult {
+  /** Display and storage form, 'HH:mm' (24-hour). null when empty or unreadable. */
+  value: string | null
+  /** Minutes since midnight, 0-1439. null when empty or unreadable. */
+  minutes: number | null
+}
+
+const EMPTY_TIME: TimeEntryResult = { value: null, minutes: null }
+
+function timeCandidate(hour: number, minute: number): TimeEntryResult {
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return EMPTY_TIME
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return EMPTY_TIME
+  return { value: `${pad2(hour)}:${pad2(minute)}`, minutes: hour * 60 + minute }
+}
+
+/**
+ * Turn typed text into 'HH:mm' + minutes-since-midnight.
+ *
+ * Accepted (24-hour, never am/pm):
+ *   '9' / '09' -> 09:00        a bare hour means the hour
+ *   '930' -> 09:30             3 digits are H MM
+ *   '1430' / '0930' -> HH MM
+ *   '9:30', '9.30', '9h30', '14 30'  -- one separator alphabet, like the date
+ *   '14:30:00' / '143000'      a seconds group is dropped, not rejected
+ *
+ * Rejected (returns nulls, so the caller shows an error rather than storing
+ * a guess): hour 24+, minute 60+, letters, and any digit run that is not one
+ * of the lengths above. There is deliberately NO 12-hour reading: '0130'
+ * means half past one in the morning, and a parser that also accepted
+ * '1:30pm' would make the same four keystrokes mean two different minutes.
+ */
+export function normalizeTimeEntry(raw: string): TimeEntryResult {
+  const text = String(raw ?? '').trim()
+  if (!text) return EMPTY_TIME
+  // Same separator alphabet as the date half, plus 'h' for '9h30'.
+  const unified = text.replace(/[:.\-\s_hH]+/g, ':').replace(/^:+|:+$/g, '')
+  if (!unified || !/^[0-9:]+$/.test(unified)) return EMPTY_TIME
+
+  if (unified.includes(':')) {
+    // The operator (or the as-you-type mask) put the separator in, so honour
+    // the grouping literally rather than re-cutting the digits.
+    const parts = unified.split(':')
+    if (parts.length === 3 && /^\d{1,2}$/.test(parts[2])) parts.pop()
+    if (parts.length !== 2) return EMPTY_TIME
+    const [hour, minute] = parts
+    if (!/^\d{1,2}$/.test(hour) || !/^\d{1,2}$/.test(minute)) return EMPTY_TIME
+    return timeCandidate(Number(hour), Number(minute))
+  }
+
+  switch (unified.length) {
+    case 1:
+    case 2:
+      return timeCandidate(Number(unified), 0)
+    case 3:
+      return timeCandidate(Number(unified.slice(0, 1)), Number(unified.slice(1, 3)))
+    case 4:
+    case 6:
+      // 6 digits are HHMMSS; the seconds are dropped for the same reason the
+      // date half drops a trailing time -- pasted exports carry them.
+      return timeCandidate(Number(unified.slice(0, 2)), Number(unified.slice(2, 4)))
+    default:
+      return EMPTY_TIME
+  }
+}
+
+/**
+ * As-you-type mask for the time half.
+ *
+ * It inserts the colon only where it cannot be wrong: after a 2-digit group
+ * that is a real HOUR (00-23). A run whose first two digits are not an hour
+ * ('93' on the way to '930') is left exactly as typed and normalised on
+ * Enter/blur instead -- the same contract applyDateEntryMask keeps, so a
+ * keypad run never fights the typist.
+ *
+ * `deleting` suppresses the trailing colon so backspacing over one is not
+ * instantly undone.
+ */
+export function applyTimeEntryMask(raw: string, options?: { deleting?: boolean }): string {
+  const digits = String(raw ?? '').replace(/\D/g, '').slice(0, 4)
+  if (!digits) return ''
+  const hour = digits.slice(0, 2)
+  const hourComplete = hour.length === 2 && Number(hour) <= 23
+  if (!hourComplete) return digits
+  if (digits.length <= 2) return options?.deleting ? hour : `${hour}:`
+  return `${hour}:${digits.slice(2)}`
+}
+
+/** The local wall-clock pair the shift transport consumes: 'YYYY-MM-DDTHH:mm'. */
+const LOCAL_DATE_TIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/
+
+/**
+ * Split a stored 'YYYY-MM-DDTHH:mm' into its two typed halves. Anything else
+ * -- including a half-entered value -- splits to two empty strings, so a
+ * caller never renders a fragment it cannot round-trip.
+ */
+export function splitLocalDateTime(local: string | null | undefined): { date: string; time: string } {
+  const match = LOCAL_DATE_TIME.exec(String(local ?? '').trim())
+  return match ? { date: match[1], time: match[2] } : { date: '', time: '' }
+}
+
+/**
+ * Join an ISO date and a typed time back into 'YYYY-MM-DDTHH:mm'.
+ *
+ * Returns '' unless BOTH halves are real. A date with no time must never
+ * default to midnight: on the shift close form that would silently invent a
+ * closing minute the cashier never entered, which is the one thing
+ * shift_close_time_hint promises the app does not do.
+ */
+export function joinLocalDateTime(isoDate: string | null | undefined, time: string | null | undefined): string {
+  const date = String(isoDate ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return ''
+  const parsed = normalizeTimeEntry(String(time ?? ''))
+  return parsed.value ? `${date}T${parsed.value}` : ''
+}
+
+/** 'YYYY-MM-DDTHH:mm' -> 'DD/MM/YYYY HH:mm' (string surgery only, never a Date). */
+export function localDateTimeToDisplay(local: string | null | undefined): string {
+  const { date, time } = splitLocalDateTime(local)
+  const display = isoToDisplayDate(date)
+  return display && time ? `${display} ${time}` : ''
+}
