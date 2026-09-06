@@ -59,7 +59,10 @@ function loadReal(relPath, requireOverrides = {}) {
 // Minimal stubs -- enough to LOAD portal.ts (route registration runs at module
 // load; no imported function is invoked until a handler runs, and we never run
 // a handler here -- we only call the pure buildPortalConfig export).
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../index': {},
   '../lib/db': { getDb: () => null },

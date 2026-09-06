@@ -23,9 +23,12 @@ import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
+import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { buildHistoryRowModel, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 import {
   browserStockStorage,
   dropFailedStockAttempt,
@@ -347,21 +350,21 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     downloadCSV(`stock-changes-${range.startDate || 'all'}-${range.endDate || 'all'}.csv`, rows.map((row) => ({
       date: isDateOnlyStamp(row.created_at) ? fmtDate(row.created_at) : fmtDateTime24(row.created_at),
       product: row.product_name,
-      barcode: row.barcode || '',
-      branch: row.branch_name || '',
+      barcode: historyExportField(row.barcode),
+      branch: historyExportField(row.branch_name),
       type: row.movement_type,
       quantity: row.signed_quantity,
       before: row.before_qty,
       after: row.after_qty,
       batch: row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '',
-      supplier: row.batch_supplier_name || '',
-      reason: row.reason || '',
+      supplier: historyExportField(row.batch_supplier_name),
+      reason: historyExportField(row.reason),
       reference: row.reference_id ?? '',
       unit: row.unit || '',
       category: row.category || '',
       brand: row.brand || '',
       tag: row.tag_label || '',
-      user: row.user_name || '',
+      user: historyExportField(row.user_name),
       unit_cost_usd: row.unit_cost_usd ?? row.batch_unit_cost_usd ?? '',
       unit_cost_khr: row.unit_cost_khr ?? '',
       total_cost_usd: row.total_cost_usd ?? row.batch_received_cost_usd ?? '',
@@ -504,6 +507,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     const dateOnly = isDateOnlyStamp(row.created_at)
     const clock = dateOnly ? '' : fmtClock24(row.created_at)
     const timeUnknown = dateOnly || clock === '—' || clock === ''
+    const model = buildHistoryRowModel(row)
     return (
       <button
         key={row.id}
@@ -524,17 +528,31 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             </span>
             <span className="break-words text-[13px] font-semibold leading-4 text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
           </div>
+          {/* O3/N8: the barcode gets its OWN muted mono line directly under the
+              name -- never inline with it, and never sharing a wrapping row with
+              the branch/user/reason chips, where it used to push the amount
+              column around on a narrow card. */}
+          <div className="mt-0.5 break-all font-mono text-[10px] leading-[0.9rem] text-gray-400">{model.barcode}</div>
+          {/* One row model: branch · user · reason, always in this order and
+              always present (an absent value shows the shared placeholder
+              instead of vanishing, which is what made a Sale row look broken). */}
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
             {row.batch_id ? (
               <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
                 {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
               </span>
             ) : null}
-            {row.barcode ? <span className="break-all font-mono">{row.barcode}</span> : null}
             {row.batch_supplier_name ? <span className="break-words font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
-            {row.branch_name ? <span className="break-words">{row.branch_name}</span> : null}
-            {row.user_name ? <span className="break-words">· {row.user_name}</span> : null}
-            {row.reason ? <span className="break-words text-gray-400">· {row.reason}</span> : null}
+            {model.isBare ? (
+              // Nothing was recorded at all: say so once, not three times.
+              <span className="break-words" title={`${tr(t, 'branch', 'Branch')} · ${tr(t, 'cashier_user', 'User')} · ${tr(t, 'reason', 'Reason')}`}>{model.branch}</span>
+            ) : (
+              <>
+                <span className="break-words" title={`${tr(t, 'branch', 'Branch')}: ${model.branch}`}>{model.branch}</span>
+                <span className="break-words" title={`${tr(t, 'cashier_user', 'User')}: ${model.actor}`}>· {model.actor}</span>
+                <span className="break-words text-gray-400" title={`${tr(t, 'reason', 'Reason')}: ${model.reason}`}>· {model.reason}</span>
+              </>
+            )}
           </div>
         </div>
         <div className="shrink-0 text-right">
@@ -585,6 +603,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 const dateOnly = isDateOnlyStamp(row.created_at)
                 const clock = dateOnly ? '' : fmtClock24(row.created_at)
                 const timeUnknown = dateOnly || clock === '—' || clock === ''
+                const model = buildHistoryRowModel(row)
                 return (
                   <tr
                     key={row.id}
@@ -595,14 +614,39 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     aria-label={`${row.product_name}, ${signedLabel(row)}`}
                   >
                     <td className="tabular-nums text-gray-400" title={timeUnknown ? noTimeLabel : undefined}>{timeUnknown ? '––:––' : clock}</td>
-                    <td><span className="whitespace-normal break-words font-semibold text-gray-800 dark:text-gray-100">{row.product_name}</span><span className="break-all dense-id text-gray-400">{row.barcode || (row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '—')}</span></td>
-                    <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate">{translateMovementType(row.movement_type, t)}</span></span></td>
+                    {/* O3/N8: name on line one, barcode on its OWN muted mono
+                        line under it. Both are single-line and clipped, so a
+                        long name can no longer wrap and stretch the whole row
+                        past the dense floor -- every row is the same height.
+                        The batch label moved to the Supplier cell (a lot
+                        belongs with its supplier) so this cell means one thing
+                        per line instead of multiplexing barcode/batch/dash. */}
+                    <td>
+                      <span className="block dense-cell-truncate font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+                      <span className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400" title={model.barcode}>{model.barcode}</span>
+                    </td>
+                    <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate" title={translateMovementType(row.movement_type, t)}>{translateMovementType(row.movement_type, t)}</span></span></td>
                     <td className={`text-center font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
                     <td className="text-center tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
-                    <td><span className="dense-cell-truncate" title={row.branch_name || ''}>{row.branch_name || '—'}</span></td>
-                    <td><span className="dense-cell-truncate" title={row.batch_supplier_name || ''}>{row.batch_supplier_name || '—'}</span></td>
-                    <td><span className="dense-cell-truncate" title={row.user_name || ''}>{row.user_name || '—'}</span></td>
-                    <td><span className="dense-cell-truncate text-gray-500" title={row.reason || ''}>{row.reason || '—'}</span></td>
+                    <td><span className="dense-cell-truncate" title={model.branch}>{model.branch}</span></td>
+                    <td>
+                      <span className="block dense-cell-truncate" title={row.batch_supplier_name || ''}>{historyField(row.batch_supplier_name)}</span>
+                      {row.batch_id ? (
+                        // Titled with the label itself, like every sibling cell in this
+                        // row. The line truncates, so its tooltip is the only way to
+                        // read a long lot code; titling it with the FIELD name instead
+                        // ("Received date", the 'batch' key) spent the one affordance
+                        // that could reveal the value on repeating the column header.
+                        <span
+                          className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400"
+                          title={batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+                        >
+                          {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td><span className="dense-cell-truncate" title={model.actor}>{model.actor}</span></td>
+                    <td><span className="dense-cell-truncate text-gray-500" title={model.reason}>{model.reason}</span></td>
                   </tr>
                 )
               }),
@@ -892,8 +936,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               ))}
             </dl>
             <div className="flex items-center justify-between text-xs text-gray-400">
-              <span>{detail.branch_name || '--'}</span>
-              <span>{detail.user_name || '--'}</span>
+              <span title={`${tr(t, 'branch', 'Branch')}`}>{buildHistoryRowModel(detail).branch}</span>
+              <span title={`${tr(t, 'cashier_user', 'User')}`}>{buildHistoryRowModel(detail).actor}</span>
             </div>
             {/* Row context actions -- Edit reason + Revert -- only for a user
                 with Inventory adjust access (the server enforces the same).
@@ -902,28 +946,58 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             {canAdjust ? (
               editingReason == null ? (
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                  {/* N8: these were text links -- a bordered 24px chip next to a
+                      filled one, neither matching anything else in the app. They
+                      are now the shared button kit (.btn-secondary/.btn-danger:
+                      same 2.5rem height, same --ui-radius, same font-weight as
+                      every other row action), icon + label from sm up and
+                      icon-only with an aria-label below it, where a two-word
+                      label would wrap the rail. */}
                   <button
                     type="button"
                     disabled={rowBusy}
                     onClick={() => setEditingReason(detail.reason || '')}
-                    className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                    aria-label={tr(t, 'edit_reason', 'Edit reason')}
+                    title={tr(t, 'edit_reason', 'Edit reason')}
+                    className="btn-secondary inline-flex items-center gap-1.5 px-3 text-sm disabled:opacity-50"
                   >
-                    {tr(t, 'edit_reason', 'Edit reason')}
+                    <Pencil className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span className="hidden sm:inline">{tr(t, 'edit_reason', 'Edit reason')}</span>
                   </button>
                   {confirmRevert ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs">
+                    <span className="inline-flex flex-wrap items-center gap-2 text-xs">
                       <span className="text-gray-500 dark:text-gray-400">{tr(t, 'confirm_revert', 'Revert this change?')}</span>
-                      <button type="button" disabled={rowBusy} onClick={() => void doRevert()} className="rounded-lg bg-rose-600 px-2.5 py-1 font-medium text-white hover:bg-rose-700 disabled:opacity-50">{tr(t, 'revert', 'Revert')}</button>
-                      <button type="button" disabled={rowBusy} onClick={() => setConfirmRevert(false)} className="rounded-lg border border-gray-200 px-2.5 py-1 text-gray-600 dark:border-gray-700 dark:text-gray-300">{tr(t, 'cancel', 'Cancel')}</button>
+                      <button
+                        type="button"
+                        disabled={rowBusy}
+                        onClick={() => void doRevert()}
+                        aria-label={tr(t, 'revert', 'Revert')}
+                        title={tr(t, 'revert', 'Revert')}
+                        className="btn-danger inline-flex items-center gap-1.5 px-3 text-sm disabled:opacity-50"
+                      >
+                        <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        <span className="hidden sm:inline">{tr(t, 'revert', 'Revert')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={rowBusy}
+                        onClick={() => setConfirmRevert(false)}
+                        className="btn-secondary px-3 text-sm disabled:opacity-50"
+                      >
+                        {tr(t, 'cancel', 'Cancel')}
+                      </button>
                     </span>
                   ) : (
                     <button
                       type="button"
                       disabled={rowBusy}
                       onClick={() => setConfirmRevert(true)}
-                      className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:text-rose-300 dark:hover:bg-rose-900/20"
+                      aria-label={tr(t, 'revert', 'Revert')}
+                      title={tr(t, 'revert', 'Revert')}
+                      className="btn-secondary inline-flex items-center gap-1.5 border-rose-300 px-3 text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/60 dark:text-rose-300 dark:hover:bg-rose-900/20"
                     >
-                      {tr(t, 'revert', 'Revert')}
+                      <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span className="hidden sm:inline">{tr(t, 'revert', 'Revert')}</span>
                     </button>
                   )}
                   <InfoHint
@@ -932,17 +1006,17 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                   />
                 </div>
               ) : (
-                <div className="flex items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
                   <input
                     autoFocus
                     value={editingReason}
                     onChange={(event) => setEditingReason(event.target.value)}
-                    className="input flex-1 text-sm"
+                    className="input min-w-[10rem] flex-1 text-sm"
                     placeholder={tr(t, 'reason', 'Reason')}
                     onKeyDown={(event) => { if (event.key === 'Enter') void saveReason() }}
                   />
-                  <button type="button" disabled={rowBusy} onClick={() => void saveReason()} className="btn-primary px-3 py-1 text-xs disabled:opacity-50">{tr(t, 'save', 'Save')}</button>
-                  <button type="button" disabled={rowBusy} onClick={() => setEditingReason(null)} className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">{tr(t, 'cancel', 'Cancel')}</button>
+                  <button type="button" disabled={rowBusy} onClick={() => void saveReason()} className="btn-primary px-3 text-sm disabled:opacity-50">{tr(t, 'save', 'Save')}</button>
+                  <button type="button" disabled={rowBusy} onClick={() => setEditingReason(null)} className="btn-secondary px-3 text-sm disabled:opacity-50">{tr(t, 'cancel', 'Cancel')}</button>
                 </div>
               )
             ) : null}

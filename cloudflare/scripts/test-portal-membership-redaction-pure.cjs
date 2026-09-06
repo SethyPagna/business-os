@@ -60,7 +60,10 @@ function loadReal(relPath, requireOverrides = {}) {
 // Load the REAL portal route against the real DB. Everything here is
 // cross-cutting infrastructure the redaction does not depend on; getDb is the
 // one that matters -- it hands the handler the real, migrated, seeded database.
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../index': {},
   '../lib/db': { getDb: () => db },

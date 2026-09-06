@@ -27,6 +27,7 @@
 import { createPendingAction } from './pendingActions'
 import { getPermissionTier, type PermissionUser } from './permissions'
 import type { Env } from '../index'
+import { actorSnapshot } from './actorSnapshot'
 
 export interface MaybeQueueForReviewInput {
   actionType: string
@@ -61,6 +62,6 @@ export async function maybeQueueForReview(
     payload: input.payload,
     summary: input.summary ?? null,
     requestedBy: user?.id ?? null,
-    requestedByName: user?.name || user?.username || null,
+    requestedByName: actorSnapshot(user),
   })
 }

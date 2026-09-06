@@ -10,6 +10,7 @@ import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
 // lib/productBatches.ts. Gated behind the same 'inventory' permission as
@@ -195,11 +196,11 @@ app.post('/', async (c) => {
     reason: `Stock received (${lotCode})`,
     referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
     userId: user?.id ?? null,
-    userName: user?.name ?? null,
+    userName: actorSnapshot(user),
     batchId,
   })
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_receive', 'product_batch', batchId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_receive', 'product_batch', batchId, {
     product_id: productId,
     product_name: product.name,
     branch_id: branchId,
@@ -296,7 +297,7 @@ app.patch('/:id', async (c) => {
   updates.push(`updated_at = datetime('now')`)
 
   await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id`).run(params)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_update', 'product_batch', id, body)
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_update', 'product_batch', id, body)
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
   return c.json({ success: true })
 })
@@ -373,12 +374,12 @@ app.patch('/:id/branches/:branchId', async (c) => {
       quantity: Math.abs(delta),
       reason: `Quantity correction (received date #${batchId})`,
       userId: user?.id ?? null,
-      userName: user?.name ?? null,
+      userName: actorSnapshot(user),
       batchId,
     })
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity })
   c.executionCtx.waitUntil(Promise.all([
     bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
@@ -417,7 +418,7 @@ app.delete('/:id', async (c) => {
   }
 
   await db.prepare(`UPDATE product_batches SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run([id])
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_deactivate', 'product_batch', id, null)
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_deactivate', 'product_batch', id, null)
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
   return c.json({ success: true })
 })

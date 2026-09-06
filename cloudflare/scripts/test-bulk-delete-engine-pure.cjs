@@ -52,6 +52,8 @@ function loadRealLib(relName) {
 // the transpiler) -- anything else falls through to the real require.
 function stubRequire(id) {
   if (id === './sqlBinding') return loadRealLib('sqlBinding')
+  // N13: the actor snapshot kernel. Pure, no imports of its own, so it loads
+  if (id === './actorSnapshot') return loadRealLib('actorSnapshot')
   if (id === './db') return { getDb: () => { throw new Error('getDb should not be called by these pure tests') } }
   if (id === './importEngine') return { runD1BatchInChunks: async () => { throw new Error('runD1BatchInChunks should not be called by these pure tests') } }
   if (id === './cache') return { bumpVersion: async () => { throw new Error('bumpVersion should not be called by these pure tests') } }

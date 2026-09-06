@@ -7,6 +7,10 @@ import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+// N13: Transfer History is a history surface, so its branch pair, actor and
+// note go through the one shared row model -- the card said "N/A", the table
+// said '-' and the detail said an em dash about the same transfer.
+import { historyActor, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
@@ -1051,11 +1055,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           exportRows.push(...pageRows.map((transfer) => ({
             Date: formatTransferDate(transfer.created_at),
             Product: transfer.product_name || '',
-            From: transfer.from_name || '',
-            To: transfer.to_name || '',
+            From: historyExportField(transfer.from_name),
+            To: historyExportField(transfer.to_name),
             Quantity: Number(transfer.quantity || 0),
-            Note: transfer.note || '',
-            User: transfer.user_name || '',
+            Note: historyExportField(transfer.note),
+            User: historyExportField(transfer.user_name),
           })))
           totalPages = Array.isArray(response)
             ? 1
@@ -1675,13 +1679,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                   </div>
                 </div>
                 <div className="mt-2 flex min-w-0 items-center gap-1 text-[11px]">
-                  <span className="min-w-0 truncate rounded bg-rose-50 px-1.5 py-0.5 font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{transfer.from_name || 'N/A'}</span>
+                  <span className="min-w-0 truncate rounded bg-rose-50 px-1.5 py-0.5 font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{historyField(transfer.from_name)}</span>
                   <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
-                  <span className="min-w-0 truncate rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{transfer.to_name || 'N/A'}</span>
+                  <span className="min-w-0 truncate rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{historyField(transfer.to_name)}</span>
                 </div>
                 <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                  <div className="min-w-0 truncate" title={transfer.note || undefined}>{transfer.note || '-'}</div>
-                  <div className="shrink-0 truncate">{transfer.user_name || 'N/A'}</div>
+                  <div className="min-w-0 truncate" title={transfer.note || undefined}>{historyField(transfer.note)}</div>
+                  <div className="shrink-0 truncate">{historyActor(transfer.user_name)}</div>
                 </div>
               </button>
             ))}
@@ -1718,14 +1722,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                     <td className="max-w-[16rem] whitespace-normal break-words px-2.5 py-1.5 font-medium text-gray-800 dark:text-gray-200">{transfer.product_name}</td>
                     <td className="px-2.5 py-1.5">
                       <div className="flex min-w-0 items-center gap-1">
-                        <span className="max-w-[8rem] truncate rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{transfer.from_name || 'N/A'}</span>
+                        <span className="max-w-[8rem] truncate rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{historyField(transfer.from_name)}</span>
                         <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
-                        <span className="max-w-[8rem] truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" title={transfer.to_name || undefined}>{transfer.to_name || 'N/A'}</span>
+                        <span className="max-w-[8rem] truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" title={transfer.to_name || undefined}>{historyField(transfer.to_name)}</span>
                       </div>
                     </td>
                     <td className="bg-blue-50/30 px-2.5 py-1.5 text-right font-bold text-blue-700 dark:bg-blue-950/10 dark:text-blue-300">{transfer.quantity}</td>
-                    <td className="max-w-[14rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.note || undefined}>{transfer.note || '-'}</div></td>
-                    <td className="max-w-[10rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.user_name || undefined}>{transfer.user_name || '-'}</div></td>
+                    <td className="max-w-[14rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.note || undefined}>{historyField(transfer.note)}</div></td>
+                    <td className="max-w-[10rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.user_name || undefined}>{historyActor(transfer.user_name)}</div></td>
                   </tr>
                 ))}
               </tbody>
@@ -1794,11 +1798,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
               {[
                 [tr('product_name', 'Product'), transferDetail.product_name || '—'],
-                [tr('route', 'Route'), `${transferDetail.from_name || '—'} → ${transferDetail.to_name || '—'}`],
+                [tr('route', 'Route'), `${historyField(transferDetail.from_name)} → ${historyField(transferDetail.to_name)}`],
                 [tr('quantity', 'Quantity'), String(transferDetail.quantity ?? '—')],
                 [tr('date', 'Date'), formatTransferDate(transferDetail.created_at)],
-                [tr('user', 'User'), transferDetail.user_name || '—'],
-                [tr('transfer_note', 'Note'), transferDetail.note || '—'],
+                [tr('user', 'User'), historyActor(transferDetail.user_name)],
+                [tr('transfer_note', 'Note'), historyField(transferDetail.note)],
               ].map(([label, value]) => (
                 <div key={label} className="flex items-start justify-between gap-3 px-3 py-2">
                   <dt className="text-xs text-slate-500 dark:text-slate-400">{label}</dt>

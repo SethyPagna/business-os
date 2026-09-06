@@ -23,6 +23,7 @@ import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSe
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -1455,10 +1456,10 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
     rewardPoints: status === 'approved' ? rewardPoints : 0,
     reviewNote: reviewNote || null,
     reviewedById: user?.id ?? null,
-    reviewedByName: user?.name ?? null,
+    reviewedByName: actorSnapshot(user),
   })
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'review', 'portal_submission', id ?? null, { status, rewardPoints })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'review', 'portal_submission', id ?? null, { status, rewardPoints })
   c.executionCtx.waitUntil(broadcast(c.env, 'portalSubmissions', { action: 'review', id }))
   return c.json({ success: true })
 })

@@ -92,8 +92,11 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 // runs through the REAL lib/permissions tier resolution, not a stub of it.
 let activeUser = FAKE_USER
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   // routes/returns.ts buckets return dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.

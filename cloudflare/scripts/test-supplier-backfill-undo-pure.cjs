@@ -40,7 +40,16 @@ function loadUndoAppliers(d1) {
     },
     batch: (stmts) => d1.batch(stmts),
   }
+  // N13: the actor snapshot kernel, loaded for REAL -- it is pure, and what
+  // it decides (username, never the display name) is the point of it.
+  const { outputText: actorOut } = ts.transpileModule(fs.readFileSync(path.join(LIB_DIR, 'actorSnapshot.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'actorSnapshot.ts',
+  })
+  const actorModule = { exports: {} }
+  new Function('exports', 'require', 'module', actorOut)(actorModule.exports, require, actorModule)
   const stubs = {
+    './actorSnapshot': actorModule.exports,
     // Bulk status replay is outside this suite; fail if it is invoked.
     './saleBulkStatus': {
       replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-supplier-backfill-undo-pure.cjs') },

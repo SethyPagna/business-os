@@ -10,6 +10,7 @@ import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpd
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
 import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
 import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
 const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
@@ -244,7 +245,7 @@ app.post('/', async (c) => {
       undo_payload: serializePayload(body.undo_payload),
       redo_payload: serializePayload(body.redo_payload),
       created_by_id: user?.id ?? null,
-      created_by_name: user?.name ?? null,
+      created_by_name: actorSnapshot(user),
     })
     return c.json({ success: true, id: result.lastInsertRowid })
   } catch (error) {
@@ -274,7 +275,7 @@ app.patch('/:id', async (c) => {
     `).run({ status, last_error: body.last_error ? String(body.last_error) : null, id: actionId })
 
     if (status === 'redoable' || status === 'undoable') {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, status === 'redoable' ? 'action_undo' : 'action_redo',
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), status === 'redoable' ? 'action_undo' : 'action_redo',
         existing.entity || 'action_history', existing.entity_id || existing.id,
         { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status })
     }
@@ -370,7 +371,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       UPDATE action_history SET status = @status, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id
     `).run({ status: nextStatus, id: existing.id })
 
-    await audit(c.env, user?.id ?? null, user?.name ?? null, direction === 'undo' ? 'action_undo' : 'action_redo',
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), direction === 'undo' ? 'action_undo' : 'action_redo',
       existing.entity || 'action_history', existing.entity_id || existing.id,
       { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status: nextStatus, serverApplied: applied, appliedBy: applier?.name || null })
 

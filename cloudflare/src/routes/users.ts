@@ -14,6 +14,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 // Ported from backend/src/routes/users.ts. Replaces the previous generic
 // CRUD stub in compat.ts (plain insertTableRow/updateTableRow with no
@@ -357,7 +358,7 @@ app.post('/users/avatar-upload', async (c) => {
     mime_type: mimeType,
     byte_size: buffer.byteLength,
     created_by_id: user?.id ?? null,
-    created_by_name: user?.name ?? null,
+    created_by_name: actorSnapshot(user),
   })
 
   const asset = await db.prepare('SELECT * FROM file_assets WHERE id = ?').get([insert.lastInsertRowid])

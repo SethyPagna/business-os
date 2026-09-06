@@ -4,6 +4,7 @@ import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { actorSnapshot } from './actorSnapshot'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -227,7 +228,7 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
         reason: `${direction > 0 ? 'Apply' : 'Undo'} grouped return status`,
         returnId: member.id,
         userId: user.id ?? null,
-        userName: user.name ?? null,
+        userName: actorSnapshot(user),
         batch: delta.batchId,
       },
     })
@@ -270,7 +271,7 @@ function auditStatement(user: SessionUser, operationId: string, action: string, 
   return {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
           VALUES(@userId,@userName,@action,'return',@id,@details,'returns',@id,@details)`,
-    params: { userId: user.id ?? null, userName: user.name ?? null, action, id: operationId, details },
+    params: { userId: user.id ?? null, userName: actorSnapshot(user), action, id: operationId, details },
   }
 }
 
@@ -459,7 +460,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   ]
   for (const member of members) statements.push(...memberStatements(member, 1, user, stamp))
   for (const saleId of [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) statements.push(saleStatusStatement(saleId, stamp))
-  statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: RETURN_BULK_ACTION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: user.name } })
+  statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: RETURN_BULK_ACTION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE return_bulk_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   const historyIndex = statements.length
   statements.push({
@@ -468,7 +469,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
             json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'field',@field,'source',@source,'target',@target,'changed_count',@changed,'unchanged_count',@unchanged),
             json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'field',@field,'source',@source,'target',@target,'changed_count',@changed,'unchanged_count',@unchanged),
             @actor,@name FROM return_bulk_operations WHERE id=@id`,
-    params: { id: operationId, label: `${changedIds.length} returns: ${request.field} ${request.source} → ${request.target}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: RETURN_BULK_ACTION_KIND, field: request.field, source: request.source, target: request.target, changed: changedIds.length, unchanged: unchangedIds.length, actor: user.id, name: user.name },
+    params: { id: operationId, label: `${changedIds.length} returns: ${request.field} ${request.source} → ${request.target}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: RETURN_BULK_ACTION_KIND, field: request.field, source: request.source, target: request.target, changed: changedIds.length, unchanged: unchangedIds.length, actor: user.id, name: actorSnapshot(user) },
   })
   statements.push({ sql: "UPDATE return_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } })
   for (const member of members.filter((candidate) => candidate.changed)) {

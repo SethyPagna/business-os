@@ -101,6 +101,7 @@ import {
   seedBranchStockForNewProduct, seedInitialBatchForNewProduct, isImageOnlyWritePayload, restrictToImageOnlyFields,
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
+import { actorSnapshot } from '../lib/actorSnapshot'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
@@ -1246,7 +1247,7 @@ app.post('/:id/suppliers/backfill', async (c) => {
     lots: targets.map((t) => ({ id: Number(t.id), prevSupplierId: t.supplier_id == null ? null : Number(t.supplier_id), prevSupplierName: t.supplier_name ?? null })),
   })
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'supplier_backfill', 'product', productId, { supplierId, lots: ids.length })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'supplier_backfill', 'product', productId, { supplierId, lots: ids.length })
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
@@ -1472,7 +1473,7 @@ app.post('/bulk-price-adjust', async (c) => {
   }))
   const results = await db.batch(statements)
   const changed = Math.max(0, ...results.map((r) => Number((r as { changes?: number }).changes) || 0))
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'product', 'bulk-price-adjust', {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', 'bulk-price-adjust', {
     scope: 'all', direction, amount, fields, skipZero, rowsTouched: changed,
   })
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
@@ -1697,7 +1698,7 @@ app.post('/rename-brand', async (c) => {
   const changed = await buildLiveLookupMutationPlan(db, 'brand', [from, to], to, new Date().toISOString())
   const library = await buildBrandLibraryMutationPlan(db, [from, to], to)
   await db.batch([...changed.statements, ...library.statements])
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'brand', null, { from, to, products: changed.products })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'brand', null, { from, to, products: changed.products })
   await Promise.all([bumpVersion(c.env, 'products'), bumpVersion(c.env, 'settings')])
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'rename-brand', from, to }))
   return c.json({ renamed: true, products: changed.products, batches: 0, brands: library.brands })
@@ -1806,7 +1807,7 @@ app.put('/:id', async (c) => {
       const fromName = String(current.name || '').trim()
       if (fromName && fromName.toLowerCase() !== nextName.toLowerCase()) {
         const carried = await applyRenameCarry(getDb(c.env), 'product_name', fromName, nextName, new Date().toISOString())
-        await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'product_group', id, { from: fromName, to: nextName, rows: carried.products })
+        await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id, { from: fromName, to: nextName, rows: carried.products })
       }
     }
     delete body.__rename_scope
@@ -1950,11 +1951,11 @@ app.delete('/:id', async (c) => {
       quantity: row.quantity,
       reason,
       userId: user?.id ?? null,
-      userName: user?.name ?? null,
+      userName: actorSnapshot(user),
     })
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', 'product', Number(id), { name: existing?.name ?? null, reason })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'product', Number(id), { name: existing?.name ?? null, reason })
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'delete', id }))
   return c.json({ success: true, changes: result.changes })
@@ -1999,7 +2000,7 @@ app.post('/bulk-delete-jobs', async (c) => {
   if (rawIds.length > 50000) return c.json({ error: 'Select 50,000 or fewer products per bulk delete' }, 400)
 
   try {
-    const { jobId, totalCount } = await createBulkDeleteJob(c.env, 'products', rawIds as number[], reason, { id: user?.id ?? null, name: user?.name ?? null })
+    const { jobId, totalCount } = await createBulkDeleteJob(c.env, 'products', rawIds as number[], reason, { id: user?.id ?? null, name: actorSnapshot(user) })
     return c.json({ success: true, jobId, totalCount }, 202)
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Failed to start bulk delete' }, 400)
@@ -2361,7 +2362,7 @@ app.post('/unwire-images', async (c) => {
     }
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'unwire_images', 'product', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'unwire_images', 'product', null, {
     scope: clearAll ? 'all' : 'selection',
     productCount: clearAll ? cleared : productIds.length,
   })
@@ -2637,7 +2638,7 @@ export async function foldDuplicateProductInto(
           quantity: -qty,
           reason: writeOffReason(dup, mergeContext),
           userId: user?.id ?? null,
-          userName: user?.name ?? null,
+          userName: actorSnapshot(user),
         },
       })
       continue
@@ -2659,7 +2660,7 @@ export async function foldDuplicateProductInto(
         quantity: qty,
         reason: `Merged duplicate product "${dup.name}" (#${dup.id}) into this product -- ${mergeContext}`,
         userId: user?.id ?? null,
-        userName: user?.name ?? null,
+        userName: actorSnapshot(user),
       },
     })
   }
@@ -2880,7 +2881,7 @@ export async function foldDuplicateProductInto(
       writeOffFrag: `%${writeOffMarker(dup.id)}%`,
     })).map((r) => Number(r.id))
 
-  await audit(env, user?.id ?? null, user?.name ?? null, 'merge_duplicate', 'product', dup.id, {
+  await audit(env, user?.id ?? null, actorSnapshot(user), 'merge_duplicate', 'product', dup.id, {
     productName: dup.name,
     mergedIntoProductId: canonicalId,
     mergedIntoProductName: canonicalName,
@@ -3166,7 +3167,7 @@ app.post('/possible-duplicates/dismiss', async (c) => {
     VALUES (@type, @value, @byId, @byName, CURRENT_TIMESTAMP)
     ON CONFLICT(cluster_type, cluster_value) DO UPDATE SET
       dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
-  `).run({ type, value, byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ type, value, byId: user?.id ?? null, byName: actorSnapshot(user) })
   return c.json({ success: true })
 })
 
@@ -3469,7 +3470,7 @@ app.post('/zero-quantity-delete', async (c) => {
     await db.batch(statements)
     for (const id of deletedIds) {
       const row = rowById.get(id)
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'zero_quantity_delete', 'product', id, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'zero_quantity_delete', 'product', id, {
         productName: row?.name ?? null,
       })
     }
@@ -3556,7 +3557,7 @@ app.post('/lookups/replace', async (c) => {
     }
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'lookup_replace', 'product', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'lookup_replace', 'product', null, {
     type,
     from: sourceEntries,
     to: normalizedTarget || null,
@@ -3724,10 +3725,10 @@ app.post('/upload-image', async (c) => {
   const insert = await db.prepare(`
     INSERT INTO file_assets (original_name, stored_name, public_path, mime_type, media_type, byte_size, source, created_by_id, created_by_name, optimization_status)
     VALUES (@original_name, @stored_name, @public_path, @mime_type, 'image', @byte_size, 'upload', @created_by_id, @created_by_name, 'not_applicable_no_sharp')
-  `).run({ original_name: originalName, stored_name: storedName, public_path: publicPath, mime_type: mimeType, byte_size: buffer.byteLength, created_by_id: user?.id ?? null, created_by_name: user?.name ?? null })
+  `).run({ original_name: originalName, stored_name: storedName, public_path: publicPath, mime_type: mimeType, byte_size: buffer.byteLength, created_by_id: user?.id ?? null, created_by_name: actorSnapshot(user) })
   const asset = await db.prepare(`SELECT * FROM file_assets WHERE id = @id`).get({ id: insert.lastInsertRowid })
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'upload', 'product_image', insert.lastInsertRowid, { original_name: originalName })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'upload', 'product_image', insert.lastInsertRowid, { original_name: originalName })
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   return c.json({

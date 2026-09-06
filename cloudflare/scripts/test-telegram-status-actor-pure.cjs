@@ -40,10 +40,11 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const telegramLang = loadReal('lib/telegramLang.ts')
+const actorSnapshot = loadReal('lib/actorSnapshot.ts')
 
 // ---- 1. extract the ACTUAL composition block out of routes/sales.ts -------
 const salesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-const START = "const actorName = user?.name || user?.username || null"
+const START = "const actorName = actorSnapshot(user)"
 const END = "}).catch((error) => console.error('[telegram] sale status notification failed', error)))"
 const startIdx = salesSrc.indexOf(START)
 const endIdx = salesSrc.indexOf(END, startIdx)
@@ -63,13 +64,16 @@ block = block.replace(CALL_START, 'return ({').replace(CALL_END, '})')
 function buildEvent(input) {
   const fn = new Function(
     'sale', 'id', 'oldStatus', 'saleStatus', 'cancelReason', 'skipStock', 'totalSkippedUnits',
-    'cancelFeeUsd', 'cancelFeeKhr', 'user', 'cancelReasonLabel', 'telegramMoney',
+    'cancelFeeUsd', 'cancelFeeKhr', 'user', 'cancelReasonLabel', 'telegramMoney', 'actorSnapshot',
     block,
   )
   return fn(
     input.sale, input.id, input.oldStatus, input.saleStatus, input.cancelReason ?? null,
     input.skipStock ?? false, input.totalSkippedUnits ?? 0, input.cancelFeeUsd ?? 0, input.cancelFeeKhr ?? 0,
     input.user ?? null, input.cancelReasonLabel ?? (() => ''), input.telegramMoney ?? (() => ''),
+    // N13: the REAL kernel, not a local re-implementation -- if the Telegram
+    // line and the stored cashier_name ever disagreed, that is the bug.
+    actorSnapshot.actorSnapshot,
   )
 }
 
@@ -80,21 +84,28 @@ const baseInput = (user) => ({
 
 // -- non-vacuous proof: WITHOUT the actor line, none of these would hold. --
 
-// Full name wins over username.
+// N13: the account USERNAME wins -- the shop channel must name the same
+// identity the sale row stores as cashier_name, and the fixture session
+// carries a display name that differs so the two are distinguishable.
 {
   const event = buildEvent(baseInput({ name: 'Za', username: 'za01' }))
   assert.equal(event.type, 'status')
-  assert.deepEqual(event.lines.filter(Boolean).filter((line) => line.startsWith('By')), ['By: Za'])
-  assert.equal(event.lines[event.lines.length - 1], 'By: Za', 'the actor line is last, matching the existing `by` idiom in formatStockChangeTelegramLines/formatTransferTelegramLines/formatReturnTelegramLines')
-  console.log('PASS 1: a named actor produces the trailing "By: Za" line')
+  assert.deepEqual(event.lines.filter(Boolean).filter((line) => line.startsWith('By')), ['By: za01'])
+  assert.equal(event.lines[event.lines.length - 1], 'By: za01', 'the actor line is last, matching the existing `by` idiom in formatStockChangeTelegramLines/formatTransferTelegramLines/formatReturnTelegramLines')
+  console.log('PASS 1: a named actor produces the trailing "By: za01" line -- the username, never the display name')
 }
 
-// No `name` on the session row: falls back to username, same fallback chain
-// as the sale-recorded message's Cashier line.
+// A session with no display name at all changes nothing: the username was
+// always the value being reported.
 {
   const event = buildEvent(baseInput({ name: '', username: 'za01' }))
-  assert.ok(event.lines.includes('By: za01'), 'must fall back to username when name is blank')
-  console.log('PASS 2: a blank name falls back to username, not "By: undefined"')
+  assert.ok(event.lines.includes('By: za01'), 'the username is reported whether or not a display name exists')
+  const withName = buildEvent(baseInput({ name: 'Za Sethy', username: 'za01' }))
+  assert.deepEqual(
+    withName.lines.filter((line) => line.startsWith('By')), event.lines.filter((line) => line.startsWith('By')),
+    'the display name has no influence on the actor line',
+  )
+  console.log('PASS 2: the actor line is identical with and without a display name')
 }
 
 // No actor at all (defensive: requireAuth should always set one, but the
@@ -103,6 +114,8 @@ const baseInput = (user) => ({
 {
   const event = buildEvent(baseInput(null))
   assert.ok(!event.lines.some((line) => line.startsWith('By')), 'with no known actor, the whole line is omitted -- never "By: undefined"')
+  const noAccount = buildEvent(baseInput({ id: 7, name: 'Za Sethy' }))
+  assert.ok(!noAccount.lines.some((line) => line.startsWith('By')), 'a session with a display name but NO account username still prints no actor line')
   assert.ok(!event.lines.some((line) => /undefined|null/.test(line)), 'no line anywhere prints the literal "undefined"/"null"')
   console.log('PASS 3: a missing actor omits the line entirely, the same degrade-gracefully idiom `by` already uses elsewhere')
 }
@@ -124,9 +137,9 @@ function composeMessage(event) {
 {
   const withActor = buildEvent(baseInput({ name: 'Za', username: 'za01' }))
   const text = composeMessage(withActor)
-  assert.ok(text.includes('By / ដោយ: Za'), `composed message must carry the bilingual actor line, got:\n${text}`)
+  assert.ok(text.includes('By / ដោយ: za01'), `composed message must carry the bilingual actor line, got:\n${text}`)
   assert.ok(/[ក-៿]/.test(text), 'the composed message must contain Khmer script somewhere')
-  console.log('PASS 4: the composed message carries "By / ដោយ: Za" -- English label, Khmer label, one value')
+  console.log('PASS 4: the composed message carries "By / ដោយ: za01" -- English label, Khmer label, one value')
 }
 
 {

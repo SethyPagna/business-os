@@ -62,7 +62,10 @@ let sectionBackupTables = null
 const permissions = loadReal('lib/permissions.ts')
 const media = loadReal('lib/media.ts')
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const systemRoute = loadReal('routes/system.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },

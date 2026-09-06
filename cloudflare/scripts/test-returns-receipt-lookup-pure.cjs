@@ -80,8 +80,11 @@ const permissions = loadReal('lib/permissions.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true }) }
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   '../lib/sqlBinding': sqlBinding,

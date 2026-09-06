@@ -129,7 +129,21 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
 // ---- source lock-in: routes/sales.ts and routes/returns.ts actually call these ----
 {
   const salesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-  assert.match(salesSrc, /hasAnyPermission\(c\.get\('user'\), \['pos', 'sales'\]\)/, 'POST / (create sale) must check hasAnyPermission([pos, sales])')
+  // N13: POST / binds the session user once (`const user = c.get('user')`)
+  // because the sale header, its movement rows, the search blob and the
+  // Telegram line must all name the SAME account. Both spellings of the check
+  // are accepted; what is pinned is that the value checked comes from the
+  // session and not from the request body.
+  assert.match(salesSrc, /hasAnyPermission\((?:c\.get\('user'\)|user), \['pos', 'sales'\]\)/, 'POST / (create sale) must check hasAnyPermission([pos, sales])')
+  // Anchored to the POST '/' handler's own slice. Matched against the whole
+  // file this assertion is vacuous -- a dozen other handlers already bind the
+  // session that way, so it would stay green if POST / stopped doing it.
+  const postSaleStart = salesSrc.indexOf("app.post('/', async (c)")
+  assert.ok(postSaleStart > 0, "sales.ts no longer declares a POST '/' handler under that signature")
+  const afterPostSale = salesSrc.slice(postSaleStart + 1).search(/\napp\.(get|post|put|patch|delete)\(/)
+  assert.ok(afterPostSale > 0, "could not find the end of the POST '/' handler slice")
+  const postSaleSrc = salesSrc.slice(postSaleStart, postSaleStart + 1 + afterPostSale)
+  assert.match(postSaleSrc, /const user = c\.get\('user'\)/, 'POST / must take its actor from the session')
   // Part 557 view-tier: sales READS moved from the strict hasPermission('sales')
   // boolean to the tier-aware canReadSales() (getPermissionTier(...,'sales') !==
   // 'none') so a read-only 'view' grant can list/report without a write grant;

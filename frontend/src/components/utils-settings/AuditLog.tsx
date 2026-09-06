@@ -29,6 +29,10 @@ import {
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
 import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+// N13: the Audit Log answers the same "who did this, and why" as the stock
+// ledgers, so it renders through the one shared history row model instead of
+// its own '--' placeholder.
+import { HISTORY_EMPTY, historyActor, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 
 type SortDirection = 'asc' | 'desc'
 type AuditGroupMode = 'time' | 'time+action'
@@ -156,7 +160,7 @@ function toIso(raw: unknown): string | null {
 
 function formatDateTime(raw: unknown): string {
   const iso = toIso(raw)
-  if (!iso) return '--'
+  if (!iso) return HISTORY_EMPTY
   const fallback = String(raw)
   try {
     const date = new Date(iso)
@@ -177,7 +181,7 @@ function formatDateTime(raw: unknown): string {
 
 function formatCompactDateTime(raw: unknown): string {
   const iso = toIso(raw)
-  if (!iso) return '--'
+  if (!iso) return HISTORY_EMPTY
   try {
     const date = new Date(iso)
     if (Number.isNaN(date.getTime())) return String(raw)
@@ -189,7 +193,7 @@ function formatCompactDateTime(raw: unknown): string {
       hour12: false,
     })
   } catch {
-    return String(raw || '--')
+    return String(raw || HISTORY_EMPTY)
   }
 }
 
@@ -264,6 +268,21 @@ function formatEntityName(log: AuditLogRow): string {
   const raw = String(log.table_name || log.entity || '').trim()
   if (!raw) return 'System'
   return raw.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+// N13: the reason the operator gave, pulled out of the recorded payload the
+// row already stores. audit_logs has no `reason` column of its own, so this
+// reads the same JSON that feeds readableSummary(); rows whose action takes
+// no reason simply have none.
+function auditReason(log: AuditLogRow): string | null {
+  for (const raw of [log.new_value, log.details]) {
+    const parsed = parseLogJson(raw)
+    if (isRecord(parsed)) {
+      const value = parsed.reason
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+  }
+  return null
 }
 
 function readableSummary(log: AuditLogRow): string | null {
@@ -431,7 +450,7 @@ export default function AuditLog() {
   }, [auditFallbacks, isKhmer, t])
 
   const actionLabel = useCallback((action: unknown): string => {
-    if (!action) return '--'
+    if (!action) return HISTORY_EMPTY
     const key = String(action).toLowerCase()
     return actionLabels[key] || key.replace(/_/g, ' ')
   }, [actionLabels])
@@ -769,7 +788,7 @@ export default function AuditLog() {
         entry: sessionEntryLabel(log),
         time: formatLogTime(log),
         entity: formatEntityName(log),
-        user: log.user_name || '',
+        user: historyExportField(log.user_name),
         action: actionLabel(log.action),
         device: auditDeviceLabel(log),
         timezone: auditTimezoneLabel(log),
@@ -1114,7 +1133,7 @@ export default function AuditLog() {
                               {formatEntityName(log)}
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{log.user_name || '--'}</td>
+                          <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{historyActor(log.user_name)}</td>
                           <td className="px-3 py-2">
                             <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
                               {actionLabel(log.action)}
@@ -1268,7 +1287,7 @@ export default function AuditLog() {
                             onClick={(event) => event.stopPropagation()}
                             aria-label={`Select ${sessionEntryLabel(log)}`}
                           />
-                          <span className="truncate font-semibold text-gray-700 dark:text-gray-200">{log.user_name || '--'}</span>
+                          <span className="truncate font-semibold text-gray-700 dark:text-gray-200">{historyActor(log.user_name)}</span>
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
                             {actionLabel(log.action)}
                           </span>
@@ -1353,11 +1372,12 @@ export default function AuditLog() {
                 <div className="flex items-start gap-2">
                   <User2 className="mt-0.5 h-4 w-4 text-blue-500" />
                   <div className="space-y-2">
-                    <DetailRow label={t('user') || 'User'} value={detailLog.user_name || '--'} />
+                    <DetailRow label={t('user') || 'User'} value={historyActor(detailLog.user_name)} />
                     <DetailRow label={t('action') || 'Action'} value={actionLabel(detailLog.action)} />
                     <DetailRow label={t('table') || 'Entity'} value={formatEntityName(detailLog)} />
                     <DetailRow label={copy('entry', 'Entry', 'លំដាប់')} value={sessionEntryLabel(detailLog)} />
-                    <DetailRow label={t('summary') || 'Summary'} value={readableSummary(detailLog) || '--'} />
+                    <DetailRow label={t('reason') || 'Reason'} value={historyField(auditReason(detailLog))} />
+                    <DetailRow label={t('summary') || 'Summary'} value={historyField(readableSummary(detailLog))} />
                   </div>
                 </div>
               </div>

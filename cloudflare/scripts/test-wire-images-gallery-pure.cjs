@@ -106,7 +106,10 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const productsRoute = loadReal('routes/products.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => dbShim },
   '../lib/lowStockSettings': lowStockStub,
   // routes/products.ts buckets the sales drill-down in UTC+7 through the pure

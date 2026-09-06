@@ -7,6 +7,7 @@ import { VALID_SALE_STATUSES } from './salesStatus';
 import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
+import { actorSnapshot } from './actorSnapshot';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -206,7 +207,7 @@ function stockStatements(member: Member, sign: number, user: SessionUser, stamp:
                 out[out.length - 1] = { sql: 'UPDATE branch_stock SET quantity=quantity+@q WHERE product_id=@product AND branch_id=@branch', params: p };
             out.push({ sql: 'UPDATE products SET stock_quantity=stock_quantity+@q, updated_at=@stamp WHERE id=@product', params: p });
         }
-        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch,@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: move.costUsd, khr: move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: user.name, batch: move.batch } });
+        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch,@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: move.costUsd, khr: move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: move.batch } });
     }
     for (const move of member.batches) {
         const p = { ...move, q: move.quantity * sign, stamp };
@@ -253,11 +254,11 @@ function memberStatements(member: Member, sign: number, user: SessionUser, stamp
             out.push({ sql: `INSERT INTO fees(${keys.join(',')}) VALUES(${keys.map(k => `@${k}`).join(',')})`, params: member.fee });
         }
     }
-    out.push({ sql: `UPDATE sales SET ${fields.map(k => `${k}=@${k}`).join(',')}, updated_at=@stamp${member.skipped ? ', stock_skipped=1, stock_skipped_at=COALESCE(stock_skipped_at,@stamp), stock_skipped_by_name=COALESCE(stock_skipped_by_name,@actor)' : ''} WHERE id=@id`, params: { ...target, id: member.id, stamp, actor: user.name } });
+    out.push({ sql: `UPDATE sales SET ${fields.map(k => `${k}=@${k}`).join(',')}, updated_at=@stamp${member.skipped ? ', stock_skipped=1, stock_skipped_at=COALESCE(stock_skipped_at,@stamp), stock_skipped_by_name=COALESCE(stock_skipped_by_name,@actor)' : ''} WHERE id=@id`, params: { ...target, id: member.id, stamp, actor: actorSnapshot(user) } });
     return out;
 }
 function auditStatement(user: SessionUser, operationId: string, direction: string, count: number): StockStatement {
-    return { sql: 'INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@action,\'sale\',@id,@details,\'sales\',@id,@details)', params: { uid: user.id, name: user.name, action: direction, id: operationId, details: JSON.stringify({ kind: BULK_STATUS_KIND, count }) } };
+    return { sql: 'INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@action,\'sale\',@id,@details,\'sales\',@id,@details)', params: { uid: user.id, name: actorSnapshot(user), action: direction, id: operationId, details: JSON.stringify({ kind: BULK_STATUS_KIND, count }) } };
 }
 export async function notifyBulkStatus(env: Env) {
     await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'products'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
@@ -331,7 +332,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         if (request.target_status === 'cancelled' && changed) {
             if (!normalizeCancelReason(cancelReason) || (cancelReason === 'other' && !String(cancelNote || '').trim()))
                 throw new SaleBulkError(`Sale ${expected.id} needs its cancellation answers.`, 400);
-            Object.assign(after, { cancel_reason: cancelReason, cancel_note: String(cancelNote || '').trim() || null, cancelled_at: stamp, cancelled_by_name: user.name, status_before_cancel: old });
+            Object.assign(after, { cancel_reason: cancelReason, cancel_note: String(cancelNote || '').trim() || null, cancelled_at: stamp, cancelled_by_name: actorSnapshot(user), status_before_cancel: old });
         }
         else if (old === 'cancelled' && changed)
             Object.assign(after, { cancel_reason: null, cancel_note: null, cancelled_at: null, cancelled_by_name: null, status_before_cancel: null, cancel_fee_id: null });
@@ -367,7 +368,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 delivery_contact_id: null,
                 notes: String(itemCancel.fee_note || '').trim() || `Fee lost to cancellation (${cancelReason})`,
                 created_by: user.id,
-                created_by_name: user.name,
+                created_by_name: actorSnapshot(user),
                 created_at: stamp,
                 updated_at: stamp,
             };
@@ -378,7 +379,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
             if (!member.fee)
                 fail('Linked cancellation fee is missing.');
         }
-        const plan = planSaleStockTransition({ saleId: expected.id, oldStatus: old, newStatus: request.target_status, items: own.filter(i => !i.damaged_lot_id), returnedByItem: returned, reason: 'Grouped sale status', userId: user.id, userName: user.name, skipStock: skipped });
+        const plan = planSaleStockTransition({ saleId: expected.id, oldStatus: old, newStatus: request.target_status, items: own.filter(i => !i.damaged_lot_id), returnedByItem: returned, reason: 'Grouped sale status', userId: user.id, userName: actorSnapshot(user), skipStock: skipped });
         // The existing transition kernel decides every regular movement and batch delta.
         // Persist typed deltas, never executable SQL, for an exact inverse after reload.
         for (const statement of plan.statements) {
@@ -423,10 +424,10 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
     for (const m of members)
         statements.push(...memberStatements(m, 1, user, stamp));
-    statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_STATUS_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: user.name } });
+    statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_STATUS_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } });
     statements.push({ sql: 'UPDATE sale_bulk_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } });
     const historyStatementIndex = statements.length;
-    statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name) SELECT 'global','sale',id,@label,@reversible,@status,json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'changed_count',@changed,'unchanged_count',@unchanged,'target_status',@target),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'changed_count',@changed,'unchanged_count',@unchanged,'target_status',@target),@actor,@name FROM sale_bulk_operations WHERE id=@id`, params: { id: operationId, label: `${changedIds.length} sales → ${request.target_status}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: BULK_STATUS_KIND, actor: user.id, name: user.name, changed: changedIds.length, unchanged: unchangedIds.length, target: request.target_status } });
+    statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name) SELECT 'global','sale',id,@label,@reversible,@status,json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'changed_count',@changed,'unchanged_count',@unchanged,'target_status',@target),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'changed_count',@changed,'unchanged_count',@unchanged,'target_status',@target),@actor,@name FROM sale_bulk_operations WHERE id=@id`, params: { id: operationId, label: `${changedIds.length} sales → ${request.target_status}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: BULK_STATUS_KIND, actor: user.id, name: actorSnapshot(user), changed: changedIds.length, unchanged: unchangedIds.length, target: request.target_status } });
     statements.push({ sql: "UPDATE sale_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } });
     for (const m of members.filter(member => member.changed))
         statements.push({ sql: `INSERT INTO sale_bulk_members(operation_id,sale_id,revision,movement_fingerprint) VALUES(@op,@id,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),${saleMovementFingerprint('@id')})`, params: { op: operationId, id: m.id } });

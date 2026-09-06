@@ -9,6 +9,10 @@ import type { PaginationControlsProps } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { fmtClock24 } from '../../utils/formatters'
 import { translateMovementType } from './movementGroups'
+// N13: branch / actor / reason are rendered through the one shared history
+// row model, so this drill and the Stock Change ledger cannot disagree about
+// the same movement row (an absent value said nothing here and '—' there).
+import { historyActor, historyField } from '../../utils/historyRowModel.ts'
 
 type Translator = (key: string) => string | undefined
 type TranslationWithFallback = (key: string, fallback?: string, altFallback?: string) => string
@@ -269,11 +273,11 @@ export default function InventoryMovementsSurface({
                   </td>
                   <td className={`${cellClass} text-right font-semibold tabular-nums text-gray-900 dark:text-white`}>{movement.quantity}</td>
                   <td className={`${cellClass} text-right tabular-nums text-emerald-600 dark:text-emerald-400`}>{(movement.total_cost_usd || 0) > 0 ? fmtUSD(movement.total_cost_usd || 0) : ''}</td>
-                  <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{movement.branch_name || ''}</td>
-                  <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{movement.user_name || ''}</td>
+                  <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{historyField(movement.branch_name)}</td>
+                  <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{historyActor(movement.user_name)}</td>
                   <td className={`${cellClass} whitespace-nowrap tabular-nums text-gray-600 dark:text-gray-300`}>{fmtTime(movement.created_at)}</td>
                   <td className={`${cellClass} max-w-[14rem] text-gray-500 dark:text-gray-400`}>
-                    <span className="block max-w-full truncate" title={movement.reason || ''}>{movement.reason || ''}</span>
+                    <span className="block max-w-full truncate" title={historyField(movement.reason)}>{historyField(movement.reason)}</span>
                   </td>
                 </tr>
               ))}

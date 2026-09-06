@@ -1,4 +1,5 @@
 import { getDb } from './db'
+import { ACTOR_USERNAME_SQL, resolveActorUsername } from './actorSnapshot'
 import type { Env } from '../index'
 
 // Default retention window, in days, for automatic audit-log cleanup. This
@@ -63,6 +64,37 @@ async function lookupAuditDeviceInfo(
   }
 }
 
+// N13: the actor stored on an audit row is the account USERNAME, resolved here
+// from users.id rather than taken on trust from the caller.
+//
+// audit() is called from 130+ places and every one of them passed a *display*
+// name -- `user?.name` (the full name) at almost all sites, `user.name ||
+// user.username` at a handful -- so the Audit Log read "Za Sethy" while the
+// stock, sale and return ledgers built from the same session read "za".
+// Resolving from the id fixes every call site at once and makes the value
+// unforgeable: the only thing a caller influences is WHICH account id it names,
+// and that already comes from the authenticated session.
+//
+// audit_logs stays OUT of the rename cascade (see userIdentity.ts) because an
+// audit row is a point-in-time record; storing the username at write time is
+// what makes that exclusion harmless instead of a second naming convention.
+async function resolveAuditActorName(
+  env: Env,
+  userId: number | null,
+  provided: string | null,
+): Promise<string | null> {
+  if (!userId) return resolveActorUsername(null, provided)
+  try {
+    const db = getDb(env)
+    const row = await db.prepare(ACTOR_USERNAME_SQL).get<{ username: string | null }>({ user_id: userId })
+    return resolveActorUsername(row, provided)
+  } catch (_) {
+    // Audit failures must never crash the main request -- fall back to the
+    // value the caller already resolved (post-N13 that is itself the username).
+    return resolveActorUsername(null, provided)
+  }
+}
+
 export async function audit(
   env: Env,
   userId: number | null,
@@ -77,13 +109,14 @@ export async function audit(
       ? (typeof details === 'object' ? JSON.stringify(details) : String(details))
       : null
     const { device_name: deviceName, device_tz: deviceTz } = await lookupAuditDeviceInfo(env, userId)
+    const actorName = await resolveAuditActorName(env, userId, userName)
     const db = getDb(env)
     await db.prepare(`
       INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value, device_name, device_tz)
       VALUES (@user_id, @user_name, @action, @entity, @entity_id, @details, @table_name, @record_id, @new_value, @device_name, @device_tz)
     `).run({
       user_id: userId,
-      user_name: userName,
+      user_name: actorName,
       action,
       entity,
       entity_id: entityId,

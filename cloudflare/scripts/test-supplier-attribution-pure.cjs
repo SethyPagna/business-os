@@ -98,11 +98,17 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+// N13: the shared actor / branch kernels these routes now import.
+const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
 const inventoryRoute = loadReal('routes/inventory.ts', {
   // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
   // move through this guard, so the fixtures here run through the rejection
   // instead of opting out of it.
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/movementBranchName': movementBranchNameKernel,
   '../lib/db': { getDb: () => db },
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
@@ -156,6 +162,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
 const app = inventoryRoute.default
 
 const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },

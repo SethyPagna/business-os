@@ -34,6 +34,22 @@ const LIB_DIR = path.join(cloudflareRoot, 'src', 'lib')
 // { changes, lastInsertRowid } shape lib/db.ts's wrapper does (the shim's raw
 // run() returns { meta: { last_row_id } }, which the real wrapper normalizes).
 // --------------------------------------------------------------------------
+// N13: the actor snapshot kernel, loaded for REAL. It is pure (no imports of
+// its own) and the whole point of it is WHICH identity it picks, so a stub
+// would be testing the stub.
+let actorSnapshotCache = null
+function loadRealActorSnapshot() {
+  if (actorSnapshotCache) return actorSnapshotCache
+  const file = path.join(LIB_DIR, 'actorSnapshot.ts')
+  const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'actorSnapshot.ts',
+  })
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  actorSnapshotCache = mod.exports
+  return actorSnapshotCache
+}
 function loadUndoAppliers(d1) {
   const dbAdapter = {
     prepare(sql) {
@@ -50,6 +66,7 @@ function loadUndoAppliers(d1) {
     batch: (stmts) => d1.batch(stmts),
   }
   const stubs = {
+    './actorSnapshot': loadRealActorSnapshot(),
     // Bulk status replay is outside this suite; fail if it is invoked.
     './saleBulkStatus': {
       replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-product-merge-undo-pure.cjs') },
