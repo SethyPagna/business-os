@@ -25,6 +25,7 @@ import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
+import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 
 // Keep product creation inside this receiving flow rather than sending the
 // operator to a separate page. The standard ProductForm and create transport
@@ -200,6 +201,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     () => buildProductGroups(candidates, productsById, { preserveInputOrder: true }),
     [candidates, productsById],
   )
+  // The rows the option sheet actually offers for the open group.
+  const selectedGroupChoices = useMemo(
+    () => (selectedGroup ? (selectedGroup.sellableItems.length ? selectedGroup.sellableItems : selectedGroup.items) : []),
+    [selectedGroup],
+  )
 
   // Autosave the header + in-progress line (debounced, shared cadence).
   // Deliberately NO dirtyWork registration: with the draft persisting,
@@ -319,8 +325,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     window.setTimeout(() => searchInputRef.current?.focus(), 0)
   }
 
-  const pickFromGroup = (candidate: ProductCandidate) => {
+  const pickFromGroup = (candidate: ProductCandidate, selection?: { branchId?: string | null }) => {
     pick(candidate)
+    // The branch the sheet resolved is the one whose count the operator was
+    // reading; carry it onto the line rather than silently re-deriving one.
+    if (selection?.branchId != null) setBranchId(String(selection.branchId))
     closeCandidateOptions()
   }
 
@@ -803,21 +812,32 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         />
       ) : null}
 
+      {/* One shared option sheet, not a private nested Modal: this popup
+          used to show name / barcode / a branch-summed quantity / unit cost
+          in its own layout, so the same product looked different here than
+          in the POS. Branch, option and received date are now chosen the
+          same way on every surface. */}
       {selectedGroup ? (
-        <Modal title={selectedGroup.name} onClose={closeCandidateOptions} size="md" layer="nested" unsavedChanges="read-only">
-          <div className="space-y-3">
-            <button type="button" className="btn-secondary h-10 px-3 text-sm" onClick={closeCandidateOptions}>← {tr('back', 'Back')}</button>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {(selectedGroup.sellableItems.length ? selectedGroup.sellableItems : selectedGroup.items).map((candidate) => (
-                <button key={String(candidate.id)} type="button" onClick={() => pickFromGroup(candidate as ProductCandidate)} className="min-h-14 rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700 dark:hover:bg-blue-950/20">
-                  <span className="block font-medium text-gray-800 dark:text-gray-200">{String(candidate.name || selectedGroup.name)}</span>
-                  <span className="block font-mono text-[11px] text-gray-500">{String(candidate.barcode || tr('no_barcode', 'No barcode'))}</span>
-                  <span className="block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}: {Number(candidate.stock_quantity) || 0} · {tr('unit_cost_usd', 'Unit cost')}: ${currentCost(candidate as ProductCandidate).toFixed(2)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </Modal>
+        <ProductOptionSheet
+          // The lead row is the first OFFERED one, not group.leadProduct: a
+          // family whose root is filtered out of the offer still has a root,
+          // and handing that root in as `product` resolved the sheet to a row
+          // it never listed. SaleDetailModal's addCandidateGroups already
+          // takes the lead this way (lead = choices[0]).
+          product={{
+            ...(selectedGroupChoices[0] || selectedGroup.leadProduct || selectedGroup.items[0]),
+            name: selectedGroup.name,
+          } as never}
+          choices={selectedGroupChoices as never[]}
+          t={(key: string) => tr(key, key)}
+          fmtUSD={(value: number) => `$${Number(value || 0).toFixed(2)}`}
+          // Stock-in receives into either canonical branch.
+          intent="stock"
+          activeBranchId={branchId || defaultBranchId || null}
+          pickLabel={tr('select', 'Select')}
+          onClose={closeCandidateOptions}
+          onPick={(candidate, selection) => pickFromGroup(candidate as unknown as ProductCandidate, selection)}
+        />
       ) : null}
     </div>,
     document.body,

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { searchProducts } from '../../api/methods.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
@@ -23,6 +24,7 @@ import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import StatusBadge, { getStatusLabel } from './StatusBadge.tsx'
 import SaleDetailProductPicker, { type SaleDetailProductCandidate, type SaleDetailProductChoice } from './SaleDetailProductPicker.tsx'
+import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
 import SaleSettlementEditor, { MAX_SETTLEMENT_ROWS } from './SaleSettlementEditor.tsx'
@@ -165,6 +167,14 @@ type StagedAddLine = {
   // seconds old and another till may already have taken the units.
   stockQuantity: number
   barcode: string
+  // The branch the option sheet resolved this line at -- the shelf the units
+  // come off. It used to stop at the line form: the lots were listed at ONE
+  // branch and the batch was then posted with no branch at all, so the Worker
+  // fell back to `sale.branch_id` (routes/sales.ts: `Number(item.branch_id ||
+  // sale.branch_id)`) and drew the lot from a shelf nobody had chosen -- and
+  // from none at all on a branchless sale. Carrying it is also what puts the
+  // added line under the same selling-branch guard as a checkout line.
+  branchId: number | null
   batchId: number | null
   batchLabel: string
   batchReceivedAt: string
@@ -340,7 +350,20 @@ export default function SaleDetailModal({
   const [addLines, setAddLines] = useState<StagedAddLine[]>([])
   const [addSaving, setAddSaving] = useState(false)
   const [addConfirmOpen, setAddConfirmOpen] = useState(false)
-  const [addPicking, setAddPicking] = useState<AddProductCandidate | null>(null)
+  // Two steps, not one. WHICH row of the family, at WHICH branch, with WHICH
+  // received date is the shared option sheet's question on every surface --
+  // this picker used to answer it with its own option grid and its own batch
+  // list, so the same product offered different choices here than in the POS.
+  // What stays behind is the LINE FORM (quantity and unit price), which is
+  // not a picker; same split as CreateProductsSessionModal.
+  const [addSheetGroup, setAddSheetGroup] = useState<AddProductCandidate | null>(null)
+  const [addPicking, setAddPicking] = useState<
+    { candidate: AddProductCandidate; branchId: string | null; batchId: number | null } | null
+  >(null)
+  // Replace used to be a flat list that committed the swap on the first tap,
+  // with no branch quantity and no way to say WHICH option or received date.
+  // It now opens the same option sheet every other picker opens.
+  const [replacePicking, setReplacePicking] = useState<AddProductCandidate | null>(null)
   const addSearchSeqRef = useRef(0)
   const addSearchInputRef = useRef<HTMLInputElement | null>(null)
   const addCandidateGroups = useMemo(() => buildProductGroups(addCandidates, new Map(), { preserveInputOrder: true }).map((group) => {
@@ -358,6 +381,7 @@ export default function SaleDetailModal({
   }), [addCandidates])
   const closeAddPicker = (): void => {
     setAddPicking(null)
+    setAddSheetGroup(null)
     requestAnimationFrame(() => addSearchInputRef.current?.focus())
   }
 
@@ -444,18 +468,35 @@ export default function SaleDetailModal({
     return () => window.clearTimeout(timer)
   }, [addQuery, onAddItems, sale?.branch_id])
 
-  const stageAddLine = (choice: SaleDetailProductChoice): void => {
+  // What makes two staged lines the SAME line. Product alone was never
+  // enough (the same product on two received dates is two movements) and
+  // now that a line carries the shelf it comes off, the branch joins the
+  // key -- otherwise editing the quantity of one would edit both, and the
+  // list would render two rows under one React key.
+  const stagedLineKey = (line: StagedAddLine): string => (
+    `${line.productId}:${line.branchId ?? 'any'}:${line.batchId ?? 'stock'}`
+  )
+  // `pickedBranchId` is the branch the option sheet resolved, threaded through
+  // the line form rather than re-derived here: the form asks for quantity and
+  // price, not for a shelf, and the branch it was opened at is the branch the
+  // lots on it were listed from.
+  const stageAddLine = (choice: SaleDetailProductChoice, pickedBranchId: string | null): void => {
     const productId = Number(choice.productId)
     if (!Number.isFinite(productId) || productId <= 0) return
     const quantity = Math.max(1, Math.floor(Number(choice.quantity) || 1))
     const price = toNumber(choice.unitPriceUsd)
+    const branchId = Number(pickedBranchId)
+    const stagedBranchId = Number.isFinite(branchId) && branchId > 0 ? branchId : null
     setAddQuery('')
     setAddCandidates([])
     setAddLines((current) => {
       // A second pick of the same product bumps the quantity rather than
       // adding a duplicate row -- the server would accept two lines, but the
-      // person meant "two of these".
-      const existing = current.findIndex((line) => line.productId === productId && line.batchId === choice.batchId)
+      // person meant "two of these". Two picks at DIFFERENT branches are not
+      // the same line, though: they take units off two different shelves.
+      const existing = current.findIndex((line) => (
+        line.productId === productId && line.batchId === choice.batchId && line.branchId === stagedBranchId
+      ))
       if (existing >= 0) {
         const next = [...current]
         // A reopened picker is an explicit edit. The most recently confirmed
@@ -483,6 +524,7 @@ export default function SaleDetailModal({
         priceText: price > 0 ? String(price) : '0',
         stockQuantity: choice.batchQuantity ?? toNumber(choice.stockQuantity),
         barcode: choice.barcode,
+        branchId: stagedBranchId,
         batchId: choice.batchId,
         batchLabel: choice.batchLabel,
         batchReceivedAt: choice.batchReceivedAt,
@@ -542,7 +584,10 @@ export default function SaleDetailModal({
         amendRequestIdRef.current = createSettlementRequestId()
         setAmendMutationError(translateOr('sale_mutation_rate_changed', 'The exchange rate changed. Review the updated KHR rate, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យអត្រា KHR ថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
       } else if (mutationError) {
-        setAmendMutationError(mutationError)
+        // A replacement line the Worker refuses because its branch is the
+        // warehouse comes back as the exact English of a pack key; show the
+        // pack's own sentence so a Khmer session does not read an English one.
+        setAmendMutationError(localizeBranchRuleError(mutationError, t))
       } else if (result !== false) {
         setAmendLineId(null)
         setReplaceLineId(null)
@@ -607,12 +652,15 @@ export default function SaleDetailModal({
    * pair the removal and the addition under a single group id and the history
    * reads as the single act the cashier performed.
    */
-  const stageReplacement = (candidate: AddProductCandidate): void => {
+  const stageReplacement = (candidate: AddProductCandidate, branchId: string | null = null): void => {
     const lineId = replaceLineId
     const productId = Number(candidate?.id)
     if (!lineId || !Number.isFinite(productId) || productId <= 0) return
     const line = items.find((item) => Number(item.id) === lineId)
     const quantity = toNumber(line?.quantity ?? line?.qty) || 1
+    const replacementBranchId = branchId != null && String(branchId) !== '' && Number.isFinite(Number(branchId))
+      ? Number(branchId)
+      : null
     setAddQuery('')
     setAddCandidates([])
     amendRequestIdRef.current = createSettlementRequestId()
@@ -621,7 +669,11 @@ export default function SaleDetailModal({
       request: {
         kind: 'line_replaced',
         sale_item_id: lineId,
-        replacement: { product_id: productId, quantity },
+        replacement: {
+          product_id: productId,
+          quantity,
+          ...(replacementBranchId != null ? { branch_id: replacementBranchId } : {}),
+        },
       },
       title: translateOr('amend_replace_title', 'Replace this product?', 'ជំនួសផលិតផលនេះ?'),
       summary: `${line?.product_name || line?.name || ''} → ${candidate?.name || `#${productId}`} × ${quantity}`,
@@ -654,7 +706,7 @@ export default function SaleDetailModal({
   }, [saleId])
 
   useEffect(() => {
-    if (!saleId || addPicking || closeGuard.promptOpen) return
+    if (!saleId || addPicking || addSheetGroup || closeGuard.promptOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -681,7 +733,7 @@ export default function SaleDetailModal({
     }
     document.addEventListener('keydown', onKeyDown, true)
     return () => document.removeEventListener('keydown', onKeyDown, true)
-  }, [addPicking, closeGuard.promptOpen, closeGuard.requestClose, saleId])
+  }, [addPicking, addSheetGroup, closeGuard.promptOpen, closeGuard.requestClose, saleId])
 
   if (!sale) return null
 
@@ -809,6 +861,10 @@ export default function SaleDetailModal({
         product_id: line.productId,
         quantity: line.quantity,
         applied_price_usd: line.unitPriceUsd,
+        // The shelf the sheet resolved. Without it the Worker inherited the
+        // sale's own branch, which is not necessarily the branch whose
+        // quantity -- and whose lots -- the operator was reading.
+        ...(line.branchId != null ? { branch_id: line.branchId } : {}),
         ...(line.batchId != null ? { batch_id: line.batchId } : {}),
         ...(line.batchLabel ? { batch_label: line.batchLabel } : {}),
         ...(line.batchExpiryDate ? { batch_expiry_date: line.batchExpiryDate } : {}),
@@ -827,7 +883,7 @@ export default function SaleDetailModal({
         addRequestIdRef.current = createSettlementRequestId()
         setAddMutationError(translateOr('sale_mutation_rate_changed', 'The exchange rate changed. Review the updated KHR rate, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យអត្រា KHR ថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
       } else if (mutationError) {
-        setAddMutationError(mutationError)
+        setAddMutationError(localizeBranchRuleError(mutationError, t))
       } else if (result !== false) {
         setAddLines([])
         setAddConfirmOpen(false)
@@ -919,9 +975,9 @@ export default function SaleDetailModal({
   return createPortal(
     <div
       className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4"
-      onClick={addPicking ? undefined : closeGuard.requestClose}
-      inert={addPicking ? true : undefined}
-      aria-hidden={addPicking ? true : undefined}
+      onClick={addPicking || addSheetGroup ? undefined : closeGuard.requestClose}
+      inert={addPicking || addSheetGroup ? true : undefined}
+      aria-hidden={addPicking || addSheetGroup ? true : undefined}
     >
       <div
         ref={modalPanelRef}
@@ -1246,14 +1302,14 @@ export default function SaleDetailModal({
                                   <div className="mt-1 text-[11px] text-gray-400">{t('loading') || 'Loading'}</div>
                                 ) : addCandidates.length ? (
                                   <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-700">
-                                    {addCandidates.map((candidate) => (
-                                      <li key={String(candidate.id)}>
+                                    {addCandidateGroups.map((candidate) => (
+                                      <li key={String(candidate.__groupKey || candidate.id)}>
                                         <button
                                           type="button"
-                                          onClick={() => stageReplacement(candidate)}
+                                          onClick={() => setReplacePicking(candidate)}
                                           className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
                                         >
-                                          <span className="break-words">{candidate.name}</span>
+                                          <span className="break-words">{candidate.__displayName || candidate.name}</span>
                                           <span className="shrink-0 tabular-nums text-[11px] text-gray-500">{fmtUSD(toNumber(candidate.selling_price_usd))}</span>
                                         </button>
                                       </li>
@@ -1261,6 +1317,38 @@ export default function SaleDetailModal({
                                   </ul>
                                 ) : addQuery.trim().length >= 2 ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}</div>
+                                ) : null}
+                                {replacePicking ? (
+                                  <ProductOptionSheet
+                                    product={replacePicking as never}
+                                    choices={(replacePicking.__groupChoices || []) as never[]}
+                                    t={t}
+                                    fmtUSD={fmtUSD}
+                                    // A replacement is sold, so the warehouse
+                                    // shows its count and refuses the pick,
+                                    // exactly as it does in the POS.
+                                    intent="sell"
+                                    activeBranchId={sale.branch_id ?? null}
+                                    // POST /sales/:id/amendments plans a
+                                    // replacement with batchId null and draws
+                                    // it by FIFO, so a received date picked
+                                    // here would be silently discarded -- a
+                                    // batch-identity guarantee the write does
+                                    // not make. The step is not offered.
+                                    hideReceivedDates
+                                    pickLabel={translateOr('amend_replace', 'Replace', 'ជំនួស')}
+                                    onClose={() => setReplacePicking(null)}
+                                    onPick={(picked, selection) => {
+                                      setReplacePicking(null)
+                                      // The branch the sheet resolved travels
+                                      // with the swap: sales.ts reads
+                                      // replacement.branch_id, and without it
+                                      // the line fell back to the sale's own
+                                      // branch -- a different one from the
+                                      // quantity the operator was reading.
+                                      stageReplacement(picked as unknown as AddProductCandidate, selection.branchId)
+                                    }}
+                                  />
                                 ) : null}
                               </div>
                             ) : null}
@@ -1491,7 +1579,7 @@ export default function SaleDetailModal({
                       <button
                         type="button"
                         className="flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                        onClick={() => setAddPicking(candidate)}
+                        onClick={() => setAddSheetGroup(candidate)}
                       >
                         <span className="min-w-0">
                           <span className="block break-words font-medium text-gray-900 dark:text-white">{candidate.__displayName || candidate.name}</span>
@@ -1509,17 +1597,43 @@ export default function SaleDetailModal({
                   ))}
                 </ul>
               ) : null}
+              {addSheetGroup ? (
+                <ProductOptionSheet
+                  product={addSheetGroup as never}
+                  choices={(addSheetGroup.__groupChoices || []) as never[]}
+                  t={t}
+                  fmtUSD={fmtUSD}
+                  // An added line is sold, so the warehouse shows its count
+                  // and refuses the pick, exactly as it does in the POS.
+                  intent="sell"
+                  activeBranchId={sale.branch_id ?? null}
+                  pickLabel={t('continue') || 'Continue'}
+                  onClose={() => setAddSheetGroup(null)}
+                  onPick={(picked, selection) => {
+                    setAddSheetGroup(null)
+                    setAddPicking({
+                      candidate: picked as unknown as AddProductCandidate,
+                      branchId: selection.branchId,
+                      batchId: selection.batch?.batchId ?? null,
+                    })
+                  }}
+                />
+              ) : null}
               {addPicking ? (
                 <SaleDetailProductPicker
-                  candidate={addPicking}
-                  candidates={addCandidates}
-                  branchId={sale.branch_id ?? null}
+                  candidate={addPicking.candidate}
+                  // The row is already resolved: re-deriving siblings from the
+                  // flat result list here would reopen the option question the
+                  // sheet just answered.
+                  candidates={[]}
+                  branchId={addPicking.branchId ?? sale.branch_id ?? null}
+                  presetBatchId={addPicking.batchId}
                   fmtUSD={fmtUSD}
                   t={t}
                   stockMoves={addStockMoves}
                   stagedLines={addLines}
                   onCancel={closeAddPicker}
-                  onChoose={stageAddLine}
+                  onChoose={(choice) => stageAddLine(choice, addPicking.branchId)}
                 />
               ) : null}
 
@@ -1531,7 +1645,7 @@ export default function SaleDetailModal({
                 <>
                   <ul className="mt-3 space-y-2">
                     {addLines.map((line) => (
-                      <li key={`${line.productId}:${line.batchId ?? 'stock'}`} className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
+                      <li key={stagedLineKey(line)} className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-white">
                             {line.name}
@@ -1539,9 +1653,9 @@ export default function SaleDetailModal({
                             {line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{line.batchLabel}{line.batchReceivedAt ? ` · ${translateOr('received_date', 'Received', 'ថ្ងៃទទួល')}: ${line.batchReceivedAt.slice(0, 10)}` : ''}{line.batchExpiryDate ? ` · ${t('expiry_date') || 'Expiry'}: ${line.batchExpiryDate}` : ''}</span> : null}
                           </span>
                           <span className="flex items-center gap-1">
-                            <label htmlFor={`sale-add-qty-${line.productId}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>
+                            <label htmlFor={`sale-add-qty-${stagedLineKey(line)}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>
                             <input
-                              id={`sale-add-qty-${line.productId}`}
+                              id={`sale-add-qty-${stagedLineKey(line)}`}
                               className="input h-9 w-16 text-right text-sm"
                               inputMode="numeric"
                               value={String(line.quantity)}
@@ -1551,22 +1665,22 @@ export default function SaleDetailModal({
                                 // stock the wrong way through an add.
                                 const next = Math.max(1, Math.floor(Number(event.target.value) || 1))
                                 setAddLines((current) => current.map((row) => (
-                                  row.productId === line.productId && row.batchId === line.batchId ? { ...row, quantity: next } : row
+                                  stagedLineKey(row) === stagedLineKey(line) ? { ...row, quantity: next } : row
                                 )))
                               }}
                             />
                           </span>
                           <span className="flex items-center gap-1">
-                            <label htmlFor={`sale-add-price-${line.productId}`} className="text-[11px] text-gray-400">{t('unit_price') || 'Unit price'}</label>
+                            <label htmlFor={`sale-add-price-${stagedLineKey(line)}`} className="text-[11px] text-gray-400">{t('unit_price') || 'Unit price'}</label>
                             <input
-                              id={`sale-add-price-${line.productId}`}
+                              id={`sale-add-price-${stagedLineKey(line)}`}
                               className="input h-9 w-24 text-right text-sm"
                               inputMode="decimal"
                               value={line.priceText}
                               onChange={(event) => {
                                 const text = event.target.value
                                 setAddLines((current) => current.map((row) => (
-                                  row.productId === line.productId && row.batchId === line.batchId
+                                  stagedLineKey(row) === stagedLineKey(line)
                                     ? { ...row, priceText: text, unitPriceUsd: toNumber(text) }
                                     : row
                                 )))
@@ -1580,7 +1694,7 @@ export default function SaleDetailModal({
                             type="button"
                             aria-label={t('remove') || 'Remove'}
                             className="rounded p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-                            onClick={() => setAddLines((current) => current.filter((row) => row.productId !== line.productId || row.batchId !== line.batchId))}
+                            onClick={() => setAddLines((current) => current.filter((row) => stagedLineKey(row) !== stagedLineKey(line)))}
                           >
                             <Trash2 size={16} />
                           </button>

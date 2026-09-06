@@ -108,6 +108,10 @@ const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () =
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
+  // move through this guard, so the fixtures here run through the rejection
+  // instead of opting out of it.
+  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/db': { getDb: () => db },
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.

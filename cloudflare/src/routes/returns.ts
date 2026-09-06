@@ -20,6 +20,9 @@ import {
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
 import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
+// A replacement line is an ordinary sale line, so the warehouse may not
+// carry one -- the same rule, and the same message, POST /sales enforces.
+import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -959,6 +962,24 @@ app.post('/', async (c) => {
   const branchName = branchId
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([branchId]))?.name || saleMeta.branch_name || null
     : saleMeta.branch_name || null
+
+  // A replacement line is an ORDINARY sale line (see below), so it answers to
+  // the same rule every other sale line does: the warehouse may not sell.
+  // Checked against the branch each line actually resolves to, which is the
+  // line's own branch_id when it names one and the return's otherwise.
+  const replacementBranchIds = [...new Set(
+    replacementInputs
+      .map((rep) => Number(rep.branch_id || branchId) || null)
+      .filter((id): id is number => !!id),
+  )]
+  if (replacementBranchIds.length) {
+    const replacementBranchRows = await selectInChunks(replacementBranchIds, 0, (chunk) => db
+      .prepare(`SELECT id, name FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ id: number; name: string }>(chunk))
+    if (firstUnsellableBranch(replacementBranchRows)) {
+      return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
+    }
+  }
 
   const productIds = [...new Set([
     ...body.items.map((i) => Number(i.product_id)),

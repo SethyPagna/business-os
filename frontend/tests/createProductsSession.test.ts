@@ -327,7 +327,17 @@ runTest('existing-product search groups families then opens a topmost inert-safe
   assert.match(modalSource, /getProductBatches/)
   assert.match(modalSource, /exactBatchLoadKey/)
   assert.match(fastStockInSource, /buildProductGroups\(candidates, productsById, \{ preserveInputOrder: true \}\)/)
-  assert.match(fastStockInSource, /layer="nested"/)
+  // The option surface itself is no longer a private nested Modal on either
+  // screen: both open the ONE shared sheet, which portals above its opener
+  // and swallows Escape so the host modal (and the line being typed into it)
+  // survives the key press that dismisses the sheet.
+  assert.match(fastStockInSource, /<ProductOptionSheet/)
+  assert.match(modalSource, /<ProductOptionSheet/)
+  const optionSheetSource = readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+  assert.match(optionSheetSource, /createPortal\(sheet, document\.body\)/)
+  assert.match(optionSheetSource, /event\.key !== 'Escape'/)
+  assert.match(optionSheetSource, /document\.addEventListener\('keydown', onKeyDown, true\)/)
+  assert.match(optionSheetSource, /document\.removeEventListener\('keydown', onKeyDown, true\)/)
 })
 
 runTest('corrected stock-session wire receives real JSON numbers and explicit batch identity', () => {

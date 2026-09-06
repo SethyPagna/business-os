@@ -3434,15 +3434,32 @@ assert.doesNotMatch(
   /const qty = \(\(\) => \{[\s\S]*branchFilterId != null[\s\S]*branch_stock/,
   'POS branch filtering should not rescan branch_stock inside a quantity IIFE',
 )
+// POS no longer answers this itself: the same walk decides the cart line's
+// branch and the option sheet's, and it had to learn that a sale may not be
+// rung at the warehouse, so it moved into the shared pure module. The cost
+// characteristic being pinned here is unchanged -- ONE pass over
+// branch_stock, no map, no sort -- it is just pinned where the code now is.
+const productSheetState = fs.readFileSync(new URL('../src/components/pos/productSheetState.ts', import.meta.url), 'utf8')
 assert.match(
   pos,
-  /const pickBestBranchId = useCallback\(\(product: ProductRecord\) => \{[\s\S]*let bestBranchId: number \| null = null[\s\S]*for \(const entry of product\?\.branch_stock \|\| \[\]\)[\s\S]*if \(preferredBranchId != null && branchId === preferredBranchId\) return branchId[\s\S]*if \(qty > bestQuantity\)/,
-  'POS branch selection should choose a branch in one pass without mapping and sorting stock rows',
+  /const pickBestBranchId = useCallback\(\s*\n?\s*\(product: ProductRecord\) => resolveSaleBranch\(/,
+  'POS branch selection should delegate to the shared resolver rather than carry a second copy of the walk',
+)
+// Scope the check to the resolver's own body: an unbounded [\s\S]* runs to
+// the end of the module and would answer for code that is not this walk.
+const resolveSaleBranchBody = productSheetState
+  .split('export function resolveSaleBranch(')[1]
+  ?.split('\n}')[0] ?? ''
+assert.ok(resolveSaleBranchBody, 'productSheetState must still export resolveSaleBranch')
+assert.match(
+  resolveSaleBranchBody,
+  /let best: number \| null = null[\s\S]*for \(const entry of Array\.isArray\(product\?\.branch_stock\)[\s\S]*if \(quantity > bestQuantity\)/,
+  'branch selection should choose a branch in one pass without mapping and sorting stock rows',
 )
 assert.doesNotMatch(
-  pos,
-  /const pickBestBranchId = useCallback\(\(product: ProductRecord\) => \{[\s\S]*stockRows\.sort/,
-  'POS branch selection should not sort branch_stock rows just to find the largest quantity',
+  resolveSaleBranchBody,
+  /\.sort\(|\.map\(/,
+  'branch selection should not sort or map branch_stock rows just to find the largest quantity',
 )
 assert.match(
   pos,

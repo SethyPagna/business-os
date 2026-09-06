@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import Modal from '../../shared/Modal'
 import SearchInput from '../../shared/SearchInput'
 import ScanSearchButton from '../../shared/ScanSearchButton'
+import ProductOptionSheet from '../../shared/ProductOptionSheet.tsx'
+import { buildProductGroups } from '../../../utils/productGrouping.ts'
 import InventoryStockModals from '../../inventory/InventoryStockModals'
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog'
@@ -189,6 +191,12 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   const debouncedSearch = useDebouncedValue(search, 200)
   const [results, setResults] = useState<PickedProduct[]>([])
   const [searching, setSearching] = useState(false)
+  // Same-name rows collapse to ONE title row. Tapping it (or a standalone
+  // product's row) opens the shared option sheet, which is where branch,
+  // option and received date get chosen -- this list used to commit on the
+  // first tap and show one branch-summed number with no way to see which
+  // branch held it.
+  const [picking, setPicking] = useState<PickedProduct | null>(null)
 
   // Camera results belong to this picker only. A named handler (rather than
   // passing a generic setSearch reference) makes that boundary explicit and
@@ -354,14 +362,16 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
 
   // Initialize adjustForm exactly like Inventory.openAdjust once a product
   // is picked (pricingLocked true, prices from the product, branch = default).
-  const selectProduct = useCallback((product: PickedProduct) => {
+  const selectProduct = useCallback((product: PickedProduct, picked?: { branchId?: string | null; batchId?: number | null }) => {
     setSelectedProduct(product)
     setAdjustForm({
       product_id: product.id,
       type: initialType,
       quantity: 1,
       reason: '',
-      branch_id: defaultBranch?.id != null ? String(defaultBranch.id) : '',
+      // The branch the option sheet resolved wins over the default branch:
+      // it is the one whose quantity the operator was just reading.
+      branch_id: picked?.branchId != null ? String(picked.branchId) : (defaultBranch?.id != null ? String(defaultBranch.id) : ''),
       pricingLocked: true,
       selling_price_usd: product.selling_price_usd || 0,
       selling_price_khr: product.selling_price_khr || 0,
@@ -378,7 +388,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       cost_usd: product.cost_price_usd || product.purchase_price_usd || 0,
       cost_khr: product.cost_price_khr || product.purchase_price_khr || 0,
       barcode: product.barcode || '',
-      batch_id: '',
+      batch_id: picked?.batchId != null ? String(picked.batchId) : '',
       received_date: todayIsoDate(),
       supplier_id: '',
       supplier_name: '',
@@ -655,23 +665,49 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
             <div className="py-6 text-center text-sm text-gray-400">{t('no_data_found')}</div>
           ) : (
             <div className="max-h-96 space-y-1 overflow-y-auto">
-              {results.map((product) => (
-                <button
-                  key={String(product.id)}
-                  type="button"
-                  onClick={() => selectProduct(product)}
-                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700 dark:hover:border-blue-600 dark:hover:bg-blue-900/20"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">{product.name || String(product.id)}</span>
-                    <span className="block truncate text-xs text-gray-400">
-                      {product.barcode ? `${product.barcode} · ` : ''}{stockQtyOf(product)} {product.unit || ''}
+              {buildProductGroups(results as never[], new Map(), { preserveInputOrder: true }).map((group) => {
+                const rows = (group.items || []) as unknown as PickedProduct[]
+                const lead = (group.leadProduct || rows[0]) as unknown as PickedProduct
+                return (
+                  <button
+                    key={group.key}
+                    type="button"
+                    onClick={() => setPicking({ ...lead, __groupChoices: rows } as PickedProduct)}
+                    className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700 dark:hover:border-blue-600 dark:hover:bg-blue-900/20"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">{group.name || String(lead?.id)}</span>
+                      <span className="block truncate text-xs text-gray-400">
+                        {rows.length > 1
+                          ? `${rows.length} ${tr('options', 'options')} · ${group.stockTotal}`
+                          : `${lead?.barcode ? `${lead.barcode} · ` : ''}${stockQtyOf(lead)} ${lead?.unit || ''}`}
+                      </span>
                     </span>
-                  </span>
-                </button>
-              ))}
+                  </button>
+                )
+              })}
             </div>
           )}
+          {picking ? (
+            <ProductOptionSheet
+              product={picking as never}
+              t={t}
+              fmtUSD={(value: number) => fmtUSD(value)}
+              fmtKHR={(value: number) => fmtKHR(value)}
+              // A stock adjustment may target either canonical branch --
+              // the warehouse holds stock, it just never sells.
+              intent="stock"
+              pickLabel={tr('select', 'Select')}
+              onClose={() => setPicking(null)}
+              onPick={(product, selection) => {
+                setPicking(null)
+                selectProduct(product as unknown as PickedProduct, {
+                  branchId: selection.branchId,
+                  batchId: selection.batch?.batchId ?? null,
+                })
+              }}
+            />
+          ) : null}
         </div>
       </Modal>
     )

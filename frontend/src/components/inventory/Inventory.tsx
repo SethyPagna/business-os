@@ -70,6 +70,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import type { QueryParams } from '../../api/query.ts'
 import {
   beginTrackedRequest,
@@ -1489,7 +1490,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         userId: user?.id,
         userName: user?.name || user?.username,
       }), 'Transfer inventory stock')
-      if (result?.success === false) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed'))
+      // The direction rule now lives on POST /inventory/transfer too, so a
+      // shop -> warehouse move (including the undo of a legitimate one) comes
+      // back as the pack sentence rather than the server's English.
+      if (result?.success === false) throw new Error(localizeBranchRuleError(result?.error, (key) => tr(key, '')) || tr('stock_transfer_failed', 'Stock transfer failed'))
       actionHistory.pushAction({
         label: `${tr('transfer', 'Transfer')}: ${transferModal.name}`,
         undo: async () => {
@@ -1502,7 +1506,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
             userId: user?.id,
             userName: user?.name || user?.username,
           }), 'Undo inventory stock transfer')
-          if (undoResult?.success === false) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed'))
+          if (undoResult?.success === false) throw new Error(localizeBranchRuleError(undoResult?.error, (key) => tr(key, '')) || tr('undo_failed', 'Undo failed'))
           await load(true)
         },
         redo: async () => {
@@ -1515,7 +1519,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
             userId: user?.id,
             userName: user?.name || user?.username,
           }), 'Redo inventory stock transfer')
-          if (redoResult?.success === false) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
+          if (redoResult?.success === false) throw new Error(localizeBranchRuleError(redoResult?.error, (key) => tr(key, '')) || tr('redo_failed', 'Redo failed'))
           await load(true)
         },
       })

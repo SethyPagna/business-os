@@ -17,6 +17,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
+import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { getPermissionTierFromMap, parsePermissionMap } from '../../utils/permissions.ts'
 import { isActionOverriddenOff } from '../../utils/permissionActions.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
@@ -181,12 +182,6 @@ function canCommitProductCreateInStockSession(user?: ProductUser | null): boolea
     || hasAllPermission(user.permissions)
   return getPermissionTierFromMap(merged, 'products', admin) === 'full'
     && !isActionOverriddenOff(merged, 'products', 'add')
-}
-
-function quantityAtBranch(product: ProductCandidate, branchId: string): number {
-  const entry = (product.branch_stock || []).find((row) => String(row.branch_id ?? '') === String(branchId))
-  const value = Number(entry?.quantity ?? product.stock_quantity ?? 0)
-  return Number.isFinite(value) ? value : 0
 }
 
 function legacyLines(rows: CreateProductsSessionRow[] = []): SessionLine[] {
@@ -788,14 +783,40 @@ export default function CreateProductsSessionModal({
         </Modal>
       ) : null}
 
-      {selectedGroup ? (
+      {/* WHICH row of the family, and at which branch, is now the one shared
+          option sheet. This used to be a private grid of buttons showing a
+          single branch-scoped quantity with no way to see the other branch,
+          so the same product looked different here than in the POS. The
+          nested Modal below keeps the line FORM, which is not the picker. */}
+      {selectedGroup && !selectedProduct ? (
+        <ProductOptionSheet
+          // The lead row is the first OFFERED one, not group.leadProduct: a
+          // family whose root is filtered out of the offer still has a root,
+          // and handing that root in as `product` resolved the sheet to a row
+          // it never listed. SaleDetailModal's addCandidateGroups already
+          // takes the lead this way (lead = choices[0]).
+          product={{ ...(groupOptions[0] || selectedGroup.leadProduct || selectedGroup.items[0]), name: selectedGroup.name } as never}
+          choices={groupOptions as never[]}
+          t={(key: string) => tr(key, key)}
+          fmtUSD={(value: number) => `${usdSymbol}${Number(value || 0).toFixed(2)}`}
+          // Receiving stock targets either canonical branch: the warehouse
+          // holds stock, it only never sells.
+          intent="stock"
+          activeBranchId={lineBranchId || null}
+          pickLabel={tr('select', 'Select')}
+          onClose={closeExistingOptions}
+          onPick={(product, selection) => {
+            // The branch whose quantity the operator was just reading is the
+            // branch the line receives into.
+            if (selection.branchId != null) setLineBranchId(String(selection.branchId))
+            selectExistingProduct(product as unknown as ProductCandidate)
+          }}
+        />
+      ) : null}
+      {selectedGroup && selectedProduct ? (
         <Modal title={selectedGroup.name} onClose={closeExistingOptions} size="md" layer="nested" unsavedChanges="read-only">
           <div className="space-y-4">
-            <button type="button" className="btn-secondary h-10 px-3 text-sm" onClick={closeExistingOptions}>← {tr('back', 'Back')}</button>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{groupOptions.map((product) => {
-              const selected = String(selectedProduct?.id || '') === String(product.id)
-              return <button key={String(product.id)} type="button" aria-pressed={selected} className={`min-h-14 rounded-lg border px-3 py-2 text-left ${selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 dark:border-gray-700'}`} onClick={() => selectExistingProduct(product)}><span className="block font-medium">{String(product.name || selectedGroup.name)}</span><span className="block font-mono text-[11px] opacity-80">{String(product.barcode || tr('no_barcode', 'No barcode'))}</span><span className="block text-[11px] opacity-80">{tr('quantity', 'Quantity')}: {quantityAtBranch(product, lineBranchId)} · {tr('unit_cost_usd', 'Unit cost')}: {usdSymbol}{currentCost(product).toFixed(2)}</span></button>
-            })}</div>
+            <button type="button" className="btn-secondary h-10 px-3 text-sm" onClick={() => setSelectedProduct(null)}>← {tr('back', 'Back')}</button>
             {renderExistingLineFields(() => queueExistingLine())}
           </div>
         </Modal>

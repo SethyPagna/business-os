@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
+import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { fmtTime } from '../../utils/formatters'
 import {
   beginTrackedRequest,
@@ -16,6 +18,7 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
@@ -94,6 +97,14 @@ interface ReplacementCandidate {
   barcode?: string | null
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
+  // Carried by every /api/products/search row (attachBranchStock runs
+  // unconditionally) and read by the shared option sheet for the
+  // Warehouse/Shop counts. Declared here because the old narrow shape was
+  // why this picker showed a price and nothing else.
+  unit?: string | null
+  stock_quantity?: number | string | null
+  branch_stock?: Array<{ branch_id?: string | number | null; branch_name?: string; quantity?: string | number }>
+  __groupChoices?: ReplacementCandidate[]
 }
 
 interface ReplacementLine {
@@ -303,6 +314,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // add a line before they could look for what should be on it.
   const [replacementQuery, setReplacementQuery] = useState('')
   const [replacementResults, setReplacementResults] = useState<ReplacementCandidate[]>([])
+  // Same-name rows collapse to ONE title row; tapping it opens the shared
+  // option sheet to choose branch / option / received date. A standalone
+  // product opens the same sheet, so the flow never changes shape.
+  const [replacementPicking, setReplacementPicking] = useState<ReplacementCandidate | null>(null)
   const [replacementSearching, setReplacementSearching] = useState(false)
   const [replacementSearched, setReplacementSearched] = useState(false)
   const isKnownReason = RETURN_REASONS.includes(reason)
@@ -388,6 +403,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     quantity: number
     priceUsd: number
     priceKhr: number
+    batchId?: number | null
   }) => {
     const branchId = input.branchId || foundSale?.branch_id || null
     const key = `rep_${input.productId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
@@ -396,7 +412,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       product_id: input.productId,
       product_name: input.productName,
       branch_id: branchId,
-      batch_id: null,
+      batch_id: input.batchId ?? null,
       batches: [],
       quantity: Math.max(1, Math.floor(input.quantity) || 1),
       price_usd: input.priceUsd,
@@ -405,14 +421,21 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     void loadReplacementBatches(key, input.productId, branchId)
   }
 
-  const addReplacementFromCandidate = (candidate: ReplacementCandidate) => {
+  const addReplacementFromCandidate = (
+    candidate: ReplacementCandidate,
+    selection?: { branchId: string | null; batch?: { batchId: number } },
+  ) => {
     addReplacementLine({
       productId: candidate.id,
       productName: String(candidate.name || '').trim() || String(candidate.id),
-      branchId: foundSale?.branch_id || null,
+      // The branch the sheet resolved wins over the sale's own branch: the
+      // replacement is drawn from wherever the operator was just looking at
+      // stock, and the sheet refuses the warehouse for them.
+      branchId: selection?.branchId ?? (foundSale?.branch_id || null),
       quantity: 1,
       priceUsd: toNumber(candidate.selling_price_usd),
       priceKhr: toNumber(candidate.selling_price_khr),
+      batchId: selection?.batch?.batchId ?? null,
     })
   }
 
@@ -745,7 +768,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       await Promise.resolve(onSuccess?.(result))
       onClose()
     } catch (error) {
-      notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error, T('error', 'Error')), 'error')
+      // A replacement line the Worker refuses (its branch is the warehouse)
+      // is shown as the same pack sentence the replacement picker greys the
+      // warehouse pill with, in whichever language is active.
+      notify((T('error','Error') || 'Error') + ': ' + localizeBranchRuleError(getLoaderErrorMessage(error, T('error', 'Error')), (key: string) => T(key, '')), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       setSubmitting(false)
@@ -1134,25 +1160,46 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 </div>
                 {replacementResults.length > 0 && (
                   <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
-                    {replacementResults.map((row) => (
-                      <li key={String(row.id)}>
-                        <button
-                          type="button"
-                          onClick={() => addReplacementFromCandidate(row)}
-                          className="flex w-full items-baseline justify-between gap-2 rounded-lg border border-gray-200 px-2 py-1.5 text-left transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 dark:border-gray-600 dark:hover:border-emerald-600 dark:hover:bg-emerald-900/20"
-                        >
-                          <span className="min-w-0">
-                            <span className="block break-words text-xs font-medium text-gray-800 dark:text-gray-200">{row.name}</span>
-                            {(row.sku || row.barcode) ? (
-                              <span className="block text-[10px] text-gray-400">{[row.sku, row.barcode].filter(Boolean).join(' · ')}</span>
-                            ) : null}
-                          </span>
-                          <span className="flex-shrink-0 text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(toNumber(row.selling_price_usd))}</span>
-                        </button>
-                      </li>
-                    ))}
+                    {buildProductGroups(replacementResults as never[], new Map(), { preserveInputOrder: true }).map((group) => {
+                      const rows = (group.items || []) as unknown as ReplacementCandidate[]
+                      const lead = (group.leadProduct || rows[0]) as unknown as ReplacementCandidate
+                      return (
+                        <li key={group.key}>
+                          <button
+                            type="button"
+                            onClick={() => setReplacementPicking({ ...lead, __groupChoices: rows })}
+                            className="flex w-full items-baseline justify-between gap-2 rounded-lg border border-gray-200 px-2 py-1.5 text-left transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 dark:border-gray-600 dark:hover:border-emerald-600 dark:hover:bg-emerald-900/20"
+                          >
+                            <span className="min-w-0">
+                              <span className="block break-words text-xs font-medium text-gray-800 dark:text-gray-200">{group.name}</span>
+                              <span className="block text-[10px] text-gray-400">
+                                {rows.length > 1
+                                  ? `${rows.length} ${T('options', 'options')}`
+                                  : [lead?.sku, lead?.barcode].filter(Boolean).join(' · ')}
+                              </span>
+                            </span>
+                            <span className="flex-shrink-0 text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(toNumber(lead?.selling_price_usd))}</span>
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ul>
                 )}
+                {replacementPicking ? (
+                  <ProductOptionSheet
+                    product={replacementPicking as never}
+                    t={(key: string) => T(key, key)}
+                    fmtUSD={(value: number) => fmtUSD(value)}
+                    intent="sell"
+                    activeBranchId={foundSale?.branch_id ?? null}
+                    pickLabel={T('add', 'Add')}
+                    onClose={() => setReplacementPicking(null)}
+                    onPick={(picked, selection) => {
+                      addReplacementFromCandidate(picked as unknown as ReplacementCandidate, selection as { branchId: string | null; batch?: { batchId: number } })
+                      setReplacementPicking(null)
+                    }}
+                  />
+                ) : null}
                 {replacementSearched && !replacementSearching && replacementResults.length === 0 ? (
                   <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{T('no_products_found', 'No products found. Try another name, SKU or barcode.')}</div>
                 ) : null}

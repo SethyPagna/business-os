@@ -24,6 +24,9 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
+import { branchCanBeTransferDestination, branchCanBeTransferSource, branchRoleFromName } from '../../utils/branchRoles.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
@@ -78,6 +81,26 @@ type TransferProduct = {
   barcode?: string
   unit?: string
   branch_quantity?: number | string
+}
+
+/**
+ * The rows the shared option sheet reads.
+ *
+ * GET /api/branches/:id/stock answers for ONE branch: its rows carry
+ * branch_quantity and no branch_stock ledger at all. The sheet reads
+ * branch_stock, so the source branch's own number is handed to it as that
+ * ledger rather than leaving it to fall back on a cross-branch total.
+ */
+type TransferSheetRow = TransferProduct & {
+  stock_quantity: number
+  branch_stock: Array<{ branch_id: string; branch_name: string; quantity: number }>
+}
+
+function sheetChoicesFor(rows: TransferProduct[], branchId: string, branchName: string): TransferSheetRow[] {
+  return rows.map((row) => {
+    const quantity = Number(row.branch_quantity) || 0
+    return { ...row, stock_quantity: quantity, branch_stock: [{ branch_id: String(branchId), branch_name: branchName, quantity }] }
+  })
 }
 
 type TransferStockResponse = {
@@ -217,6 +240,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    */
   const [productBatches, setProductBatches] = useState<ProductBatch[]>([])
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
+  // A received date chosen in the shared option sheet has to survive the
+  // batch load that follows the pick -- that load clears the selection, so
+  // the choice is seeded here and re-applied once the lots arrive.
+  const batchSeedRef = useRef<number | null>(null)
+  // Same-name rows collapse to ONE title row; tapping it opens the shared
+  // option sheet, which is where the option and the received date get
+  // chosen. The old list committed the pick on the first tap.
+  const [picking, setPicking] = useState<{ product: TransferSheetRow; rows: TransferSheetRow[] } | null>(null)
   const [loadingBatches, setLoadingBatches] = useState(false)
   const batchRequestRef = useRef(0)
   // Which product ids carry active batch/lot tracking at the source branch.
@@ -300,16 +331,34 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     }
   }, [])
 
+  // Stock moves warehouse -> shop, refused on the same shared predicate the
+  // Worker rejects on (utils/branchRoles.ts). The wrong-direction branches
+  // stay VISIBLE and inert rather than disappearing, so the rule is legible
+  // instead of the list looking arbitrarily short. The hint below the source
+  // select only makes sense where a canonical warehouse exists.
+  const hasWarehouseBranch = useMemo(
+    () => branches.some((branch) => branchRoleFromName(branch.name) === 'warehouse'),
+    [branches],
+  )
+
   const branchOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: t('select_source') || 'Select source branch' },
-    ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
+    ...branches.map((branch) => ({
+      value: branch.id,
+      label: branch.name,
+      disabled: !branchCanBeTransferSource(branch.name),
+    })),
   ], [branches, t])
 
   const destinationBranchOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: t('select_destination') || 'Select destination branch' },
     ...branches
       .filter((branch) => String(branch.id) !== String(fromBranch))
-      .map((branch) => ({ value: branch.id, label: branch.name })),
+      .map((branch) => ({
+        value: branch.id,
+        label: branch.name,
+        disabled: !branchCanBeTransferDestination(branch.name),
+      })),
   ], [branches, fromBranch, t])
 
   const invalidQuantityText = settings?.language === 'km'
@@ -472,7 +521,13 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           TRANSFER_STOCK_LOAD_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(batchRequestRef, requestId)) return
-        setProductBatches(Array.isArray(res?.batches) ? res.batches : [])
+        const loaded = Array.isArray(res?.batches) ? res.batches : []
+        setProductBatches(loaded)
+        if (batchSeedRef.current != null) {
+          const seeded = loaded.find((batch) => Number(batch.id) === Number(batchSeedRef.current))
+          if (seeded) setSelectedBatchId(seeded.id)
+          batchSeedRef.current = null
+        }
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(batchRequestRef, requestId)) return
         setProductBatches([])
@@ -822,9 +877,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         return
       }
 
-      notify(res?.error || (t('transfer_failed') || 'Transfer failed'), 'error')
+      // The Worker's direction refusal is the same sentence the greyed
+      // branch select already shows, so it is read back out of the packs
+      // rather than surfacing as the English the server happened to send.
+      notify(localizeBranchRuleError(res?.error, t) || (t('transfer_failed') || 'Transfer failed'), 'error')
     } catch (error) {
-      notify(getErrorMessage(error, t('transfer_failed') || 'Transfer failed'), 'error')
+      notify(localizeBranchRuleError(getErrorMessage(error, t('transfer_failed') || 'Transfer failed'), t), 'error')
     } finally {
       finishSingleAction(transferInFlightRef)
       setSaving(false)
@@ -905,7 +963,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             userName: user?.name,
           }), 'Bulk transfer branch stock', TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS)
         } catch (error) {
-          stoppedReason = getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed')
+          stoppedReason = localizeBranchRuleError(getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed'), t)
           break
         }
         if (res?.success !== false) {
@@ -916,7 +974,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           mergeCount += res.merges?.length ?? 0
           continue
         }
-        stoppedReason = res?.error || (t('transfer_bulk_failed') || 'Bulk transfer failed')
+        stoppedReason = localizeBranchRuleError(res?.error, t) || (t('transfer_bulk_failed') || 'Bulk transfer failed')
         break
       }
 
@@ -989,6 +1047,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 onChange={setFromBranch}
                 ariaLabel={t('from_branch') || 'From Branch'}
               />
+              {hasWarehouseBranch ? (
+                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{t('transfer_source_warehouse_only') || 'Transfers move stock from Warehouse to Shop.'}</p>
+              ) : null}
             </div>
 
             <div>
@@ -1037,25 +1098,32 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                   <p className="py-6 text-center text-sm text-gray-400">{t('no_data') || 'No data'}</p>
                 ) : null}
 
-                {filtered.map((product) => (
-                  <button
-                    key={product.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedProduct(product)
-                      setQuantity('')
-                    }}
-                    className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                  >
-                    <div className="min-w-0">
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">{product.name}</span>
-                      {product.sku ? <span className="ml-2 font-mono text-xs text-gray-400">{product.sku}</span> : null}
-                    </div>
-                    <span className={`shrink-0 text-sm font-bold ${Number(product.branch_quantity || 0) > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      {product.branch_quantity} {product.unit}
-                    </span>
-                  </button>
-                ))}
+                {buildProductGroups(filtered as never[], new Map(), { preserveInputOrder: true }).map((group) => {
+                  const rows = (group.items || []) as unknown as TransferProduct[]
+                  const lead = (group.leadProduct || rows[0]) as unknown as TransferProduct
+                  const groupQuantity = rows.reduce((total, row) => total + (Number(row.branch_quantity) || 0), 0)
+                  return (
+                    <button
+                      key={group.key}
+                      type="button"
+                      onClick={() => {
+                        const sheetRows = sheetChoicesFor(rows, fromBranch, branchNameById(fromBranch))
+                        setPicking({ product: { ...sheetRows[0], name: group.name }, rows: sheetRows })
+                      }}
+                      className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                    >
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">{group.name}</span>
+                        {rows.length > 1
+                          ? <span className="ml-2 text-xs text-gray-400">{rows.length} {t('options') || 'Options'}</span>
+                          : (lead?.sku ? <span className="ml-2 font-mono text-xs text-gray-400">{lead.sku}</span> : null)}
+                      </div>
+                      <span className={`shrink-0 text-sm font-bold ${groupQuantity > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {groupQuantity} {lead?.unit}
+                      </span>
+                    </button>
+                  )
+                })}
                 {!loadingProducts && singleStockPage < singleStockTotalPages ? (
                   <button
                     type="button"
@@ -1068,6 +1136,30 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 ) : null}
               </div>
             </div>
+          ) : null}
+
+          {picking && mode === 'single' ? (
+            <ProductOptionSheet
+              product={picking.product as never}
+              choices={picking.rows as never[]}
+              t={(key: string) => t(key) || key}
+              fmtUSD={(value: number) => `$${Number(value || 0).toFixed(2)}`}
+              // A transfer READS from the source branch, so every branch the
+              // operation permits stays selectable here; the direction rule
+              // is enforced on the two branch selects above and again on the
+              // Worker.
+              intent="stock"
+              activeBranchId={fromBranch || null}
+              trackedBatchProductIds={trackedBatchProductIds}
+              pickLabel={t('select') || 'Select'}
+              onClose={() => setPicking(null)}
+              onPick={(product, selection) => {
+                batchSeedRef.current = selection.batch?.batchId ?? null
+                setSelectedProduct(product as unknown as TransferProduct)
+                setQuantity('')
+                setPicking(null)
+              }}
+            />
           ) : null}
 
           {selectedProduct && mode === 'single' ? (

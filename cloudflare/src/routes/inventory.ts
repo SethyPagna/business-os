@@ -23,6 +23,7 @@ import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
+import { transferDirectionError } from '../lib/branchRoleGuards'
 import type { Env } from '../index'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
@@ -1928,6 +1929,18 @@ app.post('/transfer', async (c) => {
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
   ])
+
+  // The direction rule, on the THIRD transfer route. /branches/transfer and
+  // /branches/transfer-bulk already refuse a shop source or a warehouse
+  // destination; this one is what Inventory.tsx's own transfer button calls,
+  // including its undo and redo, so leaving it out meant a shop -> warehouse
+  // move the other two rejected was one button away -- and undo of a
+  // legitimate warehouse -> shop transfer runs the refused direction by
+  // construction. Refused BEFORE the db.batch below, i.e. before any stock
+  // moves. It reuses the rows this route already read, so it costs no extra
+  // round-trip.
+  const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+  if (directionError) return c.json({ error: directionError }, 400)
 
   // The LOTS move with the quantity (Part-77 CRITICAL, x3 audits): this
   // route used to move only the plain branch_stock total, leaving every

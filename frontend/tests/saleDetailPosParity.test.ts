@@ -74,9 +74,14 @@ assert.match(detail, /addCandidateGroups\.map\(\(candidate\)/)
 assert.doesNotMatch(detail, /addCandidateGroups\.map\([\s\S]{0,900}candidate\.barcode/)
 assert.match(detail, /const addSearchInputRef = useRef<HTMLInputElement \| null>\(null\)/)
 assert.match(detail, /ref=\{addSearchInputRef\}/)
-assert.match(detail, /inert=\{addPicking \? true : undefined\}/)
-assert.match(detail, /aria-hidden=\{addPicking \? true : undefined\}/)
-assert.match(detail, /onClick=\{addPicking \? undefined : closeGuard\.requestClose\}/)
+// Adding a line is TWO steps now -- the shared option sheet answers which
+// row / branch / received date, then the line form asks quantity and price --
+// and the backdrop must stay inert for both. Naming only the second one left
+// the sheet dismissable by a backdrop click that also ran the sale's own
+// close guard.
+assert.match(detail, /inert=\{addPicking \|\| addSheetGroup \? true : undefined\}/)
+assert.match(detail, /aria-hidden=\{addPicking \|\| addSheetGroup \? true : undefined\}/)
+assert.match(detail, /onClick=\{addPicking \|\| addSheetGroup \? undefined : closeGuard\.requestClose\}/)
 assert.match(detail, /<UnsavedChangesPrompt guard=\{closeGuard\}/)
 assert.match(detail, /requestAnimationFrame\(\(\) => addSearchInputRef\.current\?\.focus\(\)\)/)
 assert.match(picker, /import Modal from '\.\.\/shared\/Modal\.tsx'/)
