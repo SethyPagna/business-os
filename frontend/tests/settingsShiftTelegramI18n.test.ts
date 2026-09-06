@@ -72,6 +72,15 @@ const telegramHardcodedLiterals = [
   'placeholder="Example: -1001234567890"',
   '>Bot token<',
   "telegramStatus?.configured ? 'Configured securely on the server.' : 'Not configured on the server yet.'",
+  "['telegram_sales_enabled', 'Sales & new receipts', 'Receipt number, status, totals, items, customer, and branch']",
+  "['telegram_status_enabled', 'Receipt status changes', 'Payment, delivery, completion, and cancellation changes']",
+  "['telegram_fees_enabled', 'Fees', 'New fee type, amount, date, label, and note']",
+  "['telegram_stock_in_enabled', 'Stock in', 'Product, quantity, branch, reason, and lot']",
+  "['telegram_stock_out_enabled', 'Stock out', 'Product, quantity, branch, and reason']",
+  "telegramAction === 'test' ? 'Sending test...' : 'Send test message'",
+  "telegramAction === 'summary' ? 'Sending summary...' : \"Send today's summary\"",
+  'Save the chat ID and switches first.',
+  '<span className="font-medium">Owner / manager commands:</span>',
 ]
 for (const literal of telegramHardcodedLiterals) {
   assert.ok(!src.includes(literal), `Settings.tsx still hardcodes Telegram-automation text: ${JSON.stringify(literal)}`)
@@ -87,6 +96,21 @@ const telegramKeys = [
   'telegram_bot_token_label',
   'telegram_bot_token_configured',
   'telegram_bot_token_not_configured',
+  'telegram_cat_sales',
+  'telegram_cat_sales_desc',
+  'telegram_cat_status',
+  'telegram_cat_status_desc',
+  'telegram_cat_fees_desc',
+  'telegram_cat_stock_in_desc',
+  'telegram_cat_stock_out_desc',
+  'telegram_sending_test',
+  'telegram_send_test',
+  'telegram_sending_summary',
+  'telegram_send_today_summary',
+  'telegram_help_paragraph',
+  'telegram_help_commands_label',
+  'telegram_help_commands_desc',
+  'telegram_help_commands_note',
 ]
 
 for (const key of [...shiftKeys, ...telegramKeys]) {
