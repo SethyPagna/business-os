@@ -1,6 +1,10 @@
 import History from 'lucide-react/dist/esm/icons/history.js'
 import Modal from '../shared/Modal'
 import { translateMovementType } from './movementGroups'
+// N13: the same row model the Stock Change ledger and the movement drill
+// use. This preview used to DROP the branch span and silently omit the
+// actor and reason when they were absent, so one movement read three ways.
+import { buildHistoryRowModel } from '../../utils/historyRowModel.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type TimeFormatter = (value: unknown) => string
@@ -78,6 +82,7 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
           {movements.map((movement, index) => {
             const qty = Number(movement.quantity || 0)
             const signed = qty > 0 ? `+${qty}` : String(qty)
+            const model = buildHistoryRowModel(movement)
             return (
               <div
                 key={String(movement.id ?? index)}
@@ -88,14 +93,10 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
                     <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass(movement)}`}>
                       {translateMovementType(movement.movement_type, t)}
                     </span>
-                    {movement.branch_name ? (
-                      <span className="truncate text-gray-500 dark:text-gray-400">{movement.branch_name}</span>
-                    ) : null}
+                    <span className="truncate text-gray-500 dark:text-gray-400" title={model.branch}>{model.branch}</span>
                   </div>
                   <div className="mt-0.5 truncate text-[11px] text-gray-400">
-                    {fmtTime(movement.created_at)}
-                    {movement.user_name ? ` \u00b7 ${movement.user_name}` : ''}
-                    {movement.reason ? ` \u00b7 ${movement.reason}` : ''}
+                    {`${fmtTime(movement.created_at)} · ${model.actor} · ${model.reason}`}
                   </div>
                 </div>
                 <div className={`flex-shrink-0 text-sm font-bold ${qty > 0 ? 'text-green-600' : qty < 0 ? 'text-red-600' : 'text-gray-500'}`}>
