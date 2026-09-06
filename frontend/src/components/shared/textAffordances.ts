@@ -92,25 +92,33 @@ export function resolveAffordanceTarget(closest: ClosestFn): { element: unknown;
 
 // Whose click is it?
 //
+// ONE rule, both kinds: an affordance takes the click only when nothing
+// underneath it wanted that click.
+//
 // The delegated reveal reaches `.dense-cell-truncate[title]` cells on
 // surfaces this lane never edited -- and on four of them (Stock Changes,
 // Stock-in Sessions, Returns, Fees) those cells sit inside a row whose own
 // click opens the record's detail view. Swallowing the tap there to show a
 // tooltip would be a straight downgrade: the detail view shows the same
-// value in full, plus everything else about the record. So a clipped cell
-// inside a clickable ancestor keeps that ancestor's click and reveals on
-// hover only; a clipped cell with nothing underneath it (the StatsStrip
-// detail labels, the Stock-in line rows) reveals on click, which is the
-// user's Aug 31 rule -- "if it is too long and used '...' then when click or
-// hover it should show info" -- for the cells where a click was doing
-// nothing at all.
+// value in full, plus everything else about the record.
 //
-// A copy field always takes the click: it is explicitly opted in, it renders
-// with `cursor:copy` and a "double-click or hold to copy" hint, and its
-// panel is the only way to reach the value -- unlike a reveal, there is no
-// second surface underneath that shows it.
-export function claimsClick(kind: AffordanceKind, insideClickableSurface: boolean): boolean {
-  return kind === 'copy' || !insideClickableSurface
+// A copy field is not an exception to that, though the first cut of this
+// lane made it one. On the Products list the copyable fields sit inside the
+// product row, whose click TOGGLES SELECTION while select mode is active
+// (Products.tsx renderDesktopProductRow / renderMobileProductCard). A copy
+// field that claims the click there does not add an affordance, it deletes
+// one: the row stops being selectable wherever a copyable value happens to
+// be drawn. So a copy field inside a clickable surface answers the gestures
+// the surface does NOT use -- double-click on a pointer device,
+// press-and-hold on touch -- and leaves the plain click to the row.
+//
+// Where nothing underneath wants it (the two product detail modals, the
+// StatsStrip labels, the Stock-in line rows) a plain click opens the panel,
+// which is the user's Aug 31 rule -- "if it is too long and used '...' then
+// when click or hover it should show info" -- applied to the cells where a
+// click was doing nothing at all.
+export function claimsClick(_kind: AffordanceKind, insideClickableSurface: boolean): boolean {
+  return !insideClickableSurface
 }
 
 // The delegated reveal replaces the browser's native `title` tooltip, which
@@ -441,6 +449,13 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   document.addEventListener('mousedown', (event) => {
     if (insideFloat(event.target)) return
     const found = targetFrom(event.target)
+    // A copy field keeps the PRESS even where it hands the click back. The
+    // Products row enters select mode on a click-and-hold and the copy
+    // panel opens on press-and-hold (both through utils/longPress.ts), and
+    // one hold cannot mean two things. Stopping the press costs the row
+    // nothing it needs: a `click` still dispatches after a stopped
+    // mousedown/mouseup, so the row's own onClick -- the selection toggle
+    // -- fires exactly as it always did.
     if (found?.kind === 'copy') { event.stopPropagation(); return }
     if (state && !pressWillOpenFloat(found)) apply({ type: 'dismiss' })
   }, true)

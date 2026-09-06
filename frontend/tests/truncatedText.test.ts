@@ -141,9 +141,11 @@ assert.ok(truncated.includes('title={clipped ? text : undefined}'), 'only a clip
 
 assert.equal(claimsClick('reveal', true), false, 'a clickable row keeps its own click')
 assert.equal(claimsClick('reveal', false), true, 'a cell with nothing underneath reveals on click')
-// A copy field is explicitly opted in and its panel is the ONLY way to the
-// value, so it takes the click wherever it sits.
-assert.equal(claimsClick('copy', true), true)
+// A copy field obeys the same rule, and for the same reason: on the
+// Products list it sits inside a row whose click toggles selection, so
+// claiming that click would delete an affordance rather than add one.
+// It answers double-click / press-and-hold there instead.
+assert.equal(claimsClick('copy', true), false)
 assert.equal(claimsClick('copy', false), true)
 
 // The marker the dense tables already use for "this row's click opens it",

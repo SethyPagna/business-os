@@ -20,10 +20,12 @@ import {
   COPY_SELECTOR,
   REVEAL_SELECTOR,
   claimsClick,
+  ensureTextAffordances,
   isClipped,
   nextFloatState,
   resolveAffordanceTarget,
 } from '../src/components/shared/textAffordances.ts'
+import { buildClickableRow, buildPlainBlock, installAffordanceDom } from './affordanceDomStub.ts'
 
 const read = (path: string): string => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const controller = read('components/shared/textAffordances.ts')
@@ -90,24 +92,21 @@ assert.deepEqual(
   { element: 'b', kind: 'copy', reason: 'gesture' },
 )
 
-// A plain click on a copy field OPENS the float. The alternative -- letting
-// the copy field swallow the click and do nothing -- leaves a dead control
-// on the Products list, where the supplier pill sits inside a row that used
-// to open the product: the gesture handlers have to stop that row click
-// (otherwise a hold on the pill starts the row's select-mode timer too), so
-// the click they take must lead somewhere.
+// Where nothing underneath wants the click, a plain click opens the panel.
 assert.deepEqual(
-  nextFloatState(null, { type: 'click', element: 'pill', kind: 'copy' }),
-  { element: 'pill', kind: 'copy', reason: 'click' },
-  'a single click on a copy field opens the panel, it is never a dead click',
+  nextFloatState(null, { type: 'click', element: 'value', kind: 'copy' }),
+  { element: 'value', kind: 'copy', reason: 'click' },
 )
-assert.doesNotMatch(
-  controller,
-  /if \(found\.kind === 'copy'\) \{ event\.stopPropagation\(\); return \}/,
-  'the click handler must not swallow a copy click without opening anything',
-)
-// ...and it takes that click wherever it sits, unlike a reveal.
-assert.equal(claimsClick('copy', true), true, 'a copy field inside a clickable row still takes the click')
+
+// ONE ownership rule, both kinds: an affordance takes the click only where
+// nothing underneath wanted it. A copy field is NOT an exception. On the
+// Products list the copyable values sit inside the product row, and that
+// row's click toggles selection while select mode is active (Products.tsx
+// renderDesktopProductRow / renderMobileProductCard) -- a copy field that
+// claims it does not add an affordance, it deletes one, exactly wherever a
+// copyable value happens to be drawn.
+assert.equal(claimsClick('copy', true), false, 'a copy field inside a clickable row leaves that row its click')
+assert.equal(claimsClick('copy', false), true, 'with nothing underneath, a plain click opens the panel')
 assert.equal(claimsClick('reveal', true), false, 'a reveal defers to the row that opens the record')
 
 // Shared clipping rule (also used by the reveal half).
@@ -129,6 +128,17 @@ assert.ok(hook.includes('[COPY_ATTR]: text'), 'the hook marks its target with th
 
 assert.match(rowParts, /import \{ useCopyFloat \} from '\.\.\/\.\.\/shared\/CopyFloat\.tsx'/)
 assert.ok(rowParts.includes('{...copy(product.supplier)}'), 'Products list supplier pill is copyable')
+
+// The ownership rule only bites if the row DECLARES that its click is the
+// point of the surface. Both product rows now carry the same marker the
+// dense tables use -- the desktop row AND the mobile card, or a touch user
+// loses selection wherever a copyable value happens to be drawn.
+const productsPage = read('components/products/Products.tsx')
+assert.equal(
+  (productsPage.match(/data-clickable="true"/g) || []).length,
+  2,
+  'both the desktop product row and the mobile product card must declare their own click',
+)
 
 for (const field of ['copy(productName)', 'copy(p.brand)', 'copy(p.barcode)', 'copy(p.supplier)']) {
   assert.ok(productsModal.includes(`{...${field}}`), `products detail modal must wire ${field}`)
@@ -167,5 +177,48 @@ for (const key of ['copy', 'copied', 'copy_hint']) {
   assert.ok(km[key], `km.json must carry ${key}`)
 }
 assert.doesNotMatch(km.copy_hint, /[A-Za-z]/, 'km.json copy_hint must be Khmer, not an English placeholder')
+
+/* ---------------------------------------------------------------- *
+ * 5. The ownership rule, driven for real.
+ *
+ * The assertion above says what `claimsClick` returns; this says what the
+ * live event path does with it, which is the half that regressed. A copy
+ * field inside a row that owns its own click must leave that click
+ * completely alone -- not stopped, not defaulted -- while still answering
+ * the gesture the row does NOT use.
+ * ---------------------------------------------------------------- */
+
+const dom = installAffordanceDom()
+ensureTextAffordances({ copy: 'Copy', copied: 'Copied' })
+const host = dom.host()
+if (!host) throw new Error('the controller must build its own body-level host')
+
+// The Products list: a copyable value inside the product row.
+const pill = dom.el('span', { [COPY_ATTR]: 'Sok Heng Trading' })
+buildClickableRow(dom, pill)
+const rowClick = dom.fire('click', { target: pill })
+assert.equal(rowClick.stopped, false, "a copy field must not swallow its row's click")
+assert.equal(host.hidden, true, 'and it opens no panel on that click')
+
+// ...but double-click, which no row uses, still copies. (Touch reaches the
+// same panel through press-and-hold; both land on the one 'gesture' intent.)
+const doubleClick = dom.fire('dblclick', { target: pill })
+assert.equal(doubleClick.stopped, true, 'the copy field owns the double-click')
+assert.equal(host.hidden, false, 'double-click opens the copy panel on the pill')
+assert.equal(String(host.childNodes[0]?.textContent || ''), 'Sok Heng Trading')
+dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true, 'Escape closes it')
+
+// The two product detail modals: nothing underneath wants the click, so a
+// plain click keeps opening the panel there.
+const modalValue = dom.el('span', { [COPY_ATTR]: '8850123456789' })
+buildPlainBlock(dom, modalValue)
+const modalClick = dom.fire('click', { target: modalValue })
+assert.equal(modalClick.stopped, true, 'with nothing underneath, the copy field takes the click')
+assert.equal(host.hidden, false, 'and a plain click opens the panel in the detail modals')
+assert.equal(String(host.childNodes[0]?.textContent || ''), '8850123456789')
+dom.fire('keydown', { key: 'Escape' })
+
+dom.restore()
 
 console.log('PASS product name/brand/supplier/barcode copy through one shared float')

@@ -3260,6 +3260,15 @@ function ProductsFullEditor() {
       <tr
         key={productId}
         data-product-jump-id={productId}
+        // The row's own click IS the surface here: it opens the product, or
+        // toggles selection once select mode is live. `data-clickable` is how
+        // this app already declares that (the dense tables in Stock Changes,
+        // Stock-in Sessions, Returns and Fees all carry it), and the shared
+        // text-affordance controller reads it to decide whether a copyable
+        // value inside the row may take that click. It may not. Declaration
+        // only: the CSS keyed on this attribute is scoped to
+        // `.dense-data-table`, which this table is not.
+        data-clickable="true"
         className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
@@ -3486,6 +3495,8 @@ function ProductsFullEditor() {
       <div
         key={productId}
         data-product-jump-id={productId}
+        // Same declaration as renderDesktopProductRow -- see its comment.
+        data-clickable="true"
         className={rowClassName}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
