@@ -1480,8 +1480,17 @@ export async function classifyProducts(
     // lexicographic garbage. Migration 0077 repairs the stored rows; this
     // keeps new ones ISO. An unreadable non-blank cell falls back to today
     // WITH a visible warning below, never silently.
-    const { raw: rawReceivedDate, order: receivedDateOrder } = readBatchDateCell(row as Record<string, unknown>)
-    data.received_date = normalizeToIsoDate(rawReceivedDate, receivedDateOrder) || todayIso()
+    const { raw: rawReceivedDate, order: receivedDateOrder, header: receivedDateHeader } = readBatchDateCell(row as Record<string, unknown>)
+    // ONE read of the cell, whose result the unreadable-date warning below
+    // is derived from. It used to be read TWICE -- here with the header's
+    // own order and again in the warning guard with normalizeToIsoDate's
+    // bare (month-first) default -- so every readable day-first cell whose
+    // day was > 12 (25/12/2026 under the template's own batch(dd/mm/yyyy)
+    // header) was stored correctly AND reported "unreadable, received as
+    // today". Both halves of that message were false. A single parse cannot
+    // disagree with itself.
+    const parsedReceivedDate = normalizeToIsoDate(rawReceivedDate, receivedDateOrder)
+    data.received_date = parsedReceivedDate || todayIso()
     // The stored/displayed batch code is always derived from
     // received_date directly above, never from a separately-typed label
     // -- "lot code can be removed... batch column is just a translated
@@ -1519,8 +1528,13 @@ export async function classifyProducts(
       const displayValue = str(rawStockValue).replace(/^'/, '')
       rowWarnings.push({ kind: 'negative_stock', message: `Stock quantity "${displayValue}" is negative; imported as 0 (negative stock isn't supported).` })
     }
-    if (rawReceivedDate && !normalizeToIsoDate(rawReceivedDate)) {
-      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Received date "${rawReceivedDate}" is not a readable mm/dd/yyyy date; the stock was received as today instead.` })
+    if (rawReceivedDate && !parsedReceivedDate) {
+      // Name the header AND the order it dictates: "not a readable date" on
+      // its own leaves the operator guessing which way round their own
+      // column is read, and a fixed "mm/dd/yyyy" was a lie under the
+      // day-first header the template ships.
+      const expected = receivedDateOrder === 'day-first' ? 'dd/mm/yyyy' : 'mm/dd/yyyy'
+      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Received date "${rawReceivedDate}" is not a readable date for the ${receivedDateHeader} column, which is read ${expected}; the stock was received as today instead.` })
     }
     // Only set image_path when this row actually resolved one, and only
     // then if the row didn't explicitly ask to keep whatever the existing
