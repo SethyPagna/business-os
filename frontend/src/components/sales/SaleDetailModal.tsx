@@ -7,6 +7,7 @@ import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
+import { DELIVERY_AMOUNT_ERROR_KEYS, deliveryAmountChanged, parseDeliveryAmountUsd } from '../../utils/deliveryAmounts.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 // S4-30: the STAFF-facing half of an amended sale. The receipt uses none of
 // this -- it renders the net state the backend keeps in sale_items and the
@@ -718,10 +719,25 @@ export default function SaleDetailModal({
     })
   }
 
+  // Both delivery editors validate through utils/deliveryAmounts.ts, which is
+  // the browser mirror of the Worker's lib/deliveryAmounts.ts (parity pinned by
+  // tests/deliveryAmountParity.test.ts). Refusing here therefore refuses
+  // exactly what the route would refuse -- and it SAYS SO. Before this, both
+  // stage functions answered a bad or unchanged amount with a bare `return`:
+  // Apply did nothing at all, with no dialog, no message and no reason, which
+  // is the one thing a form is never allowed to do. The typed text is left
+  // alone on every refusal, so the failed action keeps the form.
   const stageDeliveryFeeAmendment = (currentFeeUsd: number): void => {
-    const next = Number(feeText)
-    if (!Number.isFinite(next) || next < 0) return
-    if (next === currentFeeUsd) return
+    const parsed = parseDeliveryAmountUsd(feeText)
+    if (!parsed.ok) {
+      setAmendMutationError(t(DELIVERY_AMOUNT_ERROR_KEYS[parsed.code]) || DELIVERY_AMOUNT_ERROR_KEYS[parsed.code])
+      return
+    }
+    const next = parsed.usd
+    if (!deliveryAmountChanged(currentFeeUsd, next)) {
+      setAmendMutationError(translateOr('delivery_amount_unchanged', 'That is already the amount on this sale.', 'នេះជាចំនួនដែលមានស្រាប់លើការលក់នេះ។'))
+      return
+    }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
     setAmendConfirm({
@@ -732,10 +748,20 @@ export default function SaleDetailModal({
   }
 
   const stageActualDeliveryCostAmendment = (currentCostUsd: number | null): void => {
-    const raw = actualCostText.trim()
-    const next = raw === '' ? null : Number(raw)
-    if (next !== null && (!Number.isFinite(next) || next < 0)) return
-    if ((currentCostUsd === null && next === null) || (currentCostUsd !== null && next !== null && next === currentCostUsd)) return
+    // Blank is the ONE refusal this field forgives, and it means "not
+    // recorded" -- clearing a cost entered by mistake, which is a different
+    // fact from a courier who worked for free. The route agrees, by asking the
+    // same module the same question.
+    const parsed = parseDeliveryAmountUsd(actualCostText)
+    if (!parsed.ok && parsed.code !== 'blank') {
+      setAmendMutationError(t(DELIVERY_AMOUNT_ERROR_KEYS[parsed.code]) || DELIVERY_AMOUNT_ERROR_KEYS[parsed.code])
+      return
+    }
+    const next = parsed.ok ? parsed.usd : null
+    if (!deliveryAmountChanged(currentCostUsd, next)) {
+      setAmendMutationError(translateOr('delivery_amount_unchanged', 'That is already the amount on this sale.', 'នេះជាចំនួនដែលមានស្រាប់លើការលក់នេះ។'))
+      return
+    }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
     setAmendConfirm({
@@ -1463,7 +1489,7 @@ export default function SaleDetailModal({
                       action={canAmendThisSale ? (
                         <button
                           type="button"
-                          onClick={() => { if (!feeEditing) setFeeText(String(deliveryFeeUsd)); setFeeEditing(!feeEditing) }}
+                          onClick={() => { if (!feeEditing) setFeeText(String(deliveryFeeUsd)); setAmendMutationError(''); setFeeEditing(!feeEditing) }}
                           className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
                         >
                           {feeEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
@@ -1519,6 +1545,15 @@ export default function SaleDetailModal({
                             {t('cancel') || 'Cancel'}
                           </button>
                         </div>
+                        {/* The refusal is shown HERE, beside the field that was
+                            refused. The ConfirmDialog also lists it, but a
+                            staging refusal never opens that dialog -- which is
+                            precisely how "Apply does nothing" used to happen.
+                            The editor stays open and the typed value stays put:
+                            a failed action keeps the form. */}
+                        {amendMutationError && !amendConfirm ? (
+                          <p role="alert" className="mt-1 text-right text-[11px] font-medium text-red-600 dark:text-red-400">{amendMutationError}</p>
+                        ) : null}
                       </td>
                     </tr>
                   ) : null}
@@ -1531,7 +1566,7 @@ export default function SaleDetailModal({
                       action={canAmendThisSale ? (
                         <button
                           type="button"
-                          onClick={() => { if (!actualCostEditing) setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setActualCostEditing(!actualCostEditing) }}
+                          onClick={() => { if (!actualCostEditing) setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setAmendMutationError(''); setActualCostEditing(!actualCostEditing) }}
                           className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
                         >
                           {actualCostEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
@@ -1573,6 +1608,11 @@ export default function SaleDetailModal({
                             {t('cancel') || 'Cancel'}
                           </button>
                         </div>
+                        {/* Same refusal line as the fee editor above, for the
+                            same reason -- sibling parity in the same commit. */}
+                        {amendMutationError && !amendConfirm ? (
+                          <p role="alert" className="mt-1 text-right text-[11px] font-medium text-red-600 dark:text-red-400">{amendMutationError}</p>
+                        ) : null}
                       </td>
                     </tr>
                   ) : null}

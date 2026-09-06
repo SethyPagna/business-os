@@ -27,7 +27,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload } from '../../api/salesTransport.ts'
+import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
@@ -195,20 +195,12 @@ interface SaleItemAddition {
 }
 
 // S4-30: what the detail view asks the server to change, and the ledger rows
-// it reads back. The request shape is the one salesTransport.amendSale sends;
-// the row shape is migration 0115's, shared with utils/saleAmendments.ts so
-// the renderer and the caller cannot drift.
-interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
-  sale_item_id?: number
-  quantity?: number
-  delivery_fee_usd?: number
-  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
-  notes?: string
-  client_request_id: string
-  expected_exchange_rate: number
-  expected_updated_at?: string
-}
+// it reads back. The request shape is the one salesTransport.amendSale sends,
+// and it is now IMPORTED from there rather than restated here. It used to be a
+// third hand-kept copy, and when the actual-courier-cost kind was added to the
+// transport and to the modal this copy was the one left behind -- so the page
+// that passes the callback stopped compiling against the modal that receives
+// it. A shape declared once cannot be updated in two places out of three.
 
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
 type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }

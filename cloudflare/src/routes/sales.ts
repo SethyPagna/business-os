@@ -81,6 +81,7 @@ import {
   type LineAllocation,
   type TaxSettings,
 } from '../lib/saleAmendments'
+import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
 import {
@@ -2732,15 +2733,20 @@ app.post('/:id/amendments', async (c) => {
   if (kind === 'delivery_actual_cost_changed') {
     const costGuard = guardDeliveryActualCostAmendment(sale)
     if (!costGuard.ok) return c.json({ error: costGuard.error }, 400)
-    const rawCost = body.delivery_actual_cost_usd
-    const costUsd = rawCost === null || rawCost === undefined || String(rawCost).trim() === ''
-      ? null
-      : Number(rawCost)
-    if (costUsd !== null && (!Number.isFinite(costUsd) || costUsd < 0)) {
-      return c.json({ error: 'An actual delivery cost must be blank or zero or more.' }, 400)
+    // One rule, one implementation: lib/deliveryAmounts.ts is the acceptance
+    // test for BOTH delivery money fields and is mirrored in the browser
+    // (utils/deliveryAmounts.ts, pinned by tests/deliveryAmountParity.test.ts),
+    // so a form that accepts a number this route refuses cannot exist. Blank
+    // is the one refusal this field forgives: clearing the box is how a cost
+    // recorded by mistake goes back to "not recorded", which is a different
+    // fact from "the courier was free".
+    const costParsed = parseDeliveryAmountUsd(body.delivery_actual_cost_usd)
+    if (!costParsed.ok && costParsed.code !== 'blank') {
+      return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
     }
+    const costUsd = costParsed.ok ? costParsed.usd : null
     const costPlan = planDeliveryActualCostChange({ saleId, sale, newCostUsd: costUsd, exchangeRate })
-    if (costPlan.costDeltaUsd === 0 && costPlan.costBeforeUsd === costPlan.costAfterUsd) {
+    if (!deliveryAmountChanged(costPlan.costBeforeUsd, costPlan.costAfterUsd)) {
       return c.json({ error: 'That is already the actual delivery cost on this sale.' }, 400)
     }
     const money = {
@@ -2817,11 +2823,16 @@ app.post('/:id/amendments', async (c) => {
   if (kind === 'delivery_fee_changed') {
     const feeGuard = guardDeliveryFeeAmendment(sale)
     if (!feeGuard.ok) return c.json({ error: feeGuard.error }, 400)
-    const rawFee = Number(body.delivery_fee_usd)
-    if (!Number.isFinite(rawFee) || rawFee < 0) {
-      return c.json({ error: 'A delivery fee must be zero or more.' }, 400)
+    // Same one rule as the courier cost above -- lib/deliveryAmounts.ts -- but
+    // blank is NOT forgiven here: the fee is part of what the customer owes,
+    // so "no value" would have to mean zero, and silently charging zero
+    // because a box was empty is not a decision this route may make for
+    // somebody.
+    const feeParsed = parseDeliveryAmountUsd(body.delivery_fee_usd)
+    if (!feeParsed.ok) {
+      return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
     }
-    const feePlan = planDeliveryFeeChange({ saleId, sale, newFeeUsd: rawFee, exchangeRate })
+    const feePlan = planDeliveryFeeChange({ saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate })
     if (feePlan.feeDeltaUsd === 0) {
       return c.json({ error: 'That is already the delivery fee on this sale.' }, 400)
     }
