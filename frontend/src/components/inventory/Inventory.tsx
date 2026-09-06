@@ -1281,8 +1281,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setAdjustSaving(true)
     try {
       const res = await runInventoryMutation(() => getInventoryApi().adjustStock(adjustmentRequest), 'Adjust inventory stock')
-      // Match the defensive pattern used elsewhere (BulkAddStockModal,
-      // BranchStockAdjuster): treat an explicit `success: false` as failure,
+      // Match the defensive pattern used elsewhere (BulkAddStockModal):
+      // treat an explicit `success: false` as failure,
       // not a missing/undefined field. A write that reaches this line
       // without throwing already succeeded server-side (the server route
       // now always sets `success: true`, but staying defensive here means a

@@ -741,11 +741,9 @@ await runTest('product page save and delete actions use shared guards and bounde
 
 await runTest('product stock helper modals use shared guards and bounded mutations', () => {
   const bulk = readFrontend('src/components/products/forms/BulkAddStockModal.tsx')
-  const branch = readFrontend('src/components/products/forms/BranchStockAdjuster.tsx')
 
   for (const [label, source, constant, runner] of [
     ['bulk stock add', bulk, 'BULK_ADD_STOCK_MUTATION_TIMEOUT_MS', 'runBulkStockMutation'],
-    ['branch stock adjuster', branch, 'BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS', 'runBranchStockMutation'],
   ]) {
     assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/, `${label} should import shared action guards`)
     assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.ts'/, `${label} should import loader timeout helper`)
