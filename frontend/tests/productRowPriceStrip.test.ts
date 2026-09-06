@@ -162,6 +162,19 @@ type StripModel = {
 }
 
 // Worst case the owner named: three-digit USD in every slot, four-digit qty.
+//
+// The lane's acceptance words that worst case as "three-digit USD prices AND a
+// 4-digit KHR figure present". The strip renders NO KHR figure at all:
+//   git grep -n "fmtKHR(" -- frontend/src/components/products/Products.tsx
+// returns exactly three sites -- 3387 (cost), 3391 (selling) and 3397
+// (wholesale) -- and all three are DESKTOP <td>s, each printing its riel value
+// on its own line under the USD one; none of them is inside the mobile strip
+// at 3634-3678. So the four-digit token modelled below is textWidth('1234')
+// standing in for String(qty || 0), the QUANTITY -- the widest four-digit run
+// the strip can actually contain. The substitution is deliberate; the check
+// under "the model still covers the worst case the acceptance named" is what
+// keeps it honest, because the day a KHR figure IS added to the strip the
+// model silently stops covering that worst case.
 function stripWidth(m: StripModel): number {
   const price = '$123.45'
   const selling = textWidth(price, m.fontRem, m.trackingEm, 1.03) // font-semibold
@@ -241,6 +254,22 @@ runTest('the comment beside the class quotes the model, not a hand-computed gues
       `the comment claims ${label} = ${claimed}px but the model computes ${actual.toFixed(1)}px`,
     )
   }
+})
+
+runTest('the model still covers the worst case the acceptance named', () => {
+  // See the comment block above stripWidth(). The acceptance says "a 4-digit
+  // KHR figure present"; the strip has no KHR figure, so the model's four
+  // digits are the quantity instead. That substitution is only sound while it
+  // stays true that the strip carries no riel value -- a KHR figure added here
+  // would be a FOURTH money token the model does not price, and every fit
+  // assertion above would quietly stop meaning what it says.
+  const strip = stripMarkup()
+  assert.doesNotMatch(strip, /fmtKHR/, 'the strip must carry no KHR figure, or the width model no longer covers the acceptance worst case')
+  // Positive control: the three riel sites the grep names really are in this
+  // file, so the assertion above is a real distinction and not a dead regex.
+  assert.equal((products.match(/fmtKHR\(/g) || []).length, 3, 'Products.tsx must still hold exactly the three desktop <td> riel sites')
+  // And the four digits actually modelled are the quantity.
+  assert.ok(strip.includes('String(qty || 0)'), 'the four-digit token in the model stands in for the strip quantity')
 })
 
 runTest('the fix is a real saving, not a rounding artefact', () => {
