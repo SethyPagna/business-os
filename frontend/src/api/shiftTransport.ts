@@ -165,19 +165,55 @@ export type ShiftCountBlocker = 'both_blank' | 'invalid'
  * Why a two-currency count pair cannot be submitted yet, or null when it can.
  * Rendered NEXT TO the button (ShiftSubmitRow), never swallowed by a bare
  * `disabled`. The action is allowed once EITHER field holds a valid count.
+ *
+ * `blankMeansUncounted` is the CLOSE rule (owner, Sep 6 2026: the counted
+ * drawer "is not calculated in the internal system, it is calculated only for
+ * shift report"). Ending a shift may leave both fields empty -- the shift is
+ * then recorded as closed with no count, which every surface already prints as
+ * "—" -- so on those forms an empty pair is not a blocker at all. Registering
+ * an opening float keeps the old rule: that number IS the registration.
+ * An invalid entry (negative, NaN) still blocks everywhere.
  */
-export function shiftCountPairBlocker(usd: unknown, khr: unknown): ShiftCountBlocker | null {
+export function shiftCountPairBlocker(
+  usd: unknown,
+  khr: unknown,
+  options: { blankMeansUncounted?: boolean } = {},
+): ShiftCountBlocker | null {
   const usdBlank = typeof usd === 'string' && usd.trim() === ''
   const khrBlank = typeof khr === 'string' && khr.trim() === ''
-  if (usdBlank && khrBlank) return 'both_blank'
+  if (usdBlank && khrBlank) return options.blankMeansUncounted ? null : 'both_blank'
   if (shiftCountOrZero(usd) == null || shiftCountOrZero(khr) == null) return 'invalid'
   return null
+}
+
+/**
+ * The counted drawer a CLOSE form submits.
+ *
+ * Both fields blank means the drawer was not counted, which is null on the
+ * wire and NULL in the column -- never 0, because "the till held nothing" and
+ * "nobody counted the till" are different facts and the shift report prints
+ * them differently. One field blank still means 0 in that currency: a drawer
+ * holding only riel is an ordinary drawer, which is the shiftCountOrZero rule
+ * and is unchanged. ONE implementation, used by POS close and by the Shifts
+ * popup's close.
+ */
+export function shiftClosingCounts(usd: unknown, khr: unknown): { usd: number | null; khr: number | null } {
+  const usdBlank = typeof usd === 'string' && usd.trim() === ''
+  const khrBlank = typeof khr === 'string' && khr.trim() === ''
+  if (usdBlank && khrBlank) return { usd: null, khr: null }
+  return { usd: shiftCountOrZero(usd), khr: shiftCountOrZero(khr) }
 }
 
 function requiredShiftCount(value: unknown, label: string): number {
   const parsed = parseShiftCount(value)
   if (parsed == null) throw new Error(`${label} must be an explicit non-negative number`)
   return parsed
+}
+
+/** A count that may legitimately be absent (the closing drawer). */
+function optionalShiftCount(value: unknown, label: string): number | null {
+  if (value == null) return null
+  return requiredShiftCount(value, label)
 }
 
 // Shift timestamps are entered in the shop's canonical Phnom Penh wall clock.
@@ -251,14 +287,16 @@ export async function openShift(input: OpenShiftInput): Promise<ShiftState> {
 
 export type CloseShiftInput = {
   branchId?: number | null
-  closingCountedUsd: number
-  closingCountedKhr: number
+  // Null is "not counted" and is accepted by the Worker: ending a shift is
+  // never gated on the drawer count. See shiftClosingCounts.
+  closingCountedUsd: number | null
+  closingCountedKhr: number | null
   closingNote?: string | null
 }
 
 export async function closeShift(input: CloseShiftInput): Promise<ShiftState> {
-  const closingCountedUsd = requiredShiftCount(input.closingCountedUsd, 'Closing USD count')
-  const closingCountedKhr = requiredShiftCount(input.closingCountedKhr, 'Closing KHR count')
+  const closingCountedUsd = optionalShiftCount(input.closingCountedUsd, 'Closing USD count')
+  const closingCountedKhr = optionalShiftCount(input.closingCountedKhr, 'Closing KHR count')
   const state = await route<ShiftState>(
     'shifts:close',
     () => apiFetch('POST', '/api/shifts/close', {
@@ -323,12 +361,14 @@ export type AmendShiftInput = {
 export async function amendShift(id: number, input: AmendShiftInput): Promise<{ shift: Shift }> {
   const openingFloatUsd = requiredShiftCount(input.openingFloatUsd, 'Opening USD count')
   const openingFloatKhr = requiredShiftCount(input.openingFloatKhr, 'Opening KHR count')
+  // Optional even on a closed shift: a shift ended without a count keeps that
+  // fact through an amendment instead of gaining a fabricated 0.
   const closingCountedUsd = input.closedAt == null
     ? null
-    : requiredShiftCount(input.closingCountedUsd, 'Closing USD count')
+    : optionalShiftCount(input.closingCountedUsd, 'Closing USD count')
   const closingCountedKhr = input.closedAt == null
     ? null
-    : requiredShiftCount(input.closingCountedKhr, 'Closing KHR count')
+    : optionalShiftCount(input.closingCountedKhr, 'Closing KHR count')
   const result = await route<{ shift: Shift }>(
     `shifts:amend:${id}`,
     () => apiFetch('PATCH', `/api/shifts/${id}`, {
@@ -353,8 +393,10 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
 export type CloseShiftByIdInput = {
   expectedRevision: number
   closedAt: string
-  closingCountedUsd: number
-  closingCountedKhr: number
+  // Optional for the same reason as CloseShiftInput's: the historic close in
+  // the Shifts popup is the same close.
+  closingCountedUsd: number | null
+  closingCountedKhr: number | null
   closingNote?: string | null
 }
 
@@ -365,8 +407,8 @@ export type CloseShiftByIdResult = {
 }
 
 export async function closeShiftById(id: number, input: CloseShiftByIdInput): Promise<CloseShiftByIdResult> {
-  const closingCountedUsd = requiredShiftCount(input.closingCountedUsd, 'Closing USD count')
-  const closingCountedKhr = requiredShiftCount(input.closingCountedKhr, 'Closing KHR count')
+  const closingCountedUsd = optionalShiftCount(input.closingCountedUsd, 'Closing USD count')
+  const closingCountedKhr = optionalShiftCount(input.closingCountedKhr, 'Closing KHR count')
   const result = await route<CloseShiftByIdResult>(
     `shifts:close:${id}`,
     () => apiFetch('POST', `/api/shifts/${id}/close`, {

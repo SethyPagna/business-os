@@ -17,6 +17,7 @@ import {
   listShifts,
   orderShiftRows,
   reopenShift,
+  shiftClosingCounts,
   shiftCountOrZero,
   shiftCountPairBlocker,
   shiftLocalDateTimeToIso,
@@ -268,6 +269,15 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     sendNotice?.(message, 'error')
   }
 
+  // Why the amend form's count pair cannot be submitted, or null. Declared
+  // here rather than beside the other reasons below because saveEdit consults
+  // the same value: one rule, one expression. The CLOSING pair follows the
+  // close rule (blank = not counted); the opening float still requires one.
+  const editCountBlocker = edit
+    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr)
+      || (edit.closedAt ? shiftCountPairBlocker(edit.closingUsd, edit.closingKhr, { blankMeansUncounted: true }) : null)
+    : null
+
   const saveEdit = async () => {
     if (!selected || !edit || !edit.reason.trim() || !edit.openedAt || saving) return
     // Blank counts are 0 (the shared shiftCountOrZero rule); only an invalid
@@ -275,10 +285,12 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     // has already said which.
     const openingFloatUsd = shiftCountOrZero(edit.openingUsd)
     const openingFloatKhr = shiftCountOrZero(edit.openingKhr)
-    const closingCountedUsd = edit.closedAt ? shiftCountOrZero(edit.closingUsd) : null
-    const closingCountedKhr = edit.closedAt ? shiftCountOrZero(edit.closingKhr) : null
-    if (openingFloatUsd == null || openingFloatKhr == null
-      || (edit.closedAt && (closingCountedUsd == null || closingCountedKhr == null))) return
+    // The closing pair follows the close rule: both blank stays "not counted"
+    // rather than becoming a 0 the cashier never wrote.
+    const closingCounts = edit.closedAt
+      ? shiftClosingCounts(edit.closingUsd, edit.closingKhr)
+      : { usd: null, khr: null }
+    if (openingFloatUsd == null || openingFloatKhr == null || editCountBlocker) return
     setSaving(true)
     try {
       const result = await amendShift(selected.id, {
@@ -289,8 +301,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         openingFloatKhr,
         openingNote: edit.openingNote.trim() || null,
         closedAt: edit.closedAt ? shiftLocalDateTimeToIso(edit.closedAt) : null,
-        closingCountedUsd,
-        closingCountedKhr,
+        closingCountedUsd: closingCounts.usd,
+        closingCountedKhr: closingCounts.khr,
         closingNote: edit.closedAt ? edit.closingNote.trim() || null : null,
       })
       replaceRow(result.shift)
@@ -304,17 +316,19 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   }
 
   const saveClose = async () => {
+    // Only the closing TIME is required here. The drawer count is a record for
+    // the shift report, never a condition of the close -- both fields blank
+    // closes the shift with no count (shiftClosingCounts).
     if (!selected || !close.closedAt || saving) return
-    const closingCountedUsd = shiftCountOrZero(close.closingUsd)
-    const closingCountedKhr = shiftCountOrZero(close.closingKhr)
-    if (closingCountedUsd == null || closingCountedKhr == null) return
+    const counts = shiftClosingCounts(close.closingUsd, close.closingKhr)
+    if (shiftCountPairBlocker(close.closingUsd, close.closingKhr, { blankMeansUncounted: true })) return
     setSaving(true)
     try {
       const result = await closeShiftById(selected.id, {
         expectedRevision: selected.revision,
         closedAt: shiftLocalDateTimeToIso(close.closedAt),
-        closingCountedUsd,
-        closingCountedKhr,
+        closingCountedUsd: counts.usd,
+        closingCountedKhr: counts.khr,
         closingNote: close.closingNote.trim() || null,
       })
       if (result.shift) replaceRow(result.shift)
@@ -377,15 +391,12 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   // button by ShiftSubmitRow, never hidden in a bare `disabled`. The count
   // rule is the shared one (either currency is enough, blank is 0); the other
   // reasons are the form's own required fields, in the order they appear.
-  const editCountBlocker = edit
-    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr) || (edit.closedAt ? shiftCountPairBlocker(edit.closingUsd, edit.closingKhr) : null)
-    : null
   const editReason = !edit ? null
     : !edit.openedAt ? t('shift_opened_at_required')
       : editCountBlocker ? t(shiftCountBlockerKey(editCountBlocker))
         : !edit.reason.trim() ? t('shift_reason_required')
           : null
-  const closeCountBlocker = shiftCountPairBlocker(close.closingUsd, close.closingKhr)
+  const closeCountBlocker = shiftCountPairBlocker(close.closingUsd, close.closingKhr, { blankMeansUncounted: true })
   const closeReason = !close.closedAt ? t('shift_close_time_required')
     : closeCountBlocker ? t(shiftCountBlockerKey(closeCountBlocker))
       : null

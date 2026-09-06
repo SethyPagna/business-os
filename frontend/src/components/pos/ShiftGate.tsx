@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { closeShift, fetchCurrentShift, openShift, shiftCountOrZero, shiftCountPairBlocker, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { closeShift, fetchCurrentShift, openShift, shiftClosingCounts, shiftCountOrZero, shiftCountPairBlocker, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 
@@ -391,19 +391,21 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const now = useWallClock(open && !closed)
   const shift = closed || state?.shift || null
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
-  const endBlocker = shiftCountPairBlocker(countedUsd, countedKhr)
+  // Ending a shift is never gated on the drawer count (owner, Sep 6 2026: the
+  // count is "only a breakdown for admins in reports"). Leaving both fields
+  // empty records the shift as closed with no count; only an invalid entry
+  // still blocks, and the row beside the button says so.
+  const endBlocker = shiftCountPairBlocker(countedUsd, countedKhr, { blankMeansUncounted: true })
 
   const submitClose = async () => {
-    if (busy) return
-    const closingCountedUsd = shiftCountOrZero(countedUsd)
-    const closingCountedKhr = shiftCountOrZero(countedKhr)
-    if (closingCountedUsd == null || closingCountedKhr == null || endBlocker) return
+    if (busy || endBlocker) return
+    const counts = shiftClosingCounts(countedUsd, countedKhr)
     setBusy(true)
     try {
       const next = await closeShift({
         branchId,
-        closingCountedUsd,
-        closingCountedKhr,
+        closingCountedUsd: counts.usd,
+        closingCountedKhr: counts.khr,
         closingNote: note.trim() || null,
       })
       publish(next)
@@ -433,13 +435,16 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   }
 
   const money = (usd: unknown, khr: unknown) => `${fmtUSD(usd)} · ${fmtKHR(khr)}`
-  // What the cashier has typed so far, blanks as 0 -- shown beside the
-  // server's EXPECTED figure so the two are compared before the close is
-  // written. The difference itself is NOT computed here: that is the server's
-  // one reconciliation, and it appears on the summary once the close returns.
-  const typedDrawer = endBlocker === 'invalid'
+  // What the cashier has typed so far -- shown beside the server's EXPECTED
+  // figure so the two are compared before the close is written. An untouched
+  // pair reads "—" rather than "$0.00": nothing has been counted yet, and
+  // that is exactly what will be stored if End is pressed now. The difference
+  // itself is NOT computed here: that is the server's one reconciliation, and
+  // it appears on the summary once the close returns.
+  const typedCounts = shiftClosingCounts(countedUsd, countedKhr)
+  const typedDrawer = endBlocker === 'invalid' || typedCounts.usd == null || typedCounts.khr == null
     ? '—'
-    : money(shiftCountOrZero(countedUsd) ?? 0, shiftCountOrZero(countedKhr) ?? 0)
+    : money(typedCounts.usd, typedCounts.khr)
 
   // No open shift AND no summary to show: this control has nothing to do.
   if (!canCloseCurrent && !closed) return null
