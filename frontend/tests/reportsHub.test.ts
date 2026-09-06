@@ -351,6 +351,74 @@ test('buildIncomeStatement: the waterfall foots to the cent, and says so when co
   assert.equal(m.delivery_paid.note?.total, 4)
 })
 
+// The kernel floors each receipt's own net at zero (a header whose recorded
+// discounts exceed its subtotal contributes 0, never a negative), so the
+// window's net_sales_usd is NOT reproducible from the summed header columns.
+// These are the AUGUST figures of cloudflare/scripts/test-stats-non-negative-pure
+// (gross 150, store 40 + membership 5 discounts, net sales 125, refunds 40,
+// revenue 85): summing the headers gives 105 and the statement then printed
+// 105 - 40 = 65 beside a REVENUE line reading 85. The kernel figure is carried
+// instead, and the $20 the floor held back is named on its own line so the
+// group still foots.
+const flooredTotals = {
+  tx_count: 4,
+  gross_sales_usd: 150,
+  store_discount_usd: 40,
+  membership_discount_usd: 5,
+  discount_usd: 45,
+  item_discount_usd: 0,
+  tax_usd: 8,
+  delivery_usd: 0,
+  net_sales_usd: 125,
+  refund_usd: 40,
+  revenue_usd: 85,
+  pending_revenue_usd: 0,
+  collected_total_usd: 93,
+  avg_order_usd: 21.25,
+}
+
+test('buildIncomeStatement: the revenue group carries the kernel net sales and names the floored amount', () => {
+  const t = normalizeTotals(flooredTotals)
+  assert.equal(t?.net_sales_usd, 125, 'the kernel figure survives normalizeTotals')
+  const m = lineMap(buildIncomeStatement({ sales: t, profitMode: 'gross', khrToUsd }))
+  assert.equal(m.net_sales.usd, 125, 'net sales is the kernel figure, not the summed headers (105)')
+  assert.equal(m.net_sales.usd - m.refunds.usd, m.revenue.usd, 'net sales - refunds = REVENUE')
+  assert.equal(m.revenue.usd, 85)
+  assert.equal(m.net_sales_floor.usd, 20, 'the floored $20 is an explicit line, not a silent gap')
+  assert.equal(m.net_sales_floor.kind, 'add')
+  assert.equal(m.net_sales_floor.group, 'revenue')
+  // and the whole group foots, term by term, in the order it is rendered
+  assert.equal(
+    round2(m.total_sales.usd - m.item_discounts.usd - m.store_discounts.usd - m.membership_discounts.usd + m.net_sales_floor.usd),
+    m.net_sales.usd,
+    'total sales - discounts + floored = net sales',
+  )
+
+  // A window with nothing floored shows no residual line at all.
+  const clean = lineMap(buildIncomeStatement({ sales: normalizeTotals({ ...adminTotals, net_sales_usd: 270 }), profitMode: 'gross', khrToUsd }))
+  assert.equal(clean.net_sales.usd, 270)
+  assert.equal(clean.net_sales_floor, undefined, 'no line when the floor held nothing back')
+
+  // An older Worker that predates net_sales_usd still foots: revenue and
+  // refunds are kernel figures and revenue = net sales - refunds by definition,
+  // so the pre-refund term is recovered from them (the same fallback
+  // Dashboard.tsx and Sales.tsx use), never from the unfootable headers.
+  const { net_sales_usd: _n, ...legacy } = flooredTotals
+  const old = lineMap(buildIncomeStatement({ sales: normalizeTotals(legacy), profitMode: 'gross', khrToUsd }))
+  assert.equal(old.net_sales.usd, 125, 'legacy payload recovers net sales from revenue + refunds')
+  assert.equal(old.net_sales.usd - old.refunds.usd, old.revenue.usd)
+  assert.equal(old.net_sales_floor.usd, 20)
+})
+
+test('sumTotals keeps net sales summable and drops it when a row is missing it', () => {
+  const a = normalizeTotals(flooredTotals)!
+  const b = normalizeTotals({ ...flooredTotals, net_sales_usd: 10, refund_usd: 0, revenue_usd: 10, gross_sales_usd: 10, store_discount_usd: 0, membership_discount_usd: 0 })!
+  assert.equal(sumTotals([a, b]).net_sales_usd, 135)
+  const { net_sales_usd: _n, ...legacy } = flooredTotals
+  assert.equal(sumTotals([a, normalizeTotals(legacy)!]).net_sales_usd, undefined, 'absence stays absence, never a phantom 0')
+})
+
+
 test('buildIncomeStatement: Not Paid is one consolidated memo below business totals', () => {
   const opts = { profitMode: 'net' as const, khrToUsd, expenses: { usd: 10, khr: 40000 } }
   const base = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), ...opts }))

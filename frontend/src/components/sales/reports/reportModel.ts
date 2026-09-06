@@ -340,6 +340,18 @@ export interface ReportTotals {
   recognized_delivery_cost_usd: number
   refund_usd: number
   revenue_usd: number
+  /**
+   * The kernel's pre-refund term: `revenue_usd = net_sales_usd - refund_usd`,
+   * exactly (cloudflare/src/lib/salesAnalytics.ts). It is NOT reproducible from
+   * the header columns above -- the kernel floors each receipt's own net at
+   * zero, so a receipt whose recorded discounts exceed its subtotal contributes
+   * 0 instead of a negative, and the window's net sales can exceed
+   * `gross - discounts`. Optional and presence-signalled (like cost_usd)
+   * because a Worker older than the Sep 6 kernel does not send it;
+   * statementFigures then recovers it from revenue + refunds, never from the
+   * headers.
+   */
+  net_sales_usd?: number
   pending_revenue_usd: number
   collected_total_usd: number
   avg_order_usd: number
@@ -384,6 +396,10 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
   const r = raw as Record<string, unknown>
   const out = {} as ReportTotals
   for (const k of TOTAL_KEYS) (out as unknown as Record<string, number>)[k] = num(r[k])
+  // Presence-signalled, exactly like the admin keys below: a Worker older than
+  // the Sep 6 kernel does not send net_sales_usd, and a 0 there would be read
+  // as "this window sold nothing net" rather than "the server did not say".
+  if (typeof r.net_sales_usd === 'number') out.net_sales_usd = round2(num(r.net_sales_usd))
   if (typeof r.cost_usd === 'number' || typeof r.profit_usd === 'number') {
     out.cost_usd = num(r.cost_usd)
     out.profit_usd = num(r.profit_usd)
@@ -420,6 +436,11 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
   const out = {} as ReportTotals
   for (const k of TOTAL_KEYS) (out as unknown as Record<string, number>)[k] = 0
   const allProfit = rows.length > 0 && rows.every((r) => hasProfit(r))
+  // Same rule for the kernel's net-sales term: it sums like any money column,
+  // but one row that never carried it would make the sum quietly short, so the
+  // absence propagates instead.
+  const allNetSales = rows.length > 0 && rows.every((r) => typeof r.net_sales_usd === 'number')
+  let netSales = 0
   let cost = 0
   let profit = 0
   let missing = 0
@@ -430,6 +451,7 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
       if (k === 'avg_order_usd') continue
       ;(out as unknown as Record<string, number>)[k] += num(r[k])
     }
+    if (allNetSales) netSales += num(r.net_sales_usd)
     if (allProfit) {
       cost += num(r.cost_usd)
       profit += num(r.profit_usd)
@@ -442,6 +464,7 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
     if (k.endsWith('_usd')) (out as unknown as Record<string, number>)[k] = round2((out as unknown as Record<string, number>)[k])
   }
   out.avg_order_usd = out.tx_count > 0 ? round2(out.revenue_usd / out.tx_count) : 0
+  if (allNetSales) out.net_sales_usd = round2(netSales)
   if (allProfit) {
     out.cost_usd = round2(cost)
     out.profit_usd = round2(profit)
@@ -520,16 +543,37 @@ export interface StatementInput {
 }
 
 function statementFigures(t: ReportTotals): Record<string, number> {
-  const netSales = round2(t.gross_sales_usd - t.store_discount_usd - t.membership_discount_usd)
+  // What the header columns on screen add up to...
+  const headerNet = round2(t.gross_sales_usd - t.store_discount_usd - t.membership_discount_usd)
+  // ...and what the kernel actually recognized. The two differ whenever a
+  // receipt's recorded discounts exceed its own subtotal: the kernel floors
+  // that receipt at 0 rather than letting it drive the window negative (owner
+  // rule N6 -- a negative period revenue is a scoping defect, never a clamp),
+  // so summing the headers understates net sales. Deriving the line from the
+  // headers is what printed `105 - 40 = 65` beside a REVENUE line reading 85.
+  // A Worker older than the Sep 6 kernel sends no net_sales_usd; revenue and
+  // refunds are kernel figures on every version and `revenue = net sales -
+  // refunds` by definition, so they recover the same term (the fallback
+  // Dashboard.tsx and Sales.tsx already use) and the group still foots.
+  const netSales = typeof t.net_sales_usd === 'number' ? round2(t.net_sales_usd) : round2(t.revenue_usd + t.refund_usd)
   const fig: Record<string, number> = {
     total_sales: round2(t.gross_sales_usd + t.item_discount_usd),
     item_discounts: t.item_discount_usd,
     store_discounts: t.store_discount_usd,
     membership_discounts: t.membership_discount_usd,
     net_sales: netSales,
+    // The floored amount, named rather than left as an unexplained gap between
+    // the discount lines and the net-sales total. Rendered only when non-zero,
+    // like profit_rounding.
+    net_sales_floor: round2(netSales - headerNet),
     pending_credit: t.pending_revenue_usd,
     refunds: t.refund_usd,
     revenue: t.revenue_usd,
+    // net sales and refunds are round2'd on their own, so the step to REVENUE
+    // can land a cent away from revenue_usd. Carried explicitly, never absorbed
+    // into a labelled line -- the same treatment profit_rounding gives the
+    // profit bridge.
+    revenue_rounding: round2(t.revenue_usd - (netSales - t.refund_usd)),
     collected_total: t.collected_total_usd,
     // ---- delivery reconciliation (memo; owner, Sep 4 2026: "so we know the
     // actual costs vs what was received or what we paid... a detailed
@@ -584,6 +628,10 @@ function statementFigures(t: ReportTotals): Record<string, number> {
  *              (unpaid credit is NOT taken off: an awaiting-payment sale is
  *              recognized revenue, and the amount still owed is reported
  *              below as its own PENDING block, never as a subtraction)
+ *              net sales is the KERNEL's net_sales_usd, not the summed header
+ *              columns: the kernel floors a receipt whose recorded discounts
+ *              exceed its subtotal at 0, so the two differ, and the difference
+ *              gets its own line rather than making the group not foot
  *   COLLECTED  revenue + tax/delivery -> COLLECTED TOTAL
  *   PROFIT     revenue (carried down) - COGS + delivery collected
  *              - delivery paid to couriers -> GROSS PROFIT
@@ -628,11 +676,19 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
     line('item_discounts', 'rpt_item_discounts', 'Item discounts', 'sub', 'revenue'),
     line('store_discounts', 'rpt_store_discounts', 'Store discounts', 'sub', 'revenue'),
     line('membership_discounts', 'rpt_membership_discounts', 'Membership discounts', 'sub', 'revenue'),
+  ]
+  const floor = line('net_sales_floor', 'rpt_net_sales_floor', 'Discounts beyond receipt value', 'add', 'revenue', ['rpt_hint_net_sales_floor', 'Some receipts record more discount than the receipt is worth. No receipt is ever counted below zero, so the excess discount is added back here instead of pulling the period below what was sold.'])
+  if (floor.usd !== 0) lines.push(floor)
+  lines.push(
     line('net_sales', 'rpt_net_sales', 'Net sales', 'total', 'revenue'),
     line('refunds', 'refunds', 'Refunds', 'sub', 'revenue'),
+  )
+  const revenueRounding = line('revenue_rounding', 'rpt_rounding', 'Rounding', 'add', 'revenue', ['rpt_hint_rounding', 'Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.'])
+  if (revenueRounding.usd !== 0) lines.push(revenueRounding)
+  lines.push(
     line('revenue', 'revenue', 'Revenue', 'total', 'revenue', ['rpt_hint_revenue', 'Net sales of all non-cancelled sales minus refunds. Tax and delivery are excluded.']),
     line('collected_total', 'collected_total', 'Collected total', 'total', 'collected', ['rpt_hint_collected', 'Cash actually collected; Not Paid sales are excluded.']),
-  ]
+  )
   if (hasProfit(sales)) {
     lines.push(
       line('revenue_carried', 'rpt_revenue_carried', 'Revenue (from above)', 'total', 'profit', ['rpt_hint_revenue_carried', 'The revenue line repeated, so the first input of the profit calculation is on screen beside the figures taken off it.']),

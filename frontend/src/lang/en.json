@@ -5485,6 +5485,8 @@
   "rpt_style_excel": "Excel style",
   "rpt_style_receipt": "Receipt style",
   "rpt_net_sales": "Net sales",
+  "rpt_net_sales_floor": "Discounts beyond receipt value",
+  "rpt_hint_net_sales_floor": "Some receipts record more discount than the receipt is worth. No receipt is ever counted below zero, so the excess discount is added back here instead of pulling the period below what was sold.",
   "rpt_tax_delivery_collected": "Tax + delivery collected",
   "rpt_each_return": "Each return",
   "rpt_each_expense": "Each expense",
