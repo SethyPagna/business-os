@@ -166,6 +166,7 @@ runTest('the two branchRoles.ts copies are the same code', () => {
 const salesSource = read('src/routes/sales.ts')
 const returnsSource = read('src/routes/returns.ts')
 const branchesSource = read('src/routes/branches.ts')
+const inventorySource = read('src/routes/inventory.ts')
 
 runTest('every path that writes a sale line asks the guard first', () => {
   // Checkout, add-items-to-a-sale, and a replaced-in product: three writers,
@@ -188,10 +189,30 @@ runTest('the guard runs before the write, not after it', () => {
   assert.ok(guardAt < firstBatchAt, 'the selling-branch check must precede the first atomic write')
 })
 
-runTest('both transfer routes check the direction', () => {
+runTest('ALL THREE transfer routes check the direction', () => {
+  // /branches/transfer, /branches/transfer-bulk and /inventory/transfer.
+  // The third one is the route Inventory.tsx's own transfer button calls
+  // (and its undo and its redo), so a rule enforced on the first two alone
+  // left a shop -> warehouse move one button away from any operator.
   assert.equal((branchesSource.match(/transferDirectionError\(/g) || []).length, 2, 'the single and the bulk transfer route')
+  assert.equal((inventorySource.match(/transferDirectionError\(/g) || []).length, 1, 'the inventory-surface transfer route')
   assert.match(branchesSource, /if \(directionError\) return c\.json\(\{ error: directionError \}, 400\)/)
   assert.match(branchesSource, /if \(bulkDirectionError\) return c\.json\(\{ error: bulkDirectionError \}, 400\)/)
+  assert.match(inventorySource, /if \(directionError\) return c\.json\(\{ error: directionError \}, 400\)/)
+  assert.match(inventorySource, /from '\.\.\/lib\/branchRoleGuards'/)
+})
+
+runTest('the inventory transfer is refused before its atomic write', () => {
+  // Same reasoning as the sales guard above: this route moves branch_stock
+  // AND the lot rows in one db.batch, so a check that landed after it would
+  // reject a transfer that had already happened.
+  const routeAt = inventorySource.indexOf("app.post('/transfer'")
+  assert.ok(routeAt > 0, 'the inventory transfer route must still exist')
+  const guardAt = inventorySource.indexOf('transferDirectionError(', routeAt)
+  const batchAt = inventorySource.indexOf('db.batch(', routeAt)
+  assert.ok(guardAt > routeAt, 'the guard must live inside the transfer route')
+  assert.ok(batchAt > routeAt)
+  assert.ok(guardAt < batchAt, 'the direction check must precede the first atomic write')
 })
 
 if (failures) {
