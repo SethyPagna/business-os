@@ -707,8 +707,10 @@ export default function ProductForm({
       })
       // A failed read leaves the source UNREPORTED (null), not "empty": the
       // field must not tell the operator their catalog has no brands because
-      // one request 403'd or timed out. Free text keeps working either way.
-      .catch(() => {})
+      // one request 403'd or timed out. Free text keeps working either way,
+      // and releasing the once-only guard lets the NEXT focus try again --
+      // a dropped request must not silence this field for the whole form.
+      .catch(() => { brandFallbackRequestedRef.current = false })
       .finally(() => { if (aliveRef.current) setBrandFallbackLoading(false) })
   }
   const brandSuggestionOptions = useMemo(

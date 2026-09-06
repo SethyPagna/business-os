@@ -217,6 +217,10 @@ check('Brand owns its own source, so a host that plumbs nothing in still suggest
   assert.doesNotMatch(brandBlock, /emptyHint=\{tr\(/, 'the Brand hint may not be unconditional')
   assert.match(brandBlock, /emptyHint=\{emptyHintFor\(brandSuggestionsSourced/, 'it is gated on the source having reported')
   assert.match(brandBlock, /onRequestOptions=\{ensureBrandSuggestions\}/, 'and the fallback is fetched when the list is actually opened')
+  // The once-only guard must be released on failure, or one dropped request
+  // silences Brand for the entire life of the form.
+  assert.match(productForm, /\.catch\(\(\) => \{ brandFallbackRequestedRef\.current = false \}\)/, 'a failed fallback read may be retried on the next focus')
+  assert.doesNotMatch(productForm, /setFallbackBrands\(\[\]\)/, 'and a failure must never be recorded as "this catalog has no brands"')
 })
 
 check('every hint in the family answers to the same gate (one rule, one implementation)', () => {
