@@ -15,6 +15,7 @@ import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry }
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import InfoHint from '../shared/InfoHint.tsx'
 import { RECEIPT_CONTRAST_ATTR, normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
+import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 // N4 (owner, Sep 6 2026): "Open PDF" is removed -- it opened the same document
@@ -163,15 +164,6 @@ function stripEmoji<T>(text: T): T
 function stripEmoji(text: unknown): unknown {
   if (typeof text !== 'string') return text
   return text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FEFF}]/gu, '').replace(/\s{2,}/g, ' ').trim()
-}
-
-function displayAddress(raw: unknown): string {
-  if (!raw) return ''
-  try {
-    const parsed = JSON.parse(String(raw))
-    if (Array.isArray(parsed)) return String(parsed[0] || '')
-  } catch {}
-  return String(raw)
 }
 
 function parseItems(raw: ReceiptSale['items']): ReceiptItem[] {
@@ -482,7 +474,14 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const headerAlignClass = tpl.align_header === 'left' ? 'text-left' : tpl.align_header === 'right' ? 'text-right' : 'text-center'
 
   const showMembershipId = tpl.show_customer_membership !== false
-  const hasCustomer = sale.customer_name || sale.customer_phone || sale.customer_address || (showMembershipId && sale.customer_membership_number)
+  // N21: sales.customer_address may hold the Contact Options JSON that was
+  // snapshotted raw out of customers.address. Rendering it through the shared
+  // kernel (contactOptionUtils.ts, twinned in cloudflare/src/lib/contactOptions.ts)
+  // is what stops the receipt printing "[]" -- and gating the section on the
+  // RESOLVED value stops a row that resolves to nothing forcing an empty
+  // customer block onto the paper.
+  const customerAddress = contactDisplayAddress(sale.customer_address)
+  const hasCustomer = sale.customer_name || sale.customer_phone || customerAddress || (showMembershipId && sale.customer_membership_number)
   const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || sale.delivery_contact_address)
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
@@ -513,7 +512,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       <div key="customer" className="mt-2 border-t border-dashed border-gray-300 pt-2">
         {tpl.show_customer_name && sale.customer_name ? <Row label={labelFor(lang, 'customer')} value={sale.customer_name} /> : null}
         {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
-        {tpl.show_customer_address && sale.customer_address ? <Row label={labelFor(lang, 'address')} value={displayAddress(sale.customer_address)} /> : null}
+        {tpl.show_customer_address && customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
         {showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
       </div>
     ) : null,
@@ -777,7 +776,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       <div className="border-t border-gray-300 pt-1">
         <Row label={labelFor(lang, 'date')} value={dateStr} />
         {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
-        {sale.customer_address ? <Row label={labelFor(lang, 'address')} value={displayAddress(sale.customer_address)} /> : null}
+        {customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
         <Row label={labelFor(lang, 'qty')} value={items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0).toLocaleString()} />
       </div>
       <div className="border-y border-gray-900 py-1">

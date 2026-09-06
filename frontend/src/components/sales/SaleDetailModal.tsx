@@ -40,6 +40,7 @@ import {
   type SettlementRow,
 } from './saleSettlement.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 type TranslateFn = (key: string) => string
@@ -798,18 +799,18 @@ export default function SaleDetailModal({
   // rows, on the same label/value rhythm as everything else there.
   const deliveryDriverName = sanitizeSaleDetailText(sale.delivery_contact_name)
   const deliveryDriverPhone = sanitizeSaleDetailText(sale.delivery_contact_phone)
-  // The drop address is the one delivery field that can legitimately differ
-  // from what the Customer card already shows -- "keep it same in customer
-  // section" is where an address belongs, so it is shown THERE, and only when
-  // it is not simply a restatement of the customer's own address. Dropping it
-  // outright would have deleted the only place a deliver-somewhere-else
-  // address is visible on this screen.
-  const deliveryAddress = String(sale.delivery_contact_address || '').trim()
-  const sameAddressText = (left: string, right: string): boolean =>
-    left.replace(/\s+/g, ' ').trim().toLowerCase() === right.replace(/\s+/g, ' ').trim().toLowerCase()
-  const deliveryAddressToShow = deliveryAddress && !sameAddressText(deliveryAddress, String(sale.customer_address || ''))
-    ? deliveryAddress
-    : ''
+  // N21 (owner, Sep 6 2026): "i see the customer show delivery address and
+  // address. just keep address ... because in sales only show address." The
+  // Customer card used to carry BOTH an Address row and a Delivery address
+  // row (shown whenever the drop address differed from the customer's own).
+  // The second is gone. The drop address is not lost: it is still on the sale
+  // row, still exported, and still printed on the receipt under the receipt
+  // template's own delivery toggles -- only this card stops repeating it.
+  //
+  // The address itself renders through the shared kernel, because
+  // sales.customer_address was snapshotted RAW out of customers.address,
+  // which holds the Contact Options JSON -- that is the "[]" the owner saw.
+  const customerAddress = contactDisplayAddress(sale.customer_address)
   const paymentDetails = parsePaymentDetails(sale.payment_details)
   // Outstanding balance: an on-credit / partially-paid sale (tender below
   // total). Shown so the admin detail no longer hides "still owed".
@@ -1113,8 +1114,7 @@ export default function SaleDetailModal({
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
                 <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} />
-                <DetailRow label={t('address') || 'Address'} value={sale.customer_address} />
-                <DetailRow label={translateOr('delivery_address', 'Delivery address', 'អាសយដ្ឋានដឹកជញ្ជូន')} value={deliveryAddressToShow} />
+                <DetailRow label={t('address') || 'Address'} value={customerAddress} />
                 <DetailRow label={t('membership') || 'Membership'} value={sale.customer_membership_number} mono />
               </DetailRowGroup>
               {/* An ACTION, not a field -- kept in the Customer card but held

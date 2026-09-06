@@ -102,6 +102,7 @@ import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../l
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { formatSaleTelegramLines, sendTelegramEvent, telegramMoney } from '../lib/telegram'
+import { contactDisplayAddress } from '../lib/contactOptions'
 import type { Env } from '../index'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 
@@ -1892,7 +1893,12 @@ app.patch('/:id/customer', async (c) => {
         customer_id: customer?.id ?? null,
         customer_name: customer?.name ?? null,
         customer_phone: customer?.phone ?? null,
-        customer_address: customer?.address ?? null,
+        // N21: the sale snapshots the DISPLAY address, never the Contact
+        // Options JSON customers.address actually holds -- that JSON was what
+        // the receipt and the sale detail were printing. The reference guard
+        // above still compares the RAW column, because that is what it is
+        // asserting has not changed underneath us.
+        customer_address: contactDisplayAddress(customer?.address) || null,
         search_normalized: customerSearchNormalized,
         id: saleId,
       },
@@ -4040,7 +4046,10 @@ app.get('/export', async (c) => {
       branch: index === 0 ? sale.branch_name : '',
       customer_name: index === 0 ? sale.customer_name : '',
       customer_phone: index === 0 ? sale.customer_phone : '',
-      customer_address: index === 0 ? sale.customer_address : '',
+      // Rows written before N21 still hold the raw options JSON, so the
+      // export renders through the same kernel the screens do rather than
+      // shipping a CSV cell full of machine text.
+      customer_address: index === 0 ? contactDisplayAddress(sale.customer_address) : '',
       cashier_name: index === 0 ? sale.cashier_name : '',
       name: item.product_name ?? '', sku: item.sku ?? '', barcode: item.barcode ?? '', quantity: item.quantity ?? 1,
       unit_price_usd: item.applied_price_usd ?? 0, unit_price_khr: item.applied_price_khr ?? 0,

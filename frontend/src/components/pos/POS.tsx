@@ -86,6 +86,7 @@ import { buildProductSupplierOptions } from '../products/helpers/productSupplier
 import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import { resolveSaleBranch } from './productSheetState.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
+import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'pos-receipt')
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'pos-image-gallery-lightbox')
@@ -2862,7 +2863,10 @@ export default function POS() {
       customer_id:      active.customer.id      || null,
       customer_membership_number: active.customer.membership_number || null,
       customer_phone:   active.customer.phone   || null,
-      customer_address: active.customer.address || null,
+      // N21: the receipt and the sale detail print this snapshot, so it is
+      // the display address, not the Contact Options JSON a linked customer
+      // carries in customers.address.
+      customer_address: contactDisplayAddress(active.customer.address) || null,
       branch_id: saleBranchId,
       items: active.cart.map(i => ({
         id:                i.id,
