@@ -1954,11 +1954,23 @@ app.post('/transfer', async (c) => {
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? body.from_branch_id ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? body.to_branch_id ?? ''), 10)
   const quantity = Number(body.quantity)
-  const reason = body.reason != null ? String(body.reason).trim() || null : (body.note != null ? String(body.note).trim() || null : null)
+  // The operator's own reason. `reason` is what every current client sends;
+  // a non-empty legacy `note` is still accepted as the reason so a cached
+  // PWA build or a queued offline replay is not 400ed mid-release.
+  const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
 
   if (!productId || !fromBranchId || !toBranchId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
   if (!(quantity > 0)) return c.json({ error: 'Transfer quantity must be greater than zero' }, 400)
+  // The same mandatory-cause rule POST /adjust enforces above, now on the
+  // route that MOVES stock between branches.
+  // Inventory.tsx has refused a reasonless transfer in the browser since
+  // Part 387; nothing behind it did, so a stale tab, a replayed offline
+  // write or any direct caller could move stock with no recorded cause.
+  // Checked ahead of any DB work, so no path can move stock without one.
+  // The sentence is the exact English of the `transfer_reason_required`
+  // pack key, so a refusal that outruns the UI is still readable in Khmer.
+  if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
 
   const db = getDb(c.env)
   const product = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
@@ -2024,12 +2036,12 @@ app.post('/transfer', async (c) => {
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
+      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
     },
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
+      params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
     },
   ])
 
@@ -2084,10 +2096,22 @@ app.post('/move-row', async (c) => {
   const destinationProductId = Number.parseInt(String(body.destinationProductId ?? body.destination_product_id ?? ''), 10)
   const quantity = Number(body.quantity)
   const requestedBranchId = body.branchId ?? body.branch_id ? Number.parseInt(String(body.branchId ?? body.branch_id), 10) : null
-  const reason = body.reason != null ? String(body.reason).trim() || null : null
+  // The operator's own reason. `reason` is what every current client sends;
+  // a non-empty legacy `note` is still accepted as the reason so a cached
+  // PWA build or a queued offline replay is not 400ed mid-release.
+  const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
 
   if (!sourceProductId) return c.json({ error: 'Source product is required' }, 400)
   if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'Quantity must be a positive number' }, 400)
+  // The same mandatory-cause rule POST /adjust and /transfer enforce, on
+  // the route that moves stock from one product row to another.
+  // Inventory.tsx has refused a reasonless transfer in the browser since
+  // Part 387; nothing behind it did, so a stale tab, a replayed offline
+  // write or any direct caller could move stock with no recorded cause.
+  // Checked ahead of any DB work, so no path can move stock without one.
+  // The sentence is the exact English of the `transfer_reason_required`
+  // pack key, so a refusal that outruns the UI is still readable in Khmer.
+  if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
   if (!destinationProductId) {
     // The Docker backend can create a brand-new destination product inline
     // (e.g. an auto-created "Damaged stock" line item). That path isn't
@@ -2128,12 +2152,12 @@ app.post('/move-row', async (c) => {
       // receiveBatchStock resolved.
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved to ${destination.name} - ${reason}` : `Moved to ${destination.name}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveDrained.batchIds.length === 1 && moveDrained.remainder === 0 ? moveDrained.batchIds[0] : null },
+      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveDrained.batchIds.length === 1 && moveDrained.remainder === 0 ? moveDrained.batchIds[0] : null },
     },
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved from ${source.name} - ${reason}` : `Moved from ${source.name}`, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveReceived.batchId },
+      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveReceived.batchId },
     },
   ])
 
