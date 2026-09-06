@@ -4100,18 +4100,18 @@ function ProductsFullEditor() {
           previously a border-t continuation of the sticky card above it). */}
       {hasSelected && bulkEditMode === 'info' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Update basic info for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{tr('bulk_edit_update_info_for', 'Update basic info for')} <strong>{selectedVisibleCount}</strong> {tr('bulk_edit_products_count_suffix', 'products')}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <div><label className="text-xs text-gray-500 block mb-1">Category</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('category', 'Category')}</label>
               <AppSelect
                 value={bulkEditForm.category || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, category: nextValue }))}
-                ariaLabel="Category"
+                ariaLabel={tr('category', 'Category')}
                 className="w-full"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Keep current' },
+                  { value: '', label: tr('keep_current', 'Keep current') },
                   ...categories
                     .map(c => String(c.name || '').trim())
                     .filter(Boolean)
@@ -4119,16 +4119,16 @@ function ProductsFullEditor() {
                 ]}
               />
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Unit</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('unit', 'Unit')}</label>
               <AppSelect
                 value={bulkEditForm.unit || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, unit: nextValue }))}
-                ariaLabel="Unit"
+                ariaLabel={tr('unit', 'Unit')}
                 className="w-full"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Keep current' },
+                  { value: '', label: tr('keep_current', 'Keep current') },
                   ...units
                     .map(u => String(u.name || '').trim())
                     .filter(Boolean)
@@ -4136,54 +4136,53 @@ function ProductsFullEditor() {
                 ]}
               />
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Supplier</label>
-              <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder="Leave blank to keep" />
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('supplier', 'Supplier')}</label>
+              <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
             </div>
             <div><label className="text-xs text-gray-500 block mb-1">{t('brand')||'Brand'}</label>
-              <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder="Leave blank to keep" />
+              <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
             </div>
             <div className="flex gap-2 items-center mt-1">
-              <label className="text-xs text-gray-500">Low Stock Threshold</label>
-              <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder="Keep" />
+              <label className="text-xs text-gray-500">{tr('low_stock_threshold', 'Low Stock Threshold')}</label>
+              <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder={tr('keep', 'Keep')} />
             </div>
           </div>
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
             const { buildProductBulkInfoUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkInfoUpdates(bulkEditForm))
-          }}>Apply to {selectedVisibleCount} products</button>
+          }}>{tr('bulk_edit_apply_to_prefix', 'Apply to')} {selectedVisibleCount} {tr('bulk_edit_products_count_suffix', 'products')}</button>
         </div>
       )}
 
       {hasSelected && bulkEditMode === 'pricing' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Update pricing for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{tr('bulk_edit_update_pricing_for', 'Update pricing for')} <strong>{selectedVisibleCount}</strong> {tr('bulk_edit_products_count_suffix', 'products')}</p>
           <div className="grid grid-cols-2 gap-2">
-            <div><label className="text-xs text-gray-500 block mb-1">Selling Price (USD)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Selling Price (KHR)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_usd', 'Selling Price (USD)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_khr', 'Selling Price (KHR)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             {/* Was the "VIP Price" pair writing special_price_usd/khr. The
                 2026-09-04 ruling deleted that tier, so these now edit the
                 wholesale price -- the same numbers, since migration 0111 moved
                 them across. Labels come from the wholesale_price_*_full keys
-                that already exist in both packs (the neighbouring rows here are
-                still hardcoded English; not touching those is deliberate, they
-                are not this change). buildProductBulkPricingUpdates already
-                accepts wholesale_price_* so the write path needs nothing new. */}
+                that already exist in both packs. buildProductBulkPricingUpdates
+                already accepts wholesale_price_* so the write path needs
+                nothing new. */}
             <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_usd_full', 'Wholesale (USD)', 'តម្លៃបោះដុំ (USD)')}</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'តម្លៃបោះដុំ (KHR)')}</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (USD)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (KHR)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_usd', 'Purchase Price (USD)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_khr', 'Purchase Price (KHR)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
           </div>
-          <p className="text-xs text-gray-400 mt-1">KHR prices will auto-calculate at current exchange rate</p>
+          <p className="text-xs text-gray-400 mt-1">{tr('bulk_price_khr_auto_note', 'KHR prices will auto-calculate at current exchange rate')}</p>
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
             const { buildProductBulkPricingUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkPricingUpdates(bulkEditForm))
-          }}>Apply to {selectedVisibleCount} products</button>
+          }}>{tr('bulk_edit_apply_to_prefix', 'Apply to')} {selectedVisibleCount} {tr('bulk_edit_products_count_suffix', 'products')}</button>
 
           {/* Relative adjustment, kept in the same panel as the absolute
               "set every price to X" fields above but visually separated,
@@ -4330,25 +4329,25 @@ function ProductsFullEditor() {
 
       {hasSelected && bulkEditMode === 'branch' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Move stock to a branch for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{tr('bulk_edit_move_stock_to_branch_for', 'Move stock to a branch for')} <strong>{selectedVisibleCount}</strong> {tr('bulk_edit_products_count_suffix', 'products')}</p>
           <div className="flex gap-2 flex-wrap items-end">
-            <div><label className="text-xs text-gray-500 block mb-1">Target Branch</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('target_branch', 'Target Branch')}</label>
               <AppSelect
                 value={bulkEditForm.branchId || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, branchId: nextValue }))}
-                ariaLabel="Target Branch"
+                ariaLabel={tr('target_branch', 'Target Branch')}
                 className="w-full min-w-[10rem]"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Select branch' },
+                  { value: '', label: tr('select_branch', 'Select branch') },
                   ...branches
                     .filter(b => b.id != null && b.name)
                     .map(b => ({ value: b.id as string | number, label: String(b.name) })),
                 ]}
               />
             </div>
-            <button disabled={bulkActionBusy} className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId) } else notify('Select a branch first','error') }}>Move Stock</button>
+            <button disabled={bulkActionBusy} className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId) } else notify(tr('select_branch_first', 'Select a branch first'),'error') }}>{tr('move_stock', 'Move Stock')}</button>
           </div>
         </div>
       )}
