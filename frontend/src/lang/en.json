@@ -5802,5 +5802,11 @@
   "stock_line_removed": "Removed",
   "stock_line_set": "Set",
   "add_products": "Add products",
-  "add_products_button_hint": "Add new products or receive stock for products you already have."
+  "add_products_button_hint": "Add new products or receive stock for products you already have.",
+  "portal_a11y_show_password": "Show password",
+  "portal_a11y_hide_password": "Hide password",
+  "portal_a11y_selected_count": "{count} selected",
+  "portal_a11y_search_options": "Search options",
+  "portal_a11y_remove_filter": "Remove {name}",
+  "portal_a11y_skip_to_content": "Skip to products"
 }

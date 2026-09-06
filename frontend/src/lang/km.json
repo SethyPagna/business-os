@@ -5802,5 +5802,11 @@
   "stock_line_removed": "បានដកចេញ",
   "stock_line_set": "បានកំណត់",
   "add_products": "បន្ថែមផលិតផល",
-  "add_products_button_hint": "បន្ថែមផលិតផលថ្មី ឬទទួលស្តុកសម្រាប់ផលិតផលដែលមានស្រាប់។"
+  "add_products_button_hint": "បន្ថែមផលិតផលថ្មី ឬទទួលស្តុកសម្រាប់ផលិតផលដែលមានស្រាប់។",
+  "portal_a11y_show_password": "បង្ហាញពាក្យសម្ងាត់",
+  "portal_a11y_hide_password": "លាក់ពាក្យសម្ងាត់",
+  "portal_a11y_selected_count": "បានជ្រើស {count}",
+  "portal_a11y_search_options": "ស្វែងរកជម្រើស",
+  "portal_a11y_remove_filter": "ដក {name} ចេញ",
+  "portal_a11y_skip_to_content": "រំលងទៅផលិតផល"
 }

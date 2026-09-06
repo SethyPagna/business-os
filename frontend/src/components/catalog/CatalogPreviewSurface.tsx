@@ -16,7 +16,11 @@ import '../../styles/public-portal.css'
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
 const ProductDetailFlyout = lazyRetry(() => import('./ProductDetailFlyout'), 'catalog-preview-product-detail-flyout')
 
-type CopyFunction = (key: string, fallback?: string) => string
+// The storefront translator really takes a Khmer fallback as its third
+// argument (CatalogPage declares it that way and PublicCatalogPage implements
+// it) -- this local alias just under-declared it, so any call that supplied
+// the Khmer text was a type error.
+type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
 
 type DisplayConfig = {
   businessName?: string
@@ -294,6 +298,15 @@ export default function CatalogPreviewSurface({
       <div className={`mx-auto max-w-[1680px] px-5 py-3 sm:px-10 sm:py-4 lg:px-16 xl:px-20 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))]' : ''}`}>
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
+            {/* WCAG 2.4.1: the storefront opens with a row of social links,
+                the language and theme controls and a scrolling section nav.
+                Without this a keyboard visitor walked all of it again on
+                every page view before reaching a single product. */}
+            {publicView ? (
+              <a className="portal-skip-link" href="#portal-main-content">
+                {copy('portal_a11y_skip_to_content', 'Skip to products', 'រំលងទៅផលិតផល')}
+              </a>
+            ) : null}
             {canEdit ? (
               <div className="flex justify-end">
                 <button
@@ -305,7 +318,7 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <section className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
+            <header className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
               <div className="px-1 py-4 sm:py-5">
                 <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
@@ -340,13 +353,13 @@ export default function CatalogPreviewSurface({
                         {displayConfig.businessName}
                       </div>
                     ) : null}
-                    <div
+                    <h1
                       className="notranslate text-lg font-semibold leading-tight tracking-tight text-balance break-words [overflow-wrap:anywhere] text-slate-900 sm:truncate sm:text-2xl dark:text-neutral-100"
                       style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
                       translate="no"
                     >
                       {previewTitle || displayConfig.businessName || copy('about', 'About')}
-                    </div>
+                    </h1>
                     {displayConfig.businessTagline ? (
                       <div className="notranslate hidden truncate text-xs text-slate-500 sm:block dark:text-neutral-400" translate="no">
                         {displayConfig.businessTagline}
@@ -497,9 +510,13 @@ export default function CatalogPreviewSurface({
                   </div>
                 </div>
               </div>
-            </section>
+            </header>
 
-            <section
+            {/* The section tabs are navigation, and the name that described
+                them sat on an inner scroll <div> with no role of its own, so
+                nothing announced it. */}
+            <nav
+              aria-label={copy('publicNavigation', 'Section navigation')}
               ref={publicPortalNavRef}
               className={`pb-1 ${publicView ? 'sticky top-1 z-40 sm:top-2' : ''}`}
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
@@ -508,7 +525,7 @@ export default function CatalogPreviewSurface({
                 className="portal-nav-shell rounded-b-[28px] border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
-                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden" aria-label={copy('publicNavigation', 'Section navigation')}>
+                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden">
                   <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
                     {portalTabs.map((item) => {
                       const Icon = item.icon
@@ -523,6 +540,7 @@ export default function CatalogPreviewSurface({
                               : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-200'
                           }`}
                           onClick={() => handlePortalTabClick(item.key)}
+                          aria-current={selected ? 'page' : undefined}
                         >
                           <Icon className="h-4 w-4 sm:hidden" />
                           <span className="whitespace-nowrap">{item.label}</span>
@@ -532,11 +550,24 @@ export default function CatalogPreviewSurface({
                   </div>
                 </div>
               </div>
-            </section>
+            </nav>
 
-            {promotionsSection}
-            {catalogSection}
-            {secondaryTabSection}
+            {/* The admin editor renders this surface INSIDE App.tsx's own
+                <main>, and a document may only have one, so the landmark is
+                the public storefront's. */}
+            {publicView ? (
+              <main id="portal-main-content" tabIndex={-1}>
+                {promotionsSection}
+                {catalogSection}
+                {secondaryTabSection}
+              </main>
+            ) : (
+              <>
+                {promotionsSection}
+                {catalogSection}
+                {secondaryTabSection}
+              </>
+            )}
           </div>
         </div>
       </div>

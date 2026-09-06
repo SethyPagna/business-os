@@ -703,6 +703,17 @@ export default function PublicCatalogPage() {
   }, [])
 
   const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) => {
+    // This lane's assistive-technology names (portal_a11y_*) are flat keys in
+    // src/lang/en.json + km.json, not portalEditor.* ones, so they have to be
+    // looked up directly -- prefixed they resolve to nothing and the pack
+    // entries would be dead weight. `t` follows the APP's language, so an
+    // explicit Khmer choice for the storefront wins over it.
+    if (key.startsWith('portal_a11y_')) {
+      if (translateTarget === 'km' && fallbackKm) return fallbackKm
+      const packed = typeof t === 'function' ? t(key) : ''
+      if (packed && packed !== key) return packed
+      return fallback
+    }
     // Real fix: this used to only ever check the admin app's own EN/KM
     // translator (`t`) and a hardcoded Khmer fallback, so picking any of
     // the other 17 languages in the dropdown changed nothing on screen.
@@ -727,6 +738,22 @@ export default function PublicCatalogPage() {
   const externalTranslateTarget = translateWidgetEnabled && !isFirstPartyTranslateChoice(normalizedTranslateTarget)
     ? normalizedTranslateTarget
     : null
+
+  // WCAG 3.1.1: the language selector changed every string on screen but
+  // never what the DOCUMENT claimed to be written in, so a screen reader
+  // kept reading a Khmer storefront with English pronunciation (and a
+  // translation tool kept offering to translate it into the language it was
+  // already showing). 'original' means the merchant's own catalog language.
+  const portalDocumentLanguage = normalizedTranslateTarget === 'original'
+    ? configuredPortalLanguage
+    : normalizedTranslateTarget
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || !portalDocumentLanguage) return undefined
+    const previous = document.documentElement.lang
+    document.documentElement.lang = portalDocumentLanguage
+    return () => { document.documentElement.lang = previous }
+  }, [portalDocumentLanguage])
 
   // Widget isn't "ready" while an external translation is pending setup.
   useEffect(() => {
