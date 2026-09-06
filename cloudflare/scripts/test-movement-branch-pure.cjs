@@ -32,7 +32,10 @@ function ok(cond, label) {
 }
 
 // ---- compile the real modules ---------------------------------------------
-const MODULES = ['stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts']
+// stockLedgerQuery imports its receipt-type vocabulary from stockInSessionsQuery
+// (since 57cb3d29); the harness must copy that module too or tsc fails on the
+// import before a single check runs.
+const MODULES = ['stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts', 'stockInSessionsQuery.ts']
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'movement-branch-'))
 for (const file of MODULES) {
   fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', file), path.join(tmpDir, file))
