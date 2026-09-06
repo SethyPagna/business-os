@@ -59,7 +59,9 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   assert.match(modalSource, /status: 'queued'/)
   assert.match(modalSource, /const editLine = \(line: ReceivedLine\)/)
   assert.match(modalSource, /const removeLine = \(key: string\)/)
-  assert.match(modalSource, /status: 'saved', detail: result\?\.lotCode/)
+  // N27: a saved ADD still shows its lot code; remove / set lines say what
+  // they did instead (there is no lot to name)
+  assert.match(modalSource, /status: 'saved', detail: line\.mode === 'remove'[^]*?: line\.mode === 'set'[^]*?: result\?\.lotCode/)
   assert.match(modalSource, /status: 'error', detail: message/)
   // Add clears the line and refocuses for the next product
   assert.match(modalSource, /const resetLine = \(\) => \{/)
