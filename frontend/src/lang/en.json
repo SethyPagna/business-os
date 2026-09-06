@@ -5764,5 +5764,6 @@
   "sale_mutation_rate_changed": "The exchange rate changed. Review the updated KHR rate, then confirm again.",
   "add_products": "Add products",
   "suggestions_none_yet": "Nothing saved yet — type a new one.",
+  "suggestions_no_match": "No match — type to add a new one.",
   "add_products_button_hint": "Add new products or receive stock for products you already have."
 }

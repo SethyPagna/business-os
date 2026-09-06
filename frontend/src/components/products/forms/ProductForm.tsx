@@ -13,6 +13,7 @@ import MinimizeButton from '../../shared/MinimizeButton.tsx'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import SuggestionTextInput, { type SuggestionOption } from '../../shared/SuggestionTextInput.tsx'
+import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
@@ -27,7 +28,7 @@ import {
   shouldSearchProductMatches,
 } from '../helpers/productNameSuggestions.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
-import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
+import { searchProducts as searchProductsForMatch, getProductFilters } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
   beginTrackedRequest,
@@ -478,7 +479,12 @@ export default function ProductForm({
   categories,
   units,
   branches,
-  brandOptions = [],
+  // NO `= []` default: an empty array and "this host never supplied a list"
+  // have to stay distinguishable. FastStockInModal renders this form with no
+  // brandOptions at all, and with a default they looked identical -- the
+  // Brand field then claimed "Nothing saved yet" over 205 real brands
+  // instead of fetching them. See ensureBrandSuggestions below.
+  brandOptions,
   groupCandidates = [],
   onSave,
   onDelete,
@@ -574,6 +580,9 @@ export default function ProductForm({
   const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
   const lastTabResetKeyRef = useRef<string>(`${draftKey}:${initialTab || 'basic'}`)
   const [supplierList, setSupplierList] = useState<SupplierOption[]>([])
+  // Distinguishes "the names read came back and there are none" from "it has
+  // not come back yet"; only the first may say "Nothing saved yet".
+  const [supplierListLoaded, setSupplierListLoaded] = useState(false)
   const [supplierReferenceVersion, setSupplierReferenceVersion] = useState(0)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [scannerField, setScannerField] = useState<ScannerField | ''>('')
@@ -671,12 +680,43 @@ export default function ProductForm({
   // return the lookup table UNION the values products actually carry (see
   // cloudflare/src/lib/lookupSuggestions.ts). Before that union, production's
   // empty `categories` table meant this list was empty on a catalog with 42
-  // categories in use -- the owner's report. Brand's union is built
-  // client-side by buildProductBrandOptions (products in use + the curated
-  // settings library) and reaches every host through the brandOptions prop.
+  // categories in use -- the owner's report.
   const categorySuggestionOptions = useMemo(() => categories.map((category) => String(category.name || '').trim()).filter(Boolean), [categories])
   const unitSuggestionOptions = useMemo(() => units.map((unit) => String(unit.name || '').trim()).filter(Boolean), [units])
-  const brandSuggestionOptions = useMemo(() => (brandOptions || []).map((brand) => String(brand || '').trim()).filter(Boolean), [brandOptions])
+  // Brand has no lookup table to union, so the union is the caller's:
+  // buildProductBrandOptions merges the brands products carry with the
+  // curated settings library, and Products.tsx / CreateProductsSessionModal
+  // hand the result down. A host that hands nothing down is NOT a host whose
+  // catalog has no brands -- FastStockInModal is owned by another lane and
+  // simply never plumbed the prop -- so the field fetches the products-in-use
+  // half itself rather than sitting empty. Lazy: the read only happens if the
+  // list is actually opened.
+  const brandOptionsProvided = Array.isArray(brandOptions)
+  const [fallbackBrands, setFallbackBrands] = useState<string[] | null>(null)
+  const [brandFallbackLoading, setBrandFallbackLoading] = useState(false)
+  const brandFallbackRequestedRef = useRef(false)
+  const ensureBrandSuggestions = () => {
+    if (brandOptionsProvided || brandFallbackRequestedRef.current) return
+    brandFallbackRequestedRef.current = true
+    setBrandFallbackLoading(true)
+    void getProductFilters({})
+      .then((payload) => {
+        if (!aliveRef.current) return
+        const rows = (payload as { brands?: unknown[] } | null)?.brands
+        setFallbackBrands(Array.isArray(rows) ? rows.map((brand) => String(brand || '').trim()).filter(Boolean) : [])
+      })
+      // A failed read leaves the source UNREPORTED (null), not "empty": the
+      // field must not tell the operator their catalog has no brands because
+      // one request 403'd or timed out. Free text keeps working either way.
+      .catch(() => {})
+      .finally(() => { if (aliveRef.current) setBrandFallbackLoading(false) })
+  }
+  const brandSuggestionOptions = useMemo(
+    () => (brandOptionsProvided ? brandOptions || [] : fallbackBrands || [])
+      .map((brand) => String(brand || '').trim())
+      .filter(Boolean),
+    [brandOptionsProvided, brandOptions, fallbackBrands],
+  )
   // Supplier rows keep their company as the second line so two contacts with
   // the same personal name are distinguishable. Free text stays legal: this
   // form records a supplier NAME on the product, it does not link a contact.
@@ -690,6 +730,23 @@ export default function ProductForm({
       .filter((option) => option.value !== ''),
     [supplierList],
   )
+
+  // Whether each field's option SOURCE has reported, which is what decides
+  // whether an empty list has anything honest to say (see suggestionEmptyState).
+  // A prop-fed list can only prove it by being non-empty: Products.tsx passes
+  // [] until loadAuxOptions resolves, and "Nothing saved yet" over 42 real
+  // categories is exactly the lie this lane exists to remove.
+  const categorySuggestionsSourced = categorySuggestionOptions.length > 0
+  const unitSuggestionsSourced = unitSuggestionOptions.length > 0
+  const brandSuggestionsSourced = brandOptionsProvided ? brandSuggestionOptions.length > 0 : fallbackBrands !== null
+  const supplierSuggestionsSourced = supplierListLoaded
+  function emptyHintFor(sourced: boolean, optionCount: number): string | undefined {
+    const state = suggestionEmptyState(sourced, optionCount)
+    if (state === 'unknown') return undefined
+    return state === 'none-yet'
+      ? tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')
+      : tr('suggestions_no_match', 'No match — type to add a new one.', 'រកមិនឃើញ — សូមវាយបញ្ចូលថ្មី។')
+  }
 
   const initialBranchOptions = useMemo<AppSelectOption[]>(() => {
     const currentBranchId = form.branch_id ? String(form.branch_id) : ''
@@ -747,6 +804,7 @@ export default function ProductForm({
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
         setSupplierList(Array.isArray(data) ? data as SupplierOption[] : [])
+        setSupplierListLoaded(true)
       } catch {
         if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
       }
@@ -1585,20 +1643,27 @@ export default function ProductForm({
                 onChange={(value) => setField('category', value)}
                 placeholder={tr('type_or_select_category', 'Type or select category...', 'វាយ ឬជ្រើសរើសប្រភេទ...')}
                 ariaLabel={tr('category', 'Category', 'ប្រភេទ')}
-                emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
+                emptyHint={emptyHintFor(categorySuggestionsSourced, categorySuggestionOptions.length)}
               />
             </div>
             <div className="min-w-0">
               <label htmlFor="product-brand" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('brand', 'Brand', 'ម៉ាក')}</label>
+              {/* onRequestOptions is the whole point of the fallback: a host
+                  that supplies brandOptions never fires a request, and one
+                  that supplies none (FastStockInModal) fetches the brands
+                  products carry the first time this list is opened. */}
               <SuggestionTextInput
                 id="product-brand"
                 name="product_brand"
                 value={form.brand || ''}
                 options={brandSuggestionOptions}
+                loading={brandFallbackLoading}
+                loadingLabel={tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}
+                onRequestOptions={ensureBrandSuggestions}
                 onChange={(value) => setField('brand', value)}
                 placeholder={tr('type_or_select_brand', 'Type or select brand...', 'វាយ ឬជ្រើសរើសម៉ាក...')}
                 ariaLabel={tr('brand', 'Brand', 'ម៉ាក')}
-                emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
+                emptyHint={emptyHintFor(brandSuggestionsSourced, brandSuggestionOptions.length)}
               />
             </div>
             <div className="min-w-0">
@@ -1611,7 +1676,7 @@ export default function ProductForm({
                 onChange={(value) => setField('unit', value)}
                 placeholder={tr('type_or_select_unit', 'Type or select unit...', 'វាយ ឬជ្រើសរើសឯកតា...')}
                 ariaLabel={t('unit') || 'Unit'}
-                emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
+                emptyHint={emptyHintFor(unitSuggestionsSourced, unitSuggestionOptions.length)}
               />
             </div>
             <div className="min-w-0">
@@ -1630,7 +1695,7 @@ export default function ProductForm({
                 onChange={(value) => setField('supplier', value)}
                 placeholder={tr('type_or_select_supplier', 'Type or select supplier...', 'វាយឈ្មោះ ឬជ្រើសរើសអ្នកផ្គត់ផ្គង់...')}
                 ariaLabel={tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}
-                emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
+                emptyHint={emptyHintFor(supplierSuggestionsSourced, supplierSuggestionOptions.length)}
               />
             </div>
             <div className="min-w-0 sm:col-span-2 lg:col-span-4">

@@ -22,6 +22,7 @@ import {
   nextSuggestionIndex,
   normalizeSuggestionOptions,
   shouldPickOnClick,
+  suggestionEmptyState,
   PICK_GESTURE_WINDOW_MS,
 } from '../src/utils/suggestionMatching.ts'
 
@@ -183,6 +184,57 @@ check('DISCRIMINATING: the click fallback picks, except when the same tap alread
   assert.equal(shouldPickOnClick(0, 5_000), true, 'a click with no preceding pick IS the pick')
   assert.equal(shouldPickOnClick(5_000, 5_000 + PICK_GESTURE_WINDOW_MS - 1), false, 'the click of a tap whose mousedown already picked must not pick a second time')
   assert.equal(shouldPickOnClick(5_000, 5_000 + PICK_GESTURE_WINDOW_MS), true, 'a genuinely new gesture picks again')
+})
+
+check('DISCRIMINATING: an empty list may only say "nothing saved yet" once its source has reported', () => {
+  // Round-1 defect, live on a real host: FastStockInModal renders ProductForm
+  // WITHOUT brandOptions, so Brand there had NO source at all -- and the field
+  // announced "Nothing saved yet -- type a new one." over a catalog carrying
+  // 205 brands. The same sentence was also shown for a query that simply
+  // matched none of a full list.
+  const oldEmptyHintState = (_sourced: boolean, _optionCount: number): string => 'none-yet'
+  assert.equal(oldEmptyHintState(false, 0), 'none-yet', 'positive control: the old hint really was unconditional')
+  assert.equal(suggestionEmptyState(false, 0), 'unknown', 'nothing has reported -- there is nothing honest to say')
+  assert.equal(suggestionEmptyState(true, 0), 'none-yet', 'the source reported, and it holds nothing')
+  assert.equal(suggestionEmptyState(true, 205), 'no-match', 'the source holds 205 brands; none match what was typed')
+})
+
+check('Brand owns its own source, so a host that plumbs nothing in still suggests', () => {
+  const fastStockIn = read('components/inventory/FastStockInModal.tsx')
+  const hostAt = fastStockIn.indexOf('<ProductForm')
+  assert.ok(hostAt > 0, 'FastStockInModal renders ProductForm')
+  const hostBlock = fastStockIn.slice(hostAt, fastStockIn.indexOf('/>', hostAt))
+  // This pin is anchored to the REAL host shape: that file is owned by
+  // another lane and supplies no brandOptions, which is precisely why the
+  // fallback and the gate below have to live inside ProductForm.
+  assert.doesNotMatch(hostBlock, /brandOptions=/, 'this host supplies no brandOptions')
+  assert.doesNotMatch(productForm, /brandOptions = \[\]/, 'a [] default makes "did the host supply a list" unanswerable')
+  assert.match(productForm, /const brandOptionsProvided = Array\.isArray\(brandOptions\)/, 'ProductForm can tell a supplied list from none')
+  assert.match(productForm, /getProductFilters/, 'and falls back to the brands products actually carry')
+
+  const brandAt = productForm.indexOf('id="product-brand"')
+  const brandBlock = productForm.slice(brandAt, brandAt + 900)
+  assert.doesNotMatch(brandBlock, /emptyHint=\{tr\(/, 'the Brand hint may not be unconditional')
+  assert.match(brandBlock, /emptyHint=\{emptyHintFor\(brandSuggestionsSourced/, 'it is gated on the source having reported')
+  assert.match(brandBlock, /onRequestOptions=\{ensureBrandSuggestions\}/, 'and the fallback is fetched when the list is actually opened')
+})
+
+check('every hint in the family answers to the same gate (one rule, one implementation)', () => {
+  for (const [id, sourced] of [
+    ['product-category', 'categorySuggestionsSourced'],
+    ['product-brand', 'brandSuggestionsSourced'],
+    ['product-unit', 'unitSuggestionsSourced'],
+    ['product-supplier', 'supplierSuggestionsSourced'],
+  ]) {
+    const at = productForm.indexOf(`id="${id}"`)
+    assert.ok(at > 0, `${id} must exist`)
+    assert.match(productForm.slice(at, at + 900), new RegExp(`emptyHint=\\{emptyHintFor\\(${sourced}`), `${id}'s hint is gated`)
+  }
+  assert.match(productForm, /function emptyHintFor[\s\S]{0,400}suggestionEmptyState/, 'the gate is the shared rule, not a per-field literal')
+  // Siblings outside ProductForm carry the same rule rather than a copy.
+  assert.match(sessionModal, /emptyHint=\{suggestionEmptyState\(brandOptions\.length > 0, brandOptions\.length\) === 'no-match'/, 'the create-products header Brand is gated too')
+  const variantModal = read('components/products/forms/VariantFormModal.tsx')
+  assert.match(variantModal, /suggestionEmptyState\(/, "the variant form's Supplier is gated too")
 })
 
 check('the list is a real combobox for keyboard and screen readers', () => {

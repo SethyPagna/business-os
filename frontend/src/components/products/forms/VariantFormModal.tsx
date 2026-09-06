@@ -10,6 +10,7 @@ import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import SuggestionTextInput from '../../shared/SuggestionTextInput.tsx'
 import { loadSupplierNames } from '../../shared/SupplierPickerField.tsx'
+import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { normalizeProductGroupName } from '../../../utils/productGrouping.ts'
 
 const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000
@@ -162,7 +163,9 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   // field ProductForm carries, so it gets the same suggestions from the same
   // permission-free names-only read. It used to be a bare text box -- the
   // operator had to remember and re-type a name the app already knew.
-  const [supplierNames, setSupplierNames] = useState<string[]>([])
+  // null until the read reports, so an empty list cannot be mistaken for
+  // "this catalog has no suppliers" (utils/suggestionMatching.ts).
+  const [supplierNames, setSupplierNames] = useState<string[] | null>(null)
   useEffect(() => {
     let alive = true
     loadSupplierNames()
@@ -170,6 +173,12 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       .catch(() => { /* suggestions unavailable -- free text still works */ })
     return () => { alive = false }
   }, [])
+  const variantSupplierEmptyState = suggestionEmptyState(supplierNames !== null, (supplierNames || []).length)
+  const variantSupplierEmptyHint = variantSupplierEmptyState === 'unknown'
+    ? undefined
+    : variantSupplierEmptyState === 'none-yet'
+      ? tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')
+      : tr('suggestions_no_match', 'No match — type to add a new one.', 'រកមិនឃើញ — សូមវាយបញ្ចូលថ្មី។')
   // S4-21: dismissing this modal with edits raises the discard prompt.
   const { dirty: formDirty } = useFormDirty(form, String(parent?.id ?? 'new'))
   const saveInFlightRef = useRef(false)
@@ -323,11 +332,11 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
               id="variant-form-supplier"
               name="variant_supplier"
               value={form.supplier}
-              options={supplierNames}
+              options={supplierNames || []}
               onChange={(value) => setField('supplier', value)}
               placeholder={tr('type_or_select_supplier', 'Type or select supplier...', 'វាយឈ្មោះ ឬជ្រើសរើសអ្នកផ្គត់ផ្គង់...')}
               ariaLabel={t('supplier') || 'Supplier'}
-              emptyHint={tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')}
+              emptyHint={variantSupplierEmptyHint}
             />
           </div>
 

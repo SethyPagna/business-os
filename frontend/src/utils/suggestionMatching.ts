@@ -132,3 +132,30 @@ export function shouldPickOnClick(lastPickAt: number, now: number): boolean {
   if (!(lastPickAt > 0)) return true
   return now - lastPickAt >= PICK_GESTURE_WINDOW_MS
 }
+
+/**
+ * What an open list may honestly say when it has no row to show.
+ *
+ * There are three different reasons a suggestion list is empty and only two
+ * of them have anything true to tell the operator:
+ *
+ *   'unknown'   the option source has not reported. FastStockInModal renders
+ *               ProductForm with no brandOptions at all; announcing "nothing
+ *               saved yet" there was a claim about 205 brands the field had
+ *               simply never been given. Say nothing.
+ *   'none-yet'  the source reported and holds nothing -- typing a new value
+ *               really is the only way forward.
+ *   'no-match'  the source holds values, none of which match what was typed.
+ *               "Nothing saved yet" is false here too.
+ *
+ * `sourced` is the caller's evidence that its source reported. A list fed by
+ * a prop can only prove that by being non-empty (an empty array is
+ * indistinguishable from a host whose own fetch is still in flight); a list
+ * the field fetches itself knows when the read settled.
+ */
+export type SuggestionEmptyState = 'unknown' | 'none-yet' | 'no-match'
+
+export function suggestionEmptyState(sourced: boolean, optionCount: number): SuggestionEmptyState {
+  if (!sourced) return 'unknown'
+  return optionCount > 0 ? 'no-match' : 'none-yet'
+}
