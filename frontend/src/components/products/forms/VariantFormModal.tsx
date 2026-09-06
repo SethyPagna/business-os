@@ -9,6 +9,9 @@ import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuar
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import { normalizeProductGroupName } from '../../../utils/productGrouping.ts'
+// N34: the ONE link-over prompt, shared with the product form and Conflicts.
+import { useIdentityLinkOver } from '../useIdentityLinkOver.tsx'
+import { identityCollisionFrom, withKeepSeparateDecision } from '../helpers/identityLinkOver.ts'
 
 const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000
 
@@ -160,6 +163,10 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   const { dirty: formDirty } = useFormDirty(form, String(parent?.id ?? 'new'))
   const saveInFlightRef = useRef(false)
   const { notify } = useApp()
+  // The prompt itself lives in the shared hook, so this door asks the same
+  // question, with the same wording and the same answers, as the product form
+  // and the Conflicts resolve editor.
+  const { askIdentityLinkOver, identityLinkOverDialog } = useIdentityLinkOver(t)
 
   const setField = <Key extends keyof VariantFormState>(key: Key, value: VariantFormState[Key]): void => {
     setForm((current) => ({ ...current, [key]: value }))
@@ -206,7 +213,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     setErr('')
     try {
       const clientRequestId = `variant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      const response = await runVariantMutation(() => getProductVariantApi().createProductVariant({
+      const payload: Record<string, unknown> = {
         client_request_id: clientRequestId,
         ...form,
         // Name is the only grouping key. Every created row stays ordinary;
@@ -220,7 +227,31 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
         cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
         userId: user?.id,
         userName: user?.name,
-      }), 'Create product variant')
+      }
+      // N34. The variant door is a CREATE door: the row does not exist yet, so
+      // there is nothing to link over -- the Worker's guard offers open-the-
+      // existing-row or keep-them-separate, and only the second is expressible
+      // on the save. Ask it here rather than dead-ending on the refusal text:
+      // this form defaults the name to the parent's, so "same name, and a
+      // barcode a sibling already carries" is its most ordinary collision, not
+      // an exotic one. Nothing is retried without an explicit answer.
+      const response = await runVariantMutation(
+        () => getProductVariantApi().createProductVariant(payload), 'Create product variant',
+      ).catch(async (error: unknown) => {
+        const collision = identityCollisionFrom(error)
+        if (!collision) throw error
+        const choice = await askIdentityLinkOver({
+          subjectName: String(form.name || ''),
+          matches: collision.matches,
+          canLinkOver: collision.canLinkOver,
+          canKeepSeparate: collision.canKeepSeparate,
+        })
+        if (choice !== 'keep_separate' || !collision.canKeepSeparate) throw error
+        return runVariantMutation(
+          () => getProductVariantApi().createProductVariant(withKeepSeparateDecision(payload)),
+          'Create product variant',
+        )
+      })
 
       if (response?.success === false) {
         setErr(response.error || tr('failed', 'Failed', 'បរាជ័យ'))
@@ -430,6 +461,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           <button type="button" className="btn-secondary min-h-11" onClick={onClose} disabled={saving}>{t('cancel') || 'Cancel'}</button>
         </div>
       </div>
+      {identityLinkOverDialog}
     </Modal>
   )
 }

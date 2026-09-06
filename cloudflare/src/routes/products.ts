@@ -2190,13 +2190,41 @@ app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
   return c.json({ success: true })
 })
 
+// "Add variant" (Products -> a group row's menu, and the detail sheet's
+// onAddVariant) is a THIRD create door, and until now the only one with no
+// identity rule on it at all: it wrote name + barcode straight through
+// insertRow. So the exact save POST / refuses -- a second row with the same
+// name and the same FOLDED barcode -- succeeded here, on the surface whose
+// whole purpose is adding another row to an existing name group, i.e. the one
+// most likely to be pointed at an identity that already exists. It asks the
+// same question now, through the same functions, and accepts the same single
+// answer on the same wire field.
 app.post('/variant', async (c) => {
-  if (!hasPermission(c.get('user'), 'products')) {
+  const user = c.get('user')
+  if (!hasPermission(user, 'products')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+  // Same Excel-artifact refusal as the two sibling doors: a barcode that reads
+  // as scientific notation is never a real code, and this was the one door
+  // where one could still be stored.
+  const variantBarcode = String(body.barcode ?? '').trim()
+  if (SCIENTIFIC_NOTATION_BARCODE.test(variantBarcode)) {
+    return c.json(scientificBarcodeError(variantBarcode), 400)
+  }
+  // N34, the same two answers as POST /. There is no saved row yet whose
+  // records could move anywhere, so this door offers open-the-existing-row or
+  // keep-them-separate -- and keep-separate only when it was sent explicitly.
+  const variantDecision = readIdentityDecision(body)
+  const variantMatches = await findSameProductIdentityProducts(c.env, name, body.barcode, null)
+  if (variantMatches.length && !variantDecision) {
+    return c.json(identityMatchRefusal(variantMatches, 'create'), 409)
+  }
+  const variantKeptSeparateFrom = variantMatches.map((row) => row.id)
+  const variantKeptSeparateBarcodes = [body.barcode, ...variantMatches.map((row) => row.barcode)]
+  delete body[IDENTITY_DECISION_FIELD]
   const id = await insertRow(c.env, 'products', body, { name, is_active: 1 })
 
   const rawBranchId = Number.parseInt(String(body.branch_id ?? ''), 10)
@@ -2208,9 +2236,26 @@ app.post('/variant', async (c) => {
   await seedBranchStockForNewProduct(c.env, id as number, branchId, initialQty)
   await seedInitialBatchForNewProduct(c.env, id as number, branchId, initialQty)
 
+  // Same bookkeeping as POST /: the row was written over a live identity
+  // collision because the operator said "keep them separate", so record it and
+  // clear the dismissals that would hide the pair from Conflicts. After the
+  // insert, so a failed write leaves no trace of a decision that never took
+  // effect.
+  if (variantKeptSeparateFrom.length) {
+    const retired = await retireKeepSeparateDismissals(c.env, name, variantKeptSeparateBarcodes)
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'identity_keep_separate', 'product', id, {
+      keptSeparateFrom: variantKeptSeparateFrom, path: 'variant', dismissalsRetired: retired,
+    })
+  }
+
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
-  return c.json({ item: await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id }), id, success: true })
+  return c.json({
+    item: await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id }),
+    id,
+    success: true,
+    keptSeparateFrom: variantKeptSeparateFrom,
+  })
 })
 
 // POST /api/products/merge-duplicates -- retroactive cleanup for products

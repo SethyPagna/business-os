@@ -176,13 +176,67 @@ assert.ok(preFixEdit(13, { name: 'Fork Cost', barcode: '778899', cost_price_usd:
   'control: the old rule 409d the cost-forked sibling, deadlocking it against the merge tool')
 assert.ok(preFixEdit(11, { cost_price_usd: 4 }), 'control: the old rule even queried on a cost-only body')
 
-// ---- 2. Wiring: both routes, guard before the review queue, no override ----
+// ---- 2. Wiring: all three create/edit doors, guard before the review queue, no override ----
+// The two anchors the variant probe below walks between, and the pre-fix
+// handler it is controlled against. Kept as data at the top so the probe reads
+// as one function with two inputs rather than two hand-copied greps.
+const VARIANT_ROUTE = "app.post('/variant'"
+const VARIANT_INSERT = "insertRow(c.env, 'products'"
+const PRE_FIX_VARIANT_HANDLER = [
+  "app.post('/variant', async (c) => {",
+  "  if (!hasPermission(c.get('user'), 'products')) {",
+  "    return c.json({ error: 'You do not have permission to perform this action' }, 403)",
+  '  }',
+  '  const body = (await c.req.json()) as Record<string, unknown>',
+  "  const name = String(body.name || '').trim()",
+  "  if (!name) return c.json({ error: 'Product name is required' }, 400)",
+  "  const id = await insertRow(c.env, 'products', body, { name, is_active: 1 })",
+].join('\n')
+
 const createAt = source.indexOf("app.post('/', async (c) => {")
 const createGuardAt = source.indexOf('findSameProductIdentityProducts(', createAt)
 const createQueueAt = source.indexOf("actionType: 'create'", createAt)
 assert.ok(createAt > 0 && createGuardAt > createAt && createQueueAt > createGuardAt,
   'create: the identity guard runs BEFORE maybeQueueForReview so reviewers never approve duplicates')
 assert.match(source, /findSameProductIdentityProducts\(c\.env, nextName, nextBarcode, Number\(id\)\)/, 'edit: name/barcode changes are judged too')
+// The THIRD create door. "Add variant" (Products -> a group row's menu, and the
+// detail sheet) posted name + barcode straight into insertRow with no identity
+// question at all -- on the surface whose entire purpose is adding another row
+// to an existing name group, and which DEFAULTS the typed name to the parent's.
+// So the exact save POST / refuses succeeded here.
+//
+// The probe is a function, run against TWO inputs: the shipped source, and the
+// pre-fix handler quoted verbatim from 6e3abfea. A wiring assertion that only
+// ever sees the fixed file cannot tell a real guard from a grep that would have
+// matched anyway; the positive control is what makes this check mean something.
+const guardsIdentityBeforeInsert = (text) => {
+  const at = text.indexOf(VARIANT_ROUTE)
+  if (at < 0) return false
+  const insertAt = text.indexOf(VARIANT_INSERT, at)
+  if (insertAt < 0) return false
+  const head = text.slice(at, insertAt)
+  return /findSameProductIdentityProducts\(/.test(head)
+    && /identityMatchRefusal\(variantMatches, 'create'\)/.test(head)
+    && /readIdentityDecision\(body\)/.test(head)
+}
+assert.equal(guardsIdentityBeforeInsert(source), true,
+  'variant: the identity guard must run BEFORE the row is inserted, and refuse in create mode')
+// POSITIVE CONTROL: the handler as it stood at 6e3abfea. The probe must answer
+// NO on it, or it is discriminating nothing.
+assert.equal(guardsIdentityBeforeInsert(PRE_FIX_VARIANT_HANDLER), false,
+  'control: the pre-fix variant door inserted name + barcode unguarded -- a probe that passes on it proves nothing about the fixed one')
+// ...and the bookkeeping the other create door does: a kept-separate variant is
+// audited and its pair un-hidden in Conflicts, or "changeable in Conflicts" is a
+// promise this door breaks.
+const variantAt = source.indexOf(VARIANT_ROUTE)
+const variantBody = source.slice(variantAt, source.indexOf('\napp.post(', variantAt + 10))
+assert.match(variantBody, /retireKeepSeparateDismissals\(c\.env, name, variantKeptSeparateBarcodes\)/,
+  'variant: keeping a pair separate must un-hide it in Conflicts')
+assert.match(variantBody, /'identity_keep_separate', 'product', id/, 'variant: the decision is audited, not silent')
+assert.match(variantBody, /path: 'variant'/, 'variant: the audit says which door the decision was taken at')
+assert.match(variantBody, /scientificBarcodeError\(variantBarcode\)/,
+  'variant: the Excel scientific-notation artifact is refused here as it is at the sibling doors')
+
 // The edit guard's trigger, pinned at the source: it resolves the edit first and
 // only queries when the identity actually moved, and cost is nowhere in it.
 const editGuardAt = source.indexOf('const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, body)')
@@ -213,8 +267,8 @@ assert.ok(!/Boolean\(|!!|!= *null/.test(decisionBody),
 // can never reach cleanPayload or the review queue as if it were a column.
 assert.match(source, /if \(createMatches\.length && !createDecision\)/, 'create: no decision means the same refusal as before')
 assert.match(source, /if \(matches\.length && !readIdentityDecision\(body\)\)/, 'edit: no decision means the same refusal as before')
-assert.equal((source.match(/delete body\[IDENTITY_DECISION_FIELD\]/g) || []).length, 2,
-  'both doors strip the decision field from the payload they go on to write')
+assert.equal((source.match(/delete body\[IDENTITY_DECISION_FIELD\]/g) || []).length, 3,
+  'all three doors strip the decision field from the payload they go on to write')
 // The refusal is structured: every candidate, its ids, and the answers that
 // are actually available at that door (there is no row to link over on create).
 assert.match(source, /candidateIds: matches\.map\(\(row\) => row\.id\)/, 'the refusal names every candidate id')
