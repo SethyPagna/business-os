@@ -42,6 +42,7 @@
 // file only decides what order the narrowed list is drawn in.
 
 import {
+  buildBarcodeKeyMatchSql,
   buildExactBarcodeMatchClause,
   buildExactBarcodeRankSql,
   buildFtsMatchExpression,
@@ -50,10 +51,9 @@ import {
   buildShortWordFallbackClause,
   buildTrigramMatchExpression,
   normalizeSearchText,
-  normalizedBarcodeSql,
   PRODUCT_SEARCH_COLUMNS,
   PRODUCTS_FTS_BM25_SQL,
-  searchTermBarcodeKey,
+  searchTermBarcodeKeys,
   tokenizeSearchTermGroups,
 } from './searchMatch'
 
@@ -134,16 +134,16 @@ function buildMatchTierSql(
   },
 ): string | undefined {
   const nameKey = normalizeSearchText(rawSearchText)
-  const barcodeKey = opts.includeBarcodeTier ? searchTermBarcodeKey(rawSearchText) : ''
-  if (!nameKey && !barcodeKey) return undefined
+  const barcodeKeys = opts.includeBarcodeTier ? searchTermBarcodeKeys(rawSearchText) : []
+  if (!nameKey && !barcodeKeys.length) return undefined
 
   const branches: string[] = []
-  if (barcodeKey) {
-    // Same bound parameter buildExactBarcodeMatchClause binds (`barcodeKey`
-    // under this prefix) -- the WHERE disjunct and this tier must agree on
-    // what "the scanned code" is, so they share the value rather than
-    // normalizing it twice.
-    branches.push(`WHEN ${normalizedBarcodeSql(opts.barcodeColumn)} = @${opts.prefix}barcodeKey THEN ${MATCH_TIER_EXACT_BARCODE}`)
+  if (barcodeKeys.length) {
+    // Same bound parameters buildExactBarcodeMatchClause binds (`barcodeKey`
+    // under this prefix, plus one `…Alt<n>` per equivalent spelling) -- the
+    // WHERE disjunct and this tier must agree on what "the scanned code" is,
+    // so they share the values rather than normalizing them twice.
+    branches.push(`WHEN ${buildBarcodeKeyMatchSql(`${opts.prefix}barcodeKey`, opts.barcodeColumn, barcodeKeys.length)} THEN ${MATCH_TIER_EXACT_BARCODE}`)
   }
   if (nameKey) {
     const normalizedName = normalizedNameSql(opts.nameNormalizedColumn, opts.nameColumn)
@@ -194,16 +194,22 @@ export function buildProductSearchQuery(
       return `(${fallbackColumns.map((column) => `lower(COALESCE(${column}, '')) LIKE @${key}`).join(' OR ')})`
     })
     if (!wordClauses.length) return { hasSearchTerm: true, titleOnly }
-    // The exact-barcode tier needs its own bound value on this path too
-    // (buildExactBarcodeMatchClause is not called here), so bind it.
-    if (!titleOnly) {
-      const key = searchTermBarcodeKey(rawSearchText)
-      if (key) params[`${prefix}barcodeKey`] = key
-    }
+    // The exact-barcode equality clause belongs on THIS path too. It used to
+    // be skipped here -- only its parameter was bound, for the tier -- which
+    // left the compat path with no leading-zero (or UPC-E) fold at all: a
+    // LIKE '%<scanned code>%' over the raw column cannot match a stored
+    // spelling that differs in padding, so a scan that works on the indexed
+    // path silently found nothing whenever the FTS tables were missing.
+    // buildExactBarcodeMatchClause binds every key it needs, including the
+    // tier's.
+    const fallbackBarcodeMatch = titleOnly
+      ? undefined
+      : buildExactBarcodeMatchClause(rawSearchText, params, `${prefix}barcodeKey`, barcodeColumn)
+    const fallbackWords = `(${wordClauses.join(mode === 'OR' ? ' OR ' : ' AND ')})`
     return {
       hasSearchTerm: true,
       titleOnly,
-      whereClause: `(${wordClauses.join(mode === 'OR' ? ' OR ' : ' AND ')})`,
+      whereClause: fallbackBarcodeMatch ? `(${fallbackBarcodeMatch} OR ${fallbackWords})` : fallbackWords,
       matchTierSql: buildMatchTierSql(rawSearchText, params, {
         prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: !titleOnly,
       }),
@@ -270,7 +276,7 @@ export function buildProductSearchQuery(
   // the same "exact barcode leads" rule as a discrete key, and the two
   // never disagree.
   if (exactBarcodeMatch) {
-    const barcodeRank = buildExactBarcodeRankSql(`${prefix}barcodeKey`, barcodeColumn)
+    const barcodeRank = buildExactBarcodeRankSql(`${prefix}barcodeKey`, barcodeColumn, searchTermBarcodeKeys(rawSearchText).length)
     matchRankSql = matchRankSql ? `(${barcodeRank} + ${matchRankSql})` : barcodeRank
   }
 

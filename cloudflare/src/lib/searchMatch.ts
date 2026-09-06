@@ -354,17 +354,45 @@ function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
 interface HaystackIndex {
   tokens: string[]
   compact: string
+  barcodeKeys: string[]
 }
 
 // Pre-normalizes one record's searchable text once, so re-checking it
 // against multiple search-term groups (AND/OR mode) doesn't redo the same
 // normalization work per group.
+//
+// `barcodeKeys` is computed per FIELD, not from the joined text: a barcode
+// only means anything as a whole code, and joining it to a name would both
+// hide it and invent codes that no field holds. It is what lets this
+// re-filter agree with the server about UPC-E, whose compressed and
+// expanded spellings share no substring at all (see barcodeSearchKeys) --
+// without it a client re-filter would silently drop rows the server just
+// matched, which is the "server matched, page came back empty" bug class in
+// a different costume.
 export function buildHaystackIndex(...fields: unknown[]): HaystackIndex {
-  const normalized = normalizeSearchText(fields.filter((field) => field !== null && field !== undefined).join(' '))
+  const flat = fields.flatMap((field) => (Array.isArray(field) ? field : [field]))
+  const present = flat.filter((field) => field !== null && field !== undefined)
+  const normalized = normalizeSearchText(present.join(' '))
+  const barcodeKeys: string[] = []
+  for (const field of present) {
+    for (const key of barcodeSearchKeys(field)) {
+      if (!barcodeKeys.includes(key)) barcodeKeys.push(key)
+    }
+  }
   return {
     tokens: tokenizeNormalized(normalized),
     compact: normalized.replace(/\s+/g, ''),
+    barcodeKeys,
   }
+}
+
+// A lone scanned/typed code matches a record when the record carries the
+// same barcode under the shared identity rules, whatever spelling either
+// side is written in. Runs beside the word path, never instead of it.
+function termMatchesBarcode(term: string, index: HaystackIndex): boolean {
+  if (!index.barcodeKeys.length) return false
+  const keys = searchTermBarcodeKeys(term)
+  return keys.some((key) => index.barcodeKeys.includes(key))
 }
 
 // A single typed word ("query word") is considered present in the record if
@@ -388,6 +416,7 @@ function queryWordMatchesHaystack(queryWord: string, index: HaystackIndex): bool
 // this is what lets "Concealer Cover" find a product literally named
 // "Cover Concealer".
 function termMatchesHaystack(term: string, index: HaystackIndex): boolean {
+  if (termMatchesBarcode(term, index)) return true
   const words = tokenizeNormalized(normalizeSearchText(term))
   if (!words.length) return true
   return words.every((word) => queryWordMatchesHaystack(word, index))
@@ -1251,26 +1280,170 @@ export function normalizeBarcodeKey(value: unknown): string {
   return stripped
 }
 
-// True when two barcodes are the same real barcode under the rule above.
-export function barcodeKeysMatch(left: unknown, right: unknown): boolean {
-  const key = normalizeBarcodeKey(left)
-  return key !== '' && key === normalizeBarcodeKey(right)
+// --- UPC-E: the OTHER way one article carries two codes -----------------
+//
+// Owner report (2026-09-06, verbatim): "I see that barcode scanner cannot
+// scan the beginning with zero the leading zero for products that actually
+// have barcode with leading 0."
+//
+// The leading-zero fold above covers the UPC-A / EAN-13 / GTIN-14 family,
+// where two spellings of one code differ ONLY by padding. It cannot cover
+// the second way one article ends up with two codes: UPC-E, the 8-digit
+// compressed symbol printed on small packages, whose every code begins with
+// the number-system digit 0. A UPC-E is not a padded form of its UPC-A --
+// '01234565' expands to '012345000065' by re-inserting a run of zeros whose
+// POSITION is encoded in the last payload digit -- so no amount of ltrim()
+// on either side ever brings the two together. Decoders disagree about
+// which form to hand back (ZXing and the native BarcodeDetector both report
+// UPC_E as its own 8 digits), so a scan of a leading-zero UPC-E symbol
+// found nothing at all for a product the catalog holds under the expanded
+// code, and a scan of the expanded code found nothing for a product stored
+// compressed.
+//
+// Folded HERE, at the same kernel as the zero fold, so every comparison
+// site -- the SQL WHERE clause, the relevance tier, the client re-filter --
+// inherits it at once rather than growing a second implementation.
+//
+// Narrow by construction, so the "two codes that differ by anything other
+// than leading zeros never collide" guarantee still holds:
+//   * only the full 8-digit form is expanded, and only when its own check
+//     digit validates -- a 6- or 7-digit internal code is never guessed at;
+//   * only number systems 0 and 1, which is what GS1 reserves to UPC-E, so
+//     an in-store GTIN-8 beginning with 2 keeps its own identity;
+//   * compression is accepted only when expanding the result reproduces the
+//     original UPC-A digit for digit, so the rule can never invent an
+//     article that was not already the same one.
+function upcCheckDigit(elevenDigits: string): string {
+  let sum = 0
+  for (let index = 0; index < 11; index += 1) {
+    const digit = elevenDigits.charCodeAt(index) - 48
+    sum += index % 2 === 0 ? digit * 3 : digit
+  }
+  return String((10 - (sum % 10)) % 10)
 }
 
-// The barcode key a typed/scanned SEARCH BOX value stands for, or '' when
+// The 12-digit UPC-A an 8-digit UPC-E stands for, or '' when the value is
+// not a UPC-E at all.
+export function expandUpcE(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!/^[0-9]{8}$/.test(raw)) return ''
+  const numberSystem = raw[0]
+  if (numberSystem !== '0' && numberSystem !== '1') return ''
+  const [d1, d2, d3, d4, d5, d6] = raw.slice(1, 7).split('')
+  const body = d6 === '0' || d6 === '1' || d6 === '2'
+    ? `${d1}${d2}${d6}0000${d3}${d4}${d5}`
+    : d6 === '3'
+      ? `${d1}${d2}${d3}00000${d4}${d5}`
+      : d6 === '4'
+        ? `${d1}${d2}${d3}${d4}00000${d5}`
+        : `${d1}${d2}${d3}${d4}${d5}0000${d6}`
+  const eleven = `${numberSystem}${body}`
+  const upcA = `${eleven}${upcCheckDigit(eleven)}`
+  // The printed symbol carries its own check digit: a mismatch means this is
+  // some other 8-digit code (a GTIN-8), not a compressed UPC-A.
+  return raw[7] === upcA[11] ? upcA : ''
+}
+
+// The 8-digit UPC-E a UPC-A (or its 13-digit EAN-13 form) compresses to, or
+// '' when that code has no compressed form.
+export function compressUpcA(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!/^[0-9]+$/.test(raw)) return ''
+  const upcA = raw.length === 13 && raw[0] === '0' ? raw.slice(1) : raw
+  if (upcA.length !== 12) return ''
+  const numberSystem = upcA[0]
+  if (numberSystem !== '0' && numberSystem !== '1') return ''
+  const manufacturer = upcA.slice(1, 6)
+  const item = upcA.slice(6, 11)
+  const check = upcA[11]
+  const payloads = [
+    `${manufacturer[0]}${manufacturer[1]}${item[2]}${item[3]}${item[4]}${manufacturer[2]}`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${item[3]}${item[4]}3`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${manufacturer[3]}${item[4]}4`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${manufacturer[3]}${manufacturer[4]}${item[4]}`,
+  ]
+  for (const payload of payloads) {
+    const candidate = `${numberSystem}${payload}${check}`
+    // Round-tripping through the expansion IS the validation: it proves the
+    // zero run sat exactly where this pattern claims it did.
+    if (expandUpcE(candidate) === upcA) return candidate
+  }
+  return ''
+}
+
+// Every canonical key one barcode may legitimately be found under: the
+// leading-zero-folded form first, plus its UPC-E/UPC-A counterpart when the
+// value is one half of that pair. Empty when the value is not a real
+// barcode. The primary key stays first so callers that can only carry one
+// (the SQL parameter every route already binds) keep the old behaviour.
+export function barcodeSearchKeys(value: unknown): string[] {
+  const primary = normalizeBarcodeKey(value)
+  if (!primary) return []
+  const keys = [primary]
+  const digits = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+  for (const equivalent of [expandUpcE(digits), compressUpcA(digits)]) {
+    const key = equivalent ? normalizeBarcodeKey(equivalent) : ''
+    if (key && !keys.includes(key)) keys.push(key)
+  }
+  return keys
+}
+
+// True when two barcodes are the same real barcode under the rules above.
+export function barcodeKeysMatch(left: unknown, right: unknown): boolean {
+  const leftKeys = barcodeSearchKeys(left)
+  if (!leftKeys.length) return false
+  return barcodeSearchKeys(right).some((key) => leftKeys.includes(key))
+}
+
+// The barcode keys a typed/scanned SEARCH BOX value stands for, or [] when
 // the text isn't a lone code. Deliberately single-token: "dior 3348901770569"
 // is a normal two-word search (name AND code), not a barcode lookup, and
 // must keep going through the ordinary word path.
-export function searchTermBarcodeKey(raw: unknown): string {
+export function searchTermBarcodeKeys(raw: unknown): string[] {
   const text = String(raw ?? '').trim()
-  if (!text || /[\s,]/.test(text)) return ''
-  return normalizeBarcodeKey(text)
+  if (!text || /[\s,]/.test(text)) return []
+  return barcodeSearchKeys(text)
+}
+
+// The primary key alone, for the callers and tests that only need one.
+export function searchTermBarcodeKey(raw: unknown): string {
+  return searchTermBarcodeKeys(raw)[0] || ''
 }
 
 // SQL form of normalizeBarcodeKey for a stored column: lowercase, drop
 // spaces/hyphens, strip leading zeros. Kept in lockstep with the JS above.
 export function normalizedBarcodeSql(column: string): string {
   return `ltrim(lower(replace(replace(trim(COALESCE(${column}, '')), ' ', ''), '-', '')), '0')`
+}
+
+// The bound parameter names one key set occupies. The primary key keeps the
+// caller's own name, so the WHERE clause, the relevance TIER and the rank
+// expression all still share it; equivalents (the UPC-E counterpart) are
+// suffixed. One function, so those three sites can never disagree about the
+// spelling of a name only one of them binds.
+export function barcodeKeyParamNames(paramName: string, keyCount: number): string[] {
+  return Array.from(
+    { length: Math.max(0, keyCount) },
+    (_, index) => (index === 0 ? paramName : `${paramName}Alt${index - 1}`),
+  )
+}
+
+export function bindBarcodeKeyParams(
+  params: Record<string, unknown>,
+  paramName: string,
+  keys: readonly string[],
+): string[] {
+  const names = barcodeKeyParamNames(paramName, keys.length)
+  names.forEach((name, index) => { params[name] = keys[index] })
+  return names
+}
+
+// "the stored column normalizes to one of the keys this scan stands for".
+// A single key renders as `IN (@barcodeKey)`, which SQLite plans exactly as
+// the `= @barcodeKey` this replaced.
+export function buildBarcodeKeyMatchSql(paramName: string, column: string, keyCount: number): string {
+  const names = barcodeKeyParamNames(paramName, keyCount).map((name) => `@${name}`)
+  return `${normalizedBarcodeSql(column)} IN (${names.join(', ')})`
 }
 
 // Extra WHERE disjunct that makes "the scanned code finds BOTH twins" an
@@ -1284,9 +1457,9 @@ export function buildExactBarcodeMatchClause(
   idColumn = 'p.id',
   table = 'products',
 ): string | undefined {
-  const key = searchTermBarcodeKey(rawQuery)
-  if (!key) return undefined
-  params[paramName] = key
+  const keys = searchTermBarcodeKeys(rawQuery)
+  if (!keys.length) return undefined
+  bindBarcodeKeyParams(params, paramName, keys)
   // Two probes, the index-served one first. `products(barcode)` carries a
   // plain index (idx_products_barcode_pg, migrations/0001_init.sql), which a
   // predicate wrapped in ltrim()/replace() can never use -- so the literal
@@ -1308,14 +1481,22 @@ export function buildExactBarcodeMatchClause(
   // it becomes its own materialized LIST SUBQUERY, planned as a SEARCH on
   // the covering barcode index and evaluated before the FTS/trigram
   // subqueries that follow it in the OR.
-  const candidates = barcodeEqualityCandidates(key)
+  // Every key contributes its own literal forms, so a scanned UPC-E probes
+  // the expanded UPC-A the catalog most likely stores (and its zero-padded
+  // spellings) on the same index, not only its own 8 digits.
+  const candidates: string[] = []
+  for (const key of keys) {
+    for (const candidate of barcodeEqualityCandidates(key)) {
+      if (!candidates.includes(candidate)) candidates.push(candidate)
+    }
+  }
   const placeholders = candidates.map((candidate, index) => {
     params[`${paramName}Eq${index}`] = candidate
     return `@${paramName}Eq${index}`
   })
   const rawColumn = column.includes('.') ? column.slice(column.lastIndexOf('.') + 1) : column
   const probe = `${idColumn} IN (SELECT id FROM ${table} WHERE ${rawColumn} IN (${placeholders.join(', ')}))`
-  return `(${probe} OR ${normalizedBarcodeSql(column)} = @${paramName})`
+  return `(${probe} OR ${buildBarcodeKeyMatchSql(paramName, column, keys.length)})`
 }
 
 // The stored literal forms one normalized barcode key can take. GTIN-14 is the
@@ -1337,6 +1518,6 @@ export function barcodeEqualityCandidates(key: string, maxLength = 18): string[]
 // the parameter).
 export const EXACT_BARCODE_RANK_OFFSET = 1000000
 
-export function buildExactBarcodeRankSql(paramName = 'barcodeKey', column = 'p.barcode'): string {
-  return `(CASE WHEN ${normalizedBarcodeSql(column)} = @${paramName} THEN 0 ELSE ${EXACT_BARCODE_RANK_OFFSET} END)`
+export function buildExactBarcodeRankSql(paramName = 'barcodeKey', column = 'p.barcode', keyCount = 1): string {
+  return `(CASE WHEN ${buildBarcodeKeyMatchSql(paramName, column, keyCount)} THEN 0 ELSE ${EXACT_BARCODE_RANK_OFFSET} END)`
 }
