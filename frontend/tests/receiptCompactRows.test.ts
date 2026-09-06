@@ -378,6 +378,81 @@ await runTest('the print/image/PDF export reads the same track, not its own copy
   assert.doesNotMatch(receiptSource, /grid-cols-\[minmax\(0,1fr\)_minmax\(4\.6rem,auto\)\]/, 'and the component\'s rem-sized one with it')
 })
 
+// --- 5. the QR codes sit tight above their captions ------------------------
+
+// Tailwind's spacing scale in px, for the classes this block uses. Reading the
+// gap out of the rendered markup rather than asserting a class name means the
+// test states the DISTANCE the owner complained about, not its spelling.
+const TAILWIND_SPACING_PX: Record<string, number> = {
+  '0': 0, '0.5': 2, '1': 4, '1.5': 6, '2': 8, '3': 12,
+}
+
+function spacingPx(classList: string, prefix: string): number {
+  const match = classList.match(new RegExp(`(?:^|\\s)${prefix}-([0-9.]+)(?:\\s|$)`))
+  if (!match) return 0
+  const px = TAILWIND_SPACING_PX[match[1]]
+  assert.ok(px !== undefined, `unmapped Tailwind spacing ${prefix}-${match[1]}`)
+  return px
+}
+
+const qrSource = fs.readFileSync(new URL('../src/components/receipt/ReceiptQrCodes.tsx', import.meta.url), 'utf8')
+
+function loadQrComponent(): unknown {
+  const mod = { exports: {} as Record<string, unknown> }
+  const compiled = transformSync(qrSource, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+  new Function('require', 'module', 'exports', compiled)((id: string) => {
+    if (id === 'react' || id === 'react/jsx-runtime') return require(id)
+    return { normalizeSocialQrUrl: (url: string) => ({ url }) }
+  }, mod, mod.exports)
+  return mod.exports.default
+}
+
+await runTest('a QR image and its caption are 2px apart, not 8', () => {
+  const ReceiptQrCodes = loadQrComponent()
+  const html = renderToStaticMarkup(React.createElement(ReceiptQrCodes, {
+    entries: [
+      { key: 'portal', label: 'Shop Online', url: 'https://example.com' },
+      { key: 'fb', label: 'Facebook', url: 'https://facebook.com/x' },
+      { key: 'tg', label: 'Telegram', url: 'https://t.me/x' },
+    ],
+    scanLabel: 'Scan to visit',
+  }))
+  // The tile is the flex column that holds one code and its name.
+  const tileClasses = [...html.matchAll(/class="([^"]*flex-col[^"]*)"/g)].map((match) => match[1])
+  assert.equal(tileClasses.length, 3, 'three tiles rendered')
+  // The white box around the code, whose padding used to add 4px underneath
+  // the image on top of the flex gap.
+  const boxClasses = [...html.matchAll(/class="(flex w-full max-w-\[68px\][^"]*)"/g)].map((match) => match[1])
+  assert.equal(boxClasses.length, 3, 'each code sits in its own box')
+  for (let index = 0; index < 3; index += 1) {
+    const distance = spacingPx(tileClasses[index], 'gap') + spacingPx(boxClasses[index], 'p')
+    assert.ok(
+      distance <= 2,
+      `the code and its caption must sit within 2px, got ${distance}px (it was 4px of box padding + a 4px gap)`,
+    )
+  }
+})
+
+await runTest('the three QR columns are evenly spaced and fit narrow paper', () => {
+  const ReceiptQrCodes = loadQrComponent()
+  const html = renderToStaticMarkup(React.createElement(ReceiptQrCodes, {
+    entries: [
+      { key: 'portal', label: 'Shop Online', url: 'https://example.com' },
+      { key: 'fb', label: 'Facebook', url: 'https://facebook.com/x' },
+      { key: 'tg', label: 'Telegram', url: 'https://t.me/x' },
+    ],
+    scanLabel: 'Scan to visit',
+  }))
+  const grid = html.match(/class="(grid grid-cols-3[^"]*)"/)
+  assert.ok(grid, 'the codes are laid out on a grid')
+  assert.match(grid[1], /grid-cols-3/, 'three equal columns')
+  assert.match(grid[1], /justify-items-center/, 'each tile centred in its own column -- that is the even spacing')
+  // A fixed 80px tile times three plus gutters overflows a 58mm receipt's
+  // ~187px content box; the tile has to be able to shrink.
+  assert.doesNotMatch(qrSource, /className="flex w-\[80px\]/, 'the tile must not be a fixed width')
+  assert.match(qrSource, /w-full max-w-\[80px\]/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
