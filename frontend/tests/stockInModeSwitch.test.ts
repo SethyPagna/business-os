@@ -83,6 +83,30 @@ runTest('Enter still queues the current line', () => {
   assert.match(modalSource, /onKeyDown=\{\(event\) => \{ if \(event\.key === 'Enter'\) addLine\(\) \}\}/)
 })
 
+runTest('a set can target zero; an add or a remove of nothing still cannot', () => {
+  // "Set to 0" is how an operator empties a branch -- the last one sold, a
+  // miscount corrected down to nothing. The shared guard read `if (qty <= 0)`
+  // for all three modes, so the one mode that needs zero was the one mode that
+  // could not have it. The Worker refused it first, above its own set
+  // conversion; that half is proven in
+  // cloudflare/scripts/test-stock-set-zero-pure.cjs. One rule, both halves.
+  assert.match(modalSource, /if \(qty <= 0 && mode !== 'set'\)/,
+    'add and remove keep the positive-quantity guard; set does not')
+  // A blank box must not queue "set to 0" by accident, and a set cannot go
+  // negative -- the same non-negative rule the route enforces.
+  assert.match(modalSource, /if \(mode === 'set' && \(!rawQuantity \|\| qty < 0\)\)/,
+    'a set needs a value actually typed, and a non-negative one')
+  assert.match(modalSource, /const rawQuantity = quantity\.trim\(\)/)
+  // ...and the input itself says so: 0 is reachable in set mode only.
+  assert.match(modalSource, /min=\{mode === 'set' \? 0 : 1\}/,
+    "the Qty input's floor follows the mode")
+  // nothing silently refused: the set-mode rejection names its own reason
+  assert.match(modalSource, /tr\('fast_stockin_set_qty'/)
+  assert.equal(typeof en.fast_stockin_set_qty, 'string')
+  assert.equal(typeof km.fast_stockin_set_qty, 'string')
+  assert.match(String(km.fast_stockin_set_qty), /[ក-៿]/)
+})
+
 runTest('the write honours the mode through the one adjust kernel; add keeps its receipt gate', () => {
   // remove: the chosen lot or the oldest lots; no receipt fields
   assert.match(modalSource, /line\.mode === 'remove'\s*\? await adjustStock\(\{\s*productId: Number\(line\.product\.id\), type: 'remove', quantity: line\.quantity,[^]*?batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null,[^]*?sessionId: sessionIdRef\.current,/)

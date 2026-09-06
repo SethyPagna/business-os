@@ -474,6 +474,7 @@
   "fast_stockin_pick_branch": "ជ្រើសសាខា",
   "fast_stockin_pick_product": "ជ្រើសផលិតផលជាមុនសិន",
   "fast_stockin_qty": "បរិមាណត្រូវតែយ៉ាងតិច 1",
+  "fast_stockin_set_qty": "បរិមាណត្រូវតែ 0 ឬច្រើនជាង",
   "fast_stockin_received": "បានទទួលក្នុងវគ្គនេះ",
   "fast_stockin_search": "វាយឈ្មោះផលិតផល ឬបាកូដ…",
   "fast_stockin_supplier_hint": "កត់ត្រាលើគ្រប់ថ្ងៃចូលដែលវគ្គនេះទទួល (ការកំណត់ដំបូងជាប់រហូត)។",

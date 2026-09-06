@@ -430,10 +430,19 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
 
   const addLine = () => {
     if (saving) return
-    const qty = Math.floor(Number(quantity)) || 0
+    const rawQuantity = quantity.trim()
+    const qty = Math.floor(Number(rawQuantity)) || 0
     if (!picked) { notify(tr('fast_stockin_pick_product', 'Pick a product first'), 'error'); return }
     if (!branchId) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
-    if (qty <= 0) { notify(tr('fast_stockin_qty', 'Quantity must be at least 1'), 'error'); return }
+    // N27: an add and a remove are MOVEMENTS -- zero moves nothing. A set is a
+    // TARGET, and zero is a number an operator counts: the last one sold, a
+    // branch being emptied. The route enforces the same split
+    // (routes/inventory.ts: `type === 'set' ? !(quantity >= 0) : !(quantity > 0)`),
+    // so this is the same rule read early, not a second one.
+    if (qty <= 0 && mode !== 'set') { notify(tr('fast_stockin_qty', 'Quantity must be at least 1'), 'error'); return }
+    // An empty box must not queue "set to 0" by accident -- `Number('')` is 0 --
+    // and a branch cannot hold less than nothing.
+    if (mode === 'set' && (!rawQuantity || qty < 0)) { notify(tr('fast_stockin_set_qty', 'Quantity must be 0 or more'), 'error'); return }
     // A remove has no receipt: no payment, no supplier, no cost to check.
     if (mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate.trim()) {
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
@@ -808,7 +817,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 </div>
               )}
               <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode === 'remove' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_6rem_8rem_1fr]'}`}>
-                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('set_to', 'Set to') : tr('quantity', 'Qty')}</span><input type="number" min="1" step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
+                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('set_to', 'Set to') : tr('quantity', 'Qty')}</span><input type="number" min={mode === 'set' ? 0 : 1} step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
                 {mode !== 'remove' ? <>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('cost_price_usd', 'Cost price $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.01" className="input text-sm" required disabled={freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
                   const next = event.target.value

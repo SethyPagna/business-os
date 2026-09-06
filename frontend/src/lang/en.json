@@ -474,6 +474,7 @@
   "fast_stockin_pick_branch": "Pick a branch",
   "fast_stockin_pick_product": "Pick a product first",
   "fast_stockin_qty": "Quantity must be at least 1",
+  "fast_stockin_set_qty": "Quantity must be 0 or more",
   "fast_stockin_received": "Received this session",
   "fast_stockin_search": "Type a product name or barcode…",
   "fast_stockin_supplier_hint": "Recorded on every received date this session receives (first attribution sticks).",
