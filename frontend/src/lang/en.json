@@ -5786,6 +5786,17 @@
   "outstanding_balance": "Outstanding balance",
   "sale_settlement_rows_limit": "This sale has {count} recorded payment rows. Settlement supports at most {max}; no recorded rows were removed. Repair the record before completing it.",
   "sale_mutation_rate_changed": "The exchange rate changed. Review the updated KHR rate, then confirm again.",
+  "catalog_cost_price": "Catalog cost price",
+  "complete_stock_session_changes": "Complete stock session changes",
+  "confirm_complete_stock_session_mixed": "Complete this stock session with mixed results?",
+  "fast_stock_auto_lot": "Oldest lots first",
+  "fast_stock_mode_hint": "Choose whether the next line adds, removes, or sets stock.",
+  "fast_stock_set_hint": "Set the stock quantity to this number.",
+  "set_to": "Set to",
+  "stock_action": "Stock action",
+  "stock_change_session_reason": "Stock change session",
+  "stock_line_removed": "Removed",
+  "stock_line_set": "Set",
   "add_products": "Add products",
   "add_products_button_hint": "Add new products or receive stock for products you already have."
 }
