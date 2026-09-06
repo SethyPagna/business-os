@@ -16,6 +16,7 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell, StatusPill, SummaryTile } from './catalogUi'
 
 type IdValue = string | number
@@ -524,12 +525,15 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
               {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-neutral-400">{addressFact.value}</div> : null}
             </div>
           </div>
-          <iframe
-            title="portal-about-map"
+          {/* N45: the map is the storefront's only automatically-loading
+              third party, so it waits for a click instead of fetching Google
+              the moment this tab renders. Declining is a plain link, not a
+              dead end. */}
+          <PortalEmbedConsent
+            copy={copy}
             src={mapEmbedUrl}
-            className="h-72 w-full border-0"
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
+            title="portal-about-map"
+            address={addressFact?.value || ''}
           />
         </div>
       ) : null}

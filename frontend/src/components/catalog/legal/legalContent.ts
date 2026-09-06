@@ -119,6 +119,9 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   { id: 'device', name: 'businessos_device_settings', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_device_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // catalogAssetUrls.ts -- image host override.
   { id: 'assets', name: 'businessos_public_asset_base_url', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_assets_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
+  // legal/PortalEmbedConsent.tsx -- written only when the visitor asks for
+  // the map, so their answer is not asked for again on the next visit.
+  { id: 'map-consent', name: 'business-os-portal-map-consent-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_map_consent_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
 ]
 
 const EN: Record<string, string> = {
@@ -217,6 +220,7 @@ const EN: Record<string, string> = {
   portal_legal_store_cache_l: 'About 20 minutes',
   portal_legal_store_device_p: 'Your light or dark theme choice on this device.',
   portal_legal_store_assets_p: 'Where product images are loaded from.',
+  portal_legal_store_map_consent_p: 'Whether you chose to load the store map on this device.',
   portal_legal_store_until_cleared_l: 'Until you clear site data',
 
   // --- consent + embeds ----------------------------------------------------
@@ -328,6 +332,7 @@ const KM: Record<string, string> = {
   portal_legal_store_cache_l: 'ប្រហែល ២០ នាទី',
   portal_legal_store_device_p: 'ជម្រើសរូបរាងភ្លឺ ឬងងឹតលើឧបករណ៍នេះ។',
   portal_legal_store_assets_p: 'កន្លែងដែលរូបភាពផលិតផលត្រូវផ្ទុកមក។',
+  portal_legal_store_map_consent_p: 'ថាតើអ្នកបានជ្រើសរើសផ្ទុកផែនទីហាងលើឧបករណ៍នេះឬអត់។',
   portal_legal_store_until_cleared_l: 'រហូតដល់អ្នកសម្អាតទិន្នន័យគេហទំព័រ',
 
   portal_legal_consent_label: 'ខ្ញុំយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។',

@@ -96,6 +96,7 @@ for (const expected of [
   'business-os-portal-wishlist-v1',
   'business-os:portal-translate-target',
   'business-os-catalog-portal-cache',
+  'business-os-portal-map-consent-v1',
 ]) {
   assert.ok(storageNames.includes(expected), `cookie policy does not disclose ${expected}`)
 }
@@ -106,6 +107,17 @@ assert.match(bucketSource, /'business-os-portal-bucket-v1'/, 'the bucket storage
 assert.match(bucketSource, /'business-os-portal-wishlist-v1'/, 'the wishlist storage key moved; update the cookie policy')
 assert.match(source('components/catalog/portalTranslateController.ts'), /'business-os:portal-translate-target'/, 'the translate storage key moved; update the cookie policy')
 assert.match(source('components/catalog/PublicCatalogPage.tsx'), /PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'/, 'the portal cache key moved; update the cookie policy')
+const embedSource = source('components/catalog/legal/PortalEmbedConsent.tsx')
+assert.match(embedSource, /MAP_CONSENT_STORAGE_KEY = 'business-os-portal-map-consent-v1'/, 'the map consent key moved; update the cookie policy')
+// Once the visitor does ask for the map, the frame still leaks as little as
+// possible: origin-only referrer, and no navigation rights over the storefront.
+assert.match(embedSource, /referrerPolicy="strict-origin-when-cross-origin"/, 'the map embed sends the full storefront URL to Google')
+assert.doesNotMatch(embedSource, /no-referrer-when-downgrade/, 'the map embed still uses the full-URL referrer policy')
+assert.match(embedSource, /sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"/, 'the map embed is not sandboxed')
+// The gate itself: the map iframe must not render before the visitor asks.
+const secondary = source('components/catalog/CatalogSecondaryTabs.tsx')
+assert.doesNotMatch(secondary, /<iframe[^>]*src={mapEmbedUrl}/, 'the map embed loads Google without being asked')
+assert.match(secondary, /<PortalEmbedConsent/, 'the map must go through the embed consent gate')
 
 // 5. Khmer is really Khmer
 const KHMER = /[ក-៿]/

@@ -5902,5 +5902,6 @@
   "portal_legal_editor_legal_name": "ឈ្មោះអាជីវកម្មចុះបញ្ជី",
   "portal_legal_editor_legal_name_hint": "ឈ្មោះដែលអាជីវកម្មចុះបញ្ជី បើខុសពីឈ្មោះបង្ហាញ។",
   "portal_legal_editor_registration": "លេខចុះបញ្ជីអាជីវកម្ម",
-  "portal_legal_editor_registration_hint": "លេខចុះបញ្ជីក្រសួងពាណិជ្ជកម្ម ឬពន្ធដារ បើមាន។"
+  "portal_legal_editor_registration_hint": "លេខចុះបញ្ជីក្រសួងពាណិជ្ជកម្ម ឬពន្ធដារ បើមាន។",
+  "portal_legal_store_map_consent_p": "ថាតើអ្នកបានជ្រើសរើសផ្ទុកផែនទីហាងលើឧបករណ៍នេះឬអត់។"
 }

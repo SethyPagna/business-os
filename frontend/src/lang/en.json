@@ -5902,5 +5902,6 @@
   "portal_legal_editor_legal_name": "Registered business name",
   "portal_legal_editor_legal_name_hint": "The name the business is registered under, if it differs from the display name.",
   "portal_legal_editor_registration": "Business registration number",
-  "portal_legal_editor_registration_hint": "Ministry of Commerce or tax registration number, if you have one."
+  "portal_legal_editor_registration_hint": "Ministry of Commerce or tax registration number, if you have one.",
+  "portal_legal_store_map_consent_p": "Whether you chose to load the store map on this device."
 }
