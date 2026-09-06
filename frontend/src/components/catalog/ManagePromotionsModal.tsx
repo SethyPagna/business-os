@@ -286,14 +286,14 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
             className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 hover:shadow"
           >
             <Plus className="h-4 w-4" />
-            New promotion
+            {copy('newPromotion', 'New promotion')}
           </button>
         )}
 
         {isEditing && (
           <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-900 dark:bg-blue-950/20">
             <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
-              {editingId === 'new' ? 'New promotion' : 'Edit promotion'}
+              {editingId === 'new' ? copy('newPromotion', 'New promotion') : copy('editPromotion', 'Edit promotion')}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">

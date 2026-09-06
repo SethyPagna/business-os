@@ -39,6 +39,11 @@ const rawPatterns: Array<[string, RegExp]> = [
   ['empty state', /className="text-sm text-gray-500 dark:text-gray-400">No promotions yet\.</],
   ['empty state hint', /Click "New promotion" above to add your first banner\.</],
   ['drag aria-label', /aria-label="Drag to reorder"/],
+  // "New promotion above the form" button (JSX text child, not the copy()'d
+  // ternary heading and not the quoted fragment inside clickNewPromotionHint).
+  ['New promotion button text', />\s*New promotion\s*</],
+  // The section heading ternary that swapped between the two raw literals.
+  ['New/Edit promotion heading ternary', /'new' \? 'New promotion' : 'Edit promotion'/],
 ]
 
 for (const [label, pattern] of rawPatterns) {
@@ -61,6 +66,8 @@ const copyKeys = [
   'noPromotionsYet',
   'clickNewPromotionHint',
   'dragToReorder',
+  'newPromotion',
+  'editPromotion',
 ]
 
 for (const key of copyKeys) {
@@ -94,6 +101,8 @@ const newKeys = [
   'visibleOnPortalNow',
   'noPromotionsYet',
   'clickNewPromotionHint',
+  'newPromotion',
+  'editPromotion',
 ]
 
 const KHMER_SCRIPT = /[ក-៿]/
@@ -112,5 +121,28 @@ for (const key of ['title', 'product', 'dragToReorder', 'announcementStrip']) {
   assert.equal(typeof en[key], 'string' , `en.json is missing reused key "${key}"`)
   assert.equal(typeof km[key], 'string', `km.json is missing reused key "${key}"`)
 }
+
+// --- 4. the empty-state hint must name the button it actually renders -----
+// clickNewPromotionHint quotes a label ("New promotion" in en, "ប្រូម៉ូសិនថ្មី"
+// in km) that has to be the exact text the New-promotion button renders via
+// copy('newPromotion', ...) -- otherwise the hint can point at a label the
+// button never shows. Extract the quoted fragment from each pack's hint and
+// tie it directly to that pack's newPromotion value.
+const extractQuoted = (value: string): string => {
+  const match = /"([^"]+)"/.exec(value)
+  assert.ok(match, `could not find a quoted fragment inside "${value}"`)
+  return match![1]
+}
+
+assert.equal(
+  extractQuoted(en['clickNewPromotionHint']),
+  en['newPromotion'],
+  `en.json clickNewPromotionHint quotes "${extractQuoted(en['clickNewPromotionHint'])}" but the New-promotion button renders "${en['newPromotion']}"`,
+)
+assert.equal(
+  extractQuoted(km['clickNewPromotionHint']),
+  km['newPromotion'],
+  `km.json clickNewPromotionHint quotes "${extractQuoted(km['clickNewPromotionHint'])}" but the New-promotion button renders "${km['newPromotion']}"`,
+)
 
 console.log('PASS announcementStripI18n: ManagePromotionsModal routes every audited label through copy(), and both packs carry the keys')
