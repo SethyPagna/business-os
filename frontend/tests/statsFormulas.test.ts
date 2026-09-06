@@ -166,5 +166,59 @@ test('the three wrong sentences are gone from the surfaces', () => {
   }
 })
 
+// ---- the awaiting-payment cohort ------------------------------------------
+// Lineage commit fd7c49ba put awaiting_payment sales INSIDE revenue, COGS and
+// profit: the kernel's recognizedExpr is `<> 'cancelled'`, which admits them.
+// Shipped sentences still told the reader the opposite, in BOTH packs. A hint
+// is not decoration -- it is the definition the reader takes the number by --
+// so a hint that contradicts the query is the same defect class as a wrong
+// figure, and it is the one the user cannot see is wrong.
+const PENDING_CLAIM_KEYS = ['stats_sales_hint', 'rpt_hint_pending', 'awaiting_payment_title']
+// Phrases that DENY the cohort is inside the money figures, English and Khmer,
+// because a claim corrected in one pack only is still a shipped claim.
+const DENIALS = [
+  'not yet counted as revenue',
+  'not counted as revenue',
+  'counted as revenue once paid',
+  'counted as revenue when paid',
+  'excluded from revenue',
+  'មិនទាន់រាប់ជាចំណូល',
+  'រាប់ជាចំណូលនៅពេលបានបង់',
+]
+const denies = (text: string): string | null =>
+  DENIALS.find((d) => text.toLowerCase().includes(d.toLowerCase())) ?? null
+
+test('POSITIVE CONTROL: the predicate catches the sentences that actually shipped', () => {
+  assert.equal(denies('Awaiting Payment — not yet counted as revenue'), 'not yet counted as revenue')
+  assert.equal(denies('Sales awaiting payment. Counted as revenue once paid.'), 'counted as revenue once paid')
+  assert.equal(denies('រង់ចាំការទូទាត់ — មិនទាន់រាប់ជាចំណូលទេ'), 'មិនទាន់រាប់ជាចំណូល')
+  assert.equal(denies('ការលក់រង់ចាំការទូទាត់។ រាប់ជាចំណូលនៅពេលបានបង់។'), 'រាប់ជាចំណូលនៅពេលបានបង់')
+  // ... and stays quiet on a sentence that says the true thing, so a green
+  // result below is the packs being right, not the predicate being blind.
+  assert.equal(denies('Included in sales, revenue, and profit, but excluded from collected cash.'), null)
+})
+
+test('neither pack tells the reader awaiting-payment money is outside revenue', () => {
+  for (const pack of ['src/lang/en.json', 'src/lang/km.json']) {
+    const strings = JSON.parse(read(pack)) as Record<string, string>
+    for (const key of PENDING_CLAIM_KEYS) {
+      const text = strings[key]
+      assert.ok(typeof text === 'string' && text.length > 0, `${pack} carries ${key}`)
+      assert.equal(denies(text), null, `${pack} ${key} denies the cohort is counted: ${text}`)
+    }
+  }
+})
+
+// The Reports "Not Paid" memo line ships a fallback as well as a pack key, and
+// a fallback that disagrees with the pack is a second sentence to get wrong.
+test('the Not Paid memo line and its pack key say the same thing', () => {
+  const model = read('src/components/sales/reports/reportModel.ts')
+  const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
+  const fallback = model.match(/'rpt_hint_pending', '([^']+)'/)?.[1]
+  assert.ok(fallback, 'the memo line still passes a fallback for rpt_hint_pending')
+  assert.equal(denies(fallback!), null, 'the fallback does not deny it either')
+  assert.equal(en.rpt_hint_pending, fallback, 'pack and fallback are one sentence, not two')
+})
+
 if (failed) { console.error(`\n${failed} test(s) failed`); process.exit(1) }
 console.log('\nstats formulas: all checks passed')
