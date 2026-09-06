@@ -1009,7 +1009,7 @@ assert.match(
 assert.match(contactsShared, /LoadingWatchdog/, 'shared contact table should use retryable loading watchdog UI')
 assert.match(customers, /CustomerFormModal/, 'customer list should lazy-load the customer form modal')
 // Membership numbers are minted by the SERVER (cloudflare/src/lib/
-// membershipNumber.ts): new IDs are secure random eight-character values,
+// membershipNumber.ts): new IDs gap-fill the house `LC-#####` sequence,
 // checked for collisions against the database. The form
 // used to pre-fill a browser-invented random LCMN- number, which -- because
 // the create route only mints when the submitted field is blank -- always won

@@ -71,8 +71,8 @@ const dbModule = { getDb: () => db }
 const phone = loadReal('lib/phone.ts')
 const passwordPolicy = loadReal('lib/passwordPolicy.ts')
 const contactOptions = loadReal('lib/contactOptions.ts')
-// The ONE membership-number minter (eight uppercase letters/digits). portalAccounts
-// no longer generates its own id, so this must be the REAL module.
+// The ONE membership-number minter (house `LC-#####` format, gap-filling).
+// portalAccounts no longer generates its own id, so this must be the REAL module.
 const membershipNumber = loadReal('lib/membershipNumber.ts')
 const contactDuplicates = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions })
 const { canonicalizePhone } = phone
@@ -125,9 +125,11 @@ async function run() {
   await check('signup (new customer, no membership id) creates account + folded contact + auto id', async () => {
     const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret123' })
     assert.strictEqual(res.ok, true)
-    // New IDs use the shared eight-character A-Z/0-9 contract. Existing
-    // supplied membership IDs retain their separate compatibility coverage.
-    assert.ok(/^[A-Z0-9]{8}$/.test(res.membershipId), 'auto membership id uses eight uppercase letters/digits')
+    // New IDs use the shared house LC- gap-fill contract -- this is the
+    // first LC- customer in this fresh in-memory DB, so it lands on 1.
+    // Existing supplied membership IDs retain their separate compatibility
+    // coverage (see the next few checks below).
+    assert.strictEqual(res.membershipId, 'LC-00001', 'auto membership id gap-fills the house LC- sequence')
     assert.ok(!portalAccountSource.includes('Math.random('), 'account identifiers must never use Math.random')
     assert.ok(!portalAccountSource.includes('getRandomValues'), 'portalAccounts no longer mints its own id -- lib/membershipNumber.ts is the one authority')
     const account = rawDb.prepare('SELECT phone, contact_id, membership_id FROM portal_accounts WHERE id = ?').get([res.accountId])
