@@ -504,6 +504,12 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   document.addEventListener('touchstart', (event) => {
     if (insideFloat(event.target)) return
     const found = targetFrom(event.target)
+    // Touch is the one place the copy field takes the hold even inside a
+    // surface that owns its own: press-and-hold is the ONLY way to copy on a
+    // phone, and one hold cannot both copy a value and enter the Products
+    // row's select mode. It takes the hold, not the tap -- see `touchend`.
+    // A NON-copy target inside that row is left completely alone, so the
+    // row's own long-press still works everywhere else on it.
     if (found?.kind === 'copy') {
       event.stopPropagation()
       pressElement = found.element
@@ -520,7 +526,12 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
 
   document.addEventListener('touchend', (event) => {
     if (!pressElement) return
-    event.stopPropagation()
+    // Only a hold that actually opened the panel belongs to the copy field.
+    // A tap that never reached the threshold is the surface's: the Products
+    // mobile card synthesises "open this product" from touchend (its onClick
+    // is undefined outside selection mode), so swallowing every release
+    // would make tapping a copyable value on that card do nothing at all.
+    if (pressState.fired) event.stopPropagation()
     press.onTouchEnd()
     pressElement = null
   }, true)

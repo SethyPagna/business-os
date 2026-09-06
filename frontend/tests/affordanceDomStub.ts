@@ -21,6 +21,7 @@ export interface StubEventInit {
   key?: string
   clientX?: number
   clientY?: number
+  touches?: Array<{ clientX: number; clientY: number }>
 }
 
 export interface StubEvent {
@@ -32,6 +33,10 @@ export interface StubEvent {
   // harness has to carry them or the press half cannot be driven at all.
   clientX: number
   clientY: number
+  // longPress.ts reads the first entry of this on every touch event it is
+  // handed; without it the whole touch half of the gesture throws before it
+  // can be asserted on at all.
+  touches: Array<{ clientX: number; clientY: number }>
   stopped: boolean
   defaulted: boolean
   stopPropagation: () => void
@@ -191,6 +196,7 @@ export function installAffordanceDom(): AffordanceDomHarness {
         key: init.key || '',
         clientX: init.clientX ?? 0,
         clientY: init.clientY ?? 0,
+        touches: init.touches || [{ clientX: init.clientX ?? 0, clientY: init.clientY ?? 0 }],
         stopped: false,
         defaulted: false,
         stopPropagation() { event.stopped = true },

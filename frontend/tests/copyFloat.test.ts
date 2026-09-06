@@ -283,6 +283,50 @@ dom.fire('mouseup', { target: held })
 await wait(LONG_PRESS_THRESHOLD_MS + 80)
 assert.equal(host.hidden, true, 'a released press must not open the panel later, on the hold timer')
 
+/* ---------------------------------------------------------------- *
+ * 6. Touch — the ONLY way to copy on a phone.
+ *
+ * The ASK names long-press as the mobile gesture, and until this section
+ * existed nothing executed it: the two test files between them fired no
+ * touch event at all, and `dom.fire('touchstart')` threw inside
+ * longPress.ts, which reads `event.touches[0]`.
+ * ---------------------------------------------------------------- */
+
+// (a) A hold on a copy field opens the panel with that field's value --
+// inside the product row, because that is where a phone user meets it.
+const touchPill = dom.el('span', { [COPY_ATTR]: '8850123456789' })
+const touchRow = buildClickableRow(dom, touchPill)
+const touchPress = dom.fire('touchstart', { target: touchPill, touches: [{ clientX: 30, clientY: 90 }] })
+assert.equal(touchPress.stopped, true, 'the copy field owns the hold on touch, or one hold would mean two things')
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, false, 'press-and-hold opens the copy panel on touch')
+assert.equal(String(host.childNodes[0]?.textContent || ''), '8850123456789')
+const heldRelease = dom.fire('touchend', { target: touchPill })
+assert.equal(heldRelease.stopped, true, 'the release that ends a fired hold belongs to the copy field')
+dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true)
+
+// A TAP on the same value is not a hold, and the row still owns it: the
+// Products mobile card has no onClick outside selection mode and synthesises
+// "open this product" from its own touchend, so swallowing the release would
+// make tapping a copyable value do nothing at all.
+dom.fire('touchstart', { target: touchPill, touches: [{ clientX: 30, clientY: 90 }] })
+const tapRelease = dom.fire('touchend', { target: touchPill })
+assert.equal(tapRelease.stopped, false, "a tap's release goes back to the row that opens the product")
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, true, 'and the released tap never opens the panel on the hold timer')
+
+// (b) A non-copy target inside the same row is left completely alone, so
+// the row's own long-press (select mode) still works everywhere else on it.
+const plainCell = dom.el('span')
+const td = dom.el('td')
+td.append(plainCell)
+touchRow.append(td)
+const rowTouch = dom.fire('touchstart', { target: plainCell, touches: [{ clientX: 30, clientY: 90 }] })
+assert.equal(rowTouch.stopped, false, "the row keeps every touch this lane's affordance does not own")
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, true, 'and no panel opens for it')
+
 dom.restore()
 
 console.log('PASS product name/brand/supplier/barcode copy through one shared float')
