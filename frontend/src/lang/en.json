@@ -801,6 +801,7 @@
   "batches": "Received dates",
   "choose_received_date": "Choose a received date",
   "pick_received_date_first": "Pick a received date first",
+  "pos_new_order_tab": "New order",
   "pos_warehouse_not_sellable": "Only allow Shop sale. Please transfer to Shop first.",
   "received_dates_none": "No received dates at this branch",
   "stock_without_received_date": "Units are at this branch but carry no received date.",
