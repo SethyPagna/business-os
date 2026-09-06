@@ -344,6 +344,20 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     return () => { cancelled = true }
   }, [createBarcode])
 
+  // The refusal the Add button would produce, read from the SAME kernel that
+  // produces it (stockReceiptGateCode, below in addLine) rather than a second
+  // hand-written condition that can drift away from it. A primary control that
+  // cannot proceed must say why, next to itself, before the click -- a catalog
+  // cost prefetched as 0 otherwise makes the default Add path a guaranteed
+  // refusal with nothing on screen pointing at the box that clears it.
+  const pendingReceiptGate = mode === 'add' ? stockReceiptGateCode({
+    isStockIn: true,
+    supplierName: supplier.supplierName,
+    unitCostUsd: unitCost,
+    freeGoods,
+  }) : ''
+  const zeroCostNeedsDeclaration = pendingReceiptGate === 'free_goods_required'
+
   const pick = (candidate: ProductCandidate) => {
     setPicked(candidate)
     setCandidates([])
@@ -825,7 +839,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                   setCreatePriceVariant(costChanged(picked, next))
                 }} />
                   {/* N14-D: $0.00 is a claim the operator makes, never a default. */}
-                  <span className="mt-1 flex items-center gap-1 text-[10px] text-gray-600 dark:text-gray-400">
+                  <span className={`mt-1 flex items-center gap-1 rounded text-[10px] text-gray-600 dark:text-gray-400 ${zeroCostNeedsDeclaration ? 'bg-amber-50 px-1 py-0.5 font-medium text-amber-900 ring-1 ring-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-700' : ''}`}>
                     <input type="checkbox" className="h-3 w-3" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) { setUnitCost('0'); setCreatePriceVariant(costChanged(picked, '0')) } }} />
                     {tr('stock_receipt_free_goods', 'Free goods')}
                     <InfoHint label={tr('stock_receipt_free_goods', 'Free goods')} text={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')} />
@@ -845,7 +859,12 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               {/* Its own row: this queues a line, Complete in the footer is
                   what writes. Sharing a grid cell with the running total made
                   it read as a field decoration rather than an action. */}
-              <div className="mt-2 flex items-center justify-end">
+              <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                {pendingReceiptGate ? (
+                  <span className="min-w-0 flex-1 text-right text-[11px] text-amber-700 dark:text-amber-300">
+                    {tr(STOCK_RECEIPT_GATE_KEYS[pendingReceiptGate], STOCK_RECEIPT_GATE_FALLBACKS[pendingReceiptGate])}
+                  </span>
+                ) : null}
                 <button type="button" className="btn-primary h-10 shrink-0 px-3 text-xs disabled:opacity-50" disabled={saving} onClick={addLine}>
                   {editingKey ? tr('update_line', 'Update line') : `＋ ${tr('fast_stockin_add', 'Add & next')}`}
                 </button>

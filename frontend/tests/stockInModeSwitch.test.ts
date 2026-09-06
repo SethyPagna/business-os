@@ -139,6 +139,33 @@ runTest('every new string is in BOTH packs, in real Khmer', () => {
   assert.match(String(km.confirm_complete_stock_session_mixed), /\{lines\}[^]*\{branch\}/)
 })
 
+// A prefetched catalog cost of 0 is real data, and the read surfaces must show
+// it as $0.00 -- but on the WRITE form it silently makes the default Add path a
+// guaranteed refusal: stockReceiptGateCode answers 'free_goods_required' for
+// every unticked zero, and the one control that clears it is a 10px checkbox
+// under the cost box. Nothing on screen pointed at it until the operator had
+// already pressed Add and been refused.
+//
+// The button now says why it cannot proceed, before the click, from the SAME
+// kernel that refuses it -- not a second hand-written condition that can drift.
+runTest('the Add button states the receipt gate reason before the click, from the same kernel', () => {
+  assert.match(modalSource, /const pendingReceiptGate = mode === 'add' \? stockReceiptGateCode\(\{/)
+  // Same four arguments the submit-time gate passes, so preview and refusal
+  // can never disagree.
+  assert.match(modalSource, /pendingReceiptGate[\s\S]{0,600}STOCK_RECEIPT_GATE_KEYS\[pendingReceiptGate\], STOCK_RECEIPT_GATE_FALLBACKS\[pendingReceiptGate\]/)
+  // ...and it sits next to the button it explains, not in a toast after it.
+  const buttonRow = modalSource.slice(modalSource.indexOf('fast_stockin_add'))
+  assert.ok(modalSource.indexOf('pendingReceiptGate ?') < modalSource.indexOf("tr('fast_stockin_add'"),
+    'the reason renders before/beside the Add control, not after it')
+  assert.ok(buttonRow.length > 0)
+})
+
+runTest('a zero cost awaiting its declaration highlights the Free goods box that clears it', () => {
+  assert.match(modalSource, /const zeroCostNeedsDeclaration = pendingReceiptGate === 'free_goods_required'/)
+  // The checkbox row carries the amber treatment only while it is the answer.
+  assert.match(modalSource, /zeroCostNeedsDeclaration \? '[^']*amber[^']*' : ''/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
