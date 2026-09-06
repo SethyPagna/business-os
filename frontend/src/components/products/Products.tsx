@@ -4303,9 +4303,8 @@ function ProductsFullEditor() {
             <div><label className="text-xs text-gray-500 block mb-1">{tr('quantity', 'Quantity')}</label>
               <input className="input text-xs py-1 w-24" type="number" min="0" value={bulkEditForm.qty??1} onChange={e=>setBulkEditForm(f=>({...f,qty:e.target.value}))} />
               {/* Same 1/5/10/20 quick-pick chips as InventoryStockModals.tsx's
-                  Adjust modal and BranchStockAdjuster.tsx's per-branch rows --
-                  this bulk panel was the one remaining Add/Remove/Set stock
-                  flow still missing them. */}
+                  Adjust modal -- this bulk panel was the one remaining
+                  Add/Remove/Set stock flow still missing them. */}
               <div className="mt-1 flex flex-wrap gap-1">
                 {[1, 5, 10, 20].map((n) => (
                   <button
@@ -4321,8 +4320,7 @@ function ProductsFullEditor() {
             </div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('action', 'Action')}</label>
               {/* Same border-2 / primary-50+primary-700 selected-state styling
-                  as Inventory's Adjust-stock modal and the product edit
-                  page's BranchStockAdjuster -- was previously a solid
+                  as Inventory's Adjust-stock modal -- was previously a solid
                   blue-600 fill, its own separate look for the same
                   three-way choice. Recolored brass/primary Aug 24 2026. */}
               <div className="flex gap-1">

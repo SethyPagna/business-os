@@ -3,8 +3,8 @@
 // `receivedDate`, and it must flow into lib/productBatches.ts's
 // receiveBatchStock -- the same kernel (and the same date->code matching)
 // the Receive Batch modal's own route already uses, so "same date = same
-// lot" stays one rule across every entry point (Product edit's
-// BranchStockAdjuster, Inventory's Adjust modal, ReceiveBatchModal).
+// lot" stays one rule across every entry point (Products' StockAdjustModal,
+// Inventory's Adjust modal, ReceiveBatchModal).
 //
 // Same approach as test-returns-batch-restock-pure.cjs: transpile the REAL
 // route file and lib/productBatches.ts, run them against a real in-memory
