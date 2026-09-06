@@ -579,12 +579,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             </Suspense>
           ) : null}
           <div className="relative z-50 flex-shrink-0">
-            <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-label={t('account') || 'Account'} className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50/90 p-0.5 dark:bg-blue-900/30">
-              <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
+            <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-label={t('account') || 'Account'} className="bos-nav-avatar flex h-11 w-11 items-center justify-center rounded-full p-0.5">
+              <div className="bos-nav-avatar-face flex h-10 w-10 items-center justify-center overflow-hidden rounded-full">
                 {user?.avatar_path ? (
                   <img src={user.avatar_path} alt={user?.name || 'User'} className="h-10 w-10 object-cover" loading="lazy" decoding="async" />
                 ) : (
-                  <span className="text-base font-bold text-blue-600 dark:text-blue-400">
+                  <span className="text-base font-bold">
                     {user?.name?.[0]?.toUpperCase()}
                   </span>
                 )}
@@ -595,11 +595,11 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                 <div className="fixed inset-0 z-40" onClick={() => setAccountOpen(false)} />
                 <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
                   <div className="mb-1 flex items-center gap-2.5 border-b border-gray-100 px-2.5 py-2 dark:border-gray-700">
-                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
+                    <div className="bos-nav-avatar-face flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full">
                       {user?.avatar_path ? (
                         <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 object-cover" loading="lazy" decoding="async" />
                       ) : (
-                        <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{user?.name?.[0]?.toUpperCase()}</span>
+                        <span className="text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</span>
                       )}
                     </div>
                     <div className="min-w-0">

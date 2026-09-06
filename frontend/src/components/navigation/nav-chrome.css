@@ -125,6 +125,33 @@ body.lang-km .bos-nav-chrome {
   color: var(--nav-accent-strong);
 }
 
+/* The account control, and the avatar face inside it (repeated in the panel
+   it opens). It was the last colour left in the bar after the restyle, and a
+   colour this design language does not have: a `bg-blue-50/90` pill with a
+   `bg-blue-100` face and `text-blue-600` initials, dark-moded into
+   blue-900/30 and blue-900/40. It sits in pages mode too -- outside the
+   `inline ?` branch -- so on a sub page the merged bar read charcoal-and-gold
+   everywhere except its right end. Same treatment .bos-nav-back gets above:
+   the chrome's own soft accent ground, its strong accent ink.
+
+   The FACE is the bar's surface rather than the pill's ground, so the ring
+   the pill's `p-0.5` draws stays visible in both themes -- the same "a lift
+   has to be a real step" reasoning as --nav-chip-open. Measured on the flat
+   fallbacks (navChrome.test.ts recomputes):
+     light  ink  #6b5122 on the face #fffdf8 ..... 7.31:1
+            pill #efe8da against that face ....... 1.20:1
+     dark   ink  #e8cd8d on the face #141414 .... 11.89:1
+            pill #352e1e against that face ....... 1.37:1 */
+.bos-nav-avatar {
+  background-color: var(--nav-accent-soft);
+  color: var(--nav-accent-strong);
+}
+
+.bos-nav-avatar-face {
+  background-color: var(--nav-surface);
+  color: var(--nav-accent-strong);
+}
+
 /* The pages layer. Its `top` comes from utils/mobileNavChrome.ts -- the
    bottom edge of the fixed chrome -- and it runs to the bottom of the
    viewport, so it is opaque over the page it was opened from. */

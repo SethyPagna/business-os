@@ -263,6 +263,9 @@ runTest('the chrome palette is ivory / charcoal / muted gold, and legible in bot
     // of AA, not scrape it.
     assert.ok(contrast(ink2, surface) >= 6, `${name}: resting section ink (${contrast(ink2, surface).toFixed(2)}:1)`)
     assert.ok(contrast(strong, soft) >= 4.5, `${name}: open section ink on its gold ground (${contrast(strong, soft).toFixed(2)}:1)`)
+    // The account initials sit on the bar's own surface, not on the accent
+    // ground the pill around them uses, so they are measured there.
+    assert.ok(contrast(strong, surface) >= 4.5, `${name}: account initials on the bar (${contrast(strong, surface).toFixed(2)}:1)`)
     // Open vs resting differ on independent axes. The GROUND carries the
     // measurable share of it (the inks are close in luminance by design --
     // both have to stay legible on their own ground), so it is the ground
@@ -298,6 +301,20 @@ runTest('the bar, the tiles and the title carry the design language, not grey ut
   assert.doesNotMatch(sidebar, /expanded \? 'bg-blue-50 text-blue-600 dark:bg-blue-900\/30 dark:text-blue-400' : 'bg-gray-50 dark:bg-gray-800'/,
     'the old blue-on-grey tile states are gone')
   assert.match(sidebar, /\$\{expanded \? 'is-open' : ''\}/, 'the unfolded tile is a state, styled once in CSS')
+  // The account control at the bar's right end. It renders in pages mode too
+  // (it sits outside the `inline ?` branch), so while it stayed a blue pill the
+  // merged bar read charcoal-and-gold everywhere except its own right end.
+  assert.doesNotMatch(header, /bg-blue-50\/90|dark:bg-blue-900\/30/,
+    'the account control is not a blue pill any more')
+  assert.doesNotMatch(header, /bg-blue-100|dark:bg-blue-900\/40|text-blue-600 dark:text-blue-400/,
+    'nor is its face, nor the initials inside it -- in the bar or in the panel it opens')
+  assert.match(header, /className="bos-nav-avatar flex h-11 w-11/, 'it is a chrome surface')
+  assert.equal((header.match(/bos-nav-avatar-face/g) || []).length, 2,
+    'both faces -- the bar one and the panel one -- wear the same class')
+  assert.match(css, /\.bos-nav-avatar \{[\s\S]*?background-color: var\(--nav-accent-soft\);[\s\S]*?color: var\(--nav-accent-strong\)/,
+    'ground and ink come from the chrome tokens, like .bos-nav-back')
+  assert.match(css, /\.bos-nav-avatar-face \{[\s\S]*?background-color: var\(--nav-surface\)/,
+    "and the face is the bar's surface, so the pill still reads as a ring around it")
 })
 
 runTest('compact density and touch targets survive the restyle', () => {
