@@ -113,6 +113,10 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
+  // move through this guard, so the fixtures here run through the rejection
+  // instead of opting out of it.
+  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/salesAnalytics': salesAnalytics,
