@@ -85,6 +85,9 @@ const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/actorSnapshot': actorSnapshotKernel,
+  // N21: the display-address kernel routes/returns.ts snapshots through, REAL
+  // (it has no imports of its own; a stub would leave it undefined).
+  '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   '../lib/sqlBinding': sqlBinding,
