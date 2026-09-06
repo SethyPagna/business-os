@@ -86,6 +86,26 @@ runTest('the strip spends divider blanks and one step of digit size, not a secon
   assert.match(block('.price-strip .price-strip-divider'), /margin:\s*0\s+-/, 'the blank either side of "|" is what gets spent first')
 })
 
+runTest('the row does not get taller in exchange for staying on one line', () => {
+  // The compact row is the point of the ask -- buying the one-line strip back
+  // with a taller row would just move the damage. text-xs carried a 1rem line
+  // box; the strip must pin its own line-height at or below that, so the
+  // step-down cannot be traded for vertical space, and the qty cell's
+  // inline-flex chip cannot push the box open either.
+  const strip = block('.price-strip')
+  const lh = /line-height:\s*([\d.]+)rem/.exec(strip)
+  assert.ok(lh, '.price-strip must pin its own line-height rather than inheriting one')
+  assert.ok(Number(lh[1]) <= 1, `the strip's line box must not grow past the old 1rem, got ${lh[1]}rem`)
+  // Khmer is the one case allowed a taller line box -- a coeng cluster needs
+  // ~1.6em of ink and would otherwise be sheared -- and it is scoped to
+  // body.lang-km so the Latin row keeps the compact height.
+  assert.match(css, /body\.lang-km \.price-strip[\s\S]{0,80}line-height:\s*var\(--km-line-height/, 'km keeps its line-height floor, scoped to the km body class')
+  // No vertical padding/margin is introduced on the strip itself; the row's
+  // own mt-1 is the only spacing, and it is unchanged.
+  assert.doesNotMatch(strip, /padding/, 'the strip must not add vertical padding to the row')
+  assert.match(stripMarkup(), /className="price-strip mt-1"/, 'the strip keeps exactly the spacing the wrapping row had')
+})
+
 runTest('no value on the strip is hidden, clipped or dropped', () => {
   const strip = stripMarkup()
   for (const marker of ['fmtUSD(sellingUsd)', 'fmtUSD(wholesaleUsd)', 'fmtUSD(costUsd)', 'String(qty || 0)', 'renderUnitChip(unitName)']) {
