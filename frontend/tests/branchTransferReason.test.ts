@@ -140,9 +140,12 @@ runTest('both endpoints receive `reason`, never the legacy `note`', () => {
 })
 
 runTest('the Worker refuses with the exact English this modal shows', () => {
-  // Same coupling branchRuleErrors.ts documents for the two branch-role
-  // refusals: the Worker's sentence IS a pack key's English, so a rejection
-  // that outruns the UI can still be read by the operator.
+  // The same convention branchRuleErrors.ts documents for the two
+  // branch-role refusals: the Worker's sentence IS a pack key's English.
+  // Pinned so the two halves cannot drift. It is not yet WIRED -- this
+  // sentence is absent from BRANCH_RULE_MESSAGE_KEYS, so a rejection that
+  // outruns the UI still reads in English; the modal's own check is what
+  // keeps an operator from seeing it.
   const routes = [
     read('../../cloudflare/src/routes/inventory.ts'),
     read('../../cloudflare/src/routes/branches.ts'),

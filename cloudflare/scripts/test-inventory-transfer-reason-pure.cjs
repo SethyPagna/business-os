@@ -17,9 +17,14 @@
 //      atomic write -- a 400 that lands after db.batch() would report a
 //      transfer that had already happened.
 //   2. The refusal is the EXACT English of the `transfer_reason_required`
-//      pack key, in every route, byte-identical -- so a rejection that
-//      outruns the UI can be shown in the operator's own language (the same
-//      coupling branchRoleGuards' TRANSFER_DIRECTION_ERROR has).
+//      pack key, in every route, byte-identical -- the convention
+//      branchRoleGuards' TRANSFER_DIRECTION_ERROR already follows, and what
+//      a client-side mapping keys off. Pinned here so the wording cannot
+//      drift away from the pack. Note the mapping does NOT cover this
+//      sentence yet (BRANCH_RULE_MESSAGE_KEYS in
+//      frontend/src/api/branchRuleErrors.ts carries only the two
+//      branch-role refusals), so a rejection that outruns the UI still
+//      surfaces in English until one entry is added there.
 //   3. The tolerant cut, RUN rather than read: each route's own reason
 //      expression is lifted out of the source and evaluated against the
 //      payload shapes that actually reach it. A new client sends `reason`; a

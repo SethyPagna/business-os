@@ -358,7 +358,12 @@ app.post('/transfer', async (c) => {
   // write or any direct caller could move stock with no recorded cause.
   // Checked ahead of any DB work, so no path can move stock without one.
   // The sentence is the exact English of the `transfer_reason_required`
-  // pack key, so a refusal that outruns the UI is still readable in Khmer.
+  // pack key -- the convention branchRoleGuards' refusals already follow, and
+  // exactly what a client-side mapping keys off. That mapping does not cover
+  // it yet: BRANCH_RULE_MESSAGE_KEYS in frontend/src/api/branchRuleErrors.ts
+  // carries only the two branch-role sentences, so a refusal that outruns the
+  // UI still surfaces in English. One entry there is all Khmer needs, with no
+  // Worker change -- which is the whole point of pinning the wording here.
   if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
 
   const db = getDb(c.env)
@@ -591,7 +596,12 @@ app.post('/transfer-bulk', async (c) => {
   // write or any direct caller could move stock with no recorded cause.
   // Checked ahead of any DB work, so no path can move stock without one.
   // The sentence is the exact English of the `transfer_reason_required`
-  // pack key, so a refusal that outruns the UI is still readable in Khmer.
+  // pack key -- the convention branchRoleGuards' refusals already follow, and
+  // exactly what a client-side mapping keys off. That mapping does not cover
+  // it yet: BRANCH_RULE_MESSAGE_KEYS in frontend/src/api/branchRuleErrors.ts
+  // carries only the two branch-role sentences, so a refusal that outruns the
+  // UI still surfaces in English. One entry there is all Khmer needs, with no
+  // Worker change -- which is the whole point of pinning the wording here.
   if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
   if (!rawItems.length) return c.json({ error: 'No products selected' }, 400)
   if (rawItems.length > MAX_BULK_TRANSFER_ITEMS) {
