@@ -150,6 +150,17 @@ runTest('both rejections carry the exact English of a translated pack key', () =
   assert.notEqual(km.transfer_source_warehouse_only, en.transfer_source_warehouse_only)
 })
 
+runTest('the warehouse-sale wording is the owner\'s exact 2026-09-06 sentence, not the retired one', () => {
+  // Owner, 2026-09-06: "prompt when clicked saying \"Warehouse Sale Disabled,
+  // Please transfer to Shop First\"." Discriminating: a Worker that still
+  // exported the pre-2026-09-06 sentence ("Only allow Shop sale. Please
+  // transfer to Shop first.") would pass every other assertion in this file
+  // (they only compare the constant against itself and against en.json) --
+  // this pins the literal text so a revert or a stale merge is caught here.
+  assert.equal(guards.WAREHOUSE_NOT_SELLABLE_ERROR, 'Warehouse Sale Disabled, Please transfer to Shop First')
+  assert.notEqual(guards.WAREHOUSE_NOT_SELLABLE_ERROR, 'Only allow Shop sale. Please transfer to Shop first.')
+})
+
 // ---------------------------------------------------------------------------
 // 4. The twin, and the routes that call it
 // ---------------------------------------------------------------------------

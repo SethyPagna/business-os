@@ -11,7 +11,7 @@
 // scripts/test-selling-branch-guard-pure.cjs.
 import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanSell } from './branchRoles'
 
-export const WAREHOUSE_NOT_SELLABLE_ERROR = 'Only allow Shop sale. Please transfer to Shop first.'
+export const WAREHOUSE_NOT_SELLABLE_ERROR = 'Warehouse Sale Disabled, Please transfer to Shop First'
 export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock from Warehouse to Shop.'
 
 export type BranchNameRow = { id: number; name: string | null }
