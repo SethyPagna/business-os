@@ -150,6 +150,13 @@ export function translateMovementType(type: unknown, t?: (key: string) => string
     replacement_out: ['movement_type_replacement_out', 'Replacement'],
     'in': ['stock_in', 'Stock In'],
     out: ['stock_out', 'Stock Out'],
+    // N14: rows the unified stock-in session wrote before it was corrected to
+    // the ledger's canonical 'add' (cloudflare/src/lib/stockSession.ts). They
+    // ARE receipts, so they must read as "Add Stock" like every other receipt
+    // rather than title-case through the unknown-type fallback as if they were
+    // a second kind of movement. Migration 0128 rewrites the rows themselves;
+    // this keeps the ledger honest for anything not yet normalised.
+    stock_in: ['add_stock', 'Add Stock'],
   }
   const mapped = canonicalKey[key]
   if (mapped) return T(mapped[0], mapped[1])

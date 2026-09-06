@@ -94,10 +94,32 @@ const products = [
   { id: 14, name: 'Overlap Product', barcode: '077777' },
   { id: 15, name: 'Overlap Product', barcode: '77777' },
   { id: 16, name: 'Different Name Sharing Raw Barcode', barcode: '077777' },
+  // N15: the owner's case. One exact name, one real barcode written twice --
+  // once with an extra leading zero -- and two DIFFERENT costs. Before the
+  // leading_zero class existed this arrived as an ordinary same_name cluster,
+  // indistinguishable from ids 19/20 below, and the tab's bulk gate then
+  // refused it because the costs differ.
+  { id: 17, name: 'Zero Twin Diff Cost', barcode: '03614274226546', cost: 5 },
+  { id: 18, name: 'Zero Twin Diff Cost', barcode: '3614274226546', cost: 7.9 },
+  // NEGATIVE CONTROL, same shape: one exact name, two genuinely different
+  // barcodes. Must stay same_name and must never become leading_zero.
+  { id: 19, name: 'Real Two Skus', barcode: '1111111111111' },
+  { id: 20, name: 'Real Two Skus', barcode: '2222222222222' },
+  // The MAC shade pair: raw '0601' is 4 chars so the RAW barcode bucket sees
+  // it, but the folded form is 3 -- below MIN_REAL_BARCODE_LENGTH. The sweep
+  // must still class it, which is why the leading-zero bucket uses the fold's
+  // own 3-digit floor and not the raw one.
+  { id: 21, name: 'Mac Shade', barcode: '0601' },
+  { id: 22, name: 'Mac Shade', barcode: '601' },
+  // Placeholder guard: '0' and '00' must NEVER cluster with each other or
+  // with the unbarcoded row -- 238 production rows carry the placeholder.
+  { id: 23, name: 'Placeholder Row', barcode: '0' },
+  { id: 24, name: 'Placeholder Row', barcode: '00' },
+  { id: 25, name: 'Placeholder Row', barcode: null },
 ]
 for (const p of products) {
-  db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group) VALUES (@id, @name, @barcode, 1, 0)`)
-    .run({ id: p.id, name: p.name, barcode: p.barcode })
+  db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group) VALUES (@id, @name, @barcode, @cost, 1, 0)`)
+    .run({ id: p.id, name: p.name, barcode: p.barcode, cost: p.cost ?? 0 })
 }
 db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main', 1)`).run({})
 db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 7)`).run({})
@@ -142,10 +164,31 @@ async function run() {
   check('Solo product (id 9) appears in no cluster',
     !clusters.some((c) => c.products.some((x) => x.id === 9)))
 
-  // Worst-first ordering holds across all three severities.
-  const rank = { same_barcode: 0, same_name: 1, similar_name: 2 }
+  // --- N15: the leading-zero class -------------------------------------
+  // DISCRIMINATING. Before this class the sweep bucketed by the RAW barcode,
+  // so 17/18 and 19/20 both came back `same_name` and the reviewer had no way
+  // to tell the owner's merge case from two genuinely different SKUs.
+  check('a leading-zero twin under one name is its own class, whatever the costs',
+    !!findCluster(clusters, 'leading_zero', '17,18'))
+  check('the leading-zero cluster is keyed by the FOLDED barcode',
+    findCluster(clusters, 'leading_zero', '17,18').value === '3614274226546')
+  check('the same decision is not ALSO shown as a same_name cluster',
+    !clusters.some((c) => c.severity === 'same_name' && idsOf(c) === '17,18'))
+  check('NEGATIVE CONTROL: two genuinely different barcodes stay same_name',
+    !!findCluster(clusters, 'same_name', '19,20'))
+  check('NEGATIVE CONTROL: two genuinely different barcodes are never leading_zero',
+    !clusters.some((c) => c.severity === 'leading_zero' && idsOf(c) === '19,20'))
+  check('the MAC shade pair is visible even though the folded code is 3 digits',
+    !!findCluster(clusters, 'leading_zero', '21,22'))
+  check('placeholder 0/00/blank barcodes never form a leading-zero cluster',
+    !clusters.some((c) => c.severity === 'leading_zero' && c.products.some((x) => x.id >= 23)))
+  check('an exact-barcode pair is left to same_barcode, not re-reported as leading_zero',
+    !clusters.some((c) => c.severity === 'leading_zero' && idsOf(c) === '5,6'))
+
+  // Worst-first ordering holds across all four severities.
+  const rank = { leading_zero: 0, same_barcode: 1, same_name: 2, similar_name: 3 }
   const seq = clusters.map((c) => rank[c.severity])
-  check('clusters sorted worst-first (barcode < name < similar)',
+  check('clusters sorted worst-first (leading zero < barcode < name < similar)',
     seq.every((v, i) => i === 0 || seq[i - 1] <= v))
 
   // A similar cluster's value is a human-readable display name, not the raw key.
@@ -171,7 +214,18 @@ async function run() {
     .run({ v: normalizeProductClusterKey('name', 'Face Cream') })
   db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('barcode', @v)`)
     .run({ v: normalizeProductClusterKey('barcode', 'SHARE-9999') })
+  // A leading-zero dismissal keys by the FOLDED barcode, so it can be recorded
+  // from EITHER twin's spelling and still match. Keying it raw would have
+  // repeated the detector's own defect one layer down.
+  db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('leadingzero', @v)`)
+    .run({ v: normalizeProductClusterKey('leadingzero', '03614274226546') })
+  check("normalizeProductClusterKey('leadingzero', ...) folds either spelling to one key",
+    normalizeProductClusterKey('leadingzero', '03614274226546') === normalizeProductClusterKey('leadingzero', '3614274226546'))
   const after2 = await findPossiblySameProductClusters(db)
+  check('dismissing the leading-zero cluster from the zero-padded spelling removes it',
+    !after2.some((c) => c.severity === 'leading_zero' && idsOf(c) === '17,18'))
+  check('dismissing it does NOT remove the MAC shade leading-zero cluster',
+    after2.some((c) => c.severity === 'leading_zero' && idsOf(c) === '21,22'))
   check('dismissing the Face Cream same_name cluster removes it',
     !after2.some((c) => c.severity === 'same_name' && idsOf(c) === '3,4'))
   check('dismissing the SHARE-9999 same_barcode cluster removes it',

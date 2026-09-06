@@ -3,7 +3,7 @@
 
 import { BUSINESS_TIME_ZONE } from '../constants.ts'
 
-type TimestampInput = string | number | Date | null | undefined
+export type TimestampInput = string | number | Date | null | undefined
 
 function normalizeTimestampInput(raw: TimestampInput): string {
   if (!raw) return ''

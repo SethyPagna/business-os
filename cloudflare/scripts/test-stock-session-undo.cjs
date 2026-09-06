@@ -13,7 +13,9 @@ function state(f) {
 }
 function createRequest() {
   const request = receiveRequest('mixed-session-001', 3.5)
-  request.items.push({ line_id: 'new-line', kind: 'create_receive', quantity: 2.5,
+  // N14-D: the parser no longer borrows cost_price_usd for a cost the operator
+  // never typed, so the receipt cost is stated here, explicitly.
+  request.items.push({ line_id: 'new-line', kind: 'create_receive', quantity: 2.5, unit_cost_usd: 1.25,
     product: { name: 'New cream', barcode: 'CREAM', cost_price_usd: 1.25 } })
   return request
 }
@@ -189,7 +191,7 @@ async function main() {
     const f = fixture()
     f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Baseline supplier')")
     const baselineRequest = receiveRequest('baseline-receipt', 4)
-    Object.assign(baselineRequest.items[0], { supplier_id: 1, payment_status: 'credit', credit_due_date: '2026-09-30', notes: 'Pre-existing attribution' })
+    Object.assign(baselineRequest.items[0], { supplier_id: 1, supplier_name: 'Baseline supplier', payment_status: 'credit', credit_due_date: '2026-09-30', notes: 'Pre-existing attribution' })
     await api.commitStockSession(f.env, user, baselineRequest)
     const baseline = f.sql.prepare('SELECT * FROM product_batches').all()
     const r = await api.commitStockSession(f.env, user, receiveRequest('next-receipt-01', 2))
@@ -260,7 +262,7 @@ async function main() {
   {
     const f = fixture()
     const request = receiveRequest('largest-session-1')
-    request.items = Array.from({ length: 25 }, (_, i) => ({ line_id: `line-${i}`, kind: 'receive', product_id: 1, quantity: 1 }))
+    request.items = Array.from({ length: 25 }, (_, i) => ({ line_id: `line-${i}`, kind: 'receive', product_id: 1, quantity: 1, unit_cost_usd: 2 }))
     const r = await api.commitStockSession(f.env, user, request)
     await Promise.all([replay(f, r, 'undo', 0), replay(f, r, 'undo', 0)])
     assert.equal(f.sql.prepare('SELECT stock_quantity FROM products').get().stock_quantity, 0)

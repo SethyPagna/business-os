@@ -2,6 +2,12 @@
 // definition of the ten-column Add / Sale / Reconciliation sheet; the
 // upload screen, review screen and template download all consume it.
 
+// THE fold, from the rule module the Worker carries verbatim. The in-sheet
+// grouping below must reach the same verdict the server's matchProduct does, or
+// the review screen reads a leading-zero pair as two products while the import
+// that follows treats them as one.
+import { identityBarcodeKey } from '../../../utils/productDetailRule.ts'
+
 export type UnifiedStockMode = 'direct' | 'reconcile'
 
 export const UNIFIED_STOCK_HEADERS = [
@@ -175,7 +181,10 @@ export function buildUnifiedStockTemplateCsv(): string {
 export function findUnifiedStockCostBatchConflicts(rows: readonly UnifiedStockParsedRow[]): Map<number, string> {
   const groups = new Map<string, UnifiedStockParsedRow[]>()
   for (const row of rows) {
-    const key = `${row.name.trim().toLowerCase().replace(/\s+/g, ' ')}|${row.barcode.trim().toLowerCase()}`
+    // Same key the server groups by: collapsed name + FOLDED barcode. Keyed on
+    // the raw barcode, one sheet listing '0601' and '601' looked like two
+    // products here and the cost/batch gate below never fired for the pair.
+    const key = `${row.name.trim().toLowerCase().replace(/\s+/g, ' ')}|${identityBarcodeKey(row.barcode)}`
     const group = groups.get(key) || []
     group.push(row)
     groups.set(key, group)

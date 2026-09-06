@@ -177,12 +177,17 @@ async function drainAnalyze(env, jobId) {
   assert.strictEqual(job.processed_rows, 0)
   assert.strictEqual(job.failed_rows, 0)
   assert.strictEqual(job.lease_token, null, 'every continuation releases its single-writer lease')
-  assert.strictEqual(summary.requires_stock_action_confirmation, false)
-  assert.strictEqual(summary.stock_action_confirmation_rows, 0)
+  // The two Anchor rows are ONE product (N15: cost stopped being identity on
+  // Sep 4 2026), so the file asks to receive that product at two costs across
+  // two lots -- exactly the shape the stock-action confirmation exists for.
+  // It used to read as a silent cost FORK: the second row previewed as a new
+  // product, nothing needed confirming, and applying it minted the duplicate.
+  assert.strictEqual(summary.requires_stock_action_confirmation, true)
+  assert.strictEqual(summary.stock_action_confirmation_rows, 2)
   assert.strictEqual(summary.total, TOTAL_CSV_ROWS)
-  assert.strictEqual(summary.updated, 1)
-  assert.strictEqual(summary.created, FILLER_ROWS + 1)
-  assert.strictEqual(job.warning_count, 0)
+  assert.strictEqual(summary.updated, 2, 'both Anchor rows update the one live product, across two classification windows')
+  assert.strictEqual(summary.created, FILLER_ROWS)
+  assert.strictEqual(job.warning_count, 2)
 
   const sourceCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get({ id: 'analyze-e2e' })
   const reviewCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze'`).get({ id: 'analyze-e2e' })
@@ -193,19 +198,23 @@ async function drainAnalyze(env, jobId) {
     WHERE job_id = @id AND phase = 'analyze'
       AND json_extract(result_json, '$.data.identityKey') = 'product:10'
     ORDER BY row_number`).all({ id: 'analyze-e2e' })
-  // Header is row 1, first Anchor row 2, the fillers, then the second
-  // Anchor lands one row past the full window.
-  assert.deepStrictEqual(anchorRows.map((row) => row.row_number), [2])
+  // Header is row 1, first Anchor row 2, the fillers, then the second Anchor
+  // lands one row past the full window -- and it is the SAME product, which is
+  // the point: a second window resolving the same identity is what this e2e
+  // guards, and a cost difference no longer hides it behind a fresh row.
+  assert.deepStrictEqual(anchorRows.map((row) => row.row_number), [2, FILLER_ROWS + 3])
   for (const row of anchorRows) {
     const result = JSON.parse(row.result_json)
     assert.strictEqual(row.action, 'update')
-    assert.strictEqual(result.data.conflicts.length, 0)
+    assert.strictEqual(result.data.conflicts.length, 1)
+    assert.match(result.data.conflicts[0], /different cost prices/)
   }
-  const costChild = await db.prepare(`SELECT row_number, action, result_json FROM import_job_rows
+  // The cost fork is gone, not merely unused: no row may carry a cost-keyed
+  // identity, which is how this import path used to mint the duplicate itself.
+  const costForked = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows
     WHERE job_id = @id AND phase = 'analyze'
-      AND json_extract(result_json, '$.data.identityKey') = 'new:anchor serum|anchor|cost:700'`).get({ id: 'analyze-e2e' })
-  assert.strictEqual(costChild.row_number, FILLER_ROWS + 3)
-  assert.strictEqual(costChild.action, 'create', 'different cost is a distinct child row, not an ambiguous merge')
+      AND json_extract(result_json, '$.data.identityKey') LIKE '%|cost:%'`).get({ id: 'analyze-e2e' })
+  assert.strictEqual(costForked.n, 0, 'a different cost is not a different product (Sep 4 2026)')
 
   // Analyze is preview-only: a full window of create verdicts cannot mutate live data.
   assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM products`).get({})).n, 1)

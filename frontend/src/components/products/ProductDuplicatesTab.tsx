@@ -9,7 +9,7 @@ import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { ProductImg } from './shared/primitives.tsx'
 import { getPossiblySameProducts, dismissProductDuplicateCluster, updateProduct } from '../../api/productWriteTransport.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
-import { compareCosts } from '../../utils/productDetailRule.ts'
+import { identityBarcodeKey, normalizeLeadingZeroBarcodeForCleanup, resolveMergedCostDetail } from '../../utils/productDetailRule.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import Modal from '../shared/Modal'
 
@@ -25,7 +25,7 @@ import Modal from '../shared/Modal'
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
 
-type Severity = 'same_barcode' | 'same_name' | 'similar_name'
+type Severity = 'leading_zero' | 'same_barcode' | 'same_name' | 'similar_name'
 
 type ClusterProduct = {
   id: number
@@ -44,25 +44,28 @@ type ClusterProduct = {
 }
 
 type Cluster = {
-  type: 'barcode' | 'name' | 'similar'
+  type: 'leadingzero' | 'barcode' | 'name' | 'similar'
   value: string
   severity: Severity
   products: ClusterProduct[]
 }
 
 const SEVERITY_STYLE: Record<Severity, string> = {
+  leading_zero: 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30',
   same_barcode: 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30',
   same_name: 'border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30',
   similar_name: 'border-violet-200 bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/30',
 }
 
 const SEVERITY_TEXT: Record<Severity, string> = {
+  leading_zero: 'text-emerald-700 dark:text-emerald-300',
   same_barcode: 'text-amber-800 dark:text-amber-300',
   same_name: 'text-blue-700 dark:text-blue-300',
   similar_name: 'text-violet-700 dark:text-violet-300',
 }
 
 const SEVERITY_LABEL_KEY: Record<Severity, [string, string]> = {
+  leading_zero: ['product_dup_leading_zero', 'Same barcode, extra zero'],
   same_barcode: ['product_dup_same_barcode', 'Same barcode'],
   same_name: ['product_dup_same_name', 'Same name'],
   similar_name: ['product_dup_similar_name', 'Similar name'],
@@ -84,44 +87,35 @@ function clusterIsExact(cluster: Cluster): boolean {
   return names.size === 1 && !names.has('')
 }
 
-// MIRROR of normalizeLeadingZeroBarcodeForCleanup in
-// cloudflare/src/lib/productIdentity.ts -- keep the two byte-identical in
-// behaviour (frontend/tests/mergeRulesParity.test.ts runs both over the same
-// probes). Strips EVERY leading zero (idempotent: stripping exactly one moved
-// both sides of a pair in lockstep, so '08339327539' and '008339327539' never
-// met), numeric codes only, and only when three or more digits survive -- so
-// placeholder '0'/'00'/'0000' stay untouched rather than collapsing to a blank
-// barcode, and '1234' can never fold into '12345'.
-//
-// The bound was 4 until the owner ruled on 2026-09-04 that the five MAC shade
-// pairs ('0601'/'601', 617, 666, 689, 691) should merge after all. Measured
-// against production first: those ten rows are the ONLY numeric barcodes in
-// the catalogue whose zero-stripped form is exactly three digits, so 3 admits
-// them and nothing else. See the Worker copy for the full note.
-function cleanupBarcode(value: string | null): string {
-  const barcode = String(value || '').trim().toLowerCase()
-  if (!/^[0-9]+$/.test(barcode)) return barcode
-  const stripped = barcode.replace(/^0+/, '')
-  return stripped.length >= 3 ? stripped : barcode
-}
+// The leading-zero fold used to be hand-copied into this file. It now comes
+// from utils/productDetailRule.ts -- the module the Worker carries verbatim,
+// byte-compared by tests/productDetailRuleParity.test.ts -- so the client and
+// the server can no longer answer "is this one product?" differently.
+const cleanupBarcode = (value: string | null): string => normalizeLeadingZeroBarcodeForCleanup(value)
 
 // Only these pairs are safe for an automatic bulk decision: same exact name,
-// costs that do not DISAGREE, and either the exact barcode or precisely one
-// extra leading 0. Similar names and a shared barcode under different names
-// stay manual.
+// and either the exact barcode or the same code written with extra leading
+// zeros. Similar names and a shared barcode under different names stay manual.
 //
-// "Do not disagree" is the shared cost ruling (utils/productDetailRule.ts's
-// compareCosts), not an equality test: a cost of 0/NULL is a cost nobody has
-// recorded yet, so a pair where one side is blank is one product and the
-// survivor keeps the real cost. Only BOTH sides carrying a cost and the two
-// differing is a real difference -- real money out, never averaged away by a
-// bulk run -- and that pair stays review-list only.
+// COST NO LONGER BLOCKS THE AUTOMATIC PATH. This gate used to refuse any pair
+// whose costs DISAGREED ("real money out, never averaged away by a bulk run"),
+// which was the pre-Sep-4 policy: back then a differing cost forked a child
+// row. Sep 4 reversed it -- "all products if cost is different add different
+// costs together and divide by the number different costs" -- and the Worker
+// has averaged ever since (resolveMergedCostDetail), so this gate was refusing
+// exactly the case the owner asked for (N15) while POST /merge-duplicates
+// merged the identical pair. Frontend validation with no backend mirror,
+// inverted.
+//
+// What DOES still refuse is a cost pair too far apart to be one cost: above
+// COST_OUTLIER_RATIO the server refuses the merge outright (cost_outlier_review)
+// rather than inventing a mean nobody paid, so the bulk run must not offer it.
 function clusterIsSafeAutoMerge(cluster: Cluster): boolean {
   if (cluster.products.length !== 2) return false
   const [a, b] = cluster.products
   if (!normalizeProductGroupName(a.name) || normalizeProductGroupName(a.name) !== normalizeProductGroupName(b.name)) return false
-  if (compareCosts(a, b) === 'differs') return false
-  return cleanupBarcode(a.barcode) === cleanupBarcode(b.barcode)
+  if (resolveMergedCostDetail([a, b]).outliers.length) return false
+  return identityBarcodeKey(a.barcode) === identityBarcodeKey(b.barcode)
 }
 
 function chooseAutomaticKeeper(products: ClusterProduct[]): [ClusterProduct, ClusterProduct] {
@@ -527,6 +521,11 @@ export default function ProductDuplicatesTab({ t, notify }: {
     const skipped = targets.length - mergeable.length
     setBulkBusy(true)
     let failed = 0
+    // A refusal is a DECISION, not a failure -- a cost pair too far apart to be
+    // one cost, or a stock-in session that can still be undone. A bare count
+    // tells the operator a number and hides the one sentence that says what to
+    // do about it, so the first message is carried out of the loop.
+    let firstRefusal = ''
     let cancelled = 0
     let done = 0
     for (const cluster of mergeable) {
@@ -539,8 +538,9 @@ export default function ProductDuplicatesTab({ t, notify }: {
         const outcome = await mergeWithChoice(keeper, other)
         if (outcome === 'cancelled') { cancelled += 1; done += 1; continue }
         removeCluster(clusterKey(cluster))
-      } catch {
+      } catch (e: unknown) {
         failed += 1
+        if (!firstRefusal && e instanceof Error && e.message) firstRefusal = e.message
       }
       done += 1
     }
@@ -550,6 +550,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
     if (failed || skipped || cancelled) {
       const parts = []
       if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
+      if (firstRefusal) parts.push(firstRefusal)
       if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) need manual review and were skipped', { count: skipped }))
       if (cancelled) parts.push(replaceVars(t('bulk_merge_cancelled_count') || '{count} left untouched — you cancelled the stock decision', { count: cancelled }))
       notify(parts.join('. '), failed ? 'error' : 'info')
@@ -568,7 +569,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
   }), [clusters, normalizedSearch, severityFilter])
 
   const counts = useMemo(() => {
-    const result: Record<Severity, number> = { same_barcode: 0, same_name: 0, similar_name: 0 }
+    const result: Record<Severity, number> = { leading_zero: 0, same_barcode: 0, same_name: 0, similar_name: 0 }
     for (const cluster of clusters) result[cluster.severity] += 1
     return result
   }, [clusters])
@@ -581,7 +582,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
           text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one), one display name with different barcodes (usually genuinely different SKUs), or a similar name — the same name re-typed with different punctuation, accents or word order, each with its own barcode. Keep this = the other rows fold into it: lots, photos, sales and returns carry over and old sales stay valid. If a row you are removing still holds stock you are asked what happens to it — move the lots onto the kept product, or write them off against the ledger. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
         />
         <div className="flex items-center gap-1">
-          {(['all', 'same_barcode', 'same_name', 'similar_name'] as const).map((severity) => {
+          {(['all', 'leading_zero', 'same_barcode', 'same_name', 'similar_name'] as const).map((severity) => {
             const [key, fallback] = severity === 'all' ? ['all_severities', 'All'] : SEVERITY_LABEL_KEY[severity]
             return (
               <button

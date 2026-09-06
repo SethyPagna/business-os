@@ -4,6 +4,10 @@
 
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
+// The ONE fold. Imported from the rule module both packages carry verbatim, so
+// this path cannot reach a different verdict from the create/edit guard, the
+// Conflicts sweep, the merge tool or the client's own sheet review.
+import { identityBarcodeKey } from './productDetailRule'
 import {
   resolveStockActions,
   type StockActionMode,
@@ -72,10 +76,6 @@ function key(value: unknown): string {
   return text(value).toLowerCase().replace(/\s+/g, ' ')
 }
 
-function moneyCents(value: unknown): number {
-  return Math.round((Number(value) || 0) * 100)
-}
-
 function optionalNumber(value: unknown, field: string): { value: number | null; error: string | null } {
   if (!text(value)) return { value: null, error: null }
   try {
@@ -101,40 +101,52 @@ export function getUnifiedStockMode(policyJson: string | null | undefined): Stoc
   }
 }
 
+// THE identity question, asked the way every other surface asks it (the Sep-4
+// cost ruling and N15's fold): same collapsed name + same FOLDED barcode is the
+// same product. Two things used to make this path disagree with the rest of the
+// app, and each one minted exactly the rows the merge tool then has to clean up:
+//
+//   * the barcode was compared RAW, so a sheet written in the GTIN-14 form of a
+//     code the catalog stores as EAN-13 (one extra leading zero) matched
+//     nothing and the import CREATED the leading-zero twin itself;
+//   * a different COST forked a new product. That is the pre-Sep-4 rule -- it
+//     left products.ts and stockSession.ts when the owner ruled "only a
+//     different barcode creates a new child row" -- so a restock at a new price
+//     silently became a second product row.
+//
+// Cost is still read and carried onto the row (costPriceUsd below); it simply
+// no longer decides identity.
 function matchProduct(
   name: string,
   barcode: string,
-  costPriceUsd: number | null,
   batchLabel: string,
   products: UnifiedStockCatalogProduct[],
 ): { product: UnifiedStockCatalogProduct | null; conflict: string | null } {
   const nameKey = key(name)
-  const barcodeKey = key(barcode)
+  const barcodeKey = identityBarcodeKey(barcode)
   const candidates = products.filter((product) => (
-    (!nameKey || key(product.name) === nameKey) && key(product.barcode) === barcodeKey
+    (!nameKey || key(product.name) === nameKey) && identityBarcodeKey(product.barcode) === barcodeKey
   ))
-  const exactCost = candidates.filter((product) => (
-    costPriceUsd == null || moneyCents(product.cost_price_usd) === moneyCents(costPriceUsd)
-  ))
-  if (exactCost.length === 1) return { product: exactCost[0], conflict: null }
-  if (exactCost.length > 1) {
-    return { product: null, conflict: `Name/barcode/cost match ${exactCost.length} product rows; merge the exact duplicates before importing.` }
-  }
-
-  // Cost normally creates a sibling. The sole exception is an explicitly
-  // named batch already owned by exactly one compatible product: another
-  // receipt may share that option while its event cost remains on the
-  // movement/received-cost ledger, never on products.cost_price_usd.
-  const batchKey = key(batchLabel)
-  const sameBatch = batchKey
-    ? candidates.filter((product) => (product.batch_keys || []).some((value) => key(value) === batchKey))
-    : []
-  if (sameBatch.length === 1) return { product: sameBatch[0], conflict: null }
-  if (sameBatch.length > 1) return { product: null, conflict: `Received date "${batchLabel}" belongs to ${sameBatch.length} matching product rows; choose the exact row.` }
-
-  if (!nameKey && barcodeKey) {
-    const barcodeMatches = products.filter((product) => key(product.barcode) === barcodeKey)
-    if (barcodeMatches.length > 1) return { product: null, conflict: `Barcode ${barcode} matches ${barcodeMatches.length} products; add the product name and cost so the right row is chosen.` }
+  if (candidates.length === 1) return { product: candidates[0], conflict: null }
+  if (candidates.length > 1) {
+    // More than one row IS this identity, i.e. the catalog already holds
+    // duplicates. An explicitly named batch owned by exactly one of them still
+    // settles it (another receipt may share that lot option while its event
+    // cost stays on the movement/received-cost ledger, never on
+    // products.cost_price_usd); otherwise the row is reviewable, never
+    // actionable.
+    const batchKey = key(batchLabel)
+    const sameBatch = batchKey
+      ? candidates.filter((product) => (product.batch_keys || []).some((value) => key(value) === batchKey))
+      : []
+    if (sameBatch.length === 1) return { product: sameBatch[0], conflict: null }
+    if (sameBatch.length > 1) return { product: null, conflict: `Received date "${batchLabel}" belongs to ${sameBatch.length} matching product rows; choose the exact row.` }
+    return {
+      product: null,
+      conflict: nameKey
+        ? `Name/barcode match ${candidates.length} product rows; merge the exact duplicates before importing.`
+        : `Barcode ${barcode} matches ${candidates.length} products; add the product name so the right row is chosen.`,
+    }
   }
   return { product: null, conflict: null }
 }
@@ -183,13 +195,19 @@ export function resolveUnifiedStockImportRows(
 
     const batchLabel = text(raw.batch)
     const effectiveBatchLabel = batchLabel || (date ? String(dateToBatchCode(date)) : '')
-    const matched = matchProduct(name, barcode, cost.value, effectiveBatchLabel, products)
+    const matched = matchProduct(name, barcode, effectiveBatchLabel, products)
     const productName = matched.product?.name || name
+    // The identity a row that must CREATE will get, and the key sibling rows in
+    // the same file group on. It is the same question matchProduct asks of the
+    // catalog: name group + folded barcode. Cost used to be part of it, so one
+    // file listing the same article at two prices minted two products, and the
+    // raw barcode used to be part of it, so '0601' and '601' in one file minted
+    // the twin pair N15 exists to remove.
     let identityKey = matched.product
       ? `product:${matched.product.id}`
-      : `new:${key(productName)}|${key(barcode)}|cost:${moneyCents(cost.value)}`
-    if (!matched.product && key(productName) && key(barcode) && key(effectiveBatchLabel)) {
-      const batchOwnerKey = `${key(productName)}|${key(barcode)}|batch:${key(effectiveBatchLabel)}`
+      : `new:${key(productName)}|${identityBarcodeKey(barcode)}`
+    if (!matched.product && key(productName) && identityBarcodeKey(barcode) && key(effectiveBatchLabel)) {
+      const batchOwnerKey = `${key(productName)}|${identityBarcodeKey(barcode)}|batch:${key(effectiveBatchLabel)}`
       const earlierIdentity = newBatchIdentityByKey.get(batchOwnerKey)
       if (earlierIdentity) identityKey = earlierIdentity
       else newBatchIdentityByKey.set(batchOwnerKey, identityKey)

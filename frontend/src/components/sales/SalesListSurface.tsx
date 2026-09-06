@@ -7,17 +7,8 @@ import StatusBadge from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
-import type { TableColumnDef } from '../shared/columnPreferences.ts'
 import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
-
-const SALES_OPTIONAL_COLUMNS: TableColumnDef[] = [
-  { key: 'cashier', label: 'Cashier' },
-  { key: 'branch', label: 'Branch' },
-  // N9: default-visible (the owner's "must show DRIVER" wording), still
-  // chooser-toggleable/persisted like every other optional column here.
-  { key: 'driver', label: 'Driver' },
-  { key: 'items', label: 'Items' },
-]
+import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -139,7 +130,7 @@ export default function SalesListSurface({
   // every first-column cell drops padding/content and auto layout collapses
   // the column.
   const selectCellPad = selectionModeActive ? 'px-3' : 'px-0'
-  const cols = useColumnPreferences('sales', SALES_OPTIONAL_COLUMNS)
+  const cols = useColumnPreferences(SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS)
   const columnCount = 9 + cols.visibleCount
   const chooserColumns = SALES_OPTIONAL_COLUMNS.map((column) => ({ ...column, label: t(column.key) || column.label }))
 
@@ -169,7 +160,7 @@ export default function SalesListSurface({
                 {cols.isVisible('cashier') ? <th className="hidden px-3 py-2 text-left font-semibold lg:table-cell">{t('cashier')}</th> : null}
                 <th className="px-3 py-2 text-left font-semibold">{t('payment_method')}</th>
                 {cols.isVisible('branch') ? <th className="hidden px-3 py-2 text-left font-semibold md:table-cell">{t('branch')}</th> : null}
-                {cols.isVisible('driver') ? <th className="hidden px-3 py-2 text-left font-semibold lg:table-cell">{t('driver')}</th> : null}
+                {cols.isVisible('driver') ? <th className="hidden px-3 py-2 text-left font-semibold md:table-cell">{t('driver')}</th> : null}
                 <th className="px-3 py-2 text-right font-semibold">{t('total')}</th>
                 {cols.isVisible('items') ? <th className="hidden px-3 py-2 text-center font-semibold md:table-cell">{t('items')}</th> : null}
                 <th className="px-3 py-2 text-right font-semibold">{t('actions') || 'Actions'}</th>
@@ -190,7 +181,7 @@ export default function SalesListSurface({
                     {cols.isVisible('cashier') ? <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
                     {cols.isVisible('branch') ? <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
-                    {cols.isVisible('driver') ? <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
+                    {cols.isVisible('driver') ? <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="ml-auto h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     {cols.isVisible('items') ? <td className="hidden px-4 py-3 md:table-cell"><div className="mx-auto h-4 w-8 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="mx-auto h-6 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
@@ -266,6 +257,7 @@ export default function SalesListSurface({
                           const totalKhr = sale.total_khr || 0
                           const status = sale.sale_status || 'completed'
                           const branchLabel = getSaleBranchLabel(sale)
+                          const driverLabel = resolveDriverLabel(sale)
                           const rowSelected = selectedIds.has(Number(sale.id))
                           // Same long-press-to-select-mode pattern as Products/
                           // Inventory rows: out of select mode a plain click
@@ -316,7 +308,7 @@ export default function SalesListSurface({
                               {cols.isVisible('cashier') ? <td className="hidden px-3 py-1.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td> : null}
                               <td className="px-3 py-1.5"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method || 'N/A'}</span></td>
                               {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel || 'N/A'}</td> : null}
-                              {cols.isVisible('driver') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 lg:table-cell">{resolveDriverLabel(sale) || 'N/A'}</td> : null}
+                              {cols.isVisible('driver') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{driverLabel || 'N/A'}</td> : null}
                               <td className="px-3 py-1.5 text-right">
                                 <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
                                 {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
@@ -436,6 +428,7 @@ export default function SalesListSurface({
                     const totalKhr = sale.total_khr || 0
                     const status = sale.sale_status || 'completed'
                     const branchLabel = getSaleBranchLabel(sale)
+                    const driverLabel = resolveDriverLabel(sale)
                     const cardSelected = selectedIds.has(Number(sale.id))
                     // Mobile mirror of the desktop rows' long-press pattern --
                     // the card and the row share one per-sale state slot, which
@@ -485,7 +478,17 @@ export default function SalesListSurface({
                               {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
                               {sale.cashier_name ? <span>| {sale.cashier_name}</span> : null}
                               {branchLabel ? <span>| {branchLabel}</span> : null}
-                              {resolveDriverLabel(sale) ? <span>| {resolveDriverLabel(sale)}</span> : null}
+                              {/* N23: the driver is NAMED here. Cashier,
+                                  branch and driver shared one unlabeled
+                                  pipe-separated line, so a bare "Sok Dara"
+                                  could equally have been the cashier -- the
+                                  desktop table has a column header to say
+                                  which, the card had nothing. The N/A
+                                  placeholder is a TABLE convention (an empty
+                                  cell reads as a bug); a card elides an
+                                  empty field, as cashier and branch beside
+                                  it already do. */}
+                              {driverLabel ? <span>| {t('driver')}: {driverLabel}</span> : null}
                             </div>
                             {/* Third row on small screens (user, Aug 30):
                                 status + payment get their OWN line, and the

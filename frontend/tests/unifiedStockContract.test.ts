@@ -40,6 +40,25 @@ assert.equal(unified.rows[0].sellingPrice, 12.5)
 assert.equal(unified.rows[1].date, '2026-08-27')
 assert.deepEqual([...findUnifiedStockCostBatchConflicts(unified.rows).keys()], [2, 3])
 
+// N15: the review screen must group sheet rows the way the SERVER will. The
+// key used the raw barcode, so a file writing one code in its GTIN-14 and
+// EAN-13 forms looked like two products here -- the cost/batch confirm gate
+// never fired -- while the import that followed treated them as one product
+// and received it at two costs across two lots unannounced.
+const foldedTwins = parseUnifiedStockRows([
+  { name: 'Rose Lip Oil', barcode: '03614274226546', shop: '2', date: '08/27/2026', action: 'add', cost_price: '4', batch: 'LOT-A' },
+  { name: 'Rose Lip Oil', barcode: '3614274226546', shop: '2', date: '08/27/2026', action: 'add', cost_price: '9', batch: 'LOT-B' },
+])
+assert.equal(foldedTwins.issues.length, 0)
+assert.deepEqual([...findUnifiedStockCostBatchConflicts(foldedTwins.rows).keys()], [2, 3],
+  'two spellings of one barcode are one product, so two lots at two costs must raise the gate')
+// The fold stops where the rule stops: stripping '0012' would leave under
+// three characters, so these two stay two products and nothing is gated.
+const shortCodes = parseUnifiedStockRows([
+  { name: 'Short Code Balm', barcode: '0012', shop: '1', date: '08/27/2026', action: 'add', cost_price: '3', batch: 'LOT-A' },
+  { name: 'Short Code Balm', barcode: '12', shop: '1', date: '08/27/2026', action: 'add', cost_price: '8', batch: 'LOT-B' },
+])
+assert.equal(findUnifiedStockCostBatchConflicts(shortCodes.rows).size, 0)
 const invalidUnified = parseUnifiedStockRows([{ name: '', barcode: '', shop: '-1', warehouse: '', date: '31/12/2026', selling_price: 'nope' }])
 assert.deepEqual(invalidUnified.issues.map((issue) => issue.code), ['missing_identity', 'invalid_quantity', 'invalid_date', 'invalid_price'])
 assert.equal(invalidUnified.rows.length, 1, 'invalid rows stay visible for review instead of disappearing')

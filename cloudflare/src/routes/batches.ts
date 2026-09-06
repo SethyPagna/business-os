@@ -9,6 +9,7 @@ import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -115,6 +116,8 @@ app.post('/', async (c) => {
     supplier_id?: number | null
     supplier_name?: string | null
     unit_cost_usd?: number | null
+    /** N14-D: the operator's explicit declaration that a $0.00 receipt was free. */
+    free_goods?: boolean
     payment_status?: string | null
     credit_due_date?: string | null
     session_id?: number | null
@@ -133,6 +136,25 @@ app.post('/', async (c) => {
   if (paymentStatus === 'credit' && !creditDueDate) {
     return c.json({ error: 'A credit purchase needs its due date — that is what the admin reminder is built on.' }, 400)
   }
+  // N14-D: this is the THIRD receipt wire (FastStockInModal's ordinary lines
+  // and ReceiveBatchModal both land here, not on /api/inventory/adjust), so it
+  // runs the same gate -- supplier and unit cost required, $0.00 only as
+  // declared free goods. A rule enforced on two of three wires is not enforced.
+  const freeGoods = body.free_goods === true
+  // A top-up of an existing lot inherits that lot's supplier: first attribution
+  // sticks, so ReceiveBatchModal deliberately sends none for an attributed lot.
+  const topUpBatchId = Number.isSafeInteger(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
+  const lotSupplierName = topUpBatchId
+    ? (await getDb(c.env).prepare('SELECT supplier_name FROM product_batches WHERE id = @id').get<{ supplier_name: string | null }>({ id: topUpBatchId }))?.supplier_name ?? null
+    : null
+  const receiptGate = stockReceiptGateCode({
+    isStockIn: true,
+    supplierName: body.supplier_name,
+    lotSupplierName,
+    unitCostUsd: body.unit_cost_usd,
+    freeGoods,
+  })
+  if (receiptGate) return c.json({ error: stockReceiptGateMessage(receiptGate), code: receiptGate }, 400)
 
   const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([productId])
   if (!product) return c.json({ error: 'Product not found' }, 404)
@@ -193,7 +215,7 @@ app.post('/', async (c) => {
     totalCostUsd: Number.isFinite(Number(body.unit_cost_usd)) && Number(body.unit_cost_usd) >= 0
       ? Math.round(Number(body.unit_cost_usd) * quantity * 10000) / 10000
       : null,
-    reason: `Stock received (${lotCode})`,
+    reason: appendReceiptNotes(`Stock received (${lotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
     referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
     userId: user?.id ?? null,
     userName: actorSnapshot(user),

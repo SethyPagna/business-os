@@ -47,9 +47,14 @@ function ok(cond, label) {
 }
 
 // ---- compile the real modules ---------------------------------------------
+// stockInSessionsQuery.ts is here only because stockLedgerQuery imports its
+// STOCK_RECEIPT_MOVEMENT_TYPES (the session lane, c438eee0) -- without it the
+// isolated compile fails with TS2307 before a single assertion runs, which is
+// a MODULE error dressed as a test failure.
 const MODULES = [
   'stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts',
   'movementActorName.ts', 'movementReference.ts', 'movementSearch.ts',
+  'stockInSessionsQuery.ts',
 ]
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'movement-reference-'))
 for (const file of MODULES) {

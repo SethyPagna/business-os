@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
+import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import InfoHint from '../shared/InfoHint.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
@@ -66,6 +68,9 @@ export default function ReceiveBatchModal({
   const [supplierName, setSupplierName] = useState('')
   const [supplierId, setSupplierId] = useState<number | null>(null)
   const [unitCost, setUnitCost] = useState('')
+  // N14-D: the explicit free-goods declaration. POST /api/batches refuses a
+  // $0.00 unit cost without it.
+  const [freeGoods, setFreeGoods] = useState(false)
   const [paymentStatus, setPaymentStatus] = useState<'' | 'paid' | 'credit'>('')
   const [creditDueDate, setCreditDueDate] = useState('')
   const [saving, setSaving] = useState(false)
@@ -219,6 +224,22 @@ export default function ReceiveBatchModal({
       .replace('{branch}', String(branchName))
       .replace('{lot}', lotLabel))) return
 
+    // N14-D: the same rule POST /api/batches enforces
+    // (cloudflare/src/lib/stockReceiptGate.ts). An already-attributed lot
+    // supplies the supplier itself -- first attribution sticks, which is why
+    // the picker locks and this wire sends none.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn: true,
+      supplierName,
+      lotSupplierName: lotAttributedName,
+      unitCostUsd: unitCost,
+      freeGoods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
+      return
+    }
+
     setSaving(true)
     try {
       const res = await receiveBatchStock({
@@ -237,6 +258,7 @@ export default function ReceiveBatchModal({
         supplierName: lotAttributedName ? null : (supplierName.trim() || null),
         supplierId: lotAttributedName ? null : supplierId,
         unitCostUsd: unitCost.trim() === '' ? null : Number(unitCost),
+        freeGoods,
         paymentStatus: paymentStatus || null,
         creditDueDate: paymentStatus === 'credit' ? creditDueDate : null,
       })
@@ -384,17 +406,24 @@ export default function ReceiveBatchModal({
                 : null}
             />
             <label className="block">
-              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost (USD)')}</span>
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost (USD)')} <span className="text-red-500" aria-hidden="true">*</span></span>
               <input
                 className="input w-full text-sm"
                 type="number"
                 min="0"
                 step="any"
+                required
+                disabled={freeGoods}
                 inputMode="decimal"
-                value={unitCost}
+                value={freeGoods ? '0' : unitCost}
                 onChange={(event) => setUnitCost(event.target.value)}
-                placeholder="0.00"
               />
+              {/* N14-D: a zero cost is a claim, and this is where it is made. */}
+              <span className="mt-1 flex items-center gap-1 text-[10px] text-gray-600 dark:text-gray-400">
+                <input type="checkbox" className="h-3 w-3" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
+                {tr('stock_receipt_free_goods', 'Free goods')}
+                <InfoHint label={tr('stock_receipt_free_goods', 'Free goods')} text={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')} />
+              </span>
             </label>
           </div>
           {/* Paid vs on-credit; the due date appears only when credit and is

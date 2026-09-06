@@ -453,8 +453,10 @@ export function collectedSaleExpr(p: string): string { return `${saleStatusExpr(
 // discounts survive. Such a row is a broken record, not negative income: left
 // unfloored it would drag the whole window's revenue down and present a data
 // defect as a business result. The raw components stay visible beside it --
-// gross_sales_usd is still SUM(subtotal_usd) and both discount lines are
-// reported in full -- so the row that cannot foot is findable, and this is a
+// gross_sales_usd is reconstructed as the pre-line-discount merchandise value
+// (SUM(subtotal_usd) + item discounts); invoice discount lines are reported
+// separately and are applied after the merchandise gross. This keeps the row
+// that cannot foot findable, and this is a
 // row-level invariant rather than a clamp on the displayed total.
 export function rawNetSaleExpr(p: string): string {
   return `(COALESCE(${p}subtotal_usd, 0) - COALESCE(${p}discount_usd, 0) - COALESCE(${p}membership_discount_usd, 0))`
@@ -949,10 +951,15 @@ export interface DeriveTotalsOptions {
 
 export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd: number, options: DeriveTotalsOptions): SalesTotals {
   const txCount = num(level.tx_count)
-  const grossSalesUsd = num(level.gross_sales_usd)
   const storeDiscountUsd = num(level.store_discount_usd)
   const membershipDiscountUsd = num(level.membership_discount_usd)
   const discountUsd = storeDiscountUsd + membershipDiscountUsd
+  const itemDiscountUsd = num(options.itemDiscountUsd)
+  const grossSubtotalUsd = num(level.gross_sales_usd)
+  // subtotal_usd is already after line/product discounts. Restore only those
+  // discounts here; store and membership discounts are still applied to that
+  // subtotal and must not be added into merchandise gross a second time.
+  const grossSalesUsd = grossSubtotalUsd + itemDiscountUsd
   const taxUsd = num(level.tax_usd)
   const deliveryUsd = num(level.delivery_usd)
   const storeDeliveryUsd = num(level.store_delivery_usd)
@@ -966,7 +973,7 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   // silently zeroes out. gross_sales_usd / tax_usd / delivery_usd stay the full
   // display line items and are intentionally NOT changed.
   const hasRecognized = level.recognized_net_usd !== undefined && level.recognized_net_usd !== null
-  const recognizedNetUsd = hasRecognized ? num(level.recognized_net_usd) : grossSalesUsd - discountUsd
+  const recognizedNetUsd = hasRecognized ? num(level.recognized_net_usd) : grossSubtotalUsd - discountUsd
   const refundUsd = num(level.refund_usd)
   const pendingRevenueUsd = num(level.pending_revenue_usd)
   const recognizedTaxUsd = hasRecognized ? num(level.recognized_tax_usd) : taxUsd
@@ -1007,6 +1014,8 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   // are paid" is directly comparable with what it is worth today. Nothing
   // here is added into revenueUsd, collectedTotalUsd, netCostUsd or profitUsd.
   const pendingCostUsd = num(options.costUsd)
+  const pendingItemDiscountUsd = num(options.pendingItemDiscountUsd)
+  const pendingGrossSalesUsd = num(level.pending_gross_sales_usd) + pendingItemDiscountUsd
   const pendingDeliveryUsd = num(level.pending_delivery_usd)
   const pendingDeliveryCostUsd = num(level.pending_delivery_cost_usd)
   const pendingProfitUsd = pendingRevenueUsd - pendingCostUsd + (pendingDeliveryUsd - pendingDeliveryCostUsd)
@@ -1016,8 +1025,8 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     store_discount_usd: round2(storeDiscountUsd),
     membership_discount_usd: round2(membershipDiscountUsd),
     discount_usd: round2(discountUsd),
-    item_discount_usd: round2(num(options.itemDiscountUsd)),
-    total_discount_usd: round2(discountUsd + num(options.itemDiscountUsd)),
+    item_discount_usd: round2(itemDiscountUsd),
+    total_discount_usd: round2(discountUsd + itemDiscountUsd),
     tax_usd: round2(taxUsd),
     delivery_usd: round2(deliveryUsd),
     store_delivery_usd: round2(storeDeliveryUsd),
@@ -1031,14 +1040,14 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     recognized_delivery_usd: round2(recognizedDeliveryUsd),
     recognized_delivery_cost_usd: round2(recognizedDeliveryCostUsd),
     pending_tx_count: num(level.pending_tx_count),
-    pending_gross_sales_usd: round2(num(level.pending_gross_sales_usd)),
+    pending_gross_sales_usd: round2(pendingGrossSalesUsd),
     pending_store_discount_usd: round2(num(level.pending_store_discount_usd)),
     pending_membership_discount_usd: round2(num(level.pending_membership_discount_usd)),
     pending_delivery_usd: round2(pendingDeliveryUsd),
     pending_delivery_cost_usd: round2(pendingDeliveryCostUsd),
     pending_cost_usd: round2(pendingCostUsd),
     pending_profit_usd: round2(pendingProfitUsd),
-    pending_item_discount_usd: round2(num(options.pendingItemDiscountUsd)),
+    pending_item_discount_usd: round2(pendingItemDiscountUsd),
     cancelled_tx_count: num(options.cancelledTxCount),
     returned_cost_usd: round2(Math.min(costUsd, returnedCostUsd)),
     returned_cost_shortfall_usd: round2(returnedCostShortfallUsd),

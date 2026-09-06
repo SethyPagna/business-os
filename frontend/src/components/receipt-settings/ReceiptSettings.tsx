@@ -305,9 +305,9 @@ function ReceiptQrSettingsTab({ tpl, setT, t }: ReceiptQrSettingsTabProps) {
         />
         {tpl.sales_receipt_enabled ? (
           <div className="mt-3 space-y-3">
-            <input className="input" aria-label="ABA account name" placeholder={t('aba_account_name') || 'ABA account name'} value={tpl.sales_receipt_aba_account_name || ''} onChange={(event) => setT('sales_receipt_aba_account_name', event.target.value)} />
-            <input className="input" aria-label="ABA account number" placeholder={t('aba_account_number') || 'ABA account number'} value={tpl.sales_receipt_aba_account_number || ''} onChange={(event) => setT('sales_receipt_aba_account_number', event.target.value)} />
-            <input className="input" aria-label="ABA QR image" placeholder={t('aba_qr_image') || 'ABA QR image URL'} value={tpl.sales_receipt_aba_qr_image || ''} onChange={(event) => setT('sales_receipt_aba_qr_image', event.target.value)} />
+            <input className="input" aria-label={t('aba_account_name') || 'ABA account name'} placeholder={t('aba_account_name') || 'ABA account name'} value={tpl.sales_receipt_aba_account_name || ''} onChange={(event) => setT('sales_receipt_aba_account_name', event.target.value)} />
+            <input className="input" aria-label={t('aba_account_number') || 'ABA account number'} placeholder={t('aba_account_number') || 'ABA account number'} value={tpl.sales_receipt_aba_account_number || ''} onChange={(event) => setT('sales_receipt_aba_account_number', event.target.value)} />
+            <input className="input" aria-label={t('aba_qr_image') || 'ABA QR image URL'} placeholder={t('aba_qr_image') || 'ABA QR image URL'} value={tpl.sales_receipt_aba_qr_image || ''} onChange={(event) => setT('sales_receipt_aba_qr_image', event.target.value)} />
             <AppSelect
               value={tpl.sales_receipt_note || 'none'}
               onChange={(value) => setT('sales_receipt_note', value)}
@@ -759,13 +759,13 @@ export default function ReceiptSettings() {
                 <textarea id="receipt-default-footer" name="receipt_footer" className="input resize-none" rows={2}
                   value={defaultFooter}
                   onChange={e => setDefaultFooter(e.target.value)}
-                  placeholder="Thank you!"
+                  placeholder={t('default_footer_placeholder') || 'Thank you!'}
                   autoComplete="off"
                 />
               </Section>
               <Section title={t('custom_header_text') || 'Custom Header Text'}>
                 <label htmlFor="receipt-custom-header" className="sr-only">{t('custom_header_text') || 'Custom Header Text'}</label>
-                <input id="receipt-custom-header" name="receipt_custom_header" className="input mb-3" value={tpl.custom_header} onChange={e => setT('custom_header', e.target.value)} placeholder="e.g. ** OFFICIAL RECEIPT **" autoComplete="off" />
+                <input id="receipt-custom-header" name="receipt_custom_header" className="input mb-3" value={tpl.custom_header} onChange={e => setT('custom_header', e.target.value)} placeholder={t('custom_header_placeholder') || 'e.g. ** OFFICIAL RECEIPT **'} autoComplete="off" />
               </Section>
             </>
           )}
@@ -817,7 +817,7 @@ export default function ReceiptSettings() {
                     </button>
                   ))}
                 </div>
-                <button type="button" onClick={() => setPreviewOpen(false)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white" aria-label="Close preview"><X className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setPreviewOpen(false)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white" aria-label={t('close_preview') || 'Close preview'}><X className="h-4 w-4" /></button>
               </div>
             </div>
             <div ref={previewTargetRef} className="min-h-0 flex-1 overflow-auto overscroll-contain p-4">

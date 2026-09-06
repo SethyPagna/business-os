@@ -3,8 +3,10 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
-import { normalizeProductGroupName } from './productDetailRule'
+import { identityBarcodeKey, normalizeProductGroupName } from './productDetailRule'
+import { identityBarcodeKeySql } from './productIdentity'
 import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
 import { normalizeMultiValue, planInsertRow, tableColumns, validateProductImageGallery } from './productWrites'
 import { sanitizeMediaPath } from './media'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
@@ -33,12 +35,12 @@ const PRODUCT_FIELDS = [
 ] as const
 const DEFAULT_FIELDS = [
   'branch_id', 'supplier_id', 'supplier_name', 'received_date', 'expiry_date', 'notes',
-  'unit_cost_usd', 'payment_status', 'credit_due_date', 'brand',
+  'unit_cost_usd', 'payment_status', 'credit_due_date', 'brand', 'free_goods',
 ] as const
 const ITEM_FIELDS = [
   'line_id', 'kind', 'product_id', 'product', 'batch_id', 'branch_id', 'quantity',
   'supplier_id', 'supplier_name', 'received_date', 'expiry_date', 'notes',
-  'unit_cost_usd', 'payment_status', 'credit_due_date',
+  'unit_cost_usd', 'payment_status', 'credit_due_date', 'free_goods',
 ] as const
 
 type Row = Record<string, unknown>
@@ -58,6 +60,7 @@ type CanonicalLine = {
   expiry_date: string | null
   notes: string | null
   unit_cost_usd: number | null
+  free_goods: boolean
   payment_status: 'paid' | 'credit' | null
   credit_due_date: string | null
 }
@@ -263,6 +266,28 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
     if (kind === 'create_receive' && batchId != null) fail('create_receive cannot reference an existing batch.', 400, 'invalid_request')
     if (kind === 'receive' && line.product != null) fail('receive cannot include a product object.', 400, 'invalid_request')
     if (kind === 'create_receive' && line.product_id != null) fail('create_receive cannot include product_id.', 400, 'invalid_request')
+    // N14-D receipt gate. Every line of a stock-in session that actually moves
+    // stock is a receipt, so it must name its supplier and carry the cost the
+    // operator typed. The old parser filled a missing cost from the product's
+    // stored cost_price_usd -- an invented receipt cost that looked entered --
+    // and a create_receive with no cost at all recorded $0.00, i.e. free
+    // goods nobody declared. A quantity-0 create_receive is catalogue work,
+    // not a receipt, and is left alone. Same kernel as POST
+    // /api/inventory/adjust (lib/stockReceiptGate.ts), so one wire cannot
+    // accept what the other refuses.
+    const supplierName = text(expanded('supplier_name'), 'supplier_name', 240)
+    const notes = text(expanded('notes'), 'notes', 1000)
+    const unitCostUsd = finite(expanded('unit_cost_usd'), 'unit_cost_usd', true)
+    const freeGoods = expanded('free_goods') === true
+    // A line that names an existing batch_id defers the SUPPLIER half only.
+    // An attributed lot keeps its first supplier server-side, so the picker
+    // deliberately sends supplier_name: null for one -- demanding a supplier
+    // here would refuse a complete receipt for naming a lot that already has
+    // the answer. The batch is loaded and matched to the product further down
+    // (explicitBatchMap), which is where a bad batch_id is caught. The COST
+    // half is never deferred: no lot supplies that.
+    const gate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName, unitCostUsd, freeGoods, lotAttributionDeferred: batchId != null })
+    if (gate) fail(stockReceiptGateMessage(gate) as string, 400, gate)
     return {
       line_id: line.line_id,
       kind,
@@ -272,11 +297,12 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
       branch_id: branchId,
       quantity,
       supplier_id: integer(expanded('supplier_id'), 'supplier_id', true),
-      supplier_name: text(expanded('supplier_name'), 'supplier_name', 240),
+      supplier_name: supplierName,
       received_date: receivedDate,
       expiry_date: date(expanded('expiry_date'), 'expiry_date'),
-      notes: text(expanded('notes'), 'notes', 1000),
-      unit_cost_usd: finite(expanded('unit_cost_usd') ?? product?.cost_price_usd, 'unit_cost_usd', true),
+      notes: freeGoods && unitCostUsd === 0 ? appendReceiptNotes(notes, [FREE_GOODS_REASON_NOTE]) : notes,
+      unit_cost_usd: unitCostUsd,
+      free_goods: freeGoods,
       payment_status: paymentStatus,
       credit_due_date: creditDueDate,
     }
@@ -471,10 +497,20 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const createLines = request.items.filter((line) => line.kind === 'create_receive')
   const stockCreateLines = createLines.filter((line) => line.quantity > 0)
   const activeBranches = stockCreateLines.length ? await db.prepare('SELECT id FROM branches WHERE is_active=1 ORDER BY id').all<Row>() : []
+  // THE identity rule, as products.ts findSameProductIdentityProduct and the
+  // import path already apply it: normalized name + FOLDED barcode.
+  //
+  // Cost left this guard on 2026-09-06. Keeping it contradicted the Sep-4
+  // ruling head-on -- a second cost for one article is a merge, not a new
+  // child row -- so the fast stock-in session happily minted the cost-forked
+  // twin the merge tool then had to clean up. And the barcode now folds, so a
+  // code retyped with a leading zero ('0123' beside '123') is one product
+  // here too, instead of a second row this session creates and the Conflicts
+  // tab reports the next morning.
   const identityKeys = new Set<string>()
   for (const line of createLines) {
     const product = line.product as CanonicalProduct
-    const key = `${normalizeProductGroupName(product.name)}\u0001${String(product.barcode || '').trim().toLowerCase()}\u0001${Math.round((Number(product.cost_price_usd) || 0) * 100)}\u0001${Math.round((Number(product.cost_price_khr) || 0) * 100)}`
+    const key = `${normalizeProductGroupName(product.name)}\u0001${identityBarcodeKey(product.barcode)}`
     if (identityKeys.has(key)) fail('Two create_receive lines describe the same product identity.', 409, 'duplicate_product')
     identityKeys.add(key)
   }
@@ -485,12 +521,13 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     duplicateCandidates = await db.prepare(`SELECT id,name,barcode,cost_price_usd,cost_price_khr FROM products WHERE is_active=1 AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' '))) IN (${sql})`).all<Row>(params)
     for (const line of createLines) {
       const product = line.product as CanonicalProduct
+      // The SQL above narrows to the name group; the barcode is compared
+      // here, folded, mirroring pickSameIdentityRow. Same rule, same answer
+      // as the manual product form and the CSV import.
       const duplicate = duplicateCandidates.find((row) =>
         normalizeProductGroupName(row.name) === normalizeProductGroupName(product.name)
-        && String(row.barcode || '').trim().toLowerCase() === String(product.barcode || '').trim().toLowerCase()
-        && Math.round((Number(row.cost_price_usd) || 0) * 100) === Math.round((Number(product.cost_price_usd) || 0) * 100)
-        && Math.round((Number(row.cost_price_khr) || 0) * 100) === Math.round((Number(product.cost_price_khr) || 0) * 100))
-      if (duplicate) fail(`"${duplicate.name}" already exists with this barcode and cost.`, 409, 'duplicate_product', { duplicate })
+        && identityBarcodeKey(row.barcode) === identityBarcodeKey(product.barcode))
+      if (duplicate) fail(`"${duplicate.name}" already exists with this barcode.`, 409, 'duplicate_product', { duplicate })
     }
   }
 
@@ -590,14 +627,16 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     if (stockCreateLines.length) statements.push(revisionAssertion('branch_catalog', 'all', '1=1', {}, rev('branch_catalog', 'all')))
     for (const line of createLines) {
       const product = line.product as CanonicalProduct
+      // The commit-time race guard for the JS check above, and it has to ask
+      // the SAME question or it lets through exactly what that check refuses.
+      // It is a SQL predicate inside the batch, so it cannot call the fold --
+      // identityBarcodeKeySql is the one SQL copy of it, pinned against the
+      // real function by test-stock-session-identity-guard-pure.cjs. Cost is
+      // gone from here for the same reason it left the guard above.
       statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE is_active=1
-        AND LOWER(TRIM(COALESCE(barcode,'')))=LOWER(@barcode)
-        AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey
-        AND ROUND(COALESCE(cost_price_usd,0)*100)=@costUsd
-        AND ROUND(COALESCE(cost_price_khr,0)*100)=@costKhr)`, {
-        barcode: String(product.barcode || '').trim(), nameKey: normalizeProductGroupName(product.name),
-        costUsd: Math.round((Number(product.cost_price_usd) || 0) * 100),
-        costKhr: Math.round((Number(product.cost_price_khr) || 0) * 100),
+        AND ${identityBarcodeKeySql('barcode')}=@barcodeKey
+        AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
+        barcodeKey: identityBarcodeKey(product.barcode), nameKey: normalizeProductGroupName(product.name),
       }))
     }
   }
@@ -638,8 +677,17 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     statements.push(...plan.statements)
     statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,quantity,unit_cost_usd)
       VALUES(@operationId,@lineId,@kind,${plan.productIdSql},@created,@branchId,${plan.batchIdSql},@quantity,@unitCostUsd)`, params: { ...plan.params, operationId, lineId: line.line_id, kind: line.kind, created: line.kind === 'create_receive' ? 1 : 0 } })
+    // 'add' -- the ledger's canonical receipt type, the same string POST
+    // /api/inventory/adjust and POST /api/batches write, and the one this
+    // file's own redo path already emits below. This used to write the
+    // session MODE ('stock_in') instead, so every session committed through
+    // the Products page's "Add products" entry was invisible to the Stock-in
+    // Sessions list, the shared-lot receipt counter and the Telegram stock-in
+    // digest, all of which filter on 'add'. Rows already written under the
+    // old string are covered by STOCK_RECEIPT_MOVEMENT_TYPES until migration
+    // 0128 normalises them.
     statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-      SELECT m.product_id,p.name,m.branch_id,b.name,'stock_in',m.quantity,COALESCE(m.unit_cost_usd,0),0,COALESCE(m.unit_cost_usd,0)*m.quantity,0,@reason,o.rowid,@actor,@actorName,m.batch_id
+      SELECT m.product_id,p.name,m.branch_id,b.name,'add',m.quantity,COALESCE(m.unit_cost_usd,0),0,COALESCE(m.unit_cost_usd,0)*m.quantity,0,@reason,o.rowid,@actor,@actorName,m.batch_id
       FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
       WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id } })
     statements.push({ sql: 'UPDATE stock_session_members SET movement_id=last_insert_rowid() WHERE operation_id=@operationId AND line_id=@lineId', params: { operationId, lineId: line.line_id } })
@@ -807,12 +855,15 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       const original = (before[key] || []).find(r => r.id === row.id)
       const created = members.some(m => m.product_created === 1 && m.product_id === (key === 'products' ? row.id : row.product_id))
       if (key === 'products' && created && direction === 'redo') {
+        // Redoing a create must not resurrect a row that is now a duplicate.
+        // Same folded, cost-free identity as the create-time guard: a redo
+        // blocked on a cost the operator has since corrected, or waved
+        // through because someone retyped the barcode with a leading zero,
+        // are both the same bug in opposite directions.
         statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE id<>@product AND is_active=1
-          AND LOWER(TRIM(COALESCE(barcode,'')))=LOWER(@barcode)
-          AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey
-          AND ROUND(COALESCE(cost_price_usd,0)*100)=@costUsd AND ROUND(COALESCE(cost_price_khr,0)*100)=@costKhr)`, {
-          product: row.id, barcode: String(row.barcode || '').trim(), nameKey: normalizeProductGroupName(row.name),
-          costUsd: Math.round((Number(row.cost_price_usd) || 0) * 100), costKhr: Math.round((Number(row.cost_price_khr) || 0) * 100),
+          AND ${identityBarcodeKeySql('barcode')}=@barcodeKey
+          AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
+          product: row.id, barcodeKey: identityBarcodeKey(row.barcode), nameKey: normalizeProductGroupName(row.name),
         }))
       }
       if (key === 'branchStock' && !created && !members.some(m => m.product_id === row.product_id && m.branch_id === row.branch_id)) continue

@@ -131,7 +131,7 @@ const user = {
 function receiveRequest(requestId = 'stock-request-001', quantity = 5) {
   return {
     client_request_id: requestId, mode: 'stock_in',
-    defaults: { branch_id: 1, received_date: '2026-09-05' },
+    defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-05' },
     items: [{ line_id: 'line-001', kind: 'receive', product_id: 1, quantity, unit_cost_usd: 2 }],
   }
 }
@@ -153,7 +153,14 @@ function receiptState(sql) {
     lots: sql.prepare('SELECT batch_id, branch_id, quantity FROM branch_batch_stock ORDER BY id').all(),
     operations: sql.prepare('SELECT COUNT(*) count FROM stock_session_operations').get().count,
     members: sql.prepare('SELECT COUNT(*) count FROM stock_session_members').get().count,
-    movements: sql.prepare("SELECT COUNT(*) count FROM inventory_movements WHERE movement_type='stock_in'").get().count,
+    // The session's receipt rows carry the ledger's canonical receipt type
+    // 'add' -- the same string POST /adjust and POST /batches write, and the
+    // one every "a receipt happened" reader filters on. `legacyTypeMovements`
+    // is the positive control: it must stay 0, because writing the session
+    // MODE ('stock_in') here is exactly what hid these receipts from the
+    // Stock-in Sessions list, the shared-lot counter and the daily digest.
+    movements: sql.prepare("SELECT COUNT(*) count FROM inventory_movements WHERE movement_type='add'").get().count,
+    legacyTypeMovements: sql.prepare("SELECT COUNT(*) count FROM inventory_movements WHERE movement_type='stock_in'").get().count,
     audits: sql.prepare("SELECT COUNT(*) count FROM audit_logs WHERE action='stock_session_create'").get().count,
     history: sql.prepare("SELECT COUNT(*) count FROM action_history WHERE entity='stock_session'").get().count,
     snapshots: sql.prepare("SELECT COUNT(*) count FROM undo_snapshots WHERE kind='stock.session'").get().count,
@@ -186,7 +193,7 @@ async function main() {
       const f = fixture()
       f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Supplier A'),(2,'Supplier B')")
       const first = receiveRequest(`first-attribution-${explicit}`, 5)
-      Object.assign(first.items[0], { supplier_id: 1, unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-09-30' })
+      Object.assign(first.items[0], { supplier_id: 1, supplier_name: 'Supplier A', unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-09-30' })
       const a = await commitStockSession(f.env, user, first)
       const history = f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(a.actionHistoryId)
       await replayStockSession(f.env, user, 'undo', a.actionHistoryId, 0, JSON.parse(history.undo_payload))
@@ -195,7 +202,7 @@ async function main() {
         .map(table => f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())
       const neutral = allState()
       const next = receiveRequest(`next-attribution-${explicit}`, 5)
-      Object.assign(next.items[0], { supplier_id: 2, unit_cost_usd: 3, payment_status: 'paid', ...(explicit ? { batch_id: a.items[0].batchId } : {}) })
+      Object.assign(next.items[0], { supplier_id: 2, supplier_name: 'Supplier B', unit_cost_usd: 3, payment_status: 'paid', ...(explicit ? { batch_id: a.items[0].batchId } : {}) })
       f.failReceiptAfterMetadata()
       await assert.rejects(commitStockSession(f.env, user, next), /injected failure/)
       assert.deepEqual(allState(), neutral, 'failed reuse rolls back metadata, stock and all replay ledgers')
@@ -278,7 +285,7 @@ async function main() {
     assert.equal(zeroResponse.status, 400)
     assert.deepEqual(receiptState(zeroReceive.sql), {
       product: { stock_quantity: 0 }, branch: { quantity: 0 }, batches: [], lots: [],
-      operations: 0, members: 0, movements: 0, audits: 0, history: 0, snapshots: 0,
+      operations: 0, members: 0, movements: 0, legacyTypeMovements: 0, audits: 0, history: 0, snapshots: 0,
     })
   })
 
@@ -380,7 +387,7 @@ async function main() {
 
   await check('mixed zero and positive lines require the permission union and share one receipt', async () => {
     const mixed = {
-      client_request_id: 'mixed-zero-positive', mode: 'stock_in', defaults: { branch_id: 1, received_date: '2026-09-05' },
+      client_request_id: 'mixed-zero-positive', mode: 'stock_in', defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-05' },
       items: [zeroCreateRequest().items[0], { line_id: 'positive-receive', kind: 'receive', product_id: 1, quantity: 2, unit_cost_usd: 2 }],
     }
     for (const actor of [
@@ -430,7 +437,7 @@ async function main() {
       product: { stock_quantity: 5 }, branch: { quantity: 5 },
       batches: [{ id: 1, received_quantity: 5, received_cost_usd: 10 }],
       lots: [{ batch_id: 1, branch_id: 1, quantity: 5 }],
-      operations: 1, members: 1, movements: 1, audits: 1, history: 1, snapshots: 1,
+      operations: 1, members: 1, movements: 1, legacyTypeMovements: 0, audits: 1, history: 1, snapshots: 1,
     })
   })
 
@@ -482,7 +489,7 @@ async function main() {
     const receipt = await commitStockSession(f.env, user, {
       client_request_id: 'stock-request-003', mode: 'stock_in',
       defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Counter supplier' },
-      items: [{ line_id: 'line-new', kind: 'create_receive', quantity: 3,
+      items: [{ line_id: 'line-new', kind: 'create_receive', quantity: 3, unit_cost_usd: 4,
         product: { name: 'New Cream', barcode: 'CREAM-1', cost_price_usd: 4, selling_price_usd: 7, stock_quantity: 3, branch_id: 1, tag_label: 'New' } }],
     })
     assert.equal(receipt.replayed, false)
@@ -505,14 +512,14 @@ async function main() {
     }))
     const receipt = await commitStockSession(f.env, user, {
       client_request_id: 'stock-request-025', mode: 'stock_in',
-      defaults: { branch_id: 1, received_date: '2026-09-05', unit_cost_usd: 2 }, items,
+      defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-05', unit_cost_usd: 2 }, items,
     })
     assert.equal(receipt.memberCount, 25)
     assert.equal(receipt.totalQuantity, 25)
     assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 25)
     await assert.rejects(() => commitStockSession(f.env, user, {
       client_request_id: 'stock-request-026', mode: 'stock_in',
-      defaults: { branch_id: 1, received_date: '2026-09-06' },
+      defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-06', unit_cost_usd: 2 },
       items: [...items, { line_id: 'line-26', kind: 'receive', product_id: 1, quantity: 1 }],
     }), (error) => error instanceof StockSessionError && error.code === 'line_limit')
   })

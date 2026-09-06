@@ -34,10 +34,11 @@ function ok(cond, label) {
 // ---- compile the real modules ---------------------------------------------
 // movementActorName / movementReference are the ledger's sibling read-time
 // resolutions; they are here only so the isolated compile of the kernel
-// resolves, and this file still tests the BRANCH.
+// resolves, and this file still tests the BRANCH. stockInSessionsQuery joined
+// them when the session lane (c438eee0) moved the receipt-type list there.
 const MODULES = [
   'stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts',
-  'movementActorName.ts', 'movementReference.ts',
+  'movementActorName.ts', 'movementReference.ts', 'stockInSessionsQuery.ts',
 ]
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'movement-branch-'))
 for (const file of MODULES) {

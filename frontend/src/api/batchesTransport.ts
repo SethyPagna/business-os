@@ -45,6 +45,9 @@ export type ReceiveBatchPayload = {
   supplierId?: number | null
   supplierName?: string | null
   unitCostUsd?: number | null
+  // N14-D: the explicit "these goods were free" declaration. POST /api/batches
+  // refuses a $0.00 unit cost without it, exactly as /api/inventory/adjust does.
+  freeGoods?: boolean
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
   sessionId?: number | null
@@ -59,6 +62,12 @@ export type BatchSelection = {
   batchId: number
   batchLabel: string | null
   batchExpiryDate: string | null
+  // The lot's own received date, carried so a host that DISPLAYS the picked
+  // intake ("Batch 2 · Received: 09/01/2026" on a staged sale line) does not
+  // have to re-fetch the lot list to find out what it just picked. Optional:
+  // the POS cart line stores the label and the expiry only, and nothing
+  // upstream is required to supply it.
+  batchReceivedAt?: string | null
   quantity: number
 }
 
@@ -136,6 +145,7 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
       supplier_id: payload.supplierId ?? null,
       supplier_name: payload.supplierName || null,
       unit_cost_usd: payload.unitCostUsd ?? null,
+      free_goods: payload.freeGoods === true,
       payment_status: payload.paymentStatus || null,
       credit_due_date: payload.creditDueDate || null,
       session_id: payload.sessionId ?? null,

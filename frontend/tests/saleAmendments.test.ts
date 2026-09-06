@@ -104,6 +104,21 @@ await runTest('a fee that went DOWN prints one minus, not a minus inside the mon
   assert.equal(row.isIncrease, false)
 })
 
+await runTest('the actual courier cost is a distinct money history row', () => {
+  const row = toAmendmentDisplayRow(ROW({
+    kind: 'delivery_actual_cost_changed',
+    product_id: null, product_name: null, sale_item_id: null,
+    quantity_before: null, quantity_after: null, quantity_delta: null,
+    amount_before_usd: 2, amount_after_usd: 2.5, amount_delta_usd: 0.5,
+    total_before_usd: 7.5, total_after_usd: 7.5, units_moved: 0,
+  }), usd, 'Delivery')
+  assert.equal(row.family, 'money')
+  assert.equal(row.subject, 'Delivery actual cost')
+  assert.equal(row.beforeText, '$2.00')
+  assert.equal(row.afterText, '$2.50')
+  assert.equal(row.deltaText, '+$0.50')
+})
+
 await runTest('a removal is still fully described after the line it describes is gone', () => {
   // This is the case the ledger exists for: sale_items no longer holds this
   // row at all, so the receipt cannot print it and the detail view has only

@@ -314,6 +314,13 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // + cost), so the same dialog can warn about a cross-identity merge whether
   // it was opened from the preview or from this refusal.
   error.identity = parsed?.identity || null
+  // The two refusals that are DECISIONS rather than failures, so the merge
+  // flow can restate them in the operator's own language instead of showing
+  // the server's English sentence: which cost pair was too far apart to be one
+  // cost (409 cost_outlier_review), and which stock-in session must settle
+  // before the rows it names can be merged (409 stock_session_reversible).
+  error.costOutlier = parsed?.costOutlier || null
+  error.operationId = parsed?.operationId || null
   error.transientGateway = isTransientGatewayError(status)
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
@@ -1363,8 +1370,19 @@ export async function route<T = any>(
     if (isInvalidSessionError(e)) {
       throw e
     }
+    // The server's machine-readable code and status travel with the event.
+    // Without them the global write banner could only reprint the raw error
+    // sentence, so a failure the user can actually FIX -- an out-of-date app
+    // shell rejected by a newer Worker (code client_request_id_required) --
+    // read as the same opaque "Write failed" as everything else.
     window.dispatchEvent(new CustomEvent('sync:error', {
-      detail: { channel, error: e.message, ts: new Date().toISOString() },
+      detail: {
+        channel,
+        error: e.message,
+        code: e.code || null,
+        status: Number(e?.status || 0) || null,
+        ts: new Date().toISOString(),
+      },
     }))
     throw e
   }
