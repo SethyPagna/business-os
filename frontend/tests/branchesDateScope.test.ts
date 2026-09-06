@@ -15,16 +15,41 @@ test('Branches exposes one compact standalone date range and one Export action',
   assert.match(source, /\{showDateRange \? branchExportButton : null\}/)
 })
 
-test('the hub owns one range for Branches and transfers while Products owns branch-stock scope', () => {
+// N10 reverses the earlier contract this test used to pin. Products showed
+// per-product Net sold / Revenue / COGS / Profit that the Worker already
+// scopes by startDate/endDate, so leaving the tab rangeless did not mean "no
+// dated statistics" -- it meant those columns silently answered all-time
+// while Overview and Transfers answered the picked window. All three data
+// tabs now run off the hub's one clock.
+test('the hub owns ONE range for Overview, Products and Transfers', () => {
   assert.match(hubSource, /const \[sharedDateRange, setSharedDateRange\] = useState<DateTimeRange>/)
   assert.match(hubSource, /active === 'products'[\s\S]{0,300}<InventorySection[\s\S]{0,120}hostSection="products"/)
   const productsMount = hubSource.match(/active === 'products'[\s\S]*?<InventorySection([\s\S]*?)\/>/)?.[1] || ''
-  assert.doesNotMatch(productsMount, /dateRange=\{sharedDateRange\}/)
+  assert.match(productsMount, /dateRange=\{sharedDateRange\}/)
+  assert.match(productsMount, /onDateRangeChange=\{setSharedDateRange\}/)
+  assert.doesNotMatch(hubSource, /Products uses\s*\n?\s*\/\/ branch\/search scope/, 'the stale rangeless-Products comment is gone')
   assert.match(hubSource, /<BranchesSection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}[\s\S]{0,160}showDateRange/)
   assert.match(hubSource, /view="transfers"[\s\S]{0,180}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}/)
   assert.match(inventorySource, /const stripRange = dateRange \?\? localStripRange/)
   assert.match(inventorySource, /const handleStripRangeChange = onDateRangeChange \?\? setLocalStripRange/)
   assert.match(inventorySource, /range=\{stripRange\} onRangeChange=\{handleStripRangeChange\}/)
+  // The products range row lives in the same sticky wrapper as the search
+  // row, per the app-wide sticky search + date rows convention, and only
+  // when the stats strip is not already drawing that one control.
+  assert.match(inventorySource, /showProductsSection && !showInventoryStats \? \([\s\S]{0,400}<StatsRangeRow/)
+  // Stock cards stay unscoped: the stats key never grows date dimensions.
+  assert.match(inventorySource, /const inventoryStatsScope = JSON\.stringify\(\[branchFilter, deferredSearch, searchMode\]\)/)
+})
+
+// N10 sibling parity: SKU left the Products tab, so the Overview per-branch
+// stock cards must not keep printing it either -- SKU is now shown only on a
+// product's own detail surfaces, nowhere in the Branches hub.
+test('Branches overview stock cards no longer print a SKU line', () => {
+  assert.doesNotMatch(source, /font-mono text-\[10px\] leading-tight text-gray-400">\{product\.sku\}/)
+  assert.doesNotMatch(source, /\{product\.sku \? </, 'no conditional SKU sub-line is rendered in any card')
+  assert.match(source, /whitespace-normal break-words font-medium text-gray-800/, 'the product name line itself stays')
+  // The CSV export keeps its SKU column: an extract is data, not screen copy.
+  assert.match(source, /SKU: product\.sku \|\| ''/)
 })
 
 test('Branches keeps branch Overview, product stock and Transfer history separate', () => {
