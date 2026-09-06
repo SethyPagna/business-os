@@ -277,7 +277,14 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
     const notes = text(expanded('notes'), 'notes', 1000)
     const unitCostUsd = finite(expanded('unit_cost_usd'), 'unit_cost_usd', true)
     const freeGoods = expanded('free_goods') === true
-    const gate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName, unitCostUsd, freeGoods })
+    // A line that names an existing batch_id defers the SUPPLIER half only.
+    // An attributed lot keeps its first supplier server-side, so the picker
+    // deliberately sends supplier_name: null for one -- demanding a supplier
+    // here would refuse a complete receipt for naming a lot that already has
+    // the answer. The batch is loaded and matched to the product further down
+    // (explicitBatchMap), which is where a bad batch_id is caught. The COST
+    // half is never deferred: no lot supplies that.
+    const gate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName, unitCostUsd, freeGoods, lotAttributionDeferred: batchId != null })
     if (gate) fail(stockReceiptGateMessage(gate) as string, 400, gate)
     return {
       line_id: line.line_id,

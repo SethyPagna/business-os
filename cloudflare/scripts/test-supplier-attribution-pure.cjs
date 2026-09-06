@@ -297,7 +297,7 @@ async function main() {
   await check('POST /api/batches (snake_case wire) still records supplier_id + supplier_name on create -- two wires, one rule', async () => {
     seed()
     const { status, json } = await req('POST', '/', {
-      product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10',
+      product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10', unit_cost_usd: 2,
       supplier_id: 7, supplier_name: 'Acme Beauty Co',
     }, batchesApp)
     assert.strictEqual(status, 200, JSON.stringify(json))

@@ -1514,7 +1514,15 @@ app.post('/adjust', async (c) => {
   // like the mandatory-reason check above, so no path can record goods with an
   // invented supplier or an invented cost.
   const isReceipt = type === 'add'
-  const gate = stockReceiptGateCode({ isStockIn: isReceipt, supplierName, unitCostUsd, freeGoods, attribution })
+  // A top-up of an EXISTING lot inherits that lot's supplier -- first
+  // attribution sticks server-side, so the pickers send no supplier for an
+  // attributed lot and show the locked name instead. Read it rather than
+  // refusing a receipt that is already attributed.
+  const explicitBatchId = Number.isSafeInteger(Number(body.batchId)) && Number(body.batchId) > 0 ? Number(body.batchId) : null
+  const lotSupplierName = isReceipt && explicitBatchId
+    ? (await db.prepare('SELECT supplier_name FROM product_batches WHERE id = @id').get<{ supplier_name: string | null }>({ id: explicitBatchId }))?.supplier_name ?? null
+    : null
+  const gate = stockReceiptGateCode({ isStockIn: isReceipt, supplierName, lotSupplierName, unitCostUsd, freeGoods, attribution })
   if (gate) return c.json({ error: stockReceiptGateMessage(gate), code: gate }, 400)
   const reasonNotes = isReceipt && attribution === 'receipt' && freeGoods ? [FREE_GOODS_REASON_NOTE] : []
 

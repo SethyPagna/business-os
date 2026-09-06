@@ -66,9 +66,26 @@ const inventoryRoute = read(path.join('src', 'routes', 'inventory.ts'))
 assert.match(inventoryRoute, /stockReceiptGateCode/, 'POST /adjust must enforce the gate, not just let the browser check it')
 assert.match(inventoryRoute, /attribution/, 'the route must read the correction attribution explicitly rather than inferring an exemption')
 
+// The third receipt wire. FastStockInModal's ordinary lines and
+// ReceiveBatchModal post here, not to /api/inventory/adjust, so a gate on two
+// of the three wires is not a gate at all.
+const batchesRoute = read(path.join('src', 'routes', 'batches.ts'))
+assert.match(batchesRoute, /stockReceiptGateCode/, 'POST /api/batches must enforce the same gate')
+assert.match(batchesRoute, /lotSupplierName/, 'a top-up of an attributed lot must be allowed to inherit its supplier')
+
 const session = read(path.join('src', 'lib', 'stockSession.ts'))
 assert.match(session, /stockReceiptGateCode/, 'the unified stock-in session must enforce the same gate')
 assert.doesNotMatch(session, /expanded\('unit_cost_usd'\) \?\? product\?\.cost_price_usd/,
   'the session parser must stop substituting the product cost price for a cost the operator never typed')
+assert.match(session, /lotAttributionDeferred: batchId != null/,
+  'a session line naming an existing lot defers the SUPPLIER half -- the picker sends null for an attributed lot, and refusing it would reject a complete receipt')
+
+// The one create-products surface that builds its own lines. Its blank cost
+// used to become 0 in the browser before the wire ever saw it, so the server
+// gate above could not see a fabrication that had already happened.
+const createModal = fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'components', 'products', 'CreateProductsSessionModal.tsx'), 'utf8')
+assert.ok(!createModal.includes("cost_price_usd === '' ? 0"),
+  'the Add/Create products session must not turn a blank cost into a free receipt before posting')
+assert.ok(createModal.includes('stockReceiptGateCode('), 'both of its line paths run the same kernel the Worker runs')
 
 console.log(`PASS stock-in receipt gate: ${table.cases.length} shared cases, supplier+cost required, $0 only as declared free goods, corrections exempt and enforced on both writers`)

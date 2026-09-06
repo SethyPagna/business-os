@@ -17,6 +17,12 @@
     { "name": "zero cost with the free-goods flag passes", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": 0, "freeGoods": true }, "code": "" },
     { "name": "the free-goods flag does not excuse a missing supplier", "input": { "isStockIn": true, "supplierName": "", "unitCostUsd": 0, "freeGoods": true }, "code": "supplier_required" },
     { "name": "the free-goods flag does not excuse a blank cost", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": "", "freeGoods": true }, "code": "cost_required" },
+    { "name": "a top-up into an already-attributed lot inherits that lot's supplier", "input": { "isStockIn": true, "supplierName": "", "lotSupplierName": "Bong Long", "unitCostUsd": 3 }, "code": "" },
+    { "name": "an UNattributed lot excuses nothing -- the blank is exactly what the choice fills", "input": { "isStockIn": true, "lotSupplierName": "   ", "unitCostUsd": 3 }, "code": "supplier_required" },
+    { "name": "the lot's supplier does not excuse this receipt's own cost", "input": { "isStockIn": true, "lotSupplierName": "Bong Long" }, "code": "cost_required" },
+    { "name": "a surface that cannot see the lot's attribution defers the supplier half", "input": { "isStockIn": true, "lotAttributionDeferred": true, "unitCostUsd": 3 }, "code": "" },
+    { "name": "deferring the supplier does not defer this receipt's own cost", "input": { "isStockIn": true, "lotAttributionDeferred": true }, "code": "cost_required" },
+    { "name": "deferring the supplier does not make a zero cost free", "input": { "isStockIn": true, "lotAttributionDeferred": true, "unitCostUsd": 0 }, "code": "free_goods_required" },
     { "name": "a correction restores a prior state and carries no receipt facts", "input": { "isStockIn": true, "attribution": "correction" }, "code": "" },
     { "name": "an unknown attribution string is treated as a receipt, never as an exemption", "input": { "isStockIn": true, "attribution": "whatever" }, "code": "supplier_required" },
     { "name": "attribution receipt is the explicit default", "input": { "isStockIn": true, "attribution": "receipt", "supplierName": "Bong Long", "unitCostUsd": 3 }, "code": "" }

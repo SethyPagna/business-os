@@ -54,6 +54,26 @@ export type StockReceiptAttribution = 'receipt' | 'correction'
 export type StockReceiptGateInput = {
   isStockIn: boolean
   supplierName?: string | null
+  /**
+   * The supplier the TARGET lot already carries, when this receipt tops up an
+   * existing lot rather than creating one. First attribution sticks (the
+   * writers only ever COALESCE-fill a blank), so the pickers deliberately send
+   * NO supplier for an already-attributed lot -- ReceiveBatchModal and the
+   * adjust form both clear the field and show the locked name instead. That
+   * receipt is attributed; demanding the operator retype what cannot be
+   * changed would refuse a perfectly complete stock-in.
+   */
+  lotSupplierName?: string | null
+  /**
+   * "The target lot's attribution is not visible here -- let the server decide."
+   * Some surfaces (BranchStockAdjuster's per-row lot picker) know a row tops up
+   * an EXISTING lot but not whether that lot is already attributed. Guessing
+   * either way is wrong: refuse and a complete receipt is blocked in the
+   * browser; assume attributed and the surface is laxer than the wire. This
+   * defers only the supplier half; the cost is still this receipt's own and is
+   * still required.
+   */
+  lotAttributionDeferred?: boolean
   unitCostUsd?: number | string | null
   freeGoods?: boolean | null
   attribution?: string | null
@@ -76,7 +96,7 @@ export function isStockReceiptType(type: string, quantity: unknown, currentQuant
 export function stockReceiptGateCode(input: StockReceiptGateInput): '' | StockReceiptGateCode {
   if (!input.isStockIn) return ''
   if (input.attribution === 'correction') return ''
-  if (!String(input.supplierName ?? '').trim()) return 'supplier_required'
+  if (!String(input.supplierName ?? '').trim() && !String(input.lotSupplierName ?? '').trim() && !input.lotAttributionDeferred) return 'supplier_required'
   const typed = typeof input.unitCostUsd === 'string' ? input.unitCostUsd.trim() : input.unitCostUsd
   if (typed === '' || typed == null) return 'cost_required'
   const cost = Number(typed)
