@@ -170,6 +170,22 @@ await runTest('the km suggestion body names its destination in Khmer, the same w
   )
 })
 
+// The audit's finding: DatedStockReconciliationModal's own header comment
+// documented a launch path (ImportModeWizard) that was never wired, and a
+// Back behaviour ("closes the whole flow") that BulkImportModal's actual
+// wiring (onClose -> setDatedReconciliationOpen(false), staying mounted on
+// its own analysis) contradicts. The two files must not disagree in writing
+// about the flow this lane shipped.
+await runTest('DatedStockReconciliationModal documents its real launcher and Back semantics, not the old wizard design', () => {
+  const dsrm = fs.readFileSync(
+    new URL('../src/components/products/import/DatedStockReconciliationModal.tsx', import.meta.url),
+    'utf8',
+  )
+  const header = dsrm.slice(0, dsrm.indexOf('\nimport'))
+  assert.doesNotMatch(header, /Launched from ImportModeWizard/, 'that launch path does not exist')
+  assert.match(header, /BulkImportModal/, 'the header must name its real launcher')
+})
+
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)

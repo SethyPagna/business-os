@@ -6,18 +6,20 @@
 // array, and calls /resolve/apply-decisions, then feeds the combined
 // resolved list into the already-built /preview and /apply endpoints.
 //
-// Launched from ImportModeWizard once "Dated Stock Reconciliation" is
-// picked as the General sub-option and its template screen is confirmed --
-// same launch pattern that sub-option's sibling ('Add / Update Products')
-// already uses to hand off to BulkImportModal. Mode is locked from here on:
-// there is no way back into ImportModeWizard's mode/sub-option/template
-// screens from inside this component -- Back at the file-upload step closes
-// the whole flow (same as the legacy modal today), and Back from the
-// mapping or review step drops the uploaded file and returns to the upload
-// step, never further back than that -- per the user's own instruction this
-// session ("can no longer choose and change mode as we already uploaded the
-// import... has to press back which cancels the uploaded file and
-// restarts").
+// Launched from BulkImportModal's own dated-count suggestion banner (see
+// BulkImportModal.tsx:2557), shown after BulkImportModal has already parsed
+// an "Add / Update Products" file whose shape looks like a dated stock
+// count -- there is no ImportModeWizard launch path into this component.
+// Mode is locked from here on: there is no way back into a mode-selection
+// screen from inside this component -- Back (or Cancel) at the file-upload
+// or done step calls onClose, which BulkImportModal treats as "return to my
+// own analysis screen" (this component stays mounted underneath), and only
+// also closes the whole import once a reconciliation has actually been
+// applied. Back from the mapping or review step drops the uploaded file and
+// returns to the upload step, never further back than that -- per the
+// user's own instruction this session ("can no longer choose and change
+// mode as we already uploaded the import... has to press back which
+// cancels the uploaded file and restarts").
 import { useMemo, useState } from 'react'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
