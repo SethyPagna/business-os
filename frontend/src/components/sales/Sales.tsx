@@ -1752,7 +1752,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           const id = String(option?.id || '')
           return {
             id: `user-${id}`,
-            label: option?.name || option?.username || `User ${id}`,
+            // N13: actors are named by USERNAME everywhere the rows are, so the
+            // filter that narrows those rows must offer the same name.
+            label: option?.username || option?.name || `User ${id}`,
             active: isMultiActive(userFilter, id),
             onClick: () => setUserFilter(toggleMultiValue(userFilter, id)),
           }
