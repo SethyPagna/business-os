@@ -2998,7 +2998,13 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               </button>
             </div>
           ) : null}
-          <button type="button" className="btn-primary w-full" onClick={onClose}>{T('close', 'Close')}</button>
+          {/* No terminal Close here: the shared Modal already renders the
+              one close affordance (its header X), and a full-width
+              btn-primary Close at the bottom of the result screen was a
+              second one competing with it -- and on a phone it was the
+              most prominent control on the screen, outranking the "Wire
+              images" and error-download actions the operator may still
+              need to use. */}
         </div>
       ) : null}
 

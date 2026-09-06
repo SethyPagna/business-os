@@ -159,6 +159,38 @@ runTest('the pagination row is labelled through the pack, like the contacts sibl
   assert.match(contacts, /label=\{tr\('records', 'records'\)\}/, 'sibling reference')
 })
 
+// --- 3. one close affordance on the import result screen -----------------
+
+// The done screen (step 3) ended in `<button className="btn-primary w-full"
+// onClick={onClose}>Close</button>`: a second close competing with the
+// shared Modal's header X, and -- being full width and primary -- the
+// loudest control on a phone, outranking "Wire images to these rows" and
+// "Download failed rows", which are the only actions on that screen that
+// still do something.
+const bulk = read('components/products/import/BulkImportModal.tsx')
+
+function doneScreenOf(src: string): string {
+  const start = src.indexOf('{step === 3 && result ? (')
+  assert.ok(start >= 0, 'the result screen exists')
+  const end = src.indexOf('<FilePickerModal', start)
+  assert.ok(end > start, 'the result screen ends before the file picker')
+  return src.slice(start, end)
+}
+
+runTest('the import result screen has no second Close of its own -- the header X is the one affordance', () => {
+  const done = doneScreenOf(bulk)
+  assert.doesNotMatch(done, /onClick=\{onClose\}/, 'a terminal Close duplicates the shared Modal header X')
+  assert.doesNotMatch(done, /btn-primary w-full/, 'and it outranked the actions the operator may still need')
+  // The affordance that must still be there: the shared Modal owns it.
+  assert.match(bulk, /<Modal title=\{mode === 'products' \?[\s\S]{0,160}onClose=\{onClose\}/)
+})
+
+runTest('removing it left the result screen\'s real actions untouched', () => {
+  const done = doneScreenOf(bulk)
+  assert.match(done, /T\('wire_import_images_action', 'Wire images to these rows'\)/)
+  assert.match(done, /T\('download_failed_rows', 'Download failed rows'\)/)
+})
+
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)
