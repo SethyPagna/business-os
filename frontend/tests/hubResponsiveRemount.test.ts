@@ -18,7 +18,11 @@ const load = (id: string) => {
   if (id === 'react/jsx-runtime') return require(id)
   if (id.includes('AppContextCore')) return { useApp: () => ({ settings: {}, page: 'sales' }) }
   if (id.includes('useViewport')) return { useIsCompactViewport: () => compact }
-  if (id.includes('sectionNavPreference')) return { useMobileSectionNavMode: () => mode }
+  // useLayeredSectionNav is the shared "the compact home sheet owns section
+  // switching" decision (utils/sectionNavPreference.ts) that HubSectionNav
+  // and Products both read; its own composition is pinned in
+  // hubSectionNav.test.ts, here the two inputs are driven directly.
+  if (id.includes('sectionNavPreference')) return { useMobileSectionNavMode: () => mode, useLayeredSectionNav: () => compact && mode === 'pages' }
   if (id.includes('hubNavigation')) return { sealRootHubSection: () => {} }
   throw new Error(`Unexpected dependency ${id}`)
 }

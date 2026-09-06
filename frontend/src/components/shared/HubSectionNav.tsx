@@ -1,7 +1,7 @@
 import { Fragment, useEffect, type ComponentType, type ReactNode, type SVGProps } from 'react'
 import { useApp as useAppCore } from '../../app/AppContextCore.tsx'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
-import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
+import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import { sealRootHubSection } from './hubNavigation.ts'
 
 // Mobile pages mode renders the selected body directly. Its section menu and
@@ -68,8 +68,7 @@ export default function HubSectionNav({
 }: HubSectionNavProps) {
   const { settings, page } = useAppCore() as { settings?: Record<string, unknown>; page: string }
   const isCompact = useIsCompactViewport()
-  const mode = useMobileSectionNavMode(settings?.ui_mobile_section_nav)
-  const layered = isCompact && mode === 'pages'
+  const layered = useLayeredSectionNav(settings?.ui_mobile_section_nav)
   const visible = sections.filter((section) => !section.hidden)
   useEffect(() => { writeStoredActive(storageKey, active) }, [storageKey, active])
   useEffect(() => {

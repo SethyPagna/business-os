@@ -299,11 +299,15 @@ export default function ImportHub({
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <button type="button" className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline" onClick={onUseClassic}>
+      {/* N4: a full sentence facing two buttons in a no-wrap justify-between
+          row could not fit 320/375, and nothing in it was allowed to shrink.
+          The row wraps now and the sentence shrinks before it can push the
+          buttons out of the dialog. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+        <button type="button" className="min-w-0 truncate text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline" onClick={onUseClassic}>
           {T('import_hub_classic', 'Use the classic import screens')}
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {done && queuedCount > 0 ? (
             <span className="text-xs text-emerald-600 font-medium">
               {queuedCount} {T('import_hub_done', 'import(s) applying in the background — conflicts pause in the import tracker')}

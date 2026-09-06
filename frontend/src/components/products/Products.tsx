@@ -2,7 +2,7 @@
 // Main Products page; all sub-modals are imported from sibling files.
 
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import type { ReactNode, MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from 'react'
+import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -12,6 +12,8 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import { isBrokenLocalizedString, useApp, useLowStockConfig, useSync } from '../../AppContext'
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import FilterMenu from '../shared/FilterMenu'
@@ -380,8 +382,12 @@ type ProductsAppContext = {
   exchangeRate: number
   fmtKHR: (value: unknown) => string
   fmtUSD: (value: unknown) => string
+  getPermissionTier: (key: string) => string
   hasPermission: (key: string) => boolean
   khrSymbol: string
+  // Section switching commits through the app's guarded navigation, the
+  // same as every other hub page (see useHubSection below).
+  navigateTo: (page: string, anchor?: string) => void
   notify: (message: string, tone?: NotificationTone) => void
   settings: Record<string, unknown>
   t: (key: string) => string
@@ -621,7 +627,7 @@ export default function Products() {
 }
 
 function ProductsFullEditor() {
-  const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useProductsApp()
+  const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate, getPermissionTier, hasPermission, navigateTo } = useProductsApp()
   // Settings > Stock Alerts. One config for the badges on every row, the Low
   // filter pill and the same-page re-filter -- so the pill and the badge can
   // never disagree about which rows are low.
@@ -698,7 +704,24 @@ function ProductsFullEditor() {
   // Y15: the page is chip-sectioned like Promotions -- a switcher in the
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.
-  const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'>('products')
+  //
+  // N7: the section list now comes from getHubDestinations('products'), the
+  // same table the compact home sheet reads, so the sheet can never offer a
+  // section this page would refuse to render (and vice versa). The active
+  // section rides useHubSection like every other hub page: a tap commits
+  // through the guarded navigateTo, the URL anchor identifies the body, and
+  // a section chosen in the compact sheet lands here instead of dropping the
+  // page back on its default section.
+  const productSectionTabs = useMemo(
+    () => getHubDestinations('products', { getPermissionTier, hasPermission, can }),
+    [getPermissionTier, hasPermission, can],
+  )
+  const productSectionIds = useMemo(() => productSectionTabs.map((section) => section.id), [productSectionTabs])
+  const [activeProductSection, setActiveProductSection] = useHubSection<'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'>('products', 'products', productSectionIds, navigateTo)
+  // The compact home sheet owns section switching in "pages" mode, so the
+  // page must not draw a second row there -- the same rule HubSectionNav
+  // applies for the six hubs that delegate their row to it.
+  const layeredSectionNav = useLayeredSectionNav(settings?.ui_mobile_section_nav)
   // Stock Changes section's header-row actions (Adjust menu + ledger export),
   // registered up by StockChangeSection so they render on THIS page's header
   // row beside info/History/Manage (user, Aug 31). null when that section is
@@ -2148,15 +2171,6 @@ function ProductsFullEditor() {
     const nextLightbox = buildProductLightboxState(gallery, startIndex, title)
     if (nextLightbox) setLightbox(nextLightbox)
   }
-
-  const scrollProductSectionsWithWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    const element = event.currentTarget
-    if (element.scrollWidth <= element.clientWidth) return
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
-    if (!delta) return
-    event.preventDefault()
-    element.scrollLeft += delta
-  }, [])
 
   const getBranchQty = useCallback((product: Record<string, unknown>, branchId: unknown) => getProductBranchQuantity(product, branchId), [])
   const parentProductIds = useMemo(() => buildParentProductIdSet(products), [products])
@@ -3753,58 +3767,35 @@ function ProductsFullEditor() {
             heading repeating "Products" was redundant on EVERY screen, not just
             phones (user, Aug 31: "product page still use title page in addition
             to the section ... remove that"). */}
-        {/* Y15: section switcher (Products | Stock Changes), same pill
-            pattern as the Promotions page. Stock Changes stops being a
-            folded card at the bottom of the listing and becomes its own
-            section reached from here. */}
-        <div
-          className="w-full min-w-0 max-w-full overflow-x-auto pb-1 [scrollbar-width:thin] sm:w-auto sm:flex-1 sm:pb-0"
-          role="group"
-          aria-label={tr('product_sections', 'Product sections')}
-          onWheel={scrollProductSectionsWithWheel}
-        >
-          <div className="inline-flex w-max rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
-          <button
-            type="button"
-            onClick={() => setActiveProductSection('products')}
-            aria-pressed={activeProductSection === 'products'}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'products' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-          >
-            {t('products') || 'Products'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveProductSection('stock_changes')}
-            aria-pressed={activeProductSection === 'stock_changes'}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_changes' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-          >
-            {tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
-          </button>
-          {canAdjustInventoryStock ? (
-            <button
-              type="button"
-              onClick={() => setActiveProductSection('stock_in_sessions')}
-              aria-pressed={activeProductSection === 'stock_in_sessions'}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_in_sessions' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-            >
-              {tr('stock_in_sessions', 'Stock-in Sessions', 'វគ្គបញ្ចូលស្តុក')}
-            </button>
-          ) : null}
-          {/* Duplicates review (possibly-same residue) -- same section-chip
-              pattern, gated by the same permission as the merge tool since
-              its actions are the same kind of merge. */}
-          {canMergeDuplicates ? (
-            <button
-              type="button"
-              onClick={() => setActiveProductSection('duplicates')}
-              aria-pressed={activeProductSection === 'duplicates'}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'duplicates' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-            >
-              {tr('product_duplicates_section', 'Duplicates', 'ស្ទួន')}
-            </button>
-          ) : null}
+        {/* Y15: section switcher (Products | Stock Changes | Stock-in
+            Sessions | Duplicates), now the shared hub pill row. It WRAPS
+            instead of scrolling sideways -- the four labels are ~440px wide
+            against 296px (320) / 351px (375) of usable width, so half of
+            them used to sit off-screen behind a horizontal swipe (N7) -- and
+            it steps aside in compact "pages" mode, where the home sheet owns
+            section switching for every hub page. The list itself comes from
+            getHubDestinations('products'), so this row and that sheet can
+            never offer different sections. */}
+        {layeredSectionNav || productSectionTabs.length <= 1 ? null : (
+          <div className="w-full min-w-0 max-w-full sm:w-auto sm:flex-1" role="group" aria-label={tr('product_sections', 'Product sections')}>
+            <div className="hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800 md:inline-flex">
+              {productSectionTabs.map((section) => {
+                const isActive = activeProductSection === section.id
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => setActiveProductSection(section.id as typeof activeProductSection)}
+                    aria-pressed={isActive}
+                    className={`hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center break-words rounded-lg px-2.5 py-2 text-center text-sm font-medium leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0 ${isActive ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
+                  >
+                    {tr(section.key, section.label)}
+                  </button>
+                )
+              })}
+            </div>
           </div>
-        </div>
+        )}
         <div className="w-full min-w-0 overflow-x-auto pb-1 sm:ml-auto sm:w-auto sm:flex-shrink-0 sm:pb-0">
           {/* Each handler is passed only when this role's tier actually
               permits the action -- HeaderActions drops any control whose

@@ -2615,7 +2615,7 @@
   "name_username_required": "Name and username required",
   "name_z_a": "Name Z-A",
   "navReset": "Reset navigation",
-  "navigationHint": "Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.",
+  "navigationHint": "Sidebar order, landing page and mobile navigation mode. The 4 pinned items show only in the Sections mode bottom bar.",
   "navigationTitle": "Navigation Layout",
   "need_decision_count": "Need decision",
   "need_restock": "need restock",

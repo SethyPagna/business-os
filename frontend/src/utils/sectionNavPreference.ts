@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { useIsCompactViewport } from './useViewport.ts'
 
 // Mobile section-navigation preference: "pages" (inline groups -> section body) or
 // "sections" (today's chip row, kept on mobile too). See
@@ -76,4 +77,14 @@ export function useMobileSectionNavMode(accountValue?: unknown): MobileSectionNa
     () => readMobileSectionNavMode(accountValue),
     () => normalizeMode(accountValue) || DEFAULT_MOBILE_SECTION_NAV_MODE,
   )
+}
+
+/** True when the compact home sheet owns section switching, so a page must
+ *  NOT also draw its own section row (compact viewport + "pages" mode). One
+ *  authority for that decision: HubSectionNav's `layered` branch and every
+ *  page that keeps a hand-placed section row (Products) read it from here. */
+export function useLayeredSectionNav(accountValue?: unknown): boolean {
+  const isCompact = useIsCompactViewport()
+  const mode = useMobileSectionNavMode(accountValue)
+  return isCompact && mode === 'pages'
 }

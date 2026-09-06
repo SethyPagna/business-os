@@ -130,10 +130,18 @@ await runTest('mobile body has no intermediate picker or extra history, legacy p
   assert.match(navSource, /hub-section-pills[^"']*flex-wrap/)
   assert.match(navSource, /hub-section-pill[^"']*min-h-11/)
   assert.match(navSource, /aria-pressed=\{isActive\}/)
+  // "The compact home sheet owns section switching" is ONE decision shared
+  // by HubSectionNav and by every page that keeps a hand-placed section row
+  // (Products), so neither can drift into showing a second row on a phone.
+  const preference = fs.readFileSync(new URL('../src/utils/sectionNavPreference.ts', import.meta.url), 'utf8')
+  assert.match(preference, /export function useLayeredSectionNav[\s\S]*?return isCompact && mode === 'pages'/, 'the layered decision is compact viewport + pages mode')
+  assert.match(navSource, /const layered = useLayeredSectionNav\(settings\?\.ui_mobile_section_nav\)/, 'HubSectionNav consumes the shared decision')
+  const productsPage = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+  assert.match(productsPage, /useLayeredSectionNav\(settings\?\.ui_mobile_section_nav\)/, 'Products consumes it too instead of re-deriving it')
   const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
   assert.match(sidebar, /mobileGroupAction/)
-  assert.match(sidebar, /navigateTo\(item.id, hubAnchor\(item.id, section.id\)\)/)
-  assert.match(sidebar, /grid min-w-0 grid-cols-2/)
+  assert.match(sidebar, /navigateTo\(entry.ownerId, hubAnchor\(entry.ownerId, section.id\)\)/)
+  assert.match(sidebar, /col-span-2 grid min-w-0 grid-cols-2/)
 })
 
 await runTest('pages mode uses one compact header and its inline group drawer without legacy bottom chrome', () => {
