@@ -859,10 +859,15 @@ test('the awaiting-payment block is set apart in the warning tint on every surfa
   // segment), so the highlight only RECOLOURS a box that is already padded.
   // The requirement is unchanged; the guard follows the padding to where it
   // now lives instead of pinning a utility class that has moved.
-  const hl = sheet.slice(sheet.indexOf('block.highlight ?'), sheet.indexOf('block.highlight ?') + 200)
   assert.ok(/'report-segment',/.test(sheet), 'every receipt block, highlighted or not, sits in the padded segment shell')
   assert.match(css, /\.report-segment\s*\{[^}]*padding:\s*\d+px/, 'and that shell is what supplies the padding')
-  assert.ok(!/leading-|line-height/.test(hl), 'and never shortens the line box')
+  // The 'never shortens the line box' guard used to read a 200-char window of
+  // ReceiptSheet.tsx after 'block.highlight ?'. Once the block's classes moved
+  // into the `cls` variable that window held no class string at all, so the
+  // guard was dead -- it passed on any source. The contract did not move, only
+  // its home: the line box now belongs to the shared shell and its tint rule.
+  assert.doesNotMatch(css, /\.report-segment\s*\{[^}]*line-height/, 'the segment shell must not pin a line-height that shears Khmer ink')
+  assert.doesNotMatch(css, /\.report-segment\[data-segment-highlight='true'\]\s*\{[^}]*line-height/, 'nor may the highlight tint shorten the block it recolours')
 
   // Parity: the group order, the group label and the tint predicate all come
   // from the model, so a new group cannot appear on one surface and not the
