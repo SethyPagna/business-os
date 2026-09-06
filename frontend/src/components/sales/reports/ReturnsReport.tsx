@@ -213,7 +213,7 @@ export default function ReturnsReport(p: ReportViewProps) {
         />
       ) : null}
       <Fold open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('rpt_return_no', 'Return #')} ${openRow.return_number}` : ''}>
-        <div className="p-2">
+        <div className="p-2" data-reports-fold="">
           {openRow ? (
             <ReceiptSheet
               blocks={[{

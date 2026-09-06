@@ -174,7 +174,7 @@ export default function PeriodReport(p: ReportViewProps) {
           ) : null
         }
       >
-        <div className="p-2">
+        <div className="p-2" data-reports-fold="">
           {openRow ? (
             <ReceiptSheet
               blocks={[

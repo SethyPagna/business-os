@@ -83,7 +83,13 @@ assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{
 // stretch it (CSS Flexbox 9.6), so without an explicit `width: 100%` the hub
 // shrinks to fit-content, the cap never binds and the surface floats
 // mid-screen. That assertion travels with the cap:
-assert.match(css, /@media \(min-width: 1024px\)\s*\{\s*\[data-reports-hub\]\s*\{[\s\S]*?width: 100%;\s*max-width: 74rem;\s*margin-inline: auto;/, 'the capped column is given an explicit width so the auto margins stretch-then-centre it instead of collapsing it to fit-content')
+// The 1024 tier is TWO rules since the sibling-parity pass: a shared
+// `[data-reports-hub], [data-reports-fold]` SIZE rule (the portalled fold has
+// to be named there or it drops back to the root 12px) and a hub-only LAYOUT
+// rule. Slice the tier and assert inside it rather than demanding the layout
+// rule be the media block's first child.
+const tier1024 = css.slice(css.indexOf('@media (min-width: 1024px)'), css.indexOf('@media (min-width: 1280px)'))
+assert.match(tier1024, /\[data-reports-hub\]\s*\{[\s\S]*?width: 100%;\s*max-width: 74rem;\s*margin-inline: auto;/, 'the capped column is given an explicit width so the auto margins stretch-then-centre it instead of collapsing it to fit-content')
 assert.doesNotMatch(css, /max-width: 96rem/, 'the 1536-only 96rem slab is gone')
 const gutterOrder = ['@media (min-width: 768px)', '@media (min-width: 1024px)', '@media (min-width: 1280px)', '@media (min-width: 1536px)']
 for (let i = 1; i < gutterOrder.length; i += 1) {
@@ -92,7 +98,7 @@ for (let i = 1; i < gutterOrder.length; i += 1) {
 // The 1024 desktop tier gains its own, larger gutter (O9 names >=1024): 3.5vw
 // with a 28px floor, handing over to the 1280 tier without a step down. The
 // old declaration must be gone as a declaration (a comment may still cite it).
-assert.match(css, /@media \(min-width: 1024px\)\s*\{\s*\[data-reports-hub\]\s*\{[^}]*padding-inline: clamp\(28px, 3\.5vw, 56px\);/, '1024px gets a larger gutter than the tablet tier')
+assert.match(tier1024, /\[data-reports-hub\]\s*\{[^}]*padding-inline: clamp\(28px, 3\.5vw, 56px\);/, '1024px gets a larger gutter than the tablet tier')
 assert.doesNotMatch(css, /padding-inline: clamp\(20px, 3vw, 48px\);/, 'the old 1024 gutter declaration is gone')
 assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(12px, 2vw, 24px\);/, 'tablet gutter (61237948) is unchanged')
 

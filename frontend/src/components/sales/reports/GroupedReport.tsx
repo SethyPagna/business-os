@@ -230,7 +230,7 @@ export default function GroupedReport(p: ReportViewProps) {
           maxHeight="70vh"
         />
         <Fold open={!!open} onClose={() => setOpenKey(null)} anchorRef={anchorRef} title={open?.product_name || ''}>
-          <div className="p-2">
+          <div className="p-2" data-reports-fold="">
             {open ? (
               <ReceiptSheet
                 blocks={[{
@@ -369,7 +369,7 @@ export default function GroupedReport(p: ReportViewProps) {
           ) : null
         }
       >
-        <div className="p-2">
+        <div className="p-2" data-reports-fold="">
           {open ? (
             <ReceiptSheet
               blocks={[

@@ -143,6 +143,52 @@ for (let i = 1; i < ladder.length; i += 1) {
 }
 
 // ---------------------------------------------------------------------------
+// 1d. SIBLING PARITY: every view's detail Fold joins the boosted scope.
+//
+// A `Fold` is PORTALLED to document.body, so it lands outside
+// `[data-reports-hub]` and inherits none of this surface's tokens. Only the
+// options fold carried the hook, which left the six report views' own
+// detail/breakdown folds reading at the app-wide compacted size while the
+// report behind them read at the boosted one -- exactly the sibling drift this
+// lane exists to remove. Every `<Fold>` in every view now opens on a body that
+// carries the hook.
+//
+// Split on the tag rather than a fixed character window: two of the seven
+// folds (GroupedReport's grouped-row fold, PeriodReport's period fold) carry a
+// multi-line `actions` prop, so their body starts ~480 chars past `<Fold`. The
+// split form is also strictly stronger -- it proves the hook is inside THAT
+// fold, not merely nearby in the file.
+// ---------------------------------------------------------------------------
+let foldBodies = 0
+for (const view of VIEWS) {
+  const parts = viewSource[view].split(/<Fold[\s>]/).slice(1)
+  assert.ok(parts.length > 0, `${view} opens at least one detail Fold`)
+  for (const part of parts) {
+    const end = part.indexOf('</Fold>')
+    const body = end >= 0 ? part.slice(0, end) : part
+    assert.match(
+      body,
+      /<div className="p-2" data-reports-fold="">/,
+      `${view}: this Fold's body must carry data-reports-fold, or a portalled fold keeps the app-wide compacted Khmer while the report behind it is boosted`,
+    )
+    foldBodies += 1
+  }
+}
+assert.equal(foldBodies, 7, 'all seven view folds are accounted for (GroupedReport has two)')
+assert.match(optionsFold, /data-reports-fold=""/, 'and the options fold, which already had the hook, keeps it')
+
+// The DESKTOP tier has to name the fold too, or a fold opened at >=1024 falls
+// back to the 12px/11px root tokens while the hub behind it is at 14px/13px.
+// DECISION: the 1024 tier is SPLIT in two. The SIZE half is shared with
+// `[data-reports-fold]`; the LAYOUT half (gutter ladder, 74rem cap, auto
+// margins) stays hub-only, because a floating panel with a 74rem cap, auto
+// margins and a 56px gutter is not a document column -- it is a broken menu.
+const desktopTokens = ruleBody(css, '[data-reports-hub],\n[data-reports-fold]', css.indexOf('@media (min-width: 1024px)'))
+assert.match(desktopTokens, /--ui-size-body:\s*calc\(14px \* var\(--ui-km-boost, 1\)\);/, 'the desktop size tier covers the portalled fold as well as the hub')
+assert.doesNotMatch(desktop, /--ui-size-/, 'the hub-only half of the 1024 tier carries layout, not sizes')
+assert.doesNotMatch(desktopTokens, /max-width|margin-inline|padding-inline/, 'and the shared half carries sizes, not the document-column layout')
+
+// ---------------------------------------------------------------------------
 // 2 + 3. One shared segment class: four visible sides, hairline inset.
 // ---------------------------------------------------------------------------
 const segment = ruleBody(css, '.report-segment')
@@ -220,9 +266,9 @@ assert.doesNotMatch(ruleBody(css, ':root'), /--ui-size-h[123]/, 'the heading tok
 
 // The desktop tier keeps the boost -- this is the assertion that separates a
 // real fix from a boost that a later, equally specific rule silently erases.
-assert.match(desktop, /--ui-size-body:\s*calc\(14px \* var\(--ui-km-boost, 1\)\);/, 'the 1024 tier multiplies the boost too, instead of overwriting the Khmer size with a flat px')
-assert.match(desktop, /--ui-size-meta:\s*calc\(13px \* var\(--ui-km-boost, 1\)\);/)
-assert.doesNotMatch(desktop, /--ui-size-body:\s*\d+px;/, 'no flat px size may reach the desktop tier; it would cancel the Khmer boost')
+assert.match(desktopTokens, /--ui-size-body:\s*calc\(14px \* var\(--ui-km-boost, 1\)\);/, 'the 1024 tier multiplies the boost too, instead of overwriting the Khmer size with a flat px')
+assert.match(desktopTokens, /--ui-size-meta:\s*calc\(13px \* var\(--ui-km-boost, 1\)\);/)
+assert.doesNotMatch(desktopTokens, /--ui-size-body:\s*\d+px;/, 'no flat px size may reach the desktop tier; it would cancel the Khmer boost')
 
 const km = ruleBody(css, 'body.lang-km [data-reports-hub],\nbody.lang-km [data-reports-fold]')
 const boost = km.match(/--ui-km-boost:\s*([\d.]+);/)

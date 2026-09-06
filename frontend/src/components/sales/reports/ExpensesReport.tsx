@@ -209,7 +209,7 @@ export default function ExpensesReport(p: ReportViewProps) {
         />
       ) : null}
       <Fold open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? openRow.label || feeTypeLabel(openRow.type, tr) : ''}>
-        <div className="p-2">
+        <div className="p-2" data-reports-fold="">
           {openRow ? (
             <ReceiptSheet
               blocks={[{

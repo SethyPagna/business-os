@@ -338,7 +338,17 @@
 /* Desktop-only, report-local readability. Do not enlarge global UI tokens
    or reduce the existing mobile/Khmer text and line-height floors. */
 @media (min-width: 1024px) {
-  [data-reports-hub] {
+  /* SIZE tokens, shared with the PORTALLED fold.
+
+     A `Fold` renders into document.body, i.e. outside `[data-reports-hub]`, so
+     it inherits nothing from the hub and has to be named on its own. It was
+     named in the root token block and in the Khmer block but NOT here, so a
+     detail fold opened on a desktop report fell back to 12px/11px while the
+     report behind it read at 14px/13px -- the sibling drift, restated in the
+     cascade. Layout stays in the hub-only rule below on purpose: a floating
+     panel does not want a 74rem cap, auto margins or a 56px gutter. */
+  [data-reports-hub],
+  [data-reports-fold] {
     /* Boost-aware, never a flat px -- see the token block above: a flat px
        here would silently cancel the Khmer boost from 1024px up. */
     --ui-size-body: calc(14px * var(--ui-km-boost, 1));
@@ -346,6 +356,9 @@
     --ui-size-h2: calc(17px * var(--ui-km-boost, 1));
     --ui-size-h3: calc(15px * var(--ui-km-boost, 1));
     --ui-receipt-lh: 24px;
+  }
+
+  [data-reports-hub] {
     /* O9 names >=1024 too: the old clamp(20px, 3vw, 48px) gave 30.7px at
        1024, indistinguishable from the tablet gutter. 3.5vw with a 28px floor
        reads as a real margin from 1024 and hands over smoothly to the 1280
