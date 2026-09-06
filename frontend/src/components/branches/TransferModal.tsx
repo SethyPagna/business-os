@@ -26,6 +26,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { branchCanBeTransferDestination, branchCanBeTransferSource, branchRoleFromName } from '../../utils/branchRoles.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
@@ -876,9 +877,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         return
       }
 
-      notify(res?.error || (t('transfer_failed') || 'Transfer failed'), 'error')
+      // The Worker's direction refusal is the same sentence the greyed
+      // branch select already shows, so it is read back out of the packs
+      // rather than surfacing as the English the server happened to send.
+      notify(localizeBranchRuleError(res?.error, t) || (t('transfer_failed') || 'Transfer failed'), 'error')
     } catch (error) {
-      notify(getErrorMessage(error, t('transfer_failed') || 'Transfer failed'), 'error')
+      notify(localizeBranchRuleError(getErrorMessage(error, t('transfer_failed') || 'Transfer failed'), t), 'error')
     } finally {
       finishSingleAction(transferInFlightRef)
       setSaving(false)
@@ -959,7 +963,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             userName: user?.name,
           }), 'Bulk transfer branch stock', TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS)
         } catch (error) {
-          stoppedReason = getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed')
+          stoppedReason = localizeBranchRuleError(getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed'), t)
           break
         }
         if (res?.success !== false) {
@@ -970,7 +974,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           mergeCount += res.merges?.length ?? 0
           continue
         }
-        stoppedReason = res?.error || (t('transfer_bulk_failed') || 'Bulk transfer failed')
+        stoppedReason = localizeBranchRuleError(res?.error, t) || (t('transfer_bulk_failed') || 'Bulk transfer failed')
         break
       }
 

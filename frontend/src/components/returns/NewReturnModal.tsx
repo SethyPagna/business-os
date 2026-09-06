@@ -18,6 +18,7 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
@@ -767,7 +768,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       await Promise.resolve(onSuccess?.(result))
       onClose()
     } catch (error) {
-      notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error, T('error', 'Error')), 'error')
+      // A replacement line the Worker refuses (its branch is the warehouse)
+      // is shown as the same pack sentence the replacement picker greys the
+      // warehouse pill with, in whichever language is active.
+      notify((T('error','Error') || 'Error') + ': ' + localizeBranchRuleError(getLoaderErrorMessage(error, T('error', 'Error')), (key: string) => T(key, '')), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       setSubmitting(false)

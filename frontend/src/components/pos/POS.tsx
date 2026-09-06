@@ -83,6 +83,8 @@ import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } f
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
 import { buildProductSupplierOptions } from '../products/helpers/productSupplierOptions.ts'
 import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
+import { resolveSaleBranch } from './productSheetState.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'pos-receipt')
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'pos-image-gallery-lightbox')
@@ -2276,24 +2278,17 @@ export default function POS() {
     return row ? Number(row.quantity || 0) : 0
   }, [])
 
-  const pickBestBranchId = useCallback((product: ProductRecord) => {
-    let bestBranchId: number | null = null
-    let bestQuantity = 0
-    const preferredBranchId = defaultBranchId ? Number(defaultBranchId) : null
-
-    for (const entry of product?.branch_stock || []) {
-      const branchId = Number(entry.branch_id)
-      const qty = Number(entry.quantity || 0)
-      if (!Number.isFinite(branchId) || qty <= 0) continue
-      if (preferredBranchId != null && branchId === preferredBranchId) return branchId
-      if (qty > bestQuantity) {
-        bestBranchId = branchId
-        bestQuantity = qty
-      }
-    }
-
-    return bestBranchId || defaultBranchId || null
-  }, [defaultBranchId])
+  // Which branch a cart line books against -- resolveSaleBranch, so the
+  // rule lives in one tested place rather than being re-stated here.
+  //
+  // The loop this replaces did not know the warehouse cannot sell. It won on
+  // quantity (which is what a warehouse is for) and it won outright whenever
+  // it was the deployment's default branch, so the line resolved to a branch
+  // that does not sell and the cashier found out at checkout, as a 400.
+  const pickBestBranchId = useCallback(
+    (product: ProductRecord) => resolveSaleBranch(product as never, { defaultBranchId }).branchId,
+    [defaultBranchId],
+  )
 
   /**
    * Stock quantity relevant to the active branch filter or item branch
@@ -2382,9 +2377,23 @@ export default function POS() {
     const overrideBranchId = branchIdOverride == null || branchIdOverride === ''
       ? null
       : Number(branchIdOverride)
-    const assignedBranchId = overrideBranchId != null && Number.isFinite(overrideBranchId)
-      ? overrideBranchId
-      : (primaryBranchFilterId != null ? primaryBranchFilterId : pickBestBranchId(product))
+    // The last gate before a cart line exists. `primaryBranchFilterId` used
+    // to be taken verbatim, so filtering the grid to the warehouse added
+    // warehouse lines with nothing between them and a checkout 400; and a
+    // product held ONLY at the warehouse -- the normal state of something
+    // waiting to be transferred -- resolved there through the fallback.
+    // Both come back blocked now, and the sheet is opened instead: it shows
+    // the warehouse pill greyed WITH its quantity and says why, which is the
+    // answer the cashier actually needs.
+    const saleBranch = overrideBranchId != null && Number.isFinite(overrideBranchId)
+      ? { branchId: overrideBranchId, blocked: false }
+      : resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })
+    if (saleBranch.blocked) {
+      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+      setDetailProduct(product)
+      return
+    }
+    const assignedBranchId = saleBranch.branchId
     const priceValues = resolveCartPriceValues(product, priceMode, exchangeRate, {
       usdToKhr: (value: unknown, rate: unknown) => CURRENCY.usdToKhr(Number(value || 0), Number(rate || 0)),
     }, promotionRules)
@@ -2946,7 +2955,11 @@ export default function POS() {
         window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
         window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       } else {
-        notify(result.error || t('error'), 'error')
+        // A warehouse line refused by the Worker reads back as the pack
+        // sentence the sheet's greyed pill shows, not as the server's
+        // English -- this is the path an offline sale replayed later, or a
+        // stale tab, actually arrives on.
+        notify(localizeBranchRuleError(result.error, t) || t('error'), 'error')
       }
     } catch (e) {
       // Y2: a timeout is NOT a confirmed failure -- the request keeps
@@ -2959,7 +2972,7 @@ export default function POS() {
           'ម៉ាស៊ីនមេមិនទាន់បញ្ជាក់ការលក់នេះទេ។ វាប្រហែលជាត្រូវបានកត់ត្រា - ចុច Complete ម្តងទៀតដោយសុវត្ថិភាព វានឹងមិនបង្កើតច្បាប់ចម្លងទេ។',
         ), 'error')
       } else {
-        notify(getErrorMessage(e, t('error') || 'Error'), 'error')
+        notify(localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
       }
     } finally {
       checkoutInFlightRef.current = false
