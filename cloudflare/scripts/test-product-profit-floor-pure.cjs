@@ -229,6 +229,41 @@ async function main() {
     )
   }
 
+  // ---- the OTHER three call sites actually run ----------------------------
+  // attachInventoryProductMetrics above is one of the four surfaces. The other
+  // three -- GET /summary's branch-scoped and unfiltered paths, and the
+  // GET /stats financial join -- build their SQL from the same builder but no
+  // pure test executes them, so a SQL error in those shapes would ship
+  // silently. Run each shape against the same fixture and read the columns the
+  // routes read, including the gross_* columns only /stats consumes.
+  const shapes = [
+    ['GET /summary, branch-scoped', { branchScoped: true }, { branchId: 1 }],
+    ['GET /summary, unfiltered', {}, {}],
+  ]
+  for (const [label, options, params] of shapes) {
+    const sql = productSalesLedger.buildProductSalesLedgerSql(options)
+    const rows = db.prepare(`SELECT * FROM (${sql}) fin ORDER BY fin.product_id`).all(params)
+    assert.ok(Array.isArray(rows) && rows.length > 0, `${label}: the ledger SQL executes and returns rows`)
+    for (const row of rows) {
+      for (const column of ['qty_sold', 'revenue_usd', 'revenue_khr', 'cogs_usd', 'cogs_khr',
+        'store_discount_usd', 'membership_discount_usd',
+        'gross_revenue_usd', 'gross_revenue_khr', 'gross_cogs_usd', 'gross_cogs_khr']) {
+        assert.ok(column in row, `${label}: the route reads ${column}, so the ledger must emit it`)
+      }
+      assert.ok(Number(row.revenue_usd) >= 0, `${label}: revenue_usd non-negative (product ${row.product_id})`)
+      assert.ok(Number(row.cogs_usd) >= 0, `${label}: cogs_usd non-negative (product ${row.product_id})`)
+      assert.ok(Number(row.gross_revenue_usd) >= Number(row.revenue_usd),
+        `${label}: gross is before the return reversal, so it cannot be below net (product ${row.product_id})`)
+    }
+  }
+  // The branch-scoped shape must actually discriminate: everything in this
+  // fixture is branch 1, so scoping to branch 2 has to come back empty rather
+  // than quietly ignoring @branchId.
+  const otherBranch = db.prepare(
+    `SELECT * FROM (${productSalesLedger.buildProductSalesLedgerSql({ branchScoped: true })}) fin`,
+  ).all({ branchId: 2 })
+  assert.equal(otherBranch.length, 0, 'the branch-scoped shape really filters on @branchId')
+
   // ---- one implementation, not five ---------------------------------------
   const inventorySource = fs.readFileSync(path.join(srcRoot, 'routes/inventory.ts'), 'utf8')
   assert.equal((inventorySource.match(/buildProductSalesLedgerSql\(/g) || []).length, 4,
