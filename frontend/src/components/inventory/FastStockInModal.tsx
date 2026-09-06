@@ -201,6 +201,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     () => buildProductGroups(candidates, productsById, { preserveInputOrder: true }),
     [candidates, productsById],
   )
+  // The rows the option sheet actually offers for the open group.
+  const selectedGroupChoices = useMemo(
+    () => (selectedGroup ? (selectedGroup.sellableItems.length ? selectedGroup.sellableItems : selectedGroup.items) : []),
+    [selectedGroup],
+  )
 
   // Autosave the header + in-progress line (debounced, shared cadence).
   // Deliberately NO dirtyWork registration: with the draft persisting,
@@ -814,11 +819,16 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           same way on every surface. */}
       {selectedGroup ? (
         <ProductOptionSheet
+          // The lead row is the first OFFERED one, not group.leadProduct: a
+          // family whose root is filtered out of the offer still has a root,
+          // and handing that root in as `product` resolved the sheet to a row
+          // it never listed. SaleDetailModal's addCandidateGroups already
+          // takes the lead this way (lead = choices[0]).
           product={{
-            ...(selectedGroup.leadProduct || selectedGroup.items[0]),
+            ...(selectedGroupChoices[0] || selectedGroup.leadProduct || selectedGroup.items[0]),
             name: selectedGroup.name,
           } as never}
-          choices={(selectedGroup.sellableItems.length ? selectedGroup.sellableItems : selectedGroup.items) as never[]}
+          choices={selectedGroupChoices as never[]}
           t={(key: string) => tr(key, key)}
           fmtUSD={(value: number) => `$${Number(value || 0).toFixed(2)}`}
           // Stock-in receives into either canonical branch.

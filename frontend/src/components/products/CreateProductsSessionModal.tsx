@@ -790,7 +790,12 @@ export default function CreateProductsSessionModal({
           nested Modal below keeps the line FORM, which is not the picker. */}
       {selectedGroup && !selectedProduct ? (
         <ProductOptionSheet
-          product={{ ...(selectedGroup.leadProduct || selectedGroup.items[0]), name: selectedGroup.name } as never}
+          // The lead row is the first OFFERED one, not group.leadProduct: a
+          // family whose root is filtered out of the offer still has a root,
+          // and handing that root in as `product` resolved the sheet to a row
+          // it never listed. SaleDetailModal's addCandidateGroups already
+          // takes the lead this way (lead = choices[0]).
+          product={{ ...(groupOptions[0] || selectedGroup.leadProduct || selectedGroup.items[0]), name: selectedGroup.name } as never}
           choices={groupOptions as never[]}
           t={(key: string) => tr(key, key)}
           fmtUSD={(value: number) => `${usdSymbol}${Number(value || 0).toFixed(2)}`}
