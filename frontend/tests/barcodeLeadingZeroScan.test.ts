@@ -62,7 +62,8 @@
 // Run: node tests/barcodeLeadingZeroScan.test.ts
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   barcodeKeysMatch,
   barcodeSearchKeys,
@@ -270,6 +271,110 @@ check('the shared kernel is the ONLY place the UPC-E rule is implemented', () =>
     if (/expandUpcE\s*=|function\s+expandUpcE/.test(read(file))) offenders.push(file)
   }
   assert.deepEqual(offenders, [])
+})
+
+// --- 4. a scan never AUTO-PICKS, on any surface ------------------------
+//
+// Owner rule (barcode-scan-select-then-confirm): a scan fills the search
+// box, the list narrows, and the OPERATOR chooses the row. It is the same
+// rule as the fold above seen from the other side -- a fold that finally
+// finds the right row is worth nothing if the surface then commits to a row
+// on the operator's behalf.
+//
+// The Returns replacement search was the last surface that broke it: it
+// picked a row outright on an exact barcode/SKU match. dcbaa40f (the
+// one-option-sheet rewrite, already in base 01f0c93c) replaced that whole
+// section with a single catalog search plus an explicit option sheet, so
+// the auto-pick is gone. This guard is what stops it coming back -- and it
+// is mechanical over EVERY scan surface, not a note about one of them.
+const SRC_ROOT = new URL('../src/', import.meta.url)
+
+function walkSourceFiles(dirUrl: URL): string[] {
+  const found: string[] = []
+  for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+    if (entry.isDirectory()) found.push(...walkSourceFiles(new URL(`${entry.name}/`, dirUrl)))
+    else if (/\.tsx?$/.test(entry.name)) found.push(fileURLToPath(new URL(entry.name, dirUrl)))
+  }
+  return found
+}
+
+// The text between a `{` and its matching `}`, so a handler written inline
+// is read whole rather than to the first brace that happens to close.
+function balanced(src: string, openIndex: number, open = '{', close = '}'): string {
+  let depth = 0
+  for (let i = openIndex; i < src.length; i += 1) {
+    if (src[i] === open) depth += 1
+    else if (src[i] === close) {
+      depth -= 1
+      if (depth === 0) return src.slice(openIndex, i + 1)
+    }
+  }
+  return src.slice(openIndex)
+}
+
+// A function defined in the same file, by either spelling this codebase
+// uses (`const f = (…) => {…}` / `useCallback((…) => {…})`, `function f`).
+function localFunctionBody(src: string, name: string): string {
+  const decl = new RegExp(`(?:const\\s+${name}\\s*(?::[^=]+)?=|function\\s+${name}\\b)`).exec(src)
+  if (!decl) return ''
+  const brace = src.indexOf('{', decl.index)
+  return brace === -1 ? '' : balanced(src, brace)
+}
+
+// "chooses a row for the operator". setPicked(null) / setXPicking(null) are
+// the opposite -- they CLEAR a pick -- so only a non-null argument counts.
+const AUTO_PICK_CALL = /\b(?:pick|choose|select)[A-Z]\w*\s*\(/
+const AUTO_PICK_SETTER = /\bset(?:\w*Pick\w*|SelectedProduct|SelectedCandidate|SelectedRow)\s*\(\s*(?!null\b|\)|undefined\b)/
+
+check('no scan handler on any surface picks a row for the operator', () => {
+  const offenders: string[] = []
+  let surfaces = 0
+  for (const file of walkSourceFiles(SRC_ROOT)) {
+    const src = readFileSync(file, 'utf8')
+    if (!src.includes('ScanSearchButton') && !src.includes('BarcodeScannerModal')) continue
+    // Windows hands back backslashes; normalize so the failure message
+    // names the file the way the repo does.
+    const posix = file.replace(/\\/g, '/')
+    const shortName = posix.slice(posix.indexOf('/src/') + 1)
+    for (const match of src.matchAll(/onDetected=\{/g)) {
+      surfaces += 1
+      const handler = balanced(src, match.index + 'onDetected='.length)
+      // Follow the handler into whatever it calls in its own file, so a
+      // one-line `onDetected={(v) => void searchX(v)}` is not a blind spot.
+      // Depth 3 reaches search -> apply-results helpers.
+      let text = handler
+      const seen = new Set<string>()
+      for (let depth = 0; depth < 3; depth += 1) {
+        let grown = text
+        for (const call of text.matchAll(/\b([a-zA-Z_$][\w$]*)\s*\(/g)) {
+          const name = call[1]
+          if (seen.has(name)) continue
+          seen.add(name)
+          grown += `\n${localFunctionBody(src, name)}`
+        }
+        if (grown === text) break
+        text = grown
+      }
+      const picked = AUTO_PICK_CALL.exec(text) || AUTO_PICK_SETTER.exec(text)
+      if (picked) offenders.push(`${shortName}: ${picked[0].trim()}`)
+    }
+  }
+  // A sweep that finds nothing reports the same "no offenders" as a clean
+  // one, so the instrument gets its own floor. 23 onDetected surfaces across
+  // 19 files on 2026-09-07; the floor sits well under that so a lane may
+  // retire one without a false alarm, but a broken walk cannot pass.
+  assert.ok(surfaces >= 15, `only ${surfaces} scan surfaces found -- the sweep stopped seeing them`)
+  assert.deepEqual(offenders, [], 'a scan handler commits to a row instead of narrowing the list')
+})
+
+check('the Returns replacement search narrows the list and stops there', () => {
+  const src = read('../src/components/returns/NewReturnModal.tsx')
+  const body = localFunctionBody(src, 'searchReplacementCatalog')
+  assert.ok(body.includes('setReplacementResults('), 'the replacement search must still fill the candidate list')
+  assert.ok(!/exactBarcode|pickReplacementRow/.test(src),
+    'the exact-barcode auto-pick is back in the Returns replacement search')
+  assert.ok(!AUTO_PICK_SETTER.test(body) && !AUTO_PICK_CALL.test(body),
+    'the replacement search picks a row for the operator')
 })
 
 check('the frontend and Worker barcode kernels state the same rule', () => {
