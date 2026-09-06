@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PageSizeSelect from './PageSizeSelect'
+import { clampPageNumber, pagerState } from '../../utils/pagerState.ts'
 
 export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
 
@@ -63,14 +64,7 @@ export interface PaginationControlsProps {
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
-  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
-  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
-  const parsedTotal = Number(totalItems || 0)
-  const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0
-  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
-  const parsedPage = Number(page || 1)
-  const requestedPage = Number.isFinite(parsedPage) ? parsedPage : 1
-  return Math.max(1, Math.min(totalPages, requestedPage))
+  return clampPageNumber(page, totalItems, pageSize, DEFAULT_PAGE_SIZE)
 }
 
 export function paginateItems<T>(items: readonly T[] = [], page: NumericInput = 1, pageSize: NumericInput = DEFAULT_PAGE_SIZE): T[] {
@@ -99,14 +93,13 @@ export default function PaginationControls({
   rangeAsPageSize = false,
   layout = 'default',
 }: PaginationControlsProps) {
-  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
-  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
-  const parsedTotal = Number(totalItems || 0)
-  const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0
-  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
-  const safePage = clampPage(page, total, safePageSize)
-  const start = total ? ((safePage - 1) * safePageSize) + 1 : 0
-  const end = Math.min(total, safePage * safePageSize)
+  // One shared kernel (utils/pagerState.ts) answers all of it: the clamped
+  // page, the page count, the item range, whether each arrow is dead, and
+  // whether the control renders at all.
+  const state = pagerState(page, totalItems, pageSize, DEFAULT_PAGE_SIZE)
+  const { total, totalPages, start, end, backDisabled, nextDisabled } = state
+  const safePageSize = state.pageSize
+  const safePage = state.page
   const pageLabel = typeof t === 'function' ? (t('page') || 'Page') : 'Page'
   const ofLabel = typeof t === 'function' ? (t('of') || 'of') : 'of'
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
@@ -153,7 +146,7 @@ export default function PaginationControls({
     }
   }
 
-  if (total <= 0) return null
+  if (!state.visible) return null
 
   if (layout === 'centered') {
     // Storefront pager: [< Back] [page / total] [Next >] [50 v], centred, and
@@ -171,7 +164,7 @@ export default function PaginationControls({
           <button
             type="button"
             className={`${arrowButtonClass} rounded-l-full`}
-            disabled={safePage <= 1}
+            disabled={backDisabled}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label={backLabel}
           >
@@ -201,7 +194,7 @@ export default function PaginationControls({
           <button
             type="button"
             className={arrowButtonClass}
-            disabled={safePage >= totalPages}
+            disabled={nextDisabled}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
           >
@@ -243,7 +236,7 @@ export default function PaginationControls({
         <button
           type="button"
           className={arrowButtonClass}
-          disabled={safePage <= 1}
+          disabled={backDisabled}
           onClick={() => onPageChange?.(safePage - 1)}
           aria-label={backLabel}
         >
@@ -288,7 +281,7 @@ export default function PaginationControls({
         <button
           type="button"
           className={arrowButtonClass}
-          disabled={safePage >= totalPages}
+          disabled={nextDisabled}
           onClick={() => onPageChange?.(safePage + 1)}
           aria-label={nextLabel}
         >
@@ -328,7 +321,7 @@ export default function PaginationControls({
             <button
               type="button"
               className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={safePage <= 1}
+              disabled={backDisabled}
               onClick={() => onPageChange?.(safePage - 1)}
               aria-label={backLabel}
             >
@@ -359,7 +352,7 @@ export default function PaginationControls({
             <button
               type="button"
               className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={safePage >= totalPages}
+              disabled={nextDisabled}
               onClick={() => onPageChange?.(safePage + 1)}
               aria-label={nextLabel}
             >
@@ -395,7 +388,7 @@ export default function PaginationControls({
           <button
             type="button"
             className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
-            disabled={safePage <= 1}
+            disabled={backDisabled}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label={backLabel}
           >
@@ -425,7 +418,7 @@ export default function PaginationControls({
           <button
             type="button"
             className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
-            disabled={safePage >= totalPages}
+            disabled={nextDisabled}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
           >

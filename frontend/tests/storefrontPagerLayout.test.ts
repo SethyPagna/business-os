@@ -18,6 +18,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { getPortalLanguageText, FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS } from '../src/components/catalog/portalLanguagePacks.ts'
+import { pagerState } from '../src/utils/pagerState.ts'
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -95,7 +96,70 @@ runTest('the products grid mounts the pager above AND below, on one shared condi
   assert.equal(mounts.length, 2, 'exactly one pager above the grid and one below it')
   const gates = catalogProducts.match(/\{showPager \? \(/g) || []
   assert.equal(gates.length, 2, 'both mounts must share the SAME visibility gate -- the top one used to render unconditionally while the bottom one hid on a single page')
-  assert.match(catalogProducts, /const showPager = totalProducts > effectivePageSize/, 'the gate must be a single named fact, not two divergent inline conditions')
+  assert.match(
+    catalogProducts,
+    /const showPager = pagerState\(effectivePage, totalProducts, effectivePageSize, CATALOG_DEFAULT_PAGE_SIZE\)\.visible/,
+    'the gate must be the shared kernel, not a re-inlined page-count comparison',
+  )
+  assert.doesNotMatch(
+    catalogProducts,
+    /totalProducts > effectivePageSize/,
+    'the page-count gate is exactly what hid the per-page chooser on a single-page result',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// The per-page chooser has to survive a single-page result
+// ---------------------------------------------------------------------------
+
+runTest('a single page of results still renders the pager, with both arrows dead', () => {
+  // The storefront's page size is component state in PublicCatalogPage.tsx --
+  // not a URL param -- and the chooser that changes it lives INSIDE this pill.
+  // So `totalProducts > effectivePageSize` did not merely hide two arrows: a
+  // shopper on 100/page who narrowed the list to 12 products lost the only
+  // control that could put it back, short of reloading the site.
+  //
+  // Discriminating on purpose: the old rule answers `12 > 100` = false here.
+  const onePage = pagerState(1, 12, 100)
+  assert.equal(onePage.visible, true, 'the pill (and with it the per-page chooser) must survive a single-page result')
+  assert.equal(onePage.totalPages, 1)
+  assert.equal(onePage.backDisabled, true, 'there is no page before the first')
+  assert.equal(onePage.nextDisabled, true, 'and none after the last')
+  // Exactly at the boundary the old rule also said false.
+  const exactlyFull = pagerState(1, 20, 20)
+  assert.equal(exactlyFull.visible, true)
+  assert.equal(exactlyFull.totalPages, 1)
+  assert.equal(exactlyFull.nextDisabled, true)
+})
+
+runTest('an empty result renders no pager at all, and a real multi-page result pages', () => {
+  assert.equal(pagerState(1, 0, 20).visible, false, 'nothing to page through is the one case that renders nothing')
+  const middle = pagerState(2, 100, 20)
+  assert.equal(middle.visible, true)
+  assert.equal(middle.totalPages, 5)
+  assert.equal(middle.backDisabled, false)
+  assert.equal(middle.nextDisabled, false)
+  assert.equal(middle.start, 21)
+  assert.equal(middle.end, 40)
+  const past = pagerState(99, 100, 20)
+  assert.equal(past.page, 5, 'a stale page number clamps to the last real page')
+  assert.equal(past.nextDisabled, true)
+  const junk = pagerState('x', 45, 'y', 20)
+  assert.equal(junk.pageSize, 20, 'a junk page size falls back rather than dividing by NaN')
+  assert.equal(junk.page, 1)
+  assert.equal(junk.totalPages, 3)
+})
+
+runTest('the shared control takes its own arrow-disabled state from that same kernel', () => {
+  assert.match(pagination, /import \{ clampPageNumber, pagerState \} from '\.\.\/\.\.\/utils\/pagerState\.ts'/, 'one kernel, not a second copy of the arithmetic')
+  assert.match(pagination, /const state = pagerState\(page, totalItems, pageSize, DEFAULT_PAGE_SIZE\)/)
+  assert.match(pagination, /if \(!state\.visible\) return null/, 'the render gate and the storefront gate must be the same fact')
+  assert.doesNotMatch(pagination, /disabled=\{safePage <= 1\}/, 'the back arrow must read backDisabled')
+  assert.doesNotMatch(pagination, /disabled=\{safePage >= totalPages\}/, 'the next arrow must read nextDisabled')
+  const branch = centeredBranch()
+  assert.match(branch, /disabled=\{backDisabled\}/, 'so a single-page storefront pill shows a dead Back')
+  assert.match(branch, /disabled=\{nextDisabled\}/, 'and a dead Next')
+  assert.match(branch, /<PageSizeSelect/, 'while the per-page chooser beside them stays live')
 })
 
 runTest('both pager mounts translate Back and Next instead of leaking the raw keys', () => {

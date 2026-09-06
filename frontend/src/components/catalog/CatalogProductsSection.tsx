@@ -22,6 +22,7 @@ import PortalPromoStrip from './PortalPromoStrip.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import AlphaIndexRail from '../shared/AlphaIndexRail.tsx'
 import { RAIL_ALL_KEY, resolveBrandJump } from '../../utils/alphaRail.ts'
+import { pagerState } from '../../utils/pagerState.ts'
 import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
@@ -295,10 +296,15 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   )
   const totalProducts = serverPaged ? Number(productTotal || 0) : letterFilteredProducts.length
   // One fact, consulted by BOTH pager mounts. They used to disagree: the top
-  // one rendered unconditionally while the bottom one was gated on
-  // `totalProducts > effectivePageSize`, so a single-page result showed a
-  // pager above the grid and nothing below it.
-  const showPager = totalProducts > effectivePageSize
+  // one rendered unconditionally while the bottom one was gated on the page
+  // COUNT, so a single-page result showed a pager above the grid and nothing
+  // below it. Sharing that count gate then hid BOTH on a single page -- and
+  // the per-page chooser lives inside the pill, with the storefront's page
+  // size held in component state rather than in the URL, so a shopper on
+  // 100/page who narrowed to 12 products had no way back short of reloading
+  // the site. The pill renders whenever there is anything to show; on one
+  // page its arrows are simply disabled.
+  const showPager = pagerState(effectivePage, totalProducts, effectivePageSize, CATALOG_DEFAULT_PAGE_SIZE).visible
   const visiblePromotionItems = useMemo(
     () => Array.isArray(promotionItems)
       ? promotionItems.filter((item) => item?.title || item?.subtitle || item?.body || item?.mediaUrl)
