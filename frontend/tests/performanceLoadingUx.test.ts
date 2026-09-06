@@ -780,8 +780,14 @@ assert.match(inventory, /function loadUserReadTransport\(\): Promise<UserReadTra
 assert.match(inventory, /function loadBranchTransport\(\): Promise<BranchTransportModule>[\s\S]*function loadDashboardTransport\(\): Promise<DashboardTransportModule>[\s\S]*function loadRfidTransport\(\): Promise<RfidTransportModule>/, 'Inventory route should own narrow lazy loaders for branch, dashboard, and RFID transport paths')
 assert.match(inventory, /function loadInventoryExportModule\(\): Promise<InventoryExportModule>[\s\S]*import\('\.\/inventoryExport\.ts'\)/, 'Inventory route should lazy-load export assembly only when an export action is requested')
 assert.doesNotMatch(inventory, /from '\.\/inventoryExport\.ts'/, 'Inventory route should not statically import the export assembly chunk')
-assert.match(inventoryExport, /export async function exportInventoryPackage/, 'Inventory export chunk should own package report assembly')
-assert.match(inventoryExport, /buildStandaloneReportHtml/, 'Inventory export chunk should own standalone HTML report generation')
+// The package/summary/stats exports were retired with the Inventory products
+// slice (Part 562); the assertions that used to pin exportInventoryPackage and
+// buildStandaloneReportHtml here were the only thing still "using" them, which
+// is the opposite of what a chunk-shape gate is for. What the chunk must own
+// now is the movements row builder and nothing heavier.
+assert.match(inventoryExport, /export function collectInventoryMovementRows/, 'Inventory export chunk should own the movements row builder Inventory.tsx feeds to the shared export dialog')
+assert.doesNotMatch(inventoryExport, /export (?:async )?function (?:exportInventory|collectInventorySummaryRows|collectInventoryStatsRows)/, 'Inventory export chunk should not reintroduce the retired summary/stats/package exports no UI can reach')
+assert.doesNotMatch(inventoryExport, /buildStandaloneReportHtml|buildReportPackageFiles|downloadZipFilesAsync|import\('\.\.\/\.\.\/utils\/exportPackage'\)/, 'Inventory export chunk should no longer pull the HTML report and zip package assembly')
 assert.match(viteConfig, /'assets\/inventory-export-',/, 'Inventory export chunk should be excluded from eager modulepreload')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/components\/inventory\/inventoryExport\.ts'\)\) return 'inventory-export'/, 'Inventory export assembly should have a named intent chunk')
 assert.doesNotMatch(inventory, /window\.api|\(window as Window & \{ api\?:/, 'Inventory route should not wake the broad window.api registry for reads, stats, or stock mutations')
@@ -1724,10 +1730,16 @@ assert.match(
   /const defaultTransferDestinationBySourceId = useMemo\(\(\) => \{/,
   'inventory should precompute default transfer destinations instead of scanning branches for every transfer draft',
 )
-assert.match(
+// The export chunk no longer resolves branch labels at all: InventoryExportScope
+// went with the retired summary/stats/package exports, and the surviving
+// movements row builder reads group.branchSummary, which Inventory already
+// resolved through branchesById. So the indexed-map property is asserted where
+// it now lives (above, on Inventory) rather than through a scope callback the
+// export chunk no longer receives.
+assert.doesNotMatch(
   inventoryExport,
-  /scope\.getBranchLabel\(scope\.branchFilter, scope\.branchFilter\)/,
-  'inventory export chunk should resolve branch labels through the indexed branch map supplied by Inventory',
+  /InventoryExportScope|getBranchLabel/,
+  'inventory export chunk should not take a scope object back, branch labels are resolved before the rows reach it',
 )
 assert.match(
   inventory,

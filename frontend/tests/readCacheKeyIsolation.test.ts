@@ -10,6 +10,12 @@
 // embeds the id/tableName. These tests fail on the pre-fix source: the second
 // call returns the first record and no second network request is made.
 //
+// The third case is gone with its feature: the custom-tables cluster was
+// unreachable on both sides and was deleted, so getCustomTableData no longer
+// exists to cover. The rule it demonstrated stays covered by getFee and
+// getReturn, which exercise the same two code paths -- plain route() and the
+// local-fallback race path. deadFeatureRetirement.test.ts locks the deletion.
+//
 // Write-invalidation is unaffected: it clears by entity prefix
 // (getChannelRefreshKey splits the channel on ':'), which still covers every
 // per-id entry -- asserted below.
@@ -26,7 +32,6 @@ import {
 } from '../src/api/http.ts'
 import { getFee, getFees } from '../src/api/feesTransport.ts'
 import { getReturn } from '../src/api/returnsReadTransport.ts'
-import { getCustomTableData } from '../src/api/customTablesTransport.ts'
 import { getPendingActions } from '../src/api/reviewQueueTransport.ts'
 import { getSalesExport } from '../src/api/salesTransport.ts'
 
@@ -53,8 +58,8 @@ function resetApiState() {
   setSyncToken('')
 }
 
-// Minimal window shim: the getReturn / getCustomTableData reads take route()'s
-// local-fallback race path, which calls window.setTimeout/clearTimeout. The
+// Minimal window shim: the getReturn read takes route()'s local-fallback race
+// path, which calls window.setTimeout/clearTimeout. The
 // server stub resolves synchronously, so the server always wins the race well
 // before the fallback timer -- but the timer must exist to be scheduled.
 function installWindow(): () => void {
@@ -184,30 +189,6 @@ await runTest('getReturn keys the read cache per id -- opening return B never re
     assert.ok(cacheGet('returns:getOne:101'), 'per-id cache key for return 101 must be populated')
     assert.ok(cacheGet('returns:getOne:202'), 'per-id cache key for return 202 must be populated')
     assert.equal(cacheGet('returns:getOne'), null, 'the old shared constant key must never be used')
-  } finally {
-    restore()
-    restoreWindow()
-    resetApiState()
-  }
-})
-
-await runTest('getCustomTableData keys the read cache per table -- opening table B never renders table A', async () => {
-  resetApiState()
-  setSyncServerUrl('https://sync.example.test')
-  const restoreWindow = installWindow()
-  const { urls, restore } = stubFetchByUrl((url) =>
-    (url.includes('beta') ? [{ id: 2 }] : [{ id: 1 }]))
-  try {
-    const first = (await getCustomTableData({ tableName: 'alpha' })) as Array<{ id: number }>
-    const second = (await getCustomTableData({ tableName: 'beta' })) as Array<{ id: number }>
-
-    assert.equal(first[0].id, 1)
-    assert.equal(second[0].id, 2, "table 'beta' must NOT come back as cached table 'alpha'")
-    assert.equal(urls.length, 2, 'each distinct table must issue its own request')
-
-    assert.ok(cacheGet('customTables:data:alpha'), "per-table cache key for 'alpha' must be populated")
-    assert.ok(cacheGet('customTables:data:beta'), "per-table cache key for 'beta' must be populated")
-    assert.equal(cacheGet('customTables:data'), null, 'the old shared constant key must never be used')
   } finally {
     restore()
     restoreWindow()
