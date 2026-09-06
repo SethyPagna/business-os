@@ -23,12 +23,18 @@ import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
+// O3: a clipped product name must be revealable, not a dead-end "…". The
+// shared reveal-on-hover/click component, same one StatsStrip uses.
+import TruncatedText from '../shared/TruncatedText.tsx'
+// N13: a receipt id is never truncated -- it is shown in full and copied in
+// one tap, through the same component the Sale and Return detail modals use.
+import CopyableId from '../shared/CopyableId.tsx'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { buildHistoryRowModel, historyExportField, historyField } from '../../utils/historyRowModel.ts'
+import { buildHistoryRowModel, formatHistoryReference, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 import {
   browserStockStorage,
   dropFailedStockAttempt,
@@ -66,6 +72,12 @@ type LedgerRow = {
   signed_quantity: number
   reason: string | null
   reference_id?: number | string | null
+  // N13: the record this movement belongs to, resolved by the Worker
+  // (cloudflare/src/lib/movementReference.ts). reference_id alone identifies
+  // nothing to a person -- and which table it points at depends on the
+  // movement type, which is why the client never derives this itself.
+  reference_kind?: 'sale' | 'return' | null
+  reference_label?: string | null
   unit_cost_usd?: number | null
   unit_cost_khr?: number | null
   total_cost_usd?: number | null
@@ -319,6 +331,22 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     setDetail(null); setEditingReason(null); setConfirmRevert(false)
   }, [])
 
+  // N13: the ONE composition of "which record is this" -- "Sale 20260901-193100",
+  // "Return RET-...". Defined once here and used by the desktop row, the mobile
+  // card, the detail modal and the CSV export, so the four renderers of a
+  // single ledger row cannot word it four ways. The receipt itself is the
+  // server's answer (sales.receipt_number / returns.return_number); the free
+  // text in `reason` -- including the old system's "004419@2026-09-01" -- is
+  // never treated as a receipt number.
+  const referenceWords = useMemo(() => ({
+    sale: tr(t, 'sale', 'Sale'),
+    return: tr(t, 'return', 'Return'),
+  }), [t])
+  const referenceText = useCallback(
+    (row: LedgerRow): string => formatHistoryReference(buildHistoryRowModel(row).reference, referenceWords),
+    [referenceWords],
+  )
+
   // Ranged CSV export of the ledger, honoring the section's current search/
   // branch/supplier/view filters. Walks /stock-ledger pages (1000/page,
   // 10-page cap) and says so honestly if the range holds more.
@@ -358,6 +386,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       after: row.after_qty,
       batch: row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '',
       supplier: historyExportField(row.batch_supplier_name),
+      // N13: the export carries the SAME columns the table shows. `receipt` is
+      // the record a person recognises ("Sale 20260901-193100"); `reference`
+      // stays as the raw stored id beside it, for the rows whose reference is
+      // a stock-in session token rather than a receipt.
+      receipt: historyExportField(referenceText(row)),
       reason: historyExportField(row.reason),
       reference: row.reference_id ?? '',
       unit: row.unit || '',
@@ -373,7 +406,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       payment_status: row.batch_payment_status || '',
       credit_due_date: row.batch_credit_due_date || '',
     })))
-  }, [app, branchId, debouncedSearch, supplierId, t, view])
+  }, [app, branchId, debouncedSearch, referenceText, supplierId, t, view])
 
   // Revert: post the compensating counter-movement, then refresh the list (the
   // reverted row stays -- the ledger is append-only -- and the new counter-
@@ -543,6 +576,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               </span>
             ) : null}
             {row.batch_supplier_name ? <span className="break-words font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
+            {/* N13: the receipt gets the same first position on the card that
+                it has in the table's Reason cell -- the owner reads this
+                surface at 375px too, and "which sale was this" is the whole
+                question. */}
+            {model.reference.label ? (
+              <span className="break-words font-semibold text-gray-600 dark:text-gray-300">{referenceText(row)}</span>
+            ) : null}
             {model.isBare ? (
               // Nothing was recorded at all: say so once, not three times.
               <span className="break-words" title={`${tr(t, 'branch', 'Branch')} · ${tr(t, 'cashier_user', 'User')} · ${tr(t, 'reason', 'Reason')}`}>{model.branch}</span>
@@ -572,15 +612,27 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     <div className="desktop-dense-only dense-data-shell">
       <div className="scroll-x">
         <table className="dense-data-table min-w-[980px]" aria-label={tr(t, 'stock_change_ledger', 'Stock Changes')}>
+          {/* O3 (owner, Sep 6 2026: "barcode still placed very ugly in large
+              screens"). The column budget, not the barcode line, was the
+              problem: Product held 18% -- about 180px of a 1005px content
+              width at 1280 -- so a real name ("L'Occitane Hand Cream Shea
+              Butter 20% 150ml") was cut after a third of itself while four
+              fixed-width numeric columns held width they cannot use. Time,
+              Quantity and Before -> After are bounded by their own content
+              (a clock, a signed integer, "128 -> 130"), so they are trimmed
+              to what that content needs and the space goes to Product and to
+              Reason, which now carries the receipt line as well. Percentages
+              stay under the fixed columns' remainder so the table still fits
+              its 980px floor with no horizontal scrollbar at 1280. */}
           <colgroup>
-            <col className="w-[5.5rem]" />
-            <col className="w-[18%]" />
-            <col className="w-[8rem]" />
-            <col className="w-[5.5rem]" />
-            <col className="w-[7.5rem]" />
+            <col className="w-[4.25rem]" />
+            <col className="w-[26%]" />
+            <col className="w-[6rem]" />
+            <col className="w-[4rem]" />
+            <col className="w-[5.75rem]" />
+            <col className="w-[9.5%]" />
             <col className="w-[12%]" />
-            <col className="w-[12%]" />
-            <col className="w-[10%]" />
+            <col className="w-[6.5%]" />
             <col />
           </colgroup>
           <thead>
@@ -622,7 +674,15 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                         belongs with its supplier) so this cell means one thing
                         per line instead of multiplexing barcode/batch/dash. */}
                     <td>
-                      <span className="block dense-cell-truncate font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+                      {/* O3: the name goes through the shared TruncatedText --
+                          a `title` tooltip is not an affordance (nothing shows
+                          that the "…" can be opened, and it is unreachable by
+                          tap), while TruncatedText marks the clipped value as
+                          revealable and opens it on hover AND on tap. It also
+                          stops the click from opening the row's detail modal,
+                          so reading a name is not the same gesture as leaving
+                          the list. */}
+                      <TruncatedText text={row.product_name} className="font-semibold text-gray-800 dark:text-gray-100" />
                       <span className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400" title={model.barcode}>{model.barcode}</span>
                     </td>
                     <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate" title={translateMovementType(row.movement_type, t)}>{translateMovementType(row.movement_type, t)}</span></span></td>
@@ -646,7 +706,20 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       ) : null}
                     </td>
                     <td><span className="dense-cell-truncate" title={model.actor}>{model.actor}</span></td>
-                    <td><span className="dense-cell-truncate text-gray-500" title={model.reason}>{model.reason}</span></td>
+                    {/* N13: WHICH RECORD leads, the free text follows. A sale
+                        row used to show only its reason -- "Old-system sale
+                        004419@2026-09-01" on imported rows, nothing at all on
+                        rows the POS wrote -- so nothing on the line named the
+                        receipt. The receipt comes from the sales/returns row;
+                        the legacy "@date" text stays in the reason line under
+                        it, where it belongs, and is never printed as a
+                        receipt number. */}
+                    <td>
+                      {model.reference.label ? (
+                        <span className="block dense-cell-truncate font-semibold text-gray-600 dark:text-gray-300" title={referenceText(row)}>{referenceText(row)}</span>
+                      ) : null}
+                      <span className={`block dense-cell-truncate ${model.reference.label ? 'leading-[0.85rem] text-[0.68rem] text-gray-400' : 'text-gray-500'}`} title={model.reason}>{model.reason}</span>
+                    </td>
                   </tr>
                 )
               }),
@@ -909,6 +982,31 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 <span className="font-mono">{detail.barcode}</span>
               </p>
             ) : null}
+            {/* N13: the record this movement belongs to. Shown as a fact of
+                its own rather than folded into the reason line, and through
+                CopyableId -- the same component the Sale and Return detail
+                modals use -- so the id is never truncated and is one tap to
+                copy (owner rule: receipt ids are shown in full and copied
+                easily). */}
+            {(() => {
+              const reference = buildHistoryRowModel(detail).reference
+              if (!reference.label) return null
+              const isReturn = reference.kind === 'return'
+              return (
+                <div className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
+                  <div className="text-[11px] uppercase tracking-wide text-gray-400">
+                    {isReturn ? tr(t, 'return_number', 'Return #') : tr(t, 'receipt', 'Receipt')}
+                  </div>
+                  <CopyableId
+                    value={reference.label}
+                    copyLabel={isReturn ? tr(t, 'copy_return_id', 'Copy return ID') : tr(t, 'copy_receipt_number', 'Copy receipt number')}
+                    copiedLabel={tr(t, 'copied', 'Copied')}
+                    className="mt-0.5"
+                    valueClassName="font-mono text-sm font-semibold text-gray-800 dark:text-gray-100"
+                  />
+                </div>
+              )
+            })()}
             {detail.reason ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
                 <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'reason', 'Reason')}: </span>

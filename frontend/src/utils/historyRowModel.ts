@@ -59,6 +59,20 @@ export type HistoryRowSource = {
   user_name?: unknown
   reason?: unknown
   barcode?: unknown
+  // N13: the record the row belongs to, resolved server-side
+  // (cloudflare/src/lib/movementReference.ts). The Worker decides WHICH
+  // record a reference_id names -- the same id can be a sales.id or a
+  // returns.id depending on the movement type -- so this layer only
+  // formats what it is given and never re-derives it.
+  reference_kind?: unknown
+  reference_label?: unknown
+}
+
+/** Which record a movement row names, and how that record is called. */
+export type HistoryReference = {
+  kind: 'sale' | 'return' | null
+  /** The receipt as the app names it, or '' when the row names no record. */
+  label: string
 }
 
 export type HistoryRowModel = {
@@ -66,8 +80,34 @@ export type HistoryRowModel = {
   actor: string
   reason: string
   barcode: string
+  reference: HistoryReference
   /** True when the row carries none of branch / actor / reason. */
   isBare: boolean
+}
+
+/**
+ * The record a movement row belongs to. A kind with no label is not a
+ * reference: the receipt is what identifies the record to a person, and a
+ * bare "Sale" says nothing the Type column has not already said.
+ */
+export function historyReference(row: HistoryRowSource | null | undefined): HistoryReference {
+  const label = text(row?.reference_label)
+  if (!label) return { kind: null, label: '' }
+  const kind = text(row?.reference_kind)
+  return { kind: kind === 'sale' || kind === 'return' ? kind : null, label }
+}
+
+/**
+ * The ONE composition of a reference for display -- "Sale 20260901-193100",
+ * "Return RET-20260902-0007", or the bare receipt when the kind is unknown.
+ * Callers pass their own translated words so the table, the card, the detail
+ * modal and the CSV cannot word it three different ways.
+ */
+export function formatHistoryReference(reference: HistoryReference, words: { sale: string; return: string }): string {
+  if (!reference.label) return ''
+  if (reference.kind === 'sale') return `${words.sale} ${reference.label}`
+  if (reference.kind === 'return') return `${words.return} ${reference.label}`
+  return reference.label
 }
 
 /**
@@ -79,11 +119,15 @@ export function buildHistoryRowModel(row: HistoryRowSource | null | undefined): 
   const actor = historyActor(row?.user_name)
   const reason = historyField(row?.reason)
   const barcode = historyField(row?.barcode)
+  const reference = historyReference(row)
   return {
     branch,
     actor,
     reason,
     barcode,
-    isBare: branch === HISTORY_EMPTY && actor === HISTORY_EMPTY && reason === HISTORY_EMPTY,
+    reference,
+    // A row that names its receipt is never bare, whatever else is missing:
+    // the receipt is the fact that makes a sale row identifiable.
+    isBare: branch === HISTORY_EMPTY && actor === HISTORY_EMPTY && reason === HISTORY_EMPTY && !reference.label,
   }
 }

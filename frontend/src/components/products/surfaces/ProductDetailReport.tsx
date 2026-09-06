@@ -11,6 +11,11 @@ import { getProductDetailReport, getStockLedger, getProductSalesDetail, getProdu
 import { movementColorClass, translateMovementType } from '../../inventory/movementGroups.ts'
 import { fmtDate, fmtDateTime24 } from '../../../utils/formatters'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
+// N13: this report's movement rows come from the same /stock-ledger kernel the
+// Stock Change ledger reads, so "Source" names the same record the ledger
+// does. It printed "Sale #742" -- the raw sales.id, which identifies nothing
+// to a person and is not the receipt they would search for.
+import { formatHistoryReference, historyReference } from '../../../utils/historyRowModel.ts'
 import { useApp } from '../../../AppContext'
 import AttributeSupplierModal from './AttributeSupplierModal.tsx'
 
@@ -80,6 +85,9 @@ type LedgerRow = {
   before_qty: number
   after_qty: number
   reference_id?: number | null
+  // N13: resolved server-side (cloudflare/src/lib/movementReference.ts).
+  reference_kind?: 'sale' | 'return' | null
+  reference_label?: string | null
   batch_id?: number | null
   batch_lot_code?: string | null
   batch_received_at?: string | null
@@ -298,6 +306,13 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
           {movements.map((row) => {
             const expanded = openMovementId === row.id
             const typeLabel = translateMovementType(row.movement_type, t as (key: string) => string)
+            // The record this movement belongs to, worded exactly as the Stock
+            // Change ledger words it. Falls back to the raw id only for the
+            // rows that name no record (stock-in session tokens, reverts).
+            const receipt = formatHistoryReference(historyReference(row), {
+              sale: tr('sale', 'Sale'),
+              return: tr('return', 'Return'),
+            })
             const batchLabel = row.batch_id
               // batchWord is the fallback prefix for a pre-redesign row that has
               // neither a received_at nor a date-shaped lot code; omitting it
@@ -319,7 +334,9 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     {signed(row)} {typeLabel}
                   </span>
                   <span className="shrink-0 tabular-nums text-gray-500">{row.before_qty}→{row.after_qty}</span>
-                  <span className="detail-scroll-text min-w-0 flex-1 text-gray-400" title={row.reason || ''}>{row.reason || ''}</span>
+                  {/* The receipt leads, the free text follows -- the same
+                      order the Stock Change ledger's Reason cell uses. */}
+                  <span className="detail-scroll-text min-w-0 flex-1 text-gray-400" title={[receipt, row.reason || ''].filter(Boolean).join(' · ')}>{[receipt, row.reason || ''].filter(Boolean).join(' · ')}</span>
                   <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 </button>
                 {expanded ? (
@@ -332,7 +349,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                       <dt className="text-gray-400">{tr('before_after', 'Before → After')}</dt>
                       <dd className="tabular-nums text-gray-700 dark:text-gray-200">{row.before_qty} → {row.after_qty}</dd>
                       {batchLabel ? (<><dt className="text-gray-400">{tr('batch', 'Batch')}</dt><dd className="text-amber-700 dark:text-amber-300">{batchLabel}</dd></>) : null}
-                      {row.reference_id ? (<><dt className="text-gray-400">{tr('source', 'Source')}</dt><dd className="text-gray-700 dark:text-gray-200">{typeLabel} #{row.reference_id}</dd></>) : null}
+                      {receipt || row.reference_id ? (<><dt className="text-gray-400">{tr('source', 'Source')}</dt><dd className="text-gray-700 dark:text-gray-200">{receipt || `${typeLabel} #${row.reference_id}`}</dd></>) : null}
                       {row.reason ? (<><dt className="text-gray-400">{tr('reason', 'Reason')}</dt><dd className="text-gray-700 dark:text-gray-200">{row.reason}</dd></>) : null}
                     </dl>
                   </div>
