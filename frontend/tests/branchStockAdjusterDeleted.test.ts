@@ -55,6 +55,23 @@ runTest('its dedicated (now-pointless) test no longer exists', () => {
   assert.equal(fs.existsSync(DELETED_TEST), false, 'a test for a deleted component must not linger')
 })
 
+// Two cloudflare/src comments still name the deleted file, and they are NOT
+// this lane's to reword. cloudflare/src/routes/inventory.ts is held right now
+// by four live sibling lanes (a2-datefmt, a2-ledger2, a2-profit-floor,
+// a2-transfer-reason), and cloudflare/src/lib/stockReceiptGate.ts sits outside
+// this lane's declared region either way, so the wording change is HANDED to
+// the owning lane rather than taken here.
+//
+// The handoff is recorded as an exception that retires itself. The sweep below
+// still fails if the name appears in any file NOT on this list, and the check
+// after it fails once a listed file stops containing the name -- i.e. the owner
+// landed the reword and this entry is now stale and must be deleted. Neither
+// direction is a blanket allowance, and the list cannot rot unnoticed.
+const HANDOFF_TO_OWNING_LANE = [
+  'cloudflare/src/lib/stockReceiptGate.ts',
+  'cloudflare/src/routes/inventory.ts',
+]
+
 runTest('no file in EITHER package still names BranchStockAdjuster (so it cannot come back as a silent copy)', () => {
   // A pin scoped to frontend/src alone is exactly why the leftover survived
   // round 1: two cloudflare/src comments and two cloudflare/scripts test
@@ -78,12 +95,27 @@ runTest('no file in EITHER package still names BranchStockAdjuster (so it cannot
     for (const file of walk(root, /\.(ts|cjs)$/)) {
       if (file === THIS_FILE) continue
       const text = fs.readFileSync(file, 'utf8')
-      if (text.includes('BranchStockAdjuster')) {
-        offenders.push(path.relative(REPO_ROOT, file).split(path.sep).join('/'))
+      const rel = path.relative(REPO_ROOT, file).split(path.sep).join('/')
+      if (text.includes('BranchStockAdjuster') && !HANDOFF_TO_OWNING_LANE.includes(rel)) {
+        offenders.push(rel)
       }
     }
   }
   assert.deepEqual(offenders, [], `these files still reference BranchStockAdjuster by name: ${offenders.join(', ')}`)
+})
+
+runTest('the handoff list retires itself once the owning lane lands the reword', () => {
+  // Without this, a "known exception" outlives the thing it excuses and turns
+  // into exactly the silent rot the sweep above exists to prevent.
+  const stale: string[] = []
+  for (const rel of HANDOFF_TO_OWNING_LANE) {
+    const full = path.join(REPO_ROOT, rel.split('/').join(path.sep))
+    if (!fs.existsSync(full) || !fs.readFileSync(full, 'utf8').includes('BranchStockAdjuster')) {
+      stale.push(rel)
+    }
+  }
+  assert.deepEqual(stale, [],
+    `these files no longer name BranchStockAdjuster -- the owning lane landed the reword, so delete them from HANDOFF_TO_OWNING_LANE: ${stale.join(', ')}`)
 })
 
 runTest('the live surface carries the ported branch-quantity rule (behaviour 1)', () => {
