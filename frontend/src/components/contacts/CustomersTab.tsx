@@ -60,6 +60,14 @@ type CustomerPayload = Partial<CustomerRow> & {
   // contacts.ts's CUSTOMERS.columns comment for the full reasoning.
   created_at?: string | null
   __rename_cascade?: 'carry' | 'record_only'
+  // Set on every create call that replays a snapshot verbatim (redo of a
+  // create, undo of a delete -- single or bulk): tells contacts.ts's POST
+  // route that a colliding membership_number is a gap-fill race (the slot
+  // this customer used to own may have been re-minted to someone else in
+  // the undo window), not a manual-entry typo, so it should mint a fresh
+  // number instead of the flat 400 a normal Add Customer submit still gets.
+  // See membershipNumber.ts's header for the full decision.
+  isUndoRestore?: boolean
 }
 
 interface CustomerMutationResult {
@@ -536,6 +544,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     userId: user?.id,
     userName: user?.name,
     __rename_cascade: 'carry',
+    // Every caller of buildCustomerPayload replays an original snapshot
+    // (undo/redo, not a fresh manual entry) -- see the type's own comment.
+    // Harmless on the update call sites (PUT ignores it); on the create
+    // call sites it lets a gap-fill race on the replayed membership_number
+    // fall back to a fresh mint instead of a dead-end 400.
+    isUndoRestore: true,
   }), [user?.id, user?.name])
 
   const runCustomerMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<CustomerMutationResult> => (
@@ -819,6 +833,10 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
+                // See CustomerPayload's isUndoRestore comment: this replays
+                // each deleted customer's own membership_number verbatim, so
+                // a gap-fill race on that freed slot must re-mint, not 400.
+                isUndoRestore: true,
               }), 'Restore deleted customers')
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
