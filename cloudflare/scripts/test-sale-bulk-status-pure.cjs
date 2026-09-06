@@ -33,10 +33,20 @@ function load(rel) {
 const sales = load('routes/sales.ts').default
 const history = load('routes/actionHistory.ts').default
 const helper = load('lib/saleBulkStatus.ts')
+// `migrate:false` builds the database as it stood the moment BEFORE 0120, so
+// the test below can append 0120 to a POPULATED tree and prove the migration
+// preserves live rows. That means every migration numbered under 120 and none
+// numbered at or above it: a prefix filter that drops only `0120_` builds a
+// tree that never existed anywhere -- 0121..0129 applied to a schema they were
+// written on top of. 0129_sale_actual_delivery_cost_amendment made that
+// concrete: it recreates 0120's three sale_revision_sale_amendments_* triggers
+// (it must -- its DROP TABLE sale_amendments_0115 takes them with it), so the
+// replay of 0120 at the bottom of this file hit "trigger ... already exists".
+// The fault was the fixture's, not 0129's.
 function fixture(migrate = true) {
   const sql=new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
-  for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || !f.startsWith('0120_'))).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
+  for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || Number(f.slice(0,4)) < 120)).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
   sql.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'),(2,'Warehouse'); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',100),(2,'B',100); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,50),(1,2,50),(2,1,100)")
   let failAt=null, beforeBatch=null, batches=0, reads=0
   const readRows=[]
@@ -73,6 +83,14 @@ async function replay(f,id,direction='undo',generation=0) {return f.call(history
 async function run() {
   // Append 0120 to a populated pre-0120 fixture as well as the full fresh chain.
   let legacy=fixture(false);seed(legacy)
+  // Positive control on the fixture itself. Everything below is worthless if
+  // `fixture(false)` quietly stops being a pre-0120 tree, and the way it goes
+  // wrong is silent: 0120 creates sale_write_revisions and its triggers, and a
+  // LATER migration that re-creates any of them (0129 does) makes the replay
+  // below either explode or, worse, pass against a database that was already
+  // post-0120. Assert the absence directly, so the filter has to be right.
+  assert.equal(legacy.sql.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='sale_write_revisions'").get().n,0,'fixture(false) is not a pre-0120 tree')
+  assert.equal(legacy.sql.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'sale_revision_%'").get().n,0,'fixture(false) already carries 0120 revision triggers')
   const domain=legacy.sql.prepare('SELECT * FROM sales ORDER BY id').all()
   legacy.sql.exec(fs.readFileSync(path.join(root,'migrations/0120_sale_bulk_status_actions.sql'),'utf8'))
   assert.deepEqual(legacy.sql.prepare('SELECT * FROM sales ORDER BY id').all(),domain)
