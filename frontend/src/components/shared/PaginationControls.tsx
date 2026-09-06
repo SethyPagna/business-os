@@ -292,43 +292,43 @@ export default function PaginationControls({
   }
 
   return (
-    <div className={`flex flex-col gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between ${className}`}>
+    <div className={`flex min-w-0 flex-col gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between ${className}`}>
       <div className="font-medium">
         {showingLabel} {start.toLocaleString()}-{end.toLocaleString()} {ofLabel} {total.toLocaleString()} {label}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="inline-flex items-center gap-2">
-          <span>{perPageLabel}</span>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <label className="inline-flex min-w-0 items-center gap-2">
+          <span className="hidden sm:inline">{perPageLabel}</span>
           <PageSizeSelect
             value={safePageSize}
             options={pageSizeOptions}
             onChange={(nextValue) => onPageSizeChange?.(nextValue)}
             ariaLabel={perPageLabel}
             allowCustom={editablePageSizeInput}
-            buttonClassName="h-9 min-w-[5.5rem] rounded-lg px-2.5 py-1 text-xs font-semibold shadow-none"
+            buttonClassName="h-9 min-w-[4.5rem] rounded-lg px-2.5 py-1 text-xs font-semibold shadow-none sm:min-w-[5.5rem]"
             menuClassName="min-w-[10rem]"
             optionClassName="text-xs"
           />
         </label>
-        <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+        <div className="inline-flex min-w-0 max-w-full items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
           <button
             type="button"
-            className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-9 shrink-0 items-center gap-0.5 bg-white px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 sm:px-3"
             disabled={safePage <= 1}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label={backLabel}
           >
             <ChevronLeft className="h-4 w-4" />
-            <span>{backLabel}</span>
+            <span className="hidden sm:inline">{backLabel}</span>
           </button>
           {editablePageInput ? (
-            <div className="inline-flex min-w-28 items-center justify-center gap-1 bg-slate-50 px-3 py-1.5 font-semibold dark:bg-slate-800">
+            <div className="inline-flex min-w-0 flex-1 items-center justify-center gap-1 bg-slate-50 px-2 py-1.5 font-semibold dark:bg-slate-800 sm:min-w-28 sm:px-3">
               <span className="sr-only">{pageLabel}</span>
               <input
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                className="h-5 w-12 border-0 bg-transparent p-0 text-center text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
+                className="h-5 w-10 min-w-0 border-0 bg-transparent p-0 text-center text-xs font-semibold text-slate-700 outline-none dark:text-slate-100 sm:w-12"
                 value={pageDraft}
                 onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
@@ -337,18 +337,18 @@ export default function PaginationControls({
               <span className="text-slate-500 dark:text-slate-300">/ {totalPages}</span>
             </div>
           ) : (
-            <span className="min-w-28 bg-slate-50 px-3 py-2 text-center font-semibold dark:bg-slate-800">
+            <span className="min-w-0 flex-1 truncate bg-slate-50 px-2 py-2 text-center font-semibold dark:bg-slate-800 sm:min-w-28 sm:px-3">
               {pageLabel} {safePage} {ofLabel} {totalPages}
             </span>
           )}
           <button
             type="button"
-            className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-9 shrink-0 items-center gap-0.5 bg-white px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 sm:px-3"
             disabled={safePage >= totalPages}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
           >
-            <span>{nextLabel}</span>
+            <span className="hidden sm:inline">{nextLabel}</span>
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>

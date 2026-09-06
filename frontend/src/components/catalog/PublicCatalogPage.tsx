@@ -669,6 +669,26 @@ export default function PublicCatalogPage() {
   const [reloadToken, setReloadToken] = useState(0)
   const publicPageRootRef = useRef<HTMLDivElement | null>(null)
 
+  // The standalone storefront is mounted outside the authenticated app shell,
+  // so it owns the document-level public marker itself. Keep the previous
+  // values and restore them on unmount so route transitions and StrictMode do
+  // not leave storefront-only styles on a later admin view.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlMarker = html.getAttribute('data-public-portal')
+    const previousBodyMarker = body.getAttribute('data-public-portal')
+    html.setAttribute('data-public-portal', 'true')
+    body.setAttribute('data-public-portal', 'true')
+    return () => {
+      if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')
+      else html.setAttribute('data-public-portal', previousHtmlMarker)
+      if (previousBodyMarker === null) body.removeAttribute('data-public-portal')
+      else body.setAttribute('data-public-portal', previousBodyMarker)
+    }
+  }, [])
+
   // Drives the scroll-to-top/bottom buttons in CatalogPreviewSurface. This
   // used to be hardcoded to `false` here, which silently disabled the
   // feature on the real public portal (it only ever worked in the admin's

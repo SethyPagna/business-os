@@ -338,6 +338,39 @@ runTest('public product discovery uses a sticky unified search, responsive brand
     'items-per-page should stay bounded to the storefront API presets')
 })
 
+runTest('public catalog owns document scrolling and restores route markers safely', () => {
+  assert.match(publicCatalogPageSource, /previousHtmlMarker[\s\S]*html\.setAttribute\('data-public-portal', 'true'\)/,
+    'the standalone public route must set the html marker itself')
+  assert.match(publicCatalogPageSource, /previousBodyMarker[\s\S]*body\.setAttribute\('data-public-portal', 'true'\)/,
+    'the standalone public route must set the body marker itself')
+  assert.match(publicCatalogPageSource, /if \(previousHtmlMarker === null\) html\.removeAttribute\('data-public-portal'\)/,
+    'html marker cleanup must restore an absent prior value')
+  assert.match(publicCatalogPageSource, /if \(previousBodyMarker === null\) body\.removeAttribute\('data-public-portal'\)/,
+    'body marker cleanup must restore an absent prior value')
+  assert.doesNotMatch(catalogPreviewSurfaceSource, /overflowY:\s*['"]auto['"]/,
+    'the preview surface must not become a second vertical scroll owner')
+  assert.doesNotMatch(catalogPageSource, /publicView \? \{[^}]*overflowY:\s*['"]auto['"]/,
+    'public CatalogPage wrappers must leave vertical scrolling to the document')
+})
+
+runTest('public catalog pagers keep the bounded selector before Back, indicator, and Next', () => {
+  const paginationSource = fs.readFileSync(new URL('../src/components/shared/PaginationControls.tsx', import.meta.url), 'utf8')
+  assert.equal((catalogProductsSectionSource.match(/<CatalogPaginationControls\b/g) || []).length, 2,
+    'the public catalog should keep both top and bottom pagers')
+  const regularStart = paginationSource.lastIndexOf('  return (')
+  assert.notEqual(regularStart, -1, 'shared regular pager markup should remain discoverable')
+  const regularPager = paginationSource.slice(regularStart)
+  const pageSizeIndex = regularPager.indexOf('<PageSizeSelect')
+  const backIndex = regularPager.indexOf('aria-label={backLabel}')
+  const pageIndicatorIndex = regularPager.indexOf('aria-label={pageLabel}')
+  const nextIndex = regularPager.indexOf('aria-label={nextLabel}')
+  assert.ok(pageSizeIndex >= 0 && pageSizeIndex < backIndex, 'page-size selector must precede Back')
+  assert.ok(backIndex < pageIndicatorIndex && pageIndicatorIndex < nextIndex, 'navigation order must be Back, page indicator, Next')
+  assert.match(paginationSource, /options=\{pageSizeOptions\}/)
+  assert.match(fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8'), /editablePageSizeInput=\{false\}/,
+    'public page size choices must stay bounded to presets')
+})
+
 runTest('public product details keep every prepared section visible when its data is empty', () => {
   for (const section of ['features_benefits', 'who_for', 'ingredients', 'caution']) {
     assert.match(productDetailFlyoutSource, new RegExp(`sectionKey="${section}"`), `${section} should stay visibly wired`)
