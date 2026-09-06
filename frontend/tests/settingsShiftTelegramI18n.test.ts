@@ -82,6 +82,8 @@ const telegramHardcodedLiterals = [
   'Save the chat ID and switches first.',
   '<span className="font-medium">Owner / manager commands:</span>',
   '</code>, and <code>/help</code>',
+  "? 'Telegram test message sent and commands connected.' : \"Today's Telegram summary was sent.\"",
+  ": 'Telegram action failed'",
 ]
 for (const literal of telegramHardcodedLiterals) {
   assert.ok(!src.includes(literal), `Settings.tsx still hardcodes Telegram-automation text: ${JSON.stringify(literal)}`)
@@ -113,6 +115,9 @@ const telegramKeys = [
   'telegram_help_commands_desc',
   'telegram_help_commands_and',
   'telegram_help_commands_note',
+  'telegram_test_sent',
+  'telegram_summary_sent',
+  'telegram_action_failed',
 ]
 
 for (const key of [...shiftKeys, ...telegramKeys]) {
