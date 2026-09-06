@@ -23,10 +23,15 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
   RAIL_ALL_KEY,
+  RAIL_OPEN_SCRUB_THRESHOLD_PX,
   nearestRailKey,
   nextRailFocusKey,
   railFocusKey,
+  railGestureScrubs,
   railIndexAtOffset,
+  railPointerDownAction,
+  railRendersThroughPortal,
+  railTouchActionClass,
   resolveBrandJump,
   sortRailKeys,
 } from '../src/utils/alphaRail.ts'
@@ -144,6 +149,64 @@ runTest('the hit-test follows the LETTER COLUMN, not the pill, when the column i
 })
 
 // ---------------------------------------------------------------------------
+// The collapsed TAP: opening the rail is not picking a letter
+// ---------------------------------------------------------------------------
+
+runTest('a touch press on a COLLAPSED rail opens it and picks nothing', () => {
+  // The defect this pins, end to end: collapsed, the rail is a column of
+  // ~2px dashes (h-0.5) inside a 60vh cap -- about 4.9px per entry for a
+  // 27-letter facet. Touch has no hover, so the tap that a shopper means as
+  // "show me the letters" WAS the tap that hit-tested those dashes, and the
+  // key it landed on went straight out through onJump ->
+  // updateInitialFilter(resolveBrandJump(...)): an essentially random brand
+  // filter applied by the gesture that was only supposed to open the index.
+  //
+  // Discriminating on purpose: the old handlePointerDown called
+  // jumpTo(keyAtPoint(...)) unconditionally, i.e. 'jump' for every one of
+  // these four cases.
+  assert.equal(railPointerDownAction(false, 'touch'), 'open', 'the first touch on a collapsed rail must only open it')
+  assert.equal(railPointerDownAction(false, 'pen'), 'open', 'a pen has no hover either')
+  assert.equal(railPointerDownAction(true, 'touch'), 'jump', 'once the letters are laid out at 20px, a tap picks one')
+  assert.equal(railPointerDownAction(true, 'pen'), 'jump')
+})
+
+runTest('a mouse keeps press-to-jump, because it opened the rail before pressing (or never opens on hover at all)', () => {
+  assert.equal(railPointerDownAction(false, 'mouse'), 'jump', 'taking this away costs the admin rails a click per jump')
+  assert.equal(railPointerDownAction(true, 'mouse'), 'jump')
+  assert.equal(railPointerDownAction(false, undefined), 'jump', 'a missing pointerType is the mouse default, as everywhere else in this component')
+})
+
+runTest('the press that only opened the rail does not turn into a scrub on tap jitter', () => {
+  // A finger resting on the glass emits pointermove events of a pixel or
+  // two before pointerup. Without a floor, that jitter re-creates the exact
+  // defect above through the move handler instead of the down handler.
+  assert.equal(railGestureScrubs(true, 400, 400), false, 'a still finger is not a scrub')
+  assert.equal(railGestureScrubs(true, 400, 403), false, `${3}px of jitter is not a scrub`)
+  assert.equal(
+    railGestureScrubs(true, 400, 400 + RAIL_OPEN_SCRUB_THRESHOLD_PX),
+    true,
+    'a deliberate drag off the opening press still scrubs the (now laid-out) letters',
+  )
+  assert.equal(railGestureScrubs(true, 400, 400 - RAIL_OPEN_SCRUB_THRESHOLD_PX), true, 'upwards counts the same')
+  assert.equal(railGestureScrubs(false, 400, 400), true, 'a gesture that already jumped keeps scrubbing with no floor')
+  assert.equal(railGestureScrubs(true, Number.NaN, 400), false, 'an unmeasured start must not scrub by accident')
+})
+
+// ---------------------------------------------------------------------------
+// The collapsed rail must not eat the page's scroll
+// ---------------------------------------------------------------------------
+
+runTest('touch suppression applies only while the rail is expanded', () => {
+  // `touch-none` in EVERY state made the fixed ~20px strip over 60vh of the
+  // right screen edge -- exactly where a thumb lands on a phone -- a dead
+  // scroll zone, on the surface whose reported defect was "the page cannot
+  // be scrolled".
+  assert.equal(railTouchActionClass(true), 'touch-none', 'a scrub must not also pan the page')
+  assert.notEqual(railTouchActionClass(false), 'touch-none', 'the collapsed rail must let the page scroll straight through it')
+  assert.match(railTouchActionClass(false), /^touch-pan-y$/, 'vertical panning is what the page needs; the rail keeps the other axes')
+})
+
+// ---------------------------------------------------------------------------
 // Keyboard reachability (the grid it replaced was plain <button>s, so the
 // rail must not be a keyboard dead end)
 // ---------------------------------------------------------------------------
@@ -170,8 +233,42 @@ runTest('arrow keys walk the rail and clamp at both ends instead of wrapping', (
 // (and their inner scrollers) are gone
 // ---------------------------------------------------------------------------
 
+runTest('the component wires the collapsed-tap and touch-action rules to the tested kernel', () => {
+  assert.match(
+    rail,
+    /const action = railPointerDownAction\(expanded, pointerType\)/,
+    'the first press of a gesture must ask the kernel what it is allowed to do',
+  )
+  const down = /const handlePointerDown = useCallback\(\(event[\s\S]*?\n  \}, \[/.exec(rail)
+  assert.ok(down, 'handlePointerDown must stay one readable callback')
+  assert.match(
+    down![0],
+    /if \(action === 'open'\) \{\s*setStickyOpen\(true\)\s*return\s*\}/,
+    'the open action must RETURN before jumpTo -- opening the rail is not picking a letter',
+  )
+  assert.ok(
+    down![0].indexOf("if (action === 'open')") < down![0].indexOf('jumpTo(keyAtPoint('),
+    'the guard has to come before the jump, not after it',
+  )
+  assert.match(rail, /railGestureScrubs\(gesture\.openedOnly, gesture\.startY, event\.clientY\)/, 'tap jitter must not scrub the rail it just opened')
+  assert.match(rail, /\$\{railTouchActionClass\(expanded\)\}/, 'the container must take its touch-action from the kernel')
+  // Letting the page scroll through the collapsed rail means a swipe that
+  // starts on the right edge now reaches the rail's own pointerdown first.
+  // Opening on that and never closing would leave the index hanging over the
+  // page after every such swipe.
+  assert.match(rail, /onPointerCancel=\{handlePointerCancel\}/, 'a gesture the browser turns into a page scroll needs its own ending')
+  assert.match(
+    rail,
+    /const openedOnly = gestureRef\.current\?\.openedOnly === true[\s\S]{0,120}if \(openedOnly\) closeRail\(\)/,
+    'a cancelled press that had only opened the rail must close it again',
+  )
+  const container = /className=\{`flex select-none flex-col[\s\S]*?\$\{className\}`\}/.exec(rail)
+  assert.ok(container, "the rail container's className must stay one template literal")
+  assert.doesNotMatch(container![0], /(?:^|[\s`])touch-none(?:[\s`]|$)/, 'a hardcoded touch-none is the dead scroll zone; it must be conditional')
+})
+
 runTest('the shared rail offers a screen-edge variant without moving the admin one', () => {
-  assert.match(rail, /edge\?: 'sidebar' \| 'screen'/, 'the storefront edge position must be an explicit opt-in union')
+  assert.match(rail, /edge\?: 'sidebar' \| 'screen' \| 'inline'/, 'the storefront and preview edge positions must be an explicit opt-in union')
   assert.match(rail, /edge = 'sidebar'/, "the default must stay 'sidebar' so Products and POS keep sitting beside the admin sidebar")
   assert.match(rail, /md:left-\[228px\] md:right-auto/, 'the sidebar variant must keep its 220px offset')
   assert.match(rail, /env\(safe-area-inset-right\)/, 'the screen-edge variant must clear a notched right edge')
@@ -207,9 +304,25 @@ runTest('collapsed, the rail reads as DASHES -- not the round dots of the admin 
   assert.doesNotMatch(container![1], /(?:^|\s)gap-0(?:\s|$)/, 'zero-gap dashes fuse into one solid bar -- the dashes need air between them')
 })
 
-runTest('the rail renders through a portal, like every other float', () => {
+runTest('the STOREFRONT rail renders through a portal, like every other float', () => {
   assert.match(rail, /createPortal\(railNode, document\.body\)/, 'a viewport-fixed float must not depend on its ancestors not clipping it')
   assert.match(rail, /typeof document === 'undefined'/, 'the portal needs a no-DOM guard')
+  assert.match(rail, /if \(!railRendersThroughPortal\(edge\)\) return railNode/, 'and the escape hatch must be scoped to the mount that needs it')
+})
+
+runTest('the ADMIN rails stay in their own subtree, because a portal escapes display:none too', () => {
+  // POS.tsx:2989 wraps the products pane (and the rail inside it) in
+  // `${mobileView === 'cart' ? 'hidden md:flex' : 'flex'}`. That `display:
+  // none` is what takes the fixed rail down with the pane when the cashier
+  // switches to the mobile Cart tab -- portalled to <body> the rail escaped
+  // it and floated on over the cart.
+  //
+  // Discriminating on purpose: the previous code portalled unconditionally,
+  // i.e. answered true for all three of these.
+  assert.equal(railRendersThroughPortal('screen'), true, 'the storefront shell is the one with the iOS fixed-descendant problem')
+  assert.equal(railRendersThroughPortal('sidebar'), false, 'admin Products/POS ancestors are plain overflow containers -- no escape needed, and escaping costs them display')
+  assert.equal(railRendersThroughPortal('inline'), false, 'the editor preview rail must stay inside the preview panel')
+  assert.equal(railRendersThroughPortal(undefined), false, 'the default mount is the admin one')
 })
 
 runTest('the rail is keyboard reachable: real buttons, labelled, with a roving tab stop', () => {
@@ -226,9 +339,20 @@ runTest('hover opens the rail for mouse users and touch keeps press-to-open', ()
   assert.match(rail, /document\.addEventListener\('pointerdown'/, 'clicking anywhere else must still close it')
 })
 
+runTest("hover-open is per-mount, and the admin's mid-content rail is not opted in", () => {
+  // The sidebar variant is pinned at x=228px, immediately right of the admin
+  // sidebar and INSIDE the content area: the cursor crosses it on the way to
+  // the list many times a minute, and Products/POS have always opened it by
+  // pressing. The storefront/preview rails sit at the outer right edge of
+  // their own surface, where a crossing is a deliberate approach.
+  assert.match(rail, /openOnHover\?: boolean/, 'hover-open must be an explicit per-mount capability')
+  assert.match(rail, /const hoverOpens = openOnHover \?\? edge !== 'sidebar'/, 'the admin rails must not opt in by default')
+  assert.match(rail, /if \(!hoverOpens\) return/, 'the enter handler has to honour it')
+})
+
 runTest('the storefront mounts the rail at the screen edge and passes the brand vocabulary', () => {
   assert.match(catalogProducts, /<AlphaIndexRail\b/, 'the storefront must use the shared rail, not a third copy of a letter list')
-  assert.match(catalogProducts, /edge="screen"/, 'the storefront rail rides the screen edge at every breakpoint')
+  assert.match(catalogProducts, /edge=\{publicView \? 'screen' : 'inline'\}/, 'the storefront rail rides the screen edge; the preview gets the in-flow variant')
   assert.match(catalogProducts, /copy\('jumpToBrand', 'Jump to brand'\)/, "the rail's label is the storefront's own translated string")
   assert.match(catalogProducts, /resolveBrandJump\(/, 'the jump mapping must come from the tested kernel, not a re-inlined ternary')
 })
@@ -239,6 +363,33 @@ runTest('both old letter lists are gone, and with them the inner scrollers over 
   assert.doesNotMatch(catalogProducts, /`rail-\$\{item\.key\}`/, 'the desktop letter buttons must be gone')
   assert.doesNotMatch(catalogProducts, /`row-\$\{item\.key\}`/, 'the lg:hidden letter ROW must go with them')
   assert.doesNotMatch(catalogProducts, /h-8 min-w-9/, 'the 36px-wide chips were the horizontal overflow at 375')
+})
+
+runTest('the admin portal EDITOR PREVIEW gets a brand index too, not a carve-out', () => {
+  // CatalogPage.tsx renders this same section with publicView={false} inside
+  // its preview panel. Both letter lists were deleted for everyone, so gating
+  // the replacement on `publicView && ...` left the preview with no brand
+  // index at all -- an undisclosed sibling-surface carve-out.
+  assert.doesNotMatch(
+    catalogProducts,
+    /\{publicView && initialOptions\.length > 1 \? \(/,
+    'the rail must not be gated on publicView -- that is what emptied the editor preview',
+  )
+  assert.match(catalogProducts, /\{initialOptions\.length > 1 \? \(/, 'the only gate left is "is there more than one initial to index"')
+  assert.match(
+    catalogProducts,
+    /className="relative lg:grid/,
+    'the in-flow rail needs a positioned ancestor to stick inside',
+  )
+  // The preview variant must not be viewport-fixed and must not portal out of
+  // the panel -- either one puts it over the admin's own chrome.
+  assert.match(rail, /edge === 'inline'\s*\?\s*'relative max-h-\[60vh\]'/, "the inline variant must not be `fixed`")
+  const inlineBranch = /if \(edge === 'inline'\) \{[\s\S]*?\n  \}/.exec(rail)
+  assert.ok(inlineBranch, 'the inline variant needs its own render branch')
+  assert.doesNotMatch(inlineBranch![0], /createPortal/, 'the preview rail must stay inside the preview panel')
+  assert.match(inlineBranch![0], /sticky top-24/, 'it follows the preview scroll instead of scrolling away with the grid')
+  assert.match(inlineBranch![0], /pointer-events-none absolute inset-y-0 right-0/, 'its track must not swallow clicks on the product cards under it')
+  assert.match(inlineBranch![0], /pointer-events-auto/, 'the rail itself still has to be operable')
 })
 
 runTest('the admin callers still get the sidebar rail (no edge prop, no behaviour change)', () => {

@@ -21,6 +21,81 @@ export const RAIL_ALL_KEY = 'all'
 
 export type RailFocusMove = 'up' | 'down' | 'first' | 'last'
 
+/** What the FIRST pointerdown of a gesture is allowed to do. */
+export type RailPointerAction = 'open' | 'jump'
+
+/** The collapsed rail is a column of ~2px dashes: for a 27-key facet inside a
+ * 60vh cap that is under 5px per entry. A finger cannot aim at that, and it
+ * has no hover to open the rail first -- so the tap that a shopper means as
+ * "show me the letters" used to hit-test the dashes and apply an essentially
+ * random brand filter on the way in.
+ *
+ * So a touch/pen press on a COLLAPSED rail opens it and nothing else; the
+ * letters it lays out are then 20px tall and the next press (or a deliberate
+ * scrub, see railGestureScrubs) hits what the finger can actually see.
+ *
+ * A mouse is exempt in both directions: it opens the rail on hover before any
+ * press where hover-open is enabled, and where it is not (the admin rails,
+ * which sit mid-content beside the sidebar and would otherwise open every
+ * time the cursor crossed them) a click has always both opened and jumped.
+ * Taking that away would cost those two pages a click per jump. */
+export function railPointerDownAction(expanded: boolean, pointerType: string | null | undefined): RailPointerAction {
+  if (expanded) return 'jump'
+  // A blank pointerType falls back to 'mouse', the same default the component
+  // uses everywhere it records one -- an unknown device must not silently
+  // inherit the touch rule.
+  return (pointerType || 'mouse') === 'mouse' ? 'jump' : 'open'
+}
+
+/** How far the finger must travel before a press that only OPENED the rail
+ * turns into a scrub. A tap emits jitter of a pixel or two between pointerdown
+ * and pointerup; without a floor, that jitter would emit a jump from the very
+ * gesture that was supposed to open the rail and nothing else. */
+export const RAIL_OPEN_SCRUB_THRESHOLD_PX = 8
+
+/** Whether a pointermove inside the current gesture may emit a jump.
+ * `openedOnly` is true while the gesture has so far only opened the rail. */
+export function railGestureScrubs(openedOnly: boolean, startY: number, clientY: number): boolean {
+  if (!openedOnly) return true
+  const start = Number(startY)
+  const current = Number(clientY)
+  if (!Number.isFinite(start) || !Number.isFinite(current)) return false
+  return Math.abs(current - start) >= RAIL_OPEN_SCRUB_THRESHOLD_PX
+}
+
+/** The rail's `touch-action`.
+ *
+ * The rail is a ~20px-wide strip pinned over 60-70vh of the right screen
+ * edge -- on the storefront, exactly where a thumb lands. `touch-none` in
+ * every state made that strip a dead scroll zone: the page could not be
+ * scrolled from it at all, which is the same complaint (on a smaller patch of
+ * screen) that this whole rail was built to answer.
+ *
+ * Suppression is only needed while the rail is EXPANDED, i.e. while a scrub
+ * is actually possible; collapsed it must let the page pan straight through
+ * it. `pan-y` rather than `auto` so a horizontal swipe over the rail still
+ * belongs to the rail rather than starting a carousel behind it. */
+export function railTouchActionClass(expanded: boolean): string {
+  return expanded ? 'touch-none' : 'touch-pan-y'
+}
+
+/** Whether the rail escapes its own subtree into <body>.
+ *
+ * ONLY the storefront variant does, and for one storefront-specific reason:
+ * it is mounted inside a shell carrying `overflow-y: auto` +
+ * `-webkit-overflow-scrolling: touch`, the combination iOS Safari has
+ * historically clipped and mis-positioned fixed descendants inside.
+ *
+ * The admin rails must stay in the tree, because a portal does not only move
+ * a node -- it takes it out of every ancestor's `display`. POS's products pane
+ * is `hidden md:flex` while the cashier is on the mobile Cart tab, and that
+ * `display: none` is what used to take the rail down with it; portalled, the
+ * rail floated on over the cart. Their ancestors are plain overflow
+ * containers with no transform, so they never needed the escape hatch. */
+export function railRendersThroughPortal(edge: string | null | undefined): boolean {
+  return edge === 'screen'
+}
+
 /** The keys the rail actually renders: de-duplicated, ordered the way every
  * other initials surface in the app orders them, with `#` pinned last. A
  * non-array or junk payload degrades to an empty rail rather than throwing --

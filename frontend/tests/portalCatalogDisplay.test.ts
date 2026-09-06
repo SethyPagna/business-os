@@ -331,9 +331,12 @@ runTest('public product discovery uses a sticky unified search, responsive brand
   // in the desktop aside and a horizontally scrolling chip row below `lg`.
   // Both were inner scroll containers over the product list. They are now one
   // screen-edge rail that serves every breakpoint (see alphaIndexRail.test.ts
-  // and storefrontScrollRoot.test.ts).
-  assert.match(catalogProductsSectionSource, /<AlphaIndexRail\b[\s\S]*edge="screen"/,
-    'every breakpoint gets the same vertical brand rail, pinned to the screen edge')
+  // and storefrontScrollRoot.test.ts) -- and BOTH mounts of this section keep
+  // an index: the storefront pins it to the screen edge, the admin portal
+  // editor's preview takes the in-flow variant so it cannot float out of the
+  // preview panel.
+  assert.match(catalogProductsSectionSource, /<AlphaIndexRail\b[\s\S]*edge=\{publicView \? 'screen' : 'inline'\}/,
+    'every breakpoint gets the same vertical brand rail, and the editor preview gets one too')
   assert.doesNotMatch(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\]/,
     'the desktop letter grid and its inner scroller are retired')
   assert.match(paginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,

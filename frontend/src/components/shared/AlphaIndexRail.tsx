@@ -6,7 +6,11 @@ import {
   nearestRailKey,
   nextRailFocusKey,
   railFocusKey,
+  railGestureScrubs,
   railIndexAtOffset,
+  railPointerDownAction,
+  railRendersThroughPortal,
+  railTouchActionClass,
   sortRailKeys,
 } from '../../utils/alphaRail.ts'
 import type { RailFocusMove } from '../../utils/alphaRail.ts'
@@ -31,8 +35,23 @@ export interface AlphaIndexRailProps {
    *  - 'sidebar' (default): just right of the admin's fixed 220px sidebar on
    *    md+, right screen edge below it. Products and POS rely on this.
    *  - 'screen': the right screen edge at EVERY breakpoint, clear of a
-   *    notch. Used by the public storefront, which has no sidebar. */
-  edge?: 'sidebar' | 'screen'
+   *    notch. Used by the public storefront, which has no sidebar.
+   *  - 'inline': NOT viewport-fixed and NOT portalled -- it sticks to the
+   *    middle of the nearest scrollport inside whatever container the caller
+   *    positions it in. This is what lets the admin's portal EDITOR PREVIEW
+   *    have the same brand index as the storefront it previews: a `fixed`
+   *    rail there would float out of the preview panel and sit over the
+   *    admin's own chrome. */
+  edge?: 'sidebar' | 'screen' | 'inline'
+  /** Mouse hover opens the rail.
+   *
+   * Defaults ON for the storefront-shaped variants ('screen', 'inline'),
+   * which live at the outer right edge of their own surface, and OFF for
+   * 'sidebar': that one is pinned at x=228px, immediately right of the admin
+   * sidebar and INSIDE the content area, so the cursor crosses it on the way
+   * to the list several times a minute. Opening on every crossing is noise,
+   * and Products/POS have always opened it by pressing. */
+  openOnHover?: boolean
   /** Controlled highlight. Pass the caller's own selection (e.g. the active
    * brand-initial filter) so the chosen key stays marked after the rail
    * collapses. Omit to let the rail track its own last jump. */
@@ -70,6 +89,7 @@ export default function AlphaIndexRail({
   label,
   className = '',
   edge = 'sidebar',
+  openOnHover,
   activeKey,
   resetOption = null,
 }: AlphaIndexRailProps) {
@@ -89,6 +109,10 @@ export default function AlphaIndexRail({
   // every gesture, so re-picking the same key later always emits.
   const lastEmittedRef = useRef<string | null>(null)
   const lastPointerTypeRef = useRef<string>('mouse')
+  // The gesture in progress. `openedOnly` marks the press that did nothing but
+  // OPEN a collapsed rail: until the finger has actually travelled, that
+  // gesture must not emit a jump (see railGestureScrubs).
+  const gestureRef = useRef<{ openedOnly: boolean; startY: number } | null>(null)
 
   const items = useMemo(() => sortRailKeys(letters), [letters])
   // The reset entry takes part in hit-testing and keyboard movement, but
@@ -99,6 +123,7 @@ export default function AlphaIndexRail({
   )
 
   const expanded = dragging || stickyOpen
+  const hoverOpens = openOnHover ?? edge !== 'sidebar'
   const activeLetter = activeKey !== undefined ? activeKey : internalActive
   const tabStopKey = railFocusKey(navKeys, focusKey ?? activeLetter)
 
@@ -141,16 +166,33 @@ export default function AlphaIndexRail({
     if (activeKey === undefined) setInternalActive(null)
   }, [activeKey])
 
+  // The FIRST press of a gesture either opens a collapsed rail or jumps -- see
+  // railPointerDownAction. On touch it can never do both: the collapsed
+  // entries are ~2px dashes, so hit-testing the press that was meant to open
+  // the rail produced an essentially random key (on the storefront, a random
+  // brand filter).
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    lastPointerTypeRef.current = event.pointerType || 'mouse'
+    const pointerType = event.pointerType || 'mouse'
+    lastPointerTypeRef.current = pointerType
     lastEmittedRef.current = null
+    const action = railPointerDownAction(expanded, pointerType)
+    gestureRef.current = { openedOnly: action === 'open', startY: event.clientY }
     setDragging(true)
-    jumpTo(keyAtPoint(event.clientY))
     event.currentTarget.setPointerCapture?.(event.pointerId)
-  }, [jumpTo, keyAtPoint])
+    if (action === 'open') {
+      setStickyOpen(true)
+      return
+    }
+    jumpTo(keyAtPoint(event.clientY))
+  }, [expanded, jumpTo, keyAtPoint])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragging) return
+    const gesture = gestureRef.current
+    if (gesture) {
+      if (!railGestureScrubs(gesture.openedOnly, gesture.startY, event.clientY)) return
+      gesture.openedOnly = false
+    }
     jumpTo(keyAtPoint(event.clientY))
   }, [dragging, jumpTo, keyAtPoint])
 
@@ -159,8 +201,20 @@ export default function AlphaIndexRail({
   const releaseDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.currentTarget.releasePointerCapture?.(event.pointerId)
     lastEmittedRef.current = null
+    gestureRef.current = null
     setDragging(false)
   }, [])
+
+  // pointercancel on a press that had only OPENED the rail means the browser
+  // took the gesture for a page scroll -- which is exactly what the collapsed
+  // rail now permits (touch-pan-y). That was never a tap on the index, so
+  // undo the open rather than leaving the rail hanging over the page after
+  // every swipe that happens to start on the right edge.
+  const handlePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const openedOnly = gestureRef.current?.openedOnly === true
+    releaseDrag(event)
+    if (openedOnly) closeRail()
+  }, [closeRail, releaseDrag])
 
   // Hover-to-open, mouse only. A tap emits a pointerenter with pointerType
   // 'touch' immediately before pointerdown; opening on that would make the
@@ -168,9 +222,10 @@ export default function AlphaIndexRail({
   // "leave" to close it again.
   const handlePointerEnter = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     lastPointerTypeRef.current = event.pointerType || 'mouse'
+    if (!hoverOpens) return
     if (event.pointerType !== 'mouse') return
     setStickyOpen(true)
-  }, [])
+  }, [hoverOpens])
 
   // "Moving elsewhere" -- the mouse actually leaving the rail's own hit area.
   // Touch/pen keep the rail open (they have no hover state to lose) and close
@@ -242,17 +297,23 @@ export default function AlphaIndexRail({
   const railLabel = label || 'Jump to letter'
   // 'screen' clears a notched right edge at every breakpoint and keeps a
   // shorter column so the rail cannot reach the storefront's bottom-right
-  // list FAB (z-50); 'sidebar' keeps the admin's 220px offset on md+.
-  const edgeClass = edge === 'screen'
-    ? 'right-[calc(0.5rem+env(safe-area-inset-right))] max-h-[60vh]'
-    : 'right-2 max-h-[70vh] md:left-[228px] md:right-auto'
+  // list FAB (z-50); 'sidebar' keeps the admin's 220px offset on md+;
+  // 'inline' owns no position of its own -- the sticky track below places it.
+  const edgeClass = edge === 'inline'
+    ? 'relative max-h-[60vh]'
+    : edge === 'screen'
+      ? 'fixed top-1/2 z-30 -translate-y-1/2 right-[calc(0.5rem+env(safe-area-inset-right))] max-h-[60vh]'
+      : 'fixed top-1/2 z-30 -translate-y-1/2 right-2 max-h-[70vh] md:left-[228px] md:right-auto'
 
-  // Rendered through a portal, like every other float in the app. The rail is
-  // viewport-`fixed`, and on the storefront it is mounted inside a shell that
-  // carries `overflow-y: auto` + `-webkit-overflow-scrolling: touch` -- the
-  // combination iOS Safari has historically clipped and mis-positioned fixed
-  // descendants inside. Going straight to <body> removes the whole question,
-  // and keeps the rail out of any future ancestor's stacking context.
+  // The STOREFRONT rail is rendered through a portal, like every other float
+  // in the app: it is viewport-`fixed` inside a shell that carries
+  // `overflow-y: auto` + `-webkit-overflow-scrolling: touch`, the combination
+  // iOS Safari has historically clipped and mis-positioned fixed descendants
+  // inside. Going straight to <body> removes the whole question.
+  //
+  // The admin rails do NOT portal -- see railRendersThroughPortal. A portal
+  // takes a node out of every ancestor's `display`, and POS's products pane is
+  // `hidden md:flex` while the cashier is on the mobile Cart tab.
   const railNode = (
     <div
       ref={railRef}
@@ -262,7 +323,7 @@ export default function AlphaIndexRail({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={releaseDrag}
-      onPointerCancel={releaseDrag}
+      onPointerCancel={handlePointerCancel}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
       onKeyDown={handleKeyDown}
@@ -272,7 +333,12 @@ export default function AlphaIndexRail({
       // out of reach of any scroll). `overscroll-contain` keeps a wheel that
       // runs off the end of the rail from chaining into the page behind it,
       // and the scrollbar is hidden because a 20px pill has no room for one.
-      className={`fixed top-1/2 z-30 flex -translate-y-1/2 touch-none select-none flex-col items-center justify-start overflow-y-auto overscroll-contain rounded-full border border-gray-200 bg-white/90 shadow-md backdrop-blur-sm transition-[gap,padding] duration-150 [scrollbar-width:none] dark:border-slate-700 dark:bg-slate-900/90 [&::-webkit-scrollbar]:hidden ${edgeClass} ${
+      // `touch-none` ONLY while expanded (railTouchActionClass). The rail is a
+      // ~20px strip over 60vh of the right screen edge -- on the storefront,
+      // exactly where a thumb lands -- so suppressing touch in the collapsed
+      // state turned it into a dead scroll zone on the very surface whose
+      // reported defect was "the page cannot be scrolled".
+      className={`flex select-none flex-col items-center justify-start overflow-y-auto overscroll-contain rounded-full border border-gray-200 bg-white/90 shadow-md backdrop-blur-sm transition-[gap,padding] duration-150 [scrollbar-width:none] dark:border-slate-700 dark:bg-slate-900/90 [&::-webkit-scrollbar]:hidden ${railTouchActionClass(expanded)} ${edgeClass} ${
         expanded ? 'gap-[1px] px-1 py-2' : 'gap-[3px] px-1 py-1.5'
       } ${className}`}
     >
@@ -321,6 +387,29 @@ export default function AlphaIndexRail({
       })}
     </div>
   )
+
+  // 'inline' is the one variant that must NOT leave its container: it is the
+  // admin portal editor's preview of this same index, and the preview is a
+  // panel inside the admin page, not the viewport. The track spans the height
+  // of the positioned ancestor the caller provides and the rail sticks to the
+  // middle of whatever scrollport that panel lives in, so it stays beside the
+  // products it indexes instead of over the admin's chrome. The track itself
+  // is pointer-transparent, so the product cards under it stay clickable.
+  if (edge === 'inline') {
+    return (
+      <div className="pointer-events-none absolute inset-y-0 right-0 z-30 flex w-9 justify-center">
+        {/* A percentage sticky offset would resolve against this full-height
+            track, not the scrollport, so the rail is pinned a fixed distance
+            below the top of whatever scrolls -- clear of the preview's own
+            sticky search row. */}
+        <div className="pointer-events-auto sticky top-24">
+          {railNode}
+        </div>
+      </div>
+    )
+  }
+
+  if (!railRendersThroughPortal(edge)) return railNode
 
   return typeof document === 'undefined' ? railNode : createPortal(railNode, document.body)
 }

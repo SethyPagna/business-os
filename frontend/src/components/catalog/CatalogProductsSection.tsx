@@ -481,7 +481,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       {/* Desktop (lg+): an always-visible left rail replaces the floating
           Filters layer used below `lg`; no popover is needed when there is
           room for a permanent sidebar. */}
-      <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
+      {/* `relative` so the editor preview's in-flow brand rail (edge="inline",
+          mounted at the end of this grid) has a positioned ancestor to stick
+          inside. The public storefront's rail is `fixed` and portalled, so
+          this changes nothing for it. */}
+      <div className="relative lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
         <aside className="hidden min-w-0 lg:sticky lg:top-20 lg:block lg:min-w-0 lg:self-start">
           <div className="min-w-0 space-y-2 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
             <div className="flex items-center justify-between gap-2 px-1 pb-1">
@@ -936,21 +940,24 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       ) : null}
         </div>
-      </div>
 
-      {/* One vertical brand index for every breakpoint, pinned to the right
-          screen edge: collapsed it is a column of dashes, hover (mouse) or
-          touch opens it, a letter selects that brand group and the same
-          letter again clears back to All. It replaces BOTH letter lists this
-          section used to carry, and being `fixed` it adds nothing to the page
-          flow -- no inner scroller over the grid, no width at 320/375.
+      {/* One vertical brand index: collapsed it is a column of dashes, hover
+          (mouse) or touch opens it, a letter selects that brand group and the
+          same letter again clears back to All. It replaces BOTH letter lists
+          this section used to carry, and it adds nothing to the page flow --
+          no inner scroller over the grid, no width at 320/375.
 
-          publicView only: the admin portal editor renders this same section
-          inside a `.page-scroll` preview panel, where a viewport-fixed rail
-          would float outside the preview and over the admin chrome. */}
-      {publicView && initialOptions.length > 1 ? (
+          BOTH mounts get one. The storefront's is viewport-`fixed` at the
+          screen edge and portalled to <body>; the admin portal EDITOR PREVIEW
+          renders this same section inside a `.page-scroll` panel, where a
+          fixed rail would float out of the preview and over the admin's own
+          chrome -- so it takes the `inline` variant, which sticks inside this
+          (relatively positioned) grid instead. Gating the preview out
+          entirely, as an earlier pass did, left the editor with no brand
+          index at all after both letter lists were deleted. */}
+      {initialOptions.length > 1 ? (
         <AlphaIndexRail
-          edge="screen"
+          edge={publicView ? 'screen' : 'inline'}
           letters={initialOptions.map((item) => item.key)}
           activeKey={effectiveInitialFilter === RAIL_ALL_KEY ? null : effectiveInitialFilter}
           resetOption={{ key: RAIL_ALL_KEY, ariaLabel: copy('all', 'All') }}
@@ -958,6 +965,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           onJump={(key) => updateInitialFilter?.(resolveBrandJump(effectiveInitialFilter, key))}
         />
       ) : null}
+      </div>
     </SectionShell>
   )
 }
