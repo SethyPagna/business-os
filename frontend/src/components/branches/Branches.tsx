@@ -1316,7 +1316,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                 onChange={toggleSelectAll}
               />
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {`${selectedCount} selected`}
+                {`${selectedCount} ${t('selected') || 'Selected'}`}
               </span>
             </div>
           ) : null}

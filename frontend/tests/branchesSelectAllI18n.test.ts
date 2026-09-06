@@ -24,19 +24,23 @@ await (async function bothPacksCarryTheKeyThisFileDependsOn() {
   console.log('PASS both language packs carry select_all')
 })()
 
-// EXPECTED RED until the Branches.tsx owner lands the fix -- this lane's
-// region for Branches.tsx is line 1307 only (the select-all checkbox's
-// aria-label, fixed above). Line 1319, two lines below in the same
-// select-mode row, hardcodes the sibling "{selectedCount} selected" count
-// chip in English -- the same defect this lane fixed on AuditLog.tsx's own
-// chip (auditLogBulkToolbarI18n.test.ts). Left unfixed here deliberately
-// (out of region); pinned so the defect cannot silently regress out of view
-// and so the eventual one-line fix --
-//   {`${selectedCount} ${t('selected') || 'Selected'}`}
-// -- (the 'selected' key already exists in both packs) turns this green the
-// moment the Branches.tsx owner lands it.
-await (async function branchesSelectedCountChipStillHardcodedNotDoneThisLane() {
-  assert.doesNotMatch(source, /\$\{selectedCount\} selected/,
-    'KNOWN NOT-DONE (out of region for this lane): Branches.tsx:1319 selection-count chip must not hardcode "selected" in English -- assign to the Branches.tsx owner')
+// Round-2 coordinator authorization: Branches.tsx:1319, two lines below the
+// select-all checkbox in the same select-mode row, hardcoded the sibling
+// "{selectedCount} selected" count chip in English -- the same defect this
+// lane fixed on AuditLog.tsx's own chip (auditLogBulkToolbarI18n.test.ts).
+// It sits in the same select-mode block as line 1307 (this lane's declared
+// region), so the one-line completion is genuine sibling parity rather than
+// scope creep. Fixed to reuse the existing 'selected' key.
+await (async function branchesSelectedCountChipUsesTheExistingSelectedKey() {
+  assert.doesNotMatch(source, /\{`\$\{selectedCount\} selected`\}/,
+    'Branches.tsx:1319 selection-count chip must not hardcode "selected" in English')
+  assert.match(source, /\$\{selectedCount\}\s*\$\{t\('selected'\)/,
+    'Branches.tsx:1319 selection-count chip must use the existing selected translation key')
   console.log('PASS Branches selection-count chip localized')
+})()
+
+await (async function bothPacksCarryTheSelectedKeyThisFileDependsOn() {
+  assert.ok(typeof en.selected === 'string' && en.selected, 'en.json missing "selected"')
+  assert.ok(typeof km.selected === 'string' && km.selected, 'km.json missing "selected"')
+  console.log('PASS both language packs carry selected')
 })()
