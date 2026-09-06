@@ -284,8 +284,11 @@ const counted = (count: unknown, noun: 'movement(s)' | 'unit(s)'): string =>
  *
  * `categories` is the owner's per-category switch set, unchanged: a category
  * that is off takes its own lines out and nothing else.
+ *
+ * Exported for scripts/test-telegram-shift-report-pure.cjs, which renders it
+ * with no database at all -- the same reason formatShiftReport is exported.
  */
-function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: Partial<Record<TelegramEventType, boolean>>): string {
+export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: Partial<Record<TelegramEventType, boolean>>): string {
   const showSales = categories?.sales !== false
   const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
 
