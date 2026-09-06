@@ -179,6 +179,43 @@ function seedCatalog(sqlite) {
     console.log('PASS classifySales resolves items through the same identity rule')
   }
 
+  // ---- N15: the leading-zero twin resolves, on BOTH classifiers -----------
+  // A stocktake or sales export written in the GTIN-14 form of a code the
+  // catalog stores as EAN-13 (one extra leading zero) used to fail "Product
+  // not found for sku/barcode" on every line: byBarcode was keyed by the RAW
+  // lowercased barcode, while classifyProducts, the Conflicts sweep and the
+  // merge tool all called that pair one product. Both maps now key -- and are
+  // read -- through identityBarcodeKey, so the row lands on the clean-barcode
+  // product. The stored barcode is never rewritten.
+  //
+  // DISCRIMINATING: on the raw-key code the inventory row and the sale line
+  // below are both action='error'.
+  {
+    const { sqlite, db } = makeDb()
+    sqlite.exec(`
+      INSERT INTO products (id, name, barcode, category, brand) VALUES
+        (1, 'Rose Lip Oil', '3614274226546', 'Lips', 'Dior'),
+        (2, 'Short Code Balm', '0012', 'Lips', 'Dior');
+    `)
+    const inventory = await classifyInventory(db, [
+      { _rowNumber: 2, barcode: '03614274226546', name: 'Rose Lip Oil', quantity: '5' },
+      { _rowNumber: 3, barcode: '12', name: 'Short Code Balm', quantity: '5' },
+    ], 'add')
+    const inv = new Map(inventory.map((r) => [r.rowNumber, r]))
+    assert.notStrictEqual(inv.get(2).action, 'error', `a zero-padded inventory row must resolve (got: ${inv.get(2).message})`)
+    assert.strictEqual(inv.get(2).existingId, 1, 'it is the SAME product, not a missing one')
+    assert.strictEqual(inv.get(3).action, 'error', "'0012' and '12' are NOT one code -- stripping would leave under 3 characters")
+
+    const sales = await classifySales(db, [
+      { _rowNumber: 2, order_reference: 'RZ1', date: '08/28/2026', quantity: '1', selling_price: '10', barcode: '03614274226546', name: 'Rose Lip Oil' },
+    ])
+    const sale = sales.find((r) => r.rowNumber === 2)
+    assert.notStrictEqual(sale.action, 'error', `a zero-padded sale line must resolve (got: ${sale.message})`)
+    assert.strictEqual(Number(((sale.data && sale.data.items) || [])[0]?.product_id), 1,
+      'the sale lands on the clean-barcode product, not a new one')
+    console.log('PASS N15 a leading-zero barcode resolves to the clean-barcode product on both import classifiers')
+  }
+
   // ---- §12 stockActionImport.matchProduct ---------------------------------
   {
     const products = [

@@ -1621,7 +1621,7 @@ export async function classifyProducts(
     // inherit only when name+barcode identifies exactly one catalog row;
     // multiple cost children stay ambiguous and are never guessed.
     const sameNameSameBarcode = (byName.get(normalizeProductGroupName(name)) || [])
-      .filter((candidate) => lower(candidate.barcode) === lower(barcode))
+      .filter((candidate) => identityBarcodeKey(candidate.barcode) === identityBarcodeKey(barcode))
     if (!match && costWasBlank && sameNameSameBarcode.length === 1) {
       match = sameNameSameBarcode[0]
     }
@@ -2245,7 +2245,12 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   const byName = new Map<string, (typeof products)[number] | null>() // null = ambiguous (several products share the name)
   for (const product of products) {
     if (str(product.sku)) { const k = lower(product.sku); bySku.set(k, [...(bySku.get(k) || []), product]) }
-    if (str(product.barcode)) { const k = lower(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
+    // Keyed by the FOLDED barcode (identityBarcodeKey), and looked up the
+    // same way below: a stock/sale line whose code carries a leading zero the
+    // catalog row does not resolves to that row instead of failing "Product
+    // not found" -- the same equivalence classifyProducts and the merge tool
+    // already apply. The stored barcode is never rewritten.
+    if (str(product.barcode)) { const k = identityBarcodeKey(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
     const nameKey = normalizeProductGroupName(product.name)
     if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
   }
@@ -2277,7 +2282,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       if (picked.message) resolveError = `SKU "${sku}": ${picked.message}`
     }
     if (!product && !resolveError && barcode) {
-      const picked = pickCompatible(byBarcode.get(lower(barcode)), rowName)
+      const picked = pickCompatible(byBarcode.get(identityBarcodeKey(barcode)), rowName)
       product = picked.product
       if (picked.message) resolveError = `Barcode "${barcode}": ${picked.message}`
     }
@@ -2515,7 +2520,12 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   const byName = new Map<string, (typeof products)[number] | null>()
   for (const product of products) {
     if (str(product.sku)) { const k = lower(product.sku); bySku.set(k, [...(bySku.get(k) || []), product]) }
-    if (str(product.barcode)) { const k = lower(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
+    // Keyed by the FOLDED barcode (identityBarcodeKey), and looked up the
+    // same way below: a stock/sale line whose code carries a leading zero the
+    // catalog row does not resolves to that row instead of failing "Product
+    // not found" -- the same equivalence classifyProducts and the merge tool
+    // already apply. The stored barcode is never rewritten.
+    if (str(product.barcode)) { const k = identityBarcodeKey(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
     const nameKey = normalizeProductGroupName(product.name)
     if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
   }
@@ -2715,7 +2725,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       const barcode = str(row.barcode)
       const productName = str(row.name || row.product_name)
       const product = (sku ? pickSaleProduct(bySku.get(lower(sku)), productName) : null)
-        || (barcode ? pickSaleProduct(byBarcode.get(lower(barcode)), productName) : null)
+        || (barcode ? pickSaleProduct(byBarcode.get(identityBarcodeKey(barcode)), productName) : null)
         || (productName ? byName.get(normalizeProductGroupName(productName)) || null : null)
       if (!product) {
         error = `Product not found for sku/barcode/name "${sku || barcode || productName}"`
