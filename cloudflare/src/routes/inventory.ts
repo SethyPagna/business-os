@@ -257,8 +257,13 @@ export async function attachInventoryProductMetrics(
       cogs_khr: num(metric.cogs_khr),
       // Both operands are non-negative by construction (productSalesLedger.ts),
       // so this is identical to inventory/ProductDetailModal.tsx's
-      // `Math.max(0, revenue) - Math.max(0, cogs)` and the list and the pane
-      // cannot report different numbers for one product. A negative result
+      // `Math.max(0, revenue) - Math.max(0, cogs)`. The pane clamps FOUR cells
+      // of this row, not one -- qty_sold, revenue_usd and cogs_usd each with
+      // `Math.max(0, ...)`, and the profit built on the last two -- and the
+      // list renders all four raw, so agreement needs the ledger to guarantee
+      // all four. It does: qty_sold carries the same per-(sale, product) cap
+      // the money does, which is what stopped a branch-split sale reporting
+      // "Net sold -2" in the list beside "0" in the pane. A negative PROFIT
       // survives only where it is true -- the product was sold below cost --
       // and is not floored, here or in the sales kernel.
       profit_usd: revenueUsd - cogsUsd,

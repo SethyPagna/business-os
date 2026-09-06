@@ -138,19 +138,23 @@ export default function InventoryProductsSurface({
       {k !== null && k !== 0 ? <span className="block text-[11px] font-normal text-slate-400">{fmtKHR(k)}</span> : null}
     </span>
   }
-  // Profit, Revenue and COGS are the server's figures, rendered as they come.
-  // They used to disagree with the detail pane opened from this very row --
-  // ProductDetailModal.tsx clamps all three with Math.max(0, ...) over the SAME
-  // row object -- because the Worker's four hand-copied sales-minus-returns
-  // joins could emit a NEGATIVE revenue or COGS.
-  // cloudflare/src/lib/productSalesLedger.ts now makes revenue_usd >= 0 and
-  // cogs_usd >= 0 true by construction, so those clamps are no-ops and the two
-  // surfaces agree.
+  // Net sold, Revenue, COGS and Profit are the server's figures, rendered as
+  // they come. All FOUR used to disagree with the detail pane opened from this
+  // very row -- ProductDetailModal.tsx clamps qty_sold, revenue_usd and
+  // cogs_usd with Math.max(0, ...) and derives Profit from the clamped pair,
+  // over the SAME row object -- because the Worker's four hand-copied
+  // sales-minus-returns joins could emit a negative revenue or COGS, and
+  // because the per-product ledger that replaced them left the UNIT count
+  // uncapped for one more round (a sale split across branches reported
+  // "Net sold -2" here beside "0" in the pane).
+  // cloudflare/src/lib/productSalesLedger.ts now makes qty_sold >= 0,
+  // revenue_usd >= 0 and cogs_usd >= 0 true by construction, so all four
+  // clamps are no-ops and the two surfaces agree cell for cell.
   //
   // A negative reaching this line therefore means one thing: the product was
   // genuinely sold below cost. That is real and stays visible (yellow). Do NOT
   // add a floor here -- a wrong negative is a ledger defect to root-cause, and
-  // flooring it would hide the next one the way the pane's clamp hid four.
+  // flooring it would hide the next one the way the pane's clamps hid these.
   const profitTone = (value: number | null) => (value !== null && value < 0 ? 'text-yellow-600' : 'text-blue-600 dark:text-blue-400')
   const costTone = 'text-red-700 dark:text-red-400'
   const priceTone = 'text-green-700 dark:text-green-400'
