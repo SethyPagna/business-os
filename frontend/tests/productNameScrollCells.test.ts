@@ -155,6 +155,60 @@ runTest('no product-name cell still wraps or ellipsises instead of scrolling', (
   }
 })
 
+// ---------------------------------------------------------------------------
+// 2b. The four cells that are deliberately NOT converted
+// ---------------------------------------------------------------------------
+// The ask's own enumerating grep --
+//   git grep -n "dense-cell-truncate\|line-clamp" -- \
+//     frontend/src/components/products frontend/src/components/inventory
+// -- also returns product-name cells on two Products SUB PAGES that this lane
+// does not convert: Stock Change and Stock-in sessions, both rendered from
+// Products.tsx a couple of dozen lines from the Conflicts tab that IS in
+// NAME_CELLS above. Silence about them is indistinguishable from an oversight,
+// so the exclusion is stated here and goes red if anything moves.
+//
+// Two independent reasons, and either one alone is sufficient:
+//
+//   1. They are dense six-column HISTORY/ledger rows, governed by a different
+//      convention that tests/historyRowModel.test.ts already pins: "a
+//      truncated Stock Change cell has no tooltip to reveal it" -- every
+//      `dense-cell-truncate` there MUST carry a title=. Converting the cell to
+//      .scroll-x-clean drops the truncation the tooltip rule keys on, and the
+//      reveal affordance in a dense ledger is the tooltip, not a swipe.
+//   2. Both files belong to OTHER running lanes (ledger2 owns
+//      StockChangeSection, stockin owns StockInSessionsSection), so they are
+//      not this lane's to rewrite.
+//
+// The shape asserted per cell: a desktop cell truncates AND titles itself; a
+// mobile twin wraps (break-words), which has no ellipsis and therefore no dead
+// end. Neither may quietly acquire the scrolling class instead.
+const EXCLUDED_CELLS: Array<{ file: string; expect: Array<'truncate+title' | 'wrap'> }> = [
+  { file: 'components/products/StockChangeSection.tsx', expect: ['wrap', 'truncate+title'] },
+  { file: 'components/products/StockInSessionsSection.tsx', expect: ['truncate+title', 'wrap'] },
+]
+
+runTest('the dense history name cells stay OUT of the scroll conversion, on purpose', () => {
+  for (const { file, expect } of EXCLUDED_CELLS) {
+    const source = read(file)
+    const tags = [...source.matchAll(/<span\b[^>]*>\{row\.product_name\}/g)].map((m) => m[0])
+    assert.equal(
+      tags.length,
+      expect.length,
+      `${file}: expected ${expect.length} product-name cells, found ${tags.length} -- the exclusion list is stale`,
+    )
+    tags.forEach((tag, i) => {
+      const where = `${file} cell ${i + 1} (${expect[i]}): ${tag}`
+      assert.doesNotMatch(tag, /\bscroll-x-clean\b/, `${where}\n  -- converting this cell needs its own region_exceptions entry and a check that historyRowModel.test.ts stays green`)
+      if (expect[i] === 'truncate+title') {
+        assert.match(tag, /\bdense-cell-truncate\b/, `${where}\n  -- the dense ledger row's clipping is what historyRowModel.test.ts keys its tooltip rule on`)
+        assert.match(tag, /\btitle=/, `${where}\n  -- a clipped ledger value with no tooltip is a dead-end ellipsis`)
+      } else {
+        assert.match(tag, /\bbreak-words\b/, `${where}\n  -- the mobile twin wraps instead of clipping, so it has no ellipsis to reveal`)
+      }
+    })
+  }
+})
+
 runTest('the scroll behaviour lives in ONE place, not per file', () => {
   for (const [, file] of NAME_CELLS) {
     const source = read(file)
