@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 // F11 (audit sibling): the single close-affordance button on every shared
 // Modal, kit/Fold, QuickAddModal, and the image lightbox rendered
@@ -51,21 +51,59 @@ assert.match(lightbox, /aria-label=\{copy\.prev\}/, 'positive control: ImageGall
 // catalog/portal call sites). Each caller must wire `close` through the
 // same translation mechanism it already uses for the sibling prev/next
 // labels right next to it.
-const pos = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+//
+// POS.tsx's <ImageGalleryLightbox> call site is resolved by SCANNING
+// components/pos/*.tsx rather than pinning the POS.tsx path: the additems
+// lane owns a planned extraction of that call site into a new
+// pos/ProductCard.tsx, and this test must keep passing (against whichever
+// file actually holds the call) rather than going red on a file whose
+// owner has no context for a modal-close-label failure.
+const posDir = new URL('../src/components/pos/', import.meta.url)
+const posFiles = readdirSync(posDir).filter((f) => f.endsWith('.tsx'))
+const posLightboxFiles = posFiles.filter((f) =>
+  readFileSync(new URL(f, posDir), 'utf8').includes('<ImageGalleryLightbox'),
+)
+assert.equal(
+  posLightboxFiles.length,
+  1,
+  `expected exactly one components/pos/*.tsx file to render <ImageGalleryLightbox>, found: ${posLightboxFiles.join(', ') || '(none)'}`,
+)
+const posLightboxSource = readFileSync(new URL(posLightboxFiles[0], posDir), 'utf8')
+assert.match(
+  posLightboxSource,
+  /close:\s*t\('close'\)/,
+  `${posLightboxFiles[0]}'s lightbox labels must pass a translated close label, not rely on the component default`,
+)
+// Positive control on the same discovered file: its prev sibling, right
+// next to the new close field, is untouched.
+assert.match(
+  posLightboxSource,
+  /prev:\s*posCopy\('Prev'\)/,
+  `positive control: ${posLightboxFiles[0]}'s lightbox prev label (existing convention) is untouched`,
+)
+
 const products = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const catalogPreview = readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
 const productDetailFlyout = readFileSync(new URL('../src/components/catalog/ProductDetailFlyout.tsx', import.meta.url), 'utf8')
 
-assert.match(pos, /close:\s*t\('close'\)\s*\|\|\s*'Close',/, "POS.tsx's lightbox labels must pass a translated close label, not rely on the component default")
 assert.match(products, /close:\s*t\('close'\)\s*\|\|\s*'Close',/, "Products.tsx's lightbox labels must pass a translated close label, not rely on the component default")
 assert.match(productDetailFlyout, /close:\s*copy\('close', 'Close'\),/, "ProductDetailFlyout.tsx's lightbox labels must pass a translated close label, not rely on the component default")
+// The expected count is DERIVED from how many <ImageGalleryLightbox> call
+// sites CatalogPreviewSurface.tsx actually has, not hardcoded -- a
+// legitimate call-site add/remove by another lane must not read as this
+// lane regressing.
+const catalogPreviewLightboxCallSites = (catalogPreview.match(/<ImageGalleryLightbox/g) || []).length
+assert.ok(catalogPreviewLightboxCallSites > 0, 'CatalogPreviewSurface.tsx must render at least one <ImageGalleryLightbox>')
 const catalogPreviewCloseMatches = catalogPreview.match(/close:\s*copy\('close', 'Close'\),/g) || []
-assert.equal(catalogPreviewCloseMatches.length, 2, 'CatalogPreviewSurface.tsx has two ImageGalleryLightbox call sites (product gallery + portal image view); BOTH must pass a translated close label')
+assert.equal(
+  catalogPreviewCloseMatches.length,
+  catalogPreviewLightboxCallSites,
+  `CatalogPreviewSurface.tsx has ${catalogPreviewLightboxCallSites} ImageGalleryLightbox call site(s); every one must pass a translated close label`,
+)
 
 // Positive control: each caller's own prev/next siblings, right next to the
 // new close field, are untouched -- proves these regexes are scoped to the
 // close wiring and not just matching anything in these large files.
-assert.match(pos, /prev:\s*posCopy\('Prev'\)/, "positive control: POS.tsx's lightbox prev label (existing convention) is untouched")
 assert.match(products, /prev:\s*t\('prev'\)\s*\|\|\s*'Prev'/, "positive control: Products.tsx's lightbox prev label (existing convention) is untouched")
 assert.match(productDetailFlyout, /prev:\s*copy\('prevImage', 'Previous image'\)/, "positive control: ProductDetailFlyout.tsx's lightbox prev label (existing convention) is untouched")
 
