@@ -78,6 +78,10 @@ function getBranchStockKey(branchStock: BranchStockEntry, index: number): string
 
 export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onViewHistory, onManageBatches, fmtUSD, fmtKHR, t }: ProductDetailModalProps) {
   const T = (key: string, fallback: string): string => (typeof t === 'function' ? t(key) : fallback) || fallback
+  // Hooks run before the early return (Rules of Hooks): the lowstock lane
+  // added this component's first hook below `if (!p) return null`, which was
+  // unreachable from every current call site but a latent violation.
+  const lowStockConfig = useLowStockConfig()
   if (!p) return null
 
   const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
@@ -97,7 +101,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // other surface fell back to 10, so a product with no limit of its own was
   // green here and amber on the list it was opened from; going through the
   // shared rule removes the fork as well as honouring the owner's number.
-  const lowStockThreshold = effectiveLowStockThreshold(useLowStockConfig(), p.low_stock_threshold)
+  const lowStockThreshold = effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold)
   const stockPct = lowStockThreshold > 0
     ? Math.min(100, (stockQuantity / lowStockThreshold) * 100)
     : 100
