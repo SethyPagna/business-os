@@ -197,6 +197,42 @@ runTest('the chrome no longer guesses the last-visited section the body is not s
   }
 })
 
+runTest('Back opens the layer without navigating, so the section it marks is the one you are in', () => {
+  // Reconciles the reported STALE with what Back actually does, because the
+  // two are easy to read as contradicting each other and they do not.
+  //
+  // The bug was the chrome naming a section the BODY was not showing: it
+  // resolved from `bos:hub:<page>:active` (the last section VISITED) whenever
+  // the URL named none, while Products/Promotions/Review/Branches seed their
+  // bodies from a fixed default. Nothing to do with Back.
+  //
+  // Back is a pure layer toggle -- it must be, it is also the close control --
+  // so tapping it from a sub page does not navigate. The route still names
+  // that sub page, and the layer marks it open. That is the fix working: the
+  // chrome shows where you ARE. "It still shows the page i back from" is only
+  // a defect when the chrome and the body disagree, and after this they
+  // cannot: both read the same location.
+  const ids = ['products', 'stock_changes', 'stock_in_sessions', 'duplicates']
+  const opened = navLayerToggle({ open: false, expanded: null }, 'products', true)
+  assert.deepEqual(opened, { open: true, expanded: 'products' },
+    'Back unfolds the sections of the page you are on')
+  assert.deepEqual(Object.keys(opened).sort(), ['expanded', 'open'],
+    'and produces no navigation intent -- the route is not touched')
+  assert.equal(resolveChromeSection('products', '/products', '#hub:products:stock_changes', ids), 'stock_changes',
+    'so the layer marks the section the route still names')
+  // The pre-fix answer for the SAME location once the anchor is gone, kept as
+  // the negative control: a remembered section the route never named.
+  assert.equal(resolveHubSection('products', '/products', '', ids, 'stock_changes'), 'stock_changes')
+  assert.equal(resolveChromeSection('products', '/products', '', ids), '',
+    'the chrome now says "page level" instead of guessing')
+  const backHandler = sidebar.slice(sidebar.indexOf('const openSectionMenu = () => {')).split('\n  }\n')[0]
+  assert.match(backHandler, /navLayerToggle/, 'located the Back handler')
+  assert.doesNotMatch(backHandler, /navigateTo/,
+    'Back must not navigate: leaving the sub page would discard its state')
+  assert.match(sidebar, /onClick=\{\(\) => navigateTo\(entry\.ownerId, hubAnchor\(entry\.ownerId, section\.id\)\)\}/,
+    'only a section row in the layer navigates, and it names the section it goes to')
+})
+
 runTest('resolveHubSection is unchanged for the hosts that own a fallback', () => {
   // The refactor that produced resolveChromeSection must not move the host
   // hook's own answer -- sectionNavigation.test.ts drives the real thing.
