@@ -218,6 +218,20 @@ await runTest('every product picker mounts the shared option sheet', () => {
   // a picker -- and it must be seeded with what the sheet already resolved.
   assert.match(saleDetail, /presetBatchId=\{addPicking\.batchId\}/)
   assert.match(saleDetail, /branchId=\{addPicking\.branchId \?\? sale\.branch_id \?\? null\}/)
+  // The branch the sheet resolved has to survive all the way onto the wire.
+  // It reached the line form and stopped there: the lots were loaded at ONE
+  // branch and the batch was then posted with no branch at all, so the Worker
+  // fell back to the sale's own branch (sales.ts: `Number(item.branch_id ||
+  // sale.branch_id)`) -- a batch drawn from a shelf nobody chose, and on a
+  // branchless sale no shelf at all. The selling-branch guard reads the same
+  // field, so carrying it is also what makes the warehouse refusal reachable.
+  assert.match(saleDetail, /branchId: number \| null/, 'the staged line must carry a branch')
+  assert.match(saleDetail, /stageAddLine\(choice, addPicking\.branchId\)/, 'the pick\'s branch reaches the staged line')
+  assert.match(
+    saleDetail,
+    /\.\.\.\(line\.branchId != null \? \{ branch_id: line\.branchId \} : \{\}\)/,
+    'and is posted with the added item',
+  )
   // ...and the adapter stays an adapter, not a second implementation.
   assert.match(
     src('components', 'shared', 'ProductOptionSheet.tsx'),

@@ -167,6 +167,14 @@ type StagedAddLine = {
   // seconds old and another till may already have taken the units.
   stockQuantity: number
   barcode: string
+  // The branch the option sheet resolved this line at -- the shelf the units
+  // come off. It used to stop at the line form: the lots were listed at ONE
+  // branch and the batch was then posted with no branch at all, so the Worker
+  // fell back to `sale.branch_id` (routes/sales.ts: `Number(item.branch_id ||
+  // sale.branch_id)`) and drew the lot from a shelf nobody had chosen -- and
+  // from none at all on a branchless sale. Carrying it is also what puts the
+  // added line under the same selling-branch guard as a checkout line.
+  branchId: number | null
   batchId: number | null
   batchLabel: string
   batchReceivedAt: string
@@ -460,18 +468,35 @@ export default function SaleDetailModal({
     return () => window.clearTimeout(timer)
   }, [addQuery, onAddItems, sale?.branch_id])
 
-  const stageAddLine = (choice: SaleDetailProductChoice): void => {
+  // What makes two staged lines the SAME line. Product alone was never
+  // enough (the same product on two received dates is two movements) and
+  // now that a line carries the shelf it comes off, the branch joins the
+  // key -- otherwise editing the quantity of one would edit both, and the
+  // list would render two rows under one React key.
+  const stagedLineKey = (line: StagedAddLine): string => (
+    `${line.productId}:${line.branchId ?? 'any'}:${line.batchId ?? 'stock'}`
+  )
+  // `pickedBranchId` is the branch the option sheet resolved, threaded through
+  // the line form rather than re-derived here: the form asks for quantity and
+  // price, not for a shelf, and the branch it was opened at is the branch the
+  // lots on it were listed from.
+  const stageAddLine = (choice: SaleDetailProductChoice, pickedBranchId: string | null): void => {
     const productId = Number(choice.productId)
     if (!Number.isFinite(productId) || productId <= 0) return
     const quantity = Math.max(1, Math.floor(Number(choice.quantity) || 1))
     const price = toNumber(choice.unitPriceUsd)
+    const branchId = Number(pickedBranchId)
+    const stagedBranchId = Number.isFinite(branchId) && branchId > 0 ? branchId : null
     setAddQuery('')
     setAddCandidates([])
     setAddLines((current) => {
       // A second pick of the same product bumps the quantity rather than
       // adding a duplicate row -- the server would accept two lines, but the
-      // person meant "two of these".
-      const existing = current.findIndex((line) => line.productId === productId && line.batchId === choice.batchId)
+      // person meant "two of these". Two picks at DIFFERENT branches are not
+      // the same line, though: they take units off two different shelves.
+      const existing = current.findIndex((line) => (
+        line.productId === productId && line.batchId === choice.batchId && line.branchId === stagedBranchId
+      ))
       if (existing >= 0) {
         const next = [...current]
         // A reopened picker is an explicit edit. The most recently confirmed
@@ -499,6 +524,7 @@ export default function SaleDetailModal({
         priceText: price > 0 ? String(price) : '0',
         stockQuantity: choice.batchQuantity ?? toNumber(choice.stockQuantity),
         barcode: choice.barcode,
+        branchId: stagedBranchId,
         batchId: choice.batchId,
         batchLabel: choice.batchLabel,
         batchReceivedAt: choice.batchReceivedAt,
@@ -835,6 +861,10 @@ export default function SaleDetailModal({
         product_id: line.productId,
         quantity: line.quantity,
         applied_price_usd: line.unitPriceUsd,
+        // The shelf the sheet resolved. Without it the Worker inherited the
+        // sale's own branch, which is not necessarily the branch whose
+        // quantity -- and whose lots -- the operator was reading.
+        ...(line.branchId != null ? { branch_id: line.branchId } : {}),
         ...(line.batchId != null ? { batch_id: line.batchId } : {}),
         ...(line.batchLabel ? { batch_label: line.batchLabel } : {}),
         ...(line.batchExpiryDate ? { batch_expiry_date: line.batchExpiryDate } : {}),
@@ -1603,7 +1633,7 @@ export default function SaleDetailModal({
                   stockMoves={addStockMoves}
                   stagedLines={addLines}
                   onCancel={closeAddPicker}
-                  onChoose={stageAddLine}
+                  onChoose={(choice) => stageAddLine(choice, addPicking.branchId)}
                 />
               ) : null}
 
@@ -1615,7 +1645,7 @@ export default function SaleDetailModal({
                 <>
                   <ul className="mt-3 space-y-2">
                     {addLines.map((line) => (
-                      <li key={`${line.productId}:${line.batchId ?? 'stock'}`} className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
+                      <li key={stagedLineKey(line)} className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-white">
                             {line.name}
@@ -1623,9 +1653,9 @@ export default function SaleDetailModal({
                             {line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{line.batchLabel}{line.batchReceivedAt ? ` · ${translateOr('received_date', 'Received', 'ថ្ងៃទទួល')}: ${line.batchReceivedAt.slice(0, 10)}` : ''}{line.batchExpiryDate ? ` · ${t('expiry_date') || 'Expiry'}: ${line.batchExpiryDate}` : ''}</span> : null}
                           </span>
                           <span className="flex items-center gap-1">
-                            <label htmlFor={`sale-add-qty-${line.productId}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>
+                            <label htmlFor={`sale-add-qty-${stagedLineKey(line)}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>
                             <input
-                              id={`sale-add-qty-${line.productId}`}
+                              id={`sale-add-qty-${stagedLineKey(line)}`}
                               className="input h-9 w-16 text-right text-sm"
                               inputMode="numeric"
                               value={String(line.quantity)}
@@ -1635,22 +1665,22 @@ export default function SaleDetailModal({
                                 // stock the wrong way through an add.
                                 const next = Math.max(1, Math.floor(Number(event.target.value) || 1))
                                 setAddLines((current) => current.map((row) => (
-                                  row.productId === line.productId && row.batchId === line.batchId ? { ...row, quantity: next } : row
+                                  stagedLineKey(row) === stagedLineKey(line) ? { ...row, quantity: next } : row
                                 )))
                               }}
                             />
                           </span>
                           <span className="flex items-center gap-1">
-                            <label htmlFor={`sale-add-price-${line.productId}`} className="text-[11px] text-gray-400">{t('unit_price') || 'Unit price'}</label>
+                            <label htmlFor={`sale-add-price-${stagedLineKey(line)}`} className="text-[11px] text-gray-400">{t('unit_price') || 'Unit price'}</label>
                             <input
-                              id={`sale-add-price-${line.productId}`}
+                              id={`sale-add-price-${stagedLineKey(line)}`}
                               className="input h-9 w-24 text-right text-sm"
                               inputMode="decimal"
                               value={line.priceText}
                               onChange={(event) => {
                                 const text = event.target.value
                                 setAddLines((current) => current.map((row) => (
-                                  row.productId === line.productId && row.batchId === line.batchId
+                                  stagedLineKey(row) === stagedLineKey(line)
                                     ? { ...row, priceText: text, unitPriceUsd: toNumber(text) }
                                     : row
                                 )))
@@ -1664,7 +1694,7 @@ export default function SaleDetailModal({
                             type="button"
                             aria-label={t('remove') || 'Remove'}
                             className="rounded p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-                            onClick={() => setAddLines((current) => current.filter((row) => row.productId !== line.productId || row.batchId !== line.batchId))}
+                            onClick={() => setAddLines((current) => current.filter((row) => stagedLineKey(row) !== stagedLineKey(line)))}
                           >
                             <Trash2 size={16} />
                           </button>
