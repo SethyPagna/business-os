@@ -121,27 +121,44 @@ interface PlanMovement {
   reason: string
 }
 
-const REASON_LABEL: Record<string, string> = {
-  invalid_date: 'Invalid or missing date',
-  invalid_count: 'Invalid or missing count',
-  missing_branch: 'Missing branch',
-  missing_identifier: 'No product name, SKU, or barcode given',
-  product_not_found: 'No matching product found',
-  ambiguous_barcode: 'Multiple products share this barcode',
-  ambiguous_name: 'Multiple products share this name',
+// The backend's own reason/action codes, each paired with the pack key that
+// names it. These two maps were plain English -> rendered straight into the
+// review step, so every unresolved row explained itself in English no matter
+// the language -- the only strings in this file that never reached T(). They
+// went unnoticed because nothing could open this screen at all until the
+// suggestion banner in BulkImportModal.tsx was wired to it.
+const REASON_LABEL: Record<string, { key: string; en: string }> = {
+  invalid_date: { key: 'dated_count_reason_invalid_date', en: 'Invalid or missing date' },
+  invalid_count: { key: 'dated_count_reason_invalid_count', en: 'Invalid or missing count' },
+  missing_branch: { key: 'dated_count_reason_missing_branch', en: 'Missing branch' },
+  missing_identifier: { key: 'dated_count_reason_missing_identifier', en: 'No product name, SKU, or barcode given' },
+  product_not_found: { key: 'dated_count_reason_product_not_found', en: 'No matching product found' },
+  ambiguous_barcode: { key: 'dated_count_reason_ambiguous_barcode', en: 'Multiple products share this barcode' },
+  ambiguous_name: { key: 'dated_count_reason_ambiguous_name', en: 'Multiple products share this name' },
 }
 
-const ACTION_LABEL: Record<string, string> = {
-  create_new: 'Create as a new, standalone product',
-  link_variant: 'Link this count to an existing product',
-  create_child: "Create as a child row (keeps the linked product's name)",
-  skip: "Skip this row -- don't import it",
+const ACTION_LABEL: Record<string, { key: string; en: string }> = {
+  create_new: { key: 'dated_count_action_create_new', en: 'Create as a new, standalone product' },
+  link_variant: { key: 'dated_count_action_link_variant', en: 'Link this count to an existing product' },
+  create_child: { key: 'dated_count_action_create_child', en: "Create as a child row (keeps the linked product's name)" },
+  skip: { key: 'dated_count_action_skip', en: "Skip this row -- don't import it" },
 }
 
 export default function DatedStockReconciliationModal({ onClose, onDone, t, products = [] }: DatedStockReconciliationModalProps) {
   const T = (key: string, fallback: string): string => {
     const value = t?.(key)
     return value && value !== key ? value : fallback
+  }
+  // An unknown code from a newer backend still shows the code rather than
+  // nothing, same as before -- it just no longer shows English to a Khmer
+  // operator for the codes we do know.
+  const reasonLabel = (reason: string): string => {
+    const entry = REASON_LABEL[reason]
+    return entry ? T(entry.key, entry.en) : reason
+  }
+  const actionLabel = (action: string): string => {
+    const entry = ACTION_LABEL[action]
+    return entry ? T(entry.key, entry.en) : action
   }
 
   const productNameById = useMemo(() => {
@@ -504,7 +521,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
                       <div className="mb-1 font-medium text-slate-700 dark:text-slate-200">
                         {T('dated_count_row', 'Row')} {row.rowNumber}: {row.raw.productName || row.raw.sku || row.raw.barcode || T('dated_count_unnamed_row', '(unnamed)')}
                       </div>
-                      <div className="mb-2 text-slate-500 dark:text-slate-400">{REASON_LABEL[row.reason] || row.reason}</div>
+                      <div className="mb-2 text-slate-500 dark:text-slate-400">{reasonLabel(row.reason)}</div>
                       {noAction ? (
                         <div className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
                           <AlertTriangle className="h-3.5 w-3.5" />
@@ -521,7 +538,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
                                   checked={decision.action === action}
                                   onChange={() => updateDecision(row.rowNumber, { action: action as DecisionAction })}
                                 />
-                                {ACTION_LABEL[action] || action}
+                                {actionLabel(action)}
                               </label>
                             ))}
                           </div>

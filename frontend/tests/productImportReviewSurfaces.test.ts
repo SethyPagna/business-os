@@ -191,6 +191,57 @@ runTest('removing it left the result screen\'s real actions untouched', () => {
   assert.match(done, /T\('download_failed_rows', 'Download failed rows'\)/)
 })
 
+// --- 4. the review step of the flow this lane made reachable -------------
+
+// DatedStockReconciliationModal routes 45 strings through T() and two maps
+// around it: REASON_LABEL and ACTION_LABEL were plain code -> English and
+// rendered straight into the unresolved-row list, so every reason an import
+// row needs a decision, and every decision offered for it, read English in
+// Khmer mode. Nothing could open this screen at all until this lane wired
+// the suggestion banner to it, which is why the gap survived.
+const dated = read('components/products/import/DatedStockReconciliationModal.tsx')
+
+const DATED_LABEL_KEYS: Array<[key: string, english: string]> = [
+  ['dated_count_reason_invalid_date', 'Invalid or missing date'],
+  ['dated_count_reason_invalid_count', 'Invalid or missing count'],
+  ['dated_count_reason_missing_branch', 'Missing branch'],
+  ['dated_count_reason_missing_identifier', 'No product name, SKU, or barcode given'],
+  ['dated_count_reason_product_not_found', 'No matching product found'],
+  ['dated_count_reason_ambiguous_barcode', 'Multiple products share this barcode'],
+  ['dated_count_reason_ambiguous_name', 'Multiple products share this name'],
+  ['dated_count_action_create_new', 'Create as a new, standalone product'],
+  ['dated_count_action_link_variant', 'Link this count to an existing product'],
+  ['dated_count_action_create_child', "Create as a child row (keeps the linked product's name)"],
+  ['dated_count_action_skip', "Skip this row -- don't import it"],
+]
+
+runTest('the unresolved-row reason and action labels carry a pack key, not bare English', () => {
+  for (const [key, english] of DATED_LABEL_KEYS) {
+    assert.match(dated, new RegExp(`\\{ key: '${key}', en: `), `${key} is not declared on its label entry`)
+    assert.ok(dated.includes(english), `${key} lost its English fallback`)
+  }
+  assert.match(dated, /const REASON_LABEL: Record<string, \{ key: string; en: string \}>/)
+  assert.match(dated, /const ACTION_LABEL: Record<string, \{ key: string; en: string \}>/)
+})
+
+runTest('the review step renders those labels through T(), and still shows an unknown code as itself', () => {
+  assert.doesNotMatch(dated, /\{REASON_LABEL\[row\.reason\] \|\| row\.reason\}/, 'the map value went straight to the screen')
+  assert.doesNotMatch(dated, /\{ACTION_LABEL\[action\] \|\| action\}/)
+  assert.match(dated, /\{reasonLabel\(row\.reason\)\}/)
+  assert.match(dated, /\{actionLabel\(action\)\}/)
+  assert.match(dated, /const reasonLabel = \(reason: string\): string => \{[\s\S]{0,160}return entry \? T\(entry\.key, entry\.en\) : reason/)
+  assert.match(dated, /const actionLabel = \(action: string\): string => \{[\s\S]{0,160}return entry \? T\(entry\.key, entry\.en\) : action/)
+})
+
+runTest('both packs carry every dated-count reason and action label, really translated', () => {
+  for (const [key, english] of DATED_LABEL_KEYS) {
+    assert.equal(en[key], english, `en.json ${key} must be the string the screen actually shows`)
+    assert.ok(km[key], `km.json is missing ${key}`)
+    assert.notEqual(km[key], en[key], `km.json ${key} is still the English string`)
+    assert.match(km[key], /[ក-៿]/, `km.json ${key} carries no Khmer script`)
+  }
+})
+
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)
