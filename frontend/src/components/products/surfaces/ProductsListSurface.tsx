@@ -414,9 +414,14 @@ export default function ProductsListSurface({
                                         starts, making the group title look "indented"
                                         relative to its own rows. The expand/collapse
                                         chevron lives on the trailing side instead. */}
+                                    {/* N36: a group title IS a product name, so it
+                                        follows the same rule as the rows under it --
+                                        .scroll-x-clean (the one shared class, see
+                                        styles/main.css) instead of an ellipsis whose
+                                        tail could not be read at all. */}
                                     <button
                                       type="button"
-                                      className="min-w-0 truncate text-left text-sm font-semibold text-slate-700 dark:text-slate-100"
+                                      className="scroll-x-clean text-left text-sm font-semibold text-slate-700 dark:text-slate-100"
                                       onClick={() => toggleProductGroup(group.key)}
                                     >
                                       {group.name}
@@ -572,7 +577,7 @@ export default function ProductsListSurface({
                         <div className="flex min-w-0 items-start justify-between gap-2">
                           <button
                             type="button"
-                            className="min-w-0 flex-1 break-words text-left text-sm font-semibold text-slate-800 dark:text-slate-100"
+                            className="scroll-x-clean flex-1 text-left text-sm font-semibold text-slate-800 dark:text-slate-100"
                             onClick={() => toggleProductGroup(group.key)}
                           >
                             {group.name}

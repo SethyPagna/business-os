@@ -491,7 +491,10 @@ export default function ProductsImageOnlyView() {
                   onClick={() => setDetailsProduct(product)}
                   title={t('view_details') || 'Click to view details'}
                 >
-                  <p className="break-words text-sm font-medium text-gray-800 dark:text-gray-100">{product.name}</p>
+                  {/* N36: the product name scrolls inside its cell rather than
+                      wrapping to a second row -- the same shared .scroll-x-clean
+                      class every other product-name cell uses (styles/main.css). */}
+                  <p className="scroll-x-clean text-sm font-medium text-gray-800 dark:text-gray-100">{product.name}</p>
                   {showPrice ? (
                     // Named, not a bare figure. A number on its own next to a
                     // product could as easily be cost or a promotional price;
