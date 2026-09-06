@@ -181,6 +181,58 @@ await runTest('the shift surface types its date+time through the shared field', 
   assert.equal(uses, 3, `expected the opened/closed amend pair and the close-time field, found ${uses}`)
 })
 
+await runTest('the composed field hands its translator to the date half', () => {
+  // DateTimeEntryInput takes `t` and uses it for the TIME half's strings, but
+  // composed <DateEntryInput> without passing it on -- so the date half fell
+  // back to its English literals (DateEntryInput.tsx's date_entry_invalid /
+  // date_entry_help / date_entry_hint_label / date_entry_ambiguous) and a
+  // Khmer operator amending or closing a shift read "Enter the date as
+  // dd/mm/yyyy (day first)." in English inside an otherwise Khmer modal.
+  // km.json:5358-5361 already carries all four keys; nothing reached them.
+  //
+  // verify:i18n cannot see this: the keys exist in both packs and the literals
+  // are legitimate fallbacks for the callers that pass no `t` at all. Only the
+  // wiring is wrong, so only a wiring assertion catches it.
+  const HAS_T = /<DateEntryInput[^>]*\st=\{t\}/
+  // Positive control first: an assertion that cannot report a negative is not
+  // an assertion. The first string is the exact shape the bug had.
+  assert.doesNotMatch(
+    '<DateEntryInput id={id} value={date} onChange={(iso) => setDate(iso)} />', HAS_T,
+    'the matcher must fail on a tag written WITHOUT the translator',
+  )
+  assert.match('<DateEntryInput t={t} id={id} value={date} />', HAS_T, 'the matcher must pass a tag that has it')
+
+  const composed = fs.readFileSync(path.join(srcDir, 'components', 'shared', 'DateTimeEntryInput.tsx'), 'utf8')
+  assert.match(composed, HAS_T, 'DateTimeEntryInput must pass its `t` down to the DateEntryInput it composes')
+})
+
+await runTest('no typed date field is rendered without a translator', () => {
+  // The root cause, swept: every <DateEntryInput>/<DateTimeEntryInput> tag in
+  // the admin app, because dropping `t` on any one of them silently reverts
+  // that field's hints to English. The sweep, not the single assertion above,
+  // is what stops the next call site repeating it.
+  const TAGS = [/<DateEntryInput(?![A-Za-z])[\s\S]*?\/>/, /<DateTimeEntryInput(?![A-Za-z])[\s\S]*?\/>/]
+  const offenders: string[] = []
+  let seen = 0
+  for (const file of walk(srcDir)) {
+    const source = fs.readFileSync(file, 'utf8')
+    const rel = path.relative(srcDir, file).replace(/\\/g, '/')
+    for (const pattern of TAGS) {
+      const re = new RegExp(pattern.source, 'g')
+      let match: RegExpExecArray | null
+      while ((match = re.exec(source))) {
+        seen += 1
+        // `t={...}` in any form -- some call sites hand down a pack-scoped
+        // lookup (FastStockInModal's packLookup) rather than the raw `t`.
+        if (!/\st=\{/.test(match[0])) offenders.push(`${rel}:${source.slice(0, match.index).split('\n').length}`)
+      }
+    }
+  }
+  // Guards the sweep itself: a walk that found nothing would report clean.
+  assert.ok(seen >= 30, `expected the app's typed date fields to be found, saw ${seen}`)
+  assert.deepEqual(offenders, [], 'every typed date field must be given a translator (`t={...}`)')
+})
+
 await runTest('the time reader has exactly one implementation', () => {
   // DateTimeRangePicker owned a private copy. Two copies of a clock is how the
   // range row and the shift row end up disagreeing about what "930" means.

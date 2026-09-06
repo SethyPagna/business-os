@@ -102,7 +102,13 @@ export default function DateTimeEntryInput({
   // the one that actually fires. This is what is left for a screen reader.
   return (
     <span className={`flex w-full min-w-0 items-center gap-1.5 ${className}`.trim()} aria-required={required || undefined}>
+      {/* `t` goes down with it: the date half owns four of this field's six
+          user-visible strings (the unreadable-date hint, the "9032026 becomes
+          09/03/2026" help, its label and the ambiguous-run marker), and
+          without the translator they render in English inside a Khmer shift
+          modal while km.json already holds all four. */}
       <DateEntryInput
+        t={t}
         id={id}
         value={date}
         disabled={disabled}
