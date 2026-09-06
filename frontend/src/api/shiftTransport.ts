@@ -76,6 +76,42 @@ export type Shift = {
   // Present on the close response and on the shift reads. Absent on rows that
   // come back from a list (the server does not price a whole page of shifts).
   reconciliation?: ShiftReconciliation | null
+  // The admin report half. Null for a caller without the shift-review
+  // capability, and absent from list rows and from /current -- see
+  // `ShiftFigures`.
+  figures?: ShiftFigures | null
+}
+
+/**
+ * The shift REPORT figures, computed once on the server
+ * (cloudflare/src/lib/shiftReconciliation.ts) and rendered here as they
+ * arrive. Two halves that never mix:
+ *
+ *   * `opening` / `closing` are the REGISTRATION -- the cash counted into the
+ *     drawer at open and out of it at end, per currency. A record for the
+ *     report and nothing else: no sales, cost or profit figure is derived
+ *     from them, which is why the same window prices identically whatever
+ *     was counted (owner ruling, Sep 6 2026).
+ *   * everything else is the business, from the sales kernel and the `fees`
+ *     table. `credit_usd` is an amount OWED and is printed as a positive
+ *     note; it is already inside sales and profit and is subtracted from
+ *     nothing.
+ *
+ * `delivery_cost` counts both ways a courier gets paid (a fee row typed
+ * delivery, and a payout recorded on the sale) and `other_expenses` is every
+ * remaining fee, so the two always sum to the drawer's expense outflow.
+ */
+export type ShiftFigures = {
+  opening: ShiftMoney
+  closing: ShiftCountedMoney
+  sales_usd: number
+  cogs_usd: number
+  profit_usd: number
+  delivery_fee_usd: number
+  credit_usd: number
+  refunds_usd: number
+  delivery_cost: ShiftMoney
+  other_expenses: ShiftMoney
 }
 
 export type ShiftCapabilities = {
