@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import { mintMembershipNumber } from './membershipNumber'
+import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
 import { formatPhoneP8, collectContactPhones } from './contactDuplicates'
@@ -126,31 +126,59 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
 // so a prior read can never be trusted for uniqueness). Only the winner goes
 // on to create/link the contact, so two concurrent signups can never produce
 // two contacts for one phone.
+//
+// Two UNIQUE indexes can fire here (migration 0087): idx_portal_accounts_phone
+// and idx_portal_accounts_membership. A phone collision (or a membership-id
+// collision on a USER-SUPPLIED id -- the existing-customer claim path, which
+// has no number of its own to change) is a genuine "you are not who you say
+// you are" case: existingReject(), no oracle. A membership-id collision on an
+// id WE minted (createContact === true, i.e. the new-customer auto-mint path)
+// is entirely this function's own doing -- two signups computed the same
+// gap-fill number because neither had written yet -- so it re-mints and
+// retries the INSERT, bounded, exactly like withMintedMembershipNumber does
+// for contacts.ts.
 async function claimAccount(
   env: Env,
   args: { membershipId: string; name: string; canonical: string; passwordHash: string; contactId: number | null; createContact?: boolean },
 ): Promise<SignupResult> {
   const db = getDb(env)
-  let accountId: number
-  try {
-    const res = await db.prepare(
-      'INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES (@membership_id, @name, @phone, @password_hash, @contact_id)',
-    ).run({
-      membership_id: args.membershipId,
-      name: args.name,
-      phone: args.canonical,
-      password_hash: args.passwordHash,
-      contact_id: args.contactId,
-    })
-    accountId = res.lastInsertRowid
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (/UNIQUE constraint failed/i.test(message)) {
-      // Either the phone or the membership id was taken between our check and
-      // this insert — same reminder, no oracle.
-      return existingReject()
+  let membershipId = args.membershipId
+  let accountId: number | null = null
+  let lastError: unknown = null
+  const maxAttempts = args.createContact ? 5 : 1
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const res = await db.prepare(
+        'INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES (@membership_id, @name, @phone, @password_hash, @contact_id)',
+      ).run({
+        membership_id: membershipId,
+        name: args.name,
+        phone: args.canonical,
+        password_hash: args.passwordHash,
+        contact_id: args.contactId,
+      })
+      accountId = res.lastInsertRowid
+      break
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/UNIQUE constraint failed/i.test(message)) throw error
+      // Only a collision on an id WE minted (createContact === true) may
+      // retry -- deliberately NOT gated on remaining-attempts here, so the
+      // loop's own bound (maxAttempts) is what stops it, and an id supplied
+      // by the caller always falls through to existingReject() below on its
+      // very first (and only, maxAttempts === 1) failure.
+      if (!(args.createContact === true && isMembershipCollision(error))) return existingReject()
+      lastError = error
+      membershipId = await mintMembershipNumber(db)
     }
-    throw error
+  }
+
+  if (accountId === null) {
+    // Exhausted every retry -- mirrors withMintedMembershipNumber's own
+    // exhaustion behaviour (throw); the global error handler turns this into
+    // a 500 rather than the misleading "verification_failed" reminder.
+    throw lastError instanceof Error ? lastError : new Error('Could not mint a unique membership id')
   }
 
   // Fold the name into a new contact for a genuinely-new customer, then link
@@ -163,7 +191,7 @@ async function claimAccount(
         name: args.name,
         phone: formatPhoneP8(args.canonical),
         phone_normalized: args.canonical,
-        membership_number: args.membershipId,
+        membership_number: membershipId,
       })
       await db.prepare('UPDATE portal_accounts SET contact_id = @cid WHERE id = @id').run({ cid: contact.lastInsertRowid, id: accountId })
     } catch (_) {
@@ -172,7 +200,7 @@ async function claimAccount(
     }
   }
 
-  return { ok: true, accountId, membershipId: args.membershipId, name: args.name }
+  return { ok: true, accountId, membershipId, name: args.name }
 }
 
 export async function signinPortalAccount(env: Env, input: SigninInput): Promise<SigninResult> {

@@ -89,6 +89,41 @@ const env = {}
 let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
+// A fully independent DB + wiring, for the concurrency checks below: two
+// signups racing on a blank slate must not be able to see each other's
+// prior rows, and neither may collide with anything the checks above wrote
+// into the shared `db` above. Returns both the signup entry point and the
+// raw db handle so a test can seed rows directly before racing.
+function makeIsolatedPortal() {
+  const rawDb2 = openDb(loadAll())
+  const db2 = {
+    prepare(sql) {
+      const stmt = rawDb2.prepare(sql)
+      return {
+        get: async (p) => stmt.get(p),
+        all: async (p) => stmt.all(p) || [],
+        run: async (p) => {
+          const r = stmt.run(p)
+          return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
+        },
+      }
+    },
+    batch: (items) => rawDb2.batch(items),
+  }
+  const { signupPortalAccount: signup2 } = loadReal('lib/portalAccounts.ts', {
+    './db': { getDb: () => db2 },
+    './membershipNumber': membershipNumber,
+    './phone': phone,
+    './passwordPolicy': passwordPolicy,
+    './contactDuplicates': contactDuplicates,
+  })
+  return { signup: signup2, rawDb: rawDb2 }
+}
+
+function freshSignup() {
+  return makeIsolatedPortal().signup
+}
+
 function seedCustomer(fields) {
   rawDb.prepare(
     'INSERT INTO customers (name, phone, phone_normalized, address, membership_number) VALUES (@name, @phone, @phone_normalized, @address, @membership_number)',
@@ -229,6 +264,60 @@ async function run() {
       assert.strictEqual(res.ok, true)
       assert.ok(!existing.has(res.membershipId.toLowerCase()), 'the auto-issued id did not collide with any existing id')
     })
+  })
+
+  await check('two concurrent new-customer signups both succeed with distinct LC- ids (mint collision re-mints, not existingReject)', async () => {
+    // Fresh DB: both signups mint the SAME first-free sequence (neither has
+    // written yet when the other reads), so one INSERT wins the UNIQUE index
+    // on membership_id and the other must re-mint + retry -- not bounce the
+    // real customer into "verification_failed" for a collision that was
+    // entirely this function's own doing.
+    const signup2 = freshSignup()
+    const [a, b] = await Promise.all([
+      signup2(env, { name: 'Dara', phone: '099 111 222', password: 'secret123' }),
+      signup2(env, { name: 'Sokha', phone: '099 333 444', password: 'secret123' }),
+    ])
+    assert.strictEqual(a.ok, true, `first signup should succeed: ${JSON.stringify(a)}`)
+    assert.strictEqual(b.ok, true, `second signup should succeed: ${JSON.stringify(b)}`)
+    assert.match(a.membershipId, /^LC-\d{5}$/, `first id must be house format, got ${a.membershipId}`)
+    assert.match(b.membershipId, /^LC-\d{5}$/, `second id must be house format, got ${b.membershipId}`)
+    assert.notStrictEqual(a.membershipId, b.membershipId, 'concurrent signups must not share a membership id')
+  })
+
+  await check('a USER-SUPPLIED membership id that collides on the race still rejects (never re-minted)', async () => {
+    // One existing customer, reachable by the SAME supplied membership id
+    // through either of two phones (primary + a Contact Option secondary),
+    // so two concurrent existing-customer claims can each pass their own
+    // phone-match check yet race the SAME literal membershipId string into
+    // claimAccount with createContact left undefined. The two calls use
+    // DIFFERENT phones so only the membership-id UNIQUE index collides on
+    // the race (not the phone index) -- isolating exactly the branch the
+    // createContact gate protects: isMembershipCollision(error) is true,
+    // but this id was supplied by the caller, not minted here, so it must
+    // never fall into the re-mint path.
+    const { signup, rawDb: rawDb3 } = makeIsolatedPortal()
+    rawDb3.prepare(
+      'INSERT INTO customers (name, phone, phone_normalized, address, membership_number) VALUES (@name, @phone, @phone_normalized, @address, @membership_number)',
+    ).run({
+      name: 'Twin Customer',
+      phone: '099 010 010',
+      phone_normalized: '099010010',
+      address: JSON.stringify([{ phone: '099 020 020' }]),
+      membership_number: 'LC-00099',
+    })
+
+    const [a, b] = await Promise.all([
+      signup(env, { name: 'Twin Customer', phone: '099 010 010', membershipId: 'LC-00099', password: 'secret123' }),
+      signup(env, { name: 'Twin Customer', phone: '099 020 020', membershipId: 'LC-00099', password: 'secret123' }),
+    ])
+    const results = [a, b]
+    const succeeded = results.filter((r) => r.ok === true)
+    const rejected = results.filter((r) => r.ok === false)
+    assert.strictEqual(succeeded.length, 1, `exactly one racing claim on the supplied id should win: ${JSON.stringify(results)}`)
+    assert.strictEqual(rejected.length, 1, `the other must reject, not silently re-mint a different id: ${JSON.stringify(results)}`)
+    assert.strictEqual(succeeded[0].membershipId, 'LC-00099', 'the winner keeps the supplied id verbatim')
+    assert.strictEqual(rejected[0].code, 'verification_failed', 'a supplied-id collision returns the same no-oracle reminder, never a fresh mint')
+    assert.strictEqual(rejected[0].status, 409)
   })
 }
 
