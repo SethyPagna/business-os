@@ -114,7 +114,12 @@ export function parsePaymentMethods(raw: unknown): string[] {
   }
 }
 
-export default function ReportsHub({ embedded = false }: { embedded?: boolean }) {
+// The hub takes no layout props. It used to accept `embedded` and use it for
+// nothing but a padding fork -- and its one mount point (SalesHubPage) always
+// passed it, so the padded branch never ran and the surface had no side
+// gutter at all below 768px. The gutter is unconditional now and lives in
+// reports-surface.css, where it can also floor itself on the safe-area inset.
+export default function ReportsHub() {
   const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier, user, settings } = useApp()
   const trh = useCallback((key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }, [t])
   const tStr = useCallback((key: string): string => { const v = t(key); return v == null ? key : v }, [t])
@@ -419,7 +424,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   )
 
   return (
-    <div className={embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'} data-reports-hub>
+    <div className="space-y-2" data-reports-hub>
       {compact ? (controlsFolded ? foldedControls : (
         <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
           {searchInput}
@@ -433,7 +438,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
           </div>
         </section>
       )) : (
-        <div className="reports-desktop-controls">
+        <div className="reports-desktop-controls report-segment">
           <ControlRow className="reports-desktop-primary" sticky search={searchSlot} range={rangePicker} filters={null} actions={collapsedTail} overflow={collapsedTail} />
           {presetControls}
         </div>
@@ -444,7 +449,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
       {/* Shift blocks sit BELOW the report (reference: filters first, results
           second, nothing above the filters). Same two components as before. */}
       <CurrentShiftSummary showHistory={false} />
-      <section className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900" aria-label={trh('shift_history', 'Shift history')}>
+      <section className="report-segment flex min-w-0 flex-wrap items-center justify-between gap-2" aria-label={trh('shift_history', 'Shift history')}>
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{trh('shift_history', 'Shift history')}</h2>
           <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{trh('shift_history_all', 'Authorized shop history')}</p>

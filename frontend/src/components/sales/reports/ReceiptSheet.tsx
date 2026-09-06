@@ -80,7 +80,13 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
           // width of nothing between them (user, Part 586: "the fields and
           // value can be closer much closer"). The cap is lifted at md, where
           // the grid already bounds each card.
-          : 'w-full max-w-[26rem] rounded-[var(--ui-radius)] border border-[var(--ui-line)] bg-[var(--ui-surface)] px-2 py-1.5 md:max-w-none md:grid md:grid-cols-2 md:gap-1.5 md:border-0 md:bg-transparent md:p-0 xl:grid-cols-3',
+          //
+          // The frame stays at md+ too. It used to be dropped there
+          // (`md:border-0 md:bg-transparent md:p-0`), which left the card grid
+          // floating with no outer line at exactly the widths the owner reads
+          // reports on -- "use borders for all segments like up down, left and
+          // right, so see line borders" (Sep 6).
+          : 'w-full max-w-[26rem] rounded-[var(--ui-radius)] border border-[var(--ui-line)] bg-[var(--ui-surface)] px-2 py-1.5 md:max-w-none md:grid md:grid-cols-2 md:gap-1.5 xl:grid-cols-3',
         className,
       ].join(' ').trim()}
     >
@@ -91,7 +97,7 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
             {block.title != null || block.meta != null ? (
               <div className="flex items-baseline justify-between gap-2">
                 {block.title != null ? <div className="min-w-0 truncate font-semibold">{block.title}</div> : <span />}
-                {block.meta != null ? <div className="shrink-0 text-[11px] text-[var(--ui-ink-3)]">{block.meta}</div> : null}
+                {block.meta != null ? <div className="shrink-0 text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{block.meta}</div> : null}
               </div>
             ) : null}
             {block.lines.length ? (
@@ -140,7 +146,7 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
                         // in the 420px statement). `w-0 min-w-full` makes the
                         // spanning row contribute nothing to track sizing and
                         // then fill the pair's width, so it wraps under them.
-                        <span className="col-span-2 w-0 min-w-full whitespace-normal pl-3 font-sans text-[10px] leading-snug text-[var(--ui-ink-3)]">{line.note}</span>
+                        <span className="col-span-2 w-0 min-w-full whitespace-normal pl-3 font-sans text-[length:var(--ui-size-meta)] leading-snug text-[var(--ui-ink-3)]">{line.note}</span>
                       ) : null}
                     </Fragment>
                   )
@@ -149,21 +155,41 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
             ) : null}
           </>
         )
+        // Every block is a segment in its own right, bordered on all four
+        // sides at EVERY width -- the shared .report-segment class, not the
+        // old "dashed top rule below md, a real card only from md up" split.
+        // The owner's line borders have to be visible on the phone too.
         const cls = [
-          index > 0 ? 'mt-1.5 border-t border-dashed border-[var(--ui-line-2)] pt-1.5' : '',
-          !centered ? 'md:mt-0 md:rounded-[var(--ui-radius)] md:border md:border-solid md:border-[var(--ui-line)] md:bg-[var(--ui-surface)] md:p-1.5 md:mx-0' : '',
-          clickable ? 'w-full cursor-pointer text-left hover:bg-[var(--ui-surface-2)] -mx-1 px-1 rounded-[var(--ui-radius-sm)]' : '',
-          block.selected ? 'bg-[var(--ui-accent-soft)]' : '',
-          // Padding, not line-height: a Khmer cluster's ink runs ~1.6em and a
-          // tinted box that hugs the Latin metric shears its tops and tails.
-          block.highlight ? '-mx-1 rounded-[var(--ui-radius-sm)] border border-[var(--ui-warn-line)] bg-[var(--ui-warn-soft)] px-1.5 py-1' : '',
+          'report-segment',
+          // Below md the sheet is one stacked tape (the grid's own gap takes
+          // over from md up, where blocks sit side by side); the centered
+          // statement never becomes a grid, so it keeps stacking.
+          index > 0 ? (centered ? 'mt-1.5' : 'mt-1.5 md:mt-0') : '',
+          clickable ? 'w-full cursor-pointer text-left hover:bg-[var(--ui-surface-2)]' : '',
         ].join(' ').trim()
+        // Selected / highlighted are DATA ATTRIBUTES, not background
+        // utilities. A `bg-[var(--ui-warn-soft)]` utility and `.report-segment`
+        // are both 0-1-0, and this component's stylesheet is a lazily loaded
+        // chunk that lands after the utility sheet -- so the segment's own
+        // background would paint over the tint. The tint on the
+        // awaiting-payment block is load-bearing (S4R3-6): it is what stops a
+        // theoretical figure being read as a realised one. The matching
+        // 0-2-0 rules live in reports-surface.css beside .report-segment.
+        //
+        // (Padding, not line-height, is still what buys the tinted box its
+        // separation: a Khmer cluster's ink runs ~1.6em and a box that hugs
+        // the Latin metric shears its tops and tails. The segment supplies
+        // that padding for every block, tinted or not.)
+        const stateProps = {
+          'data-segment-selected': block.selected ? 'true' : undefined,
+          'data-segment-highlight': block.highlight ? 'true' : undefined,
+        }
         return clickable ? (
-          <button key={block.key} type="button" className={cls} onClick={(e) => block.onClick?.(e.currentTarget)}>
+          <button key={block.key} type="button" className={cls} {...stateProps} onClick={(e) => block.onClick?.(e.currentTarget)}>
             {body}
           </button>
         ) : (
-          <div key={block.key} className={cls}>
+          <div key={block.key} className={cls} {...stateProps}>
             {body}
           </div>
         )

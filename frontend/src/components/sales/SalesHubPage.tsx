@@ -87,7 +87,7 @@ export default function SalesHubPage() {
         <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
           {section === 'returns' && canReturns ? <ReturnsSection embedded />
             : section === 'fees' && canFees ? <FeesSection embedded />
-            : section === 'reports' && canReports ? <ReportsSection embedded />
+            : section === 'reports' && canReports ? <ReportsSection />
             : canSales ? <SalesSection embedded />
             : canReturns ? <ReturnsSection embedded />
             : <FeesSection embedded />}

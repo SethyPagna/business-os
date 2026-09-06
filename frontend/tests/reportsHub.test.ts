@@ -776,7 +776,16 @@ test('Khmer keeps a line box tall enough that truncating cells cannot shear it',
   // surface override has to as well or it never lands.
   assert.ok(/\.text-xs[\s\S]{0,80}line-height:[^;]+!important/.test(kmBlocks), 'the .text-xs override can actually win')
   // A taller line box needs a taller row, or the row clips instead of the cell.
-  assert.match(kmBlocks, /--ui-row-h:\s*38px/, 'Khmer rows grow to fit the taller line box')
+  // The row used to be pinned at a flat 38px, chosen for 12px Khmer type. Since
+  // the owner asked for larger Khmer in reports (Sep 6) the type itself moves
+  // with `--ui-km-boost`, so a flat row height would go straight back to
+  // clipping the moment the boost or the desktop tier raises the size. The row
+  // is derived from the same multiplier instead -- 43.2px at boost 1.2,
+  // comfortably past the old floor, and it tracks any future change to either.
+  assert.match(kmBlocks, /--ui-row-h:\s*calc\(36px \* var\(--ui-km-boost, 1\)\)/, 'Khmer rows grow with the boosted type instead of a frozen height')
+  assert.doesNotMatch(kmBlocks, /--ui-row-h:\s*\d+px/, 'no frozen Khmer row height may come back')
+  const kmBoost = Number((kmBlocks.match(/--ui-km-boost:\s*([\d.]+)/) || [])[1])
+  assert.ok(36 * kmBoost >= 38, `the derived Khmer row (${36 * kmBoost}px) must not fall below the 38px floor the flat value guarded`)
   // The fold is portalled to document.body, i.e. OUTSIDE [data-reports-hub],
   // so it needs its own hook or the menu keeps clipping.
   assert.ok(css.includes('[data-reports-fold]'), 'the portalled fold is covered too')
@@ -833,11 +842,26 @@ test('the awaiting-payment block is set apart in the warning tint on every surfa
   assert.ok(css.includes("tr[data-statement-group='pending']"), 'the excel style tints the block by group')
   const sheet = read('src/components/sales/reports/ReceiptSheet.tsx')
   assert.ok(/highlight\?: boolean/.test(sheet), 'the receipt style takes a highlight flag')
-  assert.ok(sheet.includes('bg-[var(--ui-warn-soft)]'), 'and paints it in the warning tint')
+  // The tint moved off a Tailwind utility and onto a data attribute on Sep 6,
+  // because the receipt block became a `.report-segment` -- and a background
+  // utility (0-1-0) ties with `.report-segment` (0-1-0), which ships in a
+  // lazily loaded chunk that lands AFTER the utility sheet and would have
+  // painted the tint out. The requirement is unchanged and now decided by
+  // specificity rather than by bundling order:
+  assert.ok(sheet.includes("'data-segment-highlight': block.highlight ? 'true' : undefined"), 'the highlighted block is marked on the element')
+  assert.match(css, /\.report-segment\[data-segment-highlight='true'\]\s*\{[^}]*background:\s*var\(--ui-warn-soft\)/, 'and painted in the warning tint by a rule that outranks the segment background')
+  assert.doesNotMatch(css, /\n\.report-segment\s*\{[^}]*background:\s*var\(--ui-warn-soft\)/, 'the base segment is not itself the warn colour')
   // Khmer: the tinted box buys its separation with PADDING. A box that hugs
   // the Latin metric shears the tops and tails of a Khmer cluster.
-  const hl = sheet.slice(sheet.indexOf('block.highlight'), sheet.indexOf('block.highlight') + 200)
-  assert.ok(/px-[\d.]+ py-[\d.]+/.test(hl), 'the tinted box is padded')
+  //
+  // Since Sep 6 that padding comes from the shared `.report-segment` shell
+  // every receipt card sits in (owner: borders on all four sides of every
+  // segment), so the highlight only RECOLOURS a box that is already padded.
+  // The requirement is unchanged; the guard follows the padding to where it
+  // now lives instead of pinning a utility class that has moved.
+  const hl = sheet.slice(sheet.indexOf('block.highlight ?'), sheet.indexOf('block.highlight ?') + 200)
+  assert.ok(/'report-segment',/.test(sheet), 'every receipt block, highlighted or not, sits in the padded segment shell')
+  assert.match(css, /\.report-segment\s*\{[^}]*padding:\s*\d+px/, 'and that shell is what supplies the padding')
   assert.ok(!/leading-|line-height/.test(hl), 'and never shortens the line box')
 
   // Parity: the group order, the group label and the tint predicate all come

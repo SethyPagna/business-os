@@ -30,7 +30,11 @@ for (const now of [new Date(2026, 0, 1), new Date(2026, 8, 5), new Date(2026, 3,
     assert.deepEqual(helper(preset, now), statsPresetRange(preset, now), `${preset} must have identical clock/date semantics`)
   }
 }
-assert.match(css, /@media \(min-width: 1024px\)[\s\S]*?\[data-reports-hub\][\s\S]*?--ui-size-body: 14px/)
+// The desktop tier still raises the body size; it now states it as a multiple
+// of `--ui-km-boost` so the Khmer boost (reportDocumentSurface.test.ts) is not
+// silently overwritten at >=1024 by an equally specific flat px. The Latin
+// value is unchanged -- the boost is 1 unless `body.lang-km` raises it.
+assert.match(css, /@media \(min-width: 1024px\)[\s\S]*?\[data-reports-hub\][\s\S]*?--ui-size-body: calc\(14px \* var\(--ui-km-boost, 1\)\)/)
 assert.match(css, /@media \(min-width: 768px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(12px, 2vw, 24px\);/)
 assert.ok(css.indexOf('@media (min-width: 768px)') < css.indexOf('@media (min-width: 1024px)'), 'desktop gutter overrides tablet gutter; phones remain unchanged')
 assert.match(css, /\[data-reports-hub\] \.reports-overview-statement\s*\{[^}]*max-width: 34rem/)
@@ -68,15 +72,19 @@ for (const lang of ['en', 'km']) {
 // specificity) and must never touch the tablet gutter (61237948) or the
 // rounding fix (c999e909) already on this line.
 assert.match(css, /@media \(min-width: 1280px\)\s*\{\s*\[data-reports-hub\]\s*\{\s*padding-inline: clamp\(40px, 4vw, 64px\);/, '1280px gets its own, larger gutter')
-assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[^}]*max-width: 96rem;[^}]*margin-inline: auto;[^}]*padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ caps the reading width and centers it, so 1920/4K keeps growing margin instead of a saturated 48px')
-// REPAIR (verifier, Sep 6): `margin-inline: auto` on a flex item does not
-// stretch it (CSS Flexbox 9.6) -- without an explicit `width: 100%` the hub
-// shrinks to fit-content and `max-width: 96rem` never binds, so the whole
-// surface floats mid-screen at >=1536px instead of centering at its cap.
-// This assertion must fail against the un-repaired declaration list (it did,
-// before `width: 100%` was added) so it actually guards the stretch
-// contract instead of freezing the flex-collapse defect.
-assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[^}]*width: 100%;[^}]*max-width: 96rem;[^}]*margin-inline: auto;[^}]*padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ hub is given an explicit width so the auto margins can stretch-then-center it against the max-width cap, instead of shrinking to fit-content')
+assert.match(css, /@media \(min-width: 1536px\)\s*\{\s*\[data-reports-hub\]\s*\{[\s\S]*?padding-inline: clamp\(56px, 4vw, 80px\);/, '1536px+ keeps the last rung of the gutter ladder')
+// SUPERSEDED, Sep 6 (owner: "in small and large screens move them more to the
+// center...compact them"). The width cap and its auto margins used to live
+// HERE, at 96rem, so 1024-1535 ran the full content width and 1920 still
+// showed a 1536px slab. They moved up to the 1024 tier at 74rem, which is a
+// reading width -- checked in reportDocumentSurface.test.ts, which owns the
+// cap contract now. What must NOT be lost in the move is the reason the
+// earlier repair existed: `margin-inline: auto` on a flex item does not
+// stretch it (CSS Flexbox 9.6), so without an explicit `width: 100%` the hub
+// shrinks to fit-content, the cap never binds and the surface floats
+// mid-screen. That assertion travels with the cap:
+assert.match(css, /@media \(min-width: 1024px\)\s*\{\s*\[data-reports-hub\]\s*\{[\s\S]*?width: 100%;\s*max-width: 74rem;\s*margin-inline: auto;/, 'the capped column is given an explicit width so the auto margins stretch-then-centre it instead of collapsing it to fit-content')
+assert.doesNotMatch(css, /max-width: 96rem/, 'the 1536-only 96rem slab is gone')
 const gutterOrder = ['@media (min-width: 768px)', '@media (min-width: 1024px)', '@media (min-width: 1280px)', '@media (min-width: 1536px)']
 for (let i = 1; i < gutterOrder.length; i += 1) {
   assert.ok(css.indexOf(gutterOrder[i - 1]) < css.indexOf(gutterOrder[i]), `${gutterOrder[i - 1]} must precede ${gutterOrder[i]} so wider screens win the cascade`)
