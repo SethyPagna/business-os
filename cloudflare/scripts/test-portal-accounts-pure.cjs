@@ -123,7 +123,7 @@ async function run() {
   })
 
   await check('signup (new customer, no membership id) creates account + folded contact + auto id', async () => {
-    const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret123' })
+    const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret123', consent: true })
     assert.strictEqual(res.ok, true)
     // New IDs use the shared eight-character A-Z/0-9 contract. Existing
     // supplied membership IDs retain their separate compatibility coverage.
@@ -139,7 +139,7 @@ async function run() {
   })
 
   await check('signup rejects a phone that already exists in ANY format (canonical uniqueness)', async () => {
-    const res = await signupPortalAccount(env, { name: 'Someone Else', phone: '+855 99 888 777', password: 'secret123' })
+    const res = await signupPortalAccount(env, { name: 'Someone Else', phone: '+855 99 888 777', password: 'secret123', consent: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(res.abuse, true)
@@ -147,7 +147,7 @@ async function run() {
 
   await check('signup (existing customer) succeeds with membership id + MATCHING phone, links the contact', async () => {
     const contactId = seedCustomer({ name: 'Old Buyer', phone: '011 222 333', phone_normalized: '011222333', membership_number: 'LCMN-OLDBUYER' })
-    const res = await signupPortalAccount(env, { name: 'Old Buyer', phone: '855 11 222 333', membershipId: 'lcmn-oldbuyer', password: 'secret123' })
+    const res = await signupPortalAccount(env, { name: 'Old Buyer', phone: '855 11 222 333', membershipId: 'lcmn-oldbuyer', password: 'secret123', consent: true })
     assert.strictEqual(res.ok, true)
     const account = rawDb.prepare('SELECT contact_id, membership_id FROM portal_accounts WHERE id = ?').get([res.accountId])
     assert.strictEqual(account.contact_id, contactId, 'linked to the existing contact, no new one')
@@ -156,19 +156,19 @@ async function run() {
 
   await check('signup (existing customer) with a PHONE MISMATCH is rejected with the reminder', async () => {
     seedCustomer({ name: 'Mismatch', phone: '012 000 000', phone_normalized: '012000000', membership_number: 'LCMN-MISMATCH' })
-    const res = await signupPortalAccount(env, { name: 'Mismatch', phone: '012 999 999', membershipId: 'LCMN-MISMATCH', password: 'secret123' })
+    const res = await signupPortalAccount(env, { name: 'Mismatch', phone: '012 999 999', membershipId: 'LCMN-MISMATCH', password: 'secret123', consent: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
   })
 
   await check('signup with an unknown membership id is rejected (no oracle — same reminder)', async () => {
-    const res = await signupPortalAccount(env, { name: 'Ghost', phone: '078 555 111', membershipId: 'LCMN-NOSUCHID', password: 'secret123' })
+    const res = await signupPortalAccount(env, { name: 'Ghost', phone: '078 555 111', membershipId: 'LCMN-NOSUCHID', password: 'secret123', consent: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
   })
 
   await check('signup with a short password is a benign form error (not counted as abuse)', async () => {
-    const res = await signupPortalAccount(env, { name: 'Shorty', phone: '070 111 222', password: '123' })
+    const res = await signupPortalAccount(env, { name: 'Shorty', phone: '070 111 222', password: '123', consent: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'password_weak')
     assert.strictEqual(res.abuse, false)
@@ -223,7 +223,7 @@ async function run() {
 
     // A brand-new signup's auto id equals no pre-existing id in EITHER store.
     const existing = new Set([...customerNumbers, ...accountIds])
-    return signupPortalAccount(env, { name: 'Fresh Auto', phone: '096 424 242', password: 'secret123' }).then((res) => {
+    return signupPortalAccount(env, { name: 'Fresh Auto', phone: '096 424 242', password: 'secret123', consent: true }).then((res) => {
       assert.strictEqual(res.ok, true)
       assert.ok(!existing.has(res.membershipId.toLowerCase()), 'the auto-issued id did not collide with any existing id')
     })

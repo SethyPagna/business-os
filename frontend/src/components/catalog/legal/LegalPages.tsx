@@ -29,6 +29,42 @@ import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
 
 export const LEGAL_QUERY_PARAM = 'legal'
 
+// One custom event carries "open a policy page" from anywhere in the
+// storefront to the single <PortalFooter/> that owns the reader, so no other
+// surface has to grow its own copy of it (or be prop-drilled a callback
+// through four components).
+export const LEGAL_OPEN_EVENT = 'businessos:portal-legal-open'
+
+/**
+ * An inline "Read the Privacy Policy" link for surfaces that are not the
+ * footer -- today, the sign-up consent line. It is a real anchor with a real
+ * href, so it is focusable, copyable and middle-clickable, and a plain left
+ * click opens the reader in place instead of reloading the app.
+ */
+export function LegalInlineLink({ page, label, className }: { page: LegalPageKey; label: string; className?: string }) {
+  const href = typeof window === 'undefined'
+    ? `?${LEGAL_QUERY_PARAM}=${page}`
+    : legalHref(page, window.location.search, window.location.pathname)
+  const onClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    // A modified click means "new tab/window" -- leave it to the browser.
+    if (event.defaultPrevented || event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    if (typeof window === 'undefined') return
+    const detail: LegalOpenDetail = { page, handled: false }
+    window.dispatchEvent(new CustomEvent(LEGAL_OPEN_EVENT, { detail }))
+    // If no footer is mounted to answer, fall through to a real navigation
+    // rather than leaving a dead link.
+    if (detail.handled) event.preventDefault()
+  }
+  return (
+    <a href={href} onClick={onClick} className={className ?? INLINE_LINK_CLASS}>{label}</a>
+  )
+}
+
+type LegalOpenDetail = { page: LegalPageKey; handled: boolean }
+
+const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-600 dark:text-emerald-300'
+
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
 export type PortalFooterProps = {
@@ -149,6 +185,19 @@ export default function PortalFooter({
       window.history.replaceState(null, '', legalHref(null, window.location.search, window.location.pathname))
     } catch { /* see openPage */ }
   }, [])
+
+  // Any surface can ask for a policy page (the sign-up consent line does).
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<LegalOpenDetail>).detail
+      if (!detail || !isLegalPageKey(detail.page)) return
+      detail.handled = true
+      openPage(detail.page)
+    }
+    window.addEventListener(LEGAL_OPEN_EVENT, onOpen)
+    return () => window.removeEventListener(LEGAL_OPEN_EVENT, onOpen)
+  }, [openPage])
 
   // Back/forward buttons drive the reader, so it behaves like a page.
   useEffect(() => {

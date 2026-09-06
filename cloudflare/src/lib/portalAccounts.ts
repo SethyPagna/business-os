@@ -25,7 +25,52 @@ const BCRYPT_COST = 10
 // whether or not the phone exists — no timing/enumeration oracle.
 const DUMMY_HASH = '$2b$10$bcwRkHdyVgPIxFMLWdK9sOKBez3Uv06DFpLaUR/Mq0c6w595bHNFq'
 
-export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown }
+// The storefront asks a visitor to agree to the Terms and the Privacy Policy
+// before creating an account, and we record WHICH version they agreed to --
+// a bare `consented: 1` proves nothing once the policy text changes. This
+// literal must match PORTAL_LEGAL_CONSENT_VERSION in
+// frontend/src/components/catalog/legal/legalContent.ts, which is the version
+// of the text actually shown; scripts/test-portal-legal-consent-pure.cjs pins
+// the two together so they cannot drift apart.
+export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-09-07'
+
+// A ticked checkbox arrives as `true` over JSON and as 'true'/'on'/'1' from
+// anything that posts a form. Everything else -- absent, false, '', 'false'
+// -- is not consent. Silence is never agreement, and a pre-ticked or omitted
+// box must fail closed.
+export function consentGiven(value: unknown): boolean {
+  if (value === true) return true
+  const text = String(value ?? '').trim().toLowerCase()
+  return text === 'true' || text === 'on' || text === '1' || text === 'yes'
+}
+
+// consent_version / consent_at arrive with migration 0130. A Worker deploy
+// lands before a migration is applied, so the write TOLERATES their absence:
+// the visitor still gets an account, only the stamp is lost. Same shape as
+// routes/returns.ts::salesHasLegacyReceiptColumn -- a `true` is permanent
+// (columns are not dropped), a `false` is re-probed so a warm isolate picks
+// the migration up within a minute.
+const CONSENT_COLUMN_RECHECK_MS = 60_000
+let consentColumnState: { present: boolean; checkedAt: number } | null = null
+
+async function portalAccountsHaveConsentColumns(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const now = Date.now()
+  if (consentColumnState?.present) return true
+  if (consentColumnState && now - consentColumnState.checkedAt < CONSENT_COLUMN_RECHECK_MS) return false
+  try {
+    const rows = await db.prepare('PRAGMA table_info("portal_accounts")').all<{ name?: string }>()
+    const names = new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.name || '')))
+    const present = names.has('consent_version') && names.has('consent_at')
+    consentColumnState = { present, checkedAt: now }
+    return present
+  } catch {
+    // A probe failure must not cost a real customer their account.
+    consentColumnState = { present: false, checkedAt: now }
+    return false
+  }
+}
+
+export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown }
 export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown }
 
 // `abuse` marks a failure that should count toward the 10-fail signup cap
@@ -94,6 +139,18 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   const canonical = canonicalizePhone(input.phone)
   const membershipId = String(input.membershipId ?? '').trim()
 
+  // Checked before anything is looked up: refusing after the phone probe
+  // would let a caller use signup as a phone-existence oracle while never
+  // consenting. A missing box is a form error, so it never counts as abuse.
+  if (!consentGiven(input.consent)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Please agree to the Terms & Conditions and the Privacy Policy to create an account.',
+      code: 'consent_required',
+      abuse: false,
+    }
+  }
   if (!name) return { ok: false, status: 400, error: 'Your name is required.', code: 'name_required', abuse: false }
   if (!canonical) return { ok: false, status: 400, error: 'A valid phone number is required.', code: 'phone_required', abuse: false }
   if (passwordTooShort(password)) return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
@@ -133,16 +190,27 @@ async function claimAccount(
 ): Promise<SignupResult> {
   const db = getDb(env)
   let accountId: number
+  // consent_at uses CURRENT_TIMESTAMP so it shares the database clock and the
+  // exact format of created_at in the same row.
+  const stampConsent = await portalAccountsHaveConsentColumns(db)
+  const columns = ['membership_id', 'name', 'phone', 'password_hash', 'contact_id']
+  const values = columns.map((column) => `@${column}`)
+  const params: Record<string, unknown> = {
+    membership_id: args.membershipId,
+    name: args.name,
+    phone: args.canonical,
+    password_hash: args.passwordHash,
+    contact_id: args.contactId,
+  }
+  if (stampConsent) {
+    columns.push('consent_version', 'consent_at')
+    values.push('@consent_version', 'CURRENT_TIMESTAMP')
+    params.consent_version = PORTAL_CONSENT_VERSION
+  }
   try {
     const res = await db.prepare(
-      'INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES (@membership_id, @name, @phone, @password_hash, @contact_id)',
-    ).run({
-      membership_id: args.membershipId,
-      name: args.name,
-      phone: args.canonical,
-      password_hash: args.passwordHash,
-      contact_id: args.contactId,
-    })
+      `INSERT INTO portal_accounts (${columns.join(', ')}) VALUES (${values.join(', ')})`,
+    ).run(params)
     accountId = res.lastInsertRowid
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

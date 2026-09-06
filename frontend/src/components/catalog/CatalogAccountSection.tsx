@@ -4,6 +4,7 @@ import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
+import SignupConsentField, { CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM } from './legal/SignupConsentField.tsx'
 import type { PortalAccountProfile } from './portalAccount.ts'
 
 // The storefront Account area (§2). Replaces the old anonymous membership
@@ -51,6 +52,11 @@ export default function CatalogAccountSection({
   const [signupPhone, setSignupPhone] = useState('')
   const [membershipId, setMembershipId] = useState('')
   const [signupPassword, setSignupPassword] = useState('')
+  // N45: agreement to the Terms and the Privacy Policy. Unticked by default
+  // -- a pre-ticked box is not consent -- and enforced again in the Worker,
+  // because this endpoint is public and a checkbox is only a prompt.
+  const [consent, setConsent] = useState(false)
+  const [consentError, setConsentError] = useState('')
 
   const switchMode = (next: 'signin' | 'signup') => {
     setMode(next)
@@ -64,6 +70,15 @@ export default function CatalogAccountSection({
 
   const onSignUp = async (event: React.FormEvent) => {
     event.preventDefault()
+    // `required` on the input already blocks this in every current browser;
+    // this second check is what a novalidate form or a programmatic submit
+    // hits, and it says why in the visitor's own language instead of the
+    // browser's untranslated bubble.
+    if (!consent) {
+      setConsentError(copy('portal_legal_consent_required', CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM))
+      return
+    }
+    setConsentError('')
     // The membership-id-empty reminder: existing customers should use their ID
     // (their phone must match), not create a fresh account.
     if (!membershipId.trim()) {
@@ -72,9 +87,9 @@ export default function CatalogAccountSection({
         : window.confirm(copy('signupReminder', REMINDER))
       if (!proceed) return
     }
-    const ok = await signUp({ name, phone: signupPhone, membershipId, password: signupPassword })
+    const ok = await signUp({ name, phone: signupPhone, membershipId, password: signupPassword, consent })
     if (ok) {
-      setName(''); setSignupPhone(''); setMembershipId(''); setSignupPassword('')
+      setName(''); setSignupPhone(''); setMembershipId(''); setSignupPassword(''); setConsent(false)
     }
   }
 
@@ -216,6 +231,12 @@ export default function CatalogAccountSection({
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:bg-amber-400/10 dark:text-amber-200">
                   {copy('signupReminder', REMINDER)}
                 </p>
+                <SignupConsentField
+                  copy={copy}
+                  checked={consent}
+                  onChange={(next) => { setConsent(next); if (next) setConsentError('') }}
+                  error={consentError}
+                />
                 <button type="submit" disabled={busy} className={submitClass}>
                   {busy ? copy('creatingAccount', 'Creating account…') : copy('createAccount', 'Create account')}
                 </button>
