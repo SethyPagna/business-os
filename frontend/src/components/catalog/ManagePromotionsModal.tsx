@@ -270,7 +270,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
   const isEditing = editingId !== null
 
   return (
-    <Modal title="Announcement Strip" onClose={onClose} size="lg" unsavedChanges={{ dirty: editingId !== null }}>
+    <Modal title={copy('announcementStrip', 'Announcement Strip')} onClose={onClose} size="lg" unsavedChanges={{ dirty: editingId !== null }}>
       <div className="flex flex-col gap-4 overflow-y-auto p-5">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Small, quick banner cards that scroll horizontally at the very top of the public catalog page —
@@ -297,7 +297,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                <span className="font-medium text-gray-700 dark:text-gray-300">Title *</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('title', 'Title')} *</span>
                 <input
                   type="text"
                   value={form.title}
@@ -309,7 +309,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
               </label>
 
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                <span className="font-medium text-gray-700 dark:text-gray-300">Subtitle</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('subtitle', 'Subtitle')}</span>
                 <input
                   type="text"
                   value={form.subtitle}
@@ -358,7 +358,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
               </div>
 
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-gray-700 dark:text-gray-300">Badge text</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('badgeText', 'Badge text')}</span>
                 <input
                   type="text"
                   value={form.badge_text}
@@ -370,7 +370,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
               </label>
 
               <div className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-gray-700 dark:text-gray-300">Badge color</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('badgeColor', 'Badge color')}</span>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {BADGE_COLOR_PRESETS.map((preset) => (
                     <button
@@ -386,7 +386,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
               </div>
 
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-gray-700 dark:text-gray-300">Links to</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('linksTo', 'Links to')}</span>
                 <AppSelect
                   value={form.link_type}
                   buttonClassName="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-normal dark:border-gray-700 dark:bg-gray-900"
@@ -401,7 +401,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
 
               {form.link_type === 'product' && (
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-gray-700 dark:text-gray-300">Product *</span>
+                  <span className="font-medium text-gray-700 dark:text-gray-300">{copy('product', 'Product')} *</span>
                   <AppSelect
                     value={form.link_product_id}
                     buttonClassName="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-normal dark:border-gray-700 dark:bg-gray-900"
@@ -428,7 +428,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
               )}
 
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-gray-700 dark:text-gray-300">Show from (optional)</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('showFrom', 'Show from (optional)')}</span>
                 {/* Typed, not a native picker (Sep 3) -- app-wide rule. */}
                 <DateEntryInput
                   bare
@@ -441,7 +441,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
               </label>
 
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-gray-700 dark:text-gray-300">Show until (optional)</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('showUntil', 'Show until (optional)')}</span>
                 <DateEntryInput
                   bare
                   t={t}
@@ -459,7 +459,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   onChange={(e) => setForm((p) => ({ ...p, is_active: e.target.checked }))}
                   className="h-4 w-4 rounded"
                 />
-                <span className="font-medium text-gray-700 dark:text-gray-300">Visible on the portal now</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('visibleOnPortalNow', 'Visible on the portal now')}</span>
               </label>
             </div>
 
@@ -499,8 +499,8 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
         ) : promotions.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-gray-300 py-10 text-center dark:border-gray-700">
             <ImageIcon className="h-8 w-8 text-gray-300 dark:text-gray-600" />
-            <div className="text-sm text-gray-500 dark:text-gray-400">No promotions yet.</div>
-            <div className="text-xs text-gray-400 dark:text-gray-500">Click "New promotion" above to add your first banner.</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">{copy('noPromotionsYet', 'No promotions yet.')}</div>
+            <div className="text-xs text-gray-400 dark:text-gray-500">{copy('clickNewPromotionHint', 'Click "New promotion" above to add your first banner.')}</div>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -518,7 +518,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                     : 'border-gray-200 hover:border-gray-300 hover:shadow-sm dark:border-gray-700 dark:hover:border-gray-600'
                 } ${promo.is_active ? '' : 'opacity-60'}`}
               >
-                <GripVertical className="h-4 w-4 shrink-0 cursor-grab select-none text-gray-300 transition group-hover:text-gray-400" aria-label="Drag to reorder" />
+                <GripVertical className="h-4 w-4 shrink-0 cursor-grab select-none text-gray-300 transition group-hover:text-gray-400" aria-label={copy('dragToReorder', 'Drag to reorder')} />
                 {promo.image_path ? (
                   <img src={resolvePublicAssetUrl(promo.image_path)} alt="" className="h-12 w-16 shrink-0 rounded-lg border border-gray-100 object-cover dark:border-gray-800" />
                 ) : (
