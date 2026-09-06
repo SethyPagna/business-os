@@ -1041,7 +1041,10 @@ export default function Dashboard() {
     return () => { cancelled = true }
   }, [isActive, syncChannel?.channel, syncChannel?.ts])
 
-  const profit    = (summary?.cost_out || 0) - (summary?.cost_in || 0)
+  // A fourth "profit" (cost_out - cost_in, stock movement valued at cost) used
+  // to be defined here and read by nothing, so a reader comparing formulas met
+  // a dead one first. The one profit this component shows is the kernel's:
+  // aProfit below, explained by the profit card's own formula text.
   const summaryReady = isDashboardSummaryPayload(summary)
   const analyticsReady = isDashboardAnalyticsPayload(analytics)
   const summaryUnavailable = !loading && !summaryReady
