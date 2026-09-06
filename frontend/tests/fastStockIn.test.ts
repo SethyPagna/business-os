@@ -81,17 +81,26 @@ runTest('changed cost offers and uses the existing price-variant path', () => {
   assert.match(modalSource, /Total cost'\)}: \$\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
 })
 
-runTest('known zero catalog cost is prefetched and session cost keeps zero distinct from missing', () => {
+runTest('known zero catalog cost is prefetched and the two read surfaces agree on missing', () => {
   assert.match(modalSource, /candidate\.cost_price_usd != null[\s\S]*candidate\.purchase_price_usd/)
   assert.match(modalSource, /Number\.isFinite\(cost\) && cost >= 0/)
   assert.match(modalSource, /tr\('cost_price_usd', 'Cost price \$'\)/)
   assert.match(sessionsSource, /movementTotal != null && Number\.isFinite\(movementTotal\) && movementTotal >= 0/)
-  // The UNION kernel (N29) splits this in two: the movement half decides per
-  // row whether a cost was recorded at all, the grouped half sums that flag
-  // across both line kinds. A recorded 0.00 is a cost; only NULL is missing.
-  assert.match(stockSessionQuerySource, /CASE WHEN m\.total_cost_usd IS NOT NULL THEN 0 ELSE 1 END AS cost_missing/)
-  assert.match(stockSessionQuerySource, /SUM\(s\.cost_missing\) AS lines_without_movement_cost/)
-  assert.match(stockSessionQuerySource, /SUM\(CASE WHEN s\.total_cost_usd IS NOT NULL THEN s\.total_cost_usd ELSE 0 END\) AS movement_cost_usd/)
+  // The SQL that decides recorded-vs-missing is tested where it can be RUN,
+  // against real rows: cloudflare/scripts/test-stock-in-sessions-pure.cjs seeds
+  // a declared-$0.00 session beside an unpriced one and asserts they come back
+  // different. A regex over the query text here would only restate the
+  // implementation and would pass forever whatever the kernel then answered.
+  //
+  // What DOES belong here is the pair that can silently split: the desktop
+  // table cell and the phone card render the same figure, and the zero-cost
+  // ruling was once half-applied -- $0.00 on a phone, an em-dash on the table.
+  // Both must test for null only, and neither may go back to reading a
+  // recorded $0.00 as 'not recorded'.
+  assert.equal((sessionsSource.match(/unitCost == null \?/g) || []).length, 2,
+    'the table cell and the card must both test for null only')
+  assert.equal((sessionsSource.match(/unitCost == null \|\| Number\(unitCost\) <= 0/g) || []).length, 0,
+    'a recorded $0.00 unit cost is a cost, on both surfaces')
 })
 
 runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only after real writes', () => {
