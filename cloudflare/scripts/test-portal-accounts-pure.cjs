@@ -94,15 +94,22 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
 // prior rows, and neither may collide with anything the checks above wrote
 // into the shared `db` above. Returns both the signup entry point and the
 // raw db handle so a test can seed rows directly before racing.
-function makeIsolatedPortal() {
+// `membershipOverride` lets a test replace just mintMembershipNumber (e.g.
+// pin it to an already-taken id, to force every retry attempt to collide)
+// while keeping every other export (isMembershipCollision included) real --
+// see the exhaustion check below, which is the only caller that overrides.
+function makeIsolatedPortal(membershipOverride = membershipNumber) {
   const rawDb2 = openDb(loadAll())
+  let insertAttempts = 0
   const db2 = {
     prepare(sql) {
       const stmt = rawDb2.prepare(sql)
+      const isPortalInsert = /INSERT INTO portal_accounts/i.test(sql)
       return {
         get: async (p) => stmt.get(p),
         all: async (p) => stmt.all(p) || [],
         run: async (p) => {
+          if (isPortalInsert) insertAttempts += 1
           const r = stmt.run(p)
           return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
         },
@@ -112,12 +119,12 @@ function makeIsolatedPortal() {
   }
   const { signupPortalAccount: signup2 } = loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db2 },
-    './membershipNumber': membershipNumber,
+    './membershipNumber': membershipOverride,
     './phone': phone,
     './passwordPolicy': passwordPolicy,
     './contactDuplicates': contactDuplicates,
   })
-  return { signup: signup2, rawDb: rawDb2 }
+  return { signup: signup2, rawDb: rawDb2, getInsertAttempts: () => insertAttempts }
 }
 
 function freshSignup() {
@@ -318,6 +325,35 @@ async function run() {
     assert.strictEqual(succeeded[0].membershipId, 'LC-00099', 'the winner keeps the supplied id verbatim')
     assert.strictEqual(rejected[0].code, 'verification_failed', 'a supplied-id collision returns the same no-oracle reminder, never a fresh mint')
     assert.strictEqual(rejected[0].status, 409)
+  })
+
+  await check('exhausting every retry (5 attempts) on a mint that never varies THROWS -- it must not resolve to existingReject()', async () => {
+    // A pathological mintMembershipNumber that always hands back the SAME
+    // already-taken id: every one of claimAccount's maxAttempts INSERTs
+    // must collide, so this pins the exhaustion branch (portalAccounts.ts's
+    // `if (accountId === null) throw ...`) as genuinely reachable and
+    // genuinely a throw (500 via the global handler), not the misleading
+    // "verification_failed" 409 a caller-supplied collision gets. This is
+    // the exact case a reintroduced `attempt < maxAttempts - 1` gate on the
+    // retry condition breaks: that mutant makes the LAST attempt's failure
+    // fall through to `return existingReject()` instead of exiting the loop
+    // with accountId still null, so the throw below never fires.
+    const fixedId = 'LC-00777'
+    const stuckMint = { ...membershipNumber, mintMembershipNumber: async () => fixedId }
+    const { signup, rawDb: rawDb4, getInsertAttempts } = makeIsolatedPortal(stuckMint)
+    // Seed the id as already taken BEFORE the signup below even starts, so
+    // attempt #1 (using the id generateMembershipId minted up front) fails
+    // immediately, same as every retry after it.
+    rawDb4.prepare(
+      'INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES (@membership_id, @name, @phone, @password_hash, @contact_id)',
+    ).run({ membership_id: fixedId, name: 'Already Here', phone: '099700700', password_hash: 'x', contact_id: null })
+
+    await assert.rejects(
+      () => signup(env, { name: 'New Customer', phone: '099 800 900', password: 'secret123' }),
+      /UNIQUE constraint failed/,
+      'exhausting every retry must throw, not resolve to a SignupResult of any kind',
+    )
+    assert.strictEqual(getInsertAttempts(), 5, 'must make exactly maxAttempts (5) INSERT attempts before giving up, no more and no fewer')
   })
 }
 
