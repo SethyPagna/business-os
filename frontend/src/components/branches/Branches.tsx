@@ -1304,7 +1304,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               <input
                 id="branches-select-all"
                 name="branches_select_all"
-                aria-label="Select all branches"
+                aria-label={t('select_all') || 'Select all'}
                 type="checkbox"
                 className="h-4 w-4 rounded"
                 checked={selectedCount === visibleBranches.length && visibleBranches.length > 0}
