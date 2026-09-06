@@ -6,6 +6,7 @@
 // first-attribution-sticks visible instead of silently ignored.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { bulkStockReceiptWire as bulkReceiptWire } from '../src/utils/stockReceiptFields.ts'
 
 let passed = 0
 function ok(label: string) {
@@ -77,9 +78,25 @@ assert.match(branchAdjuster, /supplierId: row\.type === 'add' && row\.supplierId
 assert.match(branchAdjuster, /onChange\(\{ supplierId: null, supplierName: '' \}\)/, 'BranchStockAdjuster clears the row when its lot is attributed')
 ok('BranchStockAdjuster: per-row honesty (adds only, attributed lots cleared)')
 
-assert.match(bulkModal, /supplierId: action === 'add' && supplierId != null \? supplierId : undefined/, 'BulkAddStockModal sends supplier only for adds')
+// N14-D widened "adds only" here too, and for the same reason S4-16 widened
+// it on Inventory.tsx: routes/inventory.ts converts a 'set' that RAISES a
+// row's stock into an add, and this surface -- one figure applied to many
+// products, with no branch quantity in sight -- cannot tell which rows those
+// are. So a bulk set states the supplier too; a remove still states none.
+// Asserted by evaluating the shared rule, not by matching the expression.
+assert.match(bulkModal, /bulkStockReceiptWire\(action, \{/, 'BulkAddStockModal builds its receipt half from the shared rule')
+assert.deepEqual(
+  bulkReceiptWire('remove', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }),
+  {},
+  'a bulk remove carries no supplier and no cost',
+)
+assert.equal(
+  bulkReceiptWire('set', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }).supplierId,
+  9,
+  'a bulk set can raise a row, and a raise is a receipt that names its supplier',
+)
 assert.match(bulkModal, /supplier_bulk_hint/, 'BulkAddStockModal explains the fill-not-rewrite semantics for existing lots')
-ok('BulkAddStockModal: one supplier per bulk event, adds only, semantics explained')
+ok('BulkAddStockModal: one supplier per bulk event, receipts only, semantics explained')
 
 // --- Transport: the lot list carries attribution so the pickers can tell
 // locked from fill; the receive payload carries the id beside the name.

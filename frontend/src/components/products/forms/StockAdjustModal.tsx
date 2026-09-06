@@ -14,7 +14,7 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
-import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import {
   applyRowOutcome,
   browserStockStorage,
@@ -386,7 +386,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       supplier_id: '',
       supplier_name: '',
       unit_cost_usd: '',
-    free_goods: false,
+      free_goods: false,
       payment_status: 'paid',
       credit_due_date: '',
     })
@@ -472,18 +472,28 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
       return
     }
+    // The lot this submission actually names, from the one shared rule
+    // InventoryStockModals renders the picker by -- a picker that is not on
+    // screen chose nothing, so nothing stale rides the wire (N14-E). Picking
+    // an EXISTING lot blanks the supplier field on purpose: an attributed lot
+    // keeps its first supplier and the picker shows that name locked instead.
+    // This form cannot read the lot from here, so it defers the supplier half
+    // to routes/inventory.ts, which looks the lot up and refuses an
+    // unattributed one. The cost half is never deferred.
+    const batchWire = stockAdjustBatchWire({
+      type: adjustForm.type,
+      quantity: qty,
+      currentQuantity,
+      unlockPricing,
+      branchId: numericBranchId,
+      batchId: adjustForm.batch_id,
+    })
     // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts).
     // The sibling surface on this same shared form runs it identically.
     const receiptGate = stockReceiptGateCode({
       isStockIn,
       supplierName: adjustForm.supplier_name,
-      // Picking an EXISTING lot blanks the supplier field on purpose: an
-      // attributed lot keeps its first supplier and the picker shows that name
-      // locked instead (InventoryStockModals.tsx). This form cannot read the
-      // lot from here, so it defers the supplier half to routes/inventory.ts,
-      // which looks the lot up and refuses an unattributed one. The cost half
-      // is never deferred.
-      lotAttributionDeferred: adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new',
+      lotAttributionDeferred: batchWire.lotAttributionDeferred,
       unitCostUsd: adjustForm.unit_cost_usd,
       freeGoods: adjustForm.free_goods,
     })
@@ -501,7 +511,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       userId: user?.id,
       userName: user?.name || user?.username,
       unlockPricing,
-      batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
+      batchId: batchWire.batchId,
       // S4-16: a 'set' above the current figure has no batch picker but
       // always creates or date-matches a lot server-side, so it carries the
       // date, supplier and receipt fields exactly as an explicit add does.

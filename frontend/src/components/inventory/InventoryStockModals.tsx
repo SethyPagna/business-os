@@ -8,7 +8,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
-import { isStockInSubmission } from '../../utils/stockReceiptFields.ts'
+import { isBatchPickerVisible, isSetDownSubmission, isStockInSubmission } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -222,10 +222,18 @@ export default function InventoryStockModals({
   // remove drains the oldest lots FIFO -- the form was silently choosing which
   // lot the loss came out of. A set-down now offers the same batch picker an
   // explicit remove does, so the operator says which lot it leaves.
-  const isSetDown = adjustForm.type === 'set' && setDifference != null && setDifference < 0
-  const showBatchPicker = (adjustForm.type === 'add' || adjustForm.type === 'remove' || isSetDown)
-    && !unlockPricing
-    && Boolean(adjustBranchId)
+  const isSetDown = isSetDownSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity)
+  // One rule, shared with the two surfaces that submit this form
+  // (Inventory.tsx and StockAdjustModal.tsx build their wire from it), so the
+  // picker on screen and the lot on the wire can never disagree.
+  const showBatchPicker = isBatchPickerVisible({
+    type: adjustForm.type,
+    quantity: adjustForm.quantity,
+    currentQuantity: adjustCurrentQuantity,
+    unlockPricing,
+    branchId: adjustBranchId,
+    batchId: adjustForm.batch_id,
+  })
   // S4-16: a 'set' above the current figure IS a receipt -- routes/inventory.ts
   // turns it into an add of the difference and runs it through the same batch
   // ledger. It has no batch picker (nothing to pick against a total), so it
@@ -239,7 +247,15 @@ export default function InventoryStockModals({
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
   useEffect(() => {
-    if (!showBatchPicker || !adjustTargetId || !adjustBranchId) { setBatchOptions([]); return }
+    if (!showBatchPicker || !adjustTargetId || !adjustBranchId) {
+      setBatchOptions([])
+      // The picker just went away (a set-down raised into a set-up, pricing
+      // unlocked, the branch cleared). Whatever it had chosen belongs to the
+      // submission it was showing for, so drop it rather than leaving a lot
+      // id in the form that nothing on screen names any more.
+      setAdjustForm((current) => (current.batch_id === '' ? current : { ...current, batch_id: '' }))
+      return
+    }
     // Target/branch/type changed since the last fetch -- whatever was
     // previously picked may not even be in the new list (different
     // product, different branch's stock, or add<->remove switched which
@@ -268,7 +284,7 @@ export default function InventoryStockModals({
       })
       .finally(() => { if (!cancelled) setBatchLoading(false) })
     return () => { cancelled = true }
-  }, [showBatchPicker, adjustTargetId, adjustBranchId, adjustForm.type, isSetDown])
+  }, [showBatchPicker, adjustTargetId, adjustBranchId, adjustForm.type, isSetDown, setAdjustForm])
   // Default to "new batch" the first time the picker has something to
   // show for an add -- matches the decided default ("Default batch
   // `n+1: mm/dd/yyyy` stays the default for add stock"). That quote is from

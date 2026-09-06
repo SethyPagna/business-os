@@ -55,6 +55,122 @@ export function isStockInSubmission(type: string, quantity: unknown, currentQuan
 }
 
 /**
+ * The mirror image: a 'set' whose new total is BELOW what the branch holds.
+ * routes/inventory.ts converts exactly that case into a `remove` of the
+ * difference, so it takes stock out of real lots -- which is why the adjust
+ * form offers the batch picker for it (N14-E) instead of letting the server
+ * FIFO-drain whichever lots happen to be oldest.
+ */
+export function isSetDownSubmission(type: string, quantity: unknown, currentQuantity: unknown): boolean {
+  if (type !== 'set') return false
+  const requested = Number(quantity)
+  const current = Number(currentQuantity)
+  return Number.isFinite(requested) && Number.isFinite(current) && requested < current
+}
+
+export type StockAdjustBatchContext = {
+  type: string
+  quantity: unknown
+  currentQuantity: unknown
+  /** An unlocked add always creates a fresh lot server-side, so it has no picker. */
+  unlockPricing: boolean
+  branchId: unknown
+  /** Whatever the form is holding: '' (nothing picked), 'new', or a lot id. */
+  batchId: string | number
+}
+
+/**
+ * Whether the adjust form's batch picker is ON SCREEN for this submission.
+ *
+ * One rule, three consumers: InventoryStockModals renders by it, and
+ * Inventory.tsx and StockAdjustModal.tsx build their wire by it. They used to
+ * derive it separately -- the modal from the live form, the two submitters
+ * from `batch_id !== ''` alone -- so a lot id chosen while the picker was
+ * showing rode along after the picker had gone: raise a set-DOWN into a
+ * set-UP and the receipt silently topped up, and inherited the supplier of,
+ * a lot the operator had picked to REMOVE from. A hidden picker chose nothing.
+ */
+export function isBatchPickerVisible(ctx: StockAdjustBatchContext): boolean {
+  if (ctx.unlockPricing) return false
+  if (!(Number(ctx.branchId) > 0)) return false
+  if (ctx.type === 'add' || ctx.type === 'remove') return true
+  return isSetDownSubmission(ctx.type, ctx.quantity, ctx.currentQuantity)
+}
+
+/**
+ * The batch half of an /api/inventory/adjust body: the lot id that may ride
+ * the wire, and whether the SUPPLIER half of the receipt gate is deferred to
+ * the server for it.
+ *
+ * `lotAttributionDeferred` is true only for an existing lot picked by a
+ * VISIBLE picker: an attributed lot keeps its first supplier server-side, so
+ * the picker blanks the supplier field and shows the locked name instead, and
+ * routes/inventory.ts reads the lot's own attribution before deciding. It is
+ * never true for a stale id, which would defer the supplier question to a lot
+ * this submission never named.
+ */
+export function stockAdjustBatchWire(ctx: StockAdjustBatchContext): {
+  batchId?: string | number
+  lotAttributionDeferred: boolean
+} {
+  if (!isBatchPickerVisible(ctx)) return { lotAttributionDeferred: false }
+  const chosen = String(ctx.batchId ?? '')
+  if (chosen === '') return { lotAttributionDeferred: false }
+  return { batchId: ctx.batchId, lotAttributionDeferred: chosen !== 'new' }
+}
+
+/**
+ * N14-D on the BULK surface. BulkAddStockModal applies one action to many
+ * products and can see none of their branch figures, so it cannot tell which
+ * rows of a 'set' raise stock -- and a set that raises stock is a receipt the
+ * Worker gates exactly like an add. Offering the receipt fields for 'add'
+ * only left a bulk 'set' with no supplier and no cost to send, so every
+ * raising row came back 400 with nothing on screen to fix.
+ *
+ * So 'add' and 'set' both state the receipt facts and 'remove' states none.
+ * Over-stating on a set that turns out to lower every row costs nothing --
+ * routes/inventory.ts ignores a receipt cost on the remove it becomes -- and
+ * it is the only alternative to inventing the answer for the rows that rise.
+ */
+export function bulkActionCanReceive(action: string): boolean {
+  return action === 'add' || action === 'set'
+}
+
+export type BulkStockReceiptDraft = {
+  unitCost: string | number
+  freeGoods: boolean
+  supplierId: number | null
+  supplierName: string
+  receivedDate: string
+}
+
+export type BulkStockReceiptWire = {
+  unitCostUsd?: number
+  freeGoods?: true
+  supplierId?: number
+  supplierName?: string
+  receivedDate?: string
+}
+
+/** The receipt half of one bulk row's payload; empty for an action that removes. */
+export function bulkStockReceiptWire(action: string, draft: BulkStockReceiptDraft): BulkStockReceiptWire {
+  if (!bulkActionCanReceive(action)) return {}
+  const wire: BulkStockReceiptWire = {}
+  const typedCost = String(draft.unitCost ?? '').trim()
+  const cost = typedCost === '' ? Number.NaN : Number(typedCost)
+  if (Number.isFinite(cost) && cost >= 0) wire.unitCostUsd = cost
+  // Only ever sent as `true`: the flag is a claim the operator made, and an
+  // explicit `false` would read as a claim they did not make.
+  if (draft.freeGoods) wire.freeGoods = true
+  if (draft.supplierId != null) wire.supplierId = draft.supplierId
+  const supplierName = String(draft.supplierName || '').trim()
+  if (supplierName) wire.supplierName = supplierName
+  const receivedDate = String(draft.receivedDate || '').trim()
+  if (receivedDate) wire.receivedDate = receivedDate
+  return wire
+}
+
+/**
  * True when the operator chose "On credit" but left the due date empty.
  * routes/inventory.ts refuses that combination with a 400, so the surfaces
  * check it before submitting and say so in their own words.

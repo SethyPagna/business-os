@@ -23,7 +23,7 @@ import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 import InfoHint from '../../shared/InfoHint.tsx'
-import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import { bulkActionCanReceive, bulkStockReceiptWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import UnsavedChangesPrompt from '../../shared/UnsavedChangesPrompt.tsx'
 import { useCloseGuard } from '../../../utils/useCloseGuard.ts'
@@ -293,7 +293,15 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     ]
     const trimmedReason = reason.trim()
     if (trimmedReason) items.push({ label: t('reason') || 'Reason', value: trimmedReason })
-    if (action === 'add' && supplierName.trim()) items.push({ label: t('supplier') || 'Supplier', value: supplierName.trim() })
+    if (bulkActionCanReceive(action)) {
+      if (supplierName.trim()) items.push({ label: t('supplier') || 'Supplier', value: supplierName.trim() })
+      // The receipt cost is a claim about money; it belongs in the review the
+      // operator confirms, not only in the field they typed it into.
+      items.push({
+        label: t('unit_cost_usd') || 'Unit cost $',
+        value: freeGoods ? (t('stock_receipt_free_goods') || 'Free goods') : `$${String(unitCost)}`,
+      })
+    }
     return items
   }
 
@@ -309,8 +317,10 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     // N14-D: the same rule routes/inventory.ts enforces on every row this loop
     // submits (cloudflare/src/lib/stockReceiptGate.ts). Checked once, up front:
     // a bulk add that would be refused row by row should not start at all.
+    // A 'set' counts: this surface sees no branch figures, so any row of it
+    // may be the raise the Worker gates as an add.
     const receiptGate = stockReceiptGateCode({
-      isStockIn: action === 'add',
+      isStockIn: bulkActionCanReceive(action),
       supplierName,
       unitCostUsd: unitCost,
       freeGoods,
@@ -348,21 +358,17 @@ export default function BulkAddStockModal({ productIds, products, branches, user
             type: action,
             quantity: amount,
             branchId: normalizeBranchId(branchId),
-            // N14-D: the cost the operator typed for THIS receipt. Never
-            // `product.purchase_price_usd || 0` -- that answered "what did this
-            // cost?" with the catalogue's price, or with a zero that reads as
-            // free goods nobody declared.
-            unitCostUsd: action === 'add' ? Number(unitCost) : undefined,
-            freeGoods: action === 'add' && freeGoods ? true : undefined,
+            // N14-D: the receipt facts the operator typed for THIS event --
+            // the cost, the free-goods declaration, the supplier and the
+            // received date. Never `product.purchase_price_usd || 0`, which
+            // answered "what did this cost?" with the catalogue's price, or
+            // with a zero that reads as free goods nobody declared. Empty for
+            // a remove, and sent for a 'set' as well as an 'add' because a set
+            // that raises a row's stock is the add the Worker gates.
+            ...bulkStockReceiptWire(action, { unitCost, freeGoods, supplierId, supplierName, receivedDate }),
             reason: reason.trim(),
             userId: user?.id,
             userName: user?.name,
-            // Only an 'add' creates/matches lots -- same visibility-mirror
-            // rule as every other adjust surface.
-            receivedDate: action === 'add' && receivedDate ? receivedDate : undefined,
-            // D5a: adds only, mirroring the field's own visibility below.
-            supplierId: action === 'add' && supplierId != null ? supplierId : undefined,
-            supplierName: action === 'add' && supplierName.trim() ? supplierName.trim() : undefined,
           }), 'Bulk adjust product stock')
           if (result?.success === false) throw new Error(result?.error || 'Failed to adjust stock')
           working = applyRowOutcome(working, row.rowId, { status: 'done' })
@@ -510,10 +516,21 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                 : (t('bulk_remove_batch_note') || 'Stock is drawn from each product\u2019s oldest batch first (FIFO).')}
             </p>
           ) : null}
-          {action === 'add' ? (
+          {/* N14-D: a 'set' shows these too. This surface applies one figure to
+              many products and can see none of their branch stock, so any row
+              of a set may be the raise routes/inventory.ts gates as an add --
+              and a receipt states its supplier and its cost. Rows that turn
+              out to lower stock ignore them. */}
+          {bulkActionCanReceive(action) ? (
             <div>
-              <label htmlFor="bulk-add-stock-received-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label htmlFor="bulk-add-stock-received-date" className="mb-1 flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300">
                 {t('received_date') || 'Received date'}
+                {action === 'set' ? (
+                  <InfoHint
+                    label={t('received_date') || 'Received date'}
+                    text={t('bulk_set_receipt_hint') || 'A set that raises a product’s stock receives goods, so it needs the supplier and unit cost. Rows where the set lowers stock ignore them.'}
+                  />
+                ) : null}
               </label>
               {/* Typed, not a native picker (Sep 3) -- the bulk add's own
                   received date, which derives every lot code it creates. */}

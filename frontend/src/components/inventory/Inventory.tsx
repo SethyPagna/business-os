@@ -67,7 +67,7 @@ import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import { isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import type { QueryParams } from '../../api/query.ts'
 import {
@@ -1139,18 +1139,33 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
       return
     }
+    // The lot this submission actually names, derived from the one shared
+    // rule InventoryStockModals renders the picker by -- a picker that is not
+    // on screen chose nothing, so nothing stale rides the wire (N14-E).
+    // Picking an EXISTING lot blanks the supplier field on purpose: an
+    // attributed lot keeps its first supplier and the picker shows that name
+    // locked instead. This form cannot read the lot from here, so it defers
+    // the supplier half to routes/inventory.ts, which looks the lot up and
+    // refuses an unattributed one. The cost half is never deferred.
+    const batchWire = stockAdjustBatchWire({
+      type: adjustForm.type,
+      quantity: qty,
+      // `adjustCurrentQuantity`, not `previousQuantity`: this decides whether
+      // the picker was ON SCREEN, and the modal renders by that exact prop.
+      // (The receipt gate above uses previousQuantity, the branch figure the
+      // route itself compares against.) Reading a different figure here is how
+      // a form and its wire come to disagree about what the operator saw.
+      currentQuantity: adjustCurrentQuantity,
+      unlockPricing,
+      branchId: numericBranchId,
+      batchId: adjustForm.batch_id,
+    })
     // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts),
     // run here so the operator is told at the form rather than by a 400.
     const receiptGate = stockReceiptGateCode({
       isStockIn,
       supplierName: adjustForm.supplier_name,
-      // Picking an EXISTING lot blanks the supplier field on purpose: an
-      // attributed lot keeps its first supplier and the picker shows that name
-      // locked instead (InventoryStockModals.tsx). This form cannot read the
-      // lot from here, so it defers the supplier half to routes/inventory.ts,
-      // which looks the lot up and refuses an unattributed one. The cost half
-      // is never deferred.
-      lotAttributionDeferred: adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new',
+      lotAttributionDeferred: batchWire.lotAttributionDeferred,
       unitCostUsd: adjustForm.unit_cost_usd,
       freeGoods: adjustForm.free_goods,
     })
@@ -1168,7 +1183,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       userId: user?.id,
       userName: user?.name || user?.username,
       unlockPricing,
-      batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
+      batchId: batchWire.batchId,
       // D4 (11.28): sent only when the date input was actually on screen
       // (InventoryStockModals.tsx's own visibility condition, recomputed
       // here) -- a value lingering from a hidden input must never re-date

@@ -14,6 +14,11 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   isStockInSubmission,
+  isSetDownSubmission,
+  isBatchPickerVisible,
+  stockAdjustBatchWire,
+  bulkActionCanReceive,
+  bulkStockReceiptWire,
   isStockReceiptCreditIncomplete,
   stockReceiptWire,
   stockReceiptGateCode,
@@ -239,6 +244,90 @@ runTest('nothing invents a receipt cost any more', () => {
   assert.match(products, /attribution: 'correction'/, 'the snapshot-restore path must declare itself a correction')
   const inventory2 = source('components/inventory/Inventory.tsx')
   assert.match(inventory2, /attribution: 'correction'/, 'undo must declare itself a correction rather than carrying a fake supplier')
+})
+
+runTest('a hidden batch picker chose nothing: a set-down lot cannot ride a set-up (N14-E)', () => {
+  // The picker is on screen for an add, for a remove, and -- since N14-E --
+  // for a set that LOWERS the figure, which routes/inventory.ts turns into a
+  // remove of the difference.
+  const base = { unlockPricing: false, branchId: 3, batchId: '' as string | number }
+  assert.equal(isBatchPickerVisible({ ...base, type: 'add', quantity: 5, currentQuantity: 10 }), true)
+  assert.equal(isBatchPickerVisible({ ...base, type: 'remove', quantity: 5, currentQuantity: 10 }), true)
+  assert.equal(isSetDownSubmission('set', 2, 10), true)
+  assert.equal(isBatchPickerVisible({ ...base, type: 'set', quantity: 2, currentQuantity: 10 }), true)
+  // ...and NOT for a set that raises it (that becomes an add of the
+  // difference, which always creates or date-matches its own lot), nor for an
+  // unlocked add (always a fresh lot), nor with no branch to scope a lot to.
+  assert.equal(isSetDownSubmission('set', 40, 10), false)
+  assert.equal(isBatchPickerVisible({ ...base, type: 'set', quantity: 40, currentQuantity: 10 }), false)
+  assert.equal(isBatchPickerVisible({ ...base, type: 'add', quantity: 5, currentQuantity: 10, unlockPricing: true }), false)
+  assert.equal(isBatchPickerVisible({ ...base, type: 'add', quantity: 5, currentQuantity: 10, branchId: '' }), false)
+
+  // THE DISCRIMINATING CASE. The operator sets 10 -> 2, the picker appears,
+  // they name lot 7 to take the loss from, then change their mind and set 40
+  // instead. The picker is gone; lot 7 was picked to REMOVE from and this is
+  // now a receipt. Both surfaces used to put `batch_id !== ''` straight on the
+  // wire, so lot 7 rode along: the receipt topped that lot up AND deferred the
+  // supplier question to it, inheriting an attribution this submission never
+  // named. Old answer: { batchId: '7', lotAttributionDeferred: true }.
+  const stale = stockAdjustBatchWire({ type: 'set', quantity: 40, currentQuantity: 10, unlockPricing: false, branchId: 3, batchId: '7' })
+  assert.equal(stale.batchId, undefined, 'a lot chosen while the picker was showing must not ride a submission that hides it')
+  assert.equal(stale.lotAttributionDeferred, false, 'a stale lot must not answer the supplier half of the receipt gate')
+
+  // What a VISIBLE picker chose still rides, and only an existing lot defers
+  // the supplier half -- '+ New batch' has no attribution to inherit.
+  const chosen = stockAdjustBatchWire({ type: 'remove', quantity: 3, currentQuantity: 10, unlockPricing: false, branchId: 3, batchId: '7' })
+  assert.deepEqual(chosen, { batchId: '7', lotAttributionDeferred: true })
+  const fresh = stockAdjustBatchWire({ type: 'add', quantity: 3, currentQuantity: 10, unlockPricing: false, branchId: 3, batchId: 'new' })
+  assert.deepEqual(fresh, { batchId: 'new', lotAttributionDeferred: false })
+  const nothing = stockAdjustBatchWire({ type: 'add', quantity: 3, currentQuantity: 10, unlockPricing: false, branchId: 3, batchId: '' })
+  assert.deepEqual(nothing, { lotAttributionDeferred: false })
+
+  // And the two submitters must derive it from here rather than re-deriving
+  // `batch_id !== ''` on their own, which is what let the two disagree.
+  for (const path of ['components/inventory/Inventory.tsx', 'components/products/forms/StockAdjustModal.tsx']) {
+    const text = source(path)
+    assert.ok(text.includes('stockAdjustBatchWire'), `${path} must build its batch wire from the shared rule`)
+    assert.ok(!text.includes("adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined"),
+      `${path} must stop putting a possibly-stale batch_id straight on the wire`)
+  }
+})
+
+runTest('a bulk SET states its receipt facts, because a set that raises stock is a receipt (N14-D)', () => {
+  // BulkAddStockModal sees no branch figures, so it cannot tell which rows of
+  // a 'set' rise. routes/inventory.ts gates each of those rows as the add it
+  // becomes, so the form must offer -- and send -- the supplier and cost for
+  // a set as well as an add. It offered them for 'add' only, which meant a
+  // bulk set-up was refused row by row with nothing on screen to fix.
+  assert.equal(bulkActionCanReceive('add'), true)
+  assert.equal(bulkActionCanReceive('set'), true)
+  assert.equal(bulkActionCanReceive('remove'), false)
+
+  const draft = { unitCost: '2.50', freeGoods: false, supplierId: 4, supplierName: ' Sok Supply ', receivedDate: '2026-09-06' }
+  // Old answer for a 'set': {} -- no supplier, no cost, so the Worker refused
+  // every raising row with supplier_required.
+  assert.deepEqual(bulkStockReceiptWire('set', draft), {
+    unitCostUsd: 2.5, supplierId: 4, supplierName: 'Sok Supply', receivedDate: '2026-09-06',
+  })
+  assert.deepEqual(bulkStockReceiptWire('add', draft), {
+    unitCostUsd: 2.5, supplierId: 4, supplierName: 'Sok Supply', receivedDate: '2026-09-06',
+  })
+  // A remove carries none of it, per the owner ruling.
+  assert.deepEqual(bulkStockReceiptWire('remove', draft), {})
+  // A blank cost stays blank -- it is never sent as 0, which is the claim the
+  // free-goods box exists to make. The gate refuses it before the wire.
+  assert.deepEqual(bulkStockReceiptWire('add', { ...draft, unitCost: '' }), {
+    supplierId: 4, supplierName: 'Sok Supply', receivedDate: '2026-09-06',
+  })
+  assert.equal(stockReceiptGateCode({ isStockIn: true, supplierName: 'Sok Supply', unitCostUsd: '' }), 'cost_required')
+  // ...and the declared zero rides as an explicit true, never as false.
+  assert.equal(bulkStockReceiptWire('add', { ...draft, unitCost: '0', freeGoods: true }).freeGoods, true)
+  assert.equal(bulkStockReceiptWire('add', { ...draft, unitCost: '0', freeGoods: false }).freeGoods, undefined)
+
+  const bulk = source('components/products/forms/BulkAddStockModal.tsx')
+  assert.ok(bulk.includes('bulkStockReceiptWire'), 'the bulk surface must build its receipt half from the shared rule')
+  assert.ok(bulk.includes('bulkActionCanReceive'), 'the bulk gate must cover a set as well as an add')
+  assert.ok(!bulk.includes("isStockIn: action === 'add'"), 'a bulk set-up is a stock-in the Worker gates; the form must gate it too')
 })
 
 if (failed > 0) {
