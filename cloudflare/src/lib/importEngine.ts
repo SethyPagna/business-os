@@ -70,7 +70,7 @@ import {
 } from './importCsv'
 import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
 import { createMembershipNumberAllocator } from './membershipNumber'
-import { buildImportedContactState } from './contactOptions'
+import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
@@ -2912,7 +2912,11 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       customer_id: matchedCustomerId,
       customer_name: str(first.customer_name) || null,
       customer_phone: str(first.customer_phone) || null,
-      customer_address: str(first.customer_address) || null,
+      // N21: a CSV exported by a build older than the address fix carries the
+      // Contact Options JSON in this column, and importing it would put machine
+      // text back into sales.customer_address. A plainly typed address -- the
+      // ordinary case, including a numeric house number -- passes through.
+      customer_address: contactDisplayAddress(str(first.customer_address)) || null,
       payment_method: str(first.payment_method) || 'Cash',
       payment_currency: str(first.payment_currency) || 'USD',
       exchange_rate: exchangeRate,

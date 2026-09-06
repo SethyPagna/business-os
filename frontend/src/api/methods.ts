@@ -1415,9 +1415,18 @@ export const updateSaleStatus = async (id, sale_status, notes, extra) => {
 }
 
 // ─── Add items to a recorded sale (S4-24b) ────────────────────────────────────
-export const addSaleItems = async (id, items, notes) => {
+// N18: `review` is NOT optional. It carries the caller's STABLE
+// client_request_id (SaleDetailModal's addRequestIdRef -- one id per user
+// action, reused across retries so a retry cannot re-add the same lines),
+// plus the expected exchange rate and expected updated_at. This wrapper used
+// to declare only (id, items, notes), so the fourth argument Sales.tsx passes
+// was silently dropped one hop before the transport and the Worker answered
+// "client_request_id is required when adding sale items." This file carries
+// `@ts-nocheck`, so tsc could not see the arity drop; tests/saleAddItemsRequestId.test.ts
+// pins it end to end instead.
+export const addSaleItems = async (id, items, notes, review) => {
   const { addSaleItems: addSaleItemsRequest } = await loadSalesTransport()
-  return addSaleItemsRequest(id, items, notes)
+  return addSaleItemsRequest(id, items, notes, review)
 }
 
 // ─── Amend a recorded sale, and read its history (S4-30) ──────────────────────
