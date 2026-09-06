@@ -57,9 +57,11 @@ import {
 import {
   AMENDMENT_WINDOW_SETTING_KEY,
   amendmentEntryStatement,
+  guardDeliveryActualCostAmendment,
   guardDeliveryFeeAmendment,
   guardSaleAmendment,
   planDeliveryFeeChange,
+  planDeliveryActualCostChange,
   planLineQuantityDecrease,
   planLineQuantityIncrease,
   recomputeSaleMoneyAfterAmendment,
@@ -2516,7 +2518,7 @@ app.get('/:id/amendments', async (c) => {
 // lib/saleAmendments.ts's DECISION 2: a line's unit price, the manual and
 // membership discounts, tax, and the tender.
 // ---------------------------------------------------------------------------
-const AMENDMENT_REQUEST_KINDS = new Set(['line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_replaced', 'delivery_fee_changed'])
+const AMENDMENT_REQUEST_KINDS = new Set(['line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_replaced', 'delivery_fee_changed', 'delivery_actual_cost_changed'])
 
 app.post('/:id/amendments', async (c) => {
   const db = getDb(c.env)
@@ -2530,6 +2532,7 @@ app.post('/:id/amendments', async (c) => {
     sale_item_id?: number
     quantity?: number
     delivery_fee_usd?: number
+    delivery_actual_cost_usd?: number | string | null
     replacement?: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number }
     notes?: string
     client_request_id?: string
@@ -2550,6 +2553,7 @@ app.post('/:id/amendments', async (c) => {
     sale_item_id: body.sale_item_id ?? null,
     quantity: body.quantity ?? null,
     delivery_fee_usd: body.delivery_fee_usd ?? null,
+    delivery_actual_cost_usd: body.delivery_actual_cost_usd ?? null,
     replacement: body.replacement ?? null,
     notes: String(body.notes || '').trim().slice(0, 500) || null,
     expected_exchange_rate: body.expected_exchange_rate,
@@ -2640,6 +2644,92 @@ app.post('/:id/amendments', async (c) => {
   const mutationStamp = new Date().toISOString()
   const mutationOperationId = crypto.randomUUID()
   const moneyBeforeSnapshot = amendmentMoneyBefore(sale)
+
+  // ---- The actual courier cost: a reporting-only amendment. It deliberately
+  // does NOT recompute the sale total: this is what the shop paid the driver,
+  // not what the customer was charged. The same immutable ledger records the
+  // before/after amount so reports and staff can explain a corrected margin.
+  if (kind === 'delivery_actual_cost_changed') {
+    const costGuard = guardDeliveryActualCostAmendment(sale)
+    if (!costGuard.ok) return c.json({ error: costGuard.error }, 400)
+    const rawCost = body.delivery_actual_cost_usd
+    const costUsd = rawCost === null || rawCost === undefined || String(rawCost).trim() === ''
+      ? null
+      : Number(rawCost)
+    if (costUsd !== null && (!Number.isFinite(costUsd) || costUsd < 0)) {
+      return c.json({ error: 'An actual delivery cost must be blank or zero or more.' }, 400)
+    }
+    const costPlan = planDeliveryActualCostChange({ saleId, sale, newCostUsd: costUsd, exchangeRate })
+    if (costPlan.costDeltaUsd === 0 && costPlan.costBeforeUsd === costPlan.costAfterUsd) {
+      return c.json({ error: 'That is already the actual delivery cost on this sale.' }, 400)
+    }
+    const money = {
+      subtotalUsd: moneyBeforeSnapshot.subtotal_usd,
+      totalUsd: moneyBeforeSnapshot.total_usd,
+      totalKhr: moneyBeforeSnapshot.total_khr || 0,
+      subtotalKhr: moneyBeforeSnapshot.subtotal_khr || 0,
+    }
+    const response = {
+      ...buildAmendmentResponsePayload({
+        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0,
+        stockSkipped, tax: { taxUsd: Number(sale.tax_usd) || 0, recomputed: false, reason: 'not_applicable' },
+      }, mutationStamp),
+      deliveryActualCostUsd: costPlan.costAfterUsd,
+      deliveryActualCostKhr: costPlan.costAfterUsd === null ? null : receiptKhrFromUsd(costPlan.costAfterUsd, exchangeRate),
+    }
+    const moneyBeforeWithCost = { ...moneyBeforeSnapshot, delivery_actual_cost_usd: costPlan.costBeforeUsd, delivery_actual_cost_khr: sale.delivery_actual_cost_khr ?? null }
+    const moneyAfterWithCost = { ...moneyBeforeWithCost, delivery_actual_cost_usd: costPlan.costAfterUsd, delivery_actual_cost_khr: response.deliveryActualCostKhr, updated_at: mutationStamp }
+    try {
+      await db.batch([
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        amendmentSettingsGuard(moneySettings),
+        saleRevisionGuard(saleId, Number(sale.write_revision)),
+        ...costPlan.statements,
+        amendmentEntryStatement({
+          saleId,
+          kind: 'delivery_actual_cost_changed',
+          amountBeforeUsd: costPlan.costBeforeUsd,
+          amountAfterUsd: costPlan.costAfterUsd,
+          totalBeforeUsd,
+          totalAfterUsd: totalBeforeUsd,
+          note,
+          userId: user?.id ?? null,
+          userName: actorSnapshot(user),
+        }),
+        saleMutationReceiptStatement({
+          operationId: mutationOperationId,
+          actorId: Number(user.id),
+          saleId,
+          kind: 'amendment',
+          requestId: amendmentRequestId,
+          requestDigest: amendmentDigest,
+          requestJson: amendmentCanonical,
+          before: { money: moneyBeforeWithCost, lines: lineMoneyBefore },
+          after: { money: moneyAfterWithCost, lines: lineMoneyAfterAtLatestRate },
+          response,
+          stamp: mutationStamp,
+        }),
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      ])
+    } catch (error) {
+      const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+        WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
+        .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+      if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
+      return c.json({ error: `Failed to amend the actual delivery cost: ${(error as Error).message || ''}` }, 500)
+    }
+    await auditAmendment(c, user, saleId, sale, {
+      kind, actual_cost_before: costPlan.costBeforeUsd, actual_cost_after: costPlan.costAfterUsd,
+      total_before: totalBeforeUsd, total_after: totalBeforeUsd,
+      exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
+      outside_window: guard.outsideWindow, notes: note,
+    })
+    return c.json(response)
+  }
 
   // ---- The delivery fee: its own short path, because it touches no line and
   // moves no stock. "$1.50, then we add another $0.50" -> the sale row holds

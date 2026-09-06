@@ -160,10 +160,11 @@ type AddProductCandidate = SaleAddCandidate
 // api/salesTransport.ts's SaleAmendmentRequest -- one shape, so the button and
 // the request cannot drift.
 interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed'
   sale_item_id?: number
   quantity?: number
   delivery_fee_usd?: number
+  delivery_actual_cost_usd?: number | string | null
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
 }
@@ -240,8 +241,8 @@ interface SaleDetailModalProps {
   // enforces the identical action server-side.
   onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number; batch_id?: number; batch_label?: string; batch_expiry_date?: string }>, review: SaleMutationReview) => Promise<SaleMutationUiResult> | SaleMutationUiResult
   // S4-30: amend this already-recorded sale -- change a line's quantity,
-  // remove a line, replace one product with another, or correct the delivery
-  // fee. Omitted entirely when the signed-in user lacks `sales:amend`, the
+  // remove a line, replace one product with another, or correct the customer
+  // delivery fee / staff-paid actual courier cost. Omitted entirely when the signed-in user lacks `sales:amend`, the
   // same hide-by-omission gate as every write callback above; the Worker
   // enforces the identical action server-side.
   onAmend?: (saleId: string | number, request: SaleAmendmentRequest & SaleMutationReview) => Promise<SaleMutationUiResult> | SaleMutationUiResult
@@ -465,6 +466,8 @@ export default function SaleDetailModal({
   // wrong; the ledger derives the "+$0.50" the owner asked to see.
   const [feeEditing, setFeeEditing] = useState(false)
   const [feeText, setFeeText] = useState('')
+  const [actualCostEditing, setActualCostEditing] = useState(false)
+  const [actualCostText, setActualCostText] = useState('')
   // Replace: the line being replaced, while the existing product search picks
   // its replacement. Reuses the add-items search rather than growing a second
   // picker with its own bugs.
@@ -486,6 +489,8 @@ export default function SaleDetailModal({
     setMutationExchangeRate(next.exchangeRate)
     setAddMutationError('')
     setAmendMutationError('')
+    setActualCostEditing(false)
+    setActualCostText('')
     setPayError('')
     // Settings changes while this sale is open deliberately do not alter the
     // reviewed rate/method snapshot. A different sale starts a new review.
@@ -624,6 +629,7 @@ export default function SaleDetailModal({
         setAmendLineId(null)
         setReplaceLineId(null)
         setFeeEditing(false)
+        setActualCostEditing(false)
         setAmendQtyText('')
         setAmendConfirm(null)
         setAmendReloadToken((token) => token + 1)
@@ -725,6 +731,20 @@ export default function SaleDetailModal({
     })
   }
 
+  const stageActualDeliveryCostAmendment = (currentCostUsd: number | null): void => {
+    const raw = actualCostText.trim()
+    const next = raw === '' ? null : Number(raw)
+    if (next !== null && (!Number.isFinite(next) || next < 0)) return
+    if ((currentCostUsd === null && next === null) || (currentCostUsd !== null && next !== null && next === currentCostUsd)) return
+    amendRequestIdRef.current = createSettlementRequestId()
+    setAmendMutationError('')
+    setAmendConfirm({
+      request: { kind: 'delivery_actual_cost_changed', delivery_actual_cost_usd: next },
+      title: translateOr('amend_actual_cost_title', 'Correct the actual delivery cost?', 'កែថ្លៃដឹកជញ្ជូនពិតប្រាកដ?'),
+      summary: `${currentCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(currentCostUsd)} → ${next === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(next)}`,
+    })
+  }
+
   const settlementDirty = sale?.sale_status === 'awaiting_payment'
     && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
     && !settlementRowsEqual(settlementRows, settlementBaselineRef.current)
@@ -816,6 +836,10 @@ export default function SaleDetailModal({
   const deliveryFeeUsd = totals.delivery.faceUsd
   const deliveryFeeKhr = totals.delivery.faceKhr
   const deliveryPaidByStore = totals.delivery.printsAsFree
+  const actualCostRaw = sale.delivery_actual_cost_usd
+  const actualCostParsed = actualCostRaw === null || actualCostRaw === undefined || String(actualCostRaw).trim() === '' ? null : Number(actualCostRaw)
+  const actualCostUsd = actualCostParsed !== null && Number.isFinite(actualCostParsed) && actualCostParsed >= 0 ? actualCostParsed : null
+  const actualCostKhr = actualCostUsd === null ? null : toNumber(sale.delivery_actual_cost_khr)
   const isDelivery = !!toNumber(sale.is_delivery) || !!String(sale.delivery_contact_name || '').trim()
   // Driver info is DRIVER info. User, Sep 4 2026: "delivery only needs phone
   // and driver name...this is driver info, for customer name, phone and
@@ -1498,6 +1522,60 @@ export default function SaleDetailModal({
                       </td>
                     </tr>
                   ) : null}
+                  {isDelivery ? (
+                    <MoneyRow
+                      label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ')}
+                      tone="muted"
+                      amount={actualCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(actualCostUsd)}
+                      sub={actualCostKhr !== null && actualCostKhr > 0 ? fmtKHR(actualCostKhr) : null}
+                      action={canAmendThisSale ? (
+                        <button
+                          type="button"
+                          onClick={() => { if (!actualCostEditing) setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setActualCostEditing(!actualCostEditing) }}
+                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          {actualCostEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
+                        </button>
+                      ) : null}
+                    />
+                  ) : null}
+                  {canAmendThisSale && actualCostEditing && isDelivery ? (
+                    <tr className="bg-gray-50 dark:bg-gray-900/40">
+                      <td colSpan={5} className="px-1.5 py-2 sm:px-2">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-actual-cost">
+                            {translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដថ្មី')}
+                          </label>
+                          <input
+                            id="amend-delivery-actual-cost"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={actualCostText}
+                            onChange={(event) => setActualCostText(event.target.value)}
+                            placeholder="0.00"
+                            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            disabled={amendSaving}
+                            onClick={() => stageActualDeliveryCostAmendment(actualCostUsd)}
+                            className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                          >
+                            {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActualCostEditing(false)}
+                            className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300"
+                          >
+                            {t('cancel') || 'Cancel'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
                   {refundUsd > 0 ? (
                     <MoneyRow
                       label={t('returns_refunded') || 'Refunded by returns'}
@@ -1556,13 +1634,10 @@ export default function SaleDetailModal({
                       sub={changeKhr > 0 ? fmtKHR(changeKhr) : null}
                     />
                   ) : null}
-                  {/* S4-24: "Actual delivery cost" is gone from this summary.
-                      It is what the shop PAID the driver, not part of what the
-                      customer owes, and printing it under Change invited the
-                      reader to subtract it from a total it was never in --
-                      literally the "difference" the user asked to remove. It
-                      stays on the sale row and in the delivery reports, which
-                      is where a margin question belongs. */}
+                  {/* Actual courier cost is shown for staff and is never part of
+                      the customer total. Its Edit action writes a separate
+                      append-only amendment so margin corrections remain
+                      explainable without changing the receipt. */}
                 </tfoot>
               </table>
             </div>

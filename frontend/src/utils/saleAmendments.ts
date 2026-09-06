@@ -82,7 +82,7 @@ export interface AmendmentDisplayRow {
   note: string | null
 }
 
-const MONEY_KINDS = new Set(['delivery_fee_changed'])
+const MONEY_KINDS = new Set(['delivery_fee_changed', 'delivery_actual_cost_changed'])
 
 function num(value: unknown): number {
   const parsed = Number(value)
@@ -140,7 +140,9 @@ export function toAmendmentDisplayRow(
     groupId: row.group_id ?? null,
     kind,
     family,
-    subject: family === 'money' ? deliveryLabel : (row.product_name || null),
+    subject: family === 'money'
+      ? (kind === 'delivery_actual_cost_changed' ? `${deliveryLabel} actual cost` : deliveryLabel)
+      : (row.product_name || null),
     beforeText: family === 'money' ? fmtUSD(before) : formatUnits(before),
     afterText: family === 'money' ? fmtUSD(after) : formatUnits(after),
     deltaText: family === 'money'

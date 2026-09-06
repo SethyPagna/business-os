@@ -244,10 +244,11 @@ export async function addSaleItems(
 }
 
 export interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed'
   sale_item_id?: number
   quantity?: number
   delivery_fee_usd?: number
+  delivery_actual_cost_usd?: number | string | null
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
   client_request_id: string
@@ -289,6 +290,8 @@ export async function amendSale(id: number | string, request: SaleAmendmentReque
       subtotal_usd: result?.subtotalUsd,
       total_usd: result?.totalUsd,
       total_khr: result?.totalKhr,
+      delivery_actual_cost_usd: result?.deliveryActualCostUsd,
+      delivery_actual_cost_khr: result?.deliveryActualCostKhr,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result
