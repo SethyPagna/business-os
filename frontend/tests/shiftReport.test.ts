@@ -45,6 +45,7 @@ const read = (p: string) => fs.readFileSync(path.join(here, '..', p), 'utf8')
 const summary = read('src/components/shifts/ShiftSummary.tsx')
 const breakdown = read('src/components/shifts/ShiftCashBreakdown.tsx')
 const report = read('src/components/shifts/ShiftReportFigures.tsx')
+const gate = read('src/components/pos/ShiftGate.tsx')
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
 
@@ -163,6 +164,13 @@ ok(/shiftCountedPairText\(shift\.closing_counted_usd, shift\.closing_counted_khr
   'the summary header prints the counted drawer through the shared rule')
 ok(/shiftCountedPairText\(usd, khr, fmtUSD, fmtKHR\)/.test(breakdown),
   'the cash breakdown prints the counted drawer through the same rule')
+// The POS close summary is the third surface. It used the local `money()`
+// helper, and fmtUSD(null) is "$0.00" -- so a shift closed WITHOUT a count
+// (now possible: 29f74f27) told the cashier they had counted an empty till.
+ok(/shiftCountedPairText\(closed\.closing_counted_usd, closed\.closing_counted_khr, fmtUSD, fmtKHR\)/.test(gate),
+  'the POS close summary prints an uncounted drawer as a dash, not as $0.00')
+ok(!/value: money\(closed\.closing_counted_usd/.test(gate),
+  'the POS close summary no longer formats a null count as money')
 
 // ---- 5. The difference is informational, not a verdict --------------------
 {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
+import { shiftCountedPairText } from '../../utils/shiftReportModel.ts'
 import { closeShift, fetchCurrentShift, openShift, shiftClosingCounts, shiftCountOrZero, shiftCountPairBlocker, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
@@ -442,9 +443,9 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   // itself is NOT computed here: that is the server's one reconciliation, and
   // it appears on the summary once the close returns.
   const typedCounts = shiftClosingCounts(countedUsd, countedKhr)
-  const typedDrawer = endBlocker === 'invalid' || typedCounts.usd == null || typedCounts.khr == null
+  const typedDrawer = endBlocker === 'invalid'
     ? '—'
-    : money(typedCounts.usd, typedCounts.khr)
+    : shiftCountedPairText(typedCounts.usd, typedCounts.khr, fmtUSD, fmtKHR)
 
   // No open shift AND no summary to show: this control has nothing to do.
   if (!canCloseCurrent && !closed) return null
@@ -491,7 +492,11 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 // The after half of the before/after: what was counted into
                 // the drawer against what it opened with, on the same cell
                 // shape so the two are read as one comparison.
-                !!closed && { label: t('shift_counted_close'), value: money(closed.closing_counted_usd, closed.closing_counted_khr) },
+                // Through the shared counted-pair rule, NOT `money`: a shift
+                // closed without a count stores NULL, and fmtUSD(null) is
+                // "$0.00" -- which would tell the cashier they counted an
+                // empty till when nobody counted anything at all.
+                !!closed && { label: t('shift_counted_close'), value: shiftCountedPairText(closed.closing_counted_usd, closed.closing_counted_khr, fmtUSD, fmtKHR) },
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
               />
