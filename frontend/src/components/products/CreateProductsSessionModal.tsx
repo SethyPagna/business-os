@@ -593,11 +593,22 @@ export default function CreateProductsSessionModal({
     const branchId = Number(payload.branch_id)
     const name = String(payload.name || '').trim()
     const barcode = String(payload.barcode || '').trim()
-    const cost = Number(payload.cost_price_usd)
+    // Same rule as adding the line. Number('') is 0, so reading the cost
+    // straight off the payload turned a cleared field into a free receipt on
+    // the way back through the editor.
+    const costText = payload.cost_price_usd == null ? '' : String(payload.cost_price_usd).trim()
+    const cost = Number(costText)
     if (!Number.isSafeInteger(quantity) || quantity < 0) throw new Error(tr('invalid_quantity', 'Invalid quantity'))
     if (quantity > 0 && !canReceiveStock) throw new Error(tr('no_permission', 'You do not have permission to receive stock.'))
     if (!branchId || !name) throw new Error(tr('create_products_branch_required', 'Choose the branch this delivery goes to.'))
-    if (!Number.isFinite(cost) || cost < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
+    if (costText === '' || !Number.isFinite(cost) || cost < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
+    const editGate = stockReceiptGateCode({
+      isStockIn: quantity > 0,
+      supplierName: String(payload.supplier ?? current.supplierName ?? header.supplierName ?? '').trim(),
+      unitCostUsd: costText,
+      freeGoods,
+    })
+    if (editGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[editGate], STOCK_RECEIPT_GATE_FALLBACKS[editGate]))
     const queuedTwin = rows.find((row) => row.lineId !== lineId && row.kind === 'create_receive'
       && row.name.trim().toLowerCase() === name.toLowerCase() && row.barcode.trim() === barcode
       && Math.round(row.unitCostUsd * 10000) === Math.round(cost * 10000))

@@ -488,7 +488,12 @@ runTest('a blank unit cost is refused here rather than becoming a silent $0 rece
   assert.match(newItemBlock, /costText === '' \|\| !Number\.isFinite\(costValue\) \|\| costValue < 0/)
   // ...and the same gate the Worker runs, so the browser verdict and the
   // server verdict are the same verdict.
-  assert.match(newItemBlock, /stockReceiptGateCode\(\{ isStockIn: quantity > 0, supplierName: receiptSupplier, unitCostUsd: costText \}\)/)
+  assert.match(newItemBlock, /stockReceiptGateCode\(\{ isStockIn: quantity > 0, supplierName: receiptSupplier, unitCostUsd: costText, freeGoods \}\)/)
+  // Editing a queued line is the same receipt. Number('') is 0, so reading
+  // the payload cost directly let a cleared field come back as free goods.
+  assert.match(newItemBlock, /const editGate = stockReceiptGateCode\(\{/)
+  assert.ok(!newItemBlock.includes('const cost = Number(payload.cost_price_usd)'),
+    'the edit path must read the cost as text so a cleared field is blank, not zero')
   assert.match(newItemBlock, /STOCK_RECEIPT_GATE_KEYS\[receiptGate\], STOCK_RECEIPT_GATE_FALLBACKS\[receiptGate\]/)
   assert.match(modalSource, /from '\.\.\/\.\.\/utils\/stockReceiptFields\.ts'/)
 })
