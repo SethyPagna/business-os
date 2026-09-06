@@ -68,3 +68,37 @@ assert.deepEqual(
   'no source file may reference the retired custom-tables cluster',
 )
 console.log('PASS the custom-tables cluster is gone from the frontend')
+
+// --- 2. inventoryExport exports exactly what a caller can reach ------------
+//
+// Part 562 removed the Inventory products slice and its export menu, which
+// removed every caller of the summary/stats/package exports -- but the exports
+// stayed, and exportInventoryPackage was kept nominally alive by a regex
+// assertion in performanceLoadingUx.test.ts, i.e. by a test rather than a user.
+// The rule is the general one: an exported function with no caller is deleted,
+// and the check is mechanical rather than a name list, so a new orphan is
+// caught too.
+
+const inventoryExportPath = path.join(srcDir, 'components', 'inventory', 'inventoryExport.ts')
+const inventoryExportSource = fs.readFileSync(inventoryExportPath, 'utf8')
+
+const exportedNames = [...inventoryExportSource.matchAll(/^export\s+(?:async\s+)?(?:function|const|type)\s+([A-Za-z0-9_]+)/gm)]
+  .map((match) => match[1])
+  .sort()
+
+// positive control: the extractor must actually see the one live export
+assert.ok(exportedNames.includes('collectInventoryMovementRows'), 'positive control: the live movements row builder must be extracted')
+
+const importersOfInventoryExport = [...sources.entries()]
+  .filter(([abs, text]) => abs !== inventoryExportPath && /inventoryExport\.ts/.test(text))
+  .map(([, text]) => text)
+  .join('\n')
+
+const unusedExports = exportedNames.filter((name) => !new RegExp(`\\b${name}\\b`).test(importersOfInventoryExport))
+assert.deepEqual(
+  unusedExports,
+  [],
+  'inventoryExport.ts exports these with no caller anywhere in src -- delete them rather than shipping an assembly no UI can request:\n  '
+    + unusedExports.join('\n  '),
+)
+console.log(`PASS all ${exportedNames.length} inventoryExport export(s) have a caller`)
