@@ -283,12 +283,17 @@ async function main() {
     seed()
     const first = await req('POST', '/', {
       product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10',
+      // POST /api/batches is a receipt wire, so it now states who the goods
+      // came from and what they cost (lib/stockReceiptGate.ts).
+      supplier_name: 'Fixture Supplier', unit_cost_usd: 2,
     }, batchesApp)
     assert.strictEqual(first.status, 200, JSON.stringify(first.json))
     const lot = batchRows()[0]
     assert.strictEqual(lot.received_at, '2025-02-10')
     const topUp = await req('POST', '/', {
-      product_id: 1, branch_id: 1, quantity: 4, batch_id: lot.id, received_date: '2026-08-01',
+      // The named lot already carries 'Fixture Supplier', so the supplier half
+      // is answered by the lot; the cost half never is.
+      product_id: 1, branch_id: 1, quantity: 4, batch_id: lot.id, received_date: '2026-08-01', unit_cost_usd: 2,
     }, batchesApp)
     assert.strictEqual(topUp.status, 200, JSON.stringify(topUp.json))
     const rows = batchRows()
