@@ -38,6 +38,8 @@ type EditorSection = readonly [string, EditorSectionKey, string]
 type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   business_address?: string
   business_email?: string
+  business_legal_name?: string
+  business_registration_number?: string
   business_name?: string
   business_phone?: string
   customer_portal_about_content?: string
@@ -1254,6 +1256,29 @@ function CatalogEditorSurfaceContent() {
                   value={editorDraft.customer_portal_address_link || ''}
                   onChange={(event) => setDraft('customer_portal_address_link', event.target.value)}
                 />
+              </div>
+            </div>
+
+            {/* N45: the registered identity an online seller must display
+                (Cambodia Law on Electronic Commerce 2019) and that the
+                privacy / terms / cookie templates interpolate. Same
+                business_identity permission bucket as the fields above. */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-1.5">
+                <div className="text-sm font-semibold text-slate-800">{copy('portal_legal_editor_block', 'Legal & business details')}</div>
+                <InfoHint label={copy('portal_legal_editor_block', 'Legal & business details')} text={copy('portal_legal_editor_hint', 'Shown in the storefront footer and filled into the privacy, terms and cookie pages. Leave a field blank to hide that line.')} />
+              </div>
+              <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="portal-business-legal-name" className="block text-sm font-medium text-slate-700">{copy('portal_legal_editor_legal_name', 'Registered business name')}</label>
+                  <input id="portal-business-legal-name" name="business_legal_name" autoComplete="organization" className="input" value={editorDraft.business_legal_name || ''} onChange={(event) => setDraft('business_legal_name', event.target.value)} />
+                  <div className="mt-1 text-[11px] text-slate-500">{copy('portal_legal_editor_legal_name_hint', 'The name the business is registered under, if it differs from the display name.')}</div>
+                </div>
+                <div>
+                  <label htmlFor="portal-business-registration" className="block text-sm font-medium text-slate-700">{copy('portal_legal_editor_registration', 'Business registration number')}</label>
+                  <input id="portal-business-registration" name="business_registration_number" autoComplete="off" className="input" value={editorDraft.business_registration_number || ''} onChange={(event) => setDraft('business_registration_number', event.target.value)} />
+                  <div className="mt-1 text-[11px] text-slate-500">{copy('portal_legal_editor_registration_hint', 'Ministry of Commerce or tax registration number, if you have one.')}</div>
+                </div>
               </div>
             </div>
 

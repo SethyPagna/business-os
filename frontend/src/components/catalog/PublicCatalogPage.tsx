@@ -46,6 +46,7 @@ import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
 import { usePortalAccount } from './portalAccount.ts'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
+import PortalFooter from './legal/LegalPages.tsx'
 import { getPortalLanguageText } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import {
@@ -122,6 +123,8 @@ type PortalConfig = LooseRecord & {
   aiProviderId?: string | number | null
   aiTitle?: string
   businessAddress?: string
+  businessLegalName?: string
+  businessRegistrationNumber?: string
   businessCover?: string
   businessEmail?: string
   businessFavicon?: string
@@ -1827,6 +1830,7 @@ export default function PublicCatalogPage() {
       catalogSection={activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={secondaryTabSection}
       promotionsSection={promotionsSection}
+      footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} />}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}

@@ -187,6 +187,11 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     businessPhone: settings.business_phone || '',
     businessEmail: settings.business_email || '',
     businessAddress: settings.business_address || '',
+    // N45: the registered identity an online seller has to display (Cambodia's
+    // 2019 e-commerce law) and that the privacy/terms/cookie templates fill in.
+    // Separate from businessName, which is the display/brand name.
+    businessLegalName: settings.business_legal_name || '',
+    businessRegistrationNumber: settings.business_registration_number || '',
     businessTagline: settings.customer_portal_business_tagline || '',
     businessLogo: settings.customer_portal_logo_image || '',
     businessFavicon: settings.customer_portal_favicon_image || '',

@@ -28,6 +28,7 @@ import {
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
+import PortalFooter from './legal/LegalPages.tsx'
 import { CATALOG_DEFAULT_PAGE_SIZE } from './catalogPagination'
 import {
   createAboutBlock,
@@ -134,6 +135,8 @@ type PortalConfig = LegacyCatalogRecord & {
   aiProviderId?: string | number | null
   addressLink?: string
   businessAddress?: string
+  businessLegalName?: string
+  businessRegistrationNumber?: string
   businessCover?: string
   businessEmail?: string
   businessFavicon?: string
@@ -665,6 +668,8 @@ function buildDraft(config: PortalConfig): PortalDraft {
     business_phone: config.businessPhone || '',
     business_email: config.businessEmail || '',
     business_address: config.businessAddress || '',
+    business_legal_name: config.businessLegalName || '',
+    business_registration_number: config.businessRegistrationNumber || '',
     customer_portal_address_link: config.addressLink || '',
     customer_portal_business_tagline: config.businessTagline || '',
     customer_portal_google_maps_embed: config.googleMapsEmbed || '',
@@ -801,6 +806,8 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     businessPhone: draft.business_phone || '',
     businessEmail: draft.business_email || '',
     businessAddress: draft.business_address || '',
+    businessLegalName: draft.business_legal_name || '',
+    businessRegistrationNumber: draft.business_registration_number || '',
     addressLink: normalizeExternalUrl(draft.customer_portal_address_link || ''),
     businessTagline: draft.customer_portal_business_tagline || '',
     googleMapsEmbed: normalizeGoogleMapsEmbed(draft.customer_portal_google_maps_embed || config.googleMapsEmbed || ''),
@@ -1149,6 +1156,8 @@ const DEFAULT_CONFIG = {
   businessPhone: '',
   businessEmail: '',
   businessAddress: '',
+  businessLegalName: '',
+  businessRegistrationNumber: '',
   addressLink: '',
   businessTagline: '',
   googleMapsEmbed: '',
@@ -2712,6 +2721,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         business_phone: editorDraft.business_phone || '',
         business_email: editorDraft.business_email || '',
         business_address: editorDraft.business_address || '',
+        business_legal_name: editorDraft.business_legal_name || '',
+        business_registration_number: editorDraft.business_registration_number || '',
         customer_portal_address_link: normalizeExternalUrl(editorDraft.customer_portal_address_link || ''),
         customer_portal_business_tagline: editorDraft.customer_portal_business_tagline || '',
         customer_portal_google_maps_embed: sanitizedGoogleMapEmbed,
@@ -3518,6 +3529,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}
         promotionsSection={promotionsSection}
+        footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} />}
         productDetailView={productDetailView}
         closeProductDetailView={closeProductDetailView}
         productDetailShopName={displayConfig.businessName || displayConfig.title || ''}

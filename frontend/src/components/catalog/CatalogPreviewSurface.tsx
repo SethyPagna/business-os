@@ -112,6 +112,11 @@ type CatalogPreviewSurfaceProps = {
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
   promotionsSection?: ReactNode
+  // N45 legal lane: the storefront <footer> (business details + the
+  // Policies menu). Rendered here so the live site and the admin
+  // preview show the SAME footer from one place; the caller supplies it
+  // so this surface never has to know the business-detail shape.
+  footer?: ReactNode
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
   productGalleryView: GalleryViewState
@@ -174,6 +179,7 @@ export default function CatalogPreviewSurface({
   catalogSection,
   secondaryTabSection,
   promotionsSection,
+  footer,
   publicScrollButtonsVisible,
   scrollPublicPortal,
   productGalleryView,
@@ -537,6 +543,7 @@ export default function CatalogPreviewSurface({
             {promotionsSection}
             {catalogSection}
             {secondaryTabSection}
+            {footer}
           </div>
         </div>
       </div>

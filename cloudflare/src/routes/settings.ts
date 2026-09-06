@@ -157,6 +157,11 @@ const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'upda
 // real feature or a decision to remove the row, not guessed at here.
 const BUSINESS_IDENTITY_KEYS = new Set([
   'business_name',
+  // N45: registered name + registration number. Same bucket as the rest of
+  // the business identity, so a business_identity grant covers them and no
+  // new permission row is invented.
+  'business_legal_name',
+  'business_registration_number',
   'business_phone',
   'business_address',
   'business_email',
