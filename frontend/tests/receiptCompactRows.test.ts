@@ -48,11 +48,15 @@ const receiptSource = fs.readFileSync(receiptUrl, 'utf8')
 const {
   RECEIPT_ITEM_COLUMN_FLOOR_EM,
   RECEIPT_ITEM_NUMERIC_FONT_EM,
+  RECEIPT_ROW_COLUMN_GAP_PX,
+  RECEIPT_ROW_GRID_TEMPLATE,
+  RECEIPT_ROW_LABEL_PADDING_PX,
   receiptItemGridTemplate,
   receiptNameColumnWidthPx,
   receiptNameLineCount,
   receiptNumericWidthEm,
   receiptResolveItemTracksPx,
+  receiptTextWidthPx,
 } = require('../src/utils/receiptItemColumns.ts') as typeof import('../src/utils/receiptItemColumns.ts')
 
 // The receipt's real collaborators are loaded for real (the money math, the
@@ -177,6 +181,51 @@ await runTest('the rate still prints when the cashier row itself is off', () => 
 await runTest('no labelled rate row survives in the source', () => {
   assert.doesNotMatch(receiptSource, /labelFor\(lang, 'rate'\)/, 'the labelled rate row is gone')
   assert.doesNotMatch(receiptSource, /rate: '/, 'the retired rate label must not linger in LABELS')
+})
+
+// The merged row has to FIT, and where it cannot it has to degrade the right
+// way round: the label stays a word, the value is what wraps.
+const CASHIER_LABELS = { en: 'Cashier:', km: 'អ្នកគិតលុយ:' }
+const RATE_SPAN_FONT_EM = 0.85
+
+await runTest('the merged cashier row is one line at 80 mm, in English and in Khmer', () => {
+  const fontSizePx = 12
+  // "Rath", a real space, then the nowrap rate span at its own smaller size.
+  const valuePx = receiptTextWidthPx('Rath', fontSizePx)
+    + receiptTextWidthPx(' ', fontSizePx)
+    + receiptTextWidthPx('· 1 USD = 4,065 ៛', fontSizePx * RATE_SPAN_FONT_EM)
+  for (const [lang, label] of Object.entries(CASHIER_LABELS)) {
+    const labelPx = receiptTextWidthPx(label, fontSizePx) + RECEIPT_ROW_LABEL_PADDING_PX
+    const rowPx = labelPx + RECEIPT_ROW_COLUMN_GAP_PX + valuePx
+    assert.ok(
+      rowPx <= 258,
+      `${lang}: the cashier row must print on one line at 80 mm, needs ${Math.round(rowPx * 10) / 10}px`,
+    )
+  }
+  // `both` mode joins the two labels and does NOT fit -- ~307px against a
+  // ~270px content box -- which is exactly why the degradation below is
+  // pinned rather than assumed away. 58mm paper is the same case.
+  const bothPx = receiptTextWidthPx('អ្នកគិតលុយ / Cashier:', fontSizePx)
+    + RECEIPT_ROW_LABEL_PADDING_PX + RECEIPT_ROW_COLUMN_GAP_PX + valuePx
+  assert.ok(bothPx > 258, 'sanity: the bilingual label is the case that has to wrap')
+})
+
+await runTest('when the row wraps it is the VALUE that breaks, never the label mid-word', () => {
+  // A `minmax(0,1fr)` label track can be squeezed below its longest word, and
+  // the label span is `break-words`, so the browser broke "Cashi/er:" instead.
+  assert.match(
+    RECEIPT_ROW_GRID_TEMPLATE,
+    /^minmax\(min-content,1fr\) /,
+    `the label track needs a min-content floor, got ${RECEIPT_ROW_GRID_TEMPLATE}`,
+  )
+  // And the value must have somewhere to break: a REAL space before the rate
+  // span, not a margin -- `ml-1` is not a soft wrap opportunity, so the nowrap
+  // span had to stay welded to the cashier's name.
+  const html = renderReceipt()
+  const rateRow = html.split('data-receipt-line="true"').find((row) => row.includes('1 USD = 4,065'))
+  assert.ok(rateRow, 'the cashier row renders')
+  assert.match(rateRow, /Rath\s+<span[^>]*whitespace-nowrap/, 'the rate span drops whole, after a real space')
+  assert.doesNotMatch(rateRow, /<span[^>]*class="ml-1[^"]*"[^>]*>·/, 'a margin is not a wrap opportunity')
 })
 
 // --- 2. the delivery fee prints exactly once, in the totals block ----------

@@ -548,7 +548,14 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             value={tpl.show_cashier ? (
               <>
                 {sale.cashier_name || '-'}
-                {exchangeRateText ? <span className="ml-1 whitespace-nowrap text-[0.85em] font-normal">· {exchangeRateText}</span> : null}
+                {/* A REAL space, not `ml-1`: a margin is not a soft wrap
+                    opportunity, so the nowrap rate span had nowhere to break
+                    and stayed welded to the cashier's name. On 58mm paper --
+                    and in `both` mode, whose label is twice as long -- the row
+                    then had to overflow or break the LABEL. With the space the
+                    rate drops whole onto a second line under the name:
+                    "Rath" / "· 1 USD = 4,065 ៛". */}
+                {exchangeRateText ? <>{' '}<span className="whitespace-nowrap text-[0.85em] font-normal">· {exchangeRateText}</span></> : null}
               </>
             ) : <span className="whitespace-nowrap">{exchangeRateText}</span>}
           />

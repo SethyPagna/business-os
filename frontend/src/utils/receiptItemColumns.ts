@@ -74,7 +74,17 @@ export const RECEIPT_ITEM_NUMERIC_FONT_EM = 0.9
 // The label/value rows (Row() in Receipt.tsx). The value column is a MINIMUM,
 // not a cap: a long total still grows it.
 export const RECEIPT_ROW_VALUE_MIN_EM = 4.6
-export const RECEIPT_ROW_GRID_TEMPLATE = `minmax(0,1fr) minmax(${RECEIPT_ROW_VALUE_MIN_EM}em,auto)`
+// The LABEL track is `minmax(min-content,1fr)`, not `minmax(0,1fr)`. With a
+// zero floor the label track can be squeezed below its longest word, and the
+// label span is `break-words`, so the browser then breaks the WORD -- a 58mm
+// receipt printed "Cashi/er:". The value cell is the one that is allowed to
+// wrap (it is `break-words`/`break-all` and its parts are nowrap), so on
+// narrow paper the rate drops WHOLE under the cashier's name and the label
+// stays a word.
+export const RECEIPT_ROW_GRID_TEMPLATE = `minmax(min-content,1fr) minmax(${RECEIPT_ROW_VALUE_MIN_EM}em,auto)`
+// Row(): `gap-x-3` on the grid and `pr-1` on the label span, in px.
+export const RECEIPT_ROW_COLUMN_GAP_PX = 12
+export const RECEIPT_ROW_LABEL_PADDING_PX = 4
 
 // shellStyleFor() in Receipt.tsx: `padding: '18px 16px 20px'`.
 export const RECEIPT_SHELL_HORIZONTAL_PADDING_PX = 32
