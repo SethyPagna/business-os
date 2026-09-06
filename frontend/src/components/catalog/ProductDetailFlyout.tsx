@@ -1,4 +1,5 @@
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useId, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ReactNode } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
@@ -143,9 +144,57 @@ function DetailSectionBlock({
   )
 }
 
+// Everything focus can land on inside the sheet, in DOM order -- the two
+// ends of this list are where a trapped Tab wraps around.
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, onAddToBucket, bucketQty = 0 }: ProductDetailFlyoutProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null)
+  const titleId = useId()
+
+  // A sheet that covers the page has to BEHAVE like a dialog, not just be
+  // labelled one. The base tree announced role="dialog" aria-modal="true"
+  // and then did none of the four things that makes true: focus stayed on
+  // the card behind it, Tab walked straight out into the catalog underneath,
+  // Escape did nothing, and closing left focus on <body>.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null
+    const raf = requestAnimationFrame(() => closeButtonRef.current?.focus())
+    return () => {
+      cancelAnimationFrame(raf)
+      previouslyFocusedRef.current?.focus?.()
+    }
+  }, [])
+
+  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      // The image lightbox opens inside this sheet and closes on Escape
+      // too; without this the one keypress would shut both.
+      if (lightboxOpen) return
+      event.stopPropagation()
+      onClose()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+    if (!focusable || focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    const current = typeof document === 'undefined' ? null : document.activeElement
+    if (event.shiftKey && (current === first || !dialogRef.current?.contains(current))) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && current === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
   const product = view.product
   if (!product) return null
 
@@ -180,24 +229,32 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
     || copy('productNeedMoreDetailsFallback', 'Contact us for more product details.')
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+      {/* The dim behind the sheet used to be the same element that closed
+          it on click, which put a nameless click target in the tree wrapped
+          around the dialog itself. It is a backdrop: presentational, with
+          Escape as the keyboard equivalent of clicking it. */}
+      <div className="absolute inset-0 bg-black/50" aria-hidden="true" onClick={onClose} />
       <div
-        className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:bg-neutral-900"
-        onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:bg-neutral-900"
         role="dialog"
         aria-modal="true"
-        aria-label={product.name || copy('productDetails', 'Product details')}
+        aria-labelledby={titleId}
       >
         <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-neutral-800">
           <div className="min-w-0 pr-4">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
               {copy('productShopName', "Shop's Product Name")}
             </div>
-            <div {...getKhmerTextProps(product.name || '', 'break-words text-base font-semibold text-slate-900 dark:text-white')}>
-              {product.name}
+            <div id={titleId} {...getKhmerTextProps(product.name || '', 'break-words text-base font-semibold text-slate-900 dark:text-white')}>
+              {product.name || copy('productDetails', 'Product details')}
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label={copy('close', 'Close')}
