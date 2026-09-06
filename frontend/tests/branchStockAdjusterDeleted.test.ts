@@ -32,15 +32,17 @@ function runTest(name: string, fn: () => void): void {
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = path.join(here, '..', '..')
 const SRC = path.join(here, '..', 'src')
 const DELETED_FILE = path.join(SRC, 'components', 'products', 'forms', 'BranchStockAdjuster.tsx')
 const DELETED_TEST = path.join(here, 'branchStockAdjusterSetRaise.test.ts')
+const THIS_FILE = path.join(here, 'branchStockAdjusterDeleted.test.ts')
 
-function walk(dir: string, out: string[] = []): string[] {
+function walk(dir: string, extensions: RegExp, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(full, out); continue }
-    if (/\.(ts|tsx)$/.test(entry.name)) out.push(full)
+    if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(full, extensions, out); continue }
+    if (extensions.test(entry.name)) out.push(full)
   }
   return out
 }
@@ -53,12 +55,32 @@ runTest('its dedicated (now-pointless) test no longer exists', () => {
   assert.equal(fs.existsSync(DELETED_TEST), false, 'a test for a deleted component must not linger')
 })
 
-runTest('no file under src still names BranchStockAdjuster (so it cannot come back as a silent copy)', () => {
+runTest('no file in EITHER package still names BranchStockAdjuster (so it cannot come back as a silent copy)', () => {
+  // A pin scoped to frontend/src alone is exactly why the leftover survived
+  // round 1: two cloudflare/src comments and two cloudflare/scripts test
+  // comments still named the deleted file after the frontend sweep called
+  // itself done. The rule this test exists to enforce -- "grep the symbol
+  // across both packages before and after" -- has to walk both packages
+  // itself, not just the one the deletion happened to touch.
   const offenders: string[] = []
-  for (const file of walk(SRC)) {
+  for (const file of walk(SRC, /\.(ts|tsx)$/)) {
+    if (file === THIS_FILE) continue
     const text = fs.readFileSync(file, 'utf8')
     if (text.includes('BranchStockAdjuster')) {
-      offenders.push(path.relative(SRC, file).split(path.sep).join('/'))
+      offenders.push('frontend/src/' + path.relative(SRC, file).split(path.sep).join('/'))
+    }
+  }
+  const cloudflareRoots = [
+    path.join(REPO_ROOT, 'cloudflare', 'src'),
+    path.join(REPO_ROOT, 'cloudflare', 'scripts'),
+  ]
+  for (const root of cloudflareRoots) {
+    for (const file of walk(root, /\.(ts|cjs)$/)) {
+      if (file === THIS_FILE) continue
+      const text = fs.readFileSync(file, 'utf8')
+      if (text.includes('BranchStockAdjuster')) {
+        offenders.push(path.relative(REPO_ROOT, file).split(path.sep).join('/'))
+      }
     }
   }
   assert.deepEqual(offenders, [], `these files still reference BranchStockAdjuster by name: ${offenders.join(', ')}`)
