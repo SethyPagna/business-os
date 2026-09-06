@@ -46,8 +46,13 @@ export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: st
   const search = String(searchValue || '').trim().slice(0, 120).toLowerCase()
   const params: Record<string, unknown> = search ? { search: escapedLike(search) } : {}
   const having = search
+    // N13 (round 2): the haystack must hold the SAME actor the list renders.
+    // The SELECT below resolves the account username through user_id, so a
+    // session written before the username rule displays 'james' -- and
+    // searching the raw snapshot would have made typing 'james' return
+    // nothing while 'james' was on the screen.
     ? `HAVING lower(COALESCE(MAX(b.supplier_name), '') || ' ' || COALESCE(MAX(m.branch_name), '') || ' ' ||
-             COALESCE(MAX(m.user_name), '') || ' ' || COALESCE(GROUP_CONCAT(m.product_name, ' '), '') || ' ' ||
+             COALESCE(MAX(${movementActorNameSql('m')}), '') || ' ' || COALESCE(GROUP_CONCAT(m.product_name, ' '), '') || ' ' ||
              COALESCE(GROUP_CONCAT(p.barcode, ' '), '')) LIKE @search ESCAPE '\\'`
     : ''
   return { groupedSql: `
