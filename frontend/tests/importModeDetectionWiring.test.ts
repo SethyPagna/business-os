@@ -129,10 +129,45 @@ await runTest('ImportModeWizard forwards the product list it already receives fr
   assert.match(wizard, /<BulkImportModal[^>]*products=\{products\}/)
 })
 
-await runTest("the banner surfaces the detector's own repeatedGroupCount and sampleProductName, not a canned message", () => {
+// Root cause: T() at line ~1232 returns the PACK value whenever the key
+// resolves, and 'dated_reconciliation_suggestion_body' resolves in both
+// packs -- so a template-literal fallback built from the detector's own
+// numbers is unreachable dead code; the operator always sees whatever
+// static sentence lives in the pack. The real fix is placeholders in the
+// pack text itself, filled in by .replace() after T() resolves.
+await runTest("the banner surfaces the detector's own repeatedGroupCount and sampleProductName via placeholders, not a canned message", () => {
   const bannerBlock = bannerBlockOf(source)
-  assert.match(bannerBlock, /datedReconciliationSignal\.repeatedGroupCount/)
-  assert.match(bannerBlock, /datedReconciliationSignal\.sampleProductName/)
+  const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
+  const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
+  assert.match(en.dated_reconciliation_suggestion_body, /\{count\}/, 'en pack text must carry the {count} placeholder')
+  assert.match(en.dated_reconciliation_suggestion_body, /\{name\}/, 'en pack text must carry the {name} placeholder')
+  assert.match(km.dated_reconciliation_suggestion_body, /\{count\}/, 'km pack text must carry the {count} placeholder')
+  assert.match(km.dated_reconciliation_suggestion_body, /\{name\}/, 'km pack text must carry the {name} placeholder')
+  assert.match(bannerBlock, /\.replace\('\{count\}'/, 'the count placeholder must be filled from the detector result')
+  assert.match(bannerBlock, /\.replace\('\{name\}'/, 'the name placeholder must be filled from the detector result')
+  assert.doesNotMatch(
+    source,
+    /\$\{datedReconciliationSignal\.repeatedGroupCount\} product/,
+    'the old template-literal fallback can never be reached once the key resolves in both packs, and must be deleted, not left as dead code',
+  )
+})
+
+// The audit's finding: the banner (BulkImportModal.tsx) and the destination
+// modal (DatedStockReconciliationModal.tsx, dated_stock_reconciliation_title)
+// must name the same destination in the same language -- an English product
+// name stitched into an otherwise-Khmer sentence, right below a button that
+// already names the destination in Khmer, reads as two different places.
+await runTest('the km suggestion body names its destination in Khmer, the same way the destination names itself', () => {
+  const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
+  assert.doesNotMatch(
+    km.dated_reconciliation_suggestion_body,
+    /Dated Stock Reconciliation/,
+    'the km banner body must not carry the English destination name',
+  )
+  assert.ok(
+    km.dated_reconciliation_suggestion_body.includes(km.dated_stock_reconciliation_title),
+    'the km banner body must name the destination using the exact km title the destination itself uses',
+  )
 })
 
 if (failed > 0) {

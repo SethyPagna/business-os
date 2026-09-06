@@ -2546,10 +2546,10 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               <div className="mt-1">
                 {T(
                   'dated_reconciliation_suggestion_body',
-                  `${datedReconciliationSignal.repeatedGroupCount} product${datedReconciliationSignal.repeatedGroupCount === 1 ? '' : 's'} in this file` +
-                  (datedReconciliationSignal.sampleProductName ? ` (e.g. "${datedReconciliationSignal.sampleProductName}")` : '') +
-                  ' appear on more than one date at the same branch. If you\'re recording repeated stock counts over time, the Dated Stock Reconciliation import handles that better -- it works out what changed between counts instead of overwriting stock in place.',
-                )}
+                  'These {count} products (e.g. "{name}") appear on more than one date at the same branch. If you\'re recording repeated stock counts over time, the Dated Stock Reconciliation import handles that better -- it works out what changed between counts instead of overwriting stock in place.',
+                )
+                  .replace('{count}', String(datedReconciliationSignal.repeatedGroupCount))
+                  .replace('{name}', datedReconciliationSignal.sampleProductName ?? '')}
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
