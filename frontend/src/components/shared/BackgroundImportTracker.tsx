@@ -1640,6 +1640,7 @@ export default function BackgroundImportTracker() {
         <Suspense fallback={null}>
           <ProductImportConflictsModal
             jobId={productConflictsJobId}
+            t={t}
             notify={(message: string, tone?: string) => notify(message, tone as NotifyTone | undefined)}
             // Every conflict decided -> re-fire the approve that the 409
             // interrupted, so "resolve, then it continues" needs no second
