@@ -7,6 +7,7 @@ import {
   parseCsvNumber,
   parseCsvRows,
 } from '../../../utils/csvImport.ts'
+import { identityBarcodeKey } from '../../../utils/productDetailRule.ts'
 
 export const PRODUCT_MONEY_FIELDS = [
   'selling_price_usd',
@@ -187,6 +188,31 @@ function normalizeComparableText(value: unknown): string {
   return normalizeText(value).toLocaleLowerCase()
 }
 
+/**
+ * A BARCODE compared as identity, not as text.
+ *
+ * This planner's create/merge decision is BINDING: it writes `_planned_action`
+ * and `_target_product_id` onto every row, and BulkImportModal and
+ * productReplaceImportPlan send those to the server rather than re-deciding.
+ * So a barcode compared here with plain trim+lowercase disagreed with
+ * cloudflare/src/lib/importEngine.ts, which folds the same comparison through
+ * identityBarcodeKey: a sheet carrying '0748485110011' for a product the
+ * catalog stores as '748485110011' was planned as a NEW product, and the
+ * server -- told exactly what to do -- created the duplicate instead of
+ * merging the stock in. That is the owner's leading-zero report reaching the
+ * import path, where it lands as a permanently forked catalog row rather than
+ * a search that comes back empty.
+ *
+ * normalizeText first so an NFC/whitespace oddity is cleaned the way every
+ * other comparable field in this file is cleaned; identityBarcodeKey (the
+ * one fold both packages carry) does the rest. Deliberately NOT applied to
+ * name or sku: the fold is a GTIN rule, and a leading zero in an
+ * alphanumeric SKU is not a padding artefact.
+ */
+function normalizeComparableBarcode(value: unknown): string {
+  return identityBarcodeKey(normalizeText(value))
+}
+
 export const BLOCKING_PRODUCT_IMPORT_ISSUES = new Set([
   'invalid_barcode',
   'barcode_scientific_notation',
@@ -357,6 +383,13 @@ export function getProductImportDetailSignature(source: ImportRow = {}): string 
     .map((field) => {
       const value = normalized[field]
       if (typeof value === 'number') return `${field}:${Number.isFinite(value) ? value : 0}`
+      // The barcode is compared as IDENTITY here too. DETAIL_FIELDS is
+      // ['barcode'] and nothing else, so this signature IS the Worker's
+      // productDetailSignature -- which folds through identityBarcodeKey.
+      // Left unfolded, two sheet rows for one article written '0748485110011'
+      // and '748485110011' landed in different subgroups and were planned as
+      // sibling child rows of one name, forking the catalog on padding alone.
+      if (field === 'barcode') return `${field}:${normalizeComparableBarcode(value)}`
       return `${field}:${normalizeComparableText(value)}`
     })
     .join('|')
@@ -390,7 +423,7 @@ function buildExistingIndex(existingProducts: ImportRow[] = []) {
     }
     const sku = normalizeComparableText(product?.sku)
     if (sku) bySku.set(sku, product)
-    const barcode = normalizeComparableText(product?.barcode)
+    const barcode = normalizeComparableBarcode(product?.barcode)
     if (barcode) byBarcode.set(barcode, product)
   })
   return { byName, bySku, byBarcode }
@@ -407,7 +440,7 @@ function buildImportedIdentifierIndex(rows: ImportRow[] = []) {
   ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
     const rowIndex = Number(row?._import_row_index ?? index)
     add(bySku, normalizeComparableText(row?.sku), rowIndex)
-    add(byBarcode, normalizeComparableText(row?.barcode), rowIndex)
+    add(byBarcode, normalizeComparableBarcode(row?.barcode), rowIndex)
   })
   return { bySku, byBarcode }
 }
@@ -596,7 +629,7 @@ export function analyzeProductImportRows(rows: ImportRow[] = [], existingProduct
     }
     const nameKey = normalizeImportProductName(row.name)
     const skuKey = normalizeComparableText(row.sku)
-    const barcodeKey = normalizeComparableText(row.barcode)
+    const barcodeKey = normalizeComparableBarcode(row.barcode)
     const sameNameProducts = byName.get(nameKey) || []
     const skuMatch = skuKey ? bySku.get(skuKey) : null
     const barcodeMatch = barcodeKey ? byBarcode.get(barcodeKey) : null

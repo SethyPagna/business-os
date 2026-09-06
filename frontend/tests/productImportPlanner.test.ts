@@ -399,6 +399,60 @@ await runTest('Wholesale price: reads wholesale_price_*, lands the legacy vip_pr
   assert.equal(Number(byName('Wholesale Blank')!.wholesale_price_usd), 0, 'a blank wholesale price is 0, NOT the selling price (12) -- defaulting to selling was destroying real prices on re-save')
 })
 
+// --- the leading-zero fold on the IMPORT path ---------------------------
+//
+// The 2026-09-06 owner report ("barcode scanner cannot scan the beginning
+// with zero...") reaches this planner as well, and here it is worse than an
+// empty search: this planner's decision is BINDING. It stamps
+// `_planned_action` / `_target_product_id` onto each row and BulkImportModal
+// and productReplaceImportPlan send those verbatim, so a barcode compared as
+// plain text here forked the catalog even though the Worker's own
+// importEngine folds the identical comparison through identityBarcodeKey.
+//
+// Red before the fold landed: the first case planned 'new' (a duplicate
+// product) instead of 'merge_stock', and the second reported no barcode
+// conflict at all.
+
+await runTest('a padded sheet barcode merges into the bare stored one', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Padded Only Serum', barcode: '0748485110011', unit: 'pcs', stock_quantity: '4' },
+  ], [
+    { id: 9, name: 'Padded Only Serum', barcode: '748485110011', unit: 'pcs', stock_quantity: 1 },
+  ])
+  assert.equal(analysis.decisions[0], 'merge_stock', 'a leading-zero twin is the SAME product, not a new one')
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 9, 'and it must be aimed at the row it merges into')
+  assert.equal(analysis.summary.newCount, 0, 'planning it as new is what creates the duplicate the owner sees')
+})
+
+await runTest('the SAME padded barcode under a different name is a barcode conflict', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Some Other Serum', barcode: '0748485110011', unit: 'pcs', stock_quantity: '4' },
+  ], [
+    { id: 9, name: 'Padded Only Serum', barcode: '748485110011', unit: 'pcs', stock_quantity: 1 },
+  ])
+  assert.equal(analysis.conflicts.length, 1, 'one barcode owned by two different names is a conflict to review')
+  assert.ok(
+    analysis.conflicts[0].conflictFields.includes('barcode'),
+    'the fold must make the clash VISIBLE, not silently plan a second owner of one barcode',
+  )
+})
+
+await runTest('two sheet rows differing only by a leading zero are one product, not siblings', () => {
+  // The other half of the same fold: the same-file index and the detail
+  // signature. DETAIL_FIELDS is ['barcode'] and nothing else, so an unfolded
+  // barcode put these two rows in different subgroups and planned them as
+  // sibling child rows of one name -- a catalog forked on padding alone.
+  const analysis = analyzeProductImportRows([
+    { name: 'Twin Sheet Serum', barcode: '0748485110011', unit: 'pcs', stock_quantity: '2' },
+    { name: 'Twin Sheet Serum', barcode: '748485110011', unit: 'pcs', stock_quantity: '3' },
+  ], [])
+  assert.equal(analysis.rows[0]._detail_signature, analysis.rows[1]._detail_signature,
+    'one article written at two widths must carry ONE detail signature')
+  assert.notEqual(analysis.decisions[1], 'create_variant',
+    'the padding twin is not a variant of the row above it')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
