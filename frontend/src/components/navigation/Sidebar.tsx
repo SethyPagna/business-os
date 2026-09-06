@@ -1,6 +1,8 @@
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import { getHubDestinations, hubAnchor, mobileGroupAction, resolveHubSection } from '../shared/hubNavigation.ts'
+import { getHubDestinations, hubAnchor, mobileGroupAction, resolveChromeSection } from '../shared/hubNavigation.ts'
 import { buildMobileHomeLayout, mobileHomeSectionsPanelId } from '../../utils/mobileHomeTiles.ts'
+import { mobileChromeViewportOffset, navLayerToggle } from '../../utils/mobileNavChrome.ts'
+import './nav-chrome.css'
 import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
@@ -232,9 +234,13 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   useEffect(() => { setMoreOpen(false); setExpandedGroup(null) }, [inline])
   const destinations = (id: string) => canAccessPage(id) ? getHubDestinations(id, { getPermissionTier, hasPermission, can }) : []
   const currentSections = destinations(page)
-  let remembered = ''
-  try { remembered = window.localStorage.getItem(`bos:hub:${page}:active`) || '' } catch { /* private mode */ }
-  const currentSectionId = resolveHubSection(page, location.pathname, location.hash, currentSections.map((section) => section.id), page === 'branches' ? 'overview' : remembered)
+  // Chrome follows the COMMITTED route, and shows page level when the route
+  // names no section. It must not fall back to `bos:hub:<page>:active` (the
+  // last section visited): only Sales and Contacts seed their bodies from
+  // that key, so on Products/Promotions/Review/Branches the guess titled the
+  // bar with the sub page just left while the body rendered the page's own
+  // default. See resolveChromeSection in shared/hubNavigation.ts.
+  const currentSectionId = resolveChromeSection(page, location.pathname, location.hash, currentSections.map((section) => section.id))
   const currentSection = currentSections.find((section) => section.id === currentSectionId)
   const sectionLabel = (section: { key: string; label: string }) => {
     const label = t(section.key)
@@ -246,9 +252,14 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     if (action.navigate) navigateTo(id)
     else { setAccountOpen(false); setMoreOpen(true) }
   }
+  // The top bar's Back control. A toggle, not an opener: the pages layer now
+  // covers the page it was opened from (that is what removes the band the
+  // old bottom sheet left under the bar), so the scrim that used to serve as
+  // "tap outside to dismiss" is gone with it. One control, both directions.
   const openSectionMenu = () => {
-    setExpandedGroup(currentSections.length ? page : null)
-    setMoreOpen(true)
+    const next = navLayerToggle({ open: moreOpen, expanded: expandedGroup }, page, currentSections.length > 0)
+    setExpandedGroup(next.expanded)
+    setMoreOpen(next.open)
   }
   const [profileOpen, setProfileOpen] = useState(false)
   // The footer account row is a full-width toggle that expands into an account
@@ -353,6 +364,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     sidebarTextColor ? { color: sidebarTextColor } : undefined,
     sidebarTextColor ? { backgroundColor: withAlpha(sidebarTextColor, isDark ? '24' : '18') || undefined } : undefined,
   )
+
+  // Where the fixed top chrome ends, from the top of the viewport. The pages
+  // layer below anchors to exactly this, in all four (update bar x auto-hidden
+  // header) states, so there is never a band between the bar and the layer --
+  // and never a strip of the page underneath showing through one.
+  const navLayerTop = mobileChromeViewportOffset({ headerVisible: mobileHeaderVisible, appUpdateVisible })
 
   // Account panel actions -- rendered inside the desktop footer expander and
   // the mobile header dropdown. Settings / Receipt Settings are gated the same
@@ -517,14 +534,21 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           padding-top is matched to this same total height. */}
       <header
         data-bos-mobile-header={inline ? 'inline' : 'sections'}
-        className={`fixed left-0 right-0 z-40 flex items-center justify-between border-b border-gray-200 bg-white transition-[transform,top] duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${inline ? 'pl-[calc(0.25rem+env(safe-area-inset-left))] pr-[calc(0.25rem+env(safe-area-inset-right))]' : 'pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))]'} ${appUpdateVisible ? 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]'} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        className={`bos-nav-chrome bos-nav-topbar fixed left-0 right-0 z-40 flex items-center justify-between transition-[transform,top] duration-300 ease-in-out md:hidden ${inline ? 'pl-[calc(0.25rem+env(safe-area-inset-left))] pr-[calc(0.25rem+env(safe-area-inset-right))]' : 'pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))]'} ${appUpdateVisible ? 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]'} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
       >
         {inline ? (
           <div className="flex min-w-0 flex-1 items-center gap-1">
-            <button type="button" onClick={openSectionMenu} aria-label={t('back') || 'Back'} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800">
-              <ChevronLeft className="h-5 w-5" />
+            <button
+              type="button"
+              onClick={openSectionMenu}
+              aria-expanded={moreOpen}
+              aria-controls="mobile-nav-layer"
+              aria-label={moreOpen ? (t('close') || 'Close') : (t('back') || 'Back')}
+              className="bos-nav-back flex h-11 w-11 shrink-0 items-center justify-center rounded-lg transition-colors"
+            >
+              <ChevronLeft className={`h-5 w-5 transition-transform ${moreOpen ? 'rotate-90' : ''}`} />
             </button>
-            <div className="min-w-0 flex-1 truncate text-sm font-semibold" title={mobileTitle}>
+            <div className="bos-nav-title min-w-0 flex-1 truncate text-sm font-semibold" title={mobileTitle}>
               {mobileTitle}
             </div>
           </div>
@@ -638,16 +662,35 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
 
       {moreOpen ? (
         <>
-          <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMoreOpen(false)} />
-          {/* bottom-[...] matches the bottom nav's actual height (3.55rem +
-              safe-area-inset-bottom, see .safe-area-inset-bottom in main.css)
-              instead of a flat bottom-16, so this drawer doesn't slide in
-              underneath -- and get hidden behind -- the taller nav bar that
+          {/* The pages layer is opaque and reaches the bottom bar, so nothing
+              behind it is visible or tappable: a scrim would only be a second
+              dismissal affordance for the Back toggle that already opened it.
+              The legacy bottom sheet still floats over its page and keeps
+              its own. */}
+          {inline ? null : <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMoreOpen(false)} />}
+          {/* Pages mode: `top` is the bottom edge of the fixed chrome
+              (mobileChromeViewportOffset), so the layer is FLUSH with the top
+              bar -- one merged surface, no band, and no strip of the page it
+              was opened from showing above it. It used to be bottom-anchored
+              with `max-h-[70vh]`, which put its top edge wherever its content
+              happened to end.
+              Sections mode: bottom-[...] matches the bottom nav's actual
+              height (3.55rem + safe-area-inset-bottom, see
+              .safe-area-inset-bottom in main.css) instead of a flat
+              bottom-16, so this drawer doesn't slide in underneath -- and get
+              hidden behind -- the taller nav bar that
               env(safe-area-inset-bottom) produces on notched iPhones. */}
-          <div className={`fixed left-0 right-0 z-40 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 md:hidden ${inline ? 'bottom-0 pb-[env(safe-area-inset-bottom)]' : 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'}`}>
+          <div
+            id="mobile-nav-layer"
+            data-bos-nav-layer={inline ? 'pages' : 'sheet'}
+            style={inline ? { top: navLayerTop } : undefined}
+            className={`fixed left-0 right-0 z-40 overflow-y-auto md:hidden ${inline ? 'bos-nav-chrome bos-nav-layer' : 'max-h-[70vh] rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900'} ${inline ? 'bottom-0 pb-[env(safe-area-inset-bottom)]' : 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'}`}
+          >
+            {inline ? null : (
             <div className="sticky top-0 bg-white px-3 pb-1 pt-3 dark:bg-gray-900">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" />
             </div>
+            )}
             {inline ? (
               /* Home tiles: a 2-column grid whose tapped tile unfolds its own
                  sections as a full-width 2-column sub-grid under that tile's
@@ -655,18 +698,25 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                  sub-grid's insertion point are buildMobileHomeLayout's --
                  see utils/mobileHomeTiles.ts for why placing it "after the
                  tile" is the wrong-looking-right implementation. */
-              <div className="grid grid-cols-2 gap-2 px-3 pb-4">
+              <div className="grid grid-cols-2 gap-2 px-3 pb-4 pt-3">
                 {buildMobileHomeLayout(inlineItems, expandedGroup, destinations).map((entry) => {
                   if (entry.kind === 'sections') return (
-                    <div key={entry.key} id={mobileHomeSectionsPanelId(entry.ownerId)} className="col-span-2 grid min-w-0 grid-cols-2 gap-1 rounded-xl bg-gray-50 p-2 dark:bg-gray-800">
-                      {entry.sections.map((section) => (
+                    <div key={entry.key} id={mobileHomeSectionsPanelId(entry.ownerId)} className="bos-nav-sections col-span-2 grid min-w-0 grid-cols-2 gap-1 rounded-xl p-2">
+                      {entry.sections.map((section) => {
+                        // Active = the section the committed route names, not
+                        // the last one tapped. It reads as open (gold ground,
+                        // gold ink, semibold, leading rule), which nothing in
+                        // this list used to do at all.
+                        const isOpenSection = page === entry.ownerId && currentSectionId === section.id
+                        return (
                         <button key={section.id} type="button" data-bos-section={`${entry.ownerId}:${section.id}`}
-                          aria-current={page === entry.ownerId && currentSectionId === section.id ? 'page' : undefined}
+                          aria-current={isOpenSection ? 'page' : undefined}
                           onClick={() => navigateTo(entry.ownerId, hubAnchor(entry.ownerId, section.id))}
-                          className="min-h-11 min-w-0 break-words rounded-lg border border-gray-200 bg-white px-2 py-2 text-left text-sm leading-snug hover:bg-blue-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-700">
+                          className={`bos-nav-section min-h-11 min-w-0 break-words rounded-lg px-2.5 py-2 text-left text-[13px] leading-snug transition-colors ${isOpenSection ? 'is-active' : ''}`}>
                           {sectionLabel(section)}
                         </button>
-                      ))}
+                        )
+                      })}
                     </div>
                   )
                   const { item, expanded, hasSections } = entry
@@ -675,11 +725,11 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                     <button key={entry.key} type="button" data-bos-nav-id={item.id} aria-expanded={hasSections ? expanded : undefined}
                       aria-controls={hasSections ? mobileHomeSectionsPanelId(item.id) : undefined}
                       onClick={() => openMobileGroup(item.id)}
-                      className={`relative flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-2 py-3 text-sm font-medium ${expanded ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-50 dark:bg-gray-800'}`}>
+                      className={`bos-nav-tile relative flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-2 py-3 text-[13px] font-medium transition-colors ${expanded ? 'is-open' : ''}`}>
                       <Icon className="h-5 w-5 shrink-0" />
                       <span className="min-w-0 break-words text-center leading-tight">{getNavLabel(item, t, language)}</span>
                       {dirtyPageIds.has(item.id) ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-400" /> : null}
-                      {hasSections ? <ChevronUp className={`absolute bottom-1.5 right-1.5 h-3.5 w-3.5 opacity-60 ${expanded ? '' : 'rotate-180'}`} /> : null}
+                      {hasSections ? <ChevronUp className={`absolute bottom-1.5 right-1.5 h-3.5 w-3.5 opacity-70 ${expanded ? '' : 'rotate-180'}`} /> : null}
                     </button>
                   )
                 })}

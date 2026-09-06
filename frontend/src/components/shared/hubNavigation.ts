@@ -80,18 +80,47 @@ export function sealRootHubSection(page: string, section: string, activePage: st
   return true
 }
 
-export function resolveHubSection(page: string, pathname: string, hash: string, allowed: readonly string[], fallback: string): string {
+const LEGACY_SECTION_PATHS: Record<string, string> = {
+  '/returns': 'returns', '/fees': 'fees', '/inventory': 'products',
+  '/users': 'users', '/backup': 'backup', '/backups': 'backup',
+  '/audit': 'audit', '/audit-log': 'audit', '/delivery-contacts': 'delivery',
+  '/loyalty': 'loyalty', '/loyalty-points': 'loyalty',
+}
+
+/**
+ * The section the LOCATION itself names -- the committed `#hub:<page>:<id>`
+ * anchor, or a legacy path that still maps to one -- and '' when it names
+ * none.
+ *
+ * This is what the CHROME (the mobile top bar's title, the navigation
+ * layer's active/unfolded state) must read, and the reason it is a separate
+ * export from resolveHubSection: the fallback resolveHubSection applies when
+ * the URL is silent belongs to the HOST page, and the chrome does not have
+ * it. The chrome used to guess with `localStorage['bos:hub:<page>:active']`,
+ * i.e. the last section visited. For Sales and Contacts that happens to
+ * agree, because their hosts seed themselves from the same key; for Products
+ * (fixed 'products'), Promotions ('rules'/'loyalty'), Review and Branches it
+ * does not. So on any entry that carries no anchor -- a cold PWA launch on
+ * /products, a bookmark, a page tap that cleared a foreign hub hash -- the
+ * bar titled itself with the sub page last visited while the body rendered
+ * the page's own default: the reported "it still shows the page i back
+ * from".
+ *
+ * '' is a real answer -- page level, no section claimed -- not a cue to
+ * guess. The host publishes its choice a tick later (useHubSection's
+ * `publish`) and the chrome follows the committed route from then on.
+ */
+export function resolveChromeSection(page: string, pathname: string, hash: string, allowed: readonly string[]): string {
   const prefix = `#hub:${page}:`
   const requested = hash.startsWith(prefix) ? hash.slice(prefix.length) : ''
   if (allowed.includes(requested)) return requested
-  const legacy: Record<string, string> = {
-    '/returns': 'returns', '/fees': 'fees', '/inventory': 'products',
-    '/users': 'users', '/backup': 'backup', '/backups': 'backup',
-    '/audit': 'audit', '/audit-log': 'audit', '/delivery-contacts': 'delivery',
-    '/loyalty': 'loyalty', '/loyalty-points': 'loyalty',
-  }
-  const oldSection = legacy[pathname.toLowerCase().replace(/\/$/, '')]
-  if (oldSection && allowed.includes(oldSection)) return oldSection
+  const oldSection = LEGACY_SECTION_PATHS[pathname.toLowerCase().replace(/\/$/, '')]
+  return oldSection && allowed.includes(oldSection) ? oldSection : ''
+}
+
+export function resolveHubSection(page: string, pathname: string, hash: string, allowed: readonly string[], fallback: string): string {
+  const located = resolveChromeSection(page, pathname, hash, allowed)
+  if (located) return located
   return allowed.includes(fallback) ? fallback : (allowed[0] || '')
 }
 
