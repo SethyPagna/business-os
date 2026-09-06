@@ -1398,13 +1398,13 @@ export default function PublicCatalogPage() {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
           <div>
             <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('bucketTitle', 'My List')}</div>
-            <div className="text-xs text-slate-400 dark:text-neutral-500">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
+            <div className="text-xs text-slate-500 dark:text-neutral-400">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {contactChannels.length > 0 ? (
               <button
                 type="button"
-                className={`rounded-full p-1.5 transition ${bucketContactOpen ? 'bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-100' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'}`}
+                className={`rounded-full p-1.5 transition ${bucketContactOpen ? 'bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-100' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'}`}
                 onClick={() => setBucketContactOpen((current) => !current)}
                 aria-label={copy('contactUs', 'Contact us')}
                 title={copy('contactUs', 'Contact us')}
@@ -1415,7 +1415,7 @@ export default function PublicCatalogPage() {
             ) : null}
             <button
               type="button"
-              className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               onClick={closeBucketDrawer}
               aria-label={copy('close', 'Close')}
             >
@@ -1437,7 +1437,7 @@ export default function PublicCatalogPage() {
         */}
         {bucketContactOpen && contactChannels.length > 0 ? (
           <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-3 dark:border-neutral-800 dark:bg-neutral-800/30">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-neutral-500">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
               {copy('contactUs', 'Contact us')}
             </div>
             <div className="space-y-1">
@@ -1468,7 +1468,7 @@ export default function PublicCatalogPage() {
 
         <div className="max-h-[50vh] overflow-y-auto px-5 py-3">
           {bucket.items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-400 dark:text-neutral-500">
+            <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
               {copy('bucketEmpty', 'Your list is empty. Tap "Add" on products you like.')}
             </div>
           ) : (
@@ -1477,7 +1477,7 @@ export default function PublicCatalogPage() {
                 <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-slate-900 dark:text-neutral-100">{item.name}</div>
-                    {item.priceText ? <div className="text-xs text-slate-400 dark:text-neutral-500">{item.priceText}</div> : null}
+                    {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
@@ -1533,11 +1533,11 @@ export default function PublicCatalogPage() {
               </button>
             </div>
             {bucketCopyState === 'failed' ? (
-              <div className="text-center text-xs text-rose-500">{copy('bucketCopyFailed', 'Could not copy automatically -- try Download instead.')}</div>
+              <div className="text-center text-xs text-rose-700 dark:text-rose-300">{copy('bucketCopyFailed', 'Could not copy automatically -- try Download instead.')}</div>
             ) : null}
             <button
               type="button"
-              className="w-full text-center text-xs font-medium text-slate-400 hover:text-rose-500 dark:text-neutral-500"
+              className="w-full text-center text-xs font-medium text-slate-500 hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300"
               onClick={bucket.clear}
             >
               {copy('clearBucket', 'Clear all')}
@@ -1568,7 +1568,7 @@ export default function PublicCatalogPage() {
           </div>
           <button
             type="button"
-            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setAccountOpen(false)}
             aria-label={copy('close', 'Close')}
           >
@@ -1615,7 +1615,7 @@ export default function PublicCatalogPage() {
           </div>
           <button
             type="button"
-            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setWishlistOpen(false)}
             aria-label={copy('close', 'Close')}
           >
@@ -1624,7 +1624,7 @@ export default function PublicCatalogPage() {
         </div>
         <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
           {wishlist.items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-400 dark:text-neutral-500">
+            <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
               {copy('wishlistEmpty', 'Your wishlist is empty. Tap the heart on products you love.', 'បញ្ជីចង់បានរបស់អ្នកនៅទទេ។ ចុចរូបបេះដូងលើផលិតផលដែលអ្នកចូលចិត្ត។')}
             </div>
           ) : (
@@ -1635,7 +1635,7 @@ export default function PublicCatalogPage() {
                   <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-slate-900 dark:text-neutral-100">{item.name}</div>
-                      {item.priceText ? <div className="text-xs text-slate-400 dark:text-neutral-500">{item.priceText}</div> : null}
+                      {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button
@@ -1665,7 +1665,7 @@ export default function PublicCatalogPage() {
           <div className="border-t border-slate-100 px-5 py-4 dark:border-neutral-800">
             <button
               type="button"
-              className="w-full text-center text-xs font-medium text-slate-400 transition hover:text-rose-500 dark:text-neutral-500"
+              className="w-full text-center text-xs font-medium text-slate-500 transition hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300"
               onClick={wishlist.clear}
             >
               {copy('clearWishlist', 'Clear all', 'សម្អាតទាំងអស់')}
@@ -1744,12 +1744,12 @@ export default function PublicCatalogPage() {
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-neutral-500">
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
             {copy('contactUs', 'Contact us')}
           </div>
           <button
             type="button"
-            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setContactOpen(false)}
             aria-label={copy('close', 'Close')}
           >

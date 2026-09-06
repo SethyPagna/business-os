@@ -108,6 +108,12 @@ export default function CatalogProductImage({ src, alt = '', className, onClick 
     <img
       src={url}
       alt={alt}
+      // An empty alt is the caller saying "this image carries nothing the
+      // surrounding markup does not already say" (the flyout thumbnail
+      // strip, where the BUTTON carries the name). Take it out of the
+      // accessibility tree entirely rather than leaving a nameless
+      // graphic in it.
+      aria-hidden={alt ? undefined : true}
       className={className}
       data-protected-media="true"
       draggable={false}

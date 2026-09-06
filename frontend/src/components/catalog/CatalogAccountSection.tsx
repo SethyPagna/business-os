@@ -88,7 +88,7 @@ export default function CatalogAccountSection({
       </p>
       <div className="space-y-4">
         {!ready ? (
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-500">
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
             {copy('accountLoading', 'Checking your account…')}
           </div>
         ) : account ? (
@@ -108,7 +108,7 @@ export default function CatalogAccountSection({
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:bg-white/5 dark:text-neutral-200">
-                <ShoppingBag className="h-4 w-4 text-slate-400" />
+                <ShoppingBag className="h-4 w-4 text-slate-400" aria-hidden="true" />
                 <span>{cartCount} {copy('inYourList', 'in your list')}</span>
               </div>
               <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:bg-white/5 dark:text-neutral-200">
@@ -116,7 +116,7 @@ export default function CatalogAccountSection({
                 <span>{wishlistCount} {copy('saved', 'saved')}</span>
               </div>
             </div>
-            <p className="mt-3 text-xs text-slate-400 dark:text-neutral-500">
+            <p className="mt-3 text-xs text-slate-500 dark:text-neutral-400">
               {copy('accountMemoryHint', 'Your list and saved items are kept with your account, so they follow you across devices.')}
             </p>
             <button
@@ -148,7 +148,7 @@ export default function CatalogAccountSection({
             </div>
 
             {error ? (
-              <div className="mb-4 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200">
+              <div className="mb-4 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200">
                 {error}
               </div>
             ) : null}
@@ -179,7 +179,7 @@ export default function CatalogAccountSection({
                 <button type="submit" disabled={busy} className={submitClass}>
                   {busy ? copy('signingIn', 'Signing in…') : copy('signIn', 'Sign in')}
                 </button>
-                <p className="text-xs text-slate-400 dark:text-neutral-500">
+                <p className="text-xs text-slate-500 dark:text-neutral-400">
                   {copy('forgotPasswordHint', 'Forgot your password? Please contact us to reset it.')}
                 </p>
               </form>
@@ -231,14 +231,14 @@ export default function CatalogAccountSection({
 }
 
 const inputClass = 'w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white'
-const submitClass = 'inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:opacity-60'
+const submitClass = 'inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:opacity-60'
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
       <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">{label}</div>
       {children}
-      {hint ? <div className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">{hint}</div> : null}
+      {hint ? <div className="mt-1 text-[11px] text-slate-500 dark:text-neutral-400">{hint}</div> : null}
     </label>
   )
 }

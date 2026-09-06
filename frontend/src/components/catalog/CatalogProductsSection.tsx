@@ -27,6 +27,7 @@ import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortal
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import { PORTAL_MERCHANT_COLOR_DEFAULTS, ensureAccessibleSurface } from './portalContrast.ts'
 
 type CopyFn = (key: string, fallback?: string) => string
 type ReplaceVarsFn = (template: string, values: Record<string, string | number>) => string
@@ -527,7 +528,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               id="portal-product-search"
               name="product_search"
               autoComplete="off"
-              className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-neutral-100"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-500 dark:text-neutral-100 dark:placeholder:text-neutral-400"
               placeholder={copy('searchPlaceholder', 'Search products')}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -659,9 +660,14 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     <button
                       type="button"
                       className="relative min-h-[220px] overflow-hidden bg-slate-100 dark:bg-neutral-800"
+                      // Without this the control is a picture inside a button
+                      // and nothing else: the image is redundant with the
+                      // heading beside it (so alt-hidden), which left the
+                      // button itself unnamed.
+                      aria-label={`${copy('viewImages', 'View images')}${item.title ? `: ${item.title}` : ''}`}
                       onClick={() => openPortalImage?.(item.title || promotionsTitle || copy('products', 'Products'), [item.mediaUrl || ''])}
                     >
-                      <img src={item.mediaUrl} alt={item.title || item.subtitle || promotionsTitle || copy('products', 'Products')} className="h-full w-full object-cover" />
+                      <img src={item.mediaUrl} alt={item.title || item.subtitle || promotionsTitle || ''} aria-hidden={item.title || item.subtitle || promotionsTitle ? undefined : true} className="h-full w-full object-cover" />
                     </button>
                   ) : null}
                 </div>
@@ -768,9 +774,9 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 }}
               >
                 {primaryImage ? (
-                  <CatalogProductImage src={primaryImage} alt={product.name || copy('products', 'Products')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+                  <CatalogProductImage src={primaryImage} alt={[product.name, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-slate-300">
+                  <div className="flex h-full items-center justify-center text-slate-300" aria-hidden="true">
                     <ShoppingBag className="h-10 w-10" />
                   </div>
                 )}
@@ -780,8 +786,16 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       (() => {
                         const BadgeIcon = getBadgeIcon(badge)
                         const badgeColor = typeof badge.color === 'string' ? badge.color : ''
-                        const customStyle = badgeColor && badge.key === 'promotion'
-                          ? { backgroundColor: badgeColor, color: '#fff' }
+                        // The promotion badge colour is merchant-typed, so
+                        // the old hardcoded white ink was a coin flip -- a
+                        // pale campaign colour left the label invisible. Take
+                        // the ink from the colour and nudge the fill only as
+                        // far as 4.5:1 needs.
+                        const badgeSurface = badgeColor && badge.key === 'promotion'
+                          ? ensureAccessibleSurface(badgeColor, 'text', PORTAL_MERCHANT_COLOR_DEFAULTS.promotionBadge)
+                          : null
+                        const customStyle = badgeSurface
+                          ? { backgroundColor: badgeSurface.background, color: badgeSurface.color }
                           : undefined
                         return (
                           <span
@@ -811,7 +825,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
 
               <div className={`space-y-1 ${compactCatalogCards ? 'pt-2.5' : 'pt-3'}`}>
                 {metadataChips.length ? (
-                  <div className="flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-wide text-slate-400 dark:text-neutral-500">
+                  <div className="flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500 dark:text-neutral-400">
                     {metadataChips.map((chip) => (
                       <span key={`${product.id}-${chip}`} {...getKhmerTextProps(chip, '')}>
                         {chip}
@@ -841,7 +855,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     <div className={`font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
                       {pricePresentation?.primaryText}
                       {showDiscountDetails && promotion?.active && pricePresentation?.originalText ? (
-                        <span className="ml-2 text-[11px] font-normal text-slate-400 line-through dark:text-neutral-500">
+                        <span className="ml-2 text-[11px] font-normal text-slate-500 line-through dark:text-neutral-400">
                           {pricePresentation.originalText}
                         </span>
                       ) : null}
@@ -856,7 +870,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex shrink-0 items-center justify-center rounded-full p-1.5 transition ${saved ? 'text-rose-500' : 'text-slate-400 hover:text-rose-400 dark:text-neutral-500'}`}
+                          className={`inline-flex shrink-0 items-center justify-center rounded-full p-1.5 transition ${saved ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300'}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onToggleWishlist(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)

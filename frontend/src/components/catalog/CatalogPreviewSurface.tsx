@@ -336,7 +336,7 @@ export default function CatalogPreviewSurface({
                   </div>
                   <div className="min-w-0 text-center">
                     {showBrandLabel ? (
-                      <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-neutral-500" translate="no">
+                      <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-neutral-400" translate="no">
                         {displayConfig.businessName}
                       </div>
                     ) : null}
@@ -454,14 +454,14 @@ export default function CatalogPreviewSurface({
                                 {firstPartyTranslateOptions.length ? firstPartyTranslateOptions.map(renderOption) : null}
                                 {externalTranslateOptions.length ? (
                                   <>
-                                    <div className="mt-1 border-t border-slate-200 px-4 pb-1.5 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:border-neutral-700 dark:text-neutral-500">
+                                    <div className="mt-1 border-t border-slate-200 px-4 pb-1.5 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-neutral-700 dark:text-neutral-400">
                                       {copy('externalTranslation', 'More languages (auto-translated)')}
                                     </div>
                                     {externalTranslateOptions.map(renderOption)}
                                   </>
                                 ) : null}
                                 {!firstPartyTranslateOptions.length && !externalTranslateOptions.length ? (
-                                  <div className="px-4 py-6 text-center text-sm text-slate-400 dark:text-neutral-500">
+                                  <div className="px-4 py-6 text-center text-sm text-slate-500 dark:text-neutral-400">
                                     {copy('noLanguagesFound', 'No languages match your search.')}
                                   </div>
                                 ) : null}

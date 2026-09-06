@@ -192,13 +192,13 @@ export default function PortalFilterCombobox({
                   </div>
                 )
               }) : (
-                <div className="px-2.5 py-3 text-center text-[11px] text-slate-400">{noMatchesLabel}</div>
+                <div className="px-2.5 py-3 text-center text-[11px] text-slate-500 dark:text-neutral-400">{noMatchesLabel}</div>
               )
             ) : (
               filteredOptions.length ? filteredOptions.map((option) => (
                 renderOptionRow(option.value, option.label, selected.includes(option.value), () => onToggle(option.value))
               )) : (
-                <div className="px-2.5 py-3 text-center text-[11px] text-slate-400">{noMatchesLabel}</div>
+                <div className="px-2.5 py-3 text-center text-[11px] text-slate-500 dark:text-neutral-400">{noMatchesLabel}</div>
               )
             )}
           </div>
@@ -214,7 +214,7 @@ export default function PortalFilterCombobox({
               <button
                 type="button"
                 onClick={() => onToggle(value)}
-                className="shrink-0 text-slate-400 transition hover:text-slate-700 dark:hover:text-neutral-100"
+                className="shrink-0 text-slate-600 transition hover:text-slate-900 dark:text-neutral-300 dark:hover:text-neutral-100"
                 aria-label={`Remove ${selectedLabelByValue.get(value) || value}`}
               >
                 <X className="h-3 w-3" />
