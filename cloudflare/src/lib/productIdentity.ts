@@ -368,6 +368,15 @@ export type ProductIdentityFold = {
   source: 'merge' | 'bulk_merge'
   /** True when the merge was undone; the pair is two rows again. */
   reversed: boolean
+  /**
+   * The undo_snapshots row this fold was read out of. It is the ONE total order
+   * over folds from both shapes: `at` is a text timestamp that two folds
+   * recorded in the same second share, and the two queries are separate, so
+   * without this the list can only be ordered within each shape. Carried out to
+   * the caller as well so a surface that re-sorts (or pages) cannot invent a
+   * different order from the one documented on mergedFrom.
+   */
+  snapshotId: number
 }
 
 export type ProductIdentityHistory = {
@@ -424,6 +433,7 @@ function foldsInSnapshot(row: SnapshotRow, source: 'merge' | 'bulk_merge'): Prod
       by: row.created_by_name,
       source,
       reversed: String(row.status || '') === 'reversed',
+      snapshotId: Number(row.id) || 0,
     })
   }
   return folds
@@ -471,13 +481,22 @@ export async function readProductIdentityHistory(db: D1Compat, productId: number
     `).all<{ created_at: string | null; user_name: string | null; details: string | null }>({ id: String(id) }),
   ])
 
+  // Two queries, each newest-first within its own shape -- so concatenating
+  // them is NOT newest-first, it is "every single fold, then every bulk one",
+  // and the type says mergedFrom is newest first. Left unsorted, a survivor
+  // whose most recent fold came from the whole-catalog run showed that fold
+  // BELOW a single merge from months earlier, and mergedInto (which takes the
+  // first match) could answer with the older of two folds. Sorted here, once,
+  // on the snapshot id: the only field that totally orders folds from both
+  // shapes.
   const folds = [
     ...singles.flatMap((row) => foldsInSnapshot(row, 'merge')),
     ...bulks.flatMap((row) => foldsInSnapshot(row, 'bulk_merge')),
-  ]
+  ].sort((a, b) => b.snapshotId - a.snapshotId)
   const mergedFrom = folds.filter((fold) => fold.intoId === id)
   // A row can only have been folded away once and still exist to be asked
-  // about, so the newest such fold is the answer.
+  // about, so the newest such fold is the answer -- newest for real now that
+  // the list above is in one order.
   const mergedInto = folds.find((fold) => fold.fromId === id) || null
 
   const keptSeparate = decisions.map((row) => {

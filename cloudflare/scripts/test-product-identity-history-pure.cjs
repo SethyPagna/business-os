@@ -212,6 +212,25 @@ async function main() {
     assert.equal(history.mergedFrom.length, 3, 'exactly the three real folds; the broken payload is skipped, not thrown on')
   })
 
+  await check('DISCRIMINATING: the folds come back in ONE newest-first order, not singles-then-bulks', () => {
+    // The seed writes, in this order: snapshot 1 = the single fold of 11,
+    // snapshot 2 = the BULK fold of 12, snapshot 3 = the (later, undone) single
+    // fold of 13. Newest first is therefore 13, 12, 11.
+    //
+    // The two queries are separate and each is newest-first WITHIN its shape, so
+    // a reader that simply concatenates them answers [13, 11, 12]: the bulk fold
+    // -- the newest but one -- sinks below a single merge that happened before
+    // it. The type on mergedFrom says "Newest first", and a panel that renders
+    // the list in order was quietly showing a false chronology.
+    assert.deepEqual(
+      history.mergedFrom.map((fold) => fold.fromId), [13, 12, 11],
+      'concatenating the two queries gives [13, 11, 12] -- documented as newest first, and not',
+    )
+    // The order is carried, not implied: the snapshot id is on the fold, so a
+    // surface that re-sorts or pages cannot invent a different one.
+    assert.deepEqual(history.mergedFrom.map((fold) => fold.snapshotId), [3, 2, 1])
+  })
+
   await check('DISCRIMINATING: mergedFrom and mergedInto are opposite answers, not the same match', () => {
     assert.equal(history.mergedInto, null, 'the survivor was not itself folded away')
     // The retired row must see the mirror image. A reader that matched the id

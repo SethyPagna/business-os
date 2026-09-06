@@ -8,6 +8,9 @@ import InfoHint from '../shared/InfoHint.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { ProductImg } from './shared/primitives.tsx'
 import { getPossiblySameProducts, dismissProductDuplicateCluster, getProductIdentityHistory, updateProduct } from '../../api/productWriteTransport.ts'
+// N34: the identity-history panel and its shape, shared with the product form.
+import IdentityHistoryPanel from './IdentityHistoryPanel.tsx'
+import type { IdentityHistory } from './helpers/identityHistory.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { identityBarcodeKey, normalizeLeadingZeroBarcodeForCleanup, resolveMergedCostDetail } from '../../utils/productDetailRule.ts'
@@ -51,28 +54,6 @@ type Cluster = {
   value: string
   severity: Severity
   products: ClusterProduct[]
-}
-
-// GET /api/products/:id/identity-history -- see readProductIdentityHistory in
-// cloudflare/src/lib/productIdentity.ts. `keptSeparate` is deliberately its own
-// list rather than folded in with the folds: it comes from audit_logs and is
-// retention-bound, so an empty one does NOT mean no decision was taken, while an
-// empty `mergedFrom` really does mean nothing was ever folded in.
-type IdentityFold = {
-  fromId: number
-  fromName: string | null
-  intoId: number
-  intoName: string | null
-  at: string | null
-  by: string | null
-  source: 'merge' | 'bulk_merge'
-  reversed: boolean
-}
-
-type IdentityHistory = {
-  mergedFrom?: IdentityFold[]
-  mergedInto?: IdentityFold | null
-  keptSeparate?: Array<{ at: string | null; by: string | null; keptSeparateFrom: number[]; path: string | null }>
 }
 
 const SEVERITY_STYLE: Record<Severity, string> = {
@@ -845,48 +826,11 @@ export default function ProductDuplicatesTab({ t, notify }: {
       {editTarget ? (
         <Modal title={`${t('resolve') || 'Resolve'} — ${editTarget.name || `#${editTarget.id}`}`} onClose={() => setEditTarget(null)} draggable unsavedChanges={{ dirty: editFormDirty }}>
           <div className="space-y-2.5">
-            {/* N34: what has ALREADY been decided about this row. Rendered only
-                when there is something to say, so an ordinary Resolve float is
-                unchanged -- a permanently empty "no history" panel would cost
-                every reviewer a line of chrome to tell them nothing. */}
-            {editHistory && ((editHistory.mergedFrom?.length || 0) > 0 || editHistory.mergedInto || (editHistory.keptSeparate?.length || 0) > 0) ? (
-              <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2 dark:border-gray-700 dark:bg-gray-800/50">
-                <div className="mb-1 flex items-center gap-1">
-                  <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                    {t('identity_history_title') || 'Already decided'}
-                  </span>
-                  <InfoHint
-                    label={t('identity_history_title') || 'Already decided'}
-                    text={t('identity_history_hint') || 'Merges are read from the undo record, so they stay visible for as long as they can be undone. Keep-separate decisions come from the audit log and age out with it.'}
-                  />
-                </div>
-                <ul className="space-y-0.5 text-[11px] leading-tight text-gray-600 dark:text-gray-300">
-                  {(editHistory.mergedFrom || []).map((fold, index) => (
-                    <li key={`from-${fold.fromId}-${index}`} className="break-words">
-                      {(t('identity_history_merged_from') || 'Merged in: {name}').replace('{name}', fold.fromName || `#${fold.fromId}`)}
-                      <span className="text-gray-400 dark:text-gray-500"> · {fmtDateTime24(fold.at)}{fold.by ? ` · ${fold.by}` : ''}</span>
-                      {fold.reversed ? (
-                        <span className="ml-1 rounded bg-amber-100 px-1 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                          {t('identity_history_reversed') || 'undone'}
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                  {editHistory.mergedInto ? (
-                    <li className="break-words">
-                      {(t('identity_history_merged_into') || 'Merged into: {name}').replace('{name}', editHistory.mergedInto.intoName || `#${editHistory.mergedInto.intoId}`)}
-                      <span className="text-gray-400 dark:text-gray-500"> · {fmtDateTime24(editHistory.mergedInto.at)}</span>
-                    </li>
-                  ) : null}
-                  {(editHistory.keptSeparate || []).map((decision, index) => (
-                    <li key={`kept-${index}`} className="break-words">
-                      {(t('identity_history_kept_separate') || 'Kept separate from #{ids}').replace('{ids}', decision.keptSeparateFrom.join(', #') || '?')}
-                      <span className="text-gray-400 dark:text-gray-500"> · {fmtDateTime24(decision.at)}{decision.by ? ` · ${decision.by}` : ''}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+            {/* N34: what has ALREADY been decided about this row -- the same
+                panel the product form shows in edit mode, from the same
+                module, so a row cannot read one way here and another there.
+                Renders nothing when there is nothing to say. */}
+            <IdentityHistoryPanel history={editHistory} t={t} />
             {([
               ['name', t('name') || 'Name', 'text'],
               ['barcode', t('barcode') || 'Barcode', 'text'],

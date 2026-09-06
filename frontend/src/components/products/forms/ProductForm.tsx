@@ -24,6 +24,10 @@ import {
   identityCollisionFrom, identityEditMovesOnto, withKeepSeparateDecision, type IdentityMatch,
 } from '../helpers/identityLinkOver.ts'
 import { useIdentityLinkOver } from '../useIdentityLinkOver.tsx'
+// N34 item 2: the folds and decisions already recorded against this row.
+import IdentityHistoryPanel from '../IdentityHistoryPanel.tsx'
+import type { IdentityHistory } from '../helpers/identityHistory.ts'
+import { getProductIdentityHistory } from '../../../api/productWriteTransport.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
@@ -831,6 +835,27 @@ export default function ProductForm({
   // records over to it?" -- shared with the Conflicts in-place editor so both
   // identity writers ask with the same words and the same three answers.
   const { askIdentityLinkOver, identityLinkOverDialog } = useIdentityLinkOver(t)
+  // N34, item 2 -- "a merge can be inspected". The history first shipped inside
+  // the Conflicts Resolve float, which only opens for a row that is STILL in an
+  // outstanding cluster: a survivor whose conflict is gone BECAUSE the merge
+  // happened -- the normal case, and the one an operator asks about -- had no
+  // screen anywhere to point at. The product form is that screen: it is where a
+  // row is opened when someone wants to know what it is.
+  //
+  // Edit mode only (a row being created has no history), read once per opened
+  // row, and a failure is silent: the fields still open and still save. An
+  // inspection aid that could block an edit would be worse than none.
+  const [identityHistory, setIdentityHistory] = useState<IdentityHistory | null>(null)
+  useEffect(() => {
+    const rowId = product?.id
+    if (!rowId) { setIdentityHistory(null); return }
+    let live = true
+    setIdentityHistory(null)
+    void getProductIdentityHistory(rowId)
+      .then((payload) => { if (live) setIdentityHistory((payload || null) as IdentityHistory | null) })
+      .catch(() => { if (live) setIdentityHistory(null) })
+    return () => { live = false }
+  }, [product?.id])
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   const saveConfirmResolveRef = useRef<((ok: boolean) => void) | null>(null)
   const askSaveConfirm = () => new Promise<boolean>((resolve) => {
@@ -1449,6 +1474,10 @@ export default function ProductForm({
         </div>
       </div>
 
+      {/* What has already been decided about THIS row -- rendered above the
+          tabs so it is visible whichever tab is open, and only when there is
+          something to say. Same panel, same module, as the Conflicts float. */}
+      {isEditMode ? <IdentityHistoryPanel history={identityHistory} t={t} className="mb-4" /> : null}
       {activeTab === 'basic' ? (
         <div className="space-y-4">
           <div className="space-y-2">
