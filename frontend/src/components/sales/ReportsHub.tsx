@@ -448,7 +448,16 @@ export default function ReportsHub() {
 
       {/* Shift blocks sit BELOW the report (reference: filters first, results
           second, nothing above the filters). Same two components as before. */}
-      <CurrentShiftSummary showHistory={false} />
+      {/* The live shift is a report segment like every other block here. Its
+          body is CurrentShiftSummary -> ShiftSummary, a component three
+          non-report pages also mount, so it draws a rounded gray-200 card for
+          itself; inside the report that read as a second rectangle in the
+          wrong ink, while the loading/failed/no-shift states drew no frame at
+          all. The segment supplies the one frame for every state and
+          report-shift-plain takes the inner card back out. */}
+      <section className="report-segment" aria-label={trh('shift_current_title', 'Current shift')}>
+        <CurrentShiftSummary showHistory={false} summaryClassName="report-shift-plain" />
+      </section>
       <section className="report-segment flex min-w-0 flex-wrap items-center justify-between gap-2" aria-label={trh('shift_history', 'Shift history')}>
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{trh('shift_history', 'Shift history')}</h2>

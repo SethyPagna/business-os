@@ -6,6 +6,18 @@ import ShiftHistoryPanel from './ShiftHistoryPanel.tsx'
 
 type Props = {
   className?: string
+  /**
+   * Class for the INNER shift card, not for this wrapper.
+   *
+   * `className` lands on the wrapper <div> below, so a caller that embeds this
+   * block inside a frame of its own (the Reports hub's `.report-segment`) had
+   * no way to reach the card ShiftSummary draws for itself -- and got two
+   * nested rectangles, the outer one a --ui-line hairline and the inner one
+   * gray-200 at a 12px inset. ShiftSummary is shared with FeesPage, Sales and
+   * ShiftHistoryModal, which all still want that card, so the frame is dropped
+   * per-call from here rather than removed at its source.
+   */
+  summaryClassName?: string
   showHistory?: boolean
 }
 
@@ -31,7 +43,7 @@ function operationalBranchId(): number | null {
   } catch { return null }
 }
 
-export default function CurrentShiftSummary({ className = '', showHistory = true }: Props) {
+export default function CurrentShiftSummary({ className = '', summaryClassName = '', showHistory = true }: Props) {
   const { t, user, settings } = useApp() as CurrentShiftContext
   const [branchId, setBranchId] = useState(operationalBranchId)
   useEffect(() => {
@@ -53,7 +65,7 @@ export default function CurrentShiftSummary({ className = '', showHistory = true
     <div className={`space-y-2 ${className}`}>
       {loading ? <p aria-busy="true" className="text-sm text-gray-500">{tr('shift_current_loading', 'Loading current shift…')}</p>
         : failed ? <div role="status" className="flex flex-wrap items-center gap-2 text-sm text-amber-700 dark:text-amber-300"><span>{tr('shift_current_unavailable', 'Current shift unavailable')}</span><button type="button" className="btn-secondary min-h-11" onClick={() => void refresh()}>{tr('retry', 'Retry')}</button></div>
-        : state?.shift ? <ShiftSummary shift={state.shift} />
+        : state?.shift ? <ShiftSummary shift={state.shift} className={summaryClassName} />
         : <p role="status" className="text-sm text-gray-500 dark:text-gray-400">{state?.exempt ? tr('shift_not_required', 'Shift not required') : tr('shift_none_current', 'No current shift')}</p>}
       <p className="px-1 pt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{tr('shift_current_live_note', 'Live shift · not part of the selected report period')}</p>
       {showHistory ? <ShiftHistoryPanel branchId={branchId} compact limit={50} /> : null}

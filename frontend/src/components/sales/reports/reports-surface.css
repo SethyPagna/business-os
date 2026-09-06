@@ -250,6 +250,27 @@
   background: var(--ui-warn-soft);
 }
 
+/* The live-shift block is the one report segment whose BODY is a component
+   shared with three non-report callers (FeesPage, Sales, ShiftHistoryModal),
+   so ShiftSummary keeps drawing its own rounded gray-200 card and that card
+   cannot be removed at the source. Inside the report the card was a second
+   rectangle nested in the segment hairline, in the wrong ink and at four
+   times the inset -- and the same block drew NO frame at all while loading,
+   on a failed read, or when there is no open shift. The segment now supplies
+   the one frame in every state and this rule takes the private one out.
+
+   By SPECIFICITY (0-3-0), not by utility order: the Tailwind classes on that
+   element are 0-1-0 and their dark: variants 0-2-0, and Tailwind emits
+   .bg-transparent BEFORE .bg-white, .rounded-none before .rounded-xl and .p-0
+   before .p-3 -- so passing those utilities down would have lost three of the
+   four overrides to source order. Same argument as
+   .report-segment[data-segment-*] above. */
+[data-reports-hub] .report-segment > .report-shift-plain {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
 .reports-mobile-controls {
   position: sticky;
   top: 0;

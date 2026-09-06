@@ -58,6 +58,8 @@ const frame = read('src/components/sales/reports/ReportFrame.tsx')
 const sheet = read('src/components/sales/reports/ReceiptSheet.tsx')
 const optionsFold = read('src/components/sales/reports/ReportOptionsFold.tsx')
 const denseTable = read('src/components/shared/kit/DenseTable.tsx')
+const currentShift = read('src/components/shifts/CurrentShiftSummary.tsx')
+const shiftSummary = read('src/components/shifts/ShiftSummary.tsx')
 // Comments in these files deliberately quote the retired class names -- that is
 // where the root cause is recorded -- so shape checks read the CODE only.
 const stripComments = (source: string) => source.replace(/^[ \t]*\/\/.*$/gm, '')
@@ -318,6 +320,51 @@ assert.match(hub, /className="reports-desktop-controls report-segment"/, 'the de
 assert.match(ruleBody(css, '.reports-mobile-controls'), /border:\s*1px solid var\(--ui-line\);/, 'the compact control card keeps its four sides')
 assert.match(hub, /<section className="report-segment flex min-w-0 flex-wrap/, 'the shift-history block uses the shared segment instead of its own gray-200 border')
 assert.doesNotMatch(hubCode, /rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900/, 'the hand-rolled border is gone')
+
+// ...AND the live-shift block, which was the one block inside [data-reports-hub]
+// that never joined the segment system.
+//
+// VERIFIER DEFECT. `<CurrentShiftSummary showHistory={false} />` sat bare in the
+// hub. It renders ShiftSummary, whose own class string is the IDENTICAL
+// `rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700
+// dark:bg-zinc-900` soup this lane deleted one line below -- so the report
+// still showed a card bordered in gray-200 at a 12px inset where a --ui-line
+// hairline belongs; and the block's other three states (loading <p>, failed
+// <div>, no-shift <p>) plus the always-on live note carried no border at all,
+// so the same block was a card or nothing depending on the network.
+//
+// ShiftSummary is also mounted by FeesPage, Sales and ShiftHistoryModal, so its
+// own class string is NOT the place to fix this. The frame is supplied once by
+// the wrapping segment and stripped from the inner card at the CALL.
+assert.match(
+  hubCode,
+  /<section className="report-segment"[^>]*>\s*<CurrentShiftSummary\b/,
+  'the live-shift block is wrapped in the shared segment, so it reads as exactly one bordered rectangle in every state',
+)
+assert.match(
+  hubCode,
+  /<CurrentShiftSummary showHistory=\{false\} summaryClassName="report-shift-plain"/,
+  'and the hub strips the inner card\'s private frame, so the segment is not two nested rectangles',
+)
+for (const soup of ['border-gray-200', 'dark:border-zinc-700']) {
+  assert.ok(!hubCode.includes(soup), `no second hand-rolled frame in the hub -- found "${soup}"`)
+}
+// The prop has to actually reach ShiftSummary. CurrentShiftSummary already
+// accepted `className` and spent it on its own wrapper <div>, which is why the
+// inner card was unreachable from the call site in the first place.
+assert.match(currentShift, /summaryClassName\?: string/, 'CurrentShiftSummary takes the inner-card class explicitly')
+assert.match(currentShift, /<ShiftSummary shift=\{state\.shift\} className=\{summaryClassName\} \/>/, 'and forwards it -- a prop that stops at the wrapper cannot strip the card')
+// The shared component is untouched: three non-report callers still want the card.
+assert.match(shiftSummary, /className=\{`min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900 \$\{className\}`\}/, 'ShiftSummary keeps its own frame for FeesPage / Sales / ShiftHistoryModal')
+// Stripping it is done by SPECIFICITY (0-3-0), not by utility order. The
+// Tailwind utilities on that element are 0-1-0 and their dark: variants 0-2-0,
+// and which of two equal-specificity rules paints depends on chunk order --
+// the same argument .report-segment[data-segment-*] already makes above.
+const shiftPlain = ruleBody(css, '[data-reports-hub] .report-segment > .report-shift-plain')
+assert.match(shiftPlain, /border:\s*0;/, 'the inner card gives up its border to the segment')
+assert.match(shiftPlain, /background:\s*transparent;/, 'and its white fill, or the segment shows a sheet on a sheet')
+assert.match(shiftPlain, /padding:\s*0;/, 'and its 12px inset -- compactness is not spent here')
+assert.match(shiftPlain, /border-radius:\s*0;/, 'and its own radius, which would print a second corner inside the segment corner')
 
 // The options fold's groups.
 assert.match(optionsFold, /<div className="report-segment space-y-1">/, 'each options group is its own bordered segment')
