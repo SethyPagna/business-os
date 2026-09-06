@@ -13,6 +13,7 @@ import {
   SALES_GROUP_KEYS,
   type SalesGroupKey,
   recognizedExpr,
+  recognizedValuedExpr,
   awaitingExpr,
   netSaleExpr,
   customerDeliveryFeeExpr,
@@ -478,17 +479,34 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
     let select: string; let joins = ''
     if (kind === 'sales') {
       const recognized = recognizedExpr('s.'); const net = netSaleExpr('s.'); const refund = netRefundExpr('s.', 'rf.')
+      // COGS is measured over a NARROWER population than revenue, and the two
+      // gates are not interchangeable. Revenue and the refund that reverses it
+      // ride on recognizedExpr (everything but a cancelled sale). COGS rides on
+      // recognizedValuedExpr, which additionally drops a receipt whose header
+      // value was never recorded -- see valuedSaleExpr and the getSalesTotals
+      // level query, where cost_usd, missing_snapshot_lines and returnedCostSql
+      // all carry that same gate.
+      //
+      // These columns used to be gated on `recognized` alone while claiming to
+      // follow deriveTotals. They followed its FLOOR and not its POPULATION:
+      // the Sep 2-3 import's zero-subtotal receipts recognise $0 of revenue and
+      // were still billed their full COGS here, so the receipt list stopped
+      // summing to the Overview COGS and profit sitting above it, and each
+      // unvalued receipt showed a loss the size of its own goods.
+      const recognizedValued = recognizedValuedExpr('s.')
       const rawCost = `(COALESCE((SELECT SUM(si.cost_price_usd * si.quantity) FROM sale_items si WHERE si.sale_id=s.id),0)
         - COALESCE((SELECT SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END)
           FROM return_items ri JOIN returns r ON r.id=ri.return_id WHERE r.sale_id=s.id
           AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'),0))`
-      // A receipt floors its own cost; the loaded statement floors the SUM,
-      // exactly like deriveTotals. Carry the un-floored value for that rollup.
+      // A receipt floors its own cost; the loaded statement floors the SUM --
+      // the same two-level floor deriveTotals applies over the population above.
+      // Carry the un-floored value so that rollup can re-floor once.
       const cost = `MAX(0, ${rawCost})`
-      const adminColumns = isAdmin ? `, CASE WHEN ${recognized} THEN ${cost} ELSE 0 END AS cost_usd,
-        CASE WHEN ${recognized} THEN ${rawCost} ELSE 0 END AS cost_before_floor_usd,
-        CASE WHEN ${recognized} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
-        CASE WHEN ${recognized} THEN ${net}-${refund}-${cost}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END AS gross_profit_usd` : ''
+      const costCol = `CASE WHEN ${recognizedValued} THEN ${cost} ELSE 0 END`
+      const adminColumns = isAdmin ? `, ${costCol} AS cost_usd,
+        CASE WHEN ${recognizedValued} THEN ${rawCost} ELSE 0 END AS cost_before_floor_usd,
+        CASE WHEN ${recognizedValued} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
+        CASE WHEN ${recognized} THEN ${net}-${refund}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END - ${costCol} AS gross_profit_usd` : ''
       select = `s.id, s.created_at AS cursor_at, s.created_at AS date, ${localDateExpr('s.created_at')} AS business_date,
         s.receipt_number, s.branch_name AS branch, s.cashier_name AS cashier, s.customer_name AS customer, s.customer_phone,
         s.payment_method, ${saleStatusExpr('s.')} AS status, COALESCE(s.subtotal_usd,0) AS gross_sales_usd,
