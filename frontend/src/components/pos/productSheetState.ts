@@ -62,6 +62,19 @@ export type SheetBranchOption = {
 // operation permits is selectable.
 export type SheetIntent = 'sell' | 'stock'
 
+// Why the pick button is dead.
+//
+// 'out_of_stock'  -- there is nothing to sell. A SALE question only: the
+//   receiving surfaces (fast stock-in, "Have already" in the create-products
+//   session, the add/set modes of the stock adjuster) exist to raise a
+//   quantity, and a product sitting at 0 is the normal state of a delivery
+//   arriving. Gating their pick on in-stock refused the very product the
+//   sheet had been opened to receive.
+// 'received_date' -- the host asked WHICH intake (trackedBatchProductIds)
+//   and no lot is chosen yet. That question is real on both intents: a
+//   transfer moves a specific lot just as a sale draws from one.
+export type SheetPickBlockedReason = 'out_of_stock' | 'received_date' | null
+
 export type ProductSheetStateInput = {
   product: SheetProductLike
   // getVariantChoices(product): the group's rows. EMPTY for a flat product.
@@ -108,6 +121,11 @@ export type ProductSheetState = {
   mergeRowsIntoLotList: boolean
   batchSelectionRequired: boolean
   batchReadyToSell: boolean
+  // Whether the sheet's PICK button (every host that is not the POS price
+  // row) may fire, and the reason it may not. See `pickBlockedReason` below
+  // for why the two intents have to answer this differently.
+  pickAllowed: boolean
+  pickBlockedReason: SheetPickBlockedReason
   receivedDateOptions: SheetBatchLike[]
   receivedDateTotal: number
   // TRUE when the branch holds units in branch_stock but the lot ledger
@@ -354,6 +372,15 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
 
   const branchSummary = branchOptions.map((option) => `${option.name}: ${option.quantity}`).join(' · ')
 
+  // The pick gate. `displayedStock` is the number the sheet SHOWS, so the
+  // button and the figure above it can never disagree -- and the in-stock
+  // half of the gate applies to a sale only.
+  const pickRow = effectiveVariant ?? product
+  const pickInStock = displayedStock > toNumber(pickRow?.out_of_stock_threshold)
+  const pickBlockedReason: SheetPickBlockedReason = intent === 'sell' && !pickInStock
+    ? 'out_of_stock'
+    : (!batchReadyToSell ? 'received_date' : null)
+
   return {
     branchOptions,
     effectiveBranchId,
@@ -368,6 +395,8 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     mergeRowsIntoLotList,
     batchSelectionRequired,
     batchReadyToSell,
+    pickAllowed: pickBlockedReason == null,
+    pickBlockedReason,
     receivedDateOptions,
     receivedDateTotal,
     stockWithoutReceivedDate: batchSelectionRequired

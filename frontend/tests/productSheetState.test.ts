@@ -334,6 +334,78 @@ await runTest('hiding the received-date step un-gates the pick instead of blocki
 })
 
 // ---------------------------------------------------------------------------
+// Receiving stock is not selling it.
+//
+// The pick button was gated on `!inStock || !batchReadyToSell` for every
+// host, so the surfaces whose whole purpose is to RAISE a quantity -- fast
+// stock-in, "Have already" in the create-products session, the add/set modes
+// of the stock adjuster -- refused the product they were opened to receive:
+// a product at 0 is the normal state of a delivery arriving, and the sheet
+// answered "Out of stock" with the button dead. Reproduced against the real
+// component (react-dom/server) at branch_stock (0, 0): the only action button
+// rendered was "out_of_stock", disabled.
+//
+// The two intents must DISAGREE on this one shape, which is why both are
+// asserted from one fixture: sell refuses it, stock allows it.
+// ---------------------------------------------------------------------------
+
+await runTest('a stock-side pick is allowed at 0 on hand, while the same shape refuses a sale', () => {
+  const product = { id: 91, name: 'Arriving', unit: 'pcs', branch_stock: branchStock(0, 0), stock_quantity: 0 }
+
+  const receiving = deriveProductSheetState({ product, variants: [], groupProduct: false, intent: 'stock' })
+  assert.equal(receiving.displayedStock, 0)
+  assert.equal(receiving.pickAllowed, true, 'stock-in targets products at 0 by definition')
+  assert.equal(receiving.pickBlockedReason, null)
+
+  const selling = deriveProductSheetState({ product, variants: [], groupProduct: false, intent: 'sell' })
+  assert.equal(selling.pickAllowed, false, 'a sale of nothing stays refused')
+  assert.equal(selling.pickBlockedReason, 'out_of_stock', 'and keeps the greyed-out reason the button prints')
+
+  assert.notEqual(receiving.pickAllowed, selling.pickAllowed, 'the two intents must disagree on this shape')
+})
+
+await runTest('the stock-side pick still waits for a received date when the host asks one', () => {
+  // TransferModal is the one stock-side host that passes trackedBatchProductIds:
+  // a transfer moves a specific intake, so the lot question is real there. It
+  // is the IN-STOCK question that does not apply to a stock write.
+  const product = { id: 92, name: 'Tracked', unit: 'pcs', branch_stock: branchStock(0, 4), stock_quantity: 4 }
+  const tracked = new Set([92])
+  const unanswered = deriveProductSheetState({
+    product, variants: [], groupProduct: false, intent: 'stock', trackedBatchProductIds: tracked, batches: [],
+  })
+  assert.equal(unanswered.pickAllowed, false)
+  assert.equal(unanswered.pickBlockedReason, 'received_date', 'the received-date gate is the only one a stock write keeps')
+
+  const answered = deriveProductSheetState({
+    product,
+    variants: [],
+    groupProduct: false,
+    intent: 'stock',
+    trackedBatchProductIds: tracked,
+    batches: [{ id: 5, quantity: 4, received_date: '2026-09-01' }],
+    selectedBatchId: 5,
+  })
+  assert.equal(answered.pickAllowed, true)
+
+  // A host that asks no lot question -- every other stock mount -- is never gated.
+  const untracked = deriveProductSheetState({ product, variants: [], groupProduct: false, intent: 'stock' })
+  assert.equal(untracked.pickAllowed, true)
+})
+
+await runTest('the pick button reads the derived gate rather than re-deriving in-stock', () => {
+  const sheet = src('components', 'pos', 'ProductDetailSheet.tsx')
+  const body = sheet.split('const renderPickButton =')[1]?.split('\n\n')[0] ?? ''
+  assert.ok(body, 'renderPickButton must still exist')
+  assert.ok(body.includes('disabled={!pickAllowed}'), 'the one gate is the derived one')
+  assert.ok(
+    !body.includes('inStock'),
+    'gating the pick on in-stock here is what refused every receiving surface',
+  )
+  assert.match(sheet, /renderPickButton\(effectiveVariant\)/)
+  assert.match(sheet, /renderPickButton\(product\)/)
+})
+
+// ---------------------------------------------------------------------------
 // The Worker's two refusals, shown from the packs.
 // ---------------------------------------------------------------------------
 

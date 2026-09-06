@@ -549,6 +549,8 @@ export default function ProductDetailSheet({
   // date gate the same way a sellable lot does (the units come from it).
   const batchSelectionRequired = sheetState.batchSelectionRequired
   const batchReadyToSell = sheetState.batchReadyToSell
+  const pickAllowed = sheetState.pickAllowed
+  const pickBlockedReason = sheetState.pickBlockedReason
   // The ONE stock number this sheet shows, from productSheetState.ts:
   // on-hand comes from branch_stock (the ledger that answers "how many are
   // at this branch"), and the lot ledger only narrows it once a specific
@@ -595,16 +597,24 @@ export default function ProductDetailSheet({
     onPick?.(nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection() })
   }
   const pickButtonLabel = pickLabel || t('select') || 'Select'
-  const renderPickButton = (row: ProductRecord, inStock: boolean) => (
+  // The gate is DERIVED (productSheetState's pickAllowed), not re-decided
+  // here. This button used to refuse anything out of stock on every host,
+  // which quietly broke the hosts whose entire job is to raise a quantity:
+  // fast stock-in, "Have already" in the create-products session and the
+  // add/set modes of the stock adjuster all open on products sitting at 0,
+  // and every one of them answered "Out of stock" with a dead button. The
+  // in-stock half of the gate belongs to a SALE; the received-date half
+  // belongs to whichever host asked the lot question.
+  const renderPickButton = (row: ProductRecord) => (
     <button
       type="button"
       className="btn-primary flex-1 text-xs"
-      disabled={!inStock || !batchReadyToSell}
+      disabled={!pickAllowed}
       onClick={() => confirmPick(row)}
     >
-      {!inStock
+      {pickBlockedReason === 'out_of_stock'
         ? (t('out_of_stock') || 'Out of stock')
-        : batchSelectionRequired && !selectedBatch
+        : pickBlockedReason === 'received_date'
           ? (t('pick_received_date_first') || 'Pick a received date first')
           : pickButtonLabel}
     </button>
@@ -891,7 +901,7 @@ export default function ProductDetailSheet({
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-1.5">
-                    {onPick ? renderPickButton(effectiveVariant, effectiveVariantInStock) : null}
+                    {onPick ? renderPickButton(effectiveVariant) : null}
                     {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
                       {batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
                     </button>}
@@ -987,7 +997,7 @@ export default function ProductDetailSheet({
               </div>
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {onPick ? renderPickButton(product, displayedStock > asNumber(product.out_of_stock_threshold)) : null}
+              {onPick ? renderPickButton(product) : null}
               {onPick ? null : <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
                 {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
               </button>}
