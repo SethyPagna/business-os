@@ -140,6 +140,24 @@ assert.equal(
   'both the desktop product row and the mobile product card must declare their own click',
 )
 
+// "CopyFloat on the Products list" is all FOUR fields, on BOTH row shapes.
+// ProductRowParts renders only the supplier pill; the name, brand and
+// barcode are drawn by Products.tsx itself, and renderMobileProductCard
+// renders no ProductDetailsCell at all -- so a touch user would get nothing
+// on this page unless the card is wired too.
+assert.match(productsPage, /const copy = useCopyFloat\(tr\)/,
+  'the hook is called ONCE at the top level, never inside the per-row map')
+assert.equal(
+  (productsPage.match(/\{\.\.\.copy\(productName\)\}/g) || []).length,
+  2,
+  'the product name is copyable on the desktop row AND on the mobile card',
+)
+assert.ok(productsPage.includes('{...copy(item?.label)}'), 'the desktop meta line carries the affordance')
+assert.match(productsPage, /metaKey !== 'barcode' && metaKey !== 'brand'/,
+  'exactly barcode and brand opt in there -- category and SKU are not product fields the user copies')
+assert.ok(productsPage.includes('{...copy(barcode)}'), 'the mobile card barcode chip is copyable')
+assert.ok(productsPage.includes('{...copy(brandName)}'), 'the mobile card brand chip is copyable')
+
 for (const field of ['copy(productName)', 'copy(p.brand)', 'copy(p.barcode)', 'copy(p.supplier)']) {
   assert.ok(productsModal.includes(`{...${field}}`), `products detail modal must wire ${field}`)
 }

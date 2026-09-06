@@ -36,6 +36,7 @@ import type { WireImageChange, WireImagesPreview } from './WireImagesReviewModal
 import DeleteConfirmModal from './DeleteConfirmModal'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
+import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
@@ -2146,6 +2147,13 @@ function ProductsFullEditor() {
     (product: Record<string, unknown>): string => buildProductBranchSummaryLabel(product, branchNameById),
     [branchNameById],
   )
+  // Copy affordance for the product NAME, BRAND, SUPPLIER and BARCODE.
+  // Called once here, not per row: the rows are drawn by a callback inside
+  // ProductsListSurface's .map(), where a hook call would be a Rules-of-
+  // Hooks violation (the same reason utils/longPress.ts is not a hook).
+  // What it hands back is a plain attribute spread, so it can be applied
+  // to a value that is already inside a laid-out row without wrapping it.
+  const copy = useCopyFloat(tr)
   const renderMetaPill = useCallback((item: { className?: string; color?: string; key: string; label?: unknown } | null) => {
     if (!item?.label) return null
     const label = String(item.label)
@@ -3339,12 +3347,27 @@ function ProductsFullEditor() {
           <div className="flex min-h-10 flex-col justify-center">
             {compactMeta.length ? (
               <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1 lg:max-w-none lg:flex-nowrap lg:overflow-hidden">
-                {compactMeta.map((item) => renderMetaPill(item ? {
-                  key: String(item.key),
-                  label: String(item.label || ''),
-                  color: typeof item.color === 'string' ? item.color : undefined,
-                  className: typeof item.className === 'string' ? item.className : undefined,
-                } : null))}
+                {compactMeta.map((item) => {
+                  const pill = renderMetaPill(item ? {
+                    key: String(item.key),
+                    label: String(item.label || ''),
+                    color: typeof item.color === 'string' ? item.color : undefined,
+                    className: typeof item.className === 'string' ? item.className : undefined,
+                  } : null)
+                  // Barcode and brand are two of the four copyable product
+                  // fields. renderMetaPill stringifies its label, so the
+                  // affordance cannot go inside the pill -- this is the same
+                  // wrapper ProductRowParts uses for the supplier pill: an
+                  // inline-flex span with no box of its own, so the meta line
+                  // lays out exactly as it did.
+                  const metaKey = String(item?.key || '')
+                  if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand')) return pill
+                  return (
+                    <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
+                      {pill}
+                    </span>
+                  )
+                })}
               </div>
             ) : null}
             <div className="flex min-w-0 items-center gap-1.5">
@@ -3355,7 +3378,7 @@ function ProductsFullEditor() {
                   row rather than one step below it -- per the Aug 19 2026
                   ask. Child rows under a group keep font-medium, same as
                   before. */}
-              <div {...getKhmerTextProps(productName, `min-w-0 break-words text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)}>{productName}</div>
+              <div {...getKhmerTextProps(productName, `min-w-0 break-words text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>{productName}</div>
             </div>
             {dupInfo ? (
               <DuplicateResolverControl
@@ -3431,7 +3454,7 @@ function ProductsFullEditor() {
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  }, [branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
 
   const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
@@ -3560,7 +3583,7 @@ function ProductsFullEditor() {
                 {/* Product names are content, not a label: let them use a
                     second (or later) row on small cards instead of clipping
                     them or requiring a horizontal drag to read them. */}
-                <div {...getKhmerTextProps(productName, 'break-words text-sm font-semibold text-gray-900 dark:text-white')}>
+                <div {...getKhmerTextProps(productName, 'break-words text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
                   {productName}
                 </div>
               </div>
@@ -3592,6 +3615,7 @@ function ProductsFullEditor() {
               {barcode ? (
                 <span
                   className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1 py-0.5 font-mono text-[10px] tracking-tight text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  {...copy(barcode)}
                   title={barcode}
                 >
                   {barcode}
@@ -3604,6 +3628,7 @@ function ProductsFullEditor() {
                     background: getBrandColor(brandName),
                     color: getContrastingTextColor(getBrandColor(brandName)),
                   } : undefined}
+                  {...copy(brandName)}
                   title={brandName}
                 >
                   {brandName}
@@ -3684,7 +3709,7 @@ function ProductsFullEditor() {
         </div>
       </div>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  }, [branchFilter, catMap, copy, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
 
   // One unified thumbnail for a whole name-group (see the `indented`
   // branches just above, which omit each row's own image once a group
