@@ -68,7 +68,15 @@ assert.match(productList, /card hidden min-w-0 max-w-full overflow-hidden xl:fle
 assert.match(productList, /min-w-0 max-w-full space-y-2 xl:hidden/, 'cards must remain width-bounded through laptop and mobile layouts')
 assert.match(productList, /inline-flex shrink-0 items-center gap-1 whitespace-nowrap[\s\S]*t\('collapse'\)/, 'the section Collapse control must remain fully visible on narrow screens')
 assert.match(productRowParts, /mb-1 flex min-w-0 flex-wrap gap-1/, 'branch details must auto-fit horizontally before creating extra rows')
-assert.match(products, /Product names are content[\s\S]*break-words text-sm font-semibold/, 'mobile product names must wrap instead of requiring horizontal scrolling')
+// N36 (owner, Sep 6 2026) REVERSED the rule this line used to pin. It read
+// "mobile product names must wrap instead of requiring horizontal scrolling";
+// the owner asked for the opposite -- "for product names, make it horizontal
+// scroll instead of pushing rows" -- because a wrapping name is what made the
+// list rows ragged. The pin stays, pointed at the new rule: names are still
+// content (never ellipsised away), they just scroll inside their own cell now.
+// The scroll behaviour itself is pinned in tests/productNameScrollCells.test.ts.
+assert.match(products, /Product names are content[\s\S]*scroll-x-clean text-sm font-semibold/, 'mobile product names must scroll horizontally inside their cell rather than wrapping to a second row')
+assert.doesNotMatch(products, /Product names are content[\s\S]{0,600}break-words text-sm font-semibold/, 'the superseded wrapping name cell must not come back')
 assert.match(products, /shrink-0 whitespace-nowrap rounded-full bg-slate-100[\s\S]*\{barcode\}/, 'the mobile barcode pill must show every digit on one line rather than truncating or wrapping')
 assert.match(products, /aria-disabled=\{!thumbnailState\.hasImage\}[\s\S]*if \(thumbnailState\.hasImage\) openLightbox\(thumbnailState\.gallery, 0, productName\)/, 'product image slots must isolate row detail clicks and only open the gallery when an image exists')
 assert.match(products, /const renderGroupThumbnail[\s\S]*?aria-label=\{`\$\{tr\('view_image', 'View image'\)\}: \$\{title\}`\}[\s\S]*?openLightbox\(state\.gallery, 0, title\)/, 'grouped product thumbnails must also open their gallery without bubbling to product details')
