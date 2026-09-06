@@ -140,10 +140,12 @@ function buildMatchTierSql(
   const branches: string[] = []
   if (barcodeKeys.length) {
     // Same bound parameters buildExactBarcodeMatchClause binds (`barcodeKey`
-    // under this prefix, plus one `…Alt<n>` per equivalent spelling) -- the
-    // WHERE disjunct and this tier must agree on what "the scanned code" is,
-    // so they share the values rather than normalizing them twice.
-    branches.push(`WHEN ${buildBarcodeKeyMatchSql(`${opts.prefix}barcodeKey`, opts.barcodeColumn, barcodeKeys.length)} THEN ${MATCH_TIER_EXACT_BARCODE}`)
+    // under this prefix, plus the `…Equiv<n>` spellings of its namespaced
+    // UPC-pair counterpart) -- the WHERE disjunct and this tier must agree on
+    // what "the scanned code" is, so they share the values rather than
+    // normalizing them twice. The KEY SET is passed, not a count: the two
+    // keyspaces render as different comparisons.
+    branches.push(`WHEN ${buildBarcodeKeyMatchSql(`${opts.prefix}barcodeKey`, opts.barcodeColumn, barcodeKeys)} THEN ${MATCH_TIER_EXACT_BARCODE}`)
   }
   if (nameKey) {
     const normalizedName = normalizedNameSql(opts.nameNormalizedColumn, opts.nameColumn)
@@ -276,7 +278,7 @@ export function buildProductSearchQuery(
   // the same "exact barcode leads" rule as a discrete key, and the two
   // never disagree.
   if (exactBarcodeMatch) {
-    const barcodeRank = buildExactBarcodeRankSql(`${prefix}barcodeKey`, barcodeColumn, searchTermBarcodeKeys(rawSearchText).length)
+    const barcodeRank = buildExactBarcodeRankSql(`${prefix}barcodeKey`, barcodeColumn, searchTermBarcodeKeys(rawSearchText))
     matchRankSql = matchRankSql ? `(${barcodeRank} + ${matchRankSql})` : barcodeRank
   }
 

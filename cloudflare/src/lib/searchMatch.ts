@@ -1371,20 +1371,66 @@ export function compressUpcA(value: unknown): string {
   return ''
 }
 
+// --- the two keyspaces --------------------------------------------------
+//
+// A key set carries two KINDS of key, and they must never meet:
+//
+//   * the PADDING key -- normalizeBarcodeKey's zero-stripped form. Two codes
+//     share it when they are one article written at two widths.
+//   * the UPC PAIR keys -- namespaced `upca:`/`upce:`, and always the FULL
+//     printed spelling. A UPC-E and its UPC-A are one article, but neither
+//     spelling is a padded form of the other, so that link has to be carried
+//     explicitly rather than fall out of a fold.
+//
+// The namespace is not decoration, it is the whole point. '012345000065'
+// compresses to UPC-E '01234565', whose zero-stripped form is '1234565' --
+// a perfectly ordinary 7-digit internal code this catalog may hold on some
+// OTHER product. Emitting the derived spelling as a plain key put it in the
+// padding keyspace and folded those two unrelated articles into one. Behind
+// a prefix a derived key can only ever meet another derived key, so the pair
+// is linked without leaking into the keyspace padding owns.
+const UPC_PAIR_KEY_PREFIX = /^upc[ae]:/
+
+// The `upca:`/`upce:` pair a code belongs to, or [] when it is not half of
+// one. Narrow by construction, which is what keeps "two codes differing by
+// anything other than leading zeros never collide" true:
+//   * UPC-E is read only from the eight digits actually printed in the
+//     symbol, and only when its own check digit validates. A zero-padded
+//     12-digit value is deliberately NOT read as a compressed symbol:
+//     '000001234565' is itself a valid UPC-A, and treating it as the padded
+//     form of UPC-E '01234565' would invent an identity;
+//   * UPC-A is read from any GTIN width the catalog stores it at (12,
+//     EAN-13, GTIN-14, wider), but only from a value ALREADY at least 12
+//     digits long, so a short internal code is never promoted into one;
+//   * only number systems 0 and 1, which is what GS1 reserves to UPC-E, so
+//     an in-store GTIN-8 beginning with 2 keeps its own identity;
+//   * compression is accepted only when expanding the result reproduces the
+//     UPC-A digit for digit.
+function upcPairKeys(digits: string): string[] {
+  if (!/^[0-9]+$/.test(digits)) return []
+  if (digits.length === 8) {
+    const upcA = expandUpcE(digits)
+    return upcA ? [`upce:${digits}`, `upca:${upcA}`] : []
+  }
+  if (digits.length < 12) return []
+  const stripped = digits.replace(/^0+/, '')
+  if (stripped.length > 12) return []
+  const upcA = stripped.padStart(12, '0')
+  const upcE = compressUpcA(upcA)
+  return upcE ? [`upca:${upcA}`, `upce:${upcE}`] : []
+}
+
 // Every canonical key one barcode may legitimately be found under: the
-// leading-zero-folded form first, plus its UPC-E/UPC-A counterpart when the
-// value is one half of that pair. Empty when the value is not a real
-// barcode. The primary key stays first so callers that can only carry one
-// (the SQL parameter every route already binds) keep the old behaviour.
+// padding key first, then its namespaced UPC pair when the value is half of
+// one. Empty when the value is not a real barcode. The padding key stays
+// first so callers that can only carry one (searchTermBarcodeKey, and the
+// single SQL parameter every route already binds) keep the old behaviour.
 export function barcodeSearchKeys(value: unknown): string[] {
   const primary = normalizeBarcodeKey(value)
   if (!primary) return []
-  const keys = [primary]
   const digits = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
-  for (const equivalent of [expandUpcE(digits), compressUpcA(digits)]) {
-    const key = equivalent ? normalizeBarcodeKey(equivalent) : ''
-    if (key && !keys.includes(key)) keys.push(key)
-  }
+  const keys = [primary]
+  for (const key of upcPairKeys(digits)) if (!keys.includes(key)) keys.push(key)
   return keys
 }
 
@@ -1413,14 +1459,78 @@ export function searchTermBarcodeKey(raw: unknown): string {
 // SQL form of normalizeBarcodeKey for a stored column: lowercase, drop
 // spaces/hyphens, strip leading zeros. Kept in lockstep with the JS above.
 export function normalizedBarcodeSql(column: string): string {
-  return `ltrim(lower(replace(replace(trim(COALESCE(${column}, '')), ' ', ''), '-', '')), '0')`
+  return `ltrim(${compactBarcodeSql(column)}, '0')`
 }
 
-// The bound parameter names one key set occupies. The primary key keeps the
+// The same cleanup WITHOUT the ltrim: lowercase, spaces and hyphens dropped,
+// every digit kept. This is the form a namespaced UPC-pair spelling is
+// compared against -- stripping its zeros is exactly what would drop it back
+// into the padding keyspace it must stay out of.
+export function compactBarcodeSql(column: string): string {
+  return `lower(replace(replace(trim(COALESCE(${column}, '')), ' ', ''), '-', ''))`
+}
+
+// How one key set is spread over bound parameters and over the comparisons
+// SQL can make. Derived from the key set alone, so the WHERE disjunct, the
+// relevance TIER and the rank expression -- three sites, one bind -- can
+// never disagree about a name only one of them binds.
+export interface BarcodeKeyPlan {
+  // Compared against the NORMALIZED (ltrim'd) column: the padding keys.
+  normKeys: string[]
+  // Compared against the COMPACT (not ltrim'd) column: every full-length
+  // spelling a namespaced UPC-pair counterpart may be stored under.
+  equivalentLiterals: string[]
+  // Compared by raw equality against the stored column, which is what lets
+  // idx_products_barcode_pg be used: the padding keys' own stored spellings.
+  paddingLiterals: string[]
+}
+
+export function barcodeKeyPlan(keys: readonly string[]): BarcodeKeyPlan {
+  const normKeys: string[] = []
+  const equivalentLiterals: string[] = []
+  for (const key of keys) {
+    if (UPC_PAIR_KEY_PREFIX.test(key)) {
+      // PADDED spellings only, never contracted ones. barcodeEqualityCandidates
+      // pads a value up, so '01234565' yields '001234565' and wider but never
+      // the bare '1234565' another product may legitimately own -- which is
+      // the whole reason the pair is namespaced rather than zero-stripped.
+      for (const form of barcodeEqualityCandidates(key.slice(key.indexOf(':') + 1))) {
+        if (!equivalentLiterals.includes(form)) equivalentLiterals.push(form)
+      }
+    } else if (key && !normKeys.includes(key)) normKeys.push(key)
+  }
+  const paddingLiterals: string[] = []
+  for (const key of normKeys) {
+    for (const form of barcodeEqualityCandidates(key)) {
+      if (!paddingLiterals.includes(form)) paddingLiterals.push(form)
+    }
+  }
+  return { normKeys, equivalentLiterals, paddingLiterals }
+}
+
+// The pre-UPC-pair shape: one padding key, bound under paramName itself, and
+// nothing else. Used when a caller holds no key set -- buildExactBarcodeRankSql's
+// default, which scripts/test-barcode-twin-search-pure.cjs pins -- so that
+// caller still renders exactly the SQL it rendered before. The value is never
+// read; only the count reaches the SQL.
+const SINGLE_PADDING_KEY_PLAN: BarcodeKeyPlan = { normKeys: [''], equivalentLiterals: [], paddingLiterals: [] }
+
+function barcodeKeyPlanParamNames(paramName: string, plan: BarcodeKeyPlan): {
+  norm: string[]
+  equivalent: string[]
+  padding: string[]
+} {
+  return {
+    norm: barcodeKeyParamNames(paramName, plan.normKeys.length),
+    equivalent: plan.equivalentLiterals.map((_, index) => `${paramName}Equiv${index}`),
+    padding: plan.paddingLiterals.map((_, index) => `${paramName}Eq${index}`),
+  }
+}
+
+// The bound parameter names the padding keys occupy. The first keeps the
 // caller's own name, so the WHERE clause, the relevance TIER and the rank
-// expression all still share it; equivalents (the UPC-E counterpart) are
-// suffixed. One function, so those three sites can never disagree about the
-// spelling of a name only one of them binds.
+// expression all still share it. One function, so those three sites can never
+// disagree about the spelling of a name only one of them binds.
 export function barcodeKeyParamNames(paramName: string, keyCount: number): string[] {
   return Array.from(
     { length: Math.max(0, keyCount) },
@@ -1432,18 +1542,35 @@ export function bindBarcodeKeyParams(
   params: Record<string, unknown>,
   paramName: string,
   keys: readonly string[],
-): string[] {
-  const names = barcodeKeyParamNames(paramName, keys.length)
-  names.forEach((name, index) => { params[name] = keys[index] })
-  return names
+): BarcodeKeyPlan {
+  const plan = barcodeKeyPlan(keys)
+  const names = barcodeKeyPlanParamNames(paramName, plan)
+  names.norm.forEach((name, index) => { params[name] = plan.normKeys[index] })
+  names.equivalent.forEach((name, index) => { params[name] = plan.equivalentLiterals[index] })
+  names.padding.forEach((name, index) => { params[name] = plan.paddingLiterals[index] })
+  return plan
 }
 
-// "the stored column normalizes to one of the keys this scan stands for".
-// A single key renders as `IN (@barcodeKey)`, which SQLite plans exactly as
-// the `= @barcodeKey` this replaced.
-export function buildBarcodeKeyMatchSql(paramName: string, column: string, keyCount: number): string {
-  const names = barcodeKeyParamNames(paramName, keyCount).map((name) => `@${name}`)
-  return `${normalizedBarcodeSql(column)} IN (${names.join(', ')})`
+// "the stored column IS one of the spellings this scan stands for", as a
+// per-row expression -- the relevance TIER and the rank, neither of which can
+// use the rowid subquery the WHERE clause uses. One comparison per keyspace
+// and never across them: the normalized column against the padding keys, the
+// compact column against the UPC pair's full spellings.
+// A single padding key renders as `IN (@barcodeKey)`, which SQLite plans
+// exactly as the `= @barcodeKey` this replaced.
+export function buildBarcodeKeyMatchSql(paramName: string, column: string, keys?: readonly string[]): string {
+  const plan = keys ? barcodeKeyPlan(keys) : SINGLE_PADDING_KEY_PLAN
+  const names = barcodeKeyPlanParamNames(paramName, plan)
+  const parts: string[] = []
+  if (names.norm.length) {
+    parts.push(`${normalizedBarcodeSql(column)} IN (${names.norm.map((name) => `@${name}`).join(', ')})`)
+  }
+  if (names.equivalent.length) {
+    parts.push(`${compactBarcodeSql(column)} IN (${names.equivalent.map((name) => `@${name}`).join(', ')})`)
+  }
+  // No key at all contributes nothing rather than matching everything.
+  if (!parts.length) return '0'
+  return parts.length > 1 ? `(${parts.join(' OR ')})` : parts[0]
 }
 
 // Extra WHERE disjunct that makes "the scanned code finds BOTH twins" an
@@ -1459,7 +1586,7 @@ export function buildExactBarcodeMatchClause(
 ): string | undefined {
   const keys = searchTermBarcodeKeys(rawQuery)
   if (!keys.length) return undefined
-  bindBarcodeKeyParams(params, paramName, keys)
+  const plan = bindBarcodeKeyParams(params, paramName, keys)
   // Two probes, the index-served one first. `products(barcode)` carries a
   // plain index (idx_products_barcode_pg, migrations/0001_init.sql), which a
   // predicate wrapped in ltrim()/replace() can never use -- so the literal
@@ -1481,22 +1608,20 @@ export function buildExactBarcodeMatchClause(
   // it becomes its own materialized LIST SUBQUERY, planned as a SEARCH on
   // the covering barcode index and evaluated before the FTS/trigram
   // subqueries that follow it in the OR.
-  // Every key contributes its own literal forms, so a scanned UPC-E probes
-  // the expanded UPC-A the catalog most likely stores (and its zero-padded
-  // spellings) on the same index, not only its own 8 digits.
-  const candidates: string[] = []
-  for (const key of keys) {
-    for (const candidate of barcodeEqualityCandidates(key)) {
-      if (!candidates.includes(candidate)) candidates.push(candidate)
-    }
-  }
-  const placeholders = candidates.map((candidate, index) => {
-    params[`${paramName}Eq${index}`] = candidate
-    return `@${paramName}Eq${index}`
-  })
+  // Both keyspaces contribute their literal forms to this one index probe,
+  // and each contributes only spellings that belong to it: the padding key
+  // its own zero-padded widths, and a namespaced UPC-pair counterpart its
+  // FULL printed spelling and the widths that pad THAT (never the contracted
+  // form, which is another product's code). So a scanned UPC-E probes the
+  // expanded UPC-A the catalog most likely stores on the same index, without
+  // the two ever meeting in the same keyspace.
+  const names = barcodeKeyPlanParamNames(paramName, plan)
+  const placeholders = [...names.padding, ...names.equivalent].map((name) => `@${name}`)
   const rawColumn = column.includes('.') ? column.slice(column.lastIndexOf('.') + 1) : column
+  const catchAll = buildBarcodeKeyMatchSql(paramName, column, keys)
+  if (!placeholders.length) return `(${catchAll})`
   const probe = `${idColumn} IN (SELECT id FROM ${table} WHERE ${rawColumn} IN (${placeholders.join(', ')}))`
-  return `(${probe} OR ${buildBarcodeKeyMatchSql(paramName, column, keys.length)})`
+  return `(${probe} OR ${catchAll})`
 }
 
 // The stored literal forms one normalized barcode key can take. GTIN-14 is the
@@ -1518,6 +1643,6 @@ export function barcodeEqualityCandidates(key: string, maxLength = 18): string[]
 // the parameter).
 export const EXACT_BARCODE_RANK_OFFSET = 1000000
 
-export function buildExactBarcodeRankSql(paramName = 'barcodeKey', column = 'p.barcode', keyCount = 1): string {
-  return `(CASE WHEN ${buildBarcodeKeyMatchSql(paramName, column, keyCount)} THEN 0 ELSE ${EXACT_BARCODE_RANK_OFFSET} END)`
+export function buildExactBarcodeRankSql(paramName = 'barcodeKey', column = 'p.barcode', keys?: readonly string[]): string {
+  return `(CASE WHEN ${buildBarcodeKeyMatchSql(paramName, column, keys)} THEN 0 ELSE ${EXACT_BARCODE_RANK_OFFSET} END)`
 }

@@ -562,20 +562,66 @@ export function compressUpcA(value: unknown): string {
   return ''
 }
 
+// --- the two keyspaces --------------------------------------------------
+//
+// A key set carries two KINDS of key, and they must never meet:
+//
+//   * the PADDING key -- normalizeBarcodeKey's zero-stripped form. Two codes
+//     share it when they are one article written at two widths.
+//   * the UPC PAIR keys -- namespaced `upca:`/`upce:`, and always the FULL
+//     printed spelling. A UPC-E and its UPC-A are one article, but neither
+//     spelling is a padded form of the other, so that link has to be carried
+//     explicitly rather than fall out of a fold.
+//
+// The namespace is not decoration, it is the whole point. '012345000065'
+// compresses to UPC-E '01234565', whose zero-stripped form is '1234565' --
+// a perfectly ordinary 7-digit internal code this catalog may hold on some
+// OTHER product. Emitting the derived spelling as a plain key put it in the
+// padding keyspace and folded those two unrelated articles into one. Behind
+// a prefix a derived key can only ever meet another derived key, so the pair
+// is linked without leaking into the keyspace padding owns.
+const UPC_PAIR_KEY_PREFIX = /^upc[ae]:/
+
+// The `upca:`/`upce:` pair a code belongs to, or [] when it is not half of
+// one. Narrow by construction, which is what keeps "two codes differing by
+// anything other than leading zeros never collide" true:
+//   * UPC-E is read only from the eight digits actually printed in the
+//     symbol, and only when its own check digit validates. A zero-padded
+//     12-digit value is deliberately NOT read as a compressed symbol:
+//     '000001234565' is itself a valid UPC-A, and treating it as the padded
+//     form of UPC-E '01234565' would invent an identity;
+//   * UPC-A is read from any GTIN width the catalog stores it at (12,
+//     EAN-13, GTIN-14, wider), but only from a value ALREADY at least 12
+//     digits long, so a short internal code is never promoted into one;
+//   * only number systems 0 and 1, which is what GS1 reserves to UPC-E, so
+//     an in-store GTIN-8 beginning with 2 keeps its own identity;
+//   * compression is accepted only when expanding the result reproduces the
+//     UPC-A digit for digit.
+function upcPairKeys(digits: string): string[] {
+  if (!/^[0-9]+$/.test(digits)) return []
+  if (digits.length === 8) {
+    const upcA = expandUpcE(digits)
+    return upcA ? [`upce:${digits}`, `upca:${upcA}`] : []
+  }
+  if (digits.length < 12) return []
+  const stripped = digits.replace(/^0+/, '')
+  if (stripped.length > 12) return []
+  const upcA = stripped.padStart(12, '0')
+  const upcE = compressUpcA(upcA)
+  return upcE ? [`upca:${upcA}`, `upce:${upcE}`] : []
+}
+
 // Every canonical key one barcode may legitimately be found under: the
-// leading-zero-folded form first, plus its UPC-E/UPC-A counterpart when the
-// value is one half of that pair. Empty when the value is not a real
-// barcode. The primary key stays first so callers that can only carry one
-// (the SQL parameter every route already binds) keep the old behaviour.
+// padding key first, then its namespaced UPC pair when the value is half of
+// one. Empty when the value is not a real barcode. The padding key stays
+// first so callers that can only carry one (searchTermBarcodeKey, and the
+// single SQL parameter every route already binds) keep the old behaviour.
 export function barcodeSearchKeys(value: unknown): string[] {
   const primary = normalizeBarcodeKey(value)
   if (!primary) return []
-  const keys = [primary]
   const digits = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
-  for (const equivalent of [expandUpcE(digits), compressUpcA(digits)]) {
-    const key = equivalent ? normalizeBarcodeKey(equivalent) : ''
-    if (key && !keys.includes(key)) keys.push(key)
-  }
+  const keys = [primary]
+  for (const key of upcPairKeys(digits)) if (!keys.includes(key)) keys.push(key)
   return keys
 }
 

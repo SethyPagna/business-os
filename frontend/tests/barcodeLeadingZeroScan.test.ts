@@ -78,12 +78,35 @@ check('UPC-A compresses back to the same UPC-E, or to nothing', () => {
 })
 
 check('barcodeSearchKeys carries every spelling one article is printed under', () => {
-  assert.deepEqual(barcodeSearchKeys(UPCE), ['1234565', '12345000065'])
-  assert.ok(barcodeSearchKeys(UPCA).includes('12345000065'))
-  assert.ok(barcodeSearchKeys(UPCA).includes('1234565'))
+  // TWO keyspaces. The padding key is the zero-stripped form; the UPC pair
+  // is namespaced and always the FULL printed spelling, so a derived key can
+  // only ever meet another derived key.
+  assert.deepEqual(barcodeSearchKeys(UPCE), ['1234565', `upce:${UPCE}`, `upca:${UPCA}`])
+  assert.deepEqual(barcodeSearchKeys(UPCA), ['12345000065', `upca:${UPCA}`, `upce:${UPCE}`])
+  // ...and through the EAN-13 and GTIN-14 spellings of the same UPC-A.
+  assert.ok(barcodeSearchKeys(`0${UPCA}`).includes(`upce:${UPCE}`))
+  assert.ok(barcodeSearchKeys(`00${UPCA}`).includes(`upce:${UPCE}`))
   // A plain code still yields exactly one key -- no invented equivalents.
   assert.deepEqual(barcodeSearchKeys(PADDED_STORED), [PADDED_BARE])
   assert.deepEqual(barcodeSearchKeys('0'), [], 'the placeholder is not a barcode')
+  // The keyspace guarantee: the derived UPC-E spelling must never appear as
+  // a bare zero-stripped key, because '1234565' is a legitimate 7-digit
+  // internal code some other product may own.
+  assert.ok(!barcodeSearchKeys(UPCA).includes('1234565'))
+})
+
+check('the derived UPC-E spelling never leaks into the padding keyspace', () => {
+  // '012345000065' compresses to '01234565', which zero-strips to '1234565'.
+  // Carried as a plain key that made an unrelated 7-digit internal code the
+  // same article. Namespaced, it cannot.
+  assert.ok(!barcodeKeysMatch(UPCA, '1234565'))
+  assert.ok(!barcodeKeysMatch('1234565', UPCA))
+  assert.notEqual(
+    searchRelevanceTier({ name: 'Internal Seven Digit Item', barcode: '1234565' }, UPCA),
+    MATCH_TIER_EXACT_BARCODE,
+  )
+  // A padding twin of that internal code is still its own article, both ways.
+  assert.ok(barcodeKeysMatch('1234565', '01234565'), 'padding still folds')
 })
 
 check('barcodeKeysMatch folds padding AND the UPC-E pair, both directions', () => {

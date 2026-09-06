@@ -137,6 +137,12 @@ row(203, 'Legacy Placeholder A', '0')
 row(204, 'Legacy Placeholder B', '0')
 // A GTIN-8 whose check digit does NOT make it a valid UPC-E.
 row(205, 'In Store Eight Digit', '20123458')
+// THE KEYSPACE CONTROL. '012345000065' compresses to UPC-E '01234565', whose
+// zero-stripped form is '1234565' -- which is also a perfectly ordinary
+// 7-digit internal code. If the derived spelling is folded into the padding
+// keyspace instead of its own, scanning the 12-digit UPC-A drags this row in
+// as an exact-barcode hit. It is a different article and must never appear.
+row(301, 'Internal Seven Digit Item', '1234565')
 
 // Mirrors how routes/products.ts consumes buildProductSearchQuery.
 function search(rawQuery, { useSearchIndex = true } = {}) {
@@ -200,6 +206,16 @@ for (const pathName of ['indexed', 'compat']) {
     assert.deepStrictEqual(hits.filter((id) => id !== 205), [],
       'a non-UPC-E eight-digit code matched foreign rows')
   })
+
+  // The derived UPC-E spelling must live in its OWN keyspace. Carried as a
+  // plain zero-stripped key it collapses into the padding keyspace and makes
+  // an unrelated 7-digit internal code the same article as this UPC-A.
+  check(`${pathName}: the derived UPC-E spelling never leaks into the padding keyspace`, () => {
+    const hits = find(UPCA)
+    assert.ok(hits.includes(103), `scan ${UPCA} must still find its own row`)
+    assert.ok(!hits.includes(301),
+      `scan ${UPCA} dragged in the unrelated 7-digit code 1234565 via its derived UPC-E`)
+  })
 }
 
 // Ranking is only meaningful on the indexed path's tier, which both paths
@@ -234,6 +250,12 @@ check('kernel: the fold never invents an identity', () => {
   // A one-digit change in the UPC-E payload must land on a different
   // article, not the same one.
   assert.ok(!barcodeKeysMatch('01234565', '01234665'))
+  // The keyspace guarantee, at the kernel: the UPC-A's derived UPC-E
+  // spelling must not reach the zero-stripped keyspace, where the ordinary
+  // 7-digit code '1234565' lives.
+  assert.ok(!barcodeKeysMatch(UPCA, '1234565'),
+    'the derived UPC-E spelling leaked into the padding keyspace')
+  assert.ok(!barcodeKeysMatch(`0${UPCA}`, '1234565'))
 })
 
 check('kernel: normalizeBarcodeKey still returns the STORED-form key', () => {
