@@ -51,6 +51,30 @@ function requiredMoney(value: unknown): number | null {
   const n = Number(value)
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null
 }
+/**
+ * ---- The counted drawer at CLOSE is a record, not a gate -----------------
+ *
+ * Owner ruling (Sep 6 2026): "closing shift is only a breakdown for admins in
+ * reports and so on ... it is not calculated in the internal system, it is
+ * calculated only for shift report". A cashier who cannot make the drawer
+ * agree, or who has not counted it at all, must still be able to end the
+ * shift, because nothing downstream of a shift depends on the count.
+ *
+ * So a blank/absent count is ACCEPTED and stored as NULL (the column has
+ * always been nullable and every reader already prints "—" for it), while a
+ * value that is not a non-negative number is still a 400. `requiredMoney`
+ * collapses those two cases into one null and therefore cannot be reused
+ * here: it would silently record "-5" as "not counted".
+ *
+ * There is no variance rule anywhere on this path. counted − expected is
+ * computed for the report (lib/shiftReconciliation.ts) and printed; it never
+ * decides whether the close is allowed.
+ */
+function countedMoney(value: unknown): { ok: true; value: number | null } | { ok: false } {
+  if (value == null || value === '') return { ok: true, value: null }
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? { ok: true, value: Math.round(n * 100) / 100 } : { ok: false }
+}
 function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
@@ -400,7 +424,7 @@ app.post('/open', async (c) => {
 })
 
 async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, input: {
-  closedAt: string; recordedAt: string; countedUsd: number; countedKhr: number
+  closedAt: string; recordedAt: string; countedUsd: number | null; countedKhr: number | null
   note: string | null; deviceName: string | null; reason: string
 }): Promise<{ changed: boolean; shift: ShiftDbRow | undefined }> {
   const shift = storedShift(row)
@@ -442,13 +466,14 @@ app.post('/close', async (c) => {
   if (shift.cancelled_at) return c.json({ error: 'This shift was cancelled. Register a replacement opening first.' }, 409)
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
   if (shift.closed_at) return c.json({ shift: await reconciledShift(c.env, user, shift), already_closed: true, is_open: false }, 200)
-  const countedUsd = requiredMoney(body.closing_counted_usd); const countedKhr = requiredMoney(body.closing_counted_khr)
-  if (countedUsd == null || countedKhr == null) return c.json({ error: 'Valid USD and KHR closing counts are required.' }, 400)
+  // Blank is "not counted", not a refusal -- see countedMoney.
+  const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
+  if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const closedAt = new Date().toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: closedAt,
-    countedUsd, countedKhr,
+    countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close' })
   if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
@@ -471,8 +496,8 @@ app.post('/:id/close', async (c) => {
   if (Number.isNaN(parsedClosedAt.getTime())) return c.json({ error: 'A valid closing time is required.' }, 400)
   const closedAt = parsedClosedAt.toISOString(); const now = Date.now()
   if (parsedClosedAt.getTime() > now) return c.json({ error: 'Closing time cannot be in the future.' }, 400)
-  const countedUsd = requiredMoney(body.closing_counted_usd); const countedKhr = requiredMoney(body.closing_counted_khr)
-  if (countedUsd == null || countedKhr == null) return c.json({ error: 'Valid USD and KHR closing counts are required.' }, 400)
+  const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
+  if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
@@ -483,7 +508,8 @@ app.post('/:id/close', async (c) => {
   if (parsedClosedAt.getTime() < new Date(shift.opened_at).getTime()) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
-  const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(), countedUsd, countedKhr,
+  const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(),
+    countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close' })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, shift.id)
@@ -592,11 +618,18 @@ app.patch('/:id', async (c) => {
   if (closedAt && new Date(closedAt).getTime() < new Date(openedAt).getTime()) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const openingUsd = 'opening_float_usd' in body ? requiredMoney(body.opening_float_usd) : before.opening_float_usd
   const openingKhr = 'opening_float_khr' in body ? requiredMoney(body.opening_float_khr) : before.opening_float_khr
-  const closingUsd = closedAt && 'closing_counted_usd' in body ? requiredMoney(body.closing_counted_usd) : before.closing_counted_usd
-  const closingKhr = closedAt && 'closing_counted_khr' in body ? requiredMoney(body.closing_counted_khr) : before.closing_counted_khr
-  if (openingUsd == null || openingKhr == null || (closedAt && (closingUsd == null || closingKhr == null))) {
+  // The counted drawer stays OPTIONAL after the close, exactly as it is at the
+  // close itself: a shift that was ended without a count must still be
+  // amendable (opening time, notes, the closing timestamp), and requiring the
+  // count here would have made every such row permanently unamendable.
+  const closingUsdParsed = closedAt && 'closing_counted_usd' in body
+    ? countedMoney(body.closing_counted_usd) : { ok: true as const, value: before.closing_counted_usd }
+  const closingKhrParsed = closedAt && 'closing_counted_khr' in body
+    ? countedMoney(body.closing_counted_khr) : { ok: true as const, value: before.closing_counted_khr }
+  if (openingUsd == null || openingKhr == null || !closingUsdParsed.ok || !closingKhrParsed.ok) {
     return c.json({ error: 'Shift cash counts must be finite, non-negative numbers.' }, 400)
   }
+  const closingUsd = closingUsdParsed.value; const closingKhr = closingKhrParsed.value
   const beforeStored = storedShift(before)
   const after = { ...beforeStored, opened_at: openedAt,
     opening_float_usd: openingUsd, opening_float_khr: openingKhr,
