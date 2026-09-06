@@ -430,6 +430,27 @@ await runTest('loyalty point rule save uses the shared single-action guard', () 
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)[\s\S]*setSaving\(false\)/)
 })
 
+await runTest('customer undo/redo replays flag themselves as restores, the manual form does not', () => {
+  const source = readFrontend('src/components/contacts/CustomersTab.tsx')
+
+  // Membership numbers gap-fill (cloudflare/src/lib/membershipNumber.ts), so a
+  // hard-deleted customer's number is handed to the next signup. An undo that
+  // replays that exact number therefore has to tell the server it is a restore,
+  // or the server 400s on a collision the user has no field to fix. A manual Add
+  // Customer submit must NOT carry the flag: there the same collision is a real
+  // typo/duplicate signal staff need to see.
+  assert.match(source, /const buildCustomerPayload = useCallback\([\s\S]*?isUndoRestore: true,[\s\S]*?\}\), \[/, 'the undo/redo replay payload must mark itself as a restore')
+
+  const manualSave = source.slice(source.indexOf('const handleSave = async'), source.indexOf('const handleDelete'))
+  assert.ok(manualSave.length > 0, 'handleSave should still be findable')
+  assert.doesNotMatch(manualSave, /isUndoRestore/, 'the manual Add/Edit Customer submit must never claim to be a restore')
+
+  // Every restore-shaped call site, and only those: buildCustomerPayload plus
+  // the bulk-delete undo payload built inline.
+  assert.equal((source.match(/isUndoRestore: true/g) || []).length, 2, 'exactly the two replay payloads (buildCustomerPayload and the bulk-restore literal) set the flag')
+  assert.match(source, /Restore deleted customers'\)/, 'the bulk-restore call site must still exist')
+})
+
 await runTest('contact tabs use same-tick guards and bounded mutations', () => {
   const targets = [
     {
