@@ -152,6 +152,14 @@ const EXCLUDED = new Map([
   ['import_auto_merges.product_id', 'provenance: records which id an import folded'],
   ['import_auto_merges.merged_into_product_id', 'provenance: records which id an import folded into'],
   ['sale_amendments.product_id', 'SNAPSHOT, declared as such in migration 0115'],
+  // OWNER DECISION, open. The ask said the merge moves EVERY linked record,
+  // stock_session_members included. It is excluded instead, and refused rather
+  // than reparented, because the column is the replay DRIVER and not a link:
+  // reparenting it would compare the keeper's rows against a postimage
+  // recorded for the loser (proved by the two checks in section 5). The price
+  // of that choice is a merge blocked for up to ACTION_HISTORY_TTL_DAYS (180)
+  // for any product a stock-in session touched, since nothing ever settles a
+  // session. Recorded as a deviation, not a silent substitution.
   ['stock_session_members.product_id', 'provenance AND the replay driver -- see the guard, not a reparent'],
 ])
 
@@ -360,9 +368,32 @@ async function main() {
     assert.ok(mod.mergeStockSessionBlockedMessage('op-1').includes('op-1'), 'the message must name the session')
   })
 
-  await check('a SPENT session does not block: the members row is then pure history', async () => {
-    d1.db.prepare("UPDATE action_history SET status = 'recorded' WHERE id = 900").run()
-    assert.equal(await mod.mergeBlockedByReversibleStockSession(adapter, [KEEPER, DUP]), null)
+  // What ACTUALLY ends the block, and what does not. The earlier version of
+  // this check flipped the history row to 'recorded' and called the session
+  // "spent" -- but nothing in the stock-session code path ever writes that
+  // status: lib/stockSession.ts inserts 'undoable' and thereafter only swaps
+  // between 'undoable' and 'redoable' (targetStatus). The block therefore ends
+  // exactly one way in production: the retention sweep DELETES the
+  // action_history row at ACTION_HISTORY_TTL_DAYS (180) and the guard's JOIN
+  // stops matching. That 180-day window is the real cost of choosing the guard
+  // over reparenting stock_session_members, so it is pinned here rather than
+  // papered over with a status the system never writes.
+  await check('DISCRIMINATING: no stock-session path ever writes a settling status', () => {
+    const sessionSrc = fs.readFileSync(path.join(SRC, 'lib/stockSession.ts'), 'utf8')
+    const written = new Set((sessionSrc.match(/'(undoable|redoable|recorded|settled|spent|retired)'/g) || []).map((m) => m.slice(1, -1)))
+    assert.deepEqual([...written].sort(), ['redoable', 'undoable'],
+      'if a settle/retire status is ever introduced, the guard and this test must learn about it')
+  })
+
+  await check('the block ends when retention removes the history row, not on a status flip', async () => {
+    // still blocked while the row lives and says undoable
+    assert.ok(await mod.mergeBlockedByReversibleStockSession(adapter, [KEEPER, DUP]))
+    // the real mechanism: ACTION_HISTORY_TTL_DAYS deletes the row outright
+    d1.db.prepare('DELETE FROM action_history WHERE id = 900').run()
+    assert.equal(await mod.mergeBlockedByReversibleStockSession(adapter, [KEEPER, DUP]), null,
+      'once retention has removed the history row the members row is pure history')
+    d1.db.prepare(`INSERT INTO action_history (id, scope, entity, entity_id, label, status)
+                   VALUES (900, 'inventory', 'product', ${DUP}, 'Stock in', 'undoable')`).run()
   })
 
   await check('a session naming NEITHER row does not block', async () => {

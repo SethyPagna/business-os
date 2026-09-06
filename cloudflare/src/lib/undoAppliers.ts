@@ -211,8 +211,21 @@ export type MergeStockDisposition = 'merge' | 'write_off'
 //     What DOES protect the session is the guard in routes/products.ts
 //     (mergeBlockedByReversibleStockSession): a merge is REFUSED while either
 //     row still belongs to a stock session that can be undone or redone, so no
-//     merge can silently brick a replay. Once the session is spent the members
-//     row is pure history and stays where it happened.
+//     merge can silently brick a replay. Once the session's history row is
+//     gone the members row is pure history and stays where it happened.
+//
+//     OWNER DECISION, OPEN -- a recorded DEVIATION from the N15 ask ("the
+//     merge moves EVERY linked record ... including stock_session_members"),
+//     not an oversight. What it costs: nothing ever settles a stock session
+//     (lib/stockSession.ts writes only 'undoable' and 'redoable'), so the block
+//     on a touched product lifts only when the retention sweep deletes the
+//     action_history row at ACTION_HISTORY_TTL_DAYS = 180. Three ways out, for
+//     the owner to pick: (a) accept the guard as it stands; (b) add a way to
+//     settle/retire a spent session so the block lifts in days rather than
+//     months; (c) implement the compensating postimage rewrite so the member
+//     row can be reparented with the replay following it. Both halves are
+//     pinned in scripts/test-merge-identity-fk-pure.cjs section 5, so
+//     whichever way it goes the test moves with it.
 export const MERGE_REPARENT_TABLES: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'sale_items', column: 'product_id' },
   { table: 'return_items', column: 'product_id' },
