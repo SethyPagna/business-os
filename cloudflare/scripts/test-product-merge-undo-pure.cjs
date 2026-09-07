@@ -51,6 +51,7 @@ function loadRealActorSnapshot() {
   return actorSnapshotCache
 }
 function loadUndoAppliers(d1) {
+  const readBatches = []
   const dbAdapter = {
     prepare(sql) {
       const st = d1.prepare(sql)
@@ -66,6 +67,7 @@ function loadUndoAppliers(d1) {
     batch: (stmts) => {
       const readOnly = stmts.every((stmt) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(stmt.sql))
       if (!readOnly) return d1.batch(stmts)
+      readBatches.push(stmts)
       return Promise.resolve(stmts.map((stmt) => ({
         success: true,
         results: d1.prepare(stmt.sql).all(stmt.params == null ? {} : stmt.params),
@@ -139,6 +141,7 @@ function loadUndoAppliers(d1) {
     Module._load = original
   }
   mod.exports.__testDbAdapter = dbAdapter
+  mod.exports.__testReadBatches = readBatches
   return mod.exports
 }
 
@@ -431,8 +434,16 @@ async function run() {
 
   await check('batched merge fingerprint is byte-equivalent to the serial CAS fingerprint', async () => {
     const serial = await serialMergeStateFingerprint(d1, [reversal], undo.MERGE_REPARENT_TABLES)
+    const before = undo.__testReadBatches.length
     const batched = await undo.mergeStateFingerprint(undo.__testDbAdapter, [reversal])
     assert.equal(batched, serial)
+    assert.equal(undo.__testReadBatches.length, before + 1, 'the complete fingerprint uses one adapter batch')
+    for (const statement of undo.__testReadBatches.at(-1)) {
+      const bindCount = Array.isArray(statement.params)
+        ? statement.params.length
+        : Object.keys(statement.params || {}).length
+      assert.ok(bindCount <= 80, `fingerprint statement exceeded 80 binds: ${bindCount}`)
+    }
   })
 
   await check('recordMergeUndoSnapshot stores the snapshot + a small action_history row (real code, 0097 table)', async () => {
