@@ -1,3 +1,9 @@
+> **Delivery addition deployed September7 11:10:18 UTC:** c475e637d197,
+> Worker d5aeeb82-cb0d-4047-8abf-8e96ba17f602 at100%. Migration0133 preserved
+> all prior amendments. Live Sales/Records verified after network recovery.
+> F33 creation snapshots, F36 retry visibility and F37 large duplicate preview
+> remain active; historical metadata repair and production merge remain pending.
+
 > **September 7 first functional release deployed:** 821efc94ce7a,
 > Worker 498efadb-f833-471d-a8b7-b4326950bd26 at 100%, 09:54:13 UTC.
 > Migrations 0128–0132 applied and preservation checks pass. 306 frontend files,
