@@ -133,7 +133,7 @@ import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOpti
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
 import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
-import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
+import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, reparkDeniedRestore, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
 import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
@@ -1206,6 +1206,43 @@ function ProductsFullEditor() {
       ? payload.filter((row) => wanted.has(Number((row as { id?: unknown })?.id)))
       : []
   }, [])
+
+  useEffect(() => {
+    let disposed = false
+    const restoreEdit = async (entry: MinimizedWorkEntry | null | undefined) => {
+      if (!entry || entry.kind !== 'edit_product') return
+      const productId = Number(entry.payload?.productId || 0)
+      if (!productId || !can('products', 'edit') || !canRestoreMinimizedWork(entry, can)) {
+        reparkDeniedRestore(entry)
+        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+        return
+      }
+      try {
+        const current = (await fetchProductsByIds([productId]))[0]
+        if (disposed || !current) throw new Error('Product is no longer available')
+        setSelected(current)
+        setFormInitialTab('basic')
+        setModal('form')
+        markRestoreHandled('edit_product')
+      } catch (error) {
+        reparkDeniedRestore(entry)
+        if (!disposed) notify(error instanceof Error ? error.message : String(error), 'error')
+      }
+    }
+
+    const pending = consumePendingRestore('edit_product')
+    if (pending) void restoreEdit(pending)
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'edit_product') return
+      void restoreEdit(detail.entry as MinimizedWorkEntry | undefined)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => {
+      disposed = true
+      window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+    }
+  }, [can, fetchProductsByIds, notify, tr])
 
   const loadAuxOptions = useCallback(async (label = 'Product auxiliary options') => {
     if (auxOptionsLoadedRef.current) return
@@ -4861,18 +4898,36 @@ function ProductsFullEditor() {
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
             // S4-20: minimizing is silent otherwise -- the form just
             // vanishes, which reads as lost work. Say where it went.
-            onMinimize={!modalProduct ? (label: string) => {
-              minimizeWork({
-                key: 'add-product',
-                kind: 'add_product',
-                pageId: 'products',
-                label,
-                draftKey: scopedWorkDraftKey('product_new_standalone-create'),
-                requiredPermission: { permissionKey: 'products', actionKey: 'add' },
-              })
+            onMinimize={(label: string, detail?: { draftKey: string; productId: EntityId | null }) => {
+              if (modalProduct) {
+                const productId = Number(detail?.productId || modalProduct.id || 0)
+                const draftKey = String(detail?.draftKey || '')
+                if (!productId || !draftKey) {
+                  notify(tr('unable_to_minimize', 'Unable to minimize this edit.', 'មិនអាចបង្រួមការកែប្រែនេះបានទេ។'), 'error')
+                  return
+                }
+                minimizeWork({
+                  key: `edit-product-${productId}`,
+                  kind: 'edit_product',
+                  pageId: 'products',
+                  label,
+                  payload: { productId },
+                  draftKey,
+                  requiredPermission: { permissionKey: 'products', actionKey: 'edit' },
+                })
+              } else {
+                minimizeWork({
+                  key: 'add-product',
+                  kind: 'add_product',
+                  pageId: 'products',
+                  label,
+                  draftKey: detail?.draftKey || scopedWorkDraftKey('product_new_standalone-create'),
+                  requiredPermission: { permissionKey: 'products', actionKey: 'add' },
+                })
+              }
               setModal(null); setSelected(null); setFormInitialTab('basic')
               notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
-            } : undefined}
+            }}
             onDelete={selected ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
             t={t}
             usdSymbol={usdSymbol}
