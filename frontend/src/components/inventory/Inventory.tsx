@@ -35,7 +35,16 @@ const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventor
 // F3 slice 2: the minimized-work chip's restore path (see
 // utils/minimizedWork.ts -- event for a mounted host, pending for a
 // fresh mount).
-import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
+import {
+  RESTORE_WORK_EVENT,
+  canRestoreMinimizedWork,
+  consumePendingRestore,
+  markRestoreHandled,
+  minimizeWork,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
+import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
 const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
@@ -552,15 +561,25 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // other add-stock surface.
   const [showFastStockIn, setShowFastStockIn] = useState(false)
   useEffect(() => {
-    if (consumePendingRestore('fast_stockin')) setShowFastStockIn(true)
-    const onRestore = (event: Event) => {
-      if ((event as CustomEvent).detail?.kind !== 'fast_stockin') return
+    const restoreFastStockIn = (entry: MinimizedWorkEntry | null | undefined) => {
+      if (!can('inventory', 'adjust') || (entry && !canRestoreMinimizedWork(entry, can))) {
+        if (entry) reparkDeniedRestore(entry)
+        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+        return
+      }
       markRestoreHandled('fast_stockin')
       setShowFastStockIn(true)
     }
+    const pending = consumePendingRestore('fast_stockin')
+    if (pending) restoreFastStockIn(pending)
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'fast_stockin') return
+      restoreFastStockIn(detail.entry as MinimizedWorkEntry | undefined)
+    }
     window.addEventListener(RESTORE_WORK_EVENT, onRestore)
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
-  }, [])
+  }, [can, notify, tr])
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -2715,7 +2734,14 @@ ${inventoryFeesFormulaText}`,
             // S4-20: minimizing is silent otherwise -- the panel just
             // vanishes, which reads as lost work. Say where it went.
             onMinimize={(label: string) => {
-              minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', pageId: 'branches', label })
+              minimizeWork({
+                key: 'fast-stockin',
+                kind: 'fast_stockin',
+                pageId: 'branches',
+                label,
+                draftKey: scopedWorkDraftKey('fast_stockin'),
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
               notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
             }}
           />
