@@ -113,6 +113,8 @@ assert.match(workerLedger, /MAX\(0, sold\.cogs_usd - COALESCE\(ret\.cogs_returne
   'and returned cost cannot drive COGS below zero')
 assert.match(workerLedger, /ORDER BY share\.order_frac DESC/,
   'and the unit spill is allocated by largest remainder, so Net sold -- which this list renders with no formatting at all, unlike the money cells -- stays a whole number instead of "1.8"')
+assert.match(workerLedger, /MIN\(part\.filled, part\.leftover\) - MIN\(part\.filled - part\.residual, part\.leftover\)/,
+  'and its leftover is poured by each line\'s REMAINING ROOM, never one unit per rank: with 1.5 units at each of two branches and all three brought back, no line had a whole unit of room left, a rank-based increment dropped the third unit, and the branch rows read 0.5 + 0.5 against an unfiltered 0')
 assert.match(workerLedger, /MIN\(sold\.qty_sold, COALESCE\(ret\.qty_returned, 0\)\)/,
   'the UNIT reversal carries the same residual cap as the money, for the one case apportionment cannot reach: a return line taking back more than the sale recognised for the product at all')
 

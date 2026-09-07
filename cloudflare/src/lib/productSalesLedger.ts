@@ -57,7 +57,7 @@
 // charged the same reversal twice: with 3 units at branch 1 and 2 at branch 2
 // and two units brought back, branch 1 -- which had nothing come back -- read
 // 1 unit and $10 instead of 3 and $30, and the two branch rows between them
-// reversed more than the sale ever had. When `branchScoped` is set, each
+// reversed more than the sale ever had. When `branchScoped` is set, the
 // reversals of one sale for one product are grouped by the branch they NAME
 // (COALESCE(ri.branch_id, r.branch_id)) and APPORTIONED over the sale's branch
 // lines: the named branch takes the reversal first, up to what it recognised,
@@ -76,8 +76,11 @@
 // formatting at all, so a proportional split of a 2-unit reversal over a
 // 3-and-2 branch sale would put "1.8" -- and off a less convenient share
 // 1.7999999999999998 -- into a column that counts things. Whole units stay
-// whole while every sold quantity is whole, and the total allocated is the
-// same either way, so the partition below is untouched.
+// whole while every sold quantity is whole, and the leftover is poured by each
+// line's REMAINING ROOM rather than one unit per rank, so the total allocated
+// is the same either way and the partition below is untouched. (Pouring by
+// rank was not: with 1.5 units at each of two branches and all 3 brought back,
+// neither line had a whole unit of room left and the third unit was dropped.)
 //
 // What that buys, stated exactly rather than absolutely: the shares of ONE
 // return group sum to 1, so for every column the branch rows add back up to
@@ -315,27 +318,42 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
   // 3-and-2 branch sale would put "Net sold 1.8" -- or, once the share is not a
   // clean fifth, 1.7999999999999998 -- in a column that counts things.
   //
-  // So the spill is allocated by LARGEST REMAINDER instead: every branch line
-  // takes the whole part of its share, and the units left over go one each to
-  // the lines with the largest fractional part (branch_id breaking a tie). The
-  // total allocated is unchanged, so the partition still holds, and while every
-  // sale_items.quantity is whole every allocation is whole. `leftover` keeps
-  // its fractional tail for the one case that can produce one -- a sale line
-  // recorded with a fractional quantity -- so even there nothing is lost.
-  // `order_frac` is -1 for a line with no room left for another whole unit, so
-  // the leftovers land where they can actually be absorbed.
+  // So the spill is allocated by LARGEST REMAINDER instead, in three steps
+  // that between them allocate EXACTLY the units the group has to spill:
+  //
+  //   * `base_qty` -- the whole part of the line's proportional share, capped
+  //     at the `room` that line still has (`sb.qty_sold - own_qty`), so a line
+  //     is never handed units it did not recognise;
+  //   * `leftover` -- what those whole parts left unallocated: `rem_qty` less
+  //     the group's own SUM(base_qty);
+  //   * the leftover is then poured over the lines in largest-remainder order
+  //     (branch_id breaking a tie), each taking as much of its REMAINING room
+  //     (`residual`) as it can hold. `filled` is the running total of that room
+  //     down the order, so a line's take is the slice of `leftover` lying
+  //     between the room before it and the room through it -- `MIN(filled,
+  //     leftover) - MIN(filled - residual, leftover)`, which telescopes to
+  //     MIN(total room, leftover) across the group. Nothing is dropped and no
+  //     line overflows.
+  //
+  // Pouring by remaining ROOM rather than one unit per rank is what makes that
+  // third step exact. A rank-based increment assumed every line could take a
+  // WHOLE unit, so a sale of 1.5 units at each of two branches with all 3 units
+  // brought back allocated 1 + 1 and silently dropped the third: the branch
+  // rows read 0.5 + 0.5 against an unfiltered 0, and a branch slice stopped
+  // partitioning the ledger. sale_items.quantity is REAL
+  // (migrations/0001_init.sql) and routes/sales.ts accepts any finite quantity
+  // > 0, so that is a shape the live API can write, not only a legacy import.
+  // While every sold quantity is whole, `room`, `base_qty`, `residual` and
+  // `leftover` are all whole, so every allocation is whole too.
   const qtyOwn = ownTake('rg.qty_returned', 'rg.named_qty')
   const qtySpill = spill('rg.qty_returned', 'rg.named_qty', 'sb.qty_sold', 'sb.sale_qty')
   const qtyRem = 'rg.qty_returned - MIN(rg.qty_returned, rg.named_qty)'
-  const qtyBase = `CAST((${qtySpill}) AS INTEGER)`
-  const qtyFrac = `CASE WHEN (sb.qty_sold - (${qtyOwn})) - ${qtyBase} >= 1
-                     THEN (${qtySpill}) - ${qtyBase} ELSE -1 END`
-  const qtyLeftoverWhole = 'CAST(part.leftover AS INTEGER)'
-  const qtyAllocated = `part.own_qty + part.base_qty + CASE
-               WHEN part.order_frac < 0 THEN 0
-               WHEN part.rk <= ${qtyLeftoverWhole} THEN 1
-               WHEN part.rk = ${qtyLeftoverWhole} + 1 THEN part.leftover - ${qtyLeftoverWhole}
-               ELSE 0 END`
+  const qtyRoom = `(sb.qty_sold - (${qtyOwn}))`
+  const qtyBase = `MIN(CAST((${qtySpill}) AS INTEGER), ${qtyRoom})`
+  const qtyResidual = `(${qtyRoom}) - (${qtyBase})`
+  const qtyFrac = `(${qtySpill}) - (${qtyBase})`
+  const qtyAllocated = `part.own_qty + part.base_qty
+               + (MIN(part.filled, part.leftover) - MIN(part.filled - part.residual, part.leftover))`
 
   const retSql = branchScoped ? `
       SELECT part.sale_id AS sale_id, part.product_id AS product_id, part.branch_id AS branch_id,
@@ -346,18 +364,20 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
              SUM(part.cogs_returned_khr) AS cogs_returned_khr
       FROM (
         SELECT share.sale_id AS sale_id, share.product_id AS product_id, share.branch_id AS branch_id,
-               share.own_qty AS own_qty, share.base_qty AS base_qty, share.order_frac AS order_frac,
+               share.own_qty AS own_qty, share.base_qty AS base_qty, share.residual AS residual,
                share.refund_usd AS refund_usd, share.refund_khr AS refund_khr,
                share.cogs_returned_usd AS cogs_returned_usd, share.cogs_returned_khr AS cogs_returned_khr,
                share.rem_qty - SUM(share.base_qty) OVER (PARTITION BY share.sale_id, share.product_id, share.named_branch) AS leftover,
-               ROW_NUMBER() OVER (PARTITION BY share.sale_id, share.product_id, share.named_branch
-                                  ORDER BY share.order_frac DESC, share.branch_id) AS rk
+               SUM(share.residual) OVER (PARTITION BY share.sale_id, share.product_id, share.named_branch
+                                         ORDER BY share.order_frac DESC, share.branch_id
+                                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS filled
         FROM (
           SELECT rg.sale_id AS sale_id, rg.product_id AS product_id, sb.branch_id AS branch_id,
                  rg.named_branch AS named_branch,
                  (${qtyOwn}) AS own_qty,
                  (${qtyRem}) AS rem_qty,
                  ${qtyBase} AS base_qty,
+                 ${qtyResidual} AS residual,
                  ${qtyFrac} AS order_frac,
                  ${refundUsdShare} AS refund_usd,
                  ${refundKhrShare} AS refund_khr,

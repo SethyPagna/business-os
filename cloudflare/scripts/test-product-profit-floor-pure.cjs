@@ -78,6 +78,15 @@
 //      reads "1.8" -- a count of things with a fraction in it. The unit spill
 //      is allocated by largest remainder instead.
 //              ledger 96a461d4, branch 1 Net sold: 1.8 -> 2 (integer)
+//   M  the case largest remainder itself got wrong. 1.5 units at branch 1 and
+//      1.5 at branch 2, all 3 brought back naming no branch. Ranking gave each
+//      line ONE whole leftover unit, but neither line had a whole unit of room
+//      left, so the third unit was dropped: branch 1 + branch 2 read 0.5 + 0.5
+//      against an unfiltered 0. The leftover is now poured by REMAINING ROOM,
+//      so it lands entirely. sale_items.quantity is REAL
+//      (migrations/0001_init.sql) and routes/sales.ts accepts any finite
+//      quantity > 0, so this is a shape the live API can write.
+//              ledger 21cf77ae, branch 1 + branch 2: 1 -> 0 = unfiltered
 //
 // Plus the two positive controls, without which a "nothing is negative any
 // more" sweep would be indistinguishable from a broken instrument:
@@ -189,8 +198,9 @@ function setupDatabase() {
       (9,'I: one sale, two branches, a partial return at one of them','i',1,0,0,0,0,0),
       (10,'J: the return line names no branch, the return does','j',1,0,0,0,0,0),
       (11,'K: one sale, two branches worth very different money','k',1,0,0,0,0,0),
-      (12,'L: a return naming a branch that sold none of it','l',1,0,0,0,0,0);
-    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0),(9,1,0),(9,2,0),(10,1,0),(10,2,0),(11,1,0),(11,2,0),(12,1,0),(12,2,0);
+      (12,'L: a return naming a branch that sold none of it','l',1,0,0,0,0,0),
+      (13,'M: fractional branch lines, all of it returned','m',1,0,0,0,0,0);
+    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0),(9,1,0),(9,2,0),(10,1,0),(10,2,0),(11,1,0),(11,2,0),(12,1,0),(12,2,0),(13,1,0),(13,2,0);
 
     -- A: the sale is in AUGUST, the return is inside the September window.
     INSERT INTO sales VALUES (100,1,'completed','2026-08-01 03:00:00',100,400000,0,0,0,0);
@@ -284,15 +294,30 @@ function setupDatabase() {
     INSERT INTO sale_items VALUES (115,111,12,2,2,20,80000,4,16000);
     INSERT INTO returns VALUES (210,111,3,'completed','customer','2026-09-05 04:00:00');
     INSERT INTO return_items VALUES (210,210,12,3,2,20,80000,4,16000,1,'restock');
+
+    -- M: FRACTIONAL branch lines -- 1.5 units at each branch, all 3 brought
+    -- back, and neither the return line nor the return row names a branch. The
+    -- spill is the whole 3 units, and no branch line has a WHOLE unit of room
+    -- left once each has taken its floor(1.5) = 1, so a rank-based leftover
+    -- ("one unit to each of the top ranks") allocated 1 + 1 and dropped the
+    -- third: the branch rows read 0.5 + 0.5 against an unfiltered 0.
+    INSERT INTO sales VALUES (112,1,'completed','2026-09-05 03:00:00',30,120000,0,0,0,0);
+    INSERT INTO sale_items VALUES (116,112,13,1,1.5,15,60000,4,16000);
+    INSERT INTO sale_items VALUES (117,112,13,2,1.5,15,60000,4,16000);
+    INSERT INTO returns VALUES (211,112,NULL,'completed','customer','2026-09-05 04:00:00');
+    INSERT INTO return_items VALUES (211,211,13,NULL,3,30,120000,4,16000,1,'restock');
+
   `)
   return d1
 }
 
 const round2 = (value) => Math.round(value * 100) / 100
 
+const ALL_PRODUCTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+
 async function main() {
   const db = dbAdapter(setupDatabase())
-  const items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((id) => ({ id }))
+  const items = ALL_PRODUCTS.map((id) => ({ id }))
   await attachInventoryProductMetrics(db, items, {
     branchId: '1', startDate: '2026-09-05', endDate: '2026-09-05',
   })
@@ -335,12 +360,27 @@ async function main() {
     "K: the single unit that came back is allocated whole, to one branch line or the other -- never half a unit to each")
   assert.deepEqual(at(12), { qty_sold: 2, revenue_usd: 18, revenue_khr: 72000, cogs_usd: 7.2, profit_usd: 10.8 },
     "L: the spill is allocated by largest remainder, so branch 1 reads a whole 2 units (proportionally it would read 1.8). Money stays proportional and is money-formatted")
+  assert.deepEqual(at(13), { qty_sold: 0, revenue_usd: 0, revenue_khr: 0, cogs_usd: 0, profit_usd: 0 },
+    "M: 1.5 units sold at branch 1 and all of them brought back -- the leftover unit is poured by remaining ROOM, so branch 1 nets to 0 (ledger 21cf77ae: 0.5, the third unit dropped)")
 
   // ---- the positive controls ----------------------------------------------
   assert.deepEqual(at(6), { qty_sold: 1, revenue_usd: 5, revenue_khr: 20000, cogs_usd: 9, profit_usd: -4 },
     'F: a product genuinely sold below cost still reports its real loss -- the root-cause fix must not have become a display floor')
   assert.deepEqual(at(7), { qty_sold: 1, revenue_usd: 10, revenue_khr: 40000, cogs_usd: 4, profit_usd: 6 },
     'G: an ordinary sale-with-return is arithmetically unchanged')
+
+  // Which products this fixture recorded with only WHOLE sold quantities.
+  // Net sold is a count, so its allocation has to stay whole for those -- but
+  // case M deliberately records 1.5-unit sale lines, where a whole answer is
+  // neither possible nor wanted. Derived from the fixture rather than
+  // hard-coded, so adding a fractional case cannot silently weaken the rule.
+  const wholeQuantityProducts = new Set(
+    db.prepare(`SELECT product_id FROM sale_items GROUP BY product_id
+                HAVING SUM(CASE WHEN quantity <> CAST(quantity AS INTEGER) THEN 1 ELSE 0 END) = 0`)
+      .all({}).map((row) => Number(row.product_id)),
+  )
+  assert.ok(wholeQuantityProducts.has(12) && !wholeQuantityProducts.has(13),
+    'the integrality rule is scoped by the fixture itself: case L is whole-quantity, case M deliberately is not')
 
   // ---- the invariants, stated over every row -------------------------------
   for (const item of items) {
@@ -354,11 +394,13 @@ async function main() {
     // carries the same invariant as the money: a reversal cannot take back
     // more units than the same (sale, product) pair recognised in scope.
     assert.ok(Number(item.qty_sold) >= 0, `qty_sold is non-negative by construction (product ${item.id} = ${Number(item.qty_sold)})`)
-    // Every sale_items.quantity in this fixture is a whole number, so every
-    // Net sold must be one too. The list renders this cell with no
-    // formatting, so a proportional split of a reversal put "1.8" -- and,
-    // off a less convenient share, 1.7999999999999998 -- into a count.
-    assert.ok(Number.isInteger(Number(item.qty_sold)), `qty_sold stays whole when every sold quantity is whole (product ${item.id} = ${Number(item.qty_sold)})`)
+    // Where every sale_items.quantity for the product is a whole number, its
+    // Net sold must be one too. The list renders this cell with no formatting,
+    // so a proportional split of a reversal put "1.8" -- and, off a less
+    // convenient share, 1.7999999999999998 -- into a count.
+    if (wholeQuantityProducts.has(Number(item.id))) {
+      assert.ok(Number.isInteger(Number(item.qty_sold)), `qty_sold stays whole when every sold quantity is whole (product ${item.id} = ${Number(item.qty_sold)})`)
+    }
     // The whole point of the lane: this is inventory/ProductDetailModal.tsx's
     // formula. With both operands non-negative its Math.max() clamps are
     // no-ops, so the list and the pane opened from that very row cannot
@@ -394,20 +436,21 @@ async function main() {
       assert.ok(Number(row.revenue_usd) >= 0, `${label}: revenue_usd non-negative (product ${row.product_id})`)
       assert.ok(Number(row.cogs_usd) >= 0, `${label}: cogs_usd non-negative (product ${row.product_id})`)
       assert.ok(Number(row.qty_sold) >= 0, `${label}: qty_sold non-negative (product ${row.product_id} = ${Number(row.qty_sold)})`)
-      assert.ok(Number.isInteger(Number(row.qty_sold)), `${label}: qty_sold stays whole (product ${row.product_id} = ${Number(row.qty_sold)})`)
+      if (wholeQuantityProducts.has(Number(row.product_id))) {
+        assert.ok(Number.isInteger(Number(row.qty_sold)), `${label}: qty_sold stays whole (product ${row.product_id} = ${Number(row.qty_sold)})`)
+      }
       assert.ok(Number(row.gross_revenue_usd) >= Number(row.revenue_usd),
         `${label}: gross is before the return reversal, so it cannot be below net (product ${row.product_id})`)
     }
   }
-  // The branch-scoped shape must actually discriminate. Products 8 and 9 (the
-  // two branch-split sales) are the only things sold at branch 2, so that
-  // scope must return exactly them -- and branch 3, where nothing was sold,
-  // must come back empty. Either half alone would pass on a builder that
-  // quietly ignored @branchId.
+  // The branch-scoped shape must actually discriminate. Only the branch-split
+  // sales have a branch-2 line, so that scope must return exactly them -- and
+  // branch 3, where nothing was sold, must come back empty. Either half alone
+  // would pass on a builder that quietly ignored @branchId.
   const branchScopedSql = productSalesLedger.buildProductSalesLedgerSql({ branchScoped: true })
   const branchTwo = db.prepare(`SELECT * FROM (${branchScopedSql}) fin ORDER BY fin.product_id`).all({ branchId: 2 })
-  assert.deepEqual(branchTwo.map((row) => Number(row.product_id)), [8, 9, 10, 11, 12],
-    'the branch-scoped shape really filters on @branchId: only cases H, I, J, K and L have a branch-2 sale line')
+  assert.deepEqual(branchTwo.map((row) => Number(row.product_id)), [8, 9, 10, 11, 12, 13],
+    'the branch-scoped shape really filters on @branchId: only cases H, I, J, K, L and M have a branch-2 sale line')
   const branchTwoById = new Map(branchTwo.map((row) => [Number(row.product_id), row]))
   assert.equal(round2(Number(branchTwoById.get(8).qty_sold)), 0,
     'H at branch 2: the 2 units branch 2 sold are the 2 the branch-1 line could not absorb, so branch 2 nets to 0 (base: -3)')
@@ -425,6 +468,8 @@ async function main() {
     "K at branch 2: the $99 line carries $49.50 of the $50 refund, so the two branches partition it (unit share: $74 here and $0 at branch 1)")
   assert.equal(round2(Number(branchTwoById.get(12).qty_sold)), 1,
     "L at branch 2: the other whole unit of the reversal lands here (proportionally it would be 1.2), so the two branches still net to the unfiltered 3")
+  assert.equal(round2(Number(branchTwoById.get(13).qty_sold)), 0,
+    "M at branch 2: it sold 1.5 and 1.5 came back, so it nets to 0 -- the leftover unit landed here in full, not as a dropped rank")
   const branchThree = db.prepare(`SELECT * FROM (${branchScopedSql}) fin`).all({ branchId: 3 })
   assert.equal(branchThree.length, 0, 'a branch with no sale lines returns nothing')
 
@@ -449,7 +494,8 @@ async function main() {
   const branchOneById = new Map(db.prepare(`SELECT * FROM (${branchScopedSql}) fin`).all({ branchId: 1 })
     .map((row) => [Number(row.product_id), row]))
   const columnOf = (row, column) => (row ? Number(row[column]) || 0 : 0)
-  for (const productId of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+
+  for (const productId of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
     for (const column of ['qty_sold', 'revenue_usd', 'revenue_khr', 'cogs_usd', 'cogs_khr']) {
       assert.equal(
         round2(columnOf(branchOneById.get(productId), column) + columnOf(branchTwoById.get(productId), column)),
