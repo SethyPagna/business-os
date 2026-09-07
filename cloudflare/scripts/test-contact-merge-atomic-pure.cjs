@@ -149,10 +149,22 @@ async function auditFailureRollsBack() {
   assert.equal(db.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='merge'").get().n, 0)
 }
 
+async function whitespaceMembershipPreservesLoserIdentity() {
+  const db = openDb(loadAll())
+  db.prepare("INSERT INTO customers(id,name,membership_number) VALUES(1,'Same','   '),(2,'Same','LEGACY-IDENTITY')").run()
+  const built = plan(db, 'customers', 1, 2, 'whitespace-membership-contact-merge')
+  await db.batch(built.statements)
+  assert.equal(row(db, 'customers', 2), undefined)
+  assert.equal(row(db, 'customers', 1).membership_number, 'LEGACY-IDENTITY')
+  const audit = db.prepare("SELECT details FROM audit_logs WHERE action='merge'").get()
+  assert.equal(JSON.parse(audit.details).operationId, 'whitespace-membership-contact-merge')
+}
+
 async function main() {
   await check('all three contact merges commit backfill, every repoint, delete and audit atomically within bounds', successfulMerges)
   await check('a stale contact identity fails the in-batch CAS without any partial write', staleSnapshotRollsBack)
   await check('an audit write failure rolls back backfill, repoints and delete', auditFailureRollsBack)
+  await check('an all-whitespace keeper membership preserves the loser exact identity', whitespaceMembershipPreservesLoserIdentity)
   await check('distinct nonblank membership identities are refused byte-exact, including legacy case variants', async () => {
     assert.equal(subject.contactMergeHasDistinctMemberships({ membership_number: 'LC-00001' }, { membership_number: 'LC-00002' }), true)
     assert.equal(subject.contactMergeHasDistinctMemberships({ membership_number: 'LC-00001' }, { membership_number: 'lc-00001' }), true)
