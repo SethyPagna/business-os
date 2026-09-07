@@ -4775,7 +4775,7 @@ app.get('/export', async (c) => {
 
   const totalMatchingRow = await db.prepare(`
     SELECT COUNT(*) AS total,
-           SUM(CASE WHEN COALESCE(s.sale_status, 'completed') = 'completed' THEN 1 ELSE 0 END) AS completed
+           SUM(CASE WHEN ${saleStatusExpr('s.')} = 'completed' THEN 1 ELSE 0 END) AS completed
     FROM sales s
     WHERE ${snapshotWhere.join(' AND ')}
   `).get<{ total: number; completed: number }>(snapshotParams)
@@ -4816,19 +4816,22 @@ app.get('/export', async (c) => {
       FROM sale_product_lines
       GROUP BY sale_id
     ), product_totals AS (
-    SELECT pl.product_id, pl.product_name,
+      SELECT pl.product_id, pl.product_name,
            COALESCE(SUM(pl.qty_sold), 0) AS qty_sold,
            COALESCE(SUM(
-             pl.line_value_usd / lt.line_value_usd
-               * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
+             CASE WHEN lt.line_value_usd <> 0
+               THEN pl.line_value_usd / lt.line_value_usd
+                 * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
+               ELSE 0
+             END
            ), 0) AS revenue_usd
-    FROM sales s
-    JOIN sale_product_lines pl ON pl.sale_id = s.id
-    JOIN sale_line_totals lt ON lt.sale_id = s.id AND lt.line_value_usd <> 0
-    ${CUSTOMER_REFUND_JOIN}s.id
-    WHERE ${snapshotWhere.join(' AND ')}
-      AND ${recognizedExpr('s.')}
-    GROUP BY pl.product_id, pl.product_name
+      FROM sales s
+      JOIN sale_product_lines pl ON pl.sale_id = s.id
+      JOIN sale_line_totals lt ON lt.sale_id = s.id
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${snapshotWhere.join(' AND ')}
+        AND ${recognizedExpr('s.')}
+      GROUP BY pl.product_id, pl.product_name
     ), unallocated_sales AS (
     -- A recognized legacy receipt can have no usable line-value denominator.
     -- Its header revenue remains real and visible in the canonical summary,
@@ -4849,22 +4852,27 @@ app.get('/export', async (c) => {
                ORDER BY revenue_usd DESC, qty_sold DESC,
                         COALESCE(product_name, ''), COALESCE(product_id, 0)
              ) AS rank
-      FROM (
-        SELECT * FROM product_totals
-        UNION ALL
-        SELECT * FROM unallocated_sales
-      )
+      FROM product_totals
+    ), product_limit AS (
+      -- Keep the response at 100 rows. Reserve one row for Unallocated when
+      -- it exists, then one for the overflow aggregate when it is needed.
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM unallocated_sales) THEN 98 ELSE 99 END AS named_limit
     )
-    SELECT product_id, product_name, qty_sold, revenue_usd
-    FROM ranked_products
-    WHERE rank <= 99
+    SELECT rp.product_id, rp.product_name, rp.qty_sold, rp.revenue_usd
+    FROM ranked_products rp
+    CROSS JOIN product_limit lim
+    WHERE rp.rank <= lim.named_limit
     UNION ALL
     SELECT NULL AS product_id, 'Other products' AS product_name,
-           COALESCE(SUM(qty_sold), 0) AS qty_sold,
-           COALESCE(SUM(revenue_usd), 0) AS revenue_usd
-    FROM ranked_products
-    WHERE rank > 99
+           COALESCE(SUM(rp.qty_sold), 0) AS qty_sold,
+           COALESCE(SUM(rp.revenue_usd), 0) AS revenue_usd
+    FROM ranked_products rp
+    CROSS JOIN product_limit lim
+    WHERE rp.rank > lim.named_limit
     HAVING COUNT(*) > 0
+    UNION ALL
+    SELECT product_id, product_name, qty_sold, revenue_usd
+    FROM unallocated_sales
     ORDER BY revenue_usd DESC, qty_sold DESC
   `).all<ProductBreakdownRow>(snapshotParams)
 

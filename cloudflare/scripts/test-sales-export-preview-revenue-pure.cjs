@@ -141,9 +141,11 @@ addItem({ id: 205, saleId: 104, productId: 304, name: 'Cent A', total: 0.34 })
 addItem({ id: 206, saleId: 104, productId: 305, name: 'Cent B', total: 0.33 })
 addItem({ id: 207, saleId: 104, productId: 306, name: 'Cent C', total: 0.33 })
 
-// A legacy header with no item rows must remain explicit rather than vanish
-// from by_product while still contributing to the summary.
+// A legacy header whose only item has no charged value must retain both facts:
+// two Free Samples moved, while the separately stored header value has no line
+// denominator and therefore remains explicit as Unallocated sales.
 addSale({ id: 105, status: 'completed', subtotal: 2.5, total: 2.5 })
+addItem({ id: 208, saleId: 105, productId: 307, name: 'Free Sample', total: 0, quantity: 2 })
 
 const sum = (rows, key) => Math.round(rows.reduce((total, row) => total + Number(row[key] || 0), 0) * 100) / 100
 
@@ -160,6 +162,7 @@ const sum = (rows, key) => Math.round(rows.reduce((total, row) => total + Number
   assert.equal(body.summary.revenue_usd, 118.48, 'pre-refund net sales are shown once')
   assert.equal(body.summary.total_refunds_usd, 25, 'refund is on the same canonical basis')
   assert.equal(body.summary.net_revenue_usd, 93.48, 'canonical net revenue includes Not Paid and excludes cancelled')
+  assert.equal(body.summary.completed_transactions, 3, 'summary normalizes blank status exactly like the breakdown')
 
   const byStatus = Object.fromEntries(body.by_status.map((row) => [row.status, row]))
   assert.deepEqual(byStatus.completed, { status: 'completed', count: 3, revenue: 73.48 })
@@ -172,12 +175,47 @@ const sum = (rows, key) => Math.round(rows.reduce((total, row) => total + Number
   assert.equal(byProduct.Beta.revenue_usd, 28)
   assert.equal(byProduct.Alpha.qty_sold, 2, 'Not Paid quantity remains recognized')
   assert.equal(byProduct['Cancelled product'], undefined, 'cancelled product contributes no recognized quantity or revenue')
+  assert.deepEqual(byProduct['Free Sample'], {
+    product_id: 307, product_name: 'Free Sample', qty_sold: 2, revenue_usd: 0,
+  }, 'zero-value recognized lines retain their sold quantity at zero revenue')
   assert.equal(byProduct['Unallocated sales'].revenue_usd, 2.5, 'unallocated legacy header remains visible')
   assert.equal(sum(body.by_product, 'revenue_usd'), body.summary.net_revenue_usd, 'product money reconciles to headline after cents allocation')
   assert.equal(sum(body.by_product.filter((row) => row.product_name?.startsWith('Cent ')), 'revenue_usd'), 0.98,
     'fractional line shares neither lose nor duplicate a cent')
 
-  console.log('PASS sales export preview: canonical headline/status/product revenue reconciles at $93.48')
+  // More than 99 higher-revenue product buckets must not absorb the synthetic
+  // Unallocated row into Other products. The response stays bounded and both
+  // synthetic meanings remain separately reviewable.
+  addSale({ id: 106, status: 'completed', subtotal: 300, total: 300 })
+  for (let index = 0; index < 100; index += 1) {
+    addItem({
+      id: 1000 + index,
+      saleId: 106,
+      productId: 1000 + index,
+      name: `Ranked ${String(index).padStart(3, '0')}`,
+      total: 3,
+    })
+  }
+  const crowdedResponse = await app.request(
+    'http://local/export?startDate=2026-09-08&endDate=2026-09-08&pageSize=50',
+    {},
+    { DB: db, TEST_USER: USER },
+    executionCtx,
+  )
+  const crowded = await crowdedResponse.json()
+  assert.equal(crowdedResponse.status, 200, JSON.stringify(crowded))
+  assert.equal(crowded.summary.net_revenue_usd, 393.48)
+  assert.equal(crowded.summary.completed_transactions, 4)
+  assert.equal(crowded.by_status.find((row) => row.status === 'completed').count, 4)
+  assert.ok(crowded.by_product.length <= 100, 'product preview remains bounded')
+  assert.equal(crowded.by_product.filter((row) => row.product_name === 'Unallocated sales').length, 1,
+    'Unallocated remains a distinct bucket after ranking')
+  assert.equal(crowded.by_product.find((row) => row.product_name === 'Unallocated sales').revenue_usd, 2.5)
+  assert.ok(crowded.by_product.some((row) => row.product_name === 'Other products'), 'rank overflow has its own bucket')
+  assert.equal(sum(crowded.by_product, 'revenue_usd'), crowded.summary.net_revenue_usd,
+    'crowded product breakdown still reconciles to the headline')
+
+  console.log('PASS sales export preview: canonical revenue, zero-value quantity, status count, and ranked buckets reconcile')
   console.log('test-sales-export-preview-revenue-pure: ok')
 })().catch((error) => {
   console.error(error)
