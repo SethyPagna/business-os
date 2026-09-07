@@ -52,6 +52,7 @@ function compile(file, stubs = {}) {
 }
 
 const salesStatus = compile('salesStatus.ts')
+const productMerge = compile('productMerge.ts')
 const productBatches = compile('productBatches.ts', {
   './db': {},
   './batchCode': compile('batchCode.ts'),
@@ -573,6 +574,7 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   {
     const undoModule = compile('undoAppliers.ts', {
       './actorSnapshot': compile('actorSnapshot.ts'),
+      './productMerge': productMerge,
       // Bulk status replay is outside this suite; fail if it is invoked.
       './saleBulkStatus': {
         replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-sale-add-items-pure.cjs') },

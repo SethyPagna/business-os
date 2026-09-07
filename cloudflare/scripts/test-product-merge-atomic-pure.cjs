@@ -7,6 +7,17 @@ const { openDb } = require('./harness/d1compat.cjs')
 
 const libDir = path.join(__dirname, '..', 'src', 'lib')
 
+function loadProductMerge() {
+  const source = fs.readFileSync(path.join(libDir, 'productMerge.ts'), 'utf8')
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: 'productMerge.ts',
+  })
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  return mod.exports
+}
+
 function loadUndoAppliers(db) {
   const dbAdapter = {
     prepare(sql) {
@@ -28,6 +39,7 @@ function loadUndoAppliers(db) {
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
     './actorSnapshot': { actorSnapshot: (user) => user?.name || user?.username || null },
+    './productMerge': loadProductMerge(),
     './saleBulkStatus': { replaySaleBulkStatus: never },
     './saleBulkUpdate': { BULK_UPDATE_KIND: 'sale.fields.bulk', BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk', replaySaleBulkUpdate: never },
     './returnBulkAction': { RETURN_BULK_ACTION_KIND: 'return.fields.bulk', replayReturnBulkAction: never },

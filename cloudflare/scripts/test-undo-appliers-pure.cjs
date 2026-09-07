@@ -100,8 +100,10 @@ function wrapDb(sqlite) {
 // It is a pure module with no imports of its own, so it loads for REAL --
 // stubbing it would hide the very substitution the appliers depend on.
 const actorSnapshotKernel = loadModule('lib/actorSnapshot.ts', require)
+const productMergeKernel = loadModule('lib/productMerge.ts', require)
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   if (id === './actorSnapshot') return actorSnapshotKernel
+  if (id === './productMerge') return productMergeKernel
   // The dedicated bulk test executes this applier with its actual Hono/SQL.
   if (id === './saleBulkStatus') return { replaySaleBulkStatus: async () => { throw new Error('Use the dedicated bulk fixture') } }
   if (id === './saleBulkUpdate') return {
