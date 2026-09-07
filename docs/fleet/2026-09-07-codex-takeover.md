@@ -3,7 +3,46 @@
 Status: implementation and integration in progress. No deployment or production
 mutation has been performed by this takeover.
 
+## Functional release verification, 07:50 UTC
+
+The exact failed stock session was reproduced on the older frozen build and
+then retried once on `eb06b80b`: three products with two images each committed
+successfully. Each product exists once, each has two correct gallery references,
+all six assets return 200, and the library physical file count did not increase
+on retry. Offline rejection retained the draft; minimize/reopen/discard passed.
+Evidence remains in the private local takeover outputs, outside this public repo.
+
+Sales browser checks passed Records placement inside sale details, return to the
+same detail after closing Records, removal of the redundant eye, and the tested
+gross 200 / discounts 15 / revenue 185 reconciliation. Structured history values
+now have readable product and payment lines. Independent review identified two
+remaining history integrity issues: replay audit retention and mutable historical
+product labels. Those are assigned and remain release blockers until verified.
+
+Combined application gates at `95657f16`: both package typechecks, bilingual
+key verification and frontend build passed; frontend 302/305 suites and Worker
+267/271 suites passed. The seven failures are assigned to the owning upload and
+permission lanes. The complete 131-file migration chain applies locally with
+integrity and foreign-key checks passing. Production still has migrations through
+0127; no migration, deployment, secret mutation, historical correction or duplicate
+merge has been executed by this takeover. The owner signed into the production
+browser for the requested supported duplicate merge after release.
+
 ## Additional owner instructions, September 7
+
+Latest priority: functional errors first; broad layout polish waits until after
+the next verified release. Sales Records belongs inside expanded sale details,
+and must explain product additions/quantity changes, status, payment methods and
+amounts, customer delivery fee and actual courier cost with actor/before/after.
+The session screenshot proves an upload save failure for a percent-encoded
+filename. This is a release blocker: validate upload, draft, session commit,
+persisted asset and PWA reconnect together. Offline/update notices need dismissal
+without lying about connection state or suppressing failed-save feedback.
+
+Queued layout follow-up: compact start/end dates with all-day 00:00–23:59 default;
+place dates beside stats/actions on Dashboard, Sales, Expenses, Returns and
+Branches; date/time before IDs; subpage icons; compact report presets; consistent
+button heights and compact payment-method action. These are recorded, not done.
 
 The owner requested a network retry and the next verified checkpoint deployment
 as soon as ready. This authorizes the next deployment; it does not waive tests,
@@ -32,9 +71,10 @@ health was retried after the owner's network update and still returned HTTP 403
 from the direct host path. A subsequent Wrangler retry through the original
 repository's existing API-token wrapper succeeded (account identity confirmed).
 The expired OAuth fallback is no longer a deployment blocker. The original
-checkout's Wrangler 4.116 transport failed on deployment listing, but invoking
-the candidate's pinned Wrangler 4.112 through that same auth wrapper succeeded
-and confirmed the unchanged production version. Use the pinned candidate CLI.
+checkout's first CLI requests failed on deployment listing, but invoking
+the candidate's installed Wrangler through that same auth wrapper succeeded
+and confirmed the unchanged production version. Use the candidate CLI and its
+lockfile (the installed version is 4.116; package.json allows ^4.112).
 Credentials remain in their existing ignored file; none were copied into the
 candidate or browser.
 
