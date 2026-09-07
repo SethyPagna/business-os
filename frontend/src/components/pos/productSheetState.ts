@@ -169,12 +169,14 @@ export function branchNameFromProduct(product: SheetProductLike | null | undefin
  * 400 the cashier could do nothing about. The branch is decided here now, on
  * the same predicate the sheet greys the pill with and the Worker rejects on.
  *
- * A branch the payload does not name is left alone: an unrecognised id is not
- * evidence of a stock-only branch.
+ * A branch the payload does not name is refused. Sales are Shop-only, and an
+ * absent name is not evidence that the selected id is the canonical Shop.
+ * This matches branchCanSell's fail-closed rule and the Worker's authoritative
+ * branch lookup instead of letting a stale or partial product payload guess.
  */
 export function branchAllowsSale(product: SheetProductLike | null | undefined, branchId: unknown): boolean {
   const name = branchNameFromProduct(product, branchId)
-  return name == null ? true : branchCanSell(name)
+  return name != null && branchCanSell(name)
 }
 
 // `blocked` means: there is stock, but only where a sale may not be rung.
