@@ -32,10 +32,8 @@ export function firstUnsellableBranch(rows: readonly BranchNameRow[]): BranchNam
 }
 
 /**
- * Null when this transfer runs the right way (warehouse -> shop, or between
- * branches this deployment named something else), the client-facing message
- * when it does not. The shop never sends stock away and the warehouse never
- * receives it.
+ * Null only for Warehouse -> Shop; every unknown or historical identity is
+ * refused with the same client-facing message.
  */
 export function transferDirectionError(fromName: unknown, toName: unknown): string | null {
   if (!branchCanBeTransferSource(fromName)) return TRANSFER_DIRECTION_ERROR
