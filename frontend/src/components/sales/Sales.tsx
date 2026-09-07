@@ -63,6 +63,7 @@ import { exportColumnLabel } from '../../utils/exportOptions.ts'
 import BulkSaleChangeModal, { type BulkSaleChangeRow, type BulkSaleChoice, type BulkSaleField } from './BulkSaleChangeModal.tsx'
 import BulkSaleCancelModal, { type BulkSaleCancelDraft } from './BulkSaleCancelModal.tsx'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
+import { createSingleUseResult, type SingleUseResult } from './saleStatusConfirmation.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
@@ -421,10 +422,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // the same for handleBulkStatusUpdate. `skipStock` (admin + unlock) rides
   // back as the request's skip_stock flag.
   const [statusPrompt, setStatusPrompt] = useState<
-    | { mode: 'single'; saleId: number; newStatus: string; notes: string; recordHistory: boolean; label: string; fromLabel: string; movesStock: boolean; alreadySkipped: boolean; resolve: (result: SaleStatusUiResult) => void }
+    | { mode: 'single'; saleId: number; newStatus: string; notes: string; recordHistory: boolean; label: string; fromLabel: string; movesStock: boolean; alreadySkipped: boolean; pendingResult: SingleUseResult<SaleStatusUiResult> }
     | { mode: 'bulk'; nextStatus: string; sales: SaleRecord[]; requestSales: SaleRecord[]; sourceStatus: string; label: string; fromLabel: string; mixed: boolean; movesStock: boolean; alreadySkipped: boolean }
     | null
   >(null)
+  const pendingStatusResultRef = useRef<SingleUseResult<SaleStatusUiResult> | null>(null)
   const [statusConfirmSaving, setStatusConfirmSaving] = useState(false)
   // Group-by dropped (user, Aug 31: "the group by seems a bit redundant
   // with the arrange by") — the list always groups by day; sorting by a
@@ -818,6 +820,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
   }, [isActive, isAdmin, salesFiltersOpen, userOptionsLoaded])
   useEffect(() => () => {
+    pendingStatusResultRef.current?.settle(false)
+    pendingStatusResultRef.current = null
     aliveRef.current = false
     clearLoadWatchdog()
     loadAbortRef.current?.abort()
@@ -884,20 +888,23 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     // and the already-collected cancel payload skip the dialog, exactly as
     // the old window.confirm did.
     if (recordHistory && !extra && !confirmed) {
-      return await new Promise<SaleStatusUiResult>((resolve) => {
-        setStatusPrompt({
-          mode: 'single',
-          saleId: numericId,
-          newStatus,
-          notes,
-          recordHistory,
-          label: String(previousSale?.receipt_number || `#${numericId}`),
-          fromLabel: getStatusLabel(previousStatus, t),
-          movesStock: transitionMovesStock(previousStatus, newStatus),
-          alreadySkipped: Number(previousSale?.stock_skipped || 0) === 1,
-          resolve,
-        })
+      const pendingResult = createSingleUseResult<SaleStatusUiResult>()
+      const replacedResult = pendingStatusResultRef.current
+      pendingStatusResultRef.current = pendingResult
+      replacedResult?.settle(false)
+      setStatusPrompt({
+        mode: 'single',
+        saleId: numericId,
+        newStatus,
+        notes,
+        recordHistory,
+        label: String(previousSale?.receipt_number || `#${numericId}`),
+        fromLabel: getStatusLabel(previousStatus, t),
+        movesStock: transitionMovesStock(previousStatus, newStatus),
+        alreadySkipped: Number(previousSale?.stock_skipped || 0) === 1,
+        pendingResult,
       })
+      return await pendingResult.promise
     }
     const actionKey = String(numericId)
     if (!beginKeyedAction(statusActionRef, actionKey)) return false
@@ -2242,8 +2249,12 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             saving={statusConfirmSaving}
             onClose={() => {
               if (statusConfirmSaving) return
-              if (statusPrompt.mode === 'single') statusPrompt.resolve(false)
-              setStatusPrompt(null)
+              const prompt = statusPrompt
+              if (prompt.mode === 'single' && pendingStatusResultRef.current === prompt.pendingResult) {
+                pendingStatusResultRef.current = null
+                prompt.pendingResult.settle(false)
+              }
+              setStatusPrompt((current) => current === prompt ? null : current)
             }}
             onConfirm={async (skipStock) => {
               if (!statusPrompt || statusConfirmSaving) return
@@ -2254,12 +2265,17 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
               setStatusConfirmSaving(true)
               try {
                 if (statusPrompt.mode === 'single') {
-                  const result = await handleStatusChange(statusPrompt.saleId, statusPrompt.newStatus, statusPrompt.notes, statusPrompt.recordHistory, skipExtra, true)
-                  statusPrompt.resolve(result)
+                  const prompt = statusPrompt
+                  const result = await handleStatusChange(prompt.saleId, prompt.newStatus, prompt.notes, prompt.recordHistory, skipExtra, true)
+                  if (pendingStatusResultRef.current === prompt.pendingResult) {
+                    pendingStatusResultRef.current = null
+                    prompt.pendingResult.settle(result)
+                  }
+                  setStatusPrompt((current) => current === prompt ? null : current)
                 } else {
                   await handleScopedBulkStatusUpdate(statusPrompt.nextStatus, skipExtra, true, false, statusPrompt.sales, statusPrompt.sourceStatus, statusPrompt.requestSales)
+                  setStatusPrompt(null)
                 }
-                setStatusPrompt(null)
               } finally {
                 setStatusConfirmSaving(false)
               }
