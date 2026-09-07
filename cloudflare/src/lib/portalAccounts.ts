@@ -3,7 +3,7 @@ import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
 import { formatPhoneP8, collectContactPhones } from './contactDuplicates'
-import { passwordTooShort, passwordMinLengthError } from './passwordPolicy'
+import { passwordMinLengthError, passwordTooShort } from './passwordPolicy'
 import type { Env } from '../index'
 
 // The account decision engine for the storefront. Route code (routes/portal.ts)
@@ -25,8 +25,50 @@ const BCRYPT_COST = 10
 // whether or not the phone exists — no timing/enumeration oracle.
 const DUMMY_HASH = '$2b$10$bcwRkHdyVgPIxFMLWdK9sOKBez3Uv06DFpLaUR/Mq0c6w595bHNFq'
 
-export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown }
-export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown }
+// The storefront asks a visitor to agree to the Terms and the Privacy Policy
+// before creating an account, and we record WHICH version they agreed to --
+// a bare `consented: 1` proves nothing once the policy text changes. This
+// literal must match PORTAL_LEGAL_CONSENT_VERSION in
+// frontend/src/components/catalog/legal/legalContent.ts, which is the version
+// of the text actually shown; scripts/test-portal-legal-consent-pure.cjs pins
+// the two together so they cannot drift apart.
+export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-09-07'
+
+// A ticked checkbox arrives as `true` over JSON and as 'true'/'on'/'1' from
+// anything that posts a form. Everything else -- absent, false, '', 'false'
+// -- is not consent. Silence is never agreement, and a pre-ticked or omitted
+// box must fail closed.
+export function consentGiven(value: unknown): boolean {
+  if (value === true) return true
+  const text = String(value ?? '').trim().toLowerCase()
+  return text === 'true' || text === 'on' || text === '1' || text === 'yes'
+}
+
+// consent_version / consent_at / consent_locale arrive with migration 0130.
+// Account creation and sign-in fail closed until all three exist: returning
+// success without the durable consent record would contradict the form and
+// make later policy-version checks impossible.
+const CONSENT_COLUMN_RECHECK_MS = 60_000
+let consentColumnState: { present: boolean; checkedAt: number } | null = null
+
+async function portalAccountsHaveConsentColumns(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const now = Date.now()
+  if (consentColumnState?.present) return true
+  if (consentColumnState && now - consentColumnState.checkedAt < CONSENT_COLUMN_RECHECK_MS) return false
+  try {
+    const rows = await db.prepare('PRAGMA table_info("portal_accounts")').all<{ name?: string }>()
+    const names = new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.name || '')))
+    const present = names.has('consent_version') && names.has('consent_at') && names.has('consent_locale')
+    consentColumnState = { present, checkedAt: now }
+    return present
+  } catch {
+    consentColumnState = { present: false, checkedAt: now }
+    return false
+  }
+}
+
+export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
+export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
 
 // `abuse` marks a failure that should count toward the 10-fail signup cap
 // (probing phones/membership ids) vs. a benign form error (missing field,
@@ -93,11 +135,36 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   const canonical = canonicalizePhone(input.phone)
   const membershipId = String(input.membershipId ?? '').trim()
 
+  // Checked before anything is looked up: refusing after the phone probe
+  // would let a caller use signup as a phone-existence oracle while never
+  // consenting. A missing box is a form error, so it never counts as abuse.
+  if (!consentGiven(input.consent)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Please agree to the Terms & Conditions and the Privacy Policy to create an account.',
+      code: 'consent_required',
+      abuse: false,
+    }
+  }
+  const db = getDb(env)
+  if (!(await portalAccountsHaveConsentColumns(db))) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'Account consent storage is not ready. Please try again later.',
+      code: 'consent_storage_unavailable',
+      abuse: false,
+    }
+  }
   if (!name) return { ok: false, status: 400, error: 'Your name is required.', code: 'name_required', abuse: false }
   if (!canonical) return { ok: false, status: 400, error: 'A valid phone number is required.', code: 'phone_required', abuse: false }
-  if (passwordTooShort(password)) return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
-
-  const db = getDb(env)
+  // Portal accounts get the stricter rule (lib/passwordPolicy.ts): the
+  // storefront privacy policy promises eight characters, and a phone number
+  // is both the login identifier here and the commonest password there is.
+  if (passwordTooShort(password)) {
+    return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
+  }
   const passwordHash = bcrypt.hashSync(password, BCRYPT_COST)
 
   if (membershipId) {
@@ -109,7 +176,7 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
     if (!customer) return existingReject()
     const phoneMatches = collectContactPhones(customer).some((raw) => canonicalizePhone(raw) === canonical)
     if (!phoneMatches) return existingReject()
-    return claimAccount(env, { membershipId, name, canonical, passwordHash, contactId: customer.id })
+    return claimAccount(env, { membershipId, name, canonical, passwordHash, contactId: customer.id, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
   }
 
   // New-customer path: the phone must be absent from customers entirely — if
@@ -118,7 +185,7 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   if (existing) return existingReject()
 
   const newMembershipId = await generateMembershipId(env)
-  return claimAccount(env, { membershipId: newMembershipId, name, canonical, passwordHash, contactId: null, createContact: true })
+  return claimAccount(env, { membershipId: newMembershipId, name, canonical, passwordHash, contactId: null, createContact: true, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
 }
 
 // Race-safe creation: claim the phone by inserting portal_accounts FIRST and
@@ -139,25 +206,30 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
 // for contacts.ts.
 async function claimAccount(
   env: Env,
-  args: { membershipId: string; name: string; canonical: string; passwordHash: string; contactId: number | null; createContact?: boolean },
+  args: { membershipId: string; name: string; canonical: string; passwordHash: string; contactId: number | null; createContact?: boolean; consentLocale: string },
 ): Promise<SignupResult> {
   const db = getDb(env)
   let membershipId = args.membershipId
   let accountId: number | null = null
   let lastError: unknown = null
   const maxAttempts = args.createContact ? 5 : 1
+  const columns = ['membership_id', 'name', 'phone', 'password_hash', 'contact_id', 'consent_version', 'consent_at', 'consent_locale']
+  const values = ['@membership_id', '@name', '@phone', '@password_hash', '@contact_id', '@consent_version', 'CURRENT_TIMESTAMP', '@consent_locale']
+  const sql = `INSERT INTO portal_accounts (${columns.join(', ')}) VALUES (${values.join(', ')})`
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const params: Record<string, unknown> = {
+      // Read from `membershipId`, never `args`: a retry has re-minted it.
+      membership_id: membershipId,
+      name: args.name,
+      phone: args.canonical,
+      password_hash: args.passwordHash,
+      contact_id: args.contactId,
+    }
+    params.consent_version = PORTAL_CONSENT_VERSION
+    params.consent_locale = args.consentLocale || 'und'
     try {
-      const res = await db.prepare(
-        'INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES (@membership_id, @name, @phone, @password_hash, @contact_id)',
-      ).run({
-        membership_id: membershipId,
-        name: args.name,
-        phone: args.canonical,
-        password_hash: args.passwordHash,
-        contact_id: args.contactId,
-      })
+      const res = await db.prepare(sql).run(params)
       accountId = res.lastInsertRowid
       break
     } catch (error) {
@@ -210,10 +282,17 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
 
   const genericFail: SigninResult = { ok: false, status: 401, error: 'Invalid sign-in details. Please check and try again.', code: 'invalid_credentials' }
   if (!identifier || !canonical || !password) return genericFail
+  const db = getDb(env)
+  if (!(await portalAccountsHaveConsentColumns(db))) {
+    return { ok: false, status: 503, error: 'Account consent storage is not ready. Please try again later.', code: 'consent_storage_unavailable' }
+  }
+  if (!consentGiven(input.consent)) {
+    return { ok: false, status: 428, error: 'Please agree to the current Terms & Conditions and Privacy Policy to sign in.', code: 'consent_required' }
+  }
 
-  const account = await getDb(env).prepare(
-    'SELECT id, name, membership_id, password_hash FROM portal_accounts WHERE phone = @p LIMIT 1',
-  ).get<{ id: number; name: string; membership_id: string; password_hash: string }>({ p: canonical })
+  const account = await db.prepare(
+    'SELECT id, name, membership_id, password_hash, consent_version FROM portal_accounts WHERE phone = @p LIMIT 1',
+  ).get<{ id: number; name: string; membership_id: string; password_hash: string; consent_version: string | null }>({ p: canonical })
 
   if (!account) {
     // No account for this phone — still spend a bcrypt compare so timing does
@@ -226,6 +305,16 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === account.membership_id.trim().toLowerCase()
   const passwordMatches = bcrypt.compareSync(password, account.password_hash)
   if (!identifierMatches || !passwordMatches) return genericFail
+
+  await db.prepare(`
+    UPDATE portal_accounts
+    SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+  `).run({
+    version: PORTAL_CONSENT_VERSION,
+    locale: String(input.consentLocale || 'und').slice(0, 16),
+    id: account.id,
+  })
 
   return { ok: true, accountId: account.id }
 }

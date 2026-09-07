@@ -16,11 +16,17 @@ import '../../styles/public-portal.css'
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
 const ProductDetailFlyout = lazyRetry(() => import('./ProductDetailFlyout'), 'catalog-preview-product-detail-flyout')
 
-type CopyFunction = (key: string, fallback?: string) => string
+// The storefront translator really takes a Khmer fallback as its third
+// argument (CatalogPage declares it that way and PublicCatalogPage implements
+// it) -- this local alias just under-declared it, so any call that supplied
+// the Khmer text was a type error.
+type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
 
 type DisplayConfig = {
   businessName?: string
   businessTagline?: string
+  publicationReady?: boolean
+  publicationMissing?: string[]
   logoFit?: string
   logoPositionX?: number
   logoPositionY?: number
@@ -112,6 +118,11 @@ type CatalogPreviewSurfaceProps = {
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
   promotionsSection?: ReactNode
+  // N45 legal lane: the storefront <footer> (business details + the
+  // Policies menu). Rendered here so the live site and the admin
+  // preview show the SAME footer from one place; the caller supplies it
+  // so this surface never has to know the business-detail shape.
+  footer?: ReactNode
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
   productGalleryView: GalleryViewState
@@ -174,6 +185,7 @@ export default function CatalogPreviewSurface({
   catalogSection,
   secondaryTabSection,
   promotionsSection,
+  footer,
   publicScrollButtonsVisible,
   scrollPublicPortal,
   productGalleryView,
@@ -274,9 +286,30 @@ export default function CatalogPreviewSurface({
       // horizontal axis without making the shell a scrollport; `hidden` would
       // make it one and break every sticky descendant, and the pinned section
       // nav lives in here.
+      //
+      // The VERTICAL axis then had to follow, and this is the fix for
+      // "scrollability in public website". `overflowY: 'auto'` was kept here
+      // as "iOS momentum scrolling on the shell", but this box has
+      // `height: auto` (only a min-height), so it grows with the catalog and
+      // its scrollHeight never exceeds its clientHeight: it is a scrollport
+      // that can never scroll, and `-webkit-overflow-scrolling: touch` on a
+      // scrollport with nothing to scroll buys no momentum -- the DOCUMENT
+      // was always the thing actually moving. What that dead scrollport DID
+      // do is become the nearest scrollport ancestor for every `position:
+      // sticky` descendant, and a sticky element resolves against its
+      // scrollport, not the page. So the section nav (`sticky top-1`) and the
+      // products search/filter row (`sticky top-16`) were pinned to a box
+      // that never moves -- i.e. they simply scrolled away -- on the live
+      // storefront, where the JS pinning fallback is also switched off
+      // (PublicCatalogPage passes publicPortalNavPinned={false}).
+      //
+      // `overflow-x: clip` is deliberately the only overflow left: `clip`
+      // paired with `visible` is the ONE pair CSS does not rewrite to `auto`,
+      // so the horizontal containment above survives while the document goes
+      // back to owning vertical scroll for the whole public route.
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-x-clip' : 'w-full'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowX: 'clip', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowX: 'clip' } : {}),
         background: portalBackground,
       }}
     >
@@ -294,6 +327,15 @@ export default function CatalogPreviewSurface({
       <div className={`mx-auto max-w-[1680px] px-5 py-3 sm:px-10 sm:py-4 lg:px-16 xl:px-20 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))]' : ''}`}>
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
+            {/* WCAG 2.4.1: the storefront opens with a row of social links,
+                the language and theme controls and a scrolling section nav.
+                Without this a keyboard visitor walked all of it again on
+                every page view before reaching a single product. */}
+            {publicView ? (
+              <a className="portal-skip-link" href="#portal-main-content">
+                {copy('portal_a11y_skip_to_content', 'Skip to products', 'រំលងទៅផលិតផល')}
+              </a>
+            ) : null}
             {canEdit ? (
               <div className="flex justify-end">
                 <button
@@ -305,9 +347,9 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <section className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
+            <header className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
               <div className="px-1 py-4 sm:py-5">
-                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
                       lives on the About page hero. Social links take this
                       side; language + light/dark sit on the far side. */}
@@ -334,19 +376,19 @@ export default function CatalogPreviewSurface({
                       </div>
                     ) : null}
                   </div>
-                  <div className="min-w-0 text-center">
+                  <div className="col-span-2 row-start-2 min-w-0 text-center sm:col-span-1 sm:row-start-auto">
                     {showBrandLabel ? (
-                      <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-neutral-500" translate="no">
+                      <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-neutral-400" translate="no">
                         {displayConfig.businessName}
                       </div>
                     ) : null}
-                    <div
-                      className="notranslate text-lg font-semibold leading-tight tracking-tight text-balance break-words [overflow-wrap:anywhere] text-slate-900 sm:truncate sm:text-2xl dark:text-neutral-100"
+                    <h1
+                      className="notranslate line-clamp-2 break-normal text-lg font-semibold leading-tight tracking-tight [overflow-wrap:normal] [word-break:normal] text-slate-900 sm:truncate sm:text-2xl dark:text-neutral-100"
                       style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
                       translate="no"
                     >
                       {previewTitle || displayConfig.businessName || copy('about', 'About')}
-                    </div>
+                    </h1>
                     {displayConfig.businessTagline ? (
                       <div className="notranslate hidden truncate text-xs text-slate-500 sm:block dark:text-neutral-400" translate="no">
                         {displayConfig.businessTagline}
@@ -438,7 +480,15 @@ export default function CatalogPreviewSurface({
                                     value={translateSearch}
                                     onChange={(event) => setTranslateSearch(event.target.value)}
                                     placeholder={copy('searchLanguages', 'Search languages')}
-                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-400 dark:focus:bg-neutral-900"
+                                    aria-label={copy('searchLanguages', 'Search languages')}
+                                    // Same createPortal() problem as the
+                                    // filter menu's search field: this popup
+                                    // is mounted on document.body, outside
+                                    // every portal root, so the stylesheet's
+                                    // :focus-visible ring cannot reach it and
+                                    // focus:border-blue-400 alone is a 1px
+                                    // tint. It paints the ring itself.
+                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-400 dark:focus:bg-neutral-900 dark:focus-visible:outline-[#fcd34d]"
                                     // Real user requirement, not decorative:
                                     // a flat 28-option list with no way to
                                     // filter was the actual complaint behind
@@ -454,14 +504,21 @@ export default function CatalogPreviewSurface({
                                 {firstPartyTranslateOptions.length ? firstPartyTranslateOptions.map(renderOption) : null}
                                 {externalTranslateOptions.length ? (
                                   <>
-                                    <div className="mt-1 border-t border-slate-200 px-4 pb-1.5 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:border-neutral-700 dark:text-neutral-500">
+                                    <div className="mt-1 border-t border-slate-200 px-4 pb-1.5 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-neutral-700 dark:text-neutral-400">
                                       {copy('externalTranslation', 'More languages (auto-translated)')}
                                     </div>
+                                    <p className="px-4 pb-2 text-xs leading-5 text-slate-500 dark:text-neutral-400">
+                                      {copy(
+                                        'externalTranslationDisclosure',
+                                        'Choosing one sends the text on this page to Google Translate and may set Google cookies.',
+                                        'ការជ្រើសរើសភាសាមួយនឹងផ្ញើអត្ថបទលើទំព័រនេះទៅ Google Translate ហើយអាចកំណត់ខូឃី Google។',
+                                      )}
+                                    </p>
                                     {externalTranslateOptions.map(renderOption)}
                                   </>
                                 ) : null}
                                 {!firstPartyTranslateOptions.length && !externalTranslateOptions.length ? (
-                                  <div className="px-4 py-6 text-center text-sm text-slate-400 dark:text-neutral-500">
+                                  <div className="px-4 py-6 text-center text-sm text-slate-500 dark:text-neutral-400">
                                     {copy('noLanguagesFound', 'No languages match your search.')}
                                   </div>
                                 ) : null}
@@ -497,9 +554,13 @@ export default function CatalogPreviewSurface({
                   </div>
                 </div>
               </div>
-            </section>
+            </header>
 
-            <section
+            {/* The section tabs are navigation, and the name that described
+                them sat on an inner scroll <div> with no role of its own, so
+                nothing announced it. */}
+            <nav
+              aria-label={copy('publicNavigation', 'Section navigation')}
               ref={publicPortalNavRef}
               className={`pb-1 ${publicView ? 'sticky top-1 z-40 sm:top-2' : ''}`}
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
@@ -508,7 +569,7 @@ export default function CatalogPreviewSurface({
                 className="portal-nav-shell rounded-b-[28px] border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
-                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden" aria-label={copy('publicNavigation', 'Section navigation')}>
+                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden">
                   <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
                     {portalTabs.map((item) => {
                       const Icon = item.icon
@@ -523,6 +584,7 @@ export default function CatalogPreviewSurface({
                               : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-200'
                           }`}
                           onClick={() => handlePortalTabClick(item.key)}
+                          aria-current={selected ? 'page' : undefined}
                         >
                           <Icon className="h-4 w-4 sm:hidden" />
                           <span className="whitespace-nowrap">{item.label}</span>
@@ -532,11 +594,29 @@ export default function CatalogPreviewSurface({
                   </div>
                 </div>
               </div>
-            </section>
+            </nav>
 
-            {promotionsSection}
-            {catalogSection}
-            {secondaryTabSection}
+            {displayConfig.publicationReady === false ? (
+              <div role="status" className="mx-1 mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100">
+                <div className="font-semibold">
+                  {copy('portalPublicationReadinessTitle', 'Seller details need verification', 'ព័ត៌មានអ្នកលក់ត្រូវការការផ្ទៀងផ្ទាត់')}
+                </div>
+                <p className="mt-1">
+                  {copy(
+                    'portalPublicationReadinessBody',
+                    'This catalogue remains available for browsing, but publication readiness is not confirmed until the registered seller name, registration number, address, phone, and email are verified.',
+                    'កាតាឡុកនេះនៅតែអាចមើលបាន ប៉ុន្តែមិនទាន់បញ្ជាក់ភាពរួចរាល់សម្រាប់ការផ្សព្វផ្សាយទេ រហូតដល់ឈ្មោះអ្នកលក់ដែលបានចុះបញ្ជី លេខចុះបញ្ជី អាសយដ្ឋាន លេខទូរស័ព្ទ និងអ៊ីមែល ត្រូវបានផ្ទៀងផ្ទាត់។',
+                  )}
+                </p>
+              </div>
+            ) : null}
+
+            <main id="portal-main-content">
+              {promotionsSection}
+              {catalogSection}
+              {secondaryTabSection}
+            </main>
+            {footer}
           </div>
         </div>
       </div>
@@ -603,7 +683,6 @@ export default function CatalogPreviewSurface({
               next: copy('nextImage', 'Next'),
               imageCount: copy('imageCount', '{current}/{total}'),
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-              close: copy('close', 'Close'),
             }}
             renderImage={(src, alt, className) => (
               <CatalogProductImage src={src} alt={alt} className={className} />
@@ -645,7 +724,6 @@ export default function CatalogPreviewSurface({
               next: copy('nextImage', 'Next'),
               imageCount: copy('imageCount', '{current}/{total}'),
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-              close: copy('close', 'Close'),
             }}
           />
         ) : null}

@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import BadgePercent from 'lucide-react/dist/esm/icons/badge-percent.js'
+import {
+  PORTAL_LIGHT_SURFACE,
+  PORTAL_MERCHANT_COLOR_DEFAULTS,
+  ensureAccessibleSurface,
+  readableInkOn,
+} from './portalContrast.ts'
 import {
   evaluatePromotionPricing,
   isProductPromoted,
@@ -78,9 +85,15 @@ export default function PortalPromoStrip({
   useEffect(() => {
     const track = trackRef.current
     if (!track || items.length === 0) return
+    // WCAG 2.2.2 / prefers-reduced-motion: this strip moves on its own for as
+    // long as the page is open, which is exactly the motion a visitor who has
+    // asked their OS to reduce it does not want. The dots still work, so the
+    // content stays fully reachable -- it just holds still.
+    const reduceMotion = typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     let raf = 0
     const step = () => {
-      if (!pausedRef.current && track.scrollWidth > track.clientWidth) {
+      if (!reduceMotion && !pausedRef.current && track.scrollWidth > track.clientWidth) {
         const max = track.scrollWidth - track.clientWidth
         track.scrollLeft = track.scrollLeft >= max - 1 ? 0 : track.scrollLeft + DRIFT_PX_PER_FRAME
       }
@@ -112,19 +125,26 @@ export default function PortalPromoStrip({
     <div className="mb-3">
       <div
         ref={trackRef}
-        className="flex gap-2 overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex gap-2 overflow-x-auto overscroll-x-contain scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onPointerEnter={() => { pausedRef.current = true }}
         onPointerLeave={() => { pausedRef.current = false }}
         onTouchStart={() => { pausedRef.current = true }}
         onTouchEnd={() => { window.setTimeout(() => { pausedRef.current = false }, 2000) }}
       >
         {items.map((item) => item.kind === 'rule' ? (
+          // The campaign colour is typed by the merchant in the portal editor,
+          // so the old `text-white` on it was a coin flip: white on a pale
+          // yellow chip is ~1.1:1 and the label disappears. Pick the better
+          // ink and nudge the chip itself only as far as AA actually needs.
           <span
             key={item.key}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-white shadow-sm"
-            style={{ backgroundColor: item.color }}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold shadow-sm"
+            style={{
+              backgroundColor: ensureAccessibleSurface(item.color, 'text', PORTAL_MERCHANT_COLOR_DEFAULTS.promoRuleChip).background,
+              color: ensureAccessibleSurface(item.color, 'text', PORTAL_MERCHANT_COLOR_DEFAULTS.promoRuleChip).color,
+            }}
           >
-            <BadgePercent className="h-3.5 w-3.5" />
+            <BadgePercent className="h-3.5 w-3.5" aria-hidden="true" />
             {item.label}
           </span>
         ) : (
@@ -135,7 +155,18 @@ export default function PortalPromoStrip({
             className="inline-flex max-w-[14rem] shrink-0 items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs shadow-sm ring-1 ring-slate-200 hover:ring-rose-300 dark:bg-neutral-800 dark:ring-neutral-700"
           >
             <span className="truncate font-medium text-slate-700 dark:text-neutral-100">{item.label}</span>
-            <span className="shrink-0 font-bold" style={{ color: item.color }}>{item.priceText}</span>
+            {/* Same merchant colour, used here as INK on the chip rather than
+                as a fill, so it is darkened (light card) or lightened (dark
+                card) until it clears 4.5:1 on the ground it actually lands on. */}
+            <span
+              className="shrink-0 font-bold text-[color:var(--portal-promo-ink)] dark:text-[color:var(--portal-promo-ink-dark)]"
+              style={{
+                '--portal-promo-ink': readableInkOn(item.color, PORTAL_LIGHT_SURFACE),
+                '--portal-promo-ink-dark': readableInkOn(item.color, '#262626'),
+              } as CSSProperties}
+            >
+              {item.priceText}
+            </span>
           </button>
         ))}
       </div>
@@ -147,7 +178,7 @@ export default function PortalPromoStrip({
               type="button"
               aria-label={`${copy('promoStripJump', 'Jump to promotion')} ${index + 1}`}
               onClick={() => jumpTo(index)}
-              className={`h-3 w-3 leading-none text-base ${index === activeDot ? 'text-rose-600' : 'text-slate-300 hover:text-slate-400 dark:text-neutral-600'}`}
+              className={`h-3 w-3 leading-none text-base ${index === activeDot ? 'text-rose-700 dark:text-rose-300' : 'text-slate-500 hover:text-slate-700 dark:text-neutral-400 dark:hover:text-neutral-200'}`}
             >
               ·
             </button>

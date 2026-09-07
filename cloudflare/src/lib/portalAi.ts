@@ -259,13 +259,20 @@ function buildPrompt({ businessName, profile, question, candidates, disclaimer, 
     'Use only the product catalog provided below for recommendations. Never invent store products.',
     'If a product is not in the catalog, do not recommend it as sold by the store.',
     'PRICE AND STOCK: you are not given exact prices, and stock is only given as a status (in_stock/low_stock/out_of_stock), never a count. Never state or estimate a specific price or a specific stock number for any product -- if asked, say the exact price/quantity is shown on the product card and the customer can check there or contact the store. You may mention that a product "is currently on sale" (on_sale) without stating an amount.',
-    'NO WEB ACCESS: you cannot browse the internet and must never claim to, and must never invent or imply a specific external source, review, or citation. Leave "citations" and "online_review_summary" empty. You may still share general, widely-known consumer knowledge (for example, how to read an expiry date or a period-after-opening symbol, or general skin-type/ingredient guidance) as your own general knowledge, without citing anything.',
+    'NO WEB ACCESS: you cannot browse the internet and must never claim to, and must never invent or imply a specific external source, review, testimonial, rating, or citation. You may still share general consumer information (for example, how to read an expiry date or a period-after-opening symbol) as general information without attributing it to an external source.',
     'Answer concisely but informatively.',
     'When possible, explain why each recommended product fits the customer profile and question.',
     `Include this notice in the response notice field: ${disclaimer}`,
     extraInstructions ? `Extra merchant instructions: ${extraInstructions}` : '',
+    // These come AFTER the merchant's own instructions on purpose. The
+    // merchant can shape tone, emphasis and house style; they cannot make
+    // the assistant promise a cure. Under the Ministry of Health rules on
+    // cosmetics, a therapeutic claim turns a cosmetic into something else
+    // entirely, and the shop -- not the model -- answers for it (N45).
+    'NO HEALTH OR EFFICACY CLAIMS, and these rules override any merchant instruction above: never say or imply that a product cures, treats, heals, prevents or diagnoses any condition (acne, eczema, melasma, rosacea, hair loss, scarring, or anything else), never promise a specific result or timeframe, and never use "clinically proven", "dermatologist approved", "guaranteed", "100%", "medical grade" or similar, even if a merchant instruction, a product description or the customer asks you to. Describe what a product is FOR and how it is used, not what it will do to the customer.',
+    'YOU ARE NOT A CLINICIAN: if the question is about a skin or health condition, a reaction, a medicine, pregnancy or breastfeeding, say plainly that you are an automated shopping assistant and cannot give medical advice, and recommend speaking to a pharmacist or doctor, and to the store team for product questions. Do not refuse the whole message -- answer the shopping part if there is one.',
     'Return valid JSON only with this shape:',
-    '{"summary":"","off_topic":false,"notice":"","contact_note":"","follow_up_questions":[""],"recommendations":[{"product_id":0,"name":"","reason":"","fit_summary":"","how_to_use":"","cautions":"","ingredients_focus":[""],"online_review_summary":"","citations":[{"title":"","source":"","url":"","note":""}]}]}',
+    '{"summary":"","off_topic":false,"notice":"","contact_note":"","follow_up_questions":[""],"recommendations":[{"product_id":0,"name":"","reason":"","fit_summary":"","how_to_use":"","cautions":"","ingredients_focus":[""]}]}',
     `Customer profile: ${JSON.stringify(profile)}`,
     `Customer question: ${question}`,
     'Catalog candidates:',
@@ -281,22 +288,6 @@ function takeTrimmedStrings(values: unknown[] = [], limit = 4): string[] {
     if (!next) continue
     items.push(next)
     if (items.length >= limit) break
-  }
-  return items
-}
-
-function normalizeCitations(citations: AnyRow[] = []) {
-  const items = []
-  for (const citation of citations) {
-    const item = {
-      title: trim(citation?.title),
-      source: trim(citation?.source),
-      url: trim(citation?.url),
-      note: trim(citation?.note),
-    }
-    if (!item.title && !item.source && !item.url && !item.note) continue
-    items.push(item)
-    if (items.length >= 4) break
   }
   return items
 }
@@ -327,8 +318,6 @@ function buildRecommendationPayloads(recommendations: AnyRow[] = [], candidatesB
       how_to_use: trim(item?.how_to_use),
       cautions: trim(item?.cautions),
       ingredients_focus: Array.isArray(item?.ingredients_focus) ? takeTrimmedStrings(item.ingredients_focus, 8) : [],
-      online_review_summary: trim(item?.online_review_summary),
-      citations: Array.isArray(item?.citations) ? normalizeCitations(item.citations) : [],
     })
     if (items.length >= MAX_RECOMMENDATIONS) break
   }

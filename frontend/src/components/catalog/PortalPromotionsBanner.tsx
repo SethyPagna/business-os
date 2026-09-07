@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { safeLinkUrl } from '../../utils/safeLinkUrl.ts'
 import { getPortalPromotions } from '../../api/portalPublicTransport.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import { PORTAL_MERCHANT_COLOR_DEFAULTS, ensureAccessibleSurface } from './portalContrast.ts'
 
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -52,10 +54,14 @@ function normalizePromotions(payload: unknown): PortalPromotion[] {
 // instead of looking like a broken/incomplete card. Picked deterministically
 // from the promotion id, so a given card's color doesn't shift on re-render.
 const FALLBACK_GRADIENTS = [
-  'from-rose-500 via-rose-500 to-orange-400',
-  'from-sky-500 via-sky-500 to-cyan-400',
-  'from-violet-500 via-violet-500 to-fuchsia-400',
-  'from-emerald-500 via-emerald-500 to-teal-400',
+  // Every stop clears 4.5:1 against the white title these cards print on
+  // top of it: the old -400/-500 stops ran 1.81:1 (teal-400) to 4.23:1
+  // (violet-500), so the promotion's own name was the least legible text
+  // on the storefront.
+  'from-rose-700 via-rose-700 to-orange-700',
+  'from-sky-800 via-sky-800 to-cyan-700',
+  'from-violet-700 via-violet-700 to-fuchsia-700',
+  'from-emerald-800 via-emerald-800 to-teal-700',
 ]
 
 function fallbackGradientFor(id: number): string {
@@ -141,11 +147,18 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
       return
     }
     if (promo.link_type === 'url' && promo.link_url) {
-      const isExternal = /^https?:\/\//i.test(promo.link_url)
-      if (isExternal) {
-        window.open(promo.link_url, '_blank', 'noopener,noreferrer')
+      // The Worker refuses to STORE anything but http(s) and site-relative
+      // paths (lib/safeLinkUrl.ts). Rows written before that guard existed
+      // are still in the table, and window.location.assign follows a
+      // javascript: URL happily, so the same rule is applied again here on
+      // the way out. A refused link does nothing rather than navigating
+      // somewhere unexpected (N45).
+      const target = safeLinkUrl(promo.link_url)
+      if (!target) return
+      if (/^https?:\/\//i.test(target)) {
+        window.open(target, '_blank', 'noopener,noreferrer')
       } else {
-        window.location.assign(promo.link_url)
+        window.location.assign(target)
       }
     }
   }
@@ -170,13 +183,17 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
       ) : null}
       <div
         ref={scrollRef}
-        className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {!loaded
           ? [0, 1, 2].map((key) => <SkeletonCard key={key} />)
           : promotions.map((promo) => {
               const clickable = (promo.link_type === 'product' && promo.link_product_id && (promo.image_path || promo.link_product_image)) || (promo.link_type === 'url' && promo.link_url)
               const imageUrl = promo.image_path ? resolvePublicAssetUrl(promo.image_path) : ''
+              // badge_color is typed by the merchant, so the ink cannot be a
+              // hardcoded white -- pick it, and darken/lighten the fill only
+              // as far as 4.5:1 requires.
+              const badgeSurface = ensureAccessibleSurface(promo.badge_color, 'text', PORTAL_MERCHANT_COLOR_DEFAULTS.promotionBadge)
               return (
                 <button
                   key={promo.id}
@@ -199,16 +216,16 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
                     </div>
                   ) : (
                     <div className={`flex h-28 w-full items-center justify-center bg-gradient-to-br ${fallbackGradientFor(promo.id)} px-4 text-center`}>
-                      <span className="line-clamp-2 text-sm font-semibold leading-tight text-white/95">{promo.title}</span>
+                      <span className="line-clamp-2 text-sm font-semibold leading-tight text-white">{promo.title}</span>
                     </div>
                   )}
                   <div className="flex flex-1 flex-col gap-1 p-3">
                     {promo.badge_text ? (
                       <span
-                        className="inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-sm"
-                        style={{ backgroundColor: promo.badge_color || '#dc2626' }}
+                        className="inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide shadow-sm"
+                        style={{ backgroundColor: badgeSurface.background, color: badgeSurface.color }}
                       >
-                        <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: badgeSurface.color }} aria-hidden="true" />
                         {promo.badge_text}
                       </span>
                     ) : null}
@@ -217,7 +234,7 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
                       <div className="line-clamp-2 text-xs text-slate-500 dark:text-neutral-400">{promo.subtitle}</div>
                     ) : null}
                     {promo.link_type === 'product' && promo.link_product_name ? (
-                      <div className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-sky-600 transition-transform group-hover:translate-x-0.5 dark:text-amber-400">
+                      <div className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-sky-700 transition-transform group-hover:translate-x-0.5 dark:text-amber-400">
                         {copy('portalPromotionsViewProduct', 'View')} {promo.link_product_name}
                         <span aria-hidden="true">→</span>
                       </div>
