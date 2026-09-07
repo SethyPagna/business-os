@@ -283,7 +283,7 @@ export default function ReceiveBatchModal({
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('receive_batch', 'Receive Batch')}</h2>
-            <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
+            <div className="mt-0.5 scroll-x-clean text-xs text-gray-400">{product.name}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>

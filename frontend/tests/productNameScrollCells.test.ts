@@ -219,6 +219,21 @@ const NAME_CELLS: Array<[string, string, string]> = [
   // that Tailwind utility still wins and the name scrolls inside the cap.
   ['Branches transfer history card', 'components/branches/Branches.tsx', '{transfer.product_name}</div>'],
   ['Branches transfer history row', 'components/branches/Branches.tsx', '{transfer.product_name}</span></td>'],
+  // The rest of the sweep. `git grep -n "break-words\|truncate\|line-clamp"`
+  // over components/products, components/inventory and components/branches,
+  // filtered to product-name bindings, also reaches these four. Each is the
+  // same defect on a different surface, so leaving them would make the rule
+  // hold on the surfaces the ask listed and nowhere else:
+  //   - the stock-adjust product picker option (a picker with a dead-end
+  //     ellipsis, exactly like the three pickers above),
+  //   - the bulk add-stock result row, which names the product a line
+  //     succeeded or failed for,
+  //   - and the two batch modals' header subtitles, which are the only place
+  //     those dialogs say WHICH product you are receiving or managing.
+  ['Stock-adjust picker option', 'components/products/forms/StockAdjustModal.tsx', '{group.name || String(lead?.id)}'],
+  ['Bulk add-stock result row', 'components/products/forms/BulkAddStockModal.tsx', '{row.request.productName}'],
+  ['Manage batches header subtitle', 'components/inventory/ManageBatchesModal.tsx', '{product.name}</div>'],
+  ['Receive batch header subtitle', 'components/inventory/ReceiveBatchModal.tsx', '{product.name}</div>'],
 ]
 
 runTest('every product-name cell carries the one shared class', () => {
@@ -283,6 +298,17 @@ const EXCLUDED_CELLS: Array<{
   { label: 'Stock-in sessions mobile card', file: 'components/products/StockInSessionsSection.tsx', marker: 'block break-words text-[13px] font-medium leading-4', shape: 'wrap' },
   { label: 'Fast stock-in received queue', file: 'components/inventory/FastStockInModal.tsx', marker: '{line.productName}', shape: 'wrap' },
   { label: 'Add-products saved list', file: 'components/products/CreateProductsSessionModal.tsx', marker: "{row.status === 'saved' ? '✅' : '•'} {row.name}", shape: 'wrap' },
+  // 3. DETAIL SHEETS. A detail sheet's title IS the reveal a scrolling row
+  //    falls back to, so wrapping it in full is the destination, not a
+  //    defect: there is nothing further to open, and a swipe gesture on the
+  //    sheet's own heading competes with dismissing the sheet. These four
+  //    also belong to other lanes (text-affordances owns the product detail
+  //    modals, sheet-safe-area owns the description modal, stockin owns the
+  //    stock-in line detail).
+  { label: 'Product detail sheet title', file: 'components/products/surfaces/ProductDetailModal.tsx', marker: '{productName}</div>', shape: 'wrap' },
+  { label: 'Product description sheet title', file: 'components/products/surfaces/ProductDescriptionDetailModal.tsx', marker: '{productName}', shape: 'wrap' },
+  { label: 'Inventory product detail sheet title', file: 'components/inventory/ProductDetailModal.tsx', marker: '{p.name}</div>', shape: 'wrap' },
+  { label: 'Stock-in line detail title', file: 'components/products/StockInSessionsSection.tsx', marker: 'font-semibold text-gray-900 dark:text-white">{selectedLine.product_name}', shape: 'wrap' },
 ]
 
 runTest('the ledger and stock-in name cells stay OUT of the scroll conversion, on purpose', () => {

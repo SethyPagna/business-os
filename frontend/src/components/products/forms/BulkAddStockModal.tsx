@@ -635,7 +635,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                         : (t('pending') || 'Pending')}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-gray-800 dark:text-gray-100">{row.request.productName}</span>
+                    <span className="block scroll-x-clean font-medium text-gray-800 dark:text-gray-100">{row.request.productName}</span>
                     {row.failure ? (
                       <span className="block break-words text-rose-600 dark:text-rose-300">
                         {row.failure.message}
