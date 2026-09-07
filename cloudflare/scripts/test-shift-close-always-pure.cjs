@@ -88,8 +88,26 @@ function database() {
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
+  db.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
   db.prepare('INSERT INTO branches(id,name,is_active) VALUES (1,?,1)').run('Shop')
   return db
+}
+
+function assertOpeningPresenceMigration() {
+  const sqlite = new Database(':memory:')
+  sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
+  sqlite.prepare(`INSERT INTO shift_sessions
+    (shift_code,user_id,business_date,opened_at,opening_float_usd,opening_float_khr)
+    VALUES ('legacy',7,'2026-09-06','2026-09-06T01:00:00.000Z',12.5,40000)`).run()
+  sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
+  const row = sqlite.prepare(`SELECT opening_float_usd,opening_float_khr,
+    opening_float_usd_registered,opening_float_khr_registered FROM shift_sessions`).get()
+  assert.deepEqual(row, {
+    opening_float_usd: 12.5, opening_float_khr: 40000,
+    opening_float_usd_registered: 1, opening_float_khr_registered: 1,
+  }, 'migration treats every existing recorded opening amount as registered')
+  assert.throws(() => sqlite.prepare('UPDATE shift_sessions SET opening_float_usd_registered=2').run(), /CHECK/)
+  sqlite.close()
 }
 
 // The REAL pure arithmetic out of lib/shiftReconciliation.ts. Its D1-reading
@@ -148,6 +166,7 @@ function scenario() {
 }
 
 async function main() {
+  assertOpeningPresenceMigration()
   // ---- 1. counted far from expected -------------------------------------
   {
     const { call, row, open } = scenario()
@@ -239,16 +258,49 @@ async function main() {
     assert.equal(row(shift.id).closing_counted_khr, 40000)
   }
 
-  // Required opening floats use the same strict primitive contract.
+  // Opening registration is optional per currency, but non-blank values keep
+  // the same strict primitive contract as close.
   {
     const { call, shiftCount } = scenario()
-    for (const malformed of [true, [10], { value: 10 }, '   ']) {
+    for (const malformed of [true, [10], { value: 10 }]) {
       const res = await call('POST', '/open', {
         branch_id: 1, opening_float_usd: malformed, opening_float_khr: 10000,
       })
       assert.equal(res.status, 400, `${JSON.stringify(malformed)} is not a valid opening float`)
       assert.equal(shiftCount(), 0, 'a malformed opening float created no shift')
     }
+  }
+
+  // Blank and explicit zero are different facts on the actual route and in
+  // storage. Legacy money columns remain populated for rollback safety; the
+  // presence flags control the nullable API/report contract.
+  {
+    const { call, row } = scenario()
+    const res = await call('POST', '/open', {
+      branch_id: 1, opening_float_usd: '', opening_float_khr: 0,
+    })
+    assert.equal(res.status, 201, 'a shift can open with one uncounted currency')
+    const body = await res.json()
+    assert.equal(body.shift.opening_float_usd, null, 'blank opening USD stays unknown')
+    assert.equal(body.shift.opening_float_khr, 0, 'explicit opening KHR zero stays measured')
+    const stored = row(body.shift.id)
+    assert.equal(stored.opening_float_usd, 0, 'legacy column retains rollback-safe numeric storage')
+    assert.equal(stored.opening_float_usd_registered, 0)
+    assert.equal(stored.opening_float_khr_registered, 1)
+    const closed = await call('POST', '/close', { branch_id: 1 })
+    assert.equal(closed.status, 200, 'unknown opening and closing counts never block a valid close')
+    const closedBody = await closed.json()
+    assert.equal(closedBody.shift.opening_float_usd, null)
+    assert.equal(closedBody.shift.closing_counted_usd, null)
+  }
+
+  {
+    const { call } = scenario()
+    const res = await call('POST', '/open', { branch_id: 1 })
+    assert.equal(res.status, 201, 'opening cash registration is optional')
+    const body = await res.json()
+    assert.equal(body.shift.opening_float_usd, null)
+    assert.equal(body.shift.opening_float_khr, null)
   }
 
   // ---- 7. the historic close (Shifts popup) accepts blank too ------------

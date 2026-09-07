@@ -12,8 +12,8 @@ import type { ShiftCountBlocker } from '../../api/shiftTransport.ts'
  * BOTH fields were typed -- the owner: "i had to enter the usd as well as
  * khmer riel to enter." One component means one behaviour:
  *
- *   - "0" is the placeholder and the hint under the pair says a blank field
- *     is recorded as 0 (the shared rule is shiftCountOrZero in the transport).
+ *   - "0" is the placeholder, while the hint distinguishes a blank unknown
+ *     count from an explicit measured zero.
  *   - The currency sits INSIDE the field as a suffix, so the label above can
  *     be one short phrase for the pair ("Opening cash") instead of two.
  *   - Side by side from 640px up, stacked below it (a 375px till still fits

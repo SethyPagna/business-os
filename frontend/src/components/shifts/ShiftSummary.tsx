@@ -35,7 +35,7 @@ export default function ShiftSummary({ shift, detail = false, className = '' }: 
     : shift.closed_at ? tr('shift_status_closed', 'Closed') : tr('shift_status_open', 'Open')
   const cashier = shift.user_name || tr('shift_staff', 'Staff')
   const branch = shift.branch_name || tr('all_branches', 'All branches')
-  const before = `${fmtUSD(shift.opening_float_usd)} · ${fmtKHR(shift.opening_float_khr)}`
+  const before = shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR)
   // Per currency, through the shared rule. A drawer counted in dollars and
   // left blank in riel used to print a bare "—" for BOTH, hiding a number the
   // cashier actually wrote; now only the uncounted half is a dash, and a

@@ -69,12 +69,12 @@ export type ShiftMoney = { usd: number; khr: number }
 export type ShiftCount = { usd: number | null; khr: number | null }
 
 export type ShiftReconciliation = {
-  opening: ShiftMoney
+  opening: ShiftCount
   cash_sales: ShiftMoney
   refunds: ShiftMoney
   expenses: ShiftMoney
   courier: ShiftMoney
-  expected: ShiftMoney
+  expected: ShiftCount
   counted: ShiftCount
   difference: ShiftCount
   /**
@@ -102,7 +102,7 @@ export const SHIFT_REVIEW = {
 } as const
 
 export type ShiftReconciliationInput = {
-  opening: Partial<ShiftMoney> | null | undefined
+  opening: Partial<ShiftCount> | null | undefined
   cashSales: Partial<ShiftMoney> | null | undefined
   refunds: Partial<ShiftMoney> | null | undefined
   expenses: Partial<ShiftMoney> | null | undefined
@@ -123,15 +123,15 @@ function countOf(value: Partial<ShiftCount> | null | undefined): ShiftCount {
 
 /** The whole arithmetic, pure. Every caller goes through this. */
 export function computeShiftReconciliation(input: ShiftReconciliationInput): ShiftReconciliation {
-  const opening = money(input.opening)
+  const opening = countOf(input.opening)
   const cashSales = money(input.cashSales)
   const refunds = money(input.refunds)
   const expenses = money(input.expenses)
   const courier = money(input.courier)
   const counted = countOf(input.counted)
-  const expected: ShiftMoney = {
-    usd: round2(opening.usd + cashSales.usd - refunds.usd - expenses.usd - courier.usd),
-    khr: roundKhr(opening.khr + cashSales.khr - refunds.khr - expenses.khr - courier.khr),
+  const expected: ShiftCount = {
+    usd: opening.usd == null ? null : round2(opening.usd + cashSales.usd - refunds.usd - expenses.usd - courier.usd),
+    khr: opening.khr == null ? null : roundKhr(opening.khr + cashSales.khr - refunds.khr - expenses.khr - courier.khr),
   }
   const codes = [...new Set((input.reviewCodes ?? []).filter(Boolean).map(String))].sort()
   return {
@@ -143,8 +143,8 @@ export function computeShiftReconciliation(input: ShiftReconciliationInput): Shi
     expected,
     counted,
     difference: {
-      usd: counted.usd == null ? null : round2(counted.usd - expected.usd),
-      khr: counted.khr == null ? null : roundKhr(counted.khr - expected.khr),
+      usd: counted.usd == null || expected.usd == null ? null : round2(counted.usd - expected.usd),
+      khr: counted.khr == null || expected.khr == null ? null : roundKhr(counted.khr - expected.khr),
     },
     needs_review: codes.length > 0,
     review_codes: codes,
@@ -240,8 +240,8 @@ export type ShiftReconciliationSession = {
   opened_at: string
   closed_at: string | null
   cancelled_at?: string | null
-  opening_float_usd: number
-  opening_float_khr: number
+  opening_float_usd: number | null
+  opening_float_khr: number | null
   closing_counted_usd?: number | null
   closing_counted_khr?: number | null
 }
@@ -436,7 +436,7 @@ export async function loadShiftReconciliation(
 
 export type ShiftFigures = {
   /** Registered cash at OPEN, per currency. Report-only. */
-  opening: ShiftMoney
+  opening: ShiftCount
   /** Registered cash at END, per currency; null where nobody counted. */
   closing: ShiftCount
   sales_usd: number
@@ -464,7 +464,7 @@ export type ShiftFigures = {
 }
 
 export type ShiftFiguresInput = {
-  opening: Partial<ShiftMoney> | null | undefined
+  opening: Partial<ShiftCount> | null | undefined
   counted: Partial<ShiftCount> | null | undefined
   totals: {
     revenue_usd?: unknown; cost_usd?: unknown; profit_usd?: unknown
@@ -485,7 +485,7 @@ export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
   const courier = money(input.courier)
   const totals = input.totals ?? {}
   return {
-    opening: money(input.opening),
+    opening: countOf(input.opening),
     closing: countOf(input.counted),
     sales_usd: round2(finite(totals.revenue_usd)),
     cogs_usd: round2(finite(totals.cost_usd)),

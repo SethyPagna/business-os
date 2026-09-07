@@ -116,6 +116,7 @@ sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0089_system
 sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
 sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
 sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
+sqlite.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
 
 // ---- the route, with only auth/audit/telegram replaced ---------------------
 // businessDateWindow is passed through as the REAL module: the business-day
@@ -288,6 +289,7 @@ async function main() {
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
+  empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
   const stranger = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': businessDateWindow,
     '../lib/db': { getDb: () => d1(empty) },
