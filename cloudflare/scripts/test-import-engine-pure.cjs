@@ -152,6 +152,33 @@ const sqlBindingModuleObj = { exports: {} }
 const sqlBindingWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', sqlBindingOutputText)
 sqlBindingWrapper(sqlBindingModuleObj.exports, require, sqlBindingModuleObj, sqlBindingSourcePath, path.dirname(sqlBindingSourcePath))
 
+// The apply-time authorization guard shares the same permission, media-path,
+// and exact-first product-image identity helpers used by the HTTP routes.
+// Load those pure siblings for real so this legacy importEngine loader keeps
+// validating the shipping dependency graph instead of weakening it with
+// empty stubs. productImagePermission's D1 import is type-only; its runtime
+// dependencies are the real media and sqlBinding modules below.
+function loadPureSibling(name, requireShim = require) {
+  const siblingPath = path.join(__dirname, '..', 'src', 'lib', `${name}.ts`)
+  const siblingOutput = ts.transpileModule(fs.readFileSync(siblingPath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: siblingPath,
+  }).outputText
+  const siblingModule = { exports: {} }
+  new Function('exports', 'require', 'module', '__filename', '__dirname', siblingOutput)(
+    siblingModule.exports, requireShim, siblingModule, siblingPath, path.dirname(siblingPath),
+  )
+  return siblingModule.exports
+}
+const permissionsModule = loadPureSibling('permissions')
+const mediaModule = loadPureSibling('media')
+const productImagePermissionModule = loadPureSibling('productImagePermission', (request) => {
+  if (request === './media') return mediaModule
+  if (request === './sqlBinding') return sqlBindingModuleObj.exports
+  if (request === './db') return {}
+  return require(request)
+})
+
 function requireForProductBatches(request) {
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
@@ -241,6 +268,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './sqlBinding') {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
+  if (request === './permissions') return permissionsModule
+  if (request === './media') return mediaModule
+  if (request === './productImagePermission') return productImagePermissionModule
   if (request === './salesImportCommit') {
     return { MAX_HISTORICAL_SALE_LINES: 100, applyHistoricalSaleImport: async () => ({ alreadyApplied: false }) }
   }
