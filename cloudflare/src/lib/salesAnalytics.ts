@@ -388,6 +388,8 @@ export interface SalesPeriodRow {
   gross_sales_usd: number
   refund_usd: number
   discount_usd: number
+  item_discount_usd: number
+  total_discount_usd: number
   tax_usd: number
   delivery_usd: number
   cost_usd: number
@@ -1155,6 +1157,8 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
       gross_sales_usd: totals.gross_sales_usd,
       refund_usd: totals.refund_usd,
       discount_usd: totals.discount_usd,
+      item_discount_usd: totals.item_discount_usd,
+      total_discount_usd: totals.total_discount_usd,
       tax_usd: totals.tax_usd,
       delivery_usd: totals.delivery_usd,
       cost_usd: totals.cost_usd,
