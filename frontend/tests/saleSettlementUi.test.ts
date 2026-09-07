@@ -12,6 +12,7 @@ import {
   settlementTotals,
   type SettlementRow,
 } from '../src/components/sales/saleSettlement.ts'
+import { createSingleUseResult } from '../src/components/sales/saleStatusConfirmation.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (relative: string) => fs.readFileSync(path.resolve(here, relative), 'utf8')
@@ -21,6 +22,25 @@ const salesSource = read('../src/components/sales/Sales.tsx')
 const historySource = read('../src/utils/actionHistory.ts')
 const workflowSource = read('../src/components/sales/SaleStatusWorkflow.tsx')
 const paymentSettlementSource = read('../../cloudflare/src/lib/paymentSettlement.ts')
+
+const confirmedResult = createSingleUseResult<{ statusUpdatedAt: string } | false>()
+assert.equal(confirmedResult.isPending(), true)
+assert.equal(confirmedResult.settle({ statusUpdatedAt: 'confirmed-version' }), true)
+assert.equal(confirmedResult.settle(false), false, 'a late cancel cannot replace a confirmed mutation result')
+assert.deepEqual(await confirmedResult.promise, { statusUpdatedAt: 'confirmed-version' })
+assert.equal(confirmedResult.isPending(), false)
+
+const unmountedResult = createSingleUseResult<boolean>()
+assert.equal(unmountedResult.settle(false), true, 'unmount cleanup releases an open confirmation request')
+assert.equal(await unmountedResult.promise, false)
+
+const replacedResult = createSingleUseResult<boolean>()
+const replacementResult = createSingleUseResult<{ statusUpdatedAt: string }>()
+assert.equal(replacedResult.settle(false), true, 'opening a newer confirmation releases the replaced caller')
+assert.equal(await replacedResult.promise, false)
+assert.equal(replacementResult.isPending(), true, 'settling the replaced request does not settle the replacement')
+assert.equal(replacementResult.settle({ statusUpdatedAt: 'replacement-version' }), true)
+assert.deepEqual(await replacementResult.promise, { statusUpdatedAt: 'replacement-version' })
 
 // MAX_SETTLEMENT_ROWS gates what the editor will let a review submit;
 // MAX_SETTLEMENT_TENDER_ROWS (paymentSettlement.ts, enforced at
@@ -178,15 +198,16 @@ const singleStatusPromptBranch = salesSource.slice(
   salesSource.indexOf('if (recordHistory && !extra && !confirmed)'),
   salesSource.indexOf('const actionKey = String(numericId)'),
 )
-assert.match(singleStatusPromptBranch, /return await new Promise<SaleStatusUiResult>/, 'the original detail request remains pending while its parent confirmation is open')
-assert.match(singleStatusPromptBranch, /setStatusPrompt\([\s\S]*?resolve,/, 'the single-sale confirmation retains the original detail request resolver')
+assert.match(singleStatusPromptBranch, /pendingStatusResultRef\.current = pendingResult[\s\S]*?replacedResult\?\.settle\(false\)/, 'a newer confirmation owns the ref and releases the replaced detail request')
+assert.match(singleStatusPromptBranch, /setStatusPrompt\([\s\S]*?pendingResult,[\s\S]*?return await pendingResult\.promise/, 'the original detail request remains pending on the prompt result until confirmation')
 const statusConfirmSurface = salesSource.slice(
   salesSource.indexOf('{statusPrompt ? ('),
   salesSource.indexOf('{pendingBulkFieldRequest ? ('),
 )
-assert.match(statusConfirmSurface, /const result = await handleStatusChange\([\s\S]*?true\)[\s\S]*?statusPrompt\.resolve\(result\)/, 'the confirmed parent write returns its authoritative result to the original detail flow')
-assert.match(statusConfirmSurface, /statusPrompt\.mode === 'single'\) statusPrompt\.resolve\(false\)[\s\S]*?setStatusPrompt\(null\)/, 'cancelling the parent confirmation releases the original detail request without a mutation')
+assert.match(statusConfirmSurface, /const result = await handleStatusChange\([\s\S]*?true\)[\s\S]*?pendingStatusResultRef\.current === prompt\.pendingResult[\s\S]*?prompt\.pendingResult\.settle\(result\)/, 'the confirmed parent write returns its authoritative result only to the matching detail flow')
+assert.match(statusConfirmSurface, /pendingStatusResultRef\.current === prompt\.pendingResult[\s\S]*?prompt\.pendingResult\.settle\(false\)/, 'cancelling the parent confirmation releases only the matching detail request without a mutation')
 assert.doesNotMatch(statusConfirmSurface, /if \(statusPrompt\.mode === 'single'\) \{\s*await handleStatusChange/, 'the confirmed single-sale result must never be discarded')
+assert.match(salesSource, /useEffect\(\(\) => \(\) => \{\s*pendingStatusResultRef\.current\?\.settle\(false\)\s*pendingStatusResultRef\.current = null/, 'Sales unmount releases an open confirmation request before clearing page state')
 assert.match(modalSource, /setSettlementSession\(\(current\) => advanceSettlementReviewVersion\(current, result\)\)/, 'the next same-modal payment review advances to the committed status version')
 assert.match(modalSource, /settlementSession\.exchangeRate/, 'the editor and coverage preview use the frozen settings rate')
 assert.match(modalSource, /useCloseGuard\(\{ dirty: settlementDirty \}/, 'edited tender rows are protected by the standard close guard')
