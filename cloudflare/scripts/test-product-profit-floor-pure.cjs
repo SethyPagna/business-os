@@ -4,12 +4,14 @@
 // The owner rule (N6) is that a negative revenue/profit figure is a scoping
 // defect to root-cause, never something to floor at display, so this exercises
 // the CAUSES rather than the symptom. Every case below runs the real SQL that
-// routes/inventory.ts builds, against real SQLite, on data where the old
-// hand-copied join and lib/productSalesLedger.ts DISAGREE -- each one produced
-// a negative revenue (and therefore a negative profit) on base 6e3abfea:
+// routes/inventory.ts builds, against real SQLite, on data where two ledgers
+// DISAGREE -- and the ledger each reading came from is named, because they are
+// not all the same one.
 //
-// (base profit -> fixed profit, measured by running this fixture against
-// `git show 6e3abfea:cloudflare/src/routes/inventory.ts`):
+// GROUP 1, the base defects. A, B, C, D, E and H each produced a NEGATIVE
+// figure on base 6e3abfea, measured by running this fixture against
+// `git show 6e3abfea:cloudflare/src/routes/inventory.ts` (base profit ->
+// fixed profit):
 //
 //   A  a refund scoped by the RETURN's own date, reversing a sale the window
 //      never recognised                                    -85.00 -> 0
@@ -29,18 +31,27 @@
 //      sale and ran past what that scope had recognised. Money was capped at
 //      what the (sale, product) pair recognised; the unit count was not, so
 //      the list could render "Net sold -2" while the pane opened from that row
-//      clamped it to 0.                             qty_sold -2.00 -> 0
-//   I  the same branch-split sale with a PARTIAL return, which is what shows
-//      that a cap is not the fix. Capping is per branch, so the SAME reversal
-//      comes off at every branch the sale touched: 3 units at branch 1 and 2
-//      at branch 2, two units returned, and branch 1 -- which had nothing come
+//      clamped it to 0.               base qty_sold -2.00 / profit -12.00 -> 0
+//
+// GROUP 2, the PARTITION defects -- "branch 1 + branch 2 = the unfiltered
+// row". These are NOT base readings: base 6e3abfea reports I 3 / $30 /
+// profit 18, J 3 / $30 / 18, K 1 / $1 / 0.5 and L 3 / $30 / 18 at branch 1,
+// none of them negative, because base filtered the return side by the branch
+// it named and simply dropped a reversal no branch line claimed. Each reading
+// below is the LANE's own intermediate ledger, named by the commit that
+// produced it, and each was fixed by the commit after it:
+//
+//   I  the branch-split sale with a PARTIAL return, which is what shows that a
+//      cap is not the fix. Capping is per branch, so the SAME reversal comes
+//      off at every branch the sale touched: 3 units at branch 1 and 2 at
+//      branch 2, two units returned, and branch 1 -- which had nothing come
 //      back -- read qty 1 / revenue $10 / profit $6 while the two branch rows
 //      summed to more reversal than the sale ever had. The sale-level return
 //      is now APPORTIONED across the sale's branch lines (the branch it names
 //      first, up to what that branch recognised; the remainder over what the
-//      other lines have left), so the branch slices add back up to the
-//      unfiltered row instead of each subtracting the whole.
-//                                    branch 1: qty 1 / $10 / $6 -> 3 / $30 / $18
+//      other lines have left).
+//                    cap-only ledger 31f6b9aa, branch 1: qty 1 / $10 / $6
+//                                                     -> 3 / $30 / $18
 //   J  the same partial return with NO branch on the return LINE. Every insert
 //      path in routes/returns.ts resolves return_items.branch_id as
 //      `item.branch_id || <the request's branch> || null` (:1397, :1921,
@@ -50,24 +61,23 @@
 //      a branch that had nothing come back; `COALESCE(ri.branch_id,
 //      r.branch_id)` -- the fallback base 6e3abfea carried as returnScope --
 //      puts it back where it belongs.
-//                        branch 1: qty 1.8 / $18 -> 3 / $30 (base: qty 1 / $10)
+//              ledger 060d8dd7, branch 1: qty 1.8 / $18 -> 3 / $30
 //   K  a reversal that names NO branch at all, over a sale whose two branch
 //      lines are worth wildly different money: 1 unit at $1 at branch 1 and
 //      1 unit at $99 at branch 2, one $50 refund. Splitting the refund by the
 //      UNIT share gives each branch $25 -- more than branch 1 ever took --
 //      and the per-branch cap then swallows the excess, so the branch rows
 //      read $0 and $74 against an unfiltered $50: the slice stopped being a
-//      partition. Money is apportioned by each line share of the VALUE (and
+//      partition. Money is apportioned by each line's share of the VALUE (and
 //      returned cost by its share of the COST), so it reads $0.50 + $49.50.
-//                              branch 1 + branch 2: $74 -> $50 = unfiltered
-//   L  a reversal naming a branch that sold none of this product, so the
-//      whole of it spreads: 2 units back over a sale of 3 units at branch 1
-//      and 2 at branch 2. A proportional split allocates 1.2 units to branch
-//      1, and the Inventory list renders Net sold with no formatting at all,
-//      so the cell reads "1.8" -- a count of things with a fraction in it.
-//      The unit spill is allocated by largest remainder instead, so the whole
-//      units stay whole and the two branches still sum to the unfiltered row.
-//                                     branch 1 Net sold: 1.8 -> 2 (integer)
+//              ledger 47b111cc, branch 1 + branch 2: $74 -> $50 = unfiltered
+//   L  a reversal naming a branch that sold none of this product, so the whole
+//      of it spreads: 2 units back over a sale of 3 units at branch 1 and 2 at
+//      branch 2. A proportional split allocates 1.2 units to branch 1, and the
+//      Inventory list renders Net sold with no formatting at all, so the cell
+//      reads "1.8" -- a count of things with a fraction in it. The unit spill
+//      is allocated by largest remainder instead.
+//              ledger 96a461d4, branch 1 Net sold: 1.8 -> 2 (integer)
 //
 // Plus the two positive controls, without which a "nothing is negative any
 // more" sweep would be indistinguishable from a broken instrument:
