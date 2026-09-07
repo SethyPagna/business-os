@@ -74,7 +74,9 @@ runTest('the fast flow carries an add / remove / set switch; each line freezes i
   // frozen on the queued line and restored when the line is reopened
   assert.match(modalSource, /interface ReceivedLine \{[^]*?\n  mode: StockMode\n[^]*?\n\}/)
   assert.match(modalSource, /const next: ReceivedLine = \{[^]*?\n\s+mode,\n[^]*?\}/)
-  assert.match(modalSource, /const editLine = \(line: ReceivedLine\) => \{[^]*?setMode\(line\.mode\)/)
+  assert.match(modalSource,
+    /(?:const editLine = |function editLine)\(line: ReceivedLine(?:,\s*index: number)?\)(?: =>)? \{[^]*?setMode\(line\.mode\)/,
+    'reopening a queued line must restore its frozen mode even when editLine also receives its row index')
   // the draft remembers the switch across reload, like every other header field
   assert.match(modalSource, /type FastStockInDraft = \{[^]*?\n  mode\?: StockMode\n/)
 })
