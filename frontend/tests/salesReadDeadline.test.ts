@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { apiFetch, cacheClearAll, cacheGet, cacheSet, route, setSyncServerUrl } from '../src/api/http.ts'
 import { getSales } from '../src/api/salesTransport.ts'
+import { withLoaderTimeout } from '../src/utils/loaders.ts'
 
 type TestCallback = () => void | Promise<void>
 type FetchCall = Parameters<typeof fetch>
@@ -49,6 +50,8 @@ await runTest('Sales page owns and cancels the transport signal at timeout and i
   assert.match(source, /const controller = new AbortController\(\)[\s\S]*fetchSales\(params, \{ signal: controller\.signal \}\)/)
   assert.match(source, /finally \{[\s\S]{0,420}controller\.abort\(\)[\s\S]{0,220}loadAbortRef\.current === controller/)
   assert.match(source, /if \(!isActive\) \{[\s\S]{0,220}loadAbortRef\.current\?\.abort\(\)[\s\S]{0,160}invalidateTrackedRequest\(loadRequestRef\)/)
+  assert.match(source, /aliveRef\.current = true\s+\/\/[\s\S]{0,260}loadSales\(false\)/)
+  assert.match(source, /else if \(!silent\) \{\s+setLoadError\(translateOr\('sales_refresh_failed'/)
   assert.match(source, /useEffect\(\(\) => \(\) => \{[\s\S]{0,220}loadAbortRef\.current\?\.abort\(\)[\s\S]{0,180}invalidateTrackedRequest\(loadRequestRef\)/)
 })
 
@@ -168,6 +171,55 @@ await runTest('the Sales stale-cache policy awaits the refresh owned by its abor
     assert.deepEqual(await request, [{ id: 'fresh' }])
   } finally {
     Date.now = originalNow
+    cacheClearAll()
+    setSyncServerUrl('')
+  }
+})
+
+await runTest('a page deadline aborts an already-started local fallback before it can cache late data', async () => {
+  resetReadState()
+  const originalFetch = globalThis.fetch
+  const controller = new AbortController()
+  let calls = 0
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+    calls += 1
+    return new Promise<Response>((_resolve, reject) => {
+      const rejectAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+      if (init?.signal?.aborted) rejectAbort()
+      else init?.signal?.addEventListener('abort', rejectAbort, { once: true })
+    })
+  }) as typeof fetch
+
+  const channel = 'sales:get:late-local-deadline-test'
+  try {
+    const request = withLoaderTimeout(
+      () => route(
+        channel,
+        () => apiFetch('GET', '/api/sales?page=3&limit=20', undefined, 15, { signal: controller.signal }),
+        async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          return [{ id: 'local-late' }]
+        },
+        {
+          raceLocalFallback: false,
+          retryTimedOutRead: false,
+          signal: controller.signal,
+        },
+      ),
+      'Sales',
+      20,
+    ).finally(() => controller.abort())
+
+    await assert.rejects(
+      request,
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'loader_timeout',
+    )
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    assert.equal(calls, 1)
+    assert.equal(cacheGet(channel), null)
+  } finally {
+    controller.abort()
+    globalThis.fetch = originalFetch
     cacheClearAll()
     setSyncServerUrl('')
   }

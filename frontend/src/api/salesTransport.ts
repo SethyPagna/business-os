@@ -132,6 +132,7 @@ export function getSales(params: QueryParams = {}, options: SalesReadOptions = {
       // abort its own still-running background request in `finally`.
       staleWhileRevalidate: false,
       retryTimedOutRead: false,
+      signal: options.signal,
     },
   )
 }

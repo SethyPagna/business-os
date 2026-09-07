@@ -48,6 +48,7 @@ type RouteOptions = {
   isWrite?: boolean
   raceLocalFallback?: boolean
   staleWhileRevalidate?: boolean
+  signal?: AbortSignal
   // Most reads retain one retry for a transient connection failure. A caller
   // with one outer deadline can disable retry specifically after apiFetch's
   // own timeout, while still retrying an immediate failure such as
@@ -627,8 +628,24 @@ function noteReadFailure(channel: string, error: any, source: string, startedAt:
   return false
 }
 
-async function resolveLocalRead<T>(channel: string, localFn: RouteFn<T>, source = 'local'): Promise<T> {
-  const localResult = await localFn()
+function throwIfRequestAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  const abortError = new Error('Request canceled')
+  abortError.name = 'AbortError'
+  throw abortError
+}
+
+async function resolveLocalRead<T>(
+  channel: string,
+  localFn: RouteFn<T>,
+  source = 'local',
+  signal?: AbortSignal,
+): Promise<T> {
+  throwIfRequestAborted(signal)
+  const localResult = await localFn(signal)
+  // A local IndexedDB read may finish after its owning page deadline. Check
+  // again at the write boundary so cancellation cannot refill shared cache.
+  throwIfRequestAborted(signal)
   cacheSet(channel, localResult)
   logCall(channel, source, 0)
   return localResult
@@ -1084,32 +1101,45 @@ async function raceServerReadWithLocalFallback<T>(
   t0: number,
   sourceLabel = 'cache-dedup',
   fallbackDelayMs: number = SYNC.READ_LOCAL_FALLBACK_MS,
+  signal?: AbortSignal,
 ): Promise<T> {
   let localPromise: Promise<T | null> | null = null
   const startLocalRead = (): Promise<T | null> => {
     if (!localPromise) {
       localPromise = Promise.resolve()
-        .then(() => localFn())
+        .then(() => {
+          throwIfRequestAborted(signal)
+          return localFn(signal)
+        })
         .then((result) => {
+          throwIfRequestAborted(signal)
           if (hasUsableLocalData(result)) {
             cacheSet(channel, result)
           }
           return result
         })
-        .catch(() => null)
+        .catch((error) => {
+          if (isAbortError(error)) throw error
+          return null
+        })
     }
     return localPromise
   }
 
   let fallbackTimer: number | null = null
-  const localFallbackPromise = new Promise<RaceReadResult>((resolve) => {
+  const localFallbackPromise = new Promise<RaceReadResult>((resolve, reject) => {
     fallbackTimer = window.setTimeout(async () => {
-      const localResult = await startLocalRead()
-      if (hasUsableLocalData(localResult)) {
-        resolve({ source: 'local', data: localResult })
-        return
+      try {
+        const localResult = await startLocalRead()
+        throwIfRequestAborted(signal)
+        if (hasUsableLocalData(localResult)) {
+          resolve({ source: 'local', data: localResult })
+          return
+        }
+        resolve({ source: 'local', data: null })
+      } catch (error) {
+        reject(error)
       }
-      resolve({ source: 'local', data: null })
     }, fallbackDelayMs)
   })
 
@@ -1123,9 +1153,11 @@ async function raceServerReadWithLocalFallback<T>(
     }
 
     if (winner?.source === 'local' && winner.data !== null) {
+      throwIfRequestAborted(signal)
       logCall(channel, sourceLabel ? `${sourceLabel}-local` : 'local-fast', Date.now() - t0)
       inflightPromise
         .then((result) => {
+          throwIfRequestAborted(signal)
           cacheSet(channel, result)
           emitCacheRefresh(channel)
         })
@@ -1149,7 +1181,9 @@ async function raceServerReadWithLocalFallback<T>(
       logCall(channel, 'auth-required', Date.now() - t0, false)
       throw error
     }
+    if (isAbortError(error)) throw error
     const localResult = await startLocalRead()
+    throwIfRequestAborted(signal)
     if (hasUsableLocalData(localResult)) {
       if (isTransientGatewayError(error?.status)) {
         const recoverySource = sourceLabel
@@ -1160,6 +1194,7 @@ async function raceServerReadWithLocalFallback<T>(
       logCall(channel, sourceLabel ? `${sourceLabel}-local-recovery` : 'local-recovery', Date.now() - t0)
       inflightPromise
         .then((result) => {
+          throwIfRequestAborted(signal)
           cacheSet(channel, result)
           emitCacheRefresh(channel)
         })
@@ -1167,7 +1202,7 @@ async function raceServerReadWithLocalFallback<T>(
       return localResult as T
     }
     noteReadFailure(channel, error, 'local-fallback', t0)
-    return resolveLocalRead(channel, localFn)
+    return resolveLocalRead(channel, localFn, 'local', signal)
   }
 }
 
@@ -1192,6 +1227,8 @@ export async function route<T = any>(
   const raceLocalFallback = typeof options === 'boolean' ? true : options?.raceLocalFallback !== false
   const staleWhileRevalidate = typeof options === 'boolean' ? true : options?.staleWhileRevalidate !== false
   const retryTimedOutRead = typeof options === 'boolean' ? true : options?.retryTimedOutRead !== false
+  const callerSignal = typeof options === 'boolean' ? undefined : options?.signal
+  throwIfRequestAborted(callerSignal)
   const browserExplicitlyOffline = typeof navigator !== 'undefined' && navigator.onLine === false
 
   // ?€?€ Reads ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1208,7 +1245,8 @@ export async function route<T = any>(
       if (cached !== null && stale && staleWhileRevalidate) {
         // Stale-while-revalidate: return stale now, refresh in background
         logCall(channel, 'cache-stale', 0)
-        tryServerReadWithRetry(serverFn, undefined, retryTimedOutRead).then(result => {
+        tryServerReadWithRetry(serverFn, callerSignal, retryTimedOutRead).then(result => {
+          throwIfRequestAborted(callerSignal)
           cacheSet(channel, result)
           emitCacheRefresh(channel)
         }).catch((error) => {
@@ -1225,7 +1263,7 @@ export async function route<T = any>(
         if (hasReusableInflight(channel)) {
           if (localFn) {
             if (raceLocalFallback) {
-              return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0, 'cache-dedup', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
+              return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0, 'cache-dedup', HEALTHY_SERVER_LOCAL_FALLBACK_MS, callerSignal)
             }
             logCall(channel, 'cache-dedup', Date.now() - t0)
             return _inflight[channel]
@@ -1236,7 +1274,8 @@ export async function route<T = any>(
 
         const searchGroup = typeof options === 'object' ? options.searchGroup : undefined
         const groupCtrl = searchGroup ? beginSearchGroup(searchGroup) : null
-        const promise = tryServerReadWithRetry(serverFn, groupCtrl?.signal, retryTimedOutRead).then(result => {
+        const promise = tryServerReadWithRetry(serverFn, groupCtrl?.signal || callerSignal, retryTimedOutRead).then(result => {
+          throwIfRequestAborted(callerSignal)
           cacheSet(channel, result)
           setServerHealth(true)
           logCall(channel, 'server', Date.now() - t0)
@@ -1253,7 +1292,7 @@ export async function route<T = any>(
         _inflightStartedAt[channel] = Date.now()
         
         if (localFn && raceLocalFallback) {
-          return raceServerReadWithLocalFallback(channel, promise, localFn, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
+          return raceServerReadWithLocalFallback(channel, promise, localFn, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS, callerSignal)
         } else {
           try {
             return await promise
@@ -1278,7 +1317,9 @@ export async function route<T = any>(
             }
             noteReadFailure(channel, e, 'local-fallback', t0)
             if (localFn) {
-              const localResult = await localFn()
+              throwIfRequestAborted(callerSignal)
+              const localResult = await localFn(callerSignal)
+              throwIfRequestAborted(callerSignal)
               if (hasUsableLocalData(localResult)) {
                 cacheSet(channel, localResult)
                 logCall(channel, 'local-fallback', Date.now() - t0)
@@ -1295,7 +1336,7 @@ export async function route<T = any>(
 
     // Local fallback
     if (localFn) {
-      return resolveLocalRead(channel, localFn)
+      return resolveLocalRead(channel, localFn, 'local', callerSignal)
     }
 
     return null
