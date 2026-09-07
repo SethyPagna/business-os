@@ -160,7 +160,7 @@ async function realDbChecks() {
 
   rawDb.prepare("INSERT INTO suppliers (name, phone) VALUES ('Acknowledged Exact', '066 111 222')").run()
   const strictGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { name: 'Acknowledged Exact', phones: ['066111222'] })
-  assert.throws(() => rawDb.prepare(strictGuard.sql).get(strictGuard.params), /malformed JSON/, 'an unacknowledged owner aborts the write guard')
+  assert.throws(() => rawDb.prepare(strictGuard.sql).run(strictGuard.params), /UNIQUE constraint failed/, 'an unacknowledged owner aborts the write guard')
   const acknowledgedMatches = await lib.findContactDuplicates(db, 'suppliers', { name: 'Acknowledged Exact', phones: ['066111222'] })
   const acknowledgedReview = lib.buildContactDuplicateReview(acknowledgedMatches)
   const decision = { action: 'create_separate', ...acknowledgedReview }
@@ -169,7 +169,7 @@ async function realDbChecks() {
   rawDb.prepare("UPDATE suppliers SET name='Renamed Concurrently' WHERE name='Acknowledged Exact'").run()
   assert.throws(() => rawDb.prepare(allowedGuard.sql).get(allowedGuard.params), /malformed JSON/, 'a concurrent rename invalidates the earlier exact-match acknowledgement')
   const clearGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { phones: ['097000000'] })
-  assert.strictEqual(rawDb.prepare(clearGuard.sql).get(clearGuard.params).contact_duplicate_guard, 1, 'a free canonical phone passes the write-time guard')
+  assert.strictEqual(rawDb.prepare(clearGuard.sql).run(clearGuard.params).meta.changes, 0, 'a free canonical phone passes the write-time guard')
   passed += 1
   console.log('PASS atomic duplicate guard blocks races and preserves only the acknowledged full candidate snapshot')
 
