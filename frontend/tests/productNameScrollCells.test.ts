@@ -317,19 +317,35 @@ runTest('no product-name cell still wraps or ellipsises instead of scrolling', (
 //      override N26. (These are also other lanes' files: ledger2 owns
 //      StockChangeSection, stockin owns the three stock-in surfaces.)
 //
-// Shapes asserted: 'truncate+title' = clips AND reveals on hover;
-// 'wrap' = wraps to a second line, which has no ellipsis and so no dead end.
-// Neither may quietly acquire the scrolling class instead.
+//   3. ANOTHER LANE'S FILE, defect recorded rather than fixed. Three product
+//      pickers inside the import modals clip a name with no tooltip at all.
+//      That IS the dead end N36 names, but BulkImportModal.tsx belongs to a
+//      wave-3 i18n lane, so this lane records the shape instead of rewriting
+//      it: the entries below assert the defect as it stands today, so when the
+//      owning lane touches those cells this file goes red and the exclusion is
+//      re-decided rather than inherited. The same applies to the Inventory
+//      movements ledger, which ledger2 owns -- there the clip at least has a
+//      title=, so it is a working reveal, not a dead end.
+//
+// Shapes asserted:
+//   'dense-truncate+title' = a dense ledger cell: clips via dense-cell-truncate
+//        AND reveals on hover (this is what historyRowModel.test.ts keys on);
+//   'truncate+title'       = clips via plain `truncate` AND reveals on hover;
+//   'truncate-no-title'    = clips with NO reveal -- a STATED DEFECT owned by
+//        another lane, pinned so it cannot change unnoticed;
+//   'wrap'                 = wraps to a second line, so no ellipsis and no
+//        dead end.
+// None of them may quietly acquire the scrolling class instead.
 const EXCLUDED_CELLS: Array<{
   label: string
   file: string
   marker: string
-  shape: 'truncate+title' | 'wrap'
+  shape: 'dense-truncate+title' | 'truncate+title' | 'truncate-no-title' | 'wrap'
   title?: string
 }> = [
   // 1. dense ledger
   { label: 'Stock Change mobile card', file: 'components/products/StockChangeSection.tsx', marker: 'text-[13px] font-semibold leading-4 text-gray-800', shape: 'wrap' },
-  { label: 'Stock Change desktop row', file: 'components/products/StockChangeSection.tsx', marker: 'block dense-cell-truncate font-semibold', shape: 'truncate+title', title: 'title={row.product_name}' },
+  { label: 'Stock Change desktop row', file: 'components/products/StockChangeSection.tsx', marker: 'block dense-cell-truncate font-semibold', shape: 'dense-truncate+title', title: 'title={row.product_name}' },
   // 2. owner ruling N26 -- these WRAP on purpose, barcode underneath
   { label: 'Stock-in sessions receipt row', file: 'components/products/StockInSessionsSection.tsx', marker: 'break-words font-semibold">{row.product_name}', shape: 'wrap' },
   { label: 'Stock-in sessions mobile card', file: 'components/products/StockInSessionsSection.tsx', marker: 'block break-words text-[13px] font-medium leading-4', shape: 'wrap' },
@@ -346,9 +362,72 @@ const EXCLUDED_CELLS: Array<{
   { label: 'Product description sheet title', file: 'components/products/surfaces/ProductDescriptionDetailModal.tsx', marker: '{productName}', shape: 'wrap' },
   { label: 'Inventory product detail sheet title', file: 'components/inventory/ProductDetailModal.tsx', marker: '{p.name}</div>', shape: 'wrap' },
   { label: 'Stock-in line detail title', file: 'components/products/StockInSessionsSection.tsx', marker: 'font-semibold text-gray-900 dark:text-white">{selectedLine.product_name}', shape: 'wrap' },
+  // 4. ANOTHER LANE'S FILE -- the shape is recorded, not repaired.
+  //    These three import-modal cells are the dead end N36 names: a product
+  //    name clipped to an ellipsis with NO title=, so there is no way to read
+  //    the rest of it. They are NOT excused, they are HANDED OVER:
+  //    BulkImportModal.tsx belongs to a wave-3 i18n lane, so converting them
+  //    here would collide with a live lane over a file this lane has no
+  //    business rewriting. `truncate-no-title` asserts the defect exactly as
+  //    it stands, so the moment the owning lane touches one of these cells
+  //    this file goes red and the hand-over is re-decided rather than
+  //    inherited in silence.
+  { label: 'Import conflicts row name', file: 'components/products/import/BulkImportModal.tsx', marker: "{editedRow.name || 'Needs a product name'}", shape: 'truncate-no-title' },
+  { label: 'Import row picker option', file: 'components/products/import/BulkImportModal.tsx', marker: "String(row._rowNumber))}: {row.name}", shape: 'truncate-no-title' },
+  { label: 'Import existing-product picker option', file: 'components/products/import/BulkImportModal.tsx', marker: '{product.name}', shape: 'truncate-no-title' },
+  //    The Inventory movements ledger. ledger2 owns this file, and unlike the
+  //    three above the clip at least HAS a title=, so it is a working reveal
+  //    rather than a dead end -- the same standing the dense Stock Change row
+  //    has. Recorded here so that "this lane did not convert it" is a stated
+  //    ruling with a reason, not silence.
+  { label: 'Inventory movements ledger name', file: 'components/inventory/InventoryMovementsSurface.tsx', marker: "{movement.product_name || (t('product')", shape: 'truncate+title', title: "title={movement.product_name || ''}" },
 ]
 
-runTest('the ledger and stock-in name cells stay OUT of the scroll conversion, on purpose', () => {
+// The bindings the completeness sweep in 2c reaches that are NOT product
+// names. Each is a different thing that happens to be spelled `name` or
+// `label`, so converting it would be wrong, and staying silent about it would
+// make the sweep's "nothing is left unclassified" claim unfalsifiable. The
+// sweep requires every hit to be in exactly one of the three lists.
+const NOT_A_PRODUCT_NAME: Array<{ file: string; marker: string; why: string }> = [
+  { file: 'components/products/forms/ProductForm.tsx', marker: 'text-gray-700 dark:text-gray-300">{branch.name}', why: 'a BRANCH name in the per-branch stock list' },
+  { file: 'components/products/import/BulkImportModal.tsx', marker: 'text-slate-400 dark:text-slate-500">{label}', why: 'a column caption in the compare grid' },
+  { file: 'components/products/import/BulkImportModal.tsx', marker: "{csvData.name || T('selected_file'", why: 'the chosen CSV FILE name' },
+  { file: 'components/products/import/BulkImportModal.tsx', marker: "{imageDir || zipFile?.name", why: 'the chosen image folder / zip FILE name' },
+  { file: 'components/products/import/ImportHub.tsx', marker: 'font-medium truncate">{entry.name}', why: 'a queued spreadsheet FILE name' },
+  { file: 'components/products/lookups/ManageBrandsModal.tsx', marker: 'text-gray-800 dark:text-gray-200">{entry.name}', why: 'a BRAND name' },
+  { file: 'components/products/lookups/ManageBrandsModal.tsx', marker: '{entry.sampleProducts.map(', why: 'a comma-joined SAMPLE list under a brand row, not that row’s own name' },
+  { file: 'components/products/lookups/ManageBrandsModal.tsx', marker: 'flex-1 truncate font-medium">{name}', why: 'a BRAND name beside its colour dot' },
+  { file: 'components/products/lookups/ManageCategoriesModal.tsx', marker: 'text-gray-700 dark:text-gray-300">{category.name}', why: 'a CATEGORY name' },
+  { file: 'components/products/lookups/ManageCategoriesModal.tsx', marker: '{category.sample_products.map(', why: 'a comma-joined SAMPLE list under a category row' },
+  { file: 'components/products/lookups/ManageUnitsModal.tsx', marker: 'text-gray-700 dark:text-gray-300">{unit.name}', why: 'a UNIT name' },
+  { file: 'components/products/lookups/ManageUnitsModal.tsx', marker: '{unit.sample_products.map(', why: 'a comma-joined SAMPLE list under a unit row' },
+  { file: 'components/products/Products.tsx', marker: '{tr(section.key, section.label)}', why: 'a hub SECTION pill' },
+  { file: 'components/products/Products.tsx', marker: '"truncate">{opt.label}', why: 'a bulk-edit MODE option label' },
+  { file: 'components/products/surfaces/ProductRowParts.tsx', marker: 'bg-cyan-900/30 dark:text-cyan-200">', why: 'a per-branch stock CHIP ("shop 12"), derived metadata' },
+  { file: 'components/products/surfaces/ProductsListSurface.tsx', marker: '"truncate">{section.label}', why: 'a SECTION chip on the Products page' },
+  { file: 'components/products/surfaces/ProductsListSurface.tsx', marker: 'min-w-0 truncate">{section.label}', why: 'the same SECTION chip in its second layout' },
+  { file: 'components/inventory/InventoryReasonManagerModal.tsx', marker: '{entry.label}', why: 'a stock-movement REASON label' },
+  { file: 'components/branches/Branches.tsx', marker: 'uppercase text-gray-400 dark:text-gray-500 sm:text-[11px]">{label}', why: 'a stat CARD caption' },
+]
+
+// The element a marker sits in: from the tag that opens it (the nearest '<'
+// before its own class string) to a little past the marker. A title= can sit
+// on either side of the text node -- after it on the dense ledger row, before
+// it on the movements button -- so a tail-only window silently misses half of
+// them, which is how a "has a tooltip" check passes on a cell that has none.
+function elementWindow(source: string, marker: string): string {
+  const at = source.indexOf(marker)
+  assert.ok(at > 0, `marker not found: ${marker}`)
+  const cls = source.lastIndexOf('className="', at)
+  const open = source.lastIndexOf('<', cls > -1 ? cls : at)
+  // Stop at the next tag. A fixed-width tail reaches into the NEXT element, so
+  // a sibling badge's title= would answer for a name cell that has none --
+  // which is exactly the false pass this window exists to prevent.
+  const shut = source.indexOf('<', at + marker.length)
+  return source.slice(open > -1 ? open : Math.max(0, at - 400), shut > -1 ? shut : at + 240)
+}
+
+runTest('the name cells left out of the conversion each hold their stated shape', () => {
   for (const { label, file, marker, shape, title } of EXCLUDED_CELLS) {
     const source = read(file)
     const owner = classNear(source, marker)
@@ -358,14 +437,106 @@ runTest('the ledger and stock-in name cells stay OUT of the scroll conversion, o
       /\bscroll-x-clean\b/,
       `${where}\n  -- converting this cell needs its own region_exceptions entry plus a check that historyRowModel.test.ts and stockInSessionProductNames.test.ts stay green`,
     )
-    if (shape === 'truncate+title') {
+    const element = elementWindow(source, marker)
+    if (shape === 'dense-truncate+title') {
       assert.match(owner, /\bdense-cell-truncate\b/, `${where}\n  -- the dense ledger row's clipping is what historyRowModel.test.ts keys its tooltip rule on`)
-      const tail = source.slice(source.indexOf(marker), source.indexOf(marker) + 240)
-      assert.ok(title && tail.includes(title), `${where}\n  -- a clipped ledger value with no tooltip is a dead-end ellipsis`)
+      assert.ok(title && element.includes(title), `${where}\n  -- a clipped ledger value with no tooltip is a dead-end ellipsis`)
+    } else if (shape === 'truncate+title') {
+      assert.match(owner, /\btruncate\b/, `${where}\n  -- the recorded shape is a clip with a tooltip; it no longer clips`)
+      assert.ok(title && element.includes(title), `${where}\n  -- the tooltip that made this clip readable is gone, so it is now a dead end`)
+    } else if (shape === 'truncate-no-title') {
+      assert.match(owner, /\btruncate\b/, `${where}\n  -- recorded as a clipping cell handed to its owning lane; it no longer clips`)
+      assert.doesNotMatch(
+        element,
+        /\btitle=/,
+        `${where}\n  -- this cell was handed over as a KNOWN dead-end ellipsis; it now has a tooltip, so the hand-over is stale and the exclusion must be re-decided (convert it, or re-record the shape as truncate+title)`,
+      )
     } else {
       assert.match(owner, /\bbreak-words\b/, `${where}\n  -- this cell wraps by ruling; losing the wrap is a behaviour change, not a class tidy-up`)
     }
   }
+})
+
+// ---------------------------------------------------------------------------
+// 2c. Completeness -- no name cell can be silent
+// ---------------------------------------------------------------------------
+// The lists above are only worth as much as the enumeration behind them, and
+// the previous enumeration was a grep whose binding filter knew exactly
+// {product.name}, product_name, productName, {group.name} and {group.label}.
+// Four cells walked straight through it -- {editedRow.name} in the import
+// conflicts row, {adjustModal.name} and {transferModal.name} in the Inventory
+// stock dialogs, and {movement.product_name} behind an `||` fallback -- and
+// the lane reported "nothing is silent" while they were.
+//
+// So the sweep below does not look for a spelling. It walks every .tsx under
+// components/products, components/inventory and components/branches and finds
+// every JSX TEXT binding whose value path ends in name / product_name /
+// productName / product_names / label, sitting inside an element whose class
+// clips or wraps. Each hit must be accounted for by exactly one of the three
+// lists -- converted (NAME_CELLS), deliberately not converted
+// (EXCLUDED_CELLS), or not a product name at all (NOT_A_PRODUCT_NAME).
+// A new clipped name cell anywhere in those trees turns this red.
+const CLIPPING = /\b(truncate|break-words|line-clamp-\d|whitespace-normal|dense-cell-truncate)\b/
+const NAME_BINDING = /^(name|product_name|productName|product_names|label)$/
+
+function tsxFiles(rel: string, out: string[] = []): string[] {
+  for (const entry of fs.readdirSync(new URL(`../src/${rel}`, import.meta.url), { withFileTypes: true })) {
+    if (entry.isDirectory()) tsxFiles(`${rel}${entry.name}/`, out)
+    else if (entry.name.endsWith('.tsx')) out.push(`${rel}${entry.name}`)
+  }
+  return out
+}
+
+// The index of the class string that owns a position -- the key both the sweep
+// and the three lists reduce to, so "this hit is that entry" is an identity,
+// not a line number.
+const ownerAt = (source: string, at: number) => source.lastIndexOf('className="', at)
+
+runTest('every clipped or wrapped name binding is accounted for by one of the three lists', () => {
+  const claimed = new Set<string>()
+  for (const entry of [
+    ...NAME_CELLS.map(([, file, marker]) => ({ file, marker })),
+    ...EXCLUDED_CELLS.map(({ file, marker }) => ({ file, marker })),
+    ...NOT_A_PRODUCT_NAME.map(({ file, marker }) => ({ file, marker })),
+  ]) {
+    const source = read(entry.file)
+    const at = source.indexOf(entry.marker)
+    assert.ok(at > 0, `list entry's marker not found: ${entry.file} :: ${entry.marker}`)
+    claimed.add(`${entry.file}#${ownerAt(source, at)}`)
+  }
+
+  const silent: string[] = []
+  for (const file of [...tsxFiles('components/products/'), ...tsxFiles('components/inventory/'), ...tsxFiles('components/branches/')]) {
+    const source = read(file)
+    for (const match of source.matchAll(/\{([^{}]{1,160}?)\}/g)) {
+      // An attribute value (`prop={...}`), a template hole (`${...}`) and a
+      // destructured parameter (`({ a, b })`) are not text the user reads.
+      const before = source.slice(0, match.index).replace(/\s+$/, '').slice(-1)
+      if (before === '=' || before === '$' || before === '(' || before === ',') continue
+      const expression = match[1]
+      if (expression.includes(';')) continue // a type literal, not a value
+      let binds = false
+      for (const path of expression.matchAll(/[A-Za-z_$][\w$]*(?:\.[\w$]+)*/g)) {
+        if (!NAME_BINDING.test(String(path[0].split('.').pop()))) continue
+        if (expression[path.index + path[0].length] === ':') continue // an object KEY
+        binds = true
+      }
+      if (!binds) continue
+      const cls = ownerAt(source, match.index)
+      if (cls < 0) continue
+      const start = cls + 'className="'.length
+      const end = source.indexOf('"', start)
+      if (end > match.index) continue // the class string is not closed before the text
+      if (!CLIPPING.test(source.slice(start, end))) continue
+      if (claimed.has(`${file}#${cls}`)) continue
+      silent.push(`${file}:${source.slice(0, match.index).split('\n').length}  {${expression.trim()}}  ==> ${source.slice(start, end)}`)
+    }
+  }
+  assert.deepEqual(
+    silent,
+    [],
+    `these clipped/wrapped name bindings are in none of the three lists -- convert them, exclude them with a reason, or record them as not-a-product-name:\n  ${silent.join('\n  ')}`,
+  )
 })
 
 runTest('the scroll behaviour lives in ONE place, not per file', () => {
