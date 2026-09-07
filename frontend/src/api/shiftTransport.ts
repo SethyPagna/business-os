@@ -177,7 +177,7 @@ export function parseShiftCount(value: unknown): number | null {
 }
 
 /**
- * The count a FORM field holds, where blank means 0.
+ * The count a required OPEN/REOPEN form field holds, where blank means 0.
  *
  * Owner, 2026-09-06: the Start-shift button sat disabled because only one
  * currency had been typed -- "i had to enter the usd as well as khmer riel".
@@ -186,9 +186,9 @@ export function parseShiftCount(value: unknown): number | null {
  * shift_blank_count_hint). Only a blank becomes 0: a negative, NaN or
  * infinite entry is still rejected, exactly as parseShiftCount rejects it.
  *
- * This is the ONE rule for every two-currency count form (POS register, POS
- * close, and the Shifts popup's amend / close / reopen). The Worker's
- * requiredMoney already accepts 0, so it is unchanged.
+ * Closing counts use shiftClosingCounts instead because a blank close field
+ * means that currency was not measured. The Worker's required opening-money
+ * contract accepts 0, so opening and reopening retain this rule.
  */
 export function shiftCountOrZero(value: unknown): number | null {
   if (typeof value === 'string' && value.trim() === '') return 0
@@ -225,19 +225,15 @@ export function shiftCountPairBlocker(
 /**
  * The counted drawer a CLOSE form submits.
  *
- * Both fields blank means the drawer was not counted, which is null on the
- * wire and NULL in the column -- never 0, because "the till held nothing" and
- * "nobody counted the till" are different facts and the shift report prints
- * them differently. One field blank still means 0 in that currency: a drawer
- * holding only riel is an ordinary drawer, which is the shiftCountOrZero rule
- * and is unchanged. ONE implementation, used by POS close and by the Shifts
+ * Each currency is independent. A blank field means that currency was not
+ * counted, which is null on the wire and NULL in the column -- never 0,
+ * because "the till held nothing" and "nobody counted the till" are different
+ * facts and the shift report prints them differently. An explicit 0 remains a
+ * measured zero. ONE implementation is used by POS close and by the Shifts
  * popup's close.
  */
 export function shiftClosingCounts(usd: unknown, khr: unknown): { usd: number | null; khr: number | null } {
-  const usdBlank = typeof usd === 'string' && usd.trim() === ''
-  const khrBlank = typeof khr === 'string' && khr.trim() === ''
-  if (usdBlank && khrBlank) return { usd: null, khr: null }
-  return { usd: shiftCountOrZero(usd), khr: shiftCountOrZero(khr) }
+  return { usd: parseShiftCount(usd), khr: parseShiftCount(khr) }
 }
 
 function requiredShiftCount(value: unknown, label: string): number {
