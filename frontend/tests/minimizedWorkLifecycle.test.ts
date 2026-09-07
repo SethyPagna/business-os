@@ -129,7 +129,7 @@ const branchFormSource = readFileSync(new URL('../src/components/branches/Branch
 assert.match(traySource, /entry\.draftKey \|\| \(legacyDraftBase \? scopedWorkDraftKey\(legacyDraftBase\) : null\)/)
 assert.match(traySource, /aria-label=\{tr\('minimized_dismiss_hint', 'Dismiss and discard this draft'/)
 assert.match(traySource, /receive_batch: null/, 'per-product receive drafts must never use a family-wide fallback clear')
-assert.match(traySource, /if \(!canRestoreMinimizedWork\(entry, can\)\) \{[\s\S]*?return[\s\S]*?\}\s*navigateTo\(entry\.pageId\)/, 'permission must be rechecked before navigation and dispatch')
+assert.match(traySource, /if \(!canRestoreMinimizedWork\(entry, can\)\) \{[\s\S]*?return[\s\S]*?\}\s*navigateTo\(entry\.pageId, entry\.anchor\)/, 'permission must be rechecked before exact page/section navigation and dispatch')
 assert.match(receiveSource, /writeWorkDraft\(draftKey, currentDraft\(\)\)[\s\S]*?onMinimize\(\{[\s\S]*?draftKey,[\s\S]*?\}\)[\s\S]*?onClose\(\)/, 'receive minimize must persist before parking and unmounting')
 assert.match(receiveSource, /useCloseGuard\(\{ workKey: product \? `receive-batch-\$\{product\.id\}` : '' \}, onClose, preserveAndMinimize\)/, 'receive X, Cancel and backdrop must retain the shared guard while its prompt can preserve')
 assert.match(receiveSource, /<MinimizeButton disabled=\{saving\} tr=\{tr\} onMinimize=\{preserveAndMinimize\} \/>/, 'receive must show the shared minus beside Close')

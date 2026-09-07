@@ -33,6 +33,8 @@ export type MinimizedWorkEntry = {
   /** The sidebar page hosting the flow (live navigationConfig id -- the
    * hubs' ids post-E-phase: 'products', 'branches', 'sales', ...). */
   pageId: string
+  /** Optional hub section anchor, for flows hosted below a consolidated page. */
+  anchor?: string
   /** Chip label ("Add product — Dior 999"). */
   label: string
   /** Optional restore detail (e.g. a product id for a detail tab). */
