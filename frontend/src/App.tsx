@@ -19,6 +19,7 @@ import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { restartIntoLatestApp } from './utils/appUpdate.ts'
+import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
@@ -218,6 +219,7 @@ interface SyncErrorBannerProps {
 
 interface AppUpdateBannerProps {
   update: SyncProblemDetail | null
+  onDismiss: () => void
 }
 
 interface OfflineModeBannerProps {
@@ -726,6 +728,7 @@ function useSyncErrorBanner(user: AppUser | null) {
   const [pendingSync, setPendingSync] = useState<PendingSyncState | null>(null)
   const [vaultLocked, setVaultLocked] = useState<SyncProblemDetail | null>(null)
   const [appUpdate, setAppUpdate] = useState<SyncProblemDetail | null>(null)
+  const dismissedAppUpdateRef = useRef('')
   const [conflictsNeedReview, setConflictsNeedReview] = useState<WriteConflictDetail | null>(null)
 
   // App updates are independent of authentication. A waiting worker may
@@ -740,6 +743,7 @@ function useSyncErrorBanner(user: AppUser | null) {
       // the page is already running. That is not an update and must not nag
       // the user; a genuinely newer waiting/active worker has a different hash.
       if (announcedHash && FRONTEND_BUILD_HASH !== 'dev' && announcedHash === FRONTEND_BUILD_HASH) return
+      if (persistentNoticeFingerprint('app-update', detail) === dismissedAppUpdateRef.current) return
       setAppUpdate(detail)
     }
     const onAppUpdate = (event: Event) => acceptAppUpdate(
@@ -835,7 +839,10 @@ function useSyncErrorBanner(user: AppUser | null) {
     appUpdate,
     conflictsNeedReview,
     clearVaultLocked: () => setVaultLocked(null),
-    clearAppUpdate: () => setAppUpdate(null),
+    clearAppUpdate: () => {
+      if (appUpdate) dismissedAppUpdateRef.current = persistentNoticeFingerprint('app-update', appUpdate)
+      setAppUpdate(null)
+    },
     clearConflictsNeedReview: () => setConflictsNeedReview(null),
     clearSyncError: () => setSyncError(null),
   }
@@ -1136,7 +1143,7 @@ function Notification({ notification, onDismiss }: NotificationProps) {
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
-function AppUpdateBanner({ update }: AppUpdateBannerProps) {
+function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
   const { t } = useApp()
   const [restarting, setRestarting] = useState(false)
 
@@ -1161,16 +1168,22 @@ function AppUpdateBanner({ update }: AppUpdateBannerProps) {
         <span className="min-w-0 text-sm font-semibold">
           {t('app_update_ready') || 'A new version is ready.'}
         </span>
-        <button
-          type="button"
-          onClick={() => { void restart() }}
-          disabled={restarting}
-          className="shrink-0 rounded-lg bg-white px-3 py-1.5 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-70 dark:text-blue-700"
-        >
-          {restarting
-            ? (t('restarting_app') || 'Restarting...')
-            : (t('restart_now') || 'Restart now')}
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => { void restart() }}
+            disabled={restarting}
+            className="rounded-lg bg-white px-3 py-1.5 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-70 dark:text-blue-700"
+          >
+            {restarting
+              ? (t('restarting_app') || 'Restarting...')
+              : (t('restart_now') || 'Restart now')}
+          </button>
+          <button type="button" onClick={onDismiss} aria-label={t('dismiss_notification') || 'Dismiss notification'}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-xl leading-none text-white/80 hover:bg-white/15 hover:text-white">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -1364,6 +1377,9 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   const total = Number(pendingSync?.total || 0)
   const [showRecovered, setShowRecovered] = useState(false)
   const [showVerboseMessage, setShowVerboseMessage] = useState(false)
+  const [dismissedNotice, setDismissedNotice] = useState('')
+  const [outageEpoch, setOutageEpoch] = useState(0)
+  const priorOfflineRef = useRef(false)
   const wasOfflineRef = useRef(false)
 
   useEffect(() => {
@@ -1419,6 +1435,20 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : t('offline_mode') || 'Offline mode')
   const message = priority?.message || `${label}${statusSuffix}`
   const shouldShowVerboseImmediately = !!priority || total > 0 || offline
+  const noticeFingerprint = persistentNoticeFingerprint(
+    offline ? 'offline-outage' : 'offline-recovered',
+    offline ? transientOutage : { reason: 'recovered' },
+    outageEpoch,
+  )
+  const hasBlockingError = failed > 0 || Boolean(priority)
+
+  useEffect(() => {
+    if (offline && !priorOfflineRef.current) {
+      setOutageEpoch((value) => value + 1)
+      setDismissedNotice('')
+    }
+    priorOfflineRef.current = offline
+  }, [offline])
 
   useEffect(() => {
     if (!offline && !ready && !priority && !showRecovered) {
@@ -1435,6 +1465,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   }, [offline, ready, priority, showRecovered, shouldShowVerboseImmediately])
 
   if (!offline && !total && !showRecovered && !vaultLocked && !conflictsNeedReview) return null
+  if (!shouldRenderPersistentNotice(noticeFingerprint, dismissedNotice, hasBlockingError)) return null
 
   return (
     <div className={`pointer-events-none fixed left-1/2 top-16 z-[1100] ${showVerboseMessage ? 'w-[min(calc(100vw-1rem),56rem)]' : 'w-[min(calc(100vw-1rem),24rem)]'} -translate-x-1/2 px-2 md:top-[4.25rem]`}>
@@ -1473,6 +1504,13 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
               </div>
             ) : null}
           </div>
+          {!hasBlockingError ? (
+            <button type="button" onClick={() => setDismissedNotice(noticeFingerprint)}
+              aria-label={t('dismiss_notification') || 'Dismiss notification'}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg leading-none opacity-70 hover:bg-current/10 hover:opacity-100">
+              <span aria-hidden="true">×</span>
+            </button>
+          ) : null}
             <div className="flex shrink-0 items-center gap-2">
             {total ? (
               <button
@@ -1672,6 +1710,7 @@ export default function App() {
     appUpdate,
     conflictsNeedReview,
     clearSyncError,
+    clearAppUpdate,
   } = useSyncErrorBanner(authReady ? user : null)
   const mountedPages = useMountedPages(page)
   const mobileHeaderVisible = useMobileHeaderAutoHide(page)
@@ -1912,7 +1951,7 @@ export default function App() {
     // loading screens appearing back to back during boot/navigation.
     return (
       <>
-        <AppUpdateBanner update={appUpdate} />
+        <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
         <div className="business-os-initial-shell" role="status" aria-live="polite">
           <div className="business-os-initial-panel">
             <div className="business-os-initial-spinner" aria-hidden="true" />
@@ -1929,7 +1968,7 @@ export default function App() {
   if (!user) {
     return (
       <>
-        <AppUpdateBanner update={appUpdate} />
+        <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
         <Suspense fallback={<PageLoader />}>
           <Login />
         </Suspense>
@@ -1939,7 +1978,7 @@ export default function App() {
 
   return (
     <div id="app-root" className={`flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900 ${appUpdate ? 'pt-[calc(3rem+env(safe-area-inset-top))]' : ''}`}>
-      <AppUpdateBanner update={appUpdate} />
+      <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
       {/* Desktop's standalone top bar (logo, business name, notification
           bell, theme/language toggles in their own h-14 row above the
           sidebar+content) is gone -- per request, large screens fold all
