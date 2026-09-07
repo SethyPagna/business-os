@@ -85,6 +85,10 @@ function loadReal(relPath, requireOverrides = {}) {
 const importImageMatch = loadReal('lib/importImageMatch.ts')
 const media = loadReal('lib/media.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
+const productImagePermission = loadReal('lib/productImagePermission.ts', {
+  './media': media,
+  './sqlBinding': sqlBinding,
+})
 const batchCode = loadReal('lib/batchCode.ts')
 const searchMatch = loadReal('lib/searchMatch.ts')
 const productDetailRule = loadReal('lib/productDetailRule.ts')
@@ -161,6 +165,7 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/importImageMatch': importImageMatch,
   '../lib/media': media,
   '../lib/sqlBinding': sqlBinding,
+  '../lib/productImagePermission': productImagePermission,
   '../lib/productWrites': productWrites,
   // Product merge economics has dedicated route/kernel tests. Gallery wiring
   // never invokes it, but the identity lane imports it from products.ts.
