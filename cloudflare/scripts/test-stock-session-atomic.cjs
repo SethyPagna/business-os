@@ -136,6 +136,18 @@ function receiveRequest(requestId = 'stock-request-001', quantity = 5) {
   }
 }
 
+function seedDistinctProducts(f, count) {
+  const insertProduct = f.sql.prepare(`
+    INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
+    VALUES(?,?,?,?,0,0,1)
+  `)
+  const insertStock = f.sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,0)')
+  for (let id = 2; id <= count; id += 1) {
+    insertProduct.run(id, `Session item ${id}`, `SESSION-${id}`, 2)
+    insertStock.run(id)
+  }
+}
+
 function zeroCreateRequest(requestId = 'zero-create-request-001', name = 'Catalog only cream') {
   return {
     client_request_id: requestId, mode: 'stock_in',
@@ -507,8 +519,9 @@ async function main() {
 
   await check('the 25-line maximum stays one atomic receipt and 26 lines reject', async () => {
     const f = fixture()
+    seedDistinctProducts(f, 26)
     const items = Array.from({ length: 25 }, (_unused, index) => ({
-      line_id: `line-${String(index + 1).padStart(2, '0')}`, kind: 'receive', product_id: 1, quantity: 1,
+      line_id: `line-${String(index + 1).padStart(2, '0')}`, kind: 'receive', product_id: index + 1, quantity: 1,
     }))
     const receipt = await commitStockSession(f.env, user, {
       client_request_id: 'stock-request-025', mode: 'stock_in',
@@ -516,16 +529,18 @@ async function main() {
     })
     assert.equal(receipt.memberCount, 25)
     assert.equal(receipt.totalQuantity, 25)
-    assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 25)
+    assert.equal(f.sql.prepare('SELECT SUM(stock_quantity) quantity FROM products').get().quantity, 25)
     await assert.rejects(() => commitStockSession(f.env, user, {
       client_request_id: 'stock-request-026', mode: 'stock_in',
       defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-06', unit_cost_usd: 2 },
-      items: [...items, { line_id: 'line-26', kind: 'receive', product_id: 1, quantity: 1 }],
+      items: [...items, { line_id: 'line-26', kind: 'receive', product_id: 26, quantity: 1 }],
     }), (error) => error instanceof StockSessionError && error.code === 'line_limit')
+    assert.equal(f.sql.prepare('SELECT SUM(stock_quantity) quantity FROM products').get().quantity, 25,
+      'the rejected 26-line request must not change any member')
   })
 
   if (failures.length) throw new Error(`${failures.length} stock-session atomic regression(s) failed`)
 }
 
-module.exports = { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest, receiptState }
+module.exports = { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest, receiptState, seedDistinctProducts }
 if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1 })
