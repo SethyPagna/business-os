@@ -32,18 +32,10 @@ const InventoryProductsSurface = lazyRetry(() => import('./InventoryProductsSurf
 const InventoryRfidSurface = lazyRetry(() => import('./InventoryRfidSurface'), 'inventory-rfid-surface') as any
 const InventoryStockModals = lazyRetry(() => import('./InventoryStockModals'), 'inventory-stock-modals') as any
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventory-fast-stock-in-modal') as any
-// F3 slice 2: the minimized-work chip's restore path (see
-// utils/minimizedWork.ts -- event for a mounted host, pending for a
-// fresh mount).
-import {
-  RESTORE_WORK_EVENT,
-  canRestoreMinimizedWork,
-  consumePendingRestore,
-  markRestoreHandled,
-  minimizeWork,
-  reparkDeniedRestore,
-  type MinimizedWorkEntry,
-} from '../../utils/minimizedWork.ts'
+// Fast Stock-in can still launch here, but its minimized chip resumes through
+// the canonical Products -> Stock Changes host. This retained Inventory body
+// must not listen for the shared restore event and reopen a hidden modal.
+import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork } from '../../utils/minimizedWork.ts'
 import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
@@ -560,26 +552,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // FastStockInModal.tsx; writes ride the same receive kernel as every
   // other add-stock surface.
   const [showFastStockIn, setShowFastStockIn] = useState(false)
-  useEffect(() => {
-    const restoreFastStockIn = (entry: MinimizedWorkEntry | null | undefined) => {
-      if (!can('inventory', 'adjust') || (entry && !canRestoreMinimizedWork(entry, can))) {
-        if (entry) reparkDeniedRestore(entry)
-        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
-        return
-      }
-      markRestoreHandled('fast_stockin')
-      setShowFastStockIn(true)
-    }
-    const pending = consumePendingRestore('fast_stockin')
-    if (pending) restoreFastStockIn(pending)
-    const onRestore = (event: Event) => {
-      const detail = (event as CustomEvent).detail
-      if (detail?.kind !== 'fast_stockin') return
-      restoreFastStockIn(detail.entry as MinimizedWorkEntry | undefined)
-    }
-    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
-    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
-  }, [can, notify, tr])
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -2737,7 +2709,7 @@ ${inventoryFeesFormulaText}`,
               minimizeWork({
                 key: 'fast-stockin',
                 kind: 'fast_stockin',
-                pageId: 'branches',
+                ...FAST_STOCK_IN_RESTORE_HOST,
                 label,
                 draftKey: scopedWorkDraftKey('fast_stockin'),
                 requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
