@@ -121,7 +121,9 @@ export function dispatchRestore(entry: MinimizedWorkEntry): void {
   removeMinimizedWork(entry.key)
   pendingRestore = entry
   pendingRestoreScope = storeKey
-  window.dispatchEvent(new CustomEvent(RESTORE_WORK_EVENT, { detail: { kind: entry.kind, payload: entry.payload || {} } }))
+  window.dispatchEvent(new CustomEvent(RESTORE_WORK_EVENT, {
+    detail: { kind: entry.kind, payload: entry.payload || {}, entry },
+  }))
 }
 
 export function canRestoreMinimizedWork(
