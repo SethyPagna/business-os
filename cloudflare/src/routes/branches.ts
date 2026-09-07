@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { getDb, toDbBool } from '../lib/db'
+import { getDb } from '../lib/db'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
@@ -16,6 +16,12 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
+import {
+  CANONICAL_BRANCH_IDENTITY_CODE,
+  CANONICAL_BRANCH_IDENTITY_ERROR,
+  CanonicalBranchIdentityError,
+  prepareCanonicalBranchUpdate,
+} from '../lib/canonicalBranchIdentity'
 // Transfers run warehouse -> shop. The direction rule lives with the two
 // canonical branch roles rather than being restated at each call site.
 import { transferDirectionError } from '../lib/branchRoleGuards'
@@ -1058,79 +1064,7 @@ app.post('/', async (c) => {
   if (getActionTier(user, 'branches', 'add') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json<BranchInput>()
-  const name = body.name?.trim()
-  if (!name) return c.json({ error: 'Name required' }, 400)
-
-  // Review Required tier: no live-state dependency (a straight insert with
-  // an optional is_default reassignment), safe to queue and replay exactly
-  // as-is later -- same reasoning as products.ts's create. maybeQueueForReview
-  // is a no-op (returns null) for Full tier, so this doesn't change behavior
-  // for anyone but a Review Required user.
-  const pendingId = await maybeQueueForReview(c.env, user, 'branches', {
-    actionType: 'create',
-    entityType: 'branch',
-    entityId: null,
-    payload: body,
-    summary: `Create branch "${name}"`,
-  })
-  if (pendingId != null) {
-    return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
-  }
-
-  const db = getDb(c.env)
-  const defaultFlag = toDbBool(body.is_default, 0)
-  const activeFlag = toDbBool(body.is_active, 1)
-
-  // Matches the original's db.transaction(): if this branch is being set as
-  // the new default, every other branch's is_default must clear first, in
-  // the same atomic unit as the insert -- otherwise a request that fails
-  // partway through could leave two branches both marked default.
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  if (defaultFlag) {
-    statements.push({ sql: 'UPDATE branches SET is_default = 0' })
-  }
-  statements.push({
-    sql: `INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active, updated_at)
-          VALUES (@name, @location, @phone, @manager, @notes, @is_default, @is_active, CURRENT_TIMESTAMP)`,
-    params: {
-      name,
-      location: body.location || null,
-      phone: body.phone || null,
-      manager: body.manager || null,
-      notes: body.notes || null,
-      is_default: defaultFlag,
-      is_active: activeFlag,
-    },
-  })
-  await db.batch(statements)
-
-  const created = await db.prepare('SELECT id FROM branches WHERE name = ? ORDER BY id DESC LIMIT 1').get<{ id: number }>([name])
-  if (created) {
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'branch', created.id, { name })
-    // Real, confirmed gap: a brand-new branch previously got zero
-    // branch_stock rows for the catalog that already existed -- only
-    // products created AFTER this branch (via seedBranchStockForNewProduct
-    // in lib/productWrites.ts) ever got one. Every existing product simply
-    // had NO row for this branch_id at all, which any branch-scoped view
-    // (POS's branch filter, Inventory's branch filter) reads as "doesn't
-    // stock this branch" -- reported as "POS shows no products for this
-    // branch even though the branch selector itself is populated
-    // correctly." Seeding every active product at 0 here makes a new
-    // branch start in the same state seedBranchStockForNewProduct already
-    // gives a brand-new product: present, explicitly zero, adjustable from
-    // there via a normal stock count/transfer -- not silently absent.
-    c.executionCtx.waitUntil(
-      db.prepare(
-        `INSERT INTO branch_stock (product_id, branch_id, quantity)
-         SELECT p.id, @branchId, 0 FROM products p
-         WHERE p.is_active = 1
-           AND NOT EXISTS (SELECT 1 FROM branch_stock bs WHERE bs.product_id = p.id AND bs.branch_id = @branchId)`
-      ).run({ branchId: created.id }).catch(() => {})
-    )
-  }
-  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'create', id: created?.id ?? null }))
-  return c.json({ id: created?.id ?? null })
+  return c.json({ error: CANONICAL_BRANCH_IDENTITY_ERROR, code: CANONICAL_BRANCH_IDENTITY_CODE }, 409)
 })
 
 app.put('/:id', async (c) => {
@@ -1143,7 +1077,8 @@ app.put('/:id', async (c) => {
   const body = await c.req.json<BranchInput & Record<string, unknown>>()
   const db = getDb(c.env)
 
-  const current = await db.prepare('SELECT id, updated_at FROM branches WHERE id = ?').get<{ id: number; updated_at: string }>([id])
+  const current = await db.prepare('SELECT id, name, is_active, updated_at FROM branches WHERE id = ?')
+    .get<{ id: number; name: string; is_active: number; updated_at: string }>([id])
   try {
     assertUpdatedAtMatch('branch', current, getExpectedUpdatedAt(body))
   } catch (error) {
@@ -1154,6 +1089,14 @@ app.put('/:id', async (c) => {
     throw error
   }
   if (!current) return c.json({ error: 'Branch not found' }, 404)
+  try {
+    prepareCanonicalBranchUpdate(current, body)
+  } catch (error) {
+    if (error instanceof CanonicalBranchIdentityError) {
+      return c.json({ error: CANONICAL_BRANCH_IDENTITY_ERROR, code: CANONICAL_BRANCH_IDENTITY_CODE }, 409)
+    }
+    throw error
+  }
 
   // Review Required tier: the conflict check above already confirmed the
   // request is against the current row, so queueing here is safe to
@@ -1174,9 +1117,9 @@ app.put('/:id', async (c) => {
 
   // Field write shared with the server-side undo/redo applier -- see
   // lib/branchWrites.ts for why this is one definition, not two.
-  await db.batch(branchUpdateStatements(id, body))
+  await db.batch(branchUpdateStatements(id, body, current))
 
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: body.name })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
   return c.json({})
 })
@@ -1187,59 +1130,7 @@ app.delete('/:id', async (c) => {
   if (getActionTier(user, 'branches', 'delete') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const id = c.req.param('id')
-  const db = getDb(c.env)
-
-  const branch = await db.prepare('SELECT * FROM branches WHERE id = ?').get<{ id: number; name: string; is_default: number; updated_at: string }>([id])
-  if (!branch) return c.json({ error: 'Branch not found' }, 404)
-
-  try {
-    assertUpdatedAtMatch('branch', branch, getExpectedUpdatedAt(Object.fromEntries(new URL(c.req.url).searchParams)))
-  } catch (error) {
-    if (error instanceof WriteConflictError) {
-      const { body: conflictBody, status } = writeConflictResponse(error)
-      return c.json(conflictBody, status)
-    }
-    throw error
-  }
-  if (branch.is_default) return c.json({ error: 'Cannot delete the default branch' }, 400)
-
-  const stockCheck = await db.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE branch_id = ? AND quantity > 0').get<{ total: number | null }>([id])
-  if (stockCheck && Number(stockCheck.total) > 0) {
-    return c.json({ error: `Cannot delete branch - it still contains ${Math.round(Number(stockCheck.total))} unit(s) of stock. Transfer all stock to another branch first.` }, 400)
-  }
-
-  // Review Required tier: both safety checks above (not-default, no-stock)
-  // already passed against the current row, so it's tempting to think this
-  // is as safe to queue-and-replay-later as create/update -- it isn't,
-  // because time can pass between queueing and a reviewer's approval and
-  // either check could flip false in the meantime (someone makes this the
-  // default branch, or stock gets transferred back into it). Unlike
-  // stock-integrity/repair and transfer above (blocked outright), a delete
-  // IS still queued here -- but its applier (lib/reviewApply.ts) re-runs
-  // both checks itself against whatever the branch's state is AT APPROVAL
-  // TIME, not the state captured when this was requested, and throws
-  // (leaving the row 'open' rather than silently deleting something that
-  // no longer qualifies) if either has changed. See that applier's own
-  // comment for the exact re-check.
-  const pendingDeleteId = await maybeQueueForReview(c.env, user, 'branches', {
-    actionType: 'delete',
-    entityType: 'branch',
-    entityId: Number(id),
-    payload: { id },
-    summary: `Delete branch #${id} "${branch.name}"`,
-  })
-  if (pendingDeleteId != null) {
-    return c.json({ success: true, pending: true, pendingActionId: pendingDeleteId }, 202)
-  }
-
-  await db.batch([
-    { sql: 'DELETE FROM branch_stock WHERE branch_id = ?', params: [id] },
-    { sql: 'DELETE FROM branches WHERE id = ?', params: [id] },
-  ])
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'branch', id, { name: branch.name })
-  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'delete', id }))
-  return c.json({})
+  return c.json({ error: CANONICAL_BRANCH_IDENTITY_ERROR, code: CANONICAL_BRANCH_IDENTITY_CODE }, 409)
 })
 
 export default app

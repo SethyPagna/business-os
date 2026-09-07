@@ -1659,14 +1659,15 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (!Number.isInteger(id) || id <= 0) {
         throw new Error('This action cannot be replayed: its saved details are missing a branch id.')
       }
-      const existing = await db.prepare('SELECT id FROM branches WHERE id = ?').get<{ id: number }>([id])
+      const existing = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?')
+        .get<{ id: number; name: string; is_active: number }>([id])
       if (!existing) {
         throw new Error('The branch this action changed no longer exists, so it cannot be reversed.')
       }
       const fields = payload.fields && typeof payload.fields === 'object'
         ? (payload.fields as Record<string, unknown>)
         : {}
-      await db.batch(branchUpdateStatements(id, fields))
+      await db.batch(branchUpdateStatements(id, fields, existing))
       await audit(
         ctx.env,
         ctx.user?.id ?? null,

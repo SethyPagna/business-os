@@ -1,4 +1,9 @@
 import { toDbBool } from './db'
+import {
+  canonicalBranchIdentityGuardStatement,
+  prepareCanonicalBranchUpdate,
+  type BranchIdentitySnapshot,
+} from './canonicalBranchIdentity'
 
 // The single definition of "how a branch row's editable fields are written",
 // extracted from routes/branches.ts's PUT /:id so the server-side undo/redo
@@ -20,12 +25,9 @@ export interface BranchWriteFields {
   is_active?: unknown
 }
 
-// When a branch is renamed, the id remains the durable relationship and the
-// human-readable name snapshots must follow it.  Otherwise old/imported sales
-// can keep a label for a branch that no longer exists even though their
-// branch_id is correct.  Read the canonical name back from `branches` after
-// the row update, rather than trusting the request body, so this stays safe
-// for replay/undo callers too.
+// Preserve the existing snapshot repair behavior. Identity enforcement keeps
+// the stored name unchanged, so these are normally no-ops for new edits while
+// still repairing a stale snapshot that predates this contract.
 function branchNameSnapshotStatements(id: string | number): Array<{ sql: string; params?: Record<string, unknown> }> {
   const params = { id }
   return [
@@ -36,27 +38,39 @@ function branchNameSnapshotStatements(id: string | number): Array<{ sql: string;
   ]
 }
 
-// Mirrors the route's own statement shape exactly: when the row is being made
-// the default, every other row's is_default is cleared first, then the single
-// UPDATE writes the editable columns and re-syncs id-linked name snapshots.
+// When a canonical row is made default, only the other canonical row is
+// cleared; historical noncanonical rows are left untouched. The identity
+// guard and update share one atomic batch with every caller.
 // Returns the statements for a db.batch(); the caller owns the batch so it can
 // bundle audit/broadcast side effects.
-export function branchUpdateStatements(id: string | number, fields: BranchWriteFields): Array<{ sql: string; params?: Record<string, unknown> }> {
+export function branchUpdateStatements(
+  id: string | number,
+  fields: BranchWriteFields,
+  currentIdentity: BranchIdentitySnapshot,
+): Array<{ sql: string; params?: Record<string, unknown> }> {
+  const identity = prepareCanonicalBranchUpdate(currentIdentity, fields)
   const defaultFlag = toDbBool(fields.is_default, 0)
-  const activeFlag = toDbBool(fields.is_active, 1)
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  if (defaultFlag) statements.push({ sql: 'UPDATE branches SET is_default = 0' })
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
+    canonicalBranchIdentityGuardStatement(currentIdentity),
+  ]
+  if (defaultFlag) {
+    statements.push({
+      sql: `UPDATE branches SET is_default = 0
+            WHERE id != @id AND lower(trim(name)) IN ('shop', 'warehouse')`,
+      params: { id },
+    })
+  }
   statements.push({
     sql: `UPDATE branches SET name=@name, location=@location, phone=@phone, manager=@manager, notes=@notes,
           is_default=@is_default, is_active=@is_active, updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
     params: {
-      name: fields.name,
+      name: identity.name,
       location: fields.location || null,
       phone: fields.phone || null,
       manager: fields.manager || null,
       notes: fields.notes || null,
       is_default: defaultFlag,
-      is_active: activeFlag,
+      is_active: identity.is_active,
       id,
     },
   })
