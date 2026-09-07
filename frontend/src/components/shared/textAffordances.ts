@@ -54,6 +54,9 @@ export const COPY_SELECTOR = '[data-copy-value]'
 // then every later event on it -- the mouseout that should close the panel,
 // a re-hover, a click -- resolves to no target at all and the float hangs.
 export const TITLE_PARK_ATTR = 'data-affordance-title'
+// Marks a `title` this controller wrote (the copy hint), so it can be
+// replaced or withdrawn without ever touching a tooltip a surface owns.
+export const HINT_OWNED_ATTR = 'data-affordance-hint'
 // A cell opts in either explicitly (TruncatedText, and anything that wants
 // the reveal without the dense-table styling) or by already carrying the
 // dense-table truncation contract plus the `title` it was relying on --
@@ -448,9 +451,14 @@ const syncCopyHint = (element: HTMLElement): void => {
   if (state?.element === element) return
   const promise = pressWillOpenFloat({ element, kind: 'copy' }) ? labels.hint : ''
   if (promise) {
+    // Marked as ours, so the removal below can never take a `title` some
+    // other surface put there, and so a language switch replaces the old
+    // hint instead of leaving it (the text changes, the marker does not).
     if (element.getAttribute('title') !== promise) element.setAttribute('title', promise)
-  } else if (element.getAttribute('title') != null) {
+    element.setAttribute(HINT_OWNED_ATTR, '1')
+  } else if (element.getAttribute(HINT_OWNED_ATTR) != null) {
     element.removeAttribute('title')
+    element.removeAttribute(HINT_OWNED_ATTR)
   }
 }
 

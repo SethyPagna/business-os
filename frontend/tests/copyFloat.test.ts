@@ -306,6 +306,16 @@ dom.fire('mouseover', { target: pill })
 assert.equal(pill.getAttribute('title'), null,
   'a copy field inside a surface that owns the pointer promises no pointer gesture')
 
+// ...and the controller withdraws only a hint IT wrote. A trigger carrying
+// a tooltip of the surface's own keeps it: attaching the hint is a
+// correction to this lane's own promise, not a licence to edit other
+// people's titles.
+const ownTitlePill = dom.el('span', { [COPY_ATTR]: 'ABC Distribution', title: 'Supplier on the last stock-in' })
+buildClickableRow(dom, ownTitlePill)
+dom.fire('mouseover', { target: ownTitlePill })
+assert.equal(ownTitlePill.getAttribute('title'), 'Supplier on the last stock-in',
+  'a title the surface owns survives a hover over a copy field')
+
 // The two product detail modals: nothing underneath wants the click, so a
 // plain click keeps opening the panel there.
 const modalValue = dom.el('span', { [COPY_ATTR]: '8850123456789' })
@@ -366,6 +376,15 @@ assert.equal(host.hidden, false, 'and it opens the copy panel')
 assert.equal(String(host.childNodes[0]?.textContent || ''), 'Sok Heng Trading Co., Ltd.')
 dom.fire('keydown', { key: 'Escape' })
 assert.equal(host.hidden, true)
+
+// Switching language replaces the promise rather than leaving the old one
+// stuck on a node the browser is not re-rendering.
+ensureTextAffordances({ hint: km.copy_hint })
+dom.fire('mouseover', { target: held })
+assert.equal(held.getAttribute('title'), km.copy_hint, 'the hint follows the language pack')
+ensureTextAffordances({ hint: en.copy_hint })
+dom.fire('mouseover', { target: held })
+assert.equal(held.getAttribute('title'), en.copy_hint)
 
 /* ---------------------------------------------------------------- *
  * 6. Touch — the ONLY way to copy on a phone.
