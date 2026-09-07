@@ -18,13 +18,22 @@ function compile(file, stubs = {}) {
 const batchCode = compile('batchCode.ts')
 const searchMatch = compile('searchMatch.ts')
 const stockReceiptGate = compile('stockReceiptGate.ts')
-const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch, './stockReceiptGate': stockReceiptGate })
+const branchRoles = compile('branchRoles.ts')
+const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branchRoles })
+const subject = compile('stockActionCommit.ts', {
+  './db': {},
+  './batchCode': batchCode,
+  './searchMatch': searchMatch,
+  './stockReceiptGate': stockReceiptGate,
+  './branchRoleGuards': branchRoleGuards,
+})
 
 function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0,
       cost_price_usd REAL DEFAULT 0, updated_at TEXT);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER,
@@ -49,6 +58,7 @@ function setup() {
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0056_import_stock_action_commits.sql'), 'utf8'))
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0057_import_stock_action_guards.sql'), 'utf8'))
   sqlite.exec(`
+    INSERT INTO branches(id, name) VALUES (1, 'Shop'), (2, 'Warehouse');
     INSERT INTO products(id, name, stock_quantity, cost_price_usd) VALUES (10, 'Serum', 10, 4.25);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES (10, 1, 10);
     INSERT INTO product_batches(id, variant_product_id, batch_key, lot_code, expiry_date, received_at)
@@ -163,7 +173,26 @@ const base = {
   await assert.rejects(() => subject.applyUnifiedStockSale(bounded.db, { ...base, saleGroupKey: '', lines: base.lines }), /Sale group is required/)
   await assert.rejects(() => subject.applyUnifiedStockSale(bounded.db, { ...base, date: '13\/40\/2026' }), /Sale date is invalid/)
 
-  console.log('PASS grouped stock sales are bounded, FIFO, transaction-asserted, rollback-safe, and retry-idempotent')
+  const warehouse = setup()
+  const beforeWarehouseStock = warehouse.sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity
+  await assert.rejects(
+    () => subject.applyUnifiedStockSale(warehouse.db, {
+      ...base,
+      jobId: 'job-warehouse-sale',
+      saleGroupKey: 'warehouse-sale',
+      // The forged label proves enforcement reads the branch row for id 2.
+      lines: base.lines.map((line) => ({ ...line, branchId: 2, branchName: 'Shop' })),
+    }),
+    (error) => error instanceof Error && error.message === branchRoleGuards.WAREHOUSE_NOT_SELLABLE_ERROR,
+    'the authoritative Warehouse row must win over a forged Shop label',
+  )
+  assert.strictEqual(warehouse.sqlite.prepare(`SELECT COUNT(*) AS n FROM sales`).get().n, 0)
+  assert.strictEqual(warehouse.sqlite.prepare(`SELECT COUNT(*) AS n FROM sale_items`).get().n, 0)
+  assert.strictEqual(warehouse.sqlite.prepare(`SELECT COUNT(*) AS n FROM inventory_movements`).get().n, 0)
+  assert.strictEqual(warehouse.sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_commits`).get().n, 0)
+  assert.strictEqual(warehouse.sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity, beforeWarehouseStock)
+
+  console.log('PASS grouped stock sales are Shop-guarded, bounded, FIFO, transaction-asserted, rollback-safe, and retry-idempotent')
 })().catch((error) => {
   console.error(error)
   process.exitCode = 1
