@@ -308,6 +308,69 @@ async function laterPrimaryImageBlocksWholeThreeRowCluster() {
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
 }
 
+function currentPairClusterPlan(d1) {
+  const rows = d1.db.prepare(`SELECT id,updated_at,cost_price_usd,cost_price_khr,
+    selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr
+    FROM products WHERE id IN (1,2) ORDER BY id`).all()
+  const fields = [
+    'cost_price_usd', 'cost_price_khr', 'selling_price_usd',
+    'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr',
+  ]
+  return {
+    version: 1,
+    identityKey: JSON.stringify(['partial item 00', '991000000000']),
+    keeperId: 1,
+    memberIds: [1, 2],
+    members: rows.map((row) => ({
+      id: row.id,
+      updated_at: row.updated_at,
+      money: Object.fromEntries(fields.map((field) => [field, row[field]])),
+    })),
+  }
+}
+
+async function saturatedPlanHistoryRefusesBeforeMutation() {
+  const d1 = seedGroups([1])
+  const plan = currentPairClusterPlan(d1)
+  const insert = d1.db.prepare(`INSERT INTO undo_snapshots(kind,status,payload_json)
+    VALUES('product.merge','applied',?)`)
+  for (let copy = 0; copy < 9; copy += 1) insert.run(JSON.stringify({ bulkClusterPlan: plan }))
+  const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.mergedProducts, 0, 'saturated matching history refuses before the pair fold')
+  assert.equal(result.body.blockedOnly, true)
+  assert.equal(result.body.refusals[0]?.code, 'merge_plan_history_unavailable')
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM products WHERE is_active=0').get().n, 0)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+}
+
+async function malformedPlanHistoryRefusesBeforeMutation() {
+  const d1 = seedGroups([1])
+  d1.db.prepare(`INSERT INTO undo_snapshots(kind,status,payload_json)
+    VALUES('product.merge','applied','{malformed')`).run()
+  const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.mergedProducts, 0, 'malformed plan history refuses before the pair fold')
+  assert.equal(result.body.blockedOnly, true)
+  assert.equal(result.body.refusals[0]?.code, 'merge_plan_history_unavailable')
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM products WHERE is_active=0').get().n, 0)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+}
+
+async function oversizedPlanHistoryRefusesBeforeMutation() {
+  const d1 = seedGroups([1])
+  const plan = { ...currentPairClusterPlan(d1), padding: 'x'.repeat(5_000) }
+  d1.db.prepare(`INSERT INTO undo_snapshots(kind,status,payload_json)
+    VALUES('product.merge','applied',?)`).run(JSON.stringify({ bulkClusterPlan: plan }))
+  const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.mergedProducts, 0, 'oversized matching plan history refuses before the pair fold')
+  assert.equal(result.body.blockedOnly, true)
+  assert.equal(result.body.refusals[0]?.code, 'merge_plan_history_unavailable')
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM products WHERE is_active=0').get().n, 0)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+}
+
 ;(async () => {
   await overloadAfterEight()
   await budgetStopsBetweenWholeGroups()
@@ -317,5 +380,8 @@ async function laterPrimaryImageBlocksWholeThreeRowCluster() {
   await oversizedDependentReadRefusesBeforeMutation()
   await complexLaterMemberBlocksWholeThreeRowCluster()
   await laterPrimaryImageBlocksWholeThreeRowCluster()
+  await saturatedPlanHistoryRefusesBeforeMutation()
+  await malformedPlanHistoryRefusesBeforeMutation()
+  await oversizedPlanHistoryRefusesBeforeMutation()
   console.log('PASS merge route reports committed partial work and stops only between complete clusters')
 })().catch((error) => { console.error(error); process.exitCode = 1 })
