@@ -73,6 +73,11 @@ async function replay(f,id,direction='undo',generation=0) {return f.call(history
 async function run() {
   // Append 0120 to a populated pre-0120 fixture as well as the full fresh chain.
   let legacy=fixture(false);seed(legacy)
+  // Prove this is really a pre-0120 tree before testing the populated
+  // migration. Later migrations can recreate these objects and otherwise
+  // turn a broken fixture filter into a misleading green run.
+  assert.equal(legacy.sql.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='sale_write_revisions'").get().n,0,'fixture(false) is not a pre-0120 tree')
+  assert.equal(legacy.sql.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'sale_revision_%'").get().n,0,'fixture(false) already carries 0120 revision triggers')
   const domain=legacy.sql.prepare('SELECT * FROM sales ORDER BY id').all()
   // The pre-0120 fixture is a database that really existed (every migration below 0120); replaying 0120 AND
   // everything after it, in order, is what production did. Filtering 0120 alone out of the full chain built a
