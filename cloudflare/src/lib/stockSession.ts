@@ -8,7 +8,7 @@ import { identityBarcodeKeySql } from './productIdentity'
 import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
 import { normalizeMultiValue, planInsertRow, tableColumns, validateProductImageGallery } from './productWrites'
-import { sanitizeMediaPath } from './media'
+import { sanitizeMediaList, sanitizeMediaPath } from './media'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import { buildInClause, chunkForBinding, D1_MAX_BOUND_PARAMS } from './sqlBinding'
 import { bumpVersion } from './cache'
@@ -341,6 +341,44 @@ async function rowsIn<T>(db: D1Compat, values: readonly unknown[], column: strin
   return rows
 }
 
+function decodedUploadPathCandidate(path: string): string {
+  if (!path.startsWith('/uploads/')) return path
+  try {
+    // Compatibility for clients that previously round-tripped the exact
+    // file_assets path through URL.pathname. decodeURI leaves reserved path
+    // separators such as `%2F` escaped and decodes only one layer.
+    return decodeURI(path)
+  } catch (_) {
+    return path
+  }
+}
+
+async function resolveSessionImagePaths(db: D1Compat, request: StockSessionRequest): Promise<void> {
+  const products = request.items.flatMap((line) => line.kind === 'create_receive' && line.product ? [line.product] : [])
+  const supplied = [...new Set(products.flatMap((product) => {
+    const gallery = (product.image_gallery as string[] | undefined) || []
+    const primary = String(product.image_path || '')
+    return primary ? [primary, ...gallery] : gallery
+  }))]
+  if (!supplied.length) return
+  const candidates = [...new Set(supplied.flatMap((path) => [path, decodedUploadPathCandidate(path)]))]
+  const assets = await rowsIn<Row>(db, candidates, 'public_path', 'SELECT id,public_path FROM file_assets')
+  const assetPaths = new Set(assets.map((row) => String(row.public_path)))
+  const resolved = new Map<string, string>()
+  for (const path of supplied) {
+    const decoded = decodedUploadPathCandidate(path)
+    const publicPath = assetPaths.has(path) ? path : decoded !== path && assetPaths.has(decoded) ? decoded : ''
+    if (!publicPath) fail(`Image asset ${path} does not exist.`, 409, 'missing_image_asset')
+    resolved.set(path, publicPath)
+  }
+  for (const product of products) {
+    const primary = String(product.image_path || '')
+    if (primary) product.image_path = resolved.get(primary) || primary
+    product.image_gallery = sanitizeMediaList(((product.image_gallery as string[] | undefined) || [])
+      .map((path) => resolved.get(path) || path))
+  }
+}
+
 function revisionKey(type: string, key: unknown) { return `${type}\u0001${String(key)}` }
 
 function receivedBatchKey(receivedDate: string): string {
@@ -457,9 +495,15 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     fail('create_receive requires full product-add permission.', 403, 'permission_denied')
   }
   const db = getDb(env)
-  const canonical = JSON.stringify(request)
+  const submittedCanonical = JSON.stringify(request)
   const previous = await db.prepare('SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
     .get<Row>({ actor: user.id, request: request.client_request_id })
+  if (previous?.request_json === submittedCanonical) return parseStoredReceipt(previous, true)
+  // Resolve a legacy encoded alias to the stored DB identity before the
+  // idempotency fingerprint. Exact `%20`/`%25` identities always win, while a
+  // retry from fixed frontend code remains the same semantic operation.
+  await resolveSessionImagePaths(db, request)
+  const canonical = JSON.stringify(request)
   if (previous) {
     if (previous.request_json !== canonical) fail('client_request_id was already used with different data.', 409, 'idempotency_conflict')
     return parseStoredReceipt(previous, true)

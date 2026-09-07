@@ -25,6 +25,13 @@ await runTest('cache busted media path appends upload version without duplicatin
 await runTest('persisted media identity strips render-only versions from upload paths', () => {
   assert.equal(canonicalizePersistedMediaPath('/uploads/logo.png?v=abc#preview'), '/uploads/logo.png')
   assert.equal(canonicalizePersistedMediaPath('uploads/logo.png?updated=1'), '/uploads/logo.png')
+  assert.equal(canonicalizePersistedMediaPath('/uploads/Lovenude Lip Stain 7.webp?v=abc'), '/uploads/Lovenude Lip Stain 7.webp')
+  assert.equal(canonicalizePersistedMediaPath('/uploads/ក្រែម ខ្មែរ.webp'), '/uploads/ក្រែម ខ្មែរ.webp')
+  assert.equal(canonicalizePersistedMediaPath('/uploads/100% Pure.webp'), '/uploads/100% Pure.webp')
+  assert.equal(canonicalizePersistedMediaPath('/uploads/literal%20name.webp'), '/uploads/literal%20name.webp')
+  assert.equal(canonicalizePersistedMediaPath('/uploads/literal%2520name.webp'), '/uploads/literal%2520name.webp')
+  assert.equal(canonicalizePersistedMediaPath('/uploads/folder%2Fname.webp'), '/uploads/folder%2Fname.webp')
+  assert.equal(canonicalizePersistedMediaPath('/uploads/malformed%name still.webp'), '/uploads/malformed%name still.webp')
   assert.equal(canonicalizePersistedMediaPath('https://cdn.example.com/signed.png?token=keep'), 'https://cdn.example.com/signed.png?token=keep')
   assert.equal(canonicalizePersistedMediaPath('', 'blob:preview'), 'blob:preview')
 })
