@@ -37,8 +37,13 @@ fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts')
 // through branch_id when the row carries no branch_name snapshot.
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'movementBranchName.ts'), path.join(tmpDir, 'movementBranchName.ts'))
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockInSessionsQuery.ts'), path.join(tmpDir, 'stockInSessionsQuery.ts'))
+// N40: and ./searchMatch, for buildExactBarcodeMatchClause. This search box
+// is a scan surface (StockChangeSection.tsx:722 fills it from
+// ScanSearchButton), so the leading-zero / UPC-E fold is OR-ed in beside the
+// LIKE and the isolated compile has to resolve it.
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'searchMatch.ts'), path.join(tmpDir, 'searchMatch.ts'))
 execSync(
-  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" "${path.join(tmpDir, 'movementBranchName.ts')}" "${path.join(tmpDir, 'stockInSessionsQuery.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
+  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" "${path.join(tmpDir, 'movementBranchName.ts')}" "${path.join(tmpDir, 'stockInSessionsQuery.ts')}" "${path.join(tmpDir, 'searchMatch.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
   { cwd: cloudflareRoot, stdio: 'pipe' },
 )
 const kernel = require(path.join(tmpDir, 'stockLedgerQuery.js'))
@@ -88,6 +93,14 @@ insertMovement(A({ id: 6, movement_type: 'remove', quantity: 1, reason: 'damaged
 // the number the recorded actions imply, not a fabricated zero.
 insertProduct(9002, 'Snapshot 50%_Serum', '8800000000028', 7)
 insertMovement({ id: 7, product_id: 9002, product_name: 'Snapshot 50%_Serum', branch_id: 1, branch_name: 'Main Store', movement_type: 'sale', quantity: 2, reason: '', user_name: 'tester', created_at: '2026-08-26 09:00:00' })
+
+// Product C: the SCAN case. StockChangeSection.tsx:722 fills this search box
+// from ScanSearchButton, so the value can carry more leading zeros than the
+// catalog stores. LIKE containment is asymmetric -- '748485110011' LIKE
+// '%0748485110011%' is FALSE -- so a scan of the padded spelling found
+// nothing at all here until the barcode fold was OR-ed in beside the LIKE.
+insertProduct(9004, 'Scanned Padded Balm', '748485110011', 3)
+insertMovement({ id: 30, product_id: 9004, product_name: 'Scanned Padded Balm', branch_id: 1, branch_name: 'Main Store', movement_type: 'add', quantity: 3, reason: 'initial stock', user_name: 'tester', created_at: '2026-08-27 09:00:00' })
 
 function runLedger(filters, page = 1, pageSize = 50) {
   const q = kernel.buildStockLedgerQuery(filters)
@@ -156,6 +169,15 @@ ok(true, 'search LIKE escapes % and _ (literal match only)')
 // barcode search reaches through the join
 assert.equal(runLedger({ search: '8800000000011' }).total, 6)
 ok(true, 'search matches barcode through the products join')
+
+// The scan direction: the scanner emits the leading zero, the catalog does
+// not store it. Pure LIKE containment cannot do this in that direction.
+assert.equal(runLedger({ search: '0748485110011' }).total, 1,
+  'a scan carrying a leading zero the catalog does not store found nothing in the ledger')
+assert.equal(runLedger({ search: '0748485110011' }).items[0].product_id, 9004)
+// ...and the fold does not widen the search: an unrelated code stays out.
+assert.equal(runLedger({ search: '0748485110012' }).total, 0, 'a one-digit-different code was dragged in')
+ok(true, 'ledger search folds a scanned leading zero onto the stored barcode')
 
 // date bounds inclusive on both ends
 const day = runLedger({ productId: 9001, startDate: '2026-08-21', endDate: '2026-08-23' })

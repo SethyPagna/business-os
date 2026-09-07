@@ -22,6 +22,7 @@ import { localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from '.
 // N13: sale/return-family movements stamp branch_id but not branch_name, so
 // the ledger rendered their Branch column empty. Resolved through the id here
 // (snapshot-first) -- see lib/movementBranchName.ts for why it is read-side.
+import { buildExactBarcodeMatchClause } from './searchMatch'
 import { movementBranchNameSql } from './movementBranchName'
 import { STOCK_RECEIPT_MOVEMENT_TYPES } from './stockInSessionsQuery'
 
@@ -125,7 +126,23 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   if (search) {
     // LIKE with ESCAPE, auditLogQuery.ts convention: user text matches
     // literally, % and _ included.
-    base.push(`(m.product_name LIKE @search ESCAPE '\\' OR p.barcode LIKE @search ESCAPE '\\')`)
+    //
+    // N40: this box is a SCAN surface -- StockChangeSection.tsx:722 fills it
+    // straight from ScanSearchButton -- and LIKE containment is asymmetric in
+    // exactly the direction a scanner fails. A decoder emitting the leading
+    // zero the catalog does not store gives
+    //   '748485110011' LIKE '%0748485110011%'  ->  FALSE
+    // so the scan found nothing at all, which is the reported failure.
+    //
+    // The shared barcode fold is OR-ed in BESIDE the LIKE rather than
+    // replacing it: the LIKE keeps the name and substring half of this box
+    // working, and the fold adds the leading-zero padding in both directions
+    // plus the UPC-E/UPC-A pair. buildExactBarcodeMatchClause returns
+    // undefined unless the text is a lone real barcode, so an ordinary word
+    // search binds nothing extra and renders exactly the SQL it did before.
+    const barcodeFold = buildExactBarcodeMatchClause(search, params, 'ledgerBarcodeKey', 'p.barcode', 'p.id')
+    const likeClause = `m.product_name LIKE @search ESCAPE '\\' OR p.barcode LIKE @search ESCAPE '\\'`
+    base.push(barcodeFold ? `(${likeClause} OR ${barcodeFold})` : `(${likeClause})`)
     params.search = `%${search.replace(/([\\%_])/g, '\\$1')}%`
   }
   const supplierId = Number(filters.supplierId) || 0
