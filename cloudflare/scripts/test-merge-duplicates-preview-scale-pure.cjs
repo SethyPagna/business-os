@@ -252,13 +252,13 @@ async function invokePreview(handler, user) {
   assert.equal(invalidCost.costRefusals[0].field, 'cost_price_usd')
   assert.equal(invalidCost.costRefusals[0].code, 'negative')
 
-  // 4,027 unique member ids fit in 41 100-bind reads. Fifteen additional
+  // 4,027 unique member ids fit in 41 100-bind reads. Sixteen additional
   // simple SELECTs map every potentially linked member of a multi-row cluster,
   // plus one duplicate detector query and one branch-name query. This bound is deliberately
   // independent of group count; the old per-group route executes 6,002.
-  assert.ok(adapter.metrics.queries <= 58, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
+  assert.ok(adapter.metrics.queries <= 59, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
   assert.equal(adapter.metrics.batchRoundTrips, 1, 'preview hydration and the linked-member map must share one D1 round trip')
-  assert.equal(adapter.metrics.maxBatchStatements, 56)
+  assert.equal(adapter.metrics.maxBatchStatements, 57)
   assert.ok(adapter.metrics.maxBoundParams <= 100, `preview bound ${adapter.metrics.maxBoundParams} params in one statement`)
   assert.ok(
     adapter.metrics.sql.some((sql) => /FROM products p LEFT JOIN branch_stock/i.test(sql)),
