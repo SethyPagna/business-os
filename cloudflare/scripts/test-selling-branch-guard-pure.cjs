@@ -129,9 +129,9 @@ runTest('transfers run warehouse -> shop, and nothing else that names those two'
   assert.equal(guards.transferDirectionError('Shop', 'Warehouse'), guards.TRANSFER_DIRECTION_ERROR)
   assert.equal(guards.transferDirectionError('Shop', 'Depot'), guards.TRANSFER_DIRECTION_ERROR, 'the shop never sends stock away')
   assert.equal(guards.transferDirectionError('Depot', 'Warehouse'), guards.TRANSFER_DIRECTION_ERROR, 'the warehouse never receives a transfer')
-  // A deployment that grew a third, differently-named pair is left alone
-  // rather than second-guessed by a rule written for two.
-  assert.equal(guards.transferDirectionError('Depot', 'Kiosk'), null)
+  assert.equal(guards.transferDirectionError('Depot', 'Kiosk'), guards.TRANSFER_DIRECTION_ERROR)
+  assert.equal(guards.transferDirectionError('Warehouse', 'Depot'), guards.TRANSFER_DIRECTION_ERROR)
+  assert.equal(guards.transferDirectionError('Depot', 'Shop'), guards.TRANSFER_DIRECTION_ERROR)
 })
 
 // ---------------------------------------------------------------------------

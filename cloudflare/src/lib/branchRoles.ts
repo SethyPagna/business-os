@@ -30,16 +30,13 @@ export function branchCanSell(name: unknown): boolean {
   return branchRoleFromName(name) === 'shop'
 }
 
-// Transfers move stock OUT of the warehouse and INTO the shop: the shop
-// never sends stock away, the warehouse never receives it. Stated as two
-// refusals rather than one whitelist so a deployment that grows a third,
-// differently-named branch is left alone instead of being second-guessed
-// by a rule written for two -- and so the UI's disabled options and the
-// Worker's rejection are the SAME predicate, not two rules that drift.
+// Transfers move stock only from the canonical Warehouse to the canonical
+// Shop. Unknown and historical branch names remain visible but cannot become
+// new stock-action identities.
 export function branchCanBeTransferSource(name: unknown): boolean {
-  return branchRoleFromName(name) !== 'shop'
+  return branchRoleFromName(name) === 'warehouse'
 }
 
 export function branchCanBeTransferDestination(name: unknown): boolean {
-  return branchRoleFromName(name) !== 'warehouse'
+  return branchRoleFromName(name) === 'shop'
 }
