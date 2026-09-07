@@ -126,6 +126,19 @@ const noPayment = source('components/catalog/PortalNoPaymentNotice.tsx')
 assert.match(noPayment, /<LegalInlineLink page="privacy"/, 'the privacy promise has no privacy policy behind it')
 assert.match(noPayment, /LEGAL_PAGE_TITLE_KEY.privacy/, 'the link label must come from the legal pack, not a hardcoded string')
 
+// The AI panel carries TWO notices: the merchant's editable disclaimer, and
+// the app's own, which says the shopper is talking to software, that the
+// question leaves the shop, and where a health question actually belongs.
+// The second one must not be reachable from the portal editor -- a notice a
+// merchant can shorten to nothing is not a notice.
+assert.match(secondary, /copy\('assistantAutomatedNotice'/, 'the automated-assistant notice must render beside the AI panel')
+const automated = (secondary.match(/const ASSISTANT_AUTOMATED_EN = '([^']*)'/) || [])[1] || ''
+for (const phrase of [/automated/i, /not medical advice/i, /third-party AI provider/i, /30 days/, /pharmacist or doctor/i]) {
+  assert.match(automated, phrase, `the assistant notice no longer says ${phrase}`)
+}
+assert.match(secondary, /const ASSISTANT_AUTOMATED_KM = '[^']*[ក-៿]/, 'the assistant notice must ship a real Khmer string, not an English fallback')
+assert.doesNotMatch(secondary, /aiDisclaimer \|\| copy\('assistantAutomatedNotice'/, 'the safety notice must not be a merchant-editable field')
+
 // 5. Khmer is really Khmer
 const KHMER = /[ក-៿]/
 for (const key of enKeys) {

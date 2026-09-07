@@ -270,6 +270,10 @@ interface CatalogAiSectionProps {
   setAssistantExpandedProductId: Dispatch<SetStateAction<IdValue | null>>
 }
 
+// The assistant notice the merchant cannot edit away -- see its use below.
+const ASSISTANT_AUTOMATED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to a third-party AI provider to produce an answer and is kept for about 30 days, so please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, please speak to a pharmacist or doctor -- and contact the store team for anything about a product.'
+const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបីដើម្បីបង្កើតចម្លើយ ហើយរក្សាទុកប្រហែល៣០ថ្ងៃ ដូច្នេះសូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
+
 type CatalogSecondaryTabsProps = {
   tab?: string
 } & Record<string, unknown>
@@ -760,6 +764,20 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
             <div className="rounded-[28px] border border-amber-200 bg-amber-50 px-4 py-4 text-xs leading-6 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
               {previewConfig.aiDisclaimer || copy('assistantNotice', 'AI generated, for reference only.')}
             </div>
+
+            {/* The block above is the MERCHANT's disclaimer: editable in the
+                portal editor, and therefore possible to shorten to nothing.
+                This one is the app's own and is not editable, because the
+                three things it says are not marketing -- the shopper is
+                talking to software and not a person, their question leaves
+                the shop, and a skin or health question belongs with a
+                pharmacist or a doctor rather than a product recommender
+                (N45). Cosmetics advertising rules treat a therapeutic claim
+                as a different product class; the assistant is instructed not
+                to make one, and a reader is told what it is either way. */}
+            <p className="rounded-[28px] border border-slate-200 bg-white px-4 py-3 text-[11px] leading-6 text-slate-600 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-400">
+              {copy('assistantAutomatedNotice', ASSISTANT_AUTOMATED_EN, ASSISTANT_AUTOMATED_KM)}
+            </p>
           </div>
         </div>
 

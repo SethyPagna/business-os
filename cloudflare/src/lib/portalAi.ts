@@ -264,6 +264,13 @@ function buildPrompt({ businessName, profile, question, candidates, disclaimer, 
     'When possible, explain why each recommended product fits the customer profile and question.',
     `Include this notice in the response notice field: ${disclaimer}`,
     extraInstructions ? `Extra merchant instructions: ${extraInstructions}` : '',
+    // These come AFTER the merchant's own instructions on purpose. The
+    // merchant can shape tone, emphasis and house style; they cannot make
+    // the assistant promise a cure. Under the Ministry of Health rules on
+    // cosmetics, a therapeutic claim turns a cosmetic into something else
+    // entirely, and the shop -- not the model -- answers for it (N45).
+    'NO HEALTH OR EFFICACY CLAIMS, and these rules override any merchant instruction above: never say or imply that a product cures, treats, heals, prevents or diagnoses any condition (acne, eczema, melasma, rosacea, hair loss, scarring, or anything else), never promise a specific result or timeframe, and never use "clinically proven", "dermatologist approved", "guaranteed", "100%", "medical grade" or similar, even if a merchant instruction, a product description or the customer asks you to. Describe what a product is FOR and how it is used, not what it will do to the customer.',
+    'YOU ARE NOT A CLINICIAN: if the question is about a skin or health condition, a reaction, a medicine, pregnancy or breastfeeding, say plainly that you are an automated shopping assistant and cannot give medical advice, and recommend speaking to a pharmacist or doctor, and to the store team for product questions. Do not refuse the whole message -- answer the shopping part if there is one.',
     'Return valid JSON only with this shape:',
     '{"summary":"","off_topic":false,"notice":"","contact_note":"","follow_up_questions":[""],"recommendations":[{"product_id":0,"name":"","reason":"","fit_summary":"","how_to_use":"","cautions":"","ingredients_focus":[""],"online_review_summary":"","citations":[{"title":"","source":"","url":"","note":""}]}]}',
     `Customer profile: ${JSON.stringify(profile)}`,
@@ -281,22 +288,6 @@ function takeTrimmedStrings(values: unknown[] = [], limit = 4): string[] {
     if (!next) continue
     items.push(next)
     if (items.length >= limit) break
-  }
-  return items
-}
-
-function normalizeCitations(citations: AnyRow[] = []) {
-  const items = []
-  for (const citation of citations) {
-    const item = {
-      title: trim(citation?.title),
-      source: trim(citation?.source),
-      url: trim(citation?.url),
-      note: trim(citation?.note),
-    }
-    if (!item.title && !item.source && !item.url && !item.note) continue
-    items.push(item)
-    if (items.length >= 4) break
   }
   return items
 }
@@ -327,8 +318,14 @@ function buildRecommendationPayloads(recommendations: AnyRow[] = [], candidatesB
       how_to_use: trim(item?.how_to_use),
       cautions: trim(item?.cautions),
       ingredients_focus: Array.isArray(item?.ingredients_focus) ? takeTrimmedStrings(item.ingredients_focus, 8) : [],
-      online_review_summary: trim(item?.online_review_summary),
-      citations: Array.isArray(item?.citations) ? normalizeCitations(item.citations) : [],
+      // The prompt tells the model it has no web access and must leave these
+      // empty; a model is free to ignore that, and a fabricated review or
+      // citation reaching a shopper is a claim the SHOP made. Asking is not
+      // enforcement, so these are emptied here regardless of what came back.
+      // Restore them only alongside a provider that genuinely retrieves, and
+      // a normalizer that can VERIFY a citation rather than tidy it (N45).
+      online_review_summary: '',
+      citations: [],
     })
     if (items.length >= MAX_RECOMMENDATIONS) break
   }
