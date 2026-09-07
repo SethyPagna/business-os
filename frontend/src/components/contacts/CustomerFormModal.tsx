@@ -13,6 +13,7 @@ import { CUSTOMER_MEMBERSHIP_PLACEHOLDER } from './customerMembershipNumber'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { formatPhoneInputElement } from '../../utils/phoneInput.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -93,7 +94,7 @@ function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEdi
         </div>
         <div>
           <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'phone', 'Phone')}</label>
-          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" className="input text-xs py-1" placeholder={tr(t, 'phone_number', 'Phone number')} value={option.phone} onChange={(event) => setField('phone', event.target.value)} />
+          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" inputMode="tel" className="input text-xs py-1" placeholder={tr(t, 'phone_number', 'Phone number')} value={option.phone} onChange={(event) => setField('phone', formatPhoneInputElement(event.currentTarget))} />
         </div>
       </div>
       <div>
@@ -214,7 +215,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor="customer-form-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'phone_number', 'Phone Number')}</label>
-            <input id="customer-form-phone" name="customer_phone" autoComplete="tel" className="input" value={form.phone || ''} onChange={(event) => setField('phone', event.target.value)} />
+            <input id="customer-form-phone" name="customer_phone" autoComplete="tel" inputMode="tel" className="input" value={form.phone || ''} onChange={(event) => setField('phone', formatPhoneInputElement(event.currentTarget))} />
           </div>
           <div>
             <label htmlFor="customer-form-email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'email', 'Email')}</label>

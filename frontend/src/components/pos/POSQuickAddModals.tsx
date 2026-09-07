@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 import QuickAddModal from './QuickAddModal'
+import { formatPhoneInputElement } from '../../utils/phoneInput.ts'
 
 type Translator = (key: string) => string
 type PosCopy = (en: string, km?: string) => string
@@ -65,7 +66,10 @@ export default function POSQuickAddModals({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label htmlFor="pos-quick-customer-phone" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('phone_number') || 'Phone Number'}</label>
-              <input id="pos-quick-customer-phone" name="pos_quick_customer_phone" className="input" value={newCustomerForm.phone} onChange={(event) => setNewCustomerForm((form) => ({ ...form, phone: event.target.value }))} autoComplete="tel" />
+              <input id="pos-quick-customer-phone" name="pos_quick_customer_phone" className="input" value={newCustomerForm.phone} onChange={(event) => {
+                const phone = formatPhoneInputElement(event.currentTarget)
+                setNewCustomerForm((form) => ({ ...form, phone }))
+              }} autoComplete="tel" inputMode="tel" />
             </div>
             <div>
               <label htmlFor="pos-quick-customer-address" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('address')}</label>
@@ -90,7 +94,10 @@ export default function POSQuickAddModals({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label htmlFor="pos-quick-delivery-phone" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Phone</label>
-              <input id="pos-quick-delivery-phone" name="pos_quick_delivery_phone" className="input" value={newDeliveryForm.phone} onChange={(event) => setNewDeliveryForm((form) => ({ ...form, phone: event.target.value }))} placeholder="012 345 678" autoComplete="tel" />
+              <input id="pos-quick-delivery-phone" name="pos_quick_delivery_phone" className="input" value={newDeliveryForm.phone} onChange={(event) => {
+                const phone = formatPhoneInputElement(event.currentTarget)
+                setNewDeliveryForm((form) => ({ ...form, phone }))
+              }} placeholder="012 345 678" autoComplete="tel" inputMode="tel" />
             </div>
             <div>
               <label htmlFor="pos-quick-delivery-area" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Area / Zone</label>
