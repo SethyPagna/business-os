@@ -196,10 +196,11 @@ export function parseUnifiedStockRows(
     // row this screen CAN settle deterministically is an explicit CREATE/NEW
     // action (below): a new product has no lot yet, so nothing can be
     // inherited and a blank supplier is certain to be refused. Nor can it
-    // settle the cost for an EXISTING product, whose blank cost column
-    // resolves to the product's catalog cost server-side; what it can say is
-    // that the sheet itself states no cost, which is why the note asks for
-    // the column rather than promising a refusal.
+    // settle the cost the same way: an existing product's catalog cost is
+    // NOT read as a fallback for the receipt gate any more (stockActionImport.ts's
+    // sheetCostPriceUsd carries no catalog inheritance, unlike costPriceUsd) --
+    // the Worker refuses a blank sheet cost outright, cost_required, on
+    // every add/create row regardless of the matched product's own price.
     // An unreadable price is already reported above; re-reporting it as a gate
     // refusal would count one bad cell as two rows needing attention.
     const action = clean(read('action'))

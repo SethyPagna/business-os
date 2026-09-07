@@ -186,6 +186,21 @@ assert.match(stockActionImportModal, /STOCK_RECEIPT_GATE_KEYS/,
 assert.match(stockActionImportModal, /noSupplierColumn/,
   'the stock-action import review must warn pre-upload when the sheet has no supplier column, the same way it warns about a missing cost column')
 
+// The client's own pre-submit mirror (unifiedStockImport.ts) used to say a
+// blank cost on an EXISTING product's row "resolves to the product's catalog
+// cost server-side" -- true before N14-D, false since: stockActionImport.ts's
+// sheetCostPriceUsd carries NO catalog fallback, and stockActionCommit.ts
+// feeds that (not costPriceUsd) to the gate, so the Worker refuses a blank
+// sheet cost outright regardless of the matched product's own price. This
+// stale claim would tell a future reader the row is safe when it is not
+// (sibling:F13 verifier wave 9, report correction 5).
+const unifiedStockImportSrc = fs.readFileSync(
+  path.join(root, '..', 'frontend', 'src', 'components', 'products', 'import', 'unifiedStockImport.ts'),
+  'utf8',
+)
+assert.doesNotMatch(unifiedStockImportSrc, /resolves to the product's catalog cost server-side/,
+  'the pre-submit comment must not promise a catalog-cost fallback the gate no longer honors')
+
 // ROOT CAUSE (sibling:F13 verifier wave 9, item 3): two independently
 // maintained header-alias tables -- the client's HEADER_ALIASES and the
 // Worker's own reader -- let a spelling accepted on one side be refused on
