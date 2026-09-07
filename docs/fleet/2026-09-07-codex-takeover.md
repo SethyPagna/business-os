@@ -3,6 +3,41 @@
 Status: implementation and integration in progress. No deployment or production
 mutation has been performed by this takeover.
 
+## Additional owner instructions, September 7
+
+The owner requested a network retry and the next verified checkpoint deployment
+as soon as ready. This authorizes the next deployment; it does not waive tests,
+historical-data evidence, or the outstanding portal privacy repairs. New GitHub
+commits must describe individual fixes, rather than checkpoint or unrelated batch
+commits. Existing lane histories and original dirty worktrees remain preserved.
+
+- When adding again within the same session, recognize a product by normalized
+  barcode **or** name against saved and queued session entries. Show “Duplicate:
+  You added this item already.”; show green availability only after a successful
+  lookup finds no session duplicate. Preserve explicit quantity-edit workflows.
+- Remove the redundant eye button beside Print on sale rows.
+- Branch inventory and POS branch options use branch quantities for stock alerts.
+  Aggregate POS, Dashboard and public catalogue displays use the Shop + Warehouse
+  quantity they show. Changes to alert settings must invalidate relevant results.
+- Add a minus/minimize control next to Close on editable add/edit/set/stock/session
+  actions; preserve drafts and make Back/discard/restore cooperate. Trace roles and
+  permissions across every affected action. Read-only policy dialogs are separate.
+- Gross sales, discounts, refunds and net revenue must agree between the chart,
+  tooltip and headline stats; the supplied chart showed 190 gross and 185 net.
+
+Assignments: sales owner for the eye button; identity owner for session duplicate
+feedback; media owner with independent accounting audit for stock and revenue
+semantics; Terra medium explorer for the shared minimize/action scope. Production
+health was retried after the owner's network update and still returned HTTP 403
+from the direct host path. A subsequent Wrangler retry through the original
+repository's existing API-token wrapper succeeded (account identity confirmed).
+The expired OAuth fallback is no longer a deployment blocker. The original
+checkout's Wrangler 4.116 transport failed on deployment listing, but invoking
+the candidate's pinned Wrangler 4.112 through that same auth wrapper succeeded
+and confirmed the unchanged production version. Use the pinned candidate CLI.
+Credentials remain in their existing ignored file; none were copied into the
+candidate or browser.
+
 Canonical base: `ea9f0d1b7d67891be519fbe74c91a8bdf4102593`, isolated branch
 `codex/takeover-20260907`. This contains the prior Codex integration `9ab9fd7a`
 and checkpoint 2 `b6a0cff8`; the dirty shared main and original Claude lanes are
