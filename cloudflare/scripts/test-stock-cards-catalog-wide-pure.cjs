@@ -39,6 +39,7 @@ const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', ...parts),
 const compat = read('src', 'routes', 'compat.ts')
 const branches = read('src', 'routes', 'branches.ts')
 const inventory = read('src', 'routes', 'inventory.ts')
+const familyStockStats = read('src', 'lib', 'familyStockStats.ts')
 
 // Anything that would make a stock figure depend on WHEN a product sold.
 const RANGE_SCOPE = /sale_items|localDateRangeClause|localTodayRangeClause|@startDate|@endDate|productInRangeClause/
@@ -108,13 +109,20 @@ check('inventory.ts stock stats are the plain active catalog',
 {
   const summary = compat.slice(compat.indexOf('async function dashboardSummary'), compat.indexOf('async function dashboardAnalytics'))
   check('compat.ts dashboardSummary was located', summary.length > 500)
-  const alerts = summary.split('db.prepare(').filter((chunk) => /COALESCE\(stock_quantity, 0\) <=|COALESCE\(expiry_alert_days/.test(chunk))
-  check('compat.ts still has all four inventory alert queries', alerts.length === 4)
-  for (const chunk of alerts) {
+  const expiryAlerts = summary.split('db.prepare(').filter((chunk) => /COALESCE\(expiry_alert_days/.test(chunk))
+  check('compat.ts still has both expiry inventory alert queries', expiryAlerts.length === 2)
+  for (const chunk of expiryAlerts) {
     const sql = chunk.slice(0, chunk.indexOf('`).'))
-    check(`compat.ts alert query is catalog-wide: ${sql.trim().split('\n').pop().trim().slice(0, 60)}...`,
+    check(`compat.ts expiry alert query is catalog-wide: ${sql.trim().split('\n').pop().trim().slice(0, 60)}...`,
       /p\.is_active = 1/.test(sql) && !RANGE_SCOPE.test(sql))
   }
+  const familyAlertCalls = summary.match(/getFamilyStockAlertPage\(\{[^}]*state: '(?:low|out)'[^}]*\}\)/g) || []
+  check('compat.ts pages both low/out lists through the family-aware helper', familyAlertCalls.length === 2)
+  check('compat.ts low/out family pages carry no date/sales range scope', familyAlertCalls.every((call) => !RANGE_SCOPE.test(call)))
+  check('the family alert helper itself starts from the active catalog and shares the configured low-stock threshold',
+    /export async function getFamilyStockAlertPage/.test(familyStockStats)
+    && /WHERE p\.is_active = 1/.test(familyStockStats)
+    && /lowStockThresholdSql\(lowStock, 'p\.low_stock_threshold'\)/.test(familyStockStats))
   check('compat.ts keeps the range on the movement queries (sales, returns, recent sales)',
     (summary.match(/localDateRangeClause\('created_at'\)/g) || []).length >= 4)
   check('compat.ts records the stock/alert exception in the code itself',

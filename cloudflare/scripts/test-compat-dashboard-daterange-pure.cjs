@@ -209,13 +209,15 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   {
     const summary = src.slice(src.indexOf('async function dashboardSummary'), src.indexOf('async function dashboardAnalytics'))
     check('compat.ts dashboardSummary was located for the alert-scope lock', summary.length > 500)
-    const alertQueries = summary.split('db.prepare(').filter((chunk) => /COALESCE\(stock_quantity, 0\) <=|COALESCE\(expiry_alert_days/.test(chunk))
-    check('compat.ts has all four inventory alert queries (low stock, out of stock, expiring list, expiring count)',
-      alertQueries.length === 4)
-    check('compat.ts inventory alert queries filter on the active catalog only -- no sales/date scope',
-      alertQueries.every((chunk) => /p\.is_active = 1/.test(chunk) && !/sale_items|localDateRangeClause|@startDate/.test(chunk.slice(0, chunk.indexOf('`).')))))
+    const expiryQueries = summary.split('db.prepare(').filter((chunk) => /COALESCE\(expiry_alert_days/.test(chunk))
+    check('compat.ts keeps both catalog-wide expiry queries (preview and count)', expiryQueries.length === 2)
+    check('compat.ts expiry queries filter on the active catalog only -- no sales/date scope',
+      expiryQueries.every((chunk) => /p\.is_active = 1/.test(chunk) && !/sale_items|localDateRangeClause|@startDate/.test(chunk.slice(0, chunk.indexOf('`).')))))
     check('compat.ts family stock stats are catalog-wide too, so the card badges match their lists',
       /whereSql: 'WHERE p\.is_active = 1',/.test(summary))
+    check('compat.ts pages the low/out drill lists through the same family-aware stock helper',
+      (summary.match(/getFamilyStockAlertPage\(\{[^}]*state: '(?:low|out)'[^}]*\}\)/g) || []).length === 2
+      && !/getFamilyStockAlertPage\(\{[^}]*@startDate/.test(summary))
   }
   check('compat.ts returns the field names consumed by the dashboard',
     /AS return_count/.test(src) && /AS items_returned/.test(src) && /AS loss_usd/.test(src))
