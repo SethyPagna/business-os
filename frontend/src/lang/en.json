@@ -5824,5 +5824,7 @@
   "stock_line_removed": "Removed",
   "stock_line_set": "Set",
   "add_products": "Add products",
+  "suggestions_none_yet": "Nothing saved yet — type a new one.",
+  "suggestions_no_match": "No match — type to add a new one.",
   "add_products_button_hint": "Add new products or receive stock for products you already have."
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
 import { useFormDirty } from '../../../utils/formDirty.ts'
@@ -8,6 +8,9 @@ import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import SuggestionTextInput from '../../shared/SuggestionTextInput.tsx'
+import { loadSupplierNames } from '../../shared/SupplierPickerField.tsx'
+import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { normalizeProductGroupName } from '../../../utils/productGrouping.ts'
 
 const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000
@@ -156,6 +159,26 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
+  // Sibling parity: Supplier here is the same "a supplier NAME on a product"
+  // field ProductForm carries, so it gets the same suggestions from the same
+  // permission-free names-only read. It used to be a bare text box -- the
+  // operator had to remember and re-type a name the app already knew.
+  // null until the read reports, so an empty list cannot be mistaken for
+  // "this catalog has no suppliers" (utils/suggestionMatching.ts).
+  const [supplierNames, setSupplierNames] = useState<string[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadSupplierNames()
+      .then((rows) => { if (alive) setSupplierNames(rows.map((row) => row.name)) })
+      .catch(() => { /* suggestions unavailable -- free text still works */ })
+    return () => { alive = false }
+  }, [])
+  const variantSupplierEmptyState = suggestionEmptyState(supplierNames !== null, (supplierNames || []).length)
+  const variantSupplierEmptyHint = variantSupplierEmptyState === 'unknown'
+    ? undefined
+    : variantSupplierEmptyState === 'none-yet'
+      ? tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')
+      : tr('suggestions_no_match', 'No match — type to add a new one.', 'រកមិនឃើញ — សូមវាយបញ្ចូលថ្មី។')
   // S4-21: dismissing this modal with edits raises the discard prompt.
   const { dirty: formDirty } = useFormDirty(form, String(parent?.id ?? 'new'))
   const saveInFlightRef = useRef(false)
@@ -305,7 +328,16 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             <label htmlFor="variant-form-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('supplier') || 'Supplier'}
             </label>
-            <input id="variant-form-supplier" name="variant_supplier" className="input min-h-11 min-w-0" value={form.supplier} onChange={(event) => setField('supplier', event.target.value)} />
+            <SuggestionTextInput
+              id="variant-form-supplier"
+              name="variant_supplier"
+              value={form.supplier}
+              options={supplierNames || []}
+              onChange={(value) => setField('supplier', value)}
+              placeholder={tr('type_or_select_supplier', 'Type or select supplier...', 'វាយឈ្មោះ ឬជ្រើសរើសអ្នកផ្គត់ផ្គង់...')}
+              ariaLabel={t('supplier') || 'Supplier'}
+              emptyHint={variantSupplierEmptyHint}
+            />
           </div>
 
           <div className="min-w-0">
