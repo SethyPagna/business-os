@@ -42,6 +42,77 @@ const km = flatten(kmRaw)
 
 const failures: string[] = []
 
+// 0. no key may be written twice in one pack.
+//
+// JSON has no duplicate-key error: the LAST occurrence silently wins and every
+// earlier one disappears. So appending `"not_recorded": "..."` at the bottom of
+// a 5000-key pack does not add a key -- it REWRITES the one at line 2766, and
+// with it every screen that already used it. Nothing else in this file can see
+// that: after JSON.parse the pack looks perfectly normal, both packs still hold
+// the same key set, every referenced key still resolves, and the slots match.
+//
+// A JSON.parse reviver cannot catch it either. V8 walks the ALREADY PARSED
+// value, so the reviver is handed one `not_recorded` -- the survivor. The
+// duplicate exists only in the text, so the text is what gets scanned.
+//
+// This shipped on Sep 6 2026: 4e58891f appended four keys for the delivery
+// actual-cost amendment, two of which already existed, and its Khmer wording
+// silently replaced the wording Dashboard, POS, the stock-in sessions and
+// invoices tables and the deleted-sales review were already showing. Exactly
+// the way a union-style merge of two lanes' packs re-admits wording nobody
+// chose.
+const duplicateKeys = (text: string): Array<{ key: string; first: number; again: number }> => {
+  const found: Array<{ key: string; first: number; again: number }> = []
+  const scopes: Array<Map<string, number> | null> = [] // null = inside an array
+  let i = 0
+  let line = 1
+  let expectKey = false
+  while (i < text.length) {
+    const ch = text[i]
+    if (ch === '\n') { line += 1; i += 1; continue }
+    if (ch === ' ' || ch === '\t' || ch === '\r') { i += 1; continue }
+    if (ch === '{') { scopes.push(new Map()); expectKey = true; i += 1; continue }
+    if (ch === '[') { scopes.push(null); expectKey = false; i += 1; continue }
+    if (ch === '}' || ch === ']') { scopes.pop(); expectKey = false; i += 1; continue }
+    if (ch === ',') { expectKey = scopes[scopes.length - 1] != null; i += 1; continue }
+    if (ch === ':') { expectKey = false; i += 1; continue }
+    if (ch === '"') {
+      let j = i + 1
+      let value = ''
+      while (j < text.length) {
+        if (text[j] === '\\') { value += text[j] + text[j + 1]; j += 2; continue }
+        if (text[j] === '"') break
+        if (text[j] === '\n') line += 1
+        value += text[j]
+        j += 1
+      }
+      i = j + 1
+      if (expectKey) {
+        const scope = scopes[scopes.length - 1]
+        if (scope) {
+          const first = scope.get(value)
+          if (first !== undefined) found.push({ key: value, first, again: line })
+          else scope.set(value, line)
+        }
+      }
+      continue
+    }
+    i += 1
+  }
+  return found
+}
+
+for (const name of ['en.json', 'km.json']) {
+  const text = fs.readFileSync(path.join(FRONTEND, 'src', 'lang', name), 'utf8')
+  for (const dup of duplicateKeys(text)) {
+    failures.push(
+      `${name}: duplicate key '${dup.key}' (line ${dup.first} and line ${dup.again}) — JSON keeps only the `
+        + `LAST one, so line ${dup.again} silently overwrote the value every existing caller was already `
+        + 'getting. Delete one, and check the survivor carries the wording you meant to ship.',
+    )
+  }
+}
+
 // 1. pack parity (top-level, same as langKeyIntegrity)
 const enTop = new Set(Object.keys(enRaw))
 const kmTop = new Set(Object.keys(kmRaw))
