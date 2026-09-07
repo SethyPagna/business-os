@@ -605,7 +605,7 @@ export default function ManageBrandsModal({
               className="input"
               value={newBrand}
               onChange={(event) => setNewBrand(event.target.value)}
-              placeholder="e.g. L'Oreal"
+              placeholder={t('brand_name_example_placeholder') || "e.g. L'Oreal"}
               disabled={busy}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') addLibraryBrand()

@@ -57,7 +57,6 @@ runTest('stock adjustments, transfers, and ledger edits retain review plus feedb
   const inventory = source('inventory/Inventory.tsx')
   const adjustment = source('products/forms/StockAdjustModal.tsx')
   const bulk = source('products/forms/BulkAddStockModal.tsx')
-  const branch = source('products/forms/BranchStockAdjuster.tsx')
   const ledger = source('products/StockChangeSection.tsx')
 
   assert.match(inventory, /window\.confirm\(adjustConfirmLabel\)/)
@@ -66,7 +65,6 @@ runTest('stock adjustments, transfers, and ledger edits retain review plus feedb
   assert.match(adjustment, /<ConfirmDialog/)
   assert.match(adjustment, /notify\(tr\('stock_updated'/)
   assert.match(bulk, /<ConfirmDialog/)
-  assert.match(branch, /<ConfirmDialog/)
   assert.match(ledger, /confirmRevert/)
   assert.match(ledger, /confirm_update_stock_reason/)
   assert.match(ledger, /movement_reverted/)

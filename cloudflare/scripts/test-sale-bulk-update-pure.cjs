@@ -7,7 +7,7 @@ const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['actorSnapshot','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry'])
+const actual = new Set(['actorSnapshot','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry','contactOptions'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -39,7 +39,9 @@ function fixture() {
     INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_methods','["Cash","ABA","Card"]','settings-v1')
       ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at;
     INSERT INTO branches(id,name) VALUES(1,'Shop');
-    INSERT INTO customers(id,name,phone,address) VALUES(1,'Old','011','Old road'),(2,'Other','022','Other road'),(3,'New','033','New road');
+    -- N21: customer 3 carries the Contact Options JSON that customers.address
+    -- actually stores, so the reassignment below is exercised on the real shape.
+    INSERT INTO customers(id,name,phone,address) VALUES(1,'Old','011','Old road'),(2,'Other','022','Other road'),(3,'New','033','[{"label":"Default","name":null,"phone":null,"email":null,"address":"New road","area":null}]');
     INSERT INTO delivery_contacts(id,name,phone,area,address) VALUES(1,'Driver A','111','A area','A road'),(2,'Driver B','222','B area','B road');
     INSERT INTO sales(id,receipt_number,sale_status,branch_id,branch_name,cashier_name,customer_id,customer_name,customer_phone,customer_address,payment_method,payment_details,payment_currency,exchange_rate,amount_paid_usd,amount_paid_khr,change_usd,change_khr,is_delivery,delivery_contact_id,delivery_contact_name,delivery_contact_phone,delivery_contact_address,delivery_actual_cost_usd,updated_at)
     VALUES
@@ -126,6 +128,10 @@ async function run(){
   assert.equal(customer.status,200,JSON.stringify(customer))
   assert.deepEqual([customer.body.changedCount,customer.body.unchangedCount],[2,1])
   assert.deepEqual(f.sql.prepare('SELECT customer_id,customer_name FROM returns WHERE id=1').get(),{customer_id:3,customer_name:'New'})
+  // N21: the sale snapshot must be the DISPLAY address. Copying the column raw,
+  // as this writer used to, stores the options JSON, and the sale detail, the
+  // receipt and the CSV export then print it.
+  assert.equal(f.sql.prepare('SELECT customer_address FROM sales WHERE id=1').get().customer_address,'New road')
   f.sql.prepare("UPDATE customers SET name='Older' WHERE id=1").run()
   const editedSource=snapshot(f)
   assert.equal((await replay(f,customer.body.actionHistoryId)).status,409)
