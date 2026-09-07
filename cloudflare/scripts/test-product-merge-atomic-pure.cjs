@@ -68,7 +68,7 @@ async function main() {
     CREATE TABLE action_history(
       id INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT,entity TEXT,entity_id TEXT,label TEXT,undo_label TEXT,redo_label TEXT,
       reversible INTEGER,status TEXT,undo_payload TEXT,redo_payload TEXT,created_by_id INTEGER,created_by_name TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE audit_logs(
       id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,
@@ -98,6 +98,8 @@ async function main() {
   const action = db.prepare('SELECT * FROM action_history').get({})
   assert.equal(JSON.parse(action.undo_payload).snapshot_id, snapshot.id)
   assert.equal(JSON.parse(action.redo_payload).snapshot_id, snapshot.id)
+  assert.equal(action.reversible, 0, 'undo is not advertised before the fingerprint is finalized')
+  assert.equal(action.status, 'recorded')
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get({}).n, 1)
 
   const before = {
@@ -116,6 +118,9 @@ async function main() {
   assert.equal(db.prepare('SELECT is_active FROM products WHERE id=1').get({}).is_active, before.active)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM undo_snapshots').get({}).n, before.snapshots)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM action_history').get({}).n, before.actions)
+  const undoSource = fs.readFileSync(path.join(libDir, 'undoAppliers.ts'), 'utf8')
+  assert.match(undoSource, /UPDATE action_history SET reversible=1,status='undoable'/)
+  assert.match(undoSource, /merge_history_guard/)
   console.log('test-product-merge-atomic-pure: all checks passed')
 }
 

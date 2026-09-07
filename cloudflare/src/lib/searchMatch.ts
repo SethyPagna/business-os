@@ -354,17 +354,30 @@ function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
 interface HaystackIndex {
   tokens: string[]
   compact: string
+  barcodeKeys: string[]
 }
 
 // Pre-normalizes one record's searchable text once, so re-checking it
 // against multiple search-term groups (AND/OR mode) doesn't redo the same
 // normalization work per group.
 export function buildHaystackIndex(...fields: unknown[]): HaystackIndex {
-  const normalized = normalizeSearchText(fields.filter((field) => field !== null && field !== undefined).join(' '))
+  const flat = fields.flatMap((field) => (Array.isArray(field) ? field : [field]))
+  const present = flat.filter((field) => field !== null && field !== undefined)
+  const normalized = normalizeSearchText(present.join(' '))
+  const barcodeKeys: string[] = []
+  for (const field of present) {
+    for (const key of barcodeSearchKeys(field)) if (!barcodeKeys.includes(key)) barcodeKeys.push(key)
+  }
   return {
     tokens: tokenizeNormalized(normalized),
     compact: normalized.replace(/\s+/g, ''),
+    barcodeKeys,
   }
+}
+
+function termMatchesBarcode(term: string, index: HaystackIndex): boolean {
+  if (!index.barcodeKeys.length) return false
+  return barcodeSearchKeySetsMatch(searchTermBarcodeKeys(term), index.barcodeKeys)
 }
 
 // A single typed word ("query word") is considered present in the record if
@@ -374,6 +387,17 @@ export function buildHaystackIndex(...fields: unknown[]): HaystackIndex {
 // typos and simple word-order independence), tried against every alias of
 // that word too.
 function queryWordMatchesHaystack(queryWord: string, index: HaystackIndex): boolean {
+  // Do not let the generic compact substring fallback undo the guarded UPC
+  // relation below. A valid UPC-E such as 01234565 has the stripped text
+  // 1234565, but that seven-digit value can also be an unrelated internal
+  // code. Numeric scans in this keyspace must share a checked upca:/upce:
+  // key or they do not match.
+  if (/^[0-9]{7,14}$/.test(queryWord)) {
+    const queryBarcodeKeys = barcodeSearchKeys(queryWord)
+    const guarded = queryBarcodeKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key))
+      || index.barcodeKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key))
+    if (guarded) return barcodeSearchKeySetsMatch(queryBarcodeKeys, index.barcodeKeys)
+  }
   const candidates = aliasCandidates(queryWord)
   for (const candidate of candidates) {
     if (!candidate) continue
@@ -388,6 +412,7 @@ function queryWordMatchesHaystack(queryWord: string, index: HaystackIndex): bool
 // this is what lets "Concealer Cover" find a product literally named
 // "Cover Concealer".
 function termMatchesHaystack(term: string, index: HaystackIndex): boolean {
+  if (termMatchesBarcode(term, index)) return true
   const words = tokenizeNormalized(normalizeSearchText(term))
   if (!words.length) return true
   return words.every((word) => queryWordMatchesHaystack(word, index))
@@ -1251,10 +1276,87 @@ export function normalizeBarcodeKey(value: unknown): string {
   return stripped
 }
 
+function upcCheckDigit(elevenDigits: string): string {
+  let sum = 0
+  for (let index = 0; index < 11; index += 1) {
+    const digit = elevenDigits.charCodeAt(index) - 48
+    sum += index % 2 === 0 ? digit * 3 : digit
+  }
+  return String((10 - (sum % 10)) % 10)
+}
+
+export function expandUpcE(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!/^[0-9]{8}$/.test(raw) || (raw[0] !== '0' && raw[0] !== '1')) return ''
+  const [d1, d2, d3, d4, d5, d6] = raw.slice(1, 7).split('')
+  const body = d6 === '0' || d6 === '1' || d6 === '2'
+    ? `${d1}${d2}${d6}0000${d3}${d4}${d5}`
+    : d6 === '3'
+      ? `${d1}${d2}${d3}00000${d4}${d5}`
+      : d6 === '4'
+        ? `${d1}${d2}${d3}${d4}00000${d5}`
+        : `${d1}${d2}${d3}${d4}${d5}0000${d6}`
+  const eleven = `${raw[0]}${body}`
+  const upcA = `${eleven}${upcCheckDigit(eleven)}`
+  return raw[7] === upcA[11] ? upcA : ''
+}
+
+export function compressUpcA(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!/^[0-9]+$/.test(raw)) return ''
+  const upcA = raw.length === 13 && raw[0] === '0' ? raw.slice(1) : raw
+  if (upcA.length !== 12 || (upcA[0] !== '0' && upcA[0] !== '1')) return ''
+  const manufacturer = upcA.slice(1, 6)
+  const item = upcA.slice(6, 11)
+  const check = upcA[11]
+  const payloads = [
+    `${manufacturer[0]}${manufacturer[1]}${item[2]}${item[3]}${item[4]}${manufacturer[2]}`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${item[3]}${item[4]}3`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${manufacturer[3]}${item[4]}4`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${manufacturer[3]}${manufacturer[4]}${item[4]}`,
+  ]
+  for (const payload of payloads) {
+    const candidate = `${upcA[0]}${payload}${check}`
+    if (expandUpcE(candidate) === upcA) return candidate
+  }
+  return ''
+}
+
+function upcPairKeys(digits: string): string[] {
+  if (!/^[0-9]+$/.test(digits)) return []
+  if (digits.length === 8) {
+    const upcA = expandUpcE(digits)
+    return upcA ? [`upce:${digits}`, `upca:${upcA}`] : []
+  }
+  if (digits.length < 12) return []
+  const stripped = digits.replace(/^0+/, '')
+  if (stripped.length > 12) return []
+  const upcA = stripped.padStart(12, '0')
+  const upcE = compressUpcA(upcA)
+  return upcE ? [`upca:${upcA}`, `upce:${upcE}`] : []
+}
+
+const UPC_PAIR_KEY_PREFIX = /^upc[ae]:/
+
+function barcodeSearchKeySetsMatch(leftKeys: readonly string[], rightKeys: readonly string[]): boolean {
+  if (!leftKeys.length || !rightKeys.length) return false
+  const sharedPair = leftKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key) && rightKeys.includes(key))
+  if (sharedPair) return true
+  if (leftKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key)) || rightKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key))) return false
+  return leftKeys.some((key) => rightKeys.includes(key))
+}
+
+export function barcodeSearchKeys(value: unknown): string[] {
+  const primary = normalizeBarcodeKey(value)
+  if (!primary) return []
+  const digits = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+  return [...new Set([primary, ...upcPairKeys(digits)])]
+}
+
 // True when two barcodes are the same real barcode under the rule above.
 export function barcodeKeysMatch(left: unknown, right: unknown): boolean {
-  const key = normalizeBarcodeKey(left)
-  return key !== '' && key === normalizeBarcodeKey(right)
+  const leftKeys = barcodeSearchKeys(left)
+  return barcodeSearchKeySetsMatch(leftKeys, barcodeSearchKeys(right))
 }
 
 // The barcode key a typed/scanned SEARCH BOX value stands for, or '' when
@@ -1262,15 +1364,27 @@ export function barcodeKeysMatch(left: unknown, right: unknown): boolean {
 // is a normal two-word search (name AND code), not a barcode lookup, and
 // must keep going through the ordinary word path.
 export function searchTermBarcodeKey(raw: unknown): string {
+  return searchTermBarcodeKeys(raw)[0] || ''
+}
+
+export function searchTermBarcodeKeys(raw: unknown): string[] {
   const text = String(raw ?? '').trim()
-  if (!text || /[\s,]/.test(text)) return ''
-  return normalizeBarcodeKey(text)
+  if (!text || /[\s,]/.test(text)) return []
+  return barcodeSearchKeys(text)
 }
 
 // SQL form of normalizeBarcodeKey for a stored column: lowercase, drop
 // spaces/hyphens, strip leading zeros. Kept in lockstep with the JS above.
 export function normalizedBarcodeSql(column: string): string {
   return `ltrim(lower(replace(replace(trim(COALESCE(${column}, '')), ' ', ''), '-', '')), '0')`
+}
+
+export function normalizedBarcodeDigitsSql(column: string): string {
+  return `lower(replace(replace(trim(COALESCE(${column}, '')), ' ', ''), '-', ''))`
+}
+
+export function exactBarcodePredicateSql(paramName = 'barcodeKey', column = 'p.barcode'): string {
+  return `((@${paramName}Pair=1 AND ${normalizedBarcodeDigitsSql(column)} IN (@${paramName}UpcA,@${paramName}UpcE)) OR (@${paramName}Pair=0 AND ${normalizedBarcodeSql(column)}=@${paramName}))`
 }
 
 // Extra WHERE disjunct that makes "the scanned code finds BOTH twins" an
@@ -1284,9 +1398,15 @@ export function buildExactBarcodeMatchClause(
   idColumn = 'p.id',
   table = 'products',
 ): string | undefined {
-  const key = searchTermBarcodeKey(rawQuery)
+  const keys = searchTermBarcodeKeys(rawQuery)
+  const key = keys[0] || ''
   if (!key) return undefined
   params[paramName] = key
+  const upcA = keys.find((candidate) => candidate.startsWith('upca:'))?.slice(5) || ''
+  const upcE = keys.find((candidate) => candidate.startsWith('upce:'))?.slice(5) || ''
+  params[`${paramName}Pair`] = upcA && upcE ? 1 : 0
+  params[`${paramName}UpcA`] = upcA
+  params[`${paramName}UpcE`] = upcE
   // Two probes, the index-served one first. `products(barcode)` carries a
   // plain index (idx_products_barcode_pg, migrations/0001_init.sql), which a
   // predicate wrapped in ltrim()/replace() can never use -- so the literal
@@ -1308,14 +1428,14 @@ export function buildExactBarcodeMatchClause(
   // it becomes its own materialized LIST SUBQUERY, planned as a SEARCH on
   // the covering barcode index and evaluated before the FTS/trigram
   // subqueries that follow it in the OR.
-  const candidates = barcodeEqualityCandidates(key)
+  const candidates = upcA && upcE ? [upcA, upcE] : barcodeEqualityCandidates(key)
   const placeholders = candidates.map((candidate, index) => {
     params[`${paramName}Eq${index}`] = candidate
     return `@${paramName}Eq${index}`
   })
   const rawColumn = column.includes('.') ? column.slice(column.lastIndexOf('.') + 1) : column
   const probe = `${idColumn} IN (SELECT id FROM ${table} WHERE ${rawColumn} IN (${placeholders.join(', ')}))`
-  return `(${probe} OR ${normalizedBarcodeSql(column)} = @${paramName})`
+  return `(${probe} OR ${exactBarcodePredicateSql(paramName, column)})`
 }
 
 // The stored literal forms one normalized barcode key can take. GTIN-14 is the
@@ -1338,5 +1458,5 @@ export function barcodeEqualityCandidates(key: string, maxLength = 18): string[]
 export const EXACT_BARCODE_RANK_OFFSET = 1000000
 
 export function buildExactBarcodeRankSql(paramName = 'barcodeKey', column = 'p.barcode'): string {
-  return `(CASE WHEN ${normalizedBarcodeSql(column)} = @${paramName} THEN 0 ELSE ${EXACT_BARCODE_RANK_OFFSET} END)`
+  return `(CASE WHEN ${exactBarcodePredicateSql(paramName, column)} THEN 0 ELSE ${EXACT_BARCODE_RANK_OFFSET} END)`
 }

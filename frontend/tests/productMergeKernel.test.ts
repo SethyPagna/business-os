@@ -10,6 +10,10 @@ const economics = resolveProductMergeEconomics([
 assert.equal(economics.merged.cost_price_usd, 5)
 assert.equal(economics.merged.selling_price_usd, 9)
 assert.equal(economics.merged.wholesale_price_usd, 4)
+assert.equal(resolveProductMergeEconomics([
+  { id: 11, cost_price_usd: 130.6595 },
+  { id: 12, cost_price_usd: 130.6596 },
+]).merged.cost_price_usd, 130.6596)
 
 const rows = mergeSameDetailRows([
   { id: 1, name: 'Tea', barcode: '000123', cost_price_usd: 4, selling_price_usd: 5 },

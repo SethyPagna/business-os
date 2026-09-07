@@ -22,7 +22,7 @@ import { canonicalProductBarcode, findDuplicateProductGroups, findPossiblySamePr
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, registerMergeFold, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
-import { MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, resolveProductMergeEconomics, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2652,7 +2652,7 @@ export async function foldDuplicateProductInto(
   mergeContext: string,
   stockDisposition: MergeStockDisposition = 'merge',
   economicsOverride?: ProductMergeEconomics,
-  atomicHistory?: { operationId: string },
+  atomicHistory?: { operationId: string; bulkClusterPlan?: ProductMergeClusterPlan; resumedCluster?: boolean },
 ): Promise<{
   batchesMoved: number
   batchesFolded: number
@@ -2711,6 +2711,15 @@ export async function foldDuplicateProductInto(
   if (!canonicalBefore || !dupPricing || !productsShareExactIdentity(canonicalBefore, dupPricing)) {
     throw new Error('merge_identity_conflict')
   }
+  if (atomicHistory?.bulkClusterPlan) {
+    const plan = atomicHistory.bulkClusterPlan
+    const keeperMatches = atomicHistory.resumedCluster
+      ? productMergePlanKeeperMatches(plan, canonicalBefore)
+      : productMergePlanSourceMemberMatches(plan, canonicalBefore)
+    if (!keeperMatches || !productMergePlanSourceMemberMatches(plan, dupPricing)) {
+      throw new Error('merge_cluster_plan_conflict')
+    }
+  }
   // Selling AND wholesale price: highest of the two rows wins (see
   // resolveMergedPricing). Both SELECTs above name wholesale_price_*, not the
   // retired special_price_* pair -- migration 0111 moved the discounted tier
@@ -2718,7 +2727,9 @@ export async function foldDuplicateProductInto(
   // merge resolved max(0, 0) and a folded-away duplicate's wholesale price was
   // deactivated with its row. Nothing threw; the number simply left the
   // catalogue. The dead pair is written by nothing here on purpose.
-  const mergedEconomics = economicsOverride ?? resolveProductMergeEconomics([canonicalBefore, dupPricing])
+  const mergedEconomics = atomicHistory?.bulkClusterPlan
+    ? resolveProductMergeClusterPlanEconomics(atomicHistory.bulkClusterPlan)
+    : economicsOverride ?? resolveProductMergeEconomics([canonicalBefore, dupPricing])
   if (mergedEconomics.issues.length) throw new Error(`merge_numeric_invalid:${productMergeNumericError(mergedEconomics.issues)}`)
   // Cost is no longer identity (Sep 4 2026), so folding a duplicate must also
   // reconcile the two costs rather than silently keeping the keeper's: the
@@ -3134,6 +3145,7 @@ export async function foldDuplicateProductInto(
     ...(adjustmentMovementMarker ? { adjustmentMovementMarker } : {}),
     stockDisposition,
     mergeContext,
+    ...(atomicHistory?.bulkClusterPlan ? { bulkClusterPlan: atomicHistory.bulkClusterPlan } : {}),
   }
 
   // Product stock caches and durable history belong to this case's transaction.
@@ -3322,6 +3334,35 @@ app.get('/merge-duplicates/preview', async (c) => {
   })
 })
 
+async function readAppliedBulkClusterPlan(
+  db: ReturnType<typeof getDb>,
+  keeperId: number,
+  identityKey: string,
+  activeDuplicateIds: readonly number[],
+): Promise<ProductMergeClusterPlan | null> {
+  if (!activeDuplicateIds.length) return null
+  const rows = await db.prepare(`
+    SELECT payload_json
+    FROM undo_snapshots
+    WHERE kind='product.merge' AND status='applied'
+      AND CAST(json_extract(payload_json,'$.bulkClusterPlan.keeperId') AS INTEGER)=@keeperId
+      AND json_extract(payload_json,'$.bulkClusterPlan.identityKey')=@identityKey
+    ORDER BY id DESC
+    LIMIT 50
+  `).all<{ payload_json: string }>({ keeperId, identityKey })
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(String(row.payload_json || '{}')) as { bulkClusterPlan?: unknown }
+      const plan = parseProductMergeClusterPlan(payload.bulkClusterPlan)
+      // A completed old plan is not reused for a newly imported member of the
+      // same identity. A partial plan is applicable only while at least one of
+      // its original duplicate ids is still active in this group.
+      if (plan && activeDuplicateIds.some((id) => plan.memberIds.includes(id))) return plan
+    } catch {}
+  }
+  return null
+}
+
 app.post('/merge-duplicates', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
@@ -3390,36 +3431,66 @@ app.post('/merge-duplicates', async (c) => {
       continue
     }
 
+    // Known blockers are checked for the complete identity cluster before the
+    // first member is changed. A cluster is one economics decision; merging
+    // the easy members while leaving a blocked member would create a partial
+    // synthetic keeper and make a later retry financially ambiguous.
+    let groupBlocker: { code: string; error: string } | null = null
+    for (const dup of group.duplicates) {
+      const identity = await readMergeIdentityDiff(db, canonicalId, dup.id)
+      if (!identity.same) {
+        groupBlocker = { code: 'incompatible_product_identity', error: 'A product identity changed; this whole group remains unchanged.' }
+        break
+      }
+      const blockingSession = await mergeBlockedByReversibleStockSession(db, [canonicalId, dup.id])
+      if (blockingSession) {
+        groupBlocker = { code: 'stock_session_reversible', error: mergeStockSessionBlockedMessage(blockingSession.operationId) }
+        break
+      }
+    }
+    if (groupBlocker) {
+      for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, ...groupBlocker })
+      continue
+    }
+
     const ids = [canonicalId, ...group.duplicates.map((item) => item.id)]
     const moneyRows = await selectInChunks(ids, 0, (chunk) => {
       const { sql, params } = buildInClause('id', chunk)
-      return db.prepare(`SELECT id, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].join(', ')} FROM products WHERE id IN (${sql})`)
+      return db.prepare(`SELECT id, updated_at, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].join(', ')} FROM products WHERE id IN (${sql})`)
         .all<Record<string, unknown>>(params)
     })
-    const economics = resolveProductMergeEconomics(moneyRows)
+    if (moneyRows.length !== ids.length) {
+      for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'merge_state_conflict', error: 'A product disappeared while this group was being planned; the group remains unchanged.' })
+      continue
+    }
+    const identityKey = JSON.stringify([normalizeProductGroupName(canonicalName), identityBarcodeKey(group.canonical.barcode)])
+    const persistedPlan = await readAppliedBulkClusterPlan(db, canonicalId, identityKey, group.duplicates.map((dup) => dup.id))
+    let clusterPlan: ProductMergeClusterPlan
+    if (persistedPlan) {
+      const currentById = new Map(moneyRows.map((row) => [Number(row.id), row]))
+      const hasOutsider = ids.some((id) => !persistedPlan.memberIds.includes(id))
+      const keeperMatches = productMergePlanKeeperMatches(persistedPlan, currentById.get(canonicalId) || {})
+      const sourcesMatch = group.duplicates.every((dup) => productMergePlanSourceMemberMatches(persistedPlan, currentById.get(dup.id) || {}))
+      if (hasOutsider || !keeperMatches || !sourcesMatch) {
+        for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'merge_cluster_plan_conflict', error: 'This partially saved identity group changed after its original plan. Review it before resuming; no further member was merged.' })
+        continue
+      }
+      clusterPlan = persistedPlan
+    } else {
+      clusterPlan = createProductMergeClusterPlan(identityKey, canonicalId, moneyRows)
+    }
+    const economics = resolveProductMergeClusterPlanEconomics(clusterPlan)
     if (economics.issues.length) {
       const message = productMergeNumericError(economics.issues)
       for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'invalid_merge_numeric', error: message })
       continue
     }
 
-    // Batch/lot history reassignment, stock fold, image carry, audit --
-    // the whole per-duplicate fold lives in foldDuplicateProductInto
-    // (shared with POST /possible-duplicates/merge). Each fold commits
-    // before the next runs, so a later duplicate in the group sees -- and
-    // folds into -- batches an earlier one already moved (the same
-    // "growing set" the old per-group snapshot provided).
+    // The complete immutable member/economics plan is stored in every
+    // successful case's atomic snapshot. If a later case fails after an
+    // earlier one committed, the next request recovers the original raw
+    // DISTINCT costs instead of averaging the synthetic keeper again.
     for (const dup of group.duplicates) {
-      const identity = await readMergeIdentityDiff(db, canonicalId, dup.id)
-      if (!identity.same) {
-        refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'incompatible_product_identity', error: 'The product identity changed before this case could be merged.' })
-        continue
-      }
-      const blockingSession = await mergeBlockedByReversibleStockSession(db, [canonicalId, dup.id])
-      if (blockingSession) {
-        refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'stock_session_reversible', error: mergeStockSessionBlockedMessage(blockingSession.operationId) })
-        continue
-      }
       try {
         const operationId = crypto.randomUUID()
         const result = await foldDuplicateProductInto(
@@ -3430,12 +3501,12 @@ app.post('/merge-duplicates', async (c) => {
           'bounded duplicate cleanup',
           'merge',
           economics,
-          { operationId },
+          { operationId, bulkClusterPlan: clusterPlan, resumedCluster: Boolean(persistedPlan) || mergedIds.length > 0 },
         )
         if (result.actionHistoryId) actionHistoryIds.push(result.actionHistoryId)
         if (!result.undoReady) undoPendingCount += 1
       } catch (error) {
-        const conflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
+        const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
         refusals.push({
           caseKey: productMergeCaseKey(canonicalId, dup.id),
           keeperId: canonicalId,
@@ -3444,7 +3515,7 @@ app.post('/merge-duplicates', async (c) => {
           code: conflict ? 'merge_state_conflict' : 'merge_failed',
           error: conflict ? 'The product changed during this case; refresh and resume.' : String(error),
         })
-        continue
+        break
       }
       mergedIds.push(dup.id)
       mergedNames.push(dup.name)
