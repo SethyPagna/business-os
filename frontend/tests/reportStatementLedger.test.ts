@@ -4,7 +4,7 @@
 // supplied as the layout reference (Sep 5 2026, screenshot #13). This pins
 // that shape so a later edit cannot quietly fold it back into one amount
 // column, and pins the two invariants that must survive it: the shared group
-// order/labels/tint still come from the model, and the Not Paid block is
+// order/labels/tint still come from the model, and the Credit block is
 // still tinted by its data attribute (the CSS rule keys on it).
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -32,9 +32,11 @@ assert.match(excel, /\{total \? \([\s\S]*?\) : ''\}/, 'outer column carries tota
 assert.match(excel, /l\.headline\s*\?\s*<span[^>]*bg-\[var\(--ui-ink\)\][^>]*>\{amount\}<\/span>/, 'the headline total is badged')
 assert.equal((excel.match(/fmtMoney\(l\.usd, l\.khr\)/g) || []).length, 1, 'one formatter call per line feeds both columns')
 
-// Caption rows survive only for the two memo groups; arithmetic groups are
-// named by their total line.
-assert.match(overview, /const captioned = \(g: StatementGroup\) => g === 'delivery' \|\| g === 'pending'/)
+// Delivery keeps a caption because its memo rows need one shared heading.
+// Credit is already named by its one positive row, so a pending caption would
+// duplicate the label the owner explicitly asked to show only once.
+assert.match(overview, /const captioned = \(g: StatementGroup\) => g === 'delivery'/)
+assert.doesNotMatch(overview, /const captioned = \(g: StatementGroup\)[^\n]*pending/)
 assert.match(excel, /\{captioned\(g\) \? \(\s*<tr[^>]*data-statement-group=\{g\}/)
 
 // The tint is keyed on the attribute, not on an inline class, so every line
@@ -50,7 +52,7 @@ assert.match(excel, /\{note \? <div className="max-w-\[16rem\] whitespace-normal
 assert.doesNotMatch(excel, /\{note \? <span/, 'and never an inline span')
 assert.match(overview, /<DenseTable fit>/, 'fit is kept')
 const css = read('src/components/sales/reports/reports-surface.css')
-assert.ok(css.includes("tr[data-statement-group='pending'] > td"), 'the CSS still tints the Not Paid rows by attribute')
+assert.ok(css.includes("tr[data-statement-group='pending'] > td"), 'the CSS still tints the Credit row by attribute')
 
 // Both packs carry the new column label.
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
