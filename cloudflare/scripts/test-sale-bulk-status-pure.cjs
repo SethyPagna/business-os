@@ -36,7 +36,7 @@ const helper = load('lib/saleBulkStatus.ts')
 function fixture(migrate = true) {
   const sql=new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
-  for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || !f.startsWith('0120_'))).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
+  for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || Number(f.slice(0,4)) < 120)).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
   sql.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'),(2,'Warehouse'); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',100),(2,'B',100); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,50),(1,2,50),(2,1,100)")
   let failAt=null, beforeBatch=null, batches=0, reads=0
   const readRows=[]
@@ -74,8 +74,13 @@ async function run() {
   // Append 0120 to a populated pre-0120 fixture as well as the full fresh chain.
   let legacy=fixture(false);seed(legacy)
   const domain=legacy.sql.prepare('SELECT * FROM sales ORDER BY id').all()
+  // The pre-0120 fixture is a database that really existed (every migration below 0120); replaying 0120 AND
+  // everything after it, in order, is what production did. Filtering 0120 alone out of the full chain built a
+  // database that never existed and broke once 0129 re-created 0120's triggers.
   legacy.sql.exec(fs.readFileSync(path.join(root,'migrations/0120_sale_bulk_status_actions.sql'),'utf8'))
   assert.deepEqual(legacy.sql.prepare('SELECT * FROM sales ORDER BY id').all(),domain)
+  // ...and then every later migration, so the route below runs against the schema production actually has.
+  for (const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && Number(f.slice(0,4)) > 120).sort()) legacy.sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
   assert.equal(legacy.sql.prepare('SELECT COUNT(*) n FROM sale_write_revisions').get().n,0)
   assert.equal((await legacy.call(sales,'/bulk-status',request(legacy))).status,200)
   const savedRevisions=legacy.sql.prepare('SELECT * FROM sale_write_revisions ORDER BY sale_id').all()

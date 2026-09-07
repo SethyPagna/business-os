@@ -5815,7 +5815,7 @@
   "catalog_cost_price": "ថ្លៃដើមក្នុងកាតាឡុក",
   "complete_stock_session_changes": "បញ្ចប់ការផ្លាស់ប្តូរស្តុក",
   "confirm_complete_stock_session_mixed": "បញ្ចប់វគ្គស្តុកនេះ ដែលមានលទ្ធផលចម្រុះឬ?",
-  "fast_stock_auto_lot": "ឡូតិ៍ចាស់បំផុតជាមុន",
+  "fast_stock_auto_lot": "ថ្ងៃចូលចាស់បំផុតមុន",
   "fast_stock_mode_hint": "ជ្រើសថាតើបន្ទាត់បន្ទាប់នឹងបន្ថែម ដក ឬកំណត់ស្តុក។",
   "fast_stock_set_hint": "កំណត់ចំនួនស្តុកទៅលេខនេះ។",
   "set_to": "កំណត់ទៅ",

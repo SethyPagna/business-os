@@ -199,7 +199,10 @@ interface SaleItemAddition {
 // the row shape is migration 0115's, shared with utils/saleAmendments.ts so
 // the renderer and the caller cannot drift.
 interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
+  // Stopgap (coordinator, checkpoint 2): kept in step with api/salesTransport.ts:247 by hand until the
+  // codex-delivery lane replaces this local copy with the imported type and a parity test.
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed'
+  delivery_actual_cost_usd?: number | string | null
   sale_item_id?: number
   quantity?: number
   delivery_fee_usd?: number

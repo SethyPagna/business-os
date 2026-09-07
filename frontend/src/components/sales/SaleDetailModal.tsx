@@ -1147,6 +1147,56 @@ export default function SaleDetailModal({
                     zero and the row did not render. */}
                 <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} />
                 <DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} />
+                {/* Stopgap placement (coordinator, checkpoint 2): what the shop paid the
+                    driver is a fact ABOUT the delivery, not a line the customer owes, so
+                    it sits here with the driver -- never in the receipt-shaped totals
+                    (tests/recordDetailRowRhythm.test.ts). The records lane owns the final
+                    editor design (N41: fee and actual cost editable side by side). */}
+                {isDelivery ? (
+                  <DetailRow label={t('delivery_actual_cost') || 'Actual delivery cost'}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="tabular-nums">
+                        {actualCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(actualCostUsd)}
+                        {actualCostKhr !== null && actualCostKhr > 0 ? <span className="ml-1 text-xs text-gray-500">{fmtKHR(actualCostKhr)}</span> : null}
+                      </span>
+                      {canAmendThisSale ? (
+                        <button
+                          type="button"
+                          onClick={() => { if (!actualCostEditing) setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setActualCostEditing(!actualCostEditing) }}
+                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          {actualCostEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
+                        </button>
+                      ) : null}
+                      {canAmendThisSale && actualCostEditing ? (
+                        <>
+                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-actual-cost">
+                            {translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដថ្មី')}
+                          </label>
+                          <input
+                            id="amend-delivery-actual-cost"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={actualCostText}
+                            onChange={(event) => setActualCostText(event.target.value)}
+                            placeholder="0.00"
+                            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            disabled={amendSaving}
+                            onClick={() => stageActualDeliveryCostAmendment(actualCostUsd)}
+                            className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                          >
+                            {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </DetailRow>
+                ) : null}
                 {/* The note the cashier typed at checkout. It used to be a
                     SectionCard of its own ABOVE the items -- user, Sep 4 2026:
                     "the notes did not show in the notes area for sales, it
@@ -1514,60 +1564,6 @@ export default function SaleDetailModal({
                           <button
                             type="button"
                             onClick={() => setFeeEditing(false)}
-                            className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300"
-                          >
-                            {t('cancel') || 'Cancel'}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : null}
-                  {isDelivery ? (
-                    <MoneyRow
-                      label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ')}
-                      tone="muted"
-                      amount={actualCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(actualCostUsd)}
-                      sub={actualCostKhr !== null && actualCostKhr > 0 ? fmtKHR(actualCostKhr) : null}
-                      action={canAmendThisSale ? (
-                        <button
-                          type="button"
-                          onClick={() => { if (!actualCostEditing) setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setActualCostEditing(!actualCostEditing) }}
-                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                          {actualCostEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
-                        </button>
-                      ) : null}
-                    />
-                  ) : null}
-                  {canAmendThisSale && actualCostEditing && isDelivery ? (
-                    <tr className="bg-gray-50 dark:bg-gray-900/40">
-                      <td colSpan={5} className="px-1.5 py-2 sm:px-2">
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-actual-cost">
-                            {translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដថ្មី')}
-                          </label>
-                          <input
-                            id="amend-delivery-actual-cost"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={actualCostText}
-                            onChange={(event) => setActualCostText(event.target.value)}
-                            placeholder="0.00"
-                            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                          />
-                          <button
-                            type="button"
-                            disabled={amendSaving}
-                            onClick={() => stageActualDeliveryCostAmendment(actualCostUsd)}
-                            className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
-                          >
-                            {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActualCostEditing(false)}
                             className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300"
                           >
                             {t('cancel') || 'Cancel'}
