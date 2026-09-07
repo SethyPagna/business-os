@@ -103,6 +103,8 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0', productDiscountActiveSql: () => '0', anyRuleAppliesSql: () => '0', singleRuleAppliesSql: () => '0' },
 
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
+  '../lib/portalAbuseKey': loadReal('lib/portalAbuseKey.ts'),
+  '../lib/safeLinkUrl': loadReal('lib/safeLinkUrl.ts'),
   '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
   '../lib/portalSession': { createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
   '../lib/portalAuthLockout': { getPortalLockoutState: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), recordPortalFailure: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), clearPortalLockout: async () => {} },
@@ -110,6 +112,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/fileAssets': { buildUniqueStoredName: (name) => name },
   '../lib/media': { sanitizeMediaList: (list) => list },
   '../lib/uploadSecurity': { detectBufferKind: () => null },
+  '../lib/r2': { serveObject: async () => new Response(null, { status: 404 }) },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/portalAi': { generatePortalAiResponse: async () => ({}), getPortalAiUsageStatus: () => ({}) },
   '../lib/searchMatch': searchMatch,

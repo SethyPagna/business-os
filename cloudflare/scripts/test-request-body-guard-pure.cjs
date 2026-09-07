@@ -138,11 +138,26 @@ async function main() {
   const guard = { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit }
   const portal = load('routes/portal.ts', {
     '../lib/requestBodyGuard': guard, '../lib/auth': auth,
+    '../lib/portalAbuseKey': { portalAbuseKey: async () => 'unit-portal-abuse-key' },
+    '../lib/portalSession': {
+      createPortalSession: async () => ({ token: '', expiresAt: '' }),
+      setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},
+      getPortalAccount: async () => null,
+    },
     '../lib/rateLimit': { getClientIp: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
     '../lib/db': { getDb: () => ({ prepare: (sql) => {
       assert.match(sql, /^SELECT key, value FROM settings$/)
       calls.settings++
-      return { all: async () => ['customer_portal_ai_enabled', 'customer_portal_submission_enabled'].map(key => ({ key, value: String(enabled) })) }
+      const values = {
+        customer_portal_ai_enabled: String(enabled),
+        customer_portal_submission_enabled: String(enabled),
+        business_legal_name: 'Unit Test Seller Ltd',
+        business_registration_number: 'UNIT-123',
+        business_address: '1 Test Street',
+        business_phone: '+855 12 345 678',
+        business_email: 'seller@unit.test',
+      }
+      return { all: async () => Object.entries(values).map(([key, value]) => ({ key, value })) }
     } }) },
   }).default
   const backups = load('routes/backups.ts', { '../lib/auth': auth, '../lib/permissions': permissions })
@@ -228,8 +243,10 @@ async function main() {
     const response = await send(route, limit + 1, '1')
     assert.equal(response.status, 413, route)
     assert.equal(response.headers.get('x-frame-options'), 'SAMEORIGIN')
-    // At the exact limit the real parser/validator runs (blank body -> 400).
-    assert.equal((await send(route, limit)).status, 400, route)
+    // At the exact limit the real route continues past admission. AI reaches
+    // validation; submissions stop at the account boundary before body fields
+    // can identify another customer.
+    assert.equal((await send(route, limit)).status, route.endsWith('/submissions') ? 401 : 400, route)
     enabled = false
     assert.equal((await send(route, limit + 1)).status, 403, route)
     enabled = true; allowed = false
@@ -242,8 +259,11 @@ async function main() {
   const screenshotBody = new TextEncoder().encode(JSON.stringify({ screenshots, membershipNumber: '' }))
   assert.ok(screenshotBody.byteLength < large)
   const screenshotResponse = await worker.fetch(streamRequest('https://unit.test/api/portal/submissions', screenshotBody).request, env, ctx)
-  assert.equal(screenshotResponse.status, 400)
-  assert.equal((await screenshotResponse.json()).error, 'Membership number is required')
+  assert.equal(screenshotResponse.status, 401)
+  const screenshotError = await screenshotResponse.json()
+  assert.equal(screenshotError.code, 'portal_unauthenticated')
+  assert.equal(screenshotError.error, 'Please sign in to your account before sharing a screenshot.')
+  assert.equal(JSON.stringify(screenshotError).includes('membershipNumber'), false, 'body membership data is not reflected or disclosed')
   assert.equal(calls.effect, 0)
   console.log('PASS request admission: byte boundaries, cancellation, parser preservation, exact scope, real index/portal/backups, 401/403/429 and no downstream effects')
 }
