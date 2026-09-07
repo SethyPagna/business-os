@@ -17,7 +17,7 @@ export type ShiftPolicy = { scope_mode: ShiftScopeMode; admin_exempt: boolean }
 export type ShiftRow = {
   id: number; shift_code: string; scope_mode: ShiftScopeMode; user_id: number; user_name: string | null
   branch_id: number | null; branch_name: string | null; business_date: string; opened_at: string
-  opening_float_usd: number; opening_float_khr: number; opening_note: string | null; closed_at: string | null
+  opening_float_usd: number | null; opening_float_khr: number | null; opening_note: string | null; closed_at: string | null
   closing_counted_usd: number | null; closing_counted_khr: number | null; closing_note: string | null
   closed_by_user_id: number | null; closed_by_user_name: string | null; revision: number
   parent_shift_id: number | null; reopen_reason: string | null
@@ -30,7 +30,10 @@ export type ShiftCapabilities = { can_edit: boolean; can_close: boolean; can_reo
 export type ShiftResponseRow = ShiftRow & { capabilities: ShiftCapabilities }
 
 const SHIFT_COLUMNS = `id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
-  opened_at, opening_float_usd, opening_float_khr, opening_note,
+  opened_at,
+  CASE WHEN opening_float_usd_registered=1 THEN opening_float_usd ELSE NULL END AS opening_float_usd,
+  CASE WHEN opening_float_khr_registered=1 THEN opening_float_khr ELSE NULL END AS opening_float_khr,
+  opening_note,
   closed_at, closing_counted_usd, closing_counted_khr, closing_note,
   closed_by_user_id, closed_by_user_name, revision,
   parent_shift_id, reopen_reason, reopened_by_user_id, reopened_by_user_name,
@@ -48,12 +51,6 @@ function branchIdFrom(c: { req: { query: (k: string) => string | undefined; head
 function bodyBranchId(body: Record<string, unknown>, fallback: number | null): number | null {
   return body.branch_id == null || String(body.branch_id).trim() === '' ? fallback : parseBranchId(body.branch_id)
 }
-function requiredMoney(value: unknown): number | null {
-  if (typeof value !== 'number' && typeof value !== 'string') return null
-  if (typeof value === 'string' && value.trim() === '') return null
-  const n = Number(typeof value === 'string' ? value.trim() : value)
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null
-}
 /**
  * ---- The counted drawer at CLOSE is a record, not a gate -----------------
  *
@@ -65,9 +62,8 @@ function requiredMoney(value: unknown): number | null {
  *
  * So a blank/absent count is ACCEPTED and stored as NULL (the column has
  * always been nullable and every reader already prints "—" for it), while a
- * value that is not a non-negative number is still a 400. `requiredMoney`
- * collapses those two cases into one null and therefore cannot be reused
- * here: it would silently record "-5" as "not counted".
+ * value that is not a non-negative number is still a 400. Opening registration
+ * now uses this same strict blank/null distinction.
  *
  * There is no variance rule anywhere on this path. counted − expected is
  * computed for the report (lib/shiftReconciliation.ts) and printed; it never
@@ -240,12 +236,14 @@ async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, cl
   return null
 }
 async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftDbRow, input: {
-  reason: string; floatUsd: number; floatKhr: number; note: string | null; deviceName: string | null
+  reason: string; floatUsd: number | null; floatKhr: number | null; note: string | null; deviceName: string | null
   afterCancellation: boolean; auditAction: 'shift.reopen' | 'shift.open_after_cancel'
 }): Promise<{ changed: boolean; shift?: ShiftDbRow; conflict: boolean }> {
   const nowIso = new Date().toISOString(); const actorName = displayName(user); const childCode = shiftCode(nowIso)
   const child = { shiftCode: childCode, parentId: parent.id, expectedRevision: parent.revision, reason: input.reason,
     actorId: user.id, actorName, openedAt: nowIso, floatUsd: input.floatUsd, floatKhr: input.floatKhr,
+    storedFloatUsd: input.floatUsd ?? 0, storedFloatKhr: input.floatKhr ?? 0,
+    floatUsdRegistered: input.floatUsd == null ? 0 : 1, floatKhrRegistered: input.floatKhr == null ? 0 : 1,
     note: input.note, deviceName: input.deviceName, afterCancellation: input.afterCancellation ? 1 : 0 }
   const parentStored = storedShift(parent)
   const childSnapshot = { shift_code: child.shiftCode, scope_mode: parent.scope_mode, user_id: parent.user_id,
@@ -258,10 +256,12 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
   try {
     results = await db.batch([
       { sql: `INSERT INTO shift_sessions (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,
-          opened_at,opening_float_usd,opening_float_khr,opening_note,opened_device_name,parent_shift_id,reopen_reason,
+          opened_at,opening_float_usd,opening_float_khr,opening_float_usd_registered,opening_float_khr_registered,
+          opening_note,opened_device_name,parent_shift_id,reopen_reason,
           reopened_by_user_id,reopened_by_user_name)
         SELECT @shiftCode,scope_mode,user_id,user_name,branch_id,branch_name,business_date,
-          @openedAt,@floatUsd,@floatKhr,@note,@deviceName,id,@reason,@actorId,@actorName
+          @openedAt,@storedFloatUsd,@storedFloatKhr,@floatUsdRegistered,@floatKhrRegistered,
+          @note,@deviceName,id,@reason,@actorId,@actorName
         FROM shift_sessions parent WHERE id=@parentId AND revision=@expectedRevision
           AND ((@afterCancellation=1 AND cancelled_at IS NOT NULL)
             OR (@afterCancellation=0 AND cancelled_at IS NULL AND closed_at IS NOT NULL))
@@ -409,8 +409,9 @@ app.post('/open', async (c) => {
   if (branchId != null && !branch) return c.json({ error: 'Branch not found or inactive.' }, 400)
   const policy = await readShiftPolicy(db)
   if (policy.admin_exempt && isAdminControlUser(user)) return c.json({ error: 'This account is exempt from shifts.', exempt: true }, 403)
-  const floatUsd = requiredMoney(body.opening_float_usd); const floatKhr = requiredMoney(body.opening_float_khr)
-  if (floatUsd == null || floatKhr == null) return c.json({ error: 'Valid USD and KHR opening counts are required.' }, 400)
+  const floatUsdParsed = countedMoney(body.opening_float_usd); const floatKhrParsed = countedMoney(body.opening_float_khr)
+  if (!floatUsdParsed.ok || !floatKhrParsed.ok) return c.json({ error: 'Opening cash counts must be finite, non-negative numbers or blank.' }, 400)
+  const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
   const existing = await readCurrent(db, policy, user.id, branchId)
   if (existing && !existing.cancelled_at) return c.json({ ...currentResponse(user, existing, policy, false), already_registered: true }, 200)
   if (existing?.cancelled_at) {
@@ -431,14 +432,16 @@ app.post('/open', async (c) => {
   const nowIso = new Date().toISOString()
   const row = { shiftCode: shiftCode(nowIso), scopeMode: policy.scope_mode, userId: user.id,
     userName: displayName(user), branchId, branchName: branch?.name ?? null, openedAt: nowIso,
-    floatUsd, floatKhr,
+    floatUsd, floatKhr, storedFloatUsd: floatUsd ?? 0, storedFloatKhr: floatKhr ?? 0,
+    floatUsdRegistered: floatUsd == null ? 0 : 1, floatKhrRegistered: floatKhr == null ? 0 : 1,
     note: optionalText(body.opening_note), deviceName: c.req.header('X-Device-Name') || null }
   try {
     const results = await db.batch([
       { sql: `INSERT INTO shift_sessions (shift_code, scope_mode, user_id, user_name, branch_id,
-      branch_name, business_date, opened_at, opening_float_usd, opening_float_khr, opening_note, opened_device_name)
+      branch_name, business_date, opened_at, opening_float_usd, opening_float_khr,
+      opening_float_usd_registered, opening_float_khr_registered, opening_note, opened_device_name)
       VALUES (@shiftCode,@scopeMode,@userId,@userName,@branchId,@branchName,date(@openedAt,'${BUSINESS_TZ_FORWARD}'),
-      @openedAt,@floatUsd,@floatKhr,@note,@deviceName)`, params: row },
+      @openedAt,@storedFloatUsd,@storedFloatKhr,@floatUsdRegistered,@floatKhrRegistered,@note,@deviceName)`, params: row },
       { sql: openAuditSql(), params: { actorId: user.id, actorName: row.userName, shiftCode: row.shiftCode,
         details: JSON.stringify({ shift_code: row.shiftCode, scope_mode: row.scopeMode, branch_id: row.branchId,
           opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), oldValue: null,
@@ -599,11 +602,9 @@ app.post('/:id/reopen', async (c) => {
   const expectedRevision = Number(body.expected_revision); const reason = requiredReason(body.reason)
   if (body.expected_revision == null || !Number.isInteger(expectedRevision) || expectedRevision < 0) return c.json({ error: 'A valid expected revision is required.' }, 400)
   if (!reason) return c.json({ error: 'A reopen reason is required.' }, 400)
-  if (!Object.prototype.hasOwnProperty.call(body, 'opening_float_usd') || !Object.prototype.hasOwnProperty.call(body, 'opening_float_khr')) {
-    return c.json({ error: 'Opening USD and KHR counts are required.' }, 400)
-  }
-  const floatUsd = requiredMoney(body.opening_float_usd); const floatKhr = requiredMoney(body.opening_float_khr)
-  if (floatUsd == null || floatKhr == null) return c.json({ error: 'Valid USD and KHR opening counts are required.' }, 400)
+  const floatUsdParsed = countedMoney(body.opening_float_usd); const floatKhrParsed = countedMoney(body.opening_float_khr)
+  if (!floatUsdParsed.ok || !floatKhrParsed.ok) return c.json({ error: 'Opening cash counts must be finite, non-negative numbers or blank.' }, 400)
+  const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
   const db = getDb(c.env); const parent = await readShiftById(db, id)
   if (!parent) return c.json({ error: 'Shift not found.' }, 404)
   if (parent.branch_id != null && !(await resolveBranch(db, parent.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
@@ -651,8 +652,10 @@ app.patch('/:id', async (c) => {
   if (before.closed_at && !closedAt) return c.json({ error: 'Closed shifts cannot be reopened.' }, 400)
   if (!before.closed_at && closedAt) return c.json({ error: 'Open shifts must be closed through the close action.' }, 400)
   if (closedAt && new Date(closedAt).getTime() < new Date(openedAt).getTime()) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
-  const openingUsd = 'opening_float_usd' in body ? requiredMoney(body.opening_float_usd) : before.opening_float_usd
-  const openingKhr = 'opening_float_khr' in body ? requiredMoney(body.opening_float_khr) : before.opening_float_khr
+  const openingUsdParsed = 'opening_float_usd' in body
+    ? countedMoney(body.opening_float_usd) : { ok: true as const, value: before.opening_float_usd }
+  const openingKhrParsed = 'opening_float_khr' in body
+    ? countedMoney(body.opening_float_khr) : { ok: true as const, value: before.opening_float_khr }
   // The counted drawer stays OPTIONAL after the close, exactly as it is at the
   // close itself: a shift that was ended without a count must still be
   // amendable (opening time, notes, the closing timestamp), and requiring the
@@ -661,9 +664,10 @@ app.patch('/:id', async (c) => {
     ? countedMoney(body.closing_counted_usd) : { ok: true as const, value: before.closing_counted_usd }
   const closingKhrParsed = closedAt && 'closing_counted_khr' in body
     ? countedMoney(body.closing_counted_khr) : { ok: true as const, value: before.closing_counted_khr }
-  if (openingUsd == null || openingKhr == null || !closingUsdParsed.ok || !closingKhrParsed.ok) {
+  if (!openingUsdParsed.ok || !openingKhrParsed.ok || !closingUsdParsed.ok || !closingKhrParsed.ok) {
     return c.json({ error: 'Shift cash counts must be finite, non-negative numbers.' }, 400)
   }
+  const openingUsd = openingUsdParsed.value; const openingKhr = openingKhrParsed.value
   const closingUsd = closingUsdParsed.value; const closingKhr = closingKhrParsed.value
   const beforeStored = storedShift(before)
   const after = { ...beforeStored, opened_at: openedAt,
@@ -696,11 +700,16 @@ app.patch('/:id', async (c) => {
   if (JSON.stringify(comparableBefore) === JSON.stringify(comparableAfter)) return c.json({ error: 'No shift fields changed.' }, 400)
   const nowIso = new Date().toISOString(); const actorName = displayName(user)
   const results = await db.batch([
-    { sql: `UPDATE shift_sessions SET opened_at=@openedAt, opening_float_usd=@openingUsd, opening_float_khr=@openingKhr,
+    { sql: `UPDATE shift_sessions SET opened_at=@openedAt,
+        opening_float_usd=@storedOpeningUsd, opening_float_khr=@storedOpeningKhr,
+        opening_float_usd_registered=@openingUsdRegistered, opening_float_khr_registered=@openingKhrRegistered,
         opening_note=@openingNote, closed_at=@closedAt, closing_counted_usd=@closingUsd, closing_counted_khr=@closingKhr,
         closing_note=@closingNote, revision=revision+1, updated_at=@updatedAt WHERE id=@id AND revision=@revision`,
-      params: { id, revision: expectedRevision, openedAt: after.opened_at, openingUsd: after.opening_float_usd,
-        openingKhr: after.opening_float_khr, openingNote: after.opening_note, closedAt: after.closed_at,
+      params: { id, revision: expectedRevision, openedAt: after.opened_at,
+        storedOpeningUsd: after.opening_float_usd ?? 0, storedOpeningKhr: after.opening_float_khr ?? 0,
+        openingUsdRegistered: after.opening_float_usd == null ? 0 : 1,
+        openingKhrRegistered: after.opening_float_khr == null ? 0 : 1,
+        openingNote: after.opening_note, closedAt: after.closed_at,
         closingUsd: after.closing_counted_usd, closingKhr: after.closing_counted_khr, closingNote: after.closing_note, updatedAt: nowIso } },
     { sql: `INSERT INTO shift_session_amendments (shift_session_id, actor_user_id, actor_name, reason, before_json, after_json, created_at)
         SELECT @id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions

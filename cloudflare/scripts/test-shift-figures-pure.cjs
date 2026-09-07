@@ -208,14 +208,20 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
 
   // ---- 4. no business figure depends on the count ------------------------
   const wild = await recon.loadShiftFigures({}, { ...SHIFT, closing_counted_usd: 9_999, closing_counted_khr: 0 }, NOW)
+  const unregisteredOpening = await recon.loadShiftFigures({}, {
+    ...SHIFT, opening_float_usd: null, opening_float_khr: 0,
+  }, NOW)
   const business = (f) => ({
     sales: f.sales_usd, cogs: f.cogs_usd, profit: f.profit_usd, delivery_fee: f.delivery_fee_usd,
     credit: f.credit_usd, refunds: f.refunds_usd, delivery_cost: f.delivery_cost, other: f.other_expenses,
   })
   assert.deepEqual(business(wild), business(figures))
   assert.deepEqual(business(uncounted), business(figures))
+  assert.deepEqual(business(unregisteredOpening), business(figures))
+  assert.deepEqual(unregisteredOpening.opening, { usd: null, khr: 0 },
+    'blank opening USD stays unknown while explicit opening KHR zero stays measured')
   assert.notDeepEqual(wild.closing, figures.closing, 'the counts really did differ between the three runs')
-  ok('a $100 count, a $9,999 count and no count at all price the shift identically -- the registration is report-only')
+  ok('opening and closing registration values never price the shift -- the registration is report-only')
 
   // ---- 5. credit is a positive note --------------------------------------
   assert.equal(figures.credit_usd, 47.5, 'unpaid sales are carried as an amount owed')

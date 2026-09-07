@@ -82,6 +82,7 @@ function database() {
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
+  db.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
   db.prepare('INSERT INTO branches(id,name,is_active) VALUES (1,?,1)').run('Shop')
   return db
 }
@@ -174,8 +175,8 @@ async function main() {
     expected_revision: closedRoot.revision, opening_float_usd: 3, opening_float_khr: 3000,
   })).status, 400, 'reopen requires a reason')
   assert.equal((await call('POST', `/${rootShift.id}/reopen`, {
-    expected_revision: closedRoot.revision, reason: 'Recount', opening_float_usd: 3,
-  })).status, 400, 'reopen requires both native opening counts')
+    expected_revision: closedRoot.revision, reason: 'Recount', opening_float_usd: 3, opening_float_khr: [3000],
+  })).status, 400, 'reopen rejects a malformed opening count')
 
   user = { id: 8, name: 'Other', username: 'other', permissions: JSON.stringify({ pos: true }) }
   assert.equal((await call('POST', `/${rootShift.id}/reopen`, {
@@ -248,7 +249,7 @@ async function main() {
   const closedChild = (await childClose.json()).shift
   sent.length = 0
   user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: '{}' }
-  const reopenBody = { expected_revision: closedChild.revision, reason: 'Second count', opening_float_usd: 5, opening_float_khr: 5000 }
+  const reopenBody = { expected_revision: closedChild.revision, reason: 'Second count', opening_float_usd: '', opening_float_khr: 5000 }
   const [raceA, raceB] = await Promise.all([
     call('POST', `/${child.id}/reopen`, reopenBody),
     call('POST', `/${child.id}/reopen`, reopenBody),
@@ -264,6 +265,12 @@ async function main() {
     'only winning reopen transitions have audit rows')
 
   const grandchild = sqlite.prepare('SELECT * FROM shift_sessions WHERE parent_shift_id=?').get(child.id)
+  assert.equal(grandchild.opening_float_usd_registered, 0, 'reopen preserves a blank opening USD as unknown')
+  assert.equal(grandchild.opening_float_khr_registered, 1, 'reopen preserves explicit opening KHR')
+  const grandchildRead = await call('GET', `/${grandchild.id}/history`)
+  const grandchildShift = (await grandchildRead.json()).shift
+  assert.equal(grandchildShift.opening_float_usd, null)
+  assert.equal(grandchildShift.opening_float_khr, 5000)
   const notificationsBeforeRejectedCancels = sent.length
   const waitsBeforeRejectedCancels = waited.length
   user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.stringify({ pos: true }) }
@@ -295,7 +302,11 @@ async function main() {
   assert.equal(cancelled.closed_at, beforeCancel.closed_at, 'cancelling open does not invent a close time')
   assert.equal(cancelled.closing_counted_usd, beforeCancel.closing_counted_usd, 'cancelling never invents USD closing cash')
   assert.equal(cancelled.closing_counted_khr, beforeCancel.closing_counted_khr, 'cancelling never invents KHR closing cash')
-  assert.equal(cancelled.opening_float_usd, beforeCancel.opening_float_usd, 'cancellation retains original figures')
+  assert.equal(cancelled.opening_float_usd, null, 'cancellation retains the unknown opening registration')
+  const afterCancel = sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(grandchild.id)
+  assert.equal(afterCancel.opening_float_usd, beforeCancel.opening_float_usd)
+  assert.equal(afterCancel.opening_float_usd_registered, beforeCancel.opening_float_usd_registered,
+    'cancellation retains the stored opening amount and its presence fact')
   assert.deepEqual(cancelled.capabilities, { can_edit: false, can_close: false, can_reopen: false, can_cancel: false })
   assert.deepEqual(sent, [grandchild.id], 'only the winning cancellation schedules its cancellation-aware Telegram report')
   assert.equal(waited.length, waitsBeforeCancelRace + 1, 'only the winning cancellation registers background work')

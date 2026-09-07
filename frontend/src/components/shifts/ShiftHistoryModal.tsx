@@ -20,8 +20,8 @@ import {
   parseShiftCount,
   reopenShift,
   shiftClosingCounts,
-  shiftCountOrZero,
   shiftCountPairBlocker,
+  shiftOpeningCounts,
   shiftLocalDateTimeToIso,
   type Shift,
   type ShiftAmendment,
@@ -88,8 +88,8 @@ const editDraft = (shift: Shift): EditDraft => ({
   reason: '',
   openedAt: dateTimeLocal(shift.opened_at),
   closedAt: dateTimeLocal(shift.closed_at),
-  openingUsd: String(shift.opening_float_usd ?? 0),
-  openingKhr: String(shift.opening_float_khr ?? 0),
+  openingUsd: shift.opening_float_usd == null ? '' : String(shift.opening_float_usd),
+  openingKhr: shift.opening_float_khr == null ? '' : String(shift.opening_float_khr),
   closingUsd: shift.closing_counted_usd == null ? '' : String(shift.closing_counted_usd),
   closingKhr: shift.closing_counted_khr == null ? '' : String(shift.closing_counted_khr),
   openingNote: shift.opening_note || '',
@@ -277,10 +277,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
 
   const saveEdit = async () => {
     if (!selected || !edit || !edit.reason.trim() || !edit.openedAt || saving) return
-    const openingFloatUsd = shiftCountOrZero(edit.openingUsd)
-    const openingFloatKhr = shiftCountOrZero(edit.openingKhr)
+    const opening = shiftOpeningCounts(edit.openingUsd, edit.openingKhr)
     const closing = edit.closedAt ? shiftClosingCounts(edit.closingUsd, edit.closingKhr) : { usd: null, khr: null }
-    if (openingFloatUsd == null || openingFloatKhr == null
+    if (closingCountInvalid(edit.openingUsd) || closingCountInvalid(edit.openingKhr)
       || (edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)))) return
     setSaving(true)
     try {
@@ -288,8 +287,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         expectedRevision: edit.expectedRevision,
         reason: edit.reason.trim(),
         openedAt: shiftLocalDateTimeToIso(edit.openedAt),
-        openingFloatUsd,
-        openingFloatKhr,
+        openingFloatUsd: opening.usd,
+        openingFloatKhr: opening.khr,
         openingNote: edit.openingNote.trim() || null,
         closedAt: edit.closedAt ? shiftLocalDateTimeToIso(edit.closedAt) : null,
         closingCountedUsd: closing.usd,
@@ -333,16 +332,15 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
 
   const saveReopen = async () => {
     if (!selected || !reopen.reason.trim() || saving) return
-    const openingFloatUsd = shiftCountOrZero(reopen.openingUsd)
-    const openingFloatKhr = shiftCountOrZero(reopen.openingKhr)
-    if (openingFloatUsd == null || openingFloatKhr == null) return
+    const opening = shiftOpeningCounts(reopen.openingUsd, reopen.openingKhr)
+    if (closingCountInvalid(reopen.openingUsd) || closingCountInvalid(reopen.openingKhr)) return
     setSaving(true)
     try {
       const result = await reopenShift(selected.id, {
         expectedRevision: selected.revision,
         reason: reopen.reason.trim(),
-        openingFloatUsd,
-        openingFloatKhr,
+        openingFloatUsd: opening.usd,
+        openingFloatKhr: opening.khr,
         openingNote: reopen.openingNote.trim() || null,
       })
       setRows((current) => orderShiftRows([...current.filter((row) => row.id !== result.shift.id), result.shift]))
@@ -379,10 +377,10 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
 
   // Why each form's primary action cannot proceed yet -- printed beside the
   // button by ShiftSubmitRow, never hidden in a bare `disabled`. The count
-  // rule is the shared one (either currency is enough, blank is 0); the other
+  // rule is the shared one (blank is unknown, explicit 0 is counted); the other
   // reasons are the form's own required fields, in the order they appear.
   const editCountBlocker = edit
-    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr)
+    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr, { blankMeansUncounted: true })
     : null
   const editReason = !edit ? null
     : !edit.openedAt ? t('shift_opened_at_required')
@@ -393,7 +391,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   const closeReason = !close.closedAt ? t('shift_close_time_required')
     : closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr) ? t(shiftCountBlockerKey('invalid'))
       : null
-  const reopenCountBlocker = shiftCountPairBlocker(reopen.openingUsd, reopen.openingKhr)
+  const reopenCountBlocker = shiftCountPairBlocker(reopen.openingUsd, reopen.openingKhr, { blankMeansUncounted: true })
   const reopenReason = !reopen.reason.trim() ? t('shift_reopen_reason')
     : reopenCountBlocker ? t(shiftCountBlockerKey(reopenCountBlocker))
       : null

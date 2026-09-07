@@ -180,6 +180,12 @@ check('an open shift shows the opening count and no difference against a count n
 check('and it says it is still open rather than inventing a closing time',
   openReport.includes('still open'), openReport)
 
+const partiallyRegistered = telegram.formatShiftReport('Sunrise Mart', {
+  ...openShift, opening_float_usd: null, opening_float_khr: 0,
+}, figures, NOW)
+check('blank opening cash stays unknown while explicit zero stays measured',
+  partiallyRegistered.includes('Opening cash / សាច់ប្រាក់ដើមវេន: — · 0៛'), partiallyRegistered)
+
 // A quiet shift drops every zero line but still states the two totals the
 // shop always wants -- a $0.00 day is a fact, not a blank.
 const quiet = telegram.formatShiftReport('Sunrise Mart', { ...openShift, opening_float_usd: 0, opening_float_khr: 0 }, {

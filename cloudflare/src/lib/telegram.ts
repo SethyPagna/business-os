@@ -57,6 +57,11 @@ function money(usd: unknown, khr: unknown, separator = ' · '): string {
   if (khrValue) parts.push(`${Math.round(khrValue).toLocaleString()}៛`)
   return parts.length ? parts.join(separator) : '$0.00'
 }
+function registeredMoney(usdValue: number | null, khrValue: number | null): string {
+  const dollars = usdValue == null ? '—' : usd(usdValue)
+  const rielAmount = khrValue == null ? '—' : riel(khrValue)
+  return `${dollars} · ${rielAmount}`
+}
 
 // The ONE section rule every report draws, and the whole of what replaced the
 // explanatory sentences the owner asked us to delete ("no explanation just
@@ -532,8 +537,8 @@ export type ShiftReportSession = {
   branch_name: string | null
   business_date: string
   opened_at: string
-  opening_float_usd: number
-  opening_float_khr: number
+  opening_float_usd: number | null
+  opening_float_khr: number | null
   closed_at: string | null
   closing_counted_usd: number | null
   closing_counted_khr: number | null
@@ -638,8 +643,8 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // The owner's specific gap: registered cash, open vs end, both currencies,
   // as one small block. A factual readout -- it is not compared to anything
   // here, and an open shift (no count taken yet) shows only the open half.
-  lines.push(RULE, labeled('cashOpen', money(shift.opening_float_usd, shift.opening_float_khr)))
-  if (shift.closed_at) lines.push(labeled('cashEnd', money(shift.closing_counted_usd, shift.closing_counted_khr)))
+  lines.push(RULE, labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr)))
+  if (shift.closed_at) lines.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
 
   // Expenses split into exactly two plain lines, at most one refunds line,
   // and one informational difference line -- none of it an
@@ -674,7 +679,9 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
 }
 
 const SHIFT_COLUMNS = `shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
-  opened_at, opening_float_usd, opening_float_khr,
+  opened_at,
+  CASE WHEN opening_float_usd_registered=1 THEN opening_float_usd ELSE NULL END AS opening_float_usd,
+  CASE WHEN opening_float_khr_registered=1 THEN opening_float_khr ELSE NULL END AS opening_float_khr,
   closed_at, closing_counted_usd, closing_counted_khr,
   cancelled_at, cancelled_by_user_name, cancel_reason`
 
