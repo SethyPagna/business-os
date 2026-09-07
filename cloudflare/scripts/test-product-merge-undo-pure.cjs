@@ -403,6 +403,21 @@ async function run() {
     assert.match(appliersSrc, /This merge has later stock or batch activity/)
   })
 
+  await check('image-denied image-free undo omits image SQL and preserves a concurrent keeper cover', async () => {
+    const statement = undo.mergeKeeperRestoreStatement({
+      keeperId: KEEPER,
+      dupId: DUP,
+      keeperImagePathBefore: null,
+      dupImagesBefore: [],
+      imagesMovedToKeeper: [],
+    }, false)
+    assert.doesNotMatch(statement.sql, /image_path/)
+    assert.equal(Object.prototype.hasOwnProperty.call(statement.params, 'path'), false)
+    d1.db.prepare("UPDATE products SET image_path='/uploads/concurrent.png' WHERE id=?").run(KEEPER)
+    d1.db.prepare(statement.sql).run(statement.params)
+    assert.equal(d1.db.prepare('SELECT image_path FROM products WHERE id=?').get(KEEPER).image_path, '/uploads/concurrent.png')
+  })
+
   await check('undo refuses a merge after later stock activity', async () => {
     await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'redo' })
     run1('UPDATE branch_stock SET quantity = quantity + 1 WHERE product_id = @productId AND branch_id = @branchId', { productId: KEEPER, branchId: B1 })
