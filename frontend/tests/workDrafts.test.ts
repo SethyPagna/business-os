@@ -108,9 +108,12 @@ const fastStockInSource = readSource('../src/components/inventory/FastStockInMod
 const receiveBatchSource = readSource('../src/components/inventory/ReceiveBatchModal.tsx')
 
 await runTest('all flows ride the ONE store -- no leftover hand-rolled localStorage dialects', () => {
-  // ProductForm: restore honors server updated_at, save/discard clear
-  assert.match(productFormSource, /readWorkDraft<Partial<ProductFormState>>\(draftKey, \{ notOlderThanMs: serverEditedAt \|\| 0 \}\)/)
-  assert.match(productFormSource, /return scheduleWorkDraftWrite\(draftKey, form\)/)
+  // ProductForm: restore honors server updated_at, persists form + ordered
+  // gallery atomically, and save/discard clear the same actor/entity key.
+  assert.match(productFormSource, /readWorkDraft<Partial<ProductFormState> \| ProductFormDraftPayload>\(draftKey, \{ notOlderThanMs: serverEditedAt \|\| 0 \}\)/)
+  assert.match(productFormSource, /return scheduleWorkDraftWrite<ProductFormDraftPayload>\(draftKey, \{\s+form,\s+imageList: normalizeGallery\(\{ image_gallery: imageList \}/)
+  assert.match(productFormSource, /const restored = normalizeProductFormDraft\(restoredDraft\.data\)/)
+  assert.match(productFormSource, /if \(canManageImages && restored\.imageList\)/)
   assert.match(productFormSource, /discard: clearCurrentProductDraft/)
   assert.match(productFormSource, /if \(restoredLegacyDraftKeyRef\.current\) \{\s+clearWorkDraft\(restoredLegacyDraftKeyRef\.current\)/)
   assert.match(productFormSource, /flushPendingWorkDraft\(draftKey\)/)
