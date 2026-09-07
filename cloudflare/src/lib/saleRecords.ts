@@ -23,18 +23,14 @@
 //                             write ONE audit row keyed by the operation id,
 //                             not by sale, so without this join a sale that was
 //                             cancelled in a bulk action shows no record of it.
-//   returns           (0001)  a return REWRITES sales.sale_status to
-//                             'returned' / 'partial_return' and back
-//                             (routes/returns.ts:1658, :2558,
-//                             lib/returnBulkAction.ts:253) while auditing only
-//                             entity 'return' (returns.ts:2563,
-//                             returnBulkAction.ts:272) -- so the change the
-//                             shop asks about most often leaves no trace in
-//                             any of the three tables above.
-//   sales.created_at          the sale itself. Nothing audits a sale's own
-//                             creation, so it is synthesized from the row --
-//                             which is also why "Records" is never 0: a sale
-//                             always has at least the fact that it happened.
+//   returns + return audit/bulk history: creation, edit, grouped cancel,
+//                             undo and redo each have their own actor and time.
+//                             The mutable returns row alone cannot attribute a
+//                             later act to the person who performed it.
+//   sales.created_at + durable mutation before-snapshots: the sale itself.
+//                             Creation is reconstructed from first known
+//                             before-values so current mutable tender/status
+//                             never masquerade as original state.
 //
 // So the records list is a UNION, not a table, and this module is the pure half
 // of it: the SQL is in routes/sales.ts, the meaning is here, and
@@ -122,7 +118,7 @@ export interface SaleRecord {
   /** The acting account's USERNAME (N13's rule), never a full name. */
   actor_username: string | null
   kind: SaleRecordKind
-  /** 'amend' | 'undo' | 'redo' for ledger entries; null everywhere else. */
+  /** 'amend' | 'undo' | 'redo' when the durable source records that direction. */
   via: string | null
   /** What the change was about: a product name, "delivery", a customer. */
   subject: string | null
@@ -178,6 +174,9 @@ export interface SaleRecordSaleRow {
   sale_status?: unknown
   /** The status the sale held before a return moved it. Source of the "before". */
   status_before_return?: unknown
+  /** The status the sale held before cancellation, retained on the sale row. */
+  status_before_cancel?: unknown
+  updated_at?: unknown
   total_usd?: unknown
   payment_method?: unknown
   payment_details?: unknown
@@ -217,7 +216,7 @@ export function saleCreatedRecord(sale: SaleRecordSaleRow): SaleRecord {
     after: {
       receipt_number: text(sale.receipt_number),
       sale_status: text(sale.sale_status),
-      products: (sale.items || []).map((item) => ({
+      products: sale.items === undefined ? null : sale.items.map((item) => ({
         product: text(item.product_name),
         quantity: numberOrNull(item.quantity),
         unit_price_usd: numberOrNull(item.applied_price_usd),
@@ -235,6 +234,126 @@ export function saleCreatedRecord(sale: SaleRecordSaleRow): SaleRecord {
       change_khr: numberOrNull(sale.change_khr),
     },
   }
+}
+
+const CREATION_SNAPSHOT_FIELDS = [
+  'sale_status',
+  'total_usd',
+  'payment_method',
+  'payment_details',
+  'amount_paid_usd',
+  'amount_paid_khr',
+  'change_usd',
+  'change_khr',
+] as const
+
+type CreationSnapshotField = (typeof CREATION_SNAPSHOT_FIELDS)[number]
+
+type KnownBefore = { at: number; value: unknown }
+
+export interface SaleRecordMutationRow {
+  before_json?: unknown
+  created_at?: string | null
+}
+
+function rememberEarlierBefore(
+  known: Partial<Record<CreationSnapshotField, KnownBefore>>,
+  field: CreationSnapshotField,
+  value: unknown,
+  at: unknown,
+): void {
+  if (value === undefined) return
+  const stamp = atMs(at)
+  if (stamp === null) return
+  if (!known[field] || stamp < known[field]!.at) known[field] = { at: stamp, value }
+}
+
+/**
+ * Reconstruct only values that are provably the sale's creation state.
+ *
+ * The sales row is mutable. Rendering it verbatim in the creation record made
+ * a later settlement look as if the sale had originally been completed and
+ * paid by that tender. The first durable before-value for each field is the
+ * original value; fields with no writer remain safe to read from the row.
+ * Product lines are safe only while no line amendment exists. Once a line was
+ * added/removed/changed, the ledger does not retain enough price detail to
+ * recreate the original array, so `products: null` says unknown instead of
+ * presenting today's lines as the original basket.
+ */
+export function reconstructSaleCreation(input: {
+  sale: SaleRecordSaleRow
+  ledger?: SaleRecordLedgerRow[]
+  audit?: SaleRecordAuditRow[]
+  bulk?: SaleRecordBulkRow[]
+  returns?: SaleRecordReturnRow[]
+  mutations?: SaleRecordMutationRow[]
+}): SaleRecordSaleRow {
+  const known: Partial<Record<CreationSnapshotField, KnownBefore>> = {}
+  for (const row of input.ledger || []) {
+    rememberEarlierBefore(known, 'total_usd', row.total_before_usd, row.created_at)
+  }
+  for (const row of input.audit || []) {
+    const details = parseDetails(row.details) || {}
+    const before = details.before && typeof details.before === 'object'
+      ? details.before as Record<string, unknown> : {}
+    rememberEarlierBefore(known, 'sale_status', before.sale_status ?? details.oldStatus, row.created_at)
+    for (const field of CREATION_SNAPSHOT_FIELDS) {
+      if (field === 'sale_status' || field === 'total_usd') continue
+      if (field in before) rememberEarlierBefore(known, field, before[field], row.created_at)
+    }
+    // The old reopen-for-correction audit predates durable payment snapshots.
+    // It proves today's tender is not the creation tender, but cannot recover
+    // the old values. Keep those fields explicitly unknown rather than calling
+    // the mutable row original.
+    if (String(row.action || '') === 'sale_payment_correction_opened') {
+      for (const field of ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr'] as const) {
+        if (!(field in before)) rememberEarlierBefore(known, field, null, row.created_at)
+      }
+    }
+  }
+  for (const row of input.bulk || []) {
+    const entry = bulkMemberEntry(row.receipt_json, input.sale.id)
+    if (!entry || entry.before === undefined) continue
+    const before = entry.before
+    if (before && typeof before === 'object') {
+      for (const field of CREATION_SNAPSHOT_FIELDS) {
+        if (field in (before as Record<string, unknown>)) {
+          rememberEarlierBefore(known, field, (before as Record<string, unknown>)[field], row.created_at)
+        }
+      }
+    } else {
+      rememberEarlierBefore(known, 'sale_status', before, row.created_at)
+    }
+  }
+  for (const row of input.mutations || []) {
+    const envelope = parseDetails(row.before_json) || {}
+    const before = envelope.money && typeof envelope.money === 'object'
+      ? envelope.money as Record<string, unknown>
+      : envelope
+    for (const field of CREATION_SNAPSHOT_FIELDS) {
+      if (field in before) rememberEarlierBefore(known, field, before[field], row.created_at)
+    }
+  }
+  const firstReturnAt = (input.returns || [])
+    .filter(returnTouchesSale)
+    .map((row) => ({ row, stamp: atMs(row.created_at) }))
+    .filter((entry): entry is { row: SaleRecordReturnRow; stamp: number } => entry.stamp !== null)
+    .sort((left, right) => left.stamp - right.stamp)[0]
+  if (firstReturnAt) {
+    rememberEarlierBefore(known, 'sale_status', input.sale.status_before_return, firstReturnAt.row.created_at)
+  }
+  if (text(input.sale.sale_status) === 'cancelled') {
+    rememberEarlierBefore(known, 'sale_status', input.sale.status_before_cancel, input.sale.updated_at)
+  }
+
+  const reconstructed: SaleRecordSaleRow = { ...input.sale }
+  for (const field of CREATION_SNAPSHOT_FIELDS) {
+    if (known[field]) reconstructed[field] = known[field]!.value
+  }
+  if ((input.ledger || []).some((row) => String(row.kind || '').startsWith('line_'))) {
+    reconstructed.items = undefined
+  }
+  return reconstructed
 }
 
 // ---------------------------------------------------------------------------
@@ -570,38 +689,107 @@ export interface SaleRecordReturnRow {
   is_current?: number | null
 }
 
+export interface SaleRecordReturnAuditRow {
+  audit_id: number | string
+  return_id: number | string
+  action?: string | null
+  details?: unknown
+  user_name?: string | null
+  created_at?: string | null
+  return_number?: string | null
+}
+
+export interface SaleRecordReturnBulkEventRow {
+  audit_id: number | string
+  operation_id: string
+  return_id: number | string
+  action?: string | null
+  request_json?: unknown
+  receipt_json?: unknown
+  user_name?: string | null
+  created_at?: string | null
+  return_number?: string | null
+}
+
 /** True when this return is one of the ones that move sales.sale_status. */
 export function returnTouchesSale(row: SaleRecordReturnRow): boolean {
   return (text(row.return_scope) || 'customer') === 'customer'
 }
 
-export function returnRecord(row: SaleRecordReturnRow, sale: SaleRecordSaleRow): SaleRecord {
-  const cancelled = (text(row.status) || 'completed') === 'cancelled'
-  const current = Number(row.is_current || 0) === 1
-  const saleStatus = text(sale.sale_status)
-  const returnedNow = saleStatus === 'returned' || saleStatus === 'partial_return'
-  // A cancelled return's ACT is the cancellation, which happened at updated_at;
-  // created_at would file it hours before, next to the return it undid.
-  const at = cancelled ? (text(row.updated_at) || text(row.created_at)) : text(row.created_at)
-  const after = cancelled ? null : current && returnedNow ? saleStatus : null
+export function legacyReturnRecord(row: SaleRecordReturnRow): SaleRecord {
+  const at = text(row.created_at)
   const label = row.return_number ? text(row.return_number) : null
   return {
-    id: `return:${row.id}`,
+    id: `return-legacy:${row.id}`,
     source: 'return',
     at,
     at_ms: atMs(at),
     actor_username: text(row.cashier_name),
-    kind: 'status_changed',
+    kind: 'other',
     via: null,
     subject: label || `#${row.id}`,
-    summary: cancelled ? 'Return cancelled'
-      : after === 'partial_return' ? 'Partial return'
-      : 'Returned',
-    before: { sale_status: cancelled ? null : current && returnedNow ? text(sale.status_before_return) : null },
-    after: {
-      sale_status: after,
-      refund_usd: numberOrNull(row.total_refund_usd),
-    },
+    summary: 'Legacy return recorded; original change details unavailable',
+    before: null,
+    after: null,
+  }
+}
+
+/** One durable individual return audit event. Sparse legacy audit payloads stay sparse. */
+export function returnAuditRecord(row: SaleRecordReturnAuditRow): SaleRecord | null {
+  const action = String(row.action || '')
+  if (action !== 'create' && action !== 'update') return null
+  const at = text(row.created_at)
+  const details = parseDetails(row.details) || {}
+  const label = text(row.return_number) || `#${row.return_id}`
+  const after: Record<string, unknown> = {}
+  if (action === 'create') after.return_status = 'completed'
+  if (text(details.reason)) after.reason = text(details.reason)
+  return {
+    id: `return-audit:${row.audit_id}`,
+    source: 'return',
+    at,
+    at_ms: atMs(at),
+    actor_username: text(row.user_name),
+    kind: action === 'create' ? 'status_changed' : 'other',
+    via: null,
+    subject: label,
+    summary: action === 'create' ? 'Return recorded' : 'Return updated',
+    before: null,
+    after: Object.keys(after).length ? after : null,
+  }
+}
+
+function returnBulkMemberEntry(receiptJson: unknown, returnId: number | string): Record<string, unknown> | null {
+  return bulkMemberEntry(receiptJson, returnId)
+}
+
+/** One original/undo/redo event from the durable return bulk operation audit. */
+export function returnBulkEventRecord(row: SaleRecordReturnBulkEventRow): SaleRecord | null {
+  const request = parseDetails(row.request_json) || {}
+  if (text(request.field) !== 'status') return null
+  const entry = returnBulkMemberEntry(row.receipt_json, row.return_id)
+  if (!entry || entry.changed === false || entry.before === undefined || entry.after === undefined) return null
+  const action = String(row.action || '')
+  if (!['return_fields_bulk', 'action_undo', 'action_redo'].includes(action)) return null
+  const reversed = action === 'action_undo'
+  const beforeStatus = text(reversed ? entry.after : entry.before)
+  const afterStatus = text(reversed ? entry.before : entry.after)
+  const at = text(row.created_at)
+  const label = text(row.return_number) || `#${row.return_id}`
+  return {
+    id: `return-bulk:${row.operation_id}:${row.audit_id}`,
+    source: 'return',
+    at,
+    at_ms: atMs(at),
+    actor_username: text(row.user_name),
+    kind: 'status_changed',
+    via: action === 'action_undo' ? 'undo' : action === 'action_redo' ? 'redo' : null,
+    subject: label,
+    summary: afterStatus === 'cancelled' ? 'Return cancelled'
+      : beforeStatus === 'cancelled' && afterStatus === 'completed' ? 'Return restored'
+      : 'Return status changed',
+    before: { return_status: beforeStatus },
+    after: { return_status: afterStatus },
   }
 }
 
@@ -636,8 +824,11 @@ export function buildSaleRecords(input: {
   audit?: SaleRecordAuditRow[]
   bulk?: SaleRecordBulkRow[]
   returns?: SaleRecordReturnRow[]
+  returnAudit?: SaleRecordReturnAuditRow[]
+  returnBulk?: SaleRecordReturnBulkEventRow[]
+  mutations?: SaleRecordMutationRow[]
 }): SaleRecord[] {
-  const records: SaleRecord[] = [saleCreatedRecord(input.sale)]
+  const records: SaleRecord[] = [saleCreatedRecord(reconstructSaleCreation(input))]
   for (const row of input.ledger || []) records.push(ledgerRecord(row))
   const explicitTransitions = (input.audit || []).flatMap((row) => {
     const action = String(row.action || '')
@@ -674,8 +865,20 @@ export function buildSaleRecords(input: {
     if (record) records.push(record)
   }
   for (const row of input.bulk || []) records.push(bulkRecord(row, input.sale.id))
+  const creationAuditedReturnIds = new Set<string>()
+  for (const row of input.returnAudit || []) {
+    const record = returnAuditRecord(row)
+    if (record) {
+      records.push(record)
+      if (String(row.action || '') === 'create') creationAuditedReturnIds.add(String(row.return_id))
+    }
+  }
+  for (const row of input.returnBulk || []) {
+    const record = returnBulkEventRecord(row)
+    if (record) records.push(record)
+  }
   for (const row of input.returns || []) {
-    if (returnTouchesSale(row)) records.push(returnRecord(row, input.sale))
+    if (returnTouchesSale(row) && !creationAuditedReturnIds.has(String(row.id))) records.push(legacyReturnRecord(row))
   }
   return orderSaleRecords(records)
 }
@@ -717,9 +920,9 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
       SELECT CAST(a.entity_id AS INTEGER) AS sale_id, COUNT(*) AS n
         FROM audit_logs a
         WHERE a.entity = 'sale' AND a.entity_id IN (${placeholders})
-          AND COALESCE(json_extract(a.details, '$.action'), '') <> 'amend'
+          AND COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.action') END, '') <> 'amend'
           AND NOT (a.action IN ('action_undo','action_redo')
-                   AND json_extract(a.details, '$.applier') = 'sale.add_items')
+                   AND CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.applier') END = 'sale.add_items')
           AND NOT (a.action = 'update' AND EXISTS (
             SELECT 1 FROM audit_logs explicit
             WHERE explicit.entity = a.entity
@@ -728,12 +931,12 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
               AND ABS((julianday(explicit.created_at) - julianday(a.created_at)) * 86400) <= 2
               AND (
                 (explicit.action = 'sale_payment_correction_opened'
-                  AND COALESCE(json_extract(explicit.details, '$.oldStatus'), '') = COALESCE(json_extract(a.details, '$.oldStatus'), '')
-                  AND COALESCE(json_extract(explicit.details, '$.newStatus'), '') = COALESCE(json_extract(a.details, '$.newStatus'), ''))
+                  AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.oldStatus') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.oldStatus') END, '')
+                  AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.newStatus') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.newStatus') END, ''))
                 OR
                 (explicit.action = 'sale_settlement'
-                  AND COALESCE(json_extract(explicit.details, '$.before.sale_status'), '') = COALESCE(json_extract(a.details, '$.oldStatus'), '')
-                  AND COALESCE(json_extract(explicit.details, '$.after.sale_status'), '') = COALESCE(json_extract(a.details, '$.newStatus'), ''))
+                  AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.before.sale_status') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.oldStatus') END, '')
+                  AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.after.sale_status') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.newStatus') END, ''))
               )
           ))
         GROUP BY a.entity_id
@@ -745,14 +948,49 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
         FROM returns
         WHERE sale_id IN (${placeholders})
           AND COALESCE(return_scope, 'customer') = 'customer'
+          AND NOT EXISTS (
+            SELECT 1 FROM audit_logs ra
+            WHERE ra.entity = 'return' AND ra.entity_id = CAST(returns.id AS TEXT)
+              AND ra.action = 'create'
+          )
         GROUP BY sale_id
+      UNION ALL
+      SELECT r.sale_id AS sale_id, COUNT(*) AS n
+        FROM audit_logs ra
+        JOIN returns r ON ra.entity = 'return' AND ra.entity_id = CAST(r.id AS TEXT)
+        WHERE r.sale_id IN (${placeholders})
+          AND COALESCE(r.return_scope, 'customer') = 'customer'
+          AND ra.action IN ('create','update')
+        GROUP BY r.sale_id
+      UNION ALL
+      SELECT m.sale_id AS sale_id,
+        SUM(1 + (
+          SELECT COUNT(*) FROM audit_logs replay
+          WHERE replay.entity = 'return' AND replay.entity_id = ro.id
+            AND replay.action IN ('action_undo','action_redo')
+        )) AS n
+        FROM return_bulk_members m
+        JOIN return_bulk_operations ro ON ro.id = m.operation_id
+        JOIN action_history rh ON rh.id = ro.history_id
+        WHERE m.sale_id IN (${placeholders})
+          AND json_valid(ro.request_json)
+          AND json_extract(ro.request_json, '$.field') = 'status'
+          AND json_valid(ro.receipt_json)
+          AND EXISTS (
+            SELECT 1 FROM json_each(ro.receipt_json, '$.items') item
+            WHERE CAST(json_extract(item.value, '$.id') AS TEXT) = CAST(m.return_id AS TEXT)
+              AND COALESCE(json_extract(item.value, '$.changed'), 1) <> 0
+              AND json_type(item.value, '$.before') IS NOT NULL
+              AND json_type(item.value, '$.after') IS NOT NULL
+          )
+        GROUP BY m.sale_id
     )
     GROUP BY sale_id
   `
 }
 
 /** How many `IN (...)` lists buildSaleRecordsCountSql binds each id into. */
-export const SALE_RECORDS_COUNT_BINDS_PER_ID = 4
+export const SALE_RECORDS_COUNT_BINDS_PER_ID = 6
 
 /**
  * The bind list for buildSaleRecordsCountSql, in statement order: the ledger's
@@ -761,5 +999,5 @@ export const SALE_RECORDS_COUNT_BINDS_PER_ID = 4
  * second list is stringified.
  */
 export function saleRecordsCountBinds(ids: Array<number | string>): Array<number | string> {
-  return [...ids, ...ids.map((id) => String(id)), ...ids, ...ids]
+  return [...ids, ...ids.map((id) => String(id)), ...ids, ...ids, ...ids, ...ids]
 }

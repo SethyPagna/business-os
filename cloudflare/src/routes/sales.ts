@@ -88,12 +88,15 @@ import {
   buildSaleRecords,
   buildSaleRecordsCountSql,
   saleRecordsCountBinds,
+  type SaleRecordReturnAuditRow,
+  type SaleRecordReturnBulkEventRow,
   type SaleRecordReturnRow,
   SALE_RECORDS_COUNT_BINDS_PER_ID,
   SALE_RECORDS_SELF_COUNT,
   type SaleRecordAuditRow,
   type SaleRecordBulkRow,
   type SaleRecordLedgerRow,
+  type SaleRecordMutationRow,
   type SaleRecordSaleRow,
 } from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
@@ -2614,9 +2617,10 @@ app.get('/:id/records', async (c) => {
   // status_before_return is what the sale was BEFORE a return moved it, and it
   // is the only "before" the returns source can honestly report.
   const sale = await db.prepare(`
-    SELECT id, receipt_number, sale_status, status_before_return, cashier_name, total_usd,
+    SELECT id, receipt_number, sale_status, status_before_return, status_before_cancel,
+      cashier_name, total_usd,
       payment_method, payment_details, amount_paid_usd, amount_paid_khr,
-      change_usd, change_khr, created_at
+      change_usd, change_khr, created_at, updated_at
     FROM sales WHERE id = ?
   `).get<SaleRecordSaleRow>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
@@ -2657,27 +2661,77 @@ app.get('/:id/records', async (c) => {
     WHERE m.sale_id = ?
   `).all<SaleRecordBulkRow>([saleId])
 
-  // The returns gap: routes/returns.ts:1658, :2558 and lib/returnBulkAction.ts
-  // :253 rewrite sales.sale_status while auditing entity 'return', so neither
-  // of the reads above can see the change. `is_current` marks the newest live
-  // return -- the only one whose outcome still matches the status column,
-  // because each writer overwrote the previous answer.
+  // Monetary mutation receipts are permanent and carry the exact pre-write
+  // snapshot. Audit retention must not make a settled sale's current tender
+  // masquerade as its creation tender.
+  const mutations = await db.prepare(`
+    SELECT before_json, created_at
+    FROM sale_mutation_receipts
+    WHERE sale_id = ?
+    ORDER BY created_at ASC, id ASC
+  `).all<SaleRecordMutationRow>([saleId])
+
+  // The return row supplies immutable creation fallback data when its older
+  // audit event has aged out. Current mutable status/refund values are never
+  // presented as that original event's before/after snapshot.
   const returnRows = await db.prepare(`
-    SELECT r.id, r.return_number, r.status, r.return_scope, r.total_refund_usd,
-      r.cashier_name, r.created_at, r.updated_at,
-      CASE WHEN COALESCE(r.status,'completed') <> 'cancelled'
-        AND NOT EXISTS (
-          SELECT 1 FROM returns r2
-          WHERE r2.sale_id = r.sale_id AND r2.id > r.id
-            AND COALESCE(r2.status,'completed') <> 'cancelled'
-            AND COALESCE(r2.return_scope,'customer') = 'customer'
-        ) THEN 1 ELSE 0 END AS is_current
+    SELECT r.id, r.return_number, r.return_scope, r.cashier_name, r.created_at
     FROM returns r
     WHERE r.sale_id = ? AND COALESCE(r.return_scope,'customer') = 'customer'
     ORDER BY r.id ASC
   `).all<SaleRecordReturnRow>([saleId])
 
-  const records = buildSaleRecords({ sale, ledger, audit: auditRows, bulk, returns: returnRows })
+  // Individual return writes preserve the acting account and event time in
+  // audit_logs. The returns row itself carries only the creator, so using it
+  // for a later edit would attribute that edit to the wrong person.
+  const returnAuditRows = await db.prepare(`
+    SELECT a.id AS audit_id, r.id AS return_id, a.action, a.details,
+      a.user_name, a.created_at, r.return_number
+    FROM audit_logs a
+    JOIN returns r ON a.entity = 'return' AND a.entity_id = CAST(r.id AS TEXT)
+    WHERE r.sale_id = ?
+      AND COALESCE(r.return_scope,'customer') = 'customer'
+      AND a.action IN ('create','update')
+    ORDER BY a.id ASC
+  `).all<SaleRecordReturnAuditRow>([saleId])
+
+  // Grouped cancel/restore and its undo/redo keep one immutable receipt plus
+  // one audit row per act. Joining both is what gives this sale's return the
+  // exact before/after pair and the actor of this particular replay.
+  const returnBulkRows = await db.prepare(`
+    SELECT 'history:' || h.id AS audit_id, o.id AS operation_id, m.return_id,
+      'return_fields_bulk' AS action, o.request_json, o.receipt_json,
+      h.created_by_name AS user_name, h.created_at, r.return_number
+    FROM return_bulk_members m
+    JOIN return_bulk_operations o ON o.id = m.operation_id
+    JOIN returns r ON r.id = m.return_id
+    JOIN action_history h ON h.id = o.history_id
+    WHERE m.sale_id = ?
+      AND COALESCE(r.return_scope,'customer') = 'customer'
+    UNION ALL
+    SELECT 'audit:' || a.id AS audit_id, o.id AS operation_id, m.return_id,
+      a.action, o.request_json, o.receipt_json, a.user_name, a.created_at,
+      r.return_number
+    FROM return_bulk_members m
+    JOIN return_bulk_operations o ON o.id = m.operation_id
+    JOIN returns r ON r.id = m.return_id
+    JOIN audit_logs a ON a.entity = 'return' AND a.entity_id = o.id
+    WHERE m.sale_id = ?
+      AND COALESCE(r.return_scope,'customer') = 'customer'
+      AND a.action IN ('action_undo','action_redo')
+    ORDER BY created_at ASC, audit_id ASC
+  `).all<SaleRecordReturnBulkEventRow>([saleId, saleId])
+
+  const records = buildSaleRecords({
+    sale,
+    ledger,
+    audit: auditRows,
+    bulk,
+    returns: returnRows,
+    returnAudit: returnAuditRows,
+    returnBulk: returnBulkRows,
+    mutations,
+  })
   return c.json({ saleId, records, count: records.length })
 })
 

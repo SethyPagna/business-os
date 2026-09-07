@@ -108,6 +108,7 @@ const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }
   total_usd: { key: 'total', format: 'money' },
   quantity: { key: 'quantity', format: 'quantity' },
   sale_status: { key: 'status', format: 'status' },
+  return_status: { key: 'status', format: 'status' },
   // The returns source's own field: what the customer got back. Money, and
   // named -- 'refund_usd' printed as its own raw key is exactly the
   // snake_case-in-Khmer failure this table exists to prevent.
@@ -116,6 +117,7 @@ const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }
   customer_id: { key: 'customer', format: 'text' },
   membership_number: { key: 'membership_number', format: 'text' },
   cancel_reason: { key: 'reason', format: 'text' },
+  reason: { key: 'reason', format: 'text' },
   cancel_note: { key: 'note', format: 'text' },
   payment_method: { key: 'payment_method', format: 'text' },
   payment_details: { key: 'payment_details', format: 'text' },
