@@ -28,7 +28,8 @@ const schemaRoles = taskSchema.properties.role.enum || [];
 if (schemaRoles.length !== ids.size || schemaRoles.some((id) => !ids.has(id))) throw new Error("Task-envelope role enum is out of sync with agent-team/agents.json");
 for (const name of ["orchestrate-team", "repo-patterns"]) {
   const skill = readFileSync(join(root, `agent-team/skills/${name}/SKILL.md`), "utf8");
-  if (!skill.startsWith("---\n") || !skill.includes(`\nname: ${name}\n`) || !skill.includes("\ndescription: ")) throw new Error(`Invalid portable skill: ${name}`);
+  const normalizedSkill = skill.replaceAll("\r\n", "\n");
+  if (!normalizedSkill.startsWith("---\n") || !normalizedSkill.includes(`\nname: ${name}\n`) || !normalizedSkill.includes("\ndescription: ")) throw new Error(`Invalid portable skill: ${name}`);
 }
 execFileSync(process.execPath, [join(root, "agent-team/scripts/sync-adapters.mjs"), "--check"], { cwd: root, stdio: "inherit" });
 process.stdout.write(`Agent team valid: ${manifest.agents.length} roles, 3 adapter targets, synchronized output.\n`);
