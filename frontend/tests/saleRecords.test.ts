@@ -28,6 +28,7 @@ import {
   saleRecordsCount,
   type SaleRecord,
 } from '../src/utils/saleRecords.ts'
+import { formatSaleRecordValueLines } from '../src/components/sales/saleRecordValue.ts'
 
 let failed = 0
 const runTest = (name: string, fn: () => void): void => {
@@ -183,6 +184,41 @@ runTest('a malformed response degrades to visible rows rather than an empty list
   assert.deepEqual(normalizeSaleRecordsResponse({}), [])
 })
 
+runTest('structured product and payment details render as readable lines', () => {
+  const fmtUSD = (value: number | string): string => `$${Number(value).toFixed(2)}`
+  assert.deepEqual(
+    formatSaleRecordValueLines(
+      'products',
+      '[{"product":"Fixture product 01","quantity":1,"unit_price_usd":90,"line_total_usd":90}]',
+      fmtUSD,
+    ),
+    ['Fixture product 01 × 1 · $90.00'],
+    'a JSON transport string must not reach the Records table raw',
+  )
+  assert.deepEqual(
+    formatSaleRecordValueLines('products', [
+      { product: 'Primer', quantity: 2, line_total_usd: 16 },
+      { product_name: 'Powder', quantity: 1, line_total_usd: 12 },
+    ], fmtUSD),
+    ['Primer × 2 · $16.00', 'Powder × 1 · $12.00'],
+    'each product must keep its own quantity and total line',
+  )
+  assert.deepEqual(
+    formatSaleRecordValueLines('payment_details', '[{"method":"ABA","amount_usd":90,"amount_khr":0}]', fmtUSD),
+    ['ABA · $90.00'],
+  )
+  assert.deepEqual(
+    formatSaleRecordValueLines('payment_details', { method: 'Cash', amount_khr: 410000 }, fmtUSD),
+    ['Cash · 410,000៛'],
+    'KHR-only payment details remain explicit',
+  )
+  assert.deepEqual(
+    formatSaleRecordValueLines('payment_details', 'legacy payment note', fmtUSD),
+    ['legacy payment note'],
+    'legacy scalar details remain visible rather than being discarded',
+  )
+})
+
 // ---- the surfaces -------------------------------------------------------
 
 runTest('Records is inside the expanded sale detail and absent from collapsed rows', () => {
@@ -212,6 +248,8 @@ runTest('the float is the SHARED float, read-only, with one close affordance', (
   assert.match(float, /aria-expanded=\{isOpen\}/, 'selecting a record must announce that it expands')
   assert.match(float, /fmtDateTime24\(record\.at\)/, 'records read dd/mm/yyyy HH:mm like every other history surface')
   assert.match(float, /record\.actor_username/, 'the acting USERNAME leads every row')
+  assert.match(float, /formatSaleRecordValueLines\(row\.field, value, fmtUSD\)/, 'structured detail must use the readable value formatter')
+  assert.match(float, /inline-flex max-w-full flex-col/, 'multiple products or payments must render as separate lines')
 })
 
 runTest("a return's record renders its refund as money, not as a raw field name", () => {
