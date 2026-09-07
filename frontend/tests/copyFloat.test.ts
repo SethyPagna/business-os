@@ -197,32 +197,28 @@ for (const key of ['copy', 'copied', 'copy_hint']) {
 }
 assert.doesNotMatch(km.copy_hint, /[A-Za-z]/, 'km.json copy_hint must be Khmer, not an English placeholder')
 
-// The hint is attached as the native `title` of every copy trigger
-// (CopyFloat.tsx), so it is a PROMISE about which gestures exist -- and it
-// named a hold for a whole round while `press.onMouseDown` was never called
-// and the mousedown handler swallowed the press that would have produced
-// one. Pin the promise to what the controller actually registers, so the two
-// cannot drift apart again. (`press.onMouseDown(` is the CALL; the type
-// alias reads `press.onMouseDown>`, which is what the source looked like
-// while the gesture did nothing.)
-const registersDoubleClick = controller.includes("addEventListener('dblclick'")
-const registersHold = controller.includes('press.onMouseDown(') && controller.includes('press.onTouchStart(')
-assert.equal(
-  /double-click/i.test(en.copy_hint),
-  registersDoubleClick,
-  'the hint may promise a double-click only where the controller answers one',
-)
-assert.equal(
-  /\bhold\b/i.test(en.copy_hint),
-  registersHold,
-  'the hint may promise a hold only where the controller arms one on BOTH pointer and touch',
-)
-// Khmer names the same two gestures joined by ឬ ("or"): ចុចពីរដង
-// (press twice) ឬ ចុចឱ្យជាប់ (press and hold) ដើម្បីចម្លង (to copy).
-assert.equal(km.copy_hint.includes('ឬ'), registersDoubleClick && registersHold,
-  'the Khmer hint must offer the same two gestures the English one does, not one of them')
+// English names two gestures; Khmer must name the same two, joined by ឬ
+// ("or"): ចុចពីរដង (press twice) ឬ ចុចឱ្យជាប់ (press and hold) ដើម្បីចម្លង
+// (to copy). Whether that promise is MADE on a given surface, and whether it
+// is kept there, is driven for real in section 5 -- a source-text guard
+// cannot see it, and the previous round shipped a hint that was true of the
+// controller and false of the surface the ASK names.
+assert.match(en.copy_hint, /double-click/i, 'the English hint names the double-click half')
+assert.match(en.copy_hint, /\bhold\b/i, 'and the hold half')
+assert.ok(km.copy_hint.includes('ឬ'), 'the Khmer hint offers two gestures, not one')
 assert.ok(km.copy_hint.includes('ចុចពីរដង'), 'ចុចពីរដង -- press twice, the double-click half')
 assert.ok(km.copy_hint.includes('ចុចឱ្យជាប់'), 'ចុចឱ្យជាប់ -- press and hold, the hold half')
+
+// The hint is a POINTER affordance -- a native `title` is a hover tooltip,
+// which a touch screen never shows -- so it must be attached only where the
+// pointer gestures it names are actually the copy field's. CopyFloat.tsx
+// therefore no longer writes a `title` at render time (it cannot know what
+// its trigger will be dropped into); the controller attaches it from the
+// same `pressWillOpenFloat` predicate that decides whose press it is.
+assert.doesNotMatch(hook, /title: labels\.hint/,
+  'the hook must not promise gestures before it knows whose surface the value lands on')
+assert.match(hook, /hint: String\(t\('copy_hint'/, 'the hook still owns the translated hint')
+assert.match(hook, /ensureTextAffordances\(labels\)/, 'and hands it to the one controller')
 
 /* ---------------------------------------------------------------- *
  * 5. The ownership rule, driven for real.
@@ -235,7 +231,7 @@ assert.ok(km.copy_hint.includes('ចុចឱ្យជាប់'), 'ចុចឱ
  * ---------------------------------------------------------------- */
 
 const dom = installAffordanceDom()
-ensureTextAffordances({ copy: 'Copy', copied: 'Copied' })
+ensureTextAffordances({ copy: 'Copy', copied: 'Copied', hint: en.copy_hint })
 const host = dom.host()
 if (!host) throw new Error('the controller must build its own body-level host')
 
@@ -261,19 +257,65 @@ const rowRelease = dom.fire('mouseup', { target: pill })
 assert.equal(rowRelease.stopped, false, 'nor its mouseup')
 assert.equal(host.hidden, true, 'and a press inside a row it does not own opens no panel')
 
-// ...but double-click, which no row uses, still copies. (Touch reaches the
-// same panel through press-and-hold; both land on the one 'gesture' intent.)
+// ...AND THE DOUBLE-CLICK IS NOT THE COPY FIELD'S EITHER, ON THIS SURFACE.
+//
+// It looked like it was, for a whole round, because a stub can deliver a
+// `dblclick` to an element a real browser can no longer reach. Outside
+// selection mode the product row has no onClick: it spreads
+// utils/longPress.ts, so the FIRST press-release pair of a double-click
+// already fired the row's own onClick -- Products.tsx `setDetailProduct(p)`
+// -- and the product detail modal is over the row before the second click
+// is dispatched. That second click lands on the modal, the `dblclick` never
+// resolves a copy target, and no panel ever opens.
+//
+// So the pointer gestures on this surface are the row's, all three of them,
+// and the affordance says so instead of promising one it cannot deliver.
+// Driven against the row's REAL detector, the way the touch contract is:
+// the row's own open must fire exactly as often as it would with no
+// affordance present at all.
+let rowOpened = 0
+const listDetector = createLongPressState()
+const listGestures = createLongPressHandlers(listDetector, {
+  onLongPress: () => { /* select mode -- not what this counts */ },
+  onClick: () => { rowOpened += 1 },
+})
+type ListMouse = Parameters<typeof listGestures.onMouseDown>[0]
+const deliverToRow = (event: { type: string; stopped: boolean }): void => {
+  if (event.stopped) return
+  if (event.type === 'mousedown') listGestures.onMouseDown(event as unknown as ListMouse)
+  else if (event.type === 'mouseup') listGestures.onMouseUp()
+}
+for (let n = 0; n < 2; n += 1) {
+  deliverToRow(dom.fire('mousedown', { target: pill, clientX: 18, clientY: 44 }))
+  deliverToRow(dom.fire('mouseup', { target: pill }))
+  dom.fire('click', { target: pill })
+}
 const doubleClick = dom.fire('dblclick', { target: pill })
-assert.equal(doubleClick.stopped, true, 'the copy field owns the double-click')
-assert.equal(host.hidden, false, 'double-click opens the copy panel on the pill')
-assert.equal(String(host.childNodes[0]?.textContent || ''), 'Sok Heng Trading')
-dom.fire('keydown', { key: 'Escape' })
-assert.equal(host.hidden, true, 'Escape closes it')
+assert.equal(doubleClick.stopped, false, 'the row owns the double-click on this surface')
+assert.equal(host.hidden, true, 'so no panel opens behind the detail modal the first click already opened')
+assert.equal(rowOpened, 2, "and the row's own open fires for both clicks, exactly as it would with no affordance")
+
+// THE PROMISE IS ONLY MADE WHERE IT IS KEPT.
+//
+// The hint is a native `title`, i.e. a hover tooltip, i.e. a pointer-only
+// affordance. On this row every pointer gesture belongs to the row -- click
+// opens the product, hold enters select mode, double-click is the two
+// above -- so the trigger carries no hint at all. Touch still copies here
+// (section 6), and a native title would never have shown there anyway.
+dom.fire('mouseover', { target: pill })
+assert.equal(pill.getAttribute('title'), null,
+  'a copy field inside a surface that owns the pointer promises no pointer gesture')
 
 // The two product detail modals: nothing underneath wants the click, so a
 // plain click keeps opening the panel there.
 const modalValue = dom.el('span', { [COPY_ATTR]: '8850123456789' })
 buildPlainBlock(dom, modalValue)
+// ...and THERE the hint is attached, because there both gestures it names
+// are answered -- asserted below, gesture by gesture, against this very
+// element.
+dom.fire('mouseover', { target: modalValue })
+assert.equal(modalValue.getAttribute('title'), en.copy_hint,
+  'with nothing underneath, the copy field promises the gestures it owns')
 const modalClick = dom.fire('click', { target: modalValue })
 assert.equal(modalClick.stopped, true, 'with nothing underneath, the copy field takes the click')
 assert.equal(host.hidden, false, 'and a plain click opens the panel in the detail modals')
@@ -309,6 +351,21 @@ dom.fire('mousedown', { target: held, clientX: 40, clientY: 12 })
 dom.fire('mouseup', { target: held })
 await wait(LONG_PRESS_THRESHOLD_MS + 80)
 assert.equal(host.hidden, true, 'a released press must not open the panel later, on the hold timer')
+
+// EVERY GESTURE THE HINT NAMES, ANSWERED ON THE ELEMENT THAT CARRIES IT.
+// Read from the pack text rather than a hardcoded list, so re-wording the
+// hint cannot quietly add a promise nothing keeps.
+dom.fire('mouseover', { target: held })
+const promised = String(held.getAttribute('title') || '')
+assert.equal(promised, en.copy_hint, 'this trigger carries the hint')
+assert.ok(/\bhold\b/i.test(promised), 'which names a hold -- proven above, on this same element')
+assert.ok(/double-click/i.test(promised), 'and a double-click')
+const heldDouble = dom.fire('dblclick', { target: held })
+assert.equal(heldDouble.stopped, true, 'so the double-click is this field’s here')
+assert.equal(host.hidden, false, 'and it opens the copy panel')
+assert.equal(String(host.childNodes[0]?.textContent || ''), 'Sok Heng Trading Co., Ltd.')
+dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true)
 
 /* ---------------------------------------------------------------- *
  * 6. Touch — the ONLY way to copy on a phone.

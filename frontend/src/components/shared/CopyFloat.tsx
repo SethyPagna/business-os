@@ -6,7 +6,7 @@ import { COPY_ATTR, ensureTextAffordances, type AffordanceLabels } from './textA
 // list a three-argument `tr(key, fallback, khmerFallback)`.
 type Translate = (key: string, fallback: string, khmerFallback?: string) => string | undefined
 
-export type CopyFloatLabels = AffordanceLabels & { hint: string }
+export type CopyFloatLabels = AffordanceLabels
 
 /** Attributes that turn any element into a copy-float trigger. */
 export type CopyFloatProps = Record<string, string> | Record<string, never>
@@ -15,18 +15,25 @@ export type CopyFloatProps = Record<string, string> | Record<string, never>
 // double-click on a pointer device, press-and-hold on touch, both opening
 // the one shared float with the full value and a Copy button.
 //
-// Whether a PLAIN click or press also opens it depends on the surface, not
-// on this hook: the controller gives both to whatever is underneath when
-// something underneath wants them (see `claimsClick`). In the two product
-// detail modals nothing does, so a click opens the panel and so does a
-// press-and-hold. On the Products list the value sits inside a row that has
-// no onClick at all outside selection mode -- it synthesises "open this
+// WHICH gestures a given trigger answers depends on the surface it lands
+// in, not on this hook, so this hook does not name any.
+//
+// In the two product detail modals nothing underneath wants the pointer, so
+// a click, a double-click and a press-and-hold all open the panel. On the
+// Products list the value sits inside a row that has no onClick outside
+// selection mode: it spreads utils/longPress.ts and synthesises "open this
 // product" from a tap and "enter select mode" from a hold, both off the
-// press -- so the row keeps every press on a pointer device, and copying
-// there is the double-click. Touch is the exception the ASK asks for: a
-// hold on the value copies, because on a phone there is no other gesture
-// left, and the row keeps the tap and every hold that is not on one of
-// these four values.
+// press. There the row keeps every pointer gesture -- including the
+// double-click, whose FIRST press-release pair has already opened the
+// product detail modal over the row before a second click can be dispatched
+// -- and the copy gesture that remains is touch press-and-hold, which is
+// the one gesture a phone has spare and the only way to copy there at all.
+//
+// That is why the HINT is not attached here. It is a native `title`, i.e. a
+// hover tooltip, i.e. a pointer affordance; attaching it to every trigger
+// promised a double-click and a hold on a surface that answers neither.
+// The controller attaches it, from the same predicate that decides whose
+// press it is, so the promise and the behaviour cannot drift apart.
 //
 // This hook hands back a props SPREAD rather than a wrapper component on
 // purpose. The values it marks are a header <div>, a middot-separated
@@ -59,8 +66,8 @@ export function useCopyFloat(t: Translate): (value: unknown) => CopyFloatProps {
     // An empty field gets no affordance rather than a gesture that opens an
     // empty panel.
     if (!text) return {}
-    return { [COPY_ATTR]: text, title: labels.hint }
-  }, [labels])
+    return { [COPY_ATTR]: text }
+  }, [])
 }
 
 export default useCopyFloat

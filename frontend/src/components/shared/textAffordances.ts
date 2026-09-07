@@ -212,12 +212,20 @@ export interface AffordanceLabels {
   copy: string
   /** "Copied" -- the confirmation that replaces it for ~1.6s. */
   copied: string
+  /**
+   * "Double-click or hold to copy" -- attached as a copy trigger's native
+   * `title`, and therefore a POINTER promise (a title is a hover tooltip; a
+   * touch screen never shows one). Attached by this controller rather than
+   * at render time, because whether those gestures are the trigger's or the
+   * surface's is exactly what `pressWillOpenFloat` decides.
+   */
+  hint: string
 }
 
 const COPIED_RESET_MS = 1600
 
 let installed = false
-let labels: AffordanceLabels = { copy: 'Copy', copied: 'Copied' }
+let labels: AffordanceLabels = { copy: 'Copy', copied: 'Copied', hint: 'Double-click or hold to copy' }
 let state: FloatState<HTMLElement> | null = null
 let host: HTMLDivElement | null = null
 let valueNode: HTMLSpanElement | null = null
@@ -420,6 +428,32 @@ const pressWillOpenFloat = (found: { element: HTMLElement; kind: AffordanceKind 
   !!found && eligible(found) && claimsClick(found.kind, insideClickableSurface(found.element))
 )
 
+// The hint, attached to the trigger the pointer is on -- and only where the
+// pointer gestures it names are the trigger's.
+//
+// It is a native `title`, so it is a hover tooltip and a pointer affordance:
+// a touch screen never shows one. On the Products list every pointer gesture
+// belongs to the row (a tap opens the product, a hold enters select mode,
+// and a double-click is those two -- its first press-release pair has
+// already put the product detail modal over the row, so the second click
+// never reaches the trigger at all). Promising "Double-click or hold to
+// copy" there was a promise the surface cannot keep, and it was made at
+// render time, where the surface is not knowable. Here it is: the same
+// predicate that hands the press to the row also decides whether the trigger
+// may claim a pointer gesture, so the promise and the behaviour are one
+// decision. Touch copying on that row is unaffected -- it never read this.
+const syncCopyHint = (element: HTMLElement): void => {
+  // Never while the panel is open on it: `parkTitle` has removed the title
+  // on purpose, and restoreTitle puts back exactly what was there.
+  if (state?.element === element) return
+  const promise = pressWillOpenFloat({ element, kind: 'copy' }) ? labels.hint : ''
+  if (promise) {
+    if (element.getAttribute('title') !== promise) element.setAttribute('title', promise)
+  } else if (element.getAttribute('title') != null) {
+    element.removeAttribute('title')
+  }
+}
+
 export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   if (next) {
     labels = { ...labels, ...next }
@@ -482,6 +516,15 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   document.addEventListener('dblclick', (event) => {
     const found = targetFrom(event.target)
     if (!found || found.kind !== 'copy') return
+    // The SAME ownership rule as the click and the press, and for the reason
+    // the first two rounds of this lane missed: a double-click is not a
+    // gesture the surface leaves spare. Its first press-release pair is an
+    // ordinary click, and on the Products list that click has already run
+    // the row's `setDetailProduct(p)` and put the detail modal over the row.
+    // The second click lands on the modal, so in a real browser this
+    // listener never resolves a copy target there anyway -- claiming it was
+    // a promise that only a test stub could keep.
+    if (!pressWillOpenFloat(found)) return
     event.stopPropagation()
     // Otherwise the browser selects the word under the pointer behind the
     // panel that is about to cover it.
@@ -492,7 +535,12 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   document.addEventListener('mouseover', (event) => {
     if (insideFloat(event.target)) return
     const found = targetFrom(event.target)
-    if (!found || found.kind !== 'reveal' || !eligible(found)) return
+    if (!found) return
+    // A copy field never opens on hover -- it would fire on every sweep past
+    // a product name -- but this is the moment the pointer arrives, which is
+    // exactly when the browser decides whether it has a tooltip to show.
+    if (found.kind === 'copy') { syncCopyHint(found.element); return }
+    if (!eligible(found)) return
     if (state?.element === found.element) return
     cancelHover()
     hoverTimer = setTimeout(() => {
