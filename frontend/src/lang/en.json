@@ -5532,6 +5532,7 @@
   "historical_settlement": "Recorded as an exchange",
   "membership_number_auto": "Assigned on save",
   "membership_number_auto_hint": "The next available LC- number is assigned when you save.",
+  "membership_number_preserved_hint": "This existing membership number is preserved and cannot be changed.",
   "add_items_to_sale": "Add items to this sale",
   "add_items_search_placeholder": "Search by name or barcode",
   "add_items_no_matches": "No products matched.",

@@ -135,6 +135,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
   const [confirmOpen, setConfirmOpen] = useState(false)
   const duplicateMatches = useContactDuplicateFlag('customers', form.name, form.phone, customer?.id)
   const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
+  const membershipNumberReadOnly = !customer || Boolean(String(customer.membership_number || '').trim())
 
   const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
@@ -229,22 +230,24 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
           </label>
           {/* Minted by the server, not the browser: the LC- sequence gap-fills,
               which only the database can know. A new customer sees the field
-              read-only with the promise; an existing one can still be corrected
-              by hand (the server re-checks the number is unused). */}
+              read-only until save. Existing stored numbers are preserved by the
+              backend; only a legacy existing record with no number stays editable. */}
           <input
             id="customer-form-membership"
             name="customer_membership_number"
             autoComplete="off"
-            className="input w-full"
+            className={`input w-full ${membershipNumberReadOnly ? 'cursor-default bg-gray-50 text-gray-600 dark:bg-zinc-800 dark:text-gray-300' : ''}`}
             value={form.membership_number || ''}
             onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
             placeholder={customer ? CUSTOMER_MEMBERSHIP_PLACEHOLDER : tr(t, 'membership_number_auto', 'Assigned on save')}
-            readOnly={!customer}
-            disabled={!customer}
+            readOnly={membershipNumberReadOnly}
+            aria-readonly={membershipNumberReadOnly}
           />
-          {customer ? null : (
+          {!customer ? (
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr(t, 'membership_number_auto_hint', 'The next available LC- number is assigned when you save.')}</p>
-          )}
+          ) : membershipNumberReadOnly ? (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr(t, 'membership_number_preserved_hint', 'This existing membership number is preserved and cannot be changed.')}</p>
+          ) : null}
         </div>
 
         <DuplicateFlagBanner matches={duplicateMatches} entityLabel="customer" />

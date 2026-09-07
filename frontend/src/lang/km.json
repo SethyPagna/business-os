@@ -5532,6 +5532,7 @@
   "receipt_text_contrast_normal": "ធម្មតា",
   "membership_number_auto": "ផ្តល់ពេលរក្សាទុក",
   "membership_number_auto_hint": "លេខ LC- បន្ទាប់ដែលទំនេរ នឹងត្រូវផ្តល់ជូននៅពេលអ្នករក្សាទុក។",
+  "membership_number_preserved_hint": "លេខសមាជិកដែលមានស្រាប់នេះត្រូវបានរក្សាទុក ហើយមិនអាចកែប្រែបានទេ។",
   "add_items_to_sale": "បន្ថែមទំនិញទៅការលក់នេះ",
   "add_items_search_placeholder": "ស្វែងរកតាមឈ្មោះ ឬបាកូដ",
   "add_items_no_matches": "រកមិនឃើញផលិតផលទេ។",
