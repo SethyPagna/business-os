@@ -53,6 +53,14 @@ function registerApplier(section: string, actionType: string, entityType: string
   appliers.set(applierKey(section, actionType, entityType), fn)
 }
 
+export class ReviewRequesterPermissionError extends Error {
+  readonly code = 'request_permission_revoked'
+  constructor(message: string) {
+    super(message)
+    this.name = 'ReviewRequesterPermissionError'
+  }
+}
+
 async function loadPendingRequester(env: Env, requestedBy: number | null): Promise<SessionUser | null> {
   if (requestedBy == null) return null
   const row = await getDb(env).prepare(`
@@ -68,7 +76,7 @@ async function loadPendingRequester(env: Env, requestedBy: number | null): Promi
 async function assertPendingProductImagePermission(env: Env, row: PendingActionRow): Promise<void> {
   const requester = await loadPendingRequester(env, row.requested_by)
   if (!requester || getActionTier(requester, 'products', 'image') === 'none') {
-    throw new Error('The requester no longer has permission to change product images.')
+    throw new ReviewRequesterPermissionError('The requester no longer has permission to change product images.')
   }
 }
 

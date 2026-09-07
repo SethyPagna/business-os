@@ -11,7 +11,7 @@ import {
   resubmitPendingAction,
   type PendingActionStatus,
 } from '../lib/pendingActions'
-import { applyApprovedPendingAction, NoReviewApplierError } from '../lib/reviewApply'
+import { applyApprovedPendingAction, NoReviewApplierError, ReviewRequesterPermissionError } from '../lib/reviewApply'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -154,6 +154,9 @@ app.post('/:id/approve', async (c) => {
   } catch (err) {
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)
+    }
+    if (err instanceof ReviewRequesterPermissionError) {
+      return c.json({ error: err.message, code: err.code }, 409)
     }
     return c.json({ error: (err as Error).message || 'Failed to apply the approved change' }, 500)
   }
