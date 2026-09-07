@@ -9,6 +9,7 @@ import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import TruncatedText from '../shared/TruncatedText'
 import CatalogProductImage from './catalogImages'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import '../../styles/public-portal.css'
@@ -216,6 +217,12 @@ export default function CatalogPreviewSurface({
   const firstPartyTranslateOptions = filteredTranslateOptions.filter((option) => option.kind !== 'external')
   const externalTranslateOptions = filteredTranslateOptions.filter((option) => option.kind === 'external')
 
+  // The shop name as the header prints it. Named once because the header now
+  // renders it through two elements -- a wrapping block below sm, a truncating
+  // TruncatedText from sm up -- and the two must never be able to disagree
+  // about what the shop is called.
+  const brandWordmark = previewTitle || displayConfig.businessName || copy('about', 'About')
+
   const handlePortalTabClick = (key: string) => {
     if (key === activeTab) return
     setActiveTab(key)
@@ -328,7 +335,23 @@ export default function CatalogPreviewSurface({
             ) : null}
             <section className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
               <div className="px-1 py-4 sm:py-5">
-                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                {/* TWO ROWS on a phone, three columns from sm up.
+                    The single three-track row -- social icons | brand | action
+                    icons -- gave the brand whatever the two content-sized
+                    tracks left it: three 36px social icons one side, four 36px
+                    buttons the other, two 12px gaps. At 375px that is most of
+                    the row, and because the brand carried
+                    `[overflow-wrap:anywhere]` (which unlike `break-word`
+                    counts toward MIN-CONTENT width) its min-content
+                    contribution was one character, so the `1fr` middle track
+                    had nothing to push back with and the shop's name wrapped
+                    one letter per line.
+                    Below sm the brand therefore leaves the row entirely and
+                    takes a full-width centred row under the icons (`order-last
+                    col-span-2`), where it has the whole 375px minus padding
+                    and ordinary word-boundary wrapping is enough. At sm and up
+                    the original three-column row returns unchanged. */}
+                <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1 sm:grid-cols-[auto_1fr_auto] sm:gap-y-3">
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
                       lives on the About page hero. Social links take this
                       side; language + light/dark sit on the far side. */}
@@ -355,18 +378,25 @@ export default function CatalogPreviewSurface({
                       </div>
                     ) : null}
                   </div>
-                  <div className="min-w-0 text-center">
+                  <div className="order-last col-span-2 min-w-0 pb-1 text-center sm:order-none sm:col-span-1 sm:pb-0">
                     {showBrandLabel ? (
                       <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-neutral-500" translate="no">
                         {displayConfig.businessName}
                       </div>
                     ) : null}
                     <div
-                      className="notranslate text-lg font-semibold leading-tight tracking-tight text-balance break-words [overflow-wrap:anywhere] text-slate-900 sm:truncate sm:text-2xl dark:text-neutral-100"
+                      className="notranslate text-lg font-semibold leading-tight tracking-tight text-balance break-words text-slate-900 sm:text-2xl dark:text-neutral-100"
                       style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
                       translate="no"
                     >
-                      {previewTitle || displayConfig.businessName || copy('about', 'About')}
+                      {/* Below sm the name has a row to itself, so it wraps in
+                          full -- no ellipsis, nothing to reveal. From sm up it
+                          is back in one track and can be clipped, and a clipped
+                          name must not be a dead end: TruncatedText shows the
+                          "..." only when the text really is cut and opens the
+                          full value on hover or tap. */}
+                      <span className="block sm:hidden">{brandWordmark}</span>
+                      <TruncatedText text={brandWordmark} className="hidden sm:block" />
                     </div>
                     {displayConfig.businessTagline ? (
                       <div className="notranslate hidden truncate text-xs text-slate-500 sm:block dark:text-neutral-400" translate="no">
