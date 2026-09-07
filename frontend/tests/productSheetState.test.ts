@@ -553,6 +553,24 @@ await runTest('every sale-side option-sheet mount declares the sale intent', () 
     /intent = 'stock'/,
     "the adapter default is 'stock'; that is why every sale mount must say so explicitly",
   )
+  // The POS is the owner's primary sale surface, and it is the ONE mount that
+  // passes no intent at all (POS.tsx:3865 renders <ProductDetailSheet> with
+  // product/branch/handlers only), so the entire warehouse rule there rests on
+  // the sheet's own default parameter at ProductDetailSheet.tsx:273. Flip that
+  // default to 'stock' and the POS warehouse pill becomes selectable -- a live
+  // warehouse sale -- with every other test in the suite still green.
+  assert.match(
+    src('components', 'pos', 'ProductDetailSheet.tsx'),
+    /\n  intent = 'sell',/,
+    'POS mounts this sheet with no intent prop, so its default IS the POS sale rule',
+  )
+  // Coupled to the fact above: the day POS starts passing intent explicitly,
+  // the default stops being the rule and this pin must move to the mount.
+  assert.doesNotMatch(
+    src('components', 'pos', 'POS.tsx').split('<ProductDetailSheet')[1].split('/>')[0],
+    /intent=/,
+    'if POS ever passes intent explicitly, pin that instead of the default',
+  )
 })
 
 // ---------------------------------------------------------------------------
