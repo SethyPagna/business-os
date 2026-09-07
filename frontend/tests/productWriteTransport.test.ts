@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mergeDuplicateChunkRequiresManualResume } from '../src/components/products/mergeDuplicatesRun.ts'
+import { mergeDuplicateChunkCanContinueAutomatically, mergeDuplicateChunkRequiresManualResume } from '../src/components/products/mergeDuplicatesRun.ts'
 
-assert.equal(mergeDuplicateChunkRequiresManualResume({ interrupted: true }), true)
-assert.equal(mergeDuplicateChunkRequiresManualResume({ interrupted: false }), false)
+assert.equal(mergeDuplicateChunkRequiresManualResume({ interruptionCode: 'merge_infrastructure_interrupted' }), true)
+assert.equal(mergeDuplicateChunkRequiresManualResume({ interruptionCode: 'merge_budget_reached' }), false)
 assert.equal(mergeDuplicateChunkRequiresManualResume(undefined), false)
+assert.equal(mergeDuplicateChunkCanContinueAutomatically({ interruptionCode: 'merge_budget_reached', madeProgress: true, maxAdditionalRequests: 4 }), true)
+assert.equal(mergeDuplicateChunkCanContinueAutomatically({ interruptionCode: 'merge_budget_reached', madeProgress: false, maxAdditionalRequests: 4 }), false)
+assert.equal(mergeDuplicateChunkCanContinueAutomatically({ interruptionCode: 'merge_budget_reached', madeProgress: true, maxAdditionalRequests: null }), false)
 
 const here = dirname(fileURLToPath(import.meta.url))
 const products = readFileSync(join(here, '..', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
@@ -18,4 +21,13 @@ assert.match(partialBlock, /await load\(true\)/, 'partial success reloads author
 assert.match(partialBlock, /setMergeDuplicatesReviewOpen\(false\)/, 'manual resume must start from a fresh preview')
 assert.match(partialBlock, /merge_duplicates_partial_saved/, 'the user sees the committed count')
 
-console.log('PASS product merge interruption stops automatic continuation and reports saved work')
+const budgetAt = products.indexOf("if (result?.interruptionCode === 'merge_budget_reached')")
+const completeAt = products.indexOf('if (result?.complete)', budgetAt)
+assert.ok(budgetAt > stopAt && completeAt > budgetAt, 'a normal budget yield is handled after infrastructure interruption and before ordinary completion checks')
+const budgetBlock = products.slice(budgetAt, completeAt)
+assert.match(budgetBlock, /mergeDuplicateChunkCanContinueAutomatically\(result\)/)
+assert.match(budgetBlock, /callCeiling = Math\.max\(callCeiling, calls \+ result\.maxAdditionalRequests\)/)
+assert.match(budgetBlock, /continue/)
+assert.doesNotMatch(budgetBlock, /setMergeDuplicatesReviewOpen\(false\)/, 'a normal safe yield keeps the original confirmation active')
+
+console.log('PASS product merge auto-continues normal budget yields and stops on infrastructure interruption')

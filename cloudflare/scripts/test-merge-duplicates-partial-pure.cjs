@@ -176,6 +176,7 @@ async function overloadAfterEight() {
   assert.equal(result.body.processedCaseKeys.length, 8)
   assert.equal(result.body.actionHistoryIds.length, 8)
   assert.equal(result.body.remainingProducts, null, 'failed reconciliation must not invent an exact remaining count')
+  assert.equal(result.body.maxAdditionalRequests, null, 'infrastructure interruption must not trigger an automatic retry')
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 8)
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='undoable' AND reversible=1").get().n, 8)
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE status='applied'").get().n, 8)
@@ -196,6 +197,7 @@ async function budgetStopsBetweenWholeGroups() {
     assert.equal(result.body.mergedGroups, 1)
     assert.equal(result.body.processedCaseKeys.length, 3)
     assert.equal(result.body.remainingProducts, null)
+    assert.equal(result.body.maxAdditionalRequests, 2, 'the initial group scan provides a bounded same-confirmation continuation ceiling')
     assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 3)
     assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=1").get().n, 3)
   } finally {
@@ -203,8 +205,21 @@ async function budgetStopsBetweenWholeGroups() {
   }
 }
 
+async function oversizedFirstClusterIsRefusedWhole() {
+  const d1 = seedGroups([4])
+  const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.mergedProducts, 0)
+  assert.equal(result.body.refusals.length, 4)
+  assert.ok(result.body.refusals.every((refusal) => refusal.code === 'cluster_exceeds_atomic_limit'))
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 0)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM undo_snapshots').get().n, 0)
+}
+
 ;(async () => {
   await overloadAfterEight()
   await budgetStopsBetweenWholeGroups()
+  await oversizedFirstClusterIsRefusedWhole()
   console.log('PASS merge route reports committed partial work and stops only between complete clusters')
 })().catch((error) => { console.error(error); process.exitCode = 1 })
