@@ -23,6 +23,9 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct } from './productWrites'
 import { branchUpdateStatements } from './branchWrites'
+import { getActionTier } from './permissions'
+import { omitUnchangedProductImageFields, productImageFieldsChanged } from './productImagePermission'
+import type { SessionUser } from './auth'
 import type { PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
 
@@ -48,6 +51,38 @@ function applierKey(section: string, actionType: string, entityType: string): st
 
 function registerApplier(section: string, actionType: string, entityType: string, fn: Applier): void {
   appliers.set(applierKey(section, actionType, entityType), fn)
+}
+
+async function loadPendingRequester(env: Env, requestedBy: number | null): Promise<SessionUser | null> {
+  if (requestedBy == null) return null
+  const row = await getDb(env).prepare(`
+    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
+           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    WHERE u.id = @id AND u.is_active = 1 AND u.deleted_at IS NULL
+  `).get<SessionUser>({ id: requestedBy })
+  return row ?? null
+}
+
+async function assertPendingProductImagePermission(env: Env, row: PendingActionRow): Promise<void> {
+  const requester = await loadPendingRequester(env, row.requested_by)
+  if (!requester || getActionTier(requester, 'products', 'image') === 'none') {
+    throw new Error('The requester no longer has permission to change product images.')
+  }
+}
+
+async function currentProductImages(env: Env, id: number): Promise<{ image_path: string | null; image_gallery: string[] } | null> {
+  const db = getDb(env)
+  const product = await db.prepare('SELECT image_path FROM products WHERE id = @id')
+    .get<{ image_path: string | null }>({ id })
+  if (!product) return null
+  const gallery = await db.prepare(`
+    SELECT image_path FROM product_images
+    WHERE product_id = @id
+    ORDER BY sort_order ASC, id ASC
+  `).all<{ image_path: string }>({ id })
+  return { image_path: product.image_path, image_gallery: gallery.map((entry) => entry.image_path) }
 }
 
 // --- fees / delete / fee -----------------------------------------------
@@ -86,6 +121,9 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
   const name = String(body.name || '').trim()
   if (!name) throw new Error('Pending product create is missing a name')
+  const changesImages = productImageFieldsChanged(body)
+  if (changesImages) await assertPendingProductImagePermission(env, row)
+  else omitUnchangedProductImageFields(body)
   const id = await insertRow(env, 'products', body, { name, is_active: body.is_active == null ? 1 : body.is_active })
 
   const rawBranchId = Number.parseInt(String(body.branch_id ?? ''), 10)
@@ -125,8 +163,21 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
+    || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
+  if (submittedImageFields) {
+    const current = await currentProductImages(env, id)
+    if (!current) return
+    const changesImages = productImageFieldsChanged(body, current)
+    if (changesImages) await assertPendingProductImagePermission(env, row)
+    else omitUnchangedProductImageFields(body)
+  }
   const changes = await updateRow(env, 'products', id, body)
-  if (!changes) return
+  if (!changes && !('image_gallery' in body)) return
+  if (!changes) {
+    const existing = await getDb(env).prepare('SELECT id FROM products WHERE id = @id').get<{ id: number }>({ id })
+    if (!existing) return
+  }
   if ('image_gallery' in body) {
     await syncProductImageGallery(env, id, body.image_gallery)
   }
