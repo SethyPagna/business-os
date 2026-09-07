@@ -139,6 +139,8 @@ export default function PortalFooter({
   // no history crumb); false when the visitor arrived on a policy link
   // directly, where going back would leave the site entirely.
   const pushedRef = useRef(false)
+  const policiesTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
 
   // One resolver for every string on these pages: the portal language pack
   // first (so a future translation of portal_legal_* just works), then the
@@ -161,6 +163,12 @@ export default function PortalFooter({
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
 
   const openPage = useCallback((page: LegalPageKey) => {
+    if (!activePage && typeof document !== 'undefined') {
+      const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      returnFocusRef.current = focused?.getAttribute('role') === 'menuitem'
+        ? policiesTriggerRef.current
+        : focused
+    }
     setMenuOpen(false)
     setActivePage(page)
     if (typeof window === 'undefined') return
@@ -171,7 +179,7 @@ export default function PortalFooter({
       // History blocked (rare sandboxes): the reader still opens, the URL
       // simply does not change.
     }
-  }, [])
+  }, [activePage])
 
   const closePage = useCallback(() => {
     if (typeof window === 'undefined') { setActivePage(null); return }
@@ -222,6 +230,24 @@ export default function PortalFooter({
     return () => { document.title = previousTitle }
   }, [activePage, text, details.name])
 
+  // Restore focus only after the reader has unmounted. A footer menu item is
+  // removed as soon as it opens a policy, so the stable return target for that
+  // flow is the Policies trigger. A direct ?legal= link has no opener; the
+  // catalogue main landmark is the meaningful fallback.
+  const hadActivePageRef = useRef(!!activePage)
+  useEffect(() => {
+    const hadActivePage = hadActivePageRef.current
+    hadActivePageRef.current = !!activePage
+    if (!hadActivePage || activePage || typeof document === 'undefined') return
+    const requested = returnFocusRef.current
+    returnFocusRef.current = null
+    window.requestAnimationFrame(() => {
+      const fallback = document.getElementById('portal-main-content')
+      const target = requested?.isConnected ? requested : fallback
+      target?.focus()
+    })
+  }, [activePage])
+
   return (
     <>
       <footer
@@ -257,10 +283,9 @@ export default function PortalFooter({
             {/* A takedown route, in the one place every page of the site
                 ends. A storefront that publishes photographs -- product
                 shots, and the screenshots customers send in -- needs
-                somewhere for the person in one of them to write, and a
-                named window is what makes it an undertaking rather than a
-                sentiment. Hidden when no address is configured: a promise
-                with nowhere to send it is worse than no promise. */}
+                somewhere for the person in one of them to write. Hidden when
+                no address is configured: a contact route with nowhere to
+                send it is worse than no route. */}
             {details.email ? (
               <div className="pt-1">{fill('portal_legal_footer_content_concerns')}</div>
             ) : null}
@@ -269,6 +294,7 @@ export default function PortalFooter({
 
           <div className="relative shrink-0">
             <button
+              ref={policiesTriggerRef}
               type="button"
               className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
               onClick={() => setMenuOpen((open) => !open)}
@@ -336,21 +362,67 @@ function LegalReader({
   onNavigate: (page: LegalPageKey) => void
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     closeRef.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    const dialog = dialogRef.current
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    // The reader is rendered beside the catalogue landmarks, rather than
+    // inside them. Marking those landmarks inert keeps pointer and keyboard
+    // interaction inside the modal without hiding the reader itself.
+    const background = Array.from(document.querySelectorAll<HTMLElement>(
+      '[data-portal-root="true"] header, [data-portal-root="true"] nav, [data-portal-root="true"] main, [data-portal-root="true"] footer',
+    )).filter((element) => !element.contains(dialog) && !dialog?.contains(element))
+    const previouslyInert = background.map((element) => element.hasAttribute('inert'))
+    background.forEach((element) => element.setAttribute('inert', ''))
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab' || !dialog) return
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => !element.hasAttribute('hidden') && element.getAttribute('aria-hidden') !== 'true')
+      if (!focusable.length) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      background.forEach((element, index) => {
+        if (!previouslyInert[index]) element.removeAttribute('inert')
+      })
+    }
   }, [onClose])
 
   const titleId = `portal-legal-title-${page}`
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
+      tabIndex={-1}
       data-portal-legal-page={page}
       className="fixed inset-0 z-[90] overflow-y-auto overscroll-contain bg-white text-slate-800 dark:bg-neutral-950 dark:text-neutral-200"
     >

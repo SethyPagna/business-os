@@ -3,8 +3,8 @@
   "purpose": "Exact en/km additions and post-legal-commit replacements for the root-owned language packs.",
   "additions": {
     "portalPublicationReadinessWarning": { "en": "Publication is paused until the registered name, registration number, address, phone, and email are all verified and completed.", "km": "ការផ្សព្វផ្សាយត្រូវបានផ្អាក រហូតដល់ឈ្មោះចុះបញ្ជី លេខចុះបញ្ជី អាសយដ្ឋាន លេខទូរស័ព្ទ និងអ៊ីមែល ត្រូវបានផ្ទៀងផ្ទាត់ និងបំពេញរួច។" },
-    "portalPublicationReadinessTitle": { "en": "Seller details need verification", "km": "ព័ត៌មានអ្នកលក់ត្រូវការការផ្ទៀងផ្ទាត់" },
-    "portalPublicationReadinessBody": { "en": "This catalogue remains available for browsing, but publication readiness is not confirmed until the registered seller name, registration number, address, phone, and email are verified.", "km": "កាតាឡុកនេះនៅតែអាចមើលបាន ប៉ុន្តែមិនទាន់បញ្ជាក់ភាពរួចរាល់សម្រាប់ការផ្សព្វផ្សាយទេ រហូតដល់ឈ្មោះអ្នកលក់ដែលបានចុះបញ្ជី លេខចុះបញ្ជី អាសយដ្ឋាន លេខទូរស័ព្ទ និងអ៊ីមែល ត្រូវបានផ្ទៀងផ្ទាត់។" },
+    "portalPublicationReadinessTitle": { "en": "Some online features are unavailable", "km": "មុខងារអនឡាញមួយចំនួនមិនអាចប្រើបាន" },
+    "portalPublicationReadinessBody": { "en": "Browse the catalogue or contact the store while we complete our seller details.", "km": "សូមមើលកាតាឡុក ឬទាក់ទងហាង ខណៈយើងកំពុងបំពេញព័ត៌មានអ្នកលក់។" },
     "externalTranslationDisclosure": { "en": "Choosing one sends the text on this page to Google Translate and may set Google cookies.", "km": "ការជ្រើសរើសភាសាមួយនឹងផ្ញើអត្ថបទលើទំព័រនេះទៅ Google Translate ហើយអាចកំណត់ខូឃី Google។" },
     "shareProofTitle": { "en": "Send share proof", "km": "ផ្ញើភស្តុតាងចែករំលែក" },
     "shareProofInstructions": { "en": "Upload screenshots for staff review. A submission does not guarantee points or approval.", "km": "បញ្ចូលរូបថតអេក្រង់សម្រាប់បុគ្គលិកពិនិត្យ។ ការផ្ញើមិនធានាថានឹងទទួលបានពិន្ទុ ឬការអនុម័តទេ។" },
@@ -24,9 +24,11 @@
     "configuredAiProvider": { "en": "the configured AI provider", "km": "អ្នកផ្តល់សេវា AI ដែលបានកំណត់" },
     "portal_legal_kind_cache": { "en": "Cache Storage", "km": "ឃ្លាំងសម្ងាត់ Cache Storage" },
     "portal_legal_store_cache_storage_p": { "en": "Same-origin app-shell and static files used to load the storefront and support a poor connection. It does not contain account or submission records.", "km": "ឯកសារស្នូលកម្មវិធី និងឯកសារថេរដែលមកពីគេហទំព័រដូចគ្នា សម្រាប់ផ្ទុកទំព័រហាង និងគាំទ្រអ៊ីនធឺណិតខ្សោយ។ វាមិនមានកំណត់ត្រាគណនី ឬការផ្ញើទេ។" },
-    "portal_legal_store_cache_storage_l": { "en": "Until replaced by a newer cache version or you clear site data", "km": "រហូតដល់ជំនួសដោយកំណែឃ្លាំងសម្ងាត់ថ្មី ឬអ្នកសម្អាតទិន្នន័យគេហទំព័រ" }
+    "portal_legal_store_cache_storage_l": { "en": "Until replaced by a newer cache version or you clear site data", "km": "រហូតដល់ជំនួសដោយកំណែឃ្លាំងសម្ងាត់ថ្មី ឬអ្នកសម្អាតទិន្នន័យគេហទំព័រ" },
+    "portal_legal_map_consent_revoke": { "en": "Unload map and forget this choice", "km": "បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍" }
   },
   "replacements": {
-    "portal_legal_privacy_sharing_b": { "en": "The current storefront does not include advertising trackers. Account and submission data is used only for the purposes described in this notice unless this notice and the required consent are updated first.", "km": "ហាងអនឡាញបច្ចុប្បន្នមិនមានឧបករណ៍តាមដានសម្រាប់ការផ្សាយពាណិជ្ជកម្មទេ។ ទិន្នន័យគណនី និងការដាក់ស្នើ ត្រូវបានប្រើសម្រាប់តែគោលបំណងដែលពណ៌នាក្នុងសេចក្ដីជូនដំណឹងនេះ លុះត្រាតែសេចក្ដីជូនដំណឹង និងការយល់ព្រមដែលត្រូវការ ត្រូវបានធ្វើបច្ចុប្បន្នភាពជាមុន។" }
+    "portal_legal_privacy_sharing_b": { "en": "The current storefront does not include advertising trackers. Account and submission data is used only for the purposes described in this notice unless this notice and the required consent are updated first.", "km": "ហាងអនឡាញបច្ចុប្បន្នមិនមានឧបករណ៍តាមដានសម្រាប់ការផ្សាយពាណិជ្ជកម្មទេ។ ទិន្នន័យគណនី និងការដាក់ស្នើ ត្រូវបានប្រើសម្រាប់តែគោលបំណងដែលពណ៌នាក្នុងសេចក្ដីជូនដំណឹងនេះ លុះត្រាតែសេចក្ដីជូនដំណឹង និងការយល់ព្រមដែលត្រូវការ ត្រូវបានធ្វើបច្ចុប្បន្នភាពជាមុន។" },
+    "portal_legal_cookies_clear_b": { "en": "Sign out to end the session cookie. Use the unload control beside the map to forget the saved map choice. Clear site data for this address in your browser settings to remove everything else; this removes your saved list, wishlist, language and theme on this device.", "km": "ចាកចេញពីគណនីដើម្បីបញ្ចប់ខូឃីវគ្គ។ ប្រើប៊ូតុងបិទនៅក្បែរផែនទី ដើម្បីលុបជម្រើសផែនទីដែលបានរក្សាទុក។ សម្អាតទិន្នន័យគេហទំព័រនេះក្នុងការកំណត់កម្មវិធីរុករក ដើម្បីលុបអ្វីៗផ្សេងទៀត រួមទាំងបញ្ជី បញ្ជីចង់បាន ភាសា និងរូបរាងរបស់អ្នកលើឧបករណ៍នេះ។" }
   }
 }

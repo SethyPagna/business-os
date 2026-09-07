@@ -25,6 +25,8 @@ export const MAP_CONSENT_LOAD_EN = 'Load the map'
 export const MAP_CONSENT_LOAD_KM = 'ផ្ទុកផែនទី'
 export const MAP_CONSENT_LINK_EN = 'Open in Google Maps instead'
 export const MAP_CONSENT_LINK_KM = 'បើកក្នុង Google Maps ជំនួសវិញ'
+export const MAP_CONSENT_REVOKE_EN = 'Unload map and forget this choice'
+export const MAP_CONSENT_REVOKE_KM = 'បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍'
 
 function readStoredChoice(): boolean {
   if (typeof window === 'undefined') return false
@@ -78,21 +80,45 @@ export default function PortalEmbedConsent({
     }
   }, [])
 
+  const revoke = useCallback(() => {
+    // Unmounting the iframe stops this page from continuing to display the
+    // third-party embed. Clearing the stored grant means a later visit asks
+    // again before it sends another map request.
+    try {
+      window.localStorage.removeItem(MAP_CONSENT_STORAGE_KEY)
+    } catch {
+      // The iframe can still be unloaded for this visit when storage access
+      // is blocked by the browser.
+    }
+    setGranted(false)
+  }, [])
+
   if (granted) {
     return (
-      <iframe
-        title={title}
-        src={src}
-        className={frameClassName}
-        loading="lazy"
-        // The embed does not need the full storefront URL (which carries the
-        // visitor's ?legal= and search state); the origin is enough for Google
-        // to serve the map.
-        referrerPolicy="strict-origin-when-cross-origin"
-        // Google Maps needs scripts and its own origin; it does not need to
-        // navigate the storefront out from under the visitor.
-        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      />
+      <div className="flex flex-col gap-2">
+        <div className="flex justify-end px-3 pt-3">
+          <button
+            type="button"
+            onClick={revoke}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          >
+            {copy('portal_legal_map_consent_revoke', MAP_CONSENT_REVOKE_EN, MAP_CONSENT_REVOKE_KM)}
+          </button>
+        </div>
+        <iframe
+          title={title}
+          src={src}
+          className={frameClassName}
+          loading="lazy"
+          // The embed does not need the full storefront URL (which carries the
+          // visitor's ?legal= and search state); the origin is enough for Google
+          // to serve the map.
+          referrerPolicy="strict-origin-when-cross-origin"
+          // Google Maps needs scripts and its own origin; it does not need to
+          // navigate the storefront out from under the visitor.
+          sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        />
+      </div>
     )
   }
 

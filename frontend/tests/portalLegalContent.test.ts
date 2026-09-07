@@ -114,6 +114,11 @@ assert.match(embedSource, /MAP_CONSENT_STORAGE_KEY = 'business-os-portal-map-con
 assert.match(embedSource, /referrerPolicy="strict-origin-when-cross-origin"/, 'the map embed sends the full storefront URL to Google')
 assert.doesNotMatch(embedSource, /no-referrer-when-downgrade/, 'the map embed still uses the full-URL referrer policy')
 assert.match(embedSource, /sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"/, 'the map embed is not sandboxed')
+assert.match(embedSource, /localStorage\.removeItem\(MAP_CONSENT_STORAGE_KEY\)/, 'the visitor cannot forget a persisted map grant')
+assert.match(embedSource, /onClick=\{revoke\}/, 'the loaded map does not expose its revoke control')
+assert.match(embedSource, /setGranted\(false\)/, 'revoking the grant does not unmount the third-party iframe')
+assert.ok(PORTAL_LEGAL_EN.portal_legal_map_consent_revoke, 'the map revoke control has no English label')
+assert.ok(PORTAL_LEGAL_KM.portal_legal_map_consent_revoke, 'the map revoke control has no Khmer label')
 // The gate itself: the map iframe must not render before the visitor asks.
 const secondary = source('components/catalog/CatalogSecondaryTabs.tsx')
 assert.doesNotMatch(secondary, /<iframe[^>]*src={mapEmbedUrl}/, 'the map embed loads Google without being asked')
@@ -161,14 +166,16 @@ const details = {
   email: 'hello@example.com',
 }
 const who = interpolateLegal(PORTAL_LEGAL_EN.portal_legal_privacy_who_b, details, 2026)
-assert.match(who, /Leang Beauty Co\., Ltd\./)
+assert.match(who, /verified business details above/i, 'the policy must point to the rendered verified-details card')
+const legalPages = source('components/catalog/legal/LegalPages.tsx')
+assert.match(legalPages, /\[text\('portal_legal_identity_legal_name'\), details\.legalName\]/, 'the verified registered name is not rendered in the business-details card')
 assert.doesNotMatch(who, /\{legalName\}/)
-// legalName falls back to the display name rather than leaving a hole.
-const fallback = interpolateLegal(PORTAL_LEGAL_EN.portal_legal_privacy_who_b, { ...details, legalName: '' }, 2026)
-assert.match(fallback, /Leang Beauty/)
-assert.doesNotMatch(fallback, /\{legalName\}/)
+// A missing registered name must never be silently replaced with the trade
+// name. Rendered policy text avoids the placeholder until the field exists.
+const fallback = interpolateLegal('{legalName}', { ...details, legalName: '' }, 2026)
+assert.equal(fallback, '{legalName}')
 const rights = interpolateLegal(PORTAL_LEGAL_EN.portal_legal_footer_rights, details, 2026)
-assert.equal(rights, '© 2026 Leang Beauty. All rights reserved.')
+assert.equal(rights, 'Site operated by Leang Beauty.')
 // No rendered string may leave an unfilled placeholder once interpolated.
 for (const key of [...rendered, 'portal_legal_template_notice', 'portal_legal_footer_rights', 'portal_legal_footer_content_concerns', 'portal_legal_last_updated']) {
   for (const target of ['en', 'km']) {
@@ -177,14 +184,11 @@ for (const key of [...rendered, 'portal_legal_template_notice', 'portal_legal_fo
   }
 }
 
-// The takedown line is the site's only route for a person who appears in a
-// picture they never agreed to. It has to carry a real address and a named
-// window -- "contact us" with no deadline is a sentiment, not an undertaking
-// -- and the footer must hide it entirely when no address is configured,
-// because a promise with nowhere to send it is worse than no promise.
+// The concerns route carries a real address without inventing a response or
+// deletion deadline the business has not verified.
 const takedown = interpolateLegal(PORTAL_LEGAL_EN.portal_legal_footer_content_concerns, details, 2026)
-assert.match(takedown, /2 business days/, 'the takedown line must state a window')
 assert.match(takedown, /hello@example\.com/, 'the takedown line must resolve to the configured address')
+assert.doesNotMatch(takedown, /business days|within \d+/i, 'the policy invents an unverified response deadline')
 assert.match(PORTAL_LEGAL_KM.portal_legal_footer_content_concerns, /\{email\}/, 'the Khmer takedown line must interpolate the same address')
 const footerSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'legal', 'LegalPages.tsx'), 'utf8')
 assert.match(
@@ -208,6 +212,7 @@ assert.deepEqual([...LEGAL_PAGE_ORDER], ['privacy', 'terms', 'cookies'])
 // The template disclaimer must be present and must not claim to be advice.
 assert.match(PORTAL_LEGAL_EN.portal_legal_template_notice, /template/i)
 assert.match(PORTAL_LEGAL_EN.portal_legal_template_notice, /not legal advice/i)
+assert.doesNotMatch(footerSource, /fill\('portal_legal_template_notice'\)|text\('portal_legal_template_notice'\)/, 'the public policy reader renders an internal template warning')
 // Governing law is Cambodia, stated once.
 assert.match(PORTAL_LEGAL_EN.portal_legal_terms_law_b, /Kingdom of Cambodia/)
 
