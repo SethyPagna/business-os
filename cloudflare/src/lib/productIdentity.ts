@@ -112,6 +112,39 @@ export function productRowIdentityKey(name: unknown, barcode: unknown): string {
   return `${normalizeProductGroupName(name)}${IDENTITY_KEY_DELIM}${identityBarcodeKey(barcode)}`
 }
 
+export function productsShareExactIdentity(
+  left: { name?: unknown; barcode?: unknown } | null | undefined,
+  right: { name?: unknown; barcode?: unknown } | null | undefined,
+): boolean {
+  return productRowIdentityKey(left?.name, left?.barcode) === productRowIdentityKey(right?.name, right?.barcode)
+}
+
+// The displayed barcode of a folded identity is deterministic. Prefer a row
+// already carrying the clean identity spelling, then fewer discarded leading
+// zeroes, then shorter/raw lexical spelling and id. This makes a caller-selected
+// padded keeper converge to the clean catalog spelling inside the same merge.
+export function canonicalProductBarcode<T extends { id?: number; barcode?: unknown }>(rows: readonly T[]): string {
+  if (!rows.length) return ''
+  const identityKeys = new Set(rows.map((row) => identityBarcodeKey(row.barcode)))
+  if (identityKeys.size !== 1) throw new Error('Cannot choose a canonical barcode for different product identities.')
+  const ranked = [...rows].map((row) => {
+    const raw = String(row.barcode ?? '').trim()
+    const key = identityBarcodeKey(raw)
+    return { row, raw, key, zerosShed: raw.length - normalizeLeadingZeroBarcodeForCleanup(raw).length }
+  }).sort((a, b) => {
+    const aClean = a.raw.toLowerCase() === a.key ? 0 : 1
+    const bClean = b.raw.toLowerCase() === b.key ? 0 : 1
+    return (aClean - bClean)
+      || (a.zerosShed - b.zerosShed)
+      || (a.raw.length - b.raw.length)
+      || a.raw.localeCompare(b.raw)
+      || ((Number(a.row.id) || 0) - (Number(b.row.id) || 0))
+  })
+  // Display the normalized numeric identity even if every stored spelling was
+  // padded. Non-numeric barcodes retain the winning row's original casing.
+  return normalizeLeadingZeroBarcodeForCleanup(ranked[0].raw)
+}
+
 // The edit guard's decision, as a pure function so it can be tested for real:
 // what name/barcode the row will HAVE after this body is applied, and whether
 // that is a different identity from the one it has now. `changesIdentity` false

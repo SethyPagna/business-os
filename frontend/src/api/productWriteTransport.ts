@@ -6,6 +6,29 @@ import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 
 type ProductPayload = ExpectedUpdatedAtPayload
 
+export type MergeDuplicateProductsChunkResult = {
+  success: boolean
+  complete: boolean
+  stalled: boolean
+  madeProgress: boolean
+  batchLimit: number
+  mergedGroups: number
+  mergedProducts: number
+  remainingProductsBefore: number
+  remainingProducts: number
+  remainingGroupCount: number
+  maxAdditionalRequests: number
+  requestId: string | null
+  processedCaseKeys: string[]
+  actionHistoryIds: number[]
+  undoPendingCount: number
+  refusals: Array<{ caseKey: string; keeperId: number; mergedId: number; mergedName: string | null; code: string; error: string }>
+}
+
+export type MergeDuplicateProductsOptions = { requestId?: string; signal?: AbortSignal }
+
+const MERGE_DUPLICATES_CHUNK_TIMEOUT_MS = 120_000
+
 function getDevicePayload(): ProductPayload {
   return { ...getClientDeviceInfo() }
 }
@@ -118,13 +141,16 @@ export function createProductVariant(payload: ProductPayload = {}): Promise<unkn
 // routes/products.ts's POST /merge-duplicates, for the full identity rule
 // and why import alone never catches this). Not tied to any one product --
 // scans the whole catalog server-side, so no payload needed.
-export function mergeDuplicateProducts(): Promise<unknown> {
+export function mergeDuplicateProducts(options: MergeDuplicateProductsOptions = {}): Promise<MergeDuplicateProductsChunkResult> {
+  // One request id is retained by the caller for the entire bounded run. The
+  // same body also lets apiFetch share an in-flight retry after a double tap.
+  const body = ensureClientRequestId({ ...getDevicePayload(), client_request_id: options.requestId }, 'product-merge')
   return route(
     'products:mergeDuplicates',
-    () => apiFetch('POST', '/api/products/merge-duplicates'),
+    () => apiFetch('POST', '/api/products/merge-duplicates', body, MERGE_DUPLICATES_CHUNK_TIMEOUT_MS, { signal: options.signal }),
     null,
     true,
-  )
+  ) as Promise<MergeDuplicateProductsChunkResult>
 }
 
 // Read-only dry run for the endpoint above (GET /api/products/merge-
