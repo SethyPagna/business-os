@@ -199,6 +199,16 @@ const NAME_CELLS: Array<[string, string, string]> = [
   // on. Same shared class, no per-file CSS, handlers untouched.
   ['Stock-in picker (fast stock-in)', 'components/inventory/FastStockInModal.tsx', '{group.name}</span>'],
   ['Stock-in picker (create session)', 'components/products/CreateProductsSessionModal.tsx', '{group.name}</span>'],
+  // The TRANSFER product picker on the Branches page. Same shape as the two
+  // stock-in pickers above -- a grouped list of products you pick one from --
+  // and the same reason applies: a picker option has no detail sheet to fall
+  // back on, so the row that tells you which product you are about to move
+  // between branches must be readable to its end. All three name cells in
+  // that modal: the option, its group title, and the chosen product's own
+  // line, which was a dead-end `truncate` on a product name.
+  ['Transfer picker option', 'components/branches/TransferModal.tsx', '{product.name}</div>'],
+  ['Transfer picker group title', 'components/branches/TransferModal.tsx', "· {(t('transfer_group_variant_count')"],
+  ['Transfer picker selected product', 'components/branches/TransferModal.tsx', '{selectedProduct.name}</span>'],
 ]
 
 runTest('every product-name cell carries the one shared class', () => {
@@ -212,6 +222,7 @@ runTest('no product-name cell still wraps or ellipsises instead of scrolling', (
   for (const [label, file, marker] of NAME_CELLS) {
     const owner = classNear(read(file), marker)
     assert.doesNotMatch(owner, /\bbreak-words\b/, `${label}: still wraps to a second row`)
+    assert.doesNotMatch(owner, /\bwhitespace-normal\b/, `${label}: still re-enables wrapping`)
     assert.doesNotMatch(owner, /\btruncate\b/, `${label}: still ends in an unreadable ellipsis`)
     assert.doesNotMatch(owner, /\bline-clamp-/, `${label}: still clamps to N lines`)
   }
