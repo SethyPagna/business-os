@@ -18,6 +18,25 @@ const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
 // to not do needless work on every tick.
 const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 
+// Return bulk undo/redo audit rows are the only durable source of the actor
+// and timestamp for those replays. The operation receipt retains the status
+// transition and generation, but it cannot identify who replayed it or when.
+// Keep this predicate narrow: ordinary audit data, the original bulk receipt,
+// and unrelated undo/redo rows continue to follow the configured retention.
+export function buildAuditLogRetentionDeleteSql(): string {
+  return `DELETE FROM audit_logs WHERE id IN (
+    SELECT id FROM audit_logs
+    WHERE created_at < @cutoff
+      AND NOT (
+        entity = 'return'
+        AND action IN ('action_undo','action_redo')
+        AND json_valid(details)
+        AND json_extract(details, '$.kind') = 'return.fields.bulk'
+      )
+    LIMIT 5000
+  )`
+}
+
 // Ported from backend/src/helpers.ts's audit(). Deliberately swallows its
 // own errors (matching the original's comment: "Audit failures must never
 // crash the main request") -- an audit log write failing should never be
@@ -174,7 +193,7 @@ export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ sk
   const db = getDb(env)
   let deleted = 0
   for (;;) {
-    const result = await db.prepare('DELETE FROM audit_logs WHERE id IN (SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000)').run({ cutoff })
+    const result = await db.prepare(buildAuditLogRetentionDeleteSql()).run({ cutoff })
     const n = result.changes ?? 0
     deleted += n
     if (n < 5000) break
