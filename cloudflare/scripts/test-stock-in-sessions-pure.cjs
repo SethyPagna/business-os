@@ -128,10 +128,12 @@ assert.equal(groups.find((row) => row.session_key === 'session:101').user_name, 
 const byUsername = kernel.buildStockInSessionListQuery('james')
 assert.deepEqual(
   db.prepare(byUsername.groupedSql).bind(byUsername.params).all().map((row) => row.session_key),
-  // Session 103 is the session lane's legacy movement_type='stock_in' pair,
-  // written by the same user 7 -- so both of user 7's surviving sessions
-  // answer to the username, and an exact key set is still the assertion.
-  ['session:100', 'session:103'],
+  // Every surviving session user 7 wrote: 100 (canonical 'add'), 103 (the
+  // session lane's legacy movement_type='stock_in' pair), and 104/105 (the
+  // stockin lane's free-goods and unpriced pairs). 101 belongs to the
+  // deleted account and 102 was reverted. An exact key set, not a count:
+  // against a raw-snapshot haystack this search returns [] instead.
+  ['session:100', 'session:103', 'session:104', 'session:105'],
   'searching the username shown on the row must find it -- the haystack reads the resolved actor, not the raw snapshot',
 )
 const bySnapshot = kernel.buildStockInSessionListQuery('ung sethy')

@@ -312,7 +312,14 @@ ok(true, `every movementReference export has a consumer (${exportedNames.length}
 // The stock-in session surfaces read the same movement rows and must name the
 // actor the same way -- one rule, one implementation.
 const sessionSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockInSessionsQuery.ts'), 'utf8')
-assert.ok(/movementActorNameSql\('m'\)\} AS user_name/.test(sessionSrc), 'the stock-in session lines still select the raw snapshot')
+// Asserted as a RULE, not as one spelling. The session kernel was rebuilt
+// around a line-source subquery (stockin lane), so the actor expression is no
+// longer interpolated at the point of selection -- but it must still BE the
+// shared helper. A hand-copied COALESCE(... users ...) here is the exact
+// defect: it drifts the moment the precedence rule changes on one side.
+assert.ok(/import \{[^}]*movementActorNameSql[^}]*\} from '\.\/movementActorName'/.test(sessionSrc), 'stockInSessionsQuery no longer imports the shared actor expression')
+assert.ok(/const SESSION_ACTOR_SQL = movementActorNameSql\('m'\)/.test(sessionSrc), 'stockInSessionsQuery hand-copies the actor expression instead of calling the shared helper')
+assert.ok(/\$\{SESSION_ACTOR_SQL\} AS user_name/.test(sessionSrc), 'the stock-in session lines still select the raw snapshot')
 assert.ok(!/MAX\(m\.user_name\) AS user_name/.test(sessionSrc), 'the stock-in session list still groups on the raw snapshot')
 ok(true, 'the stock-in session list and detail resolve the actor through the shared expression')
 
