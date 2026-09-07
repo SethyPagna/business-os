@@ -325,7 +325,9 @@ const guardsGroupRenameSiblings = (text) => {
   if (carryAt < 0) return false
   const between = text.slice(at, carryAt)
   return /findSameProductIdentityProducts\(c\.env, nextName, sibling\.barcode, Number\(sibling\.id\)\)/.test(between)
-    && /identityMatchRefusal\(siblingMatches, 'edit'\)/.test(between)
+    // Which MODE it is built in is asserted separately below; this probe asks
+    // only that a structured refusal is built at all, before anything is written.
+    && /identityMatchRefusal\(siblingMatches, '[a-z_]+'\)/.test(between)
     && /readIdentityDecision\(body\)/.test(between)
 }
 assert.equal(guardsGroupRenameSiblings(source), true,
@@ -368,6 +370,63 @@ assert.match(groupGuardBody, /keptSeparateBarcodes = \[\.\.\.keptSeparateBarcode
 assert.match(groupGuardBody, /collidingSiblingIds/,
   'group rename: the refusal says WHICH sibling collides, not just which row it collides with')
 assert.match(source, /code: 'duplicate_product'/, 'refusal carries a machine-readable code')
+// ...and the refusal itself must not ADVERTISE the merge it knows is wrong.
+// The suppression above lives in the CLIENT (helpers/identityLinkOver.ts turns
+// renameScope 'group' into canLinkOver false). A server that still answers
+// resolutions ['link_over','keep_separate'] on that body is telling every other
+// caller -- the variant door's copy of the parser, a script, the next client --
+// that folding THIS row into matches[0] is an available answer, when matches[0]
+// is the row a SIBLING would land on. The door's own answer list has to say it.
+//
+// The real builder is lifted out of the route and run, so this is the shipped
+// function's output and not a paraphrase of it.
+const refusalStart = source.indexOf('const IDENTITY_DECISION_FIELD =')
+assert.ok(refusalStart > 0, 'the decision constants must still be declared in the route')
+const refusalFnAt = source.indexOf('function identityMatchRefusal(', refusalStart)
+assert.ok(refusalFnAt > refusalStart, 'identityMatchRefusal must still be declared after them')
+const refusalEndMatch = /\r?\n\}\r?\n/.exec(source.slice(refusalFnAt))
+assert.ok(refusalEndMatch, 'identityMatchRefusal must terminate')
+const refusalChunk = source.slice(refusalStart, refusalFnAt + refusalEndMatch.index + refusalEndMatch[0].length)
+  + '\nmodule.exports = { identityMatchRefusal, IDENTITY_KEEP_SEPARATE }\n'
+const refusalMod = { exports: {} }
+new Function('module', 'exports', ts.transpileModule(refusalChunk, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText)(refusalMod, refusalMod.exports)
+const { identityMatchRefusal } = refusalMod.exports
+assert.equal(typeof identityMatchRefusal, 'function', 'the refusal builder must be liftable and callable')
+
+const FIXTURE_MATCH = [{ id: 22, name: 'Bar', barcode: '2', cost_price_usd: 1, cost_price_khr: 0 }]
+const groupRefusal = identityMatchRefusal(FIXTURE_MATCH, 'group_rename')
+assert.deepEqual(
+  groupRefusal.resolutions, ['keep_separate'],
+  'a group-rename refusal must offer keep-separate ONLY -- link_over here would fold the wrong pair',
+)
+assert.equal(
+  groupRefusal.resolutions.includes('link_over'), false,
+  'the group-rename door must never advertise link_over, whatever the client then chooses to hide',
+)
+// CONTROL, on the same builder in the same run: the single-row edit door still
+// offers the merge. Without this the assertion above is satisfied by a builder
+// that simply never offers link_over to anyone, which would break the ordinary
+// edit prompt -- the whole point of the lane.
+const singleRowRefusal = identityMatchRefusal(FIXTURE_MATCH, 'edit')
+assert.equal(
+  singleRowRefusal.resolutions.includes('link_over'), true,
+  'control: the single-row edit refusal still offers link_over, so the group case is a real distinction',
+)
+assert.equal(
+  singleRowRefusal.resolutions.includes('keep_separate'), true,
+  'control: and keep-separate stays available at the single-row door',
+)
+// The mode has to be USED at the group site, or the distinction exists in a
+// function nothing calls that way.
+assert.match(
+  groupGuardBody, /identityMatchRefusal\(siblingMatches, 'group_rename'\)/,
+  "the group-rename site must build its refusal in 'group_rename' mode",
+)
+// ...and the two fields the client keys off travel with it.
+assert.match(groupGuardBody, /renameScope: 'group'/, 'the refusal still declares the scope it came from')
+
 // ---- 3. The two answers (N34), and the one that is NOT a default ----
 // This assertion used to read "no override flag: the identity rule is absolute
 // on this path". The owner's N34 ruling supersedes that: "prompt user if they

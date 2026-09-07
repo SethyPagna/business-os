@@ -1522,23 +1522,43 @@ function readIdentityDecision(body: Record<string, unknown>): 'keep_separate' | 
 // actually available at this door -- there is no row to link over yet on
 // create, so create offers open-the-existing-row instead of a merge.
 // `code` and `duplicate` are unchanged so existing callers keep working.
+//
+// There are THREE doors, not two, and they differ in which answers are real:
+//   create       -- nothing saved yet, so there is no row to fold; the way out
+//                   is to open the existing row (or keep them separate).
+//   edit         -- one saved row moving onto another's identity: both answers.
+//   group_rename -- a GROUP rename, where `matches` is what a SIBLING would
+//                   land on, not what the row being PUT would. Folding the PUT
+//                   row into matches[0] would merge a pair that never collided
+//                   and leave the pair that did, so link-over is not on offer
+//                   here at all. The client suppresses it too, but a resolution
+//                   list is a contract with EVERY caller -- the variant door's
+//                   copy of the parser, a script, the next client -- and a door
+//                   that names an answer it must not honour will eventually be
+//                   taken at its word.
 function identityMatchRefusal(
   matches: IdentityMatchRow[],
-  mode: 'create' | 'edit',
+  mode: 'create' | 'edit' | 'group_rename',
 ): Record<string, unknown> {
   const primary = matches[0]
   const others = matches.length > 1 ? ` (and ${matches.length - 1} more row${matches.length > 2 ? 's' : ''} with this identity)` : ''
+  const sameProduct = 'same name + barcode is the same product (a leading zero is not a different barcode)'
+  const error = mode === 'create'
+    ? `"${primary.name}" already exists with this barcode — ${sameProduct}. Edit it or add stock to it instead of creating a duplicate.${others}`
+    : mode === 'group_rename'
+      ? `Renaming this group would land one of its other products on "${primary.name}", which already has that barcode — ${sameProduct}. Keep them separate to write the rename, or merge that pair in Conflicts first.${others}`
+      : `"${primary.name}" already exists with this barcode — ${sameProduct}. Link this product's records over to it, or keep the two separate and settle it in Conflicts.${others}`
   return {
-    error: mode === 'create'
-      ? `"${primary.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Edit it or add stock to it instead of creating a duplicate.${others}`
-      : `"${primary.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Link this product's records over to it, or keep the two separate and settle it in Conflicts.${others}`,
+    error,
     code: 'duplicate_product',
     duplicate: primary,
     matches,
     candidateIds: matches.map((row) => row.id),
     resolutions: mode === 'create'
       ? ['open_existing', IDENTITY_KEEP_SEPARATE]
-      : ['link_over', IDENTITY_KEEP_SEPARATE],
+      : mode === 'group_rename'
+        ? [IDENTITY_KEEP_SEPARATE]
+        : ['link_over', IDENTITY_KEEP_SEPARATE],
     decisionField: IDENTITY_DECISION_FIELD,
   }
 }
@@ -1967,7 +1987,7 @@ app.put('/:id', async (c) => {
       if (siblingMatches.length) {
         if (!readIdentityDecision(body)) {
           return c.json({
-            ...identityMatchRefusal(siblingMatches, 'edit'),
+            ...identityMatchRefusal(siblingMatches, 'group_rename'),
             collidingSiblingIds,
             renameScope: 'group',
           }, 409)
