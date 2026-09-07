@@ -6,6 +6,8 @@ import Modal from '../shared/Modal.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
+import { suggestionEmptyState } from '../../utils/suggestionMatching.ts'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import {
   createInventorySession,
@@ -644,14 +646,20 @@ export default function CreateProductsSessionModal({
 
   const sessionLine = (line: SessionLine): InventoryStockSessionLine => {
     if (line.kind === 'create_receive' && Number(line.quantity) === 0) {
-      // Catalog-only creates intentionally carry no receipt/lot/AP fields.
-      // The server still validates branch/date identity, then returns null
-      // batch and movement ids in the immutable session receipt.
+      // Catalog-only creates intentionally carry no receipt/lot/AP fields
+      // (no lot, expiry, note, cost, payment). The server still validates
+      // branch/date identity, then returns null batch and movement ids in the
+      // immutable session receipt. The supplier IS sent: it is who the
+      // delivery came from, and N29's Stock-in Sessions list reads it back
+      // off this line so a session whose items were all created at 0 still
+      // shows its supplier (the same lock rule as a received line).
       return {
         line_id: line.lineId,
         kind: 'create_receive',
         branch_id: Number(line.branchId),
         quantity: 0,
+        supplier_id: line.supplierLocked || line.supplierId == null ? null : Number(line.supplierId),
+        supplier_name: line.supplierLocked ? null : (line.supplierName || null),
         received_date: line.receivedDate,
         product: line.product || {},
       }
@@ -798,7 +806,27 @@ export default function CreateProductsSessionModal({
                     these four fields never fall into four separate rows above
                     that width. Below it they stack one per row on purpose. */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label><span className="mb-1 block text-[11px] text-gray-500">{tr('brand', 'Brand')}</span><input className="input w-full text-sm" value={header.brand} list="create-products-brand-options" aria-label={tr('brand', 'Brand')} placeholder={tr('optional', 'Optional')} onChange={(event) => setHeader((prev) => ({ ...prev, brand: event.target.value }))} /><datalist id="create-products-brand-options">{brandOptions.map((brand) => <option key={brand} value={brand} />)}</datalist></label>
+                  {/* Was a native HTML datalist. Browsers render those at their
+                      own discretion -- Android/iOS webviews routinely show
+                      nothing -- so 203 brands existed here and the operator
+                      saw a plain empty box (the owner's report). The shared
+                      SuggestionTextInput is the SAME control the item form's
+                      Brand uses, fed by the SAME brandOptions list, so the
+                      header and the item can never offer different brands.
+                      The empty-state line answers to the same gate the item
+                      form uses (utils/suggestionMatching.ts): a list that has
+                      brands but no match must not claim none are saved, and a
+                      list still waiting on its source says nothing at all.
+                      The caption is a <label htmlFor> SIBLING of the control,
+                      not a wrapper: Branch and Received date beside it wrap
+                      their <AppSelect>/<DateEntryInput> in a <label>, but this
+                      control renders an option list under the input, and a
+                      click inside a <label> is forwarded to the labelled
+                      input -- which would bounce focus back and re-open the
+                      list instead of taking the row. htmlFor gives the same
+                      accessible name and the same tap-the-caption-to-focus
+                      behaviour without that. */}
+                  <div><label htmlFor="create-products-brand" className="mb-1 block text-[11px] text-gray-500">{tr('brand', 'Brand')}</label><SuggestionTextInput id="create-products-brand" value={header.brand} options={brandOptions} ariaLabel={tr('brand', 'Brand')} inputClassName="input min-h-11 w-full min-w-0 text-sm" placeholder={tr('type_or_select_brand', 'Type or select brand…')} emptyHint={suggestionEmptyState(brandOptions.length > 0, brandOptions.length) === 'no-match' ? tr('suggestions_no_match', 'No match — type to add a new one.') : undefined} onChange={(value) => setHeader((prev) => ({ ...prev, brand: value }))} /></div>
                   <SupplierPickerField value={{ supplierId: header.supplierId, supplierName: header.supplierName }} onChange={(next) => setHeader((prev) => ({ ...prev, supplierId: next.supplierId, supplierName: next.supplierName }))} tr={(key, fallback) => tr(key, fallback || key)} idPrefix="create-products-session" hint={tr('create_products_supplier_hint', 'Recorded on the opening stock of every product this session creates.')} hintDisplay="tooltip" />
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('branch', 'Branch')}</span><AppSelect value={header.branchId} onChange={(next) => setHeader((prev) => ({ ...prev, branchId: next }))} ariaLabel={tr('branch', 'Branch')} buttonClassName="h-9 w-full text-sm" options={branchSelectOptions} /></label>
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={receivedDate} onChange={setReceivedDate} /></label>
@@ -819,8 +847,11 @@ export default function CreateProductsSessionModal({
               {rows.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{rows.map((row) => (
                 <div key={row.lineId} className="flex items-start justify-between gap-2 rounded-lg bg-gray-50 px-2 py-2 text-sm dark:bg-gray-900/50">
                   <button type="button" disabled={row.status !== 'queued' || submissionLocked} className="min-w-0 flex-1 text-left disabled:cursor-default" aria-label={`${tr('edit', 'Edit')} ${row.name}`} onClick={() => openQueuedLine(row)}>
-                    <span className="block truncate">{row.status === 'saved' ? '✅' : '•'} {row.name}{row.barcode ? ` · ${row.barcode}` : ''}</span>
-                    <span className="block truncate text-[10px] text-gray-500">{row.brand || tr('none', 'None')} · {row.supplierName || tr('none', 'None')} · {row.branchName || tr('none', 'None')} · {row.receivedDate} · {row.batchLabel || tr('product_created', 'Product created')}</span>
+                    {/* N26 sibling: the full name wraps; the barcode sits under
+                        it in muted mono; the header line wraps too. */}
+                    <span className="block break-words">{row.status === 'saved' ? '✅' : '•'} {row.name}</span>
+                    {row.barcode ? <span className="block break-all dense-id text-[10px] text-gray-400">{row.barcode}</span> : null}
+                    <span className="block break-words text-[10px] text-gray-500">{row.brand || tr('none', 'None')} · {row.supplierName || tr('none', 'None')} · {row.branchName || tr('none', 'None')} · {row.receivedDate} · {row.batchLabel || tr('product_created', 'Product created')}</span>
                   </button>
                   <span className="flex shrink-0 items-center gap-1"><span className="text-[11px] tabular-nums">× {row.quantity} · {usdSymbol}{(row.quantity * row.unitCostUsd).toFixed(2)}</span>{row.status === 'queued' ? <button type="button" disabled={submissionLocked} aria-label={tr('remove', 'Remove')} className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40" onClick={() => removeLine(row.lineId)}><Trash2 className="h-4 w-4" /></button> : null}</span>
                 </div>
