@@ -14,6 +14,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import Modal from '../shared/Modal'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
 import PaginationControls, { DEFAULT_PAGE_SIZE, clampPage } from '../shared/PaginationControls'
@@ -29,6 +30,7 @@ import { isWriteConflictError } from '../../api/http.ts'
 import {
   createFee as createFeeRequest,
   deleteFee as deleteFeeRequest,
+  getFee as getFeeRequest,
   getAllFeesForExport,
   getFees as getFeesRequest,
   getFeesReport,
@@ -38,7 +40,7 @@ import {
   type FeeRecord,
   type FeeType,
 } from '../../api/feesTransport.ts'
-import FeeForm, { FEE_TYPE_OPTIONS, feeFormWorkKey } from './FeeForm.tsx'
+import FeeForm, { FEE_TYPE_OPTIONS, feeFormDraftBaseKey, feeFormWorkKey } from './FeeForm.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
@@ -48,6 +50,15 @@ import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import {
+  RESTORE_WORK_EVENT,
+  consumePendingRestore,
+  markRestoreHandled,
+  minimizeWork,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
+import { flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
 const ExpenseLabelManagerModal = lazyRetry(() => import('./ExpenseLabelManagerModal'), 'expense-label-manager-modal')
@@ -60,6 +71,7 @@ interface FeesAppContextValue {
   // a per-action boolean, because nothing here is blocked -- it needs to
   // know whether a delete will queue, not whether it is allowed.
   getPermissionTier: (key: string) => string
+  can: (permissionKey: string, actionKey: string) => boolean
   t: TranslateFn
   notify: NotifyFn
   fmtUSD: (value: unknown) => string
@@ -135,7 +147,7 @@ export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: strin
 }
 
 export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
-  const { getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency } = useApp()
+  const { can, getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency } = useApp()
   // Display-currency-aware money formatter (see utils/reportMoney.ts) —
   // honors the display_currency setting without touching stored data.
   const fmtMoney = useMemo(
@@ -152,6 +164,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // What they need instead is to know that deleting will not take effect
   // immediately. Labelling the outcome is the whole job on this page.
   const feesNeedsApproval = getPermissionTier('fees') === 'review'
+  const canAddFee = can('fees', 'add')
+  const canEditFee = can('fees', 'edit')
   const { syncChannel } = useSync()
   // E2: Fees renders as a SECTION of the Sales hub now (see Returns.tsx's
   // matching re-key note).
@@ -396,9 +410,56 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     { label: tr('export_all', 'Export all expenses'), onClick: () => { void openFeeExport('all') } },
   ]), [openFeeExport, tr])
 
-  const openAdd = () => { setSelected(null); setModal('form') }
-  const openEdit = (fee: FeeRecord) => { setSelected(fee); setModal('form') }
+  const openAdd = () => { if (canAddFee) { setSelected(null); setModal('form') } }
+  const openEdit = (fee: FeeRecord) => { if (canEditFee) { setSelected(fee); setModal('form') } }
   const closeModal = () => { setModal(null); setSelected(null) }
+
+  const restoreFeeForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
+    const rawFeeId = entry.payload?.feeId
+    const feeId = typeof rawFeeId === 'number' || typeof rawFeeId === 'string' ? Number(rawFeeId) : 0
+    const isEdit = Number.isFinite(feeId) && feeId > 0
+    if ((isEdit && !canEditFee) || (!isEdit && !canAddFee)) {
+      reparkDeniedRestore(entry)
+      notify(tr('access_denied', 'Access denied'), 'warning')
+      return false
+    }
+    if (!isEdit) {
+      setSelected(null)
+      setModal('form')
+      return true
+    }
+    try {
+      const result = await getFeeRequest(feeId)
+      if (!result?.fee) throw new Error('fee missing')
+      setSelected(result.fee)
+      setModal('form')
+      return true
+    } catch {
+      reparkDeniedRestore(entry)
+      notify(tr('failed_to_load_data', 'Failed to load data'), 'warning')
+      return false
+    }
+  }, [canAddFee, canEditFee, notify, tr])
+
+  useEffect(() => {
+    const pending = consumePendingRestore('fee_form')
+    if (pending) {
+      void restoreFeeForm(pending).then((restored) => {
+        if (restored) markRestoreHandled('fee_form')
+      })
+    }
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'fee_form') return
+      const entry = detail.entry as MinimizedWorkEntry | undefined
+      if (!entry) return
+      void restoreFeeForm(entry).then((restored) => {
+        if (restored) markRestoreHandled('fee_form')
+      })
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreFeeForm])
 
   const handleSave = async (payload: FeePayload) => {
     try {
@@ -432,6 +493,26 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       }
       throw error
     }
+  }
+
+  const feeDraftKey = scopedWorkDraftKey(feeFormDraftBaseKey(selected?.id))
+  const canMinimizeFeeForm = selected ? canEditFee : canAddFee
+  const preserveFeeForm = () => {
+    flushPendingWorkDraft(feeDraftKey)
+    const isEdit = selected != null
+    minimizeWork({
+      key: feeFormWorkKey(selected?.id),
+      kind: 'fee_form',
+      pageId: 'sales',
+      anchor: 'hub:sales:fees',
+      label: isEdit
+        ? `${tr('edit_fee', 'Edit Expense')} — ${selected.label || selected.id}`
+        : tr('add_fee', 'Add Expense'),
+      payload: { feeId: selected?.id ?? null },
+      draftKey: feeDraftKey,
+      requiredPermission: { permissionKey: 'fees', actionKey: isEdit ? 'edit' : 'add' },
+    })
+    closeModal()
   }
 
   const handleDelete = async (fee: FeeRecord) => {
@@ -527,7 +608,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             </button>
           </>
         )}
-        actions={(
+        actions={canAddFee ? (
           // Fit-to-content, not the wide toolbar-width button ("the add
           // button for fees are too wide, can make fit") — and it shares
           // the range row to save a row.
@@ -539,7 +620,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             <Plus className="h-3.5 w-3.5 shrink-0" />
             {tr('add_fee', 'Add Expense')}
           </button>
-        )}
+        ) : null}
       />
 
       {exportDialog ? (
@@ -604,14 +685,14 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-slate-400">
           <Receipt className="h-8 w-8 text-slate-300" />
           <span>{tr('no_fees', 'No expenses recorded yet.')}</span>
-          <button
+          {canAddFee ? <button
             type="button"
             onClick={openAdd}
             className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300"
           >
             <Plus className="h-3.5 w-3.5" />
             {tr('add_fee', 'Add Expense')}
-          </button>
+          </button> : null}
         </div>
       ) : (
         <>
@@ -637,7 +718,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
               </thead>
               <tbody>
                 {fees.map((fee) => (
-                  <tr key={fee.id} data-clickable="true" tabIndex={0} onClick={() => openEdit(fee)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEdit(fee) } }}>
+                  <tr key={fee.id} data-clickable={canEditFee ? 'true' : undefined} tabIndex={canEditFee ? 0 : undefined} onClick={() => openEdit(fee)} onKeyDown={(event) => { if (canEditFee && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openEdit(fee) } }}>
                     <td className="whitespace-nowrap text-slate-500 dark:text-slate-400">{formatFeeDate(fee.fee_date)}</td>
                     <td className="whitespace-nowrap">
                       <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
@@ -663,7 +744,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                     </td>
                     <td>
                       <div className="flex flex-nowrap items-center justify-end gap-0.5">
-                        <button
+                        {canEditFee ? <button
                           type="button"
                           onClick={(event) => { event.stopPropagation(); openEdit(fee) }}
                           aria-label={tr('edit', 'Edit')}
@@ -671,7 +752,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                           className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700"
                         >
                           <Pencil className="h-3.5 w-3.5" />
-                        </button>
+                        </button> : null}
                         <button
                           type="button"
                           onClick={(event) => { event.stopPropagation(); void handleDelete(fee) }}
@@ -710,9 +791,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+                    {canEditFee ? <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
                       <Pencil className="h-3.5 w-3.5" />
-                    </button>
+                    </button> : null}
                     <button type="button" onClick={() => handleDelete(fee)} disabled={deletingId === fee.id} aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} className="rounded-full p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -749,7 +830,14 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       )}
 
       {modal === 'form' ? (
-        <Modal title={selected ? tr('edit_fee', 'Edit Expense') : tr('add_fee', 'Add Expense')} onClose={closeModal} size="sm" unsavedChanges={{ workKey: feeFormWorkKey(selected?.id) }}>
+        <Modal
+          title={selected ? tr('edit_fee', 'Edit Expense') : tr('add_fee', 'Add Expense')}
+          onClose={closeModal}
+          onMinimize={canMinimizeFeeForm ? preserveFeeForm : undefined}
+          headerExtra={canMinimizeFeeForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveFeeForm} /> : null}
+          size="sm"
+          unsavedChanges={{ workKey: feeFormWorkKey(selected?.id) }}
+        >
           <FeeForm
             fee={selected}
             labelSuggestions={[...new Set(fees.map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}

@@ -19,6 +19,7 @@ export type MinimizedWorkKind =
   | 'receive_batch'
   | 'create_products_session'
   | 'branch_form'
+  | 'fee_form'
   | 'product_detail'
 
 export type MinimizedWorkPermission = {

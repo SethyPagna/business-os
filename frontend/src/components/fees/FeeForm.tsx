@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { useFormDirty } from '../../utils/formDirty.ts'
+import {
+  clearWorkDraft,
+  flushPendingWorkDraft,
+  readWorkDraft,
+  scheduleWorkDraftWrite,
+  scopedWorkDraftKey,
+} from '../../utils/workDrafts.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
@@ -149,9 +156,40 @@ export function feeFormWorkKey(feeId?: string | number | null): string {
   return `fee-form-${feeId ?? 'new'}`
 }
 
+export function feeFormDraftBaseKey(feeId?: string | number | null): string {
+  return `fee_${feeId ?? 'new'}`
+}
+
+function restoreFeeForm(base: FeeFormState, draft?: Partial<FeeFormState> | null): FeeFormState {
+  if (!draft || typeof draft !== 'object') return base
+  const feeType = FEE_TYPE_OPTIONS.some((option) => option.value === draft.fee_type)
+    ? draft.fee_type as FeeType
+    : base.fee_type
+  const text = <K extends keyof FeeFormState>(key: K): FeeFormState[K] => (
+    typeof draft[key] === 'string' ? draft[key] : base[key]
+  ) as FeeFormState[K]
+  return {
+    fee_type: feeType,
+    label: text('label'),
+    amount_usd: text('amount_usd'),
+    amount_khr: text('amount_khr'),
+    fee_date: text('fee_date'),
+    sale_id: text('sale_id'),
+    branch_id: text('branch_id'),
+    notes: text('notes'),
+  }
+}
+
 export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }: FeeFormProps) {
   const { t } = useApp()
-  const [form, setForm] = useState<FeeFormState>(() => feeToFormState(fee))
+  const draftKey = scopedWorkDraftKey(feeFormDraftBaseKey(fee?.id))
+  const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<FeeFormState>>> | undefined>(undefined)
+  if (restoredDraftRef.current === undefined) {
+    restoredDraftRef.current = readWorkDraft<Partial<FeeFormState>>(draftKey, {
+      notOlderThanMs: fee?.updated_at ? Date.parse(fee.updated_at) || 0 : 0,
+    })
+  }
+  const [form, setForm] = useState<FeeFormState>(() => restoreFeeForm(feeToFormState(fee), restoredDraftRef.current?.data))
   const [saving, setSaving] = useState(false)
   // One declaration; the ✕ above, the navigation guard, beforeunload, the
   // sidebar dot and the update gate all read it. Latched off on a real
@@ -159,15 +197,21 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   const { dirty } = useFormDirty(form, String(fee?.id ?? 'new'))
   const savedRef = useRef(false)
   const dirtyRef = useRef(false)
-  dirtyRef.current = dirty && !savedRef.current
+  dirtyRef.current = (dirty || !!restoredDraftRef.current) && !savedRef.current
   const requestClose = useModalClose(onClose)
   useEffect(() => registerDirtyWork({
     key: feeFormWorkKey(fee?.id),
-    pageId: 'fees',
+    pageId: 'sales',
     label: `${t('expense') || 'Expense'}${form.label ? ` — ${form.label}` : ''}`,
     isDirty: () => dirtyRef.current,
+    discard: () => clearWorkDraft(draftKey),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [fee?.id])
+  }), [draftKey, fee?.id])
+  useEffect(() => () => { flushPendingWorkDraft(draftKey) }, [draftKey])
+  useEffect(() => {
+    if (!dirtyRef.current) return
+    return scheduleWorkDraftWrite(draftKey, form)
+  }, [draftKey, form])
   const [touched, setTouched] = useState(false)
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   // Saved labels from the server (every distinct label ever used, with its
@@ -195,13 +239,16 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   const [saleResolving, setSaleResolving] = useState(false)
   const saleSearchSeq = useRef(0)
 
-  // On edit, resolve the fee's existing sale_id to a real display row
+  // Resolve the current sale_id to a real display row. This uses form state,
+  // rather than only the server prop, so a restored add/edit draft displays
+  // the linked sale it will submit.
   // (receipt number / customer / total) instead of just showing a bare
   // number -- uses the new `id` exact-match filter on GET /api/sales.
   useEffect(() => {
     let cancelled = false
-    const saleId = fee?.sale_id
-    if (saleId == null) return
+    const saleId = form.sale_id.trim()
+    if (!saleId || String(selectedSale?.id || '') === saleId) return
+    setSelectedSale(null)
     setSaleResolving(true)
     loadSaleModule()
       .then((mod) => mod.getSales({ id: String(saleId), limit: 1 }))
@@ -217,8 +264,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
       })
       .finally(() => { if (!cancelled) setSaleResolving(false) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only ever re-resolve for the fee this form opened with
-  }, [fee?.sale_id])
+  }, [form.sale_id, selectedSale?.id])
 
   // Debounced as-you-type sale search, same 300ms pattern other
   // search-as-you-type pickers in this app use.
@@ -315,6 +361,8 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
       // raise the discard prompt.
       savedRef.current = true
       dirtyRef.current = false
+      restoredDraftRef.current = null
+      clearWorkDraft(draftKey)
       onClose()
     } finally {
       setSaving(false)
