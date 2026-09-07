@@ -38,6 +38,7 @@ export const SALE_RECORD_KINDS = [
   'item_price_changed',
   'delivery_fee_changed',
   'delivery_cost_changed',
+  'delivery_added',
   'discount_changed',
   'customer_changed',
   'payment_settled',
@@ -76,6 +77,7 @@ export const SALE_RECORD_KIND_KEYS: Record<SaleRecordKind, string> = {
   item_price_changed: 'record_kind_item_price_changed',
   delivery_fee_changed: 'record_kind_delivery_fee_changed',
   delivery_cost_changed: 'record_kind_delivery_cost_changed',
+  delivery_added: 'record_kind_delivery_added',
   discount_changed: 'record_kind_discount_changed',
   customer_changed: 'record_kind_customer_changed',
   payment_settled: 'record_kind_payment_settled',
@@ -91,7 +93,7 @@ export function saleRecordKind(raw: unknown): SaleRecordKind {
 }
 
 /** How one before/after field should be rendered. */
-export type SaleRecordFieldFormat = 'money' | 'quantity' | 'status' | 'text'
+export type SaleRecordFieldFormat = 'money' | 'money_khr' | 'quantity' | 'status' | 'text'
 
 /**
  * Field name -> how to render it, and what to call it.
@@ -125,6 +127,18 @@ const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }
   products: { key: 'products', format: 'text' },
   direction: { key: 'action', format: 'text' },
   stock_skipped: { key: 'stock', format: 'text' },
+  is_delivery: { key: 'delivery', format: 'text' },
+  delivery_contact_id: { key: 'id', format: 'text' },
+  delivery_contact_name: { key: 'driver', format: 'text' },
+  delivery_contact_phone: { key: 'driver_phone', format: 'text' },
+  delivery_contact_address: { key: 'address', format: 'text' },
+  delivery_fee_usd: { key: 'delivery_fee', format: 'money' },
+  delivery_fee_khr: { key: 'delivery_fee', format: 'money_khr' },
+  delivery_fee_paid_by: { key: 'paid_by', format: 'text' },
+  delivery_actual_cost_usd: { key: 'delivery_actual_cost', format: 'money' },
+  delivery_actual_cost_khr: { key: 'delivery_actual_cost', format: 'money_khr' },
+  exchange_rate: { key: 'exchange_rate', format: 'quantity' },
+  total_khr: { key: 'total', format: 'money_khr' },
 }
 
 export interface SaleRecordFieldRow {

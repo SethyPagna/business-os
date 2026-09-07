@@ -244,11 +244,12 @@ export async function addSaleItems(
 }
 
 export interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed'
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
   sale_item_id?: number
   quantity?: number
   delivery_fee_usd?: number
   delivery_actual_cost_usd?: number | string | null
+  delivery_contact_id?: number
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
   client_request_id: string
@@ -290,6 +291,14 @@ export async function amendSale(id: number | string, request: SaleAmendmentReque
       subtotal_usd: result?.subtotalUsd,
       total_usd: result?.totalUsd,
       total_khr: result?.totalKhr,
+      ...(result?.isDelivery !== undefined ? { is_delivery: result.isDelivery } : {}),
+      ...(result?.deliveryContactId !== undefined ? { delivery_contact_id: result.deliveryContactId } : {}),
+      ...(result?.deliveryContactName !== undefined ? { delivery_contact_name: result.deliveryContactName } : {}),
+      ...(result?.deliveryContactPhone !== undefined ? { delivery_contact_phone: result.deliveryContactPhone } : {}),
+      ...(result?.deliveryContactAddress !== undefined ? { delivery_contact_address: result.deliveryContactAddress } : {}),
+      ...(result?.deliveryFeeUsd !== undefined ? { delivery_fee_usd: result.deliveryFeeUsd } : {}),
+      ...(result?.deliveryFeeKhr !== undefined ? { delivery_fee_khr: result.deliveryFeeKhr } : {}),
+      ...(result?.deliveryFeePaidBy !== undefined ? { delivery_fee_paid_by: result.deliveryFeePaidBy } : {}),
       delivery_actual_cost_usd: result?.deliveryActualCostUsd,
       delivery_actual_cost_khr: result?.deliveryActualCostKhr,
       updated_at: getResultTimestamp(result),
@@ -298,6 +307,12 @@ export async function amendSale(id: number | string, request: SaleAmendmentReque
   } catch (error) {
     attachAttempted(error, { ...request })
   }
+}
+
+/** Sales-scoped driver picker for the atomic add-delivery correction. */
+export function getSaleDeliveryOptions(search = ''): Promise<unknown> {
+  const query = buildQueryString({ search }, { skipEmpty: true })
+  return apiFetch('GET', appendQuery('/api/sales/delivery-options', query))
 }
 
 /**
