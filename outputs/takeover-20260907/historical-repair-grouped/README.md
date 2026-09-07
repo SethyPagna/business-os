@@ -67,7 +67,9 @@ The transport preserves the 44 reviewed business groups. It materializes only th
 - related Sales and sale-item group: two guards, group audit, two updates (5 statements);
 - completion: 45 exact full-row/audit guards and one completion audit (46 statements).
 
-The current reviewed inputs materialize to at most 37,800 bytes per apply-group file and 40,167 bytes per recovery-group file. The largest apply-group statement is 23,978 bytes. The completion file is 809,002 bytes and its largest statement is 24,907 bytes. These are below the operator's 1,000,000-byte file ceiling and Cloudflare's documented 100,000-byte per-statement and 5 GB file-import limits.
+Recovery adds a leading atomic guard that requires the plan-completion audit to be absent, followed by the existing exact post-state guard or guards, recovery audit, and updates. A fee recovery therefore has 4 statements and the related Sales/item recovery has 6. A completed plan is terminal for this operator; it will not create a recovery audit or restore pre-state beneath an immutable completion record.
+
+The current reviewed inputs materialize to at most 37,800 bytes per apply-group file and 40,460 bytes per recovery-group file. The largest apply-group statement is 23,978 bytes and the largest recovery statement is 26,517 bytes. The completion file is 809,002 bytes and its largest statement is 24,907 bytes. These are below the operator's 1,000,000-byte file ceiling and Cloudflare's documented 100,000-byte per-statement and 5 GB file-import limits.
 
 Wrangler returns aggregate import metadata, not per-statement change counts. The transport therefore requires the exact core audit and full-row classification after every import. A confirmed CLI response must report the exact query count and a final bookmark, then the post-state must be exact. A process, network, polling, malformed-output, or post-read failure pauses the operator before the next group. It never blind-retries an ambiguous file. The independent REST postchecker remains the authority for manual reconciliation before an explicit resume.
 

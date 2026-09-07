@@ -5,6 +5,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   buildImportArtifact,
+  buildCompletionAbsenceGuard,
+  cleanupImportWorkDirectory,
   executeAndReconcile,
   executeWranglerFileImport,
   materializeStatement,
@@ -51,7 +53,7 @@ await expectReject(() => Promise.resolve(materializeStatement({ label: 'transact
 await expectReject(() => Promise.resolve(materializeStatement({ label: 'crlf', expected_changes: 0, sql: 'SELECT 1\r\n', params: [] })), /LF-only/, 'CRLF SQL was accepted')
 
 const sqlite = new Database(':memory:')
-sqlite.exec("CREATE TABLE fees(id INTEGER PRIMARY KEY,value TEXT CHECK(value <> 'forbidden')); INSERT INTO fees VALUES(1,'before'),(2,'before'); CREATE TABLE victim(id INTEGER PRIMARY KEY,value TEXT); INSERT INTO victim VALUES(1,'safe'); CREATE TABLE audit_logs(id INTEGER PRIMARY KEY,label TEXT)")
+sqlite.exec("CREATE TABLE fees(id INTEGER PRIMARY KEY,value TEXT CHECK(value <> 'forbidden')); INSERT INTO fees VALUES(1,'before'),(2,'before'); CREATE TABLE victim(id INTEGER PRIMARY KEY,value TEXT); INSERT INTO victim VALUES(1,'safe'); CREATE TABLE audit_logs(id INTEGER PRIMARY KEY,label TEXT,entity TEXT,entity_id TEXT,record_id TEXT,action TEXT)")
 const runImportTransaction = (artifact) => {
   sqlite.exec('BEGIN IMMEDIATE')
   try {
@@ -91,6 +93,18 @@ const driftArtifact = buildImportArtifact('fees-004', [
 ])
 await expectReject(() => Promise.resolve(runImportTransaction(driftArtifact)), /malformed JSON/, 'false precondition did not raise an SQL error')
 assert(sqlite.prepare('SELECT value FROM fees WHERE id=2').get().value === 'before' && sqlite.prepare('SELECT COUNT(*) AS count FROM audit_logs WHERE id=3').get().count === 0, 'guard failure did not roll back atomically')
+
+const terminalManifest = { execution: { run_id: 'terminal-run' } }
+const terminalGroup = { id: 'fees-005' }
+sqlite.prepare("INSERT INTO audit_logs(id,label,entity,entity_id,record_id,action) VALUES (4,'completion','historical_metadata_repair',?,'plan','historical_branch_metadata_repair_completed')").run(terminalManifest.execution.run_id)
+const terminalRecoveryArtifact = buildImportArtifact('fees-005', [
+  buildCompletionAbsenceGuard(terminalManifest, terminalGroup),
+  { label: 'fees-005:post-guard:fees', expected_changes: 0, sql: "SELECT CASE WHEN (SELECT value FROM fees WHERE id=2)='before' THEN 0 ELSE json('guard failed') END", params: [] },
+  { label: 'fees-005:recovery-audit', expected_changes: 1, sql: "INSERT INTO audit_logs(id,label) VALUES (5,'recovery')", params: [] },
+  { label: 'fees-005:recover:fees', expected_changes: 1, sql: "UPDATE fees SET value='recovered' WHERE id=2", params: [] },
+], 'recovery')
+await expectReject(() => Promise.resolve(runImportTransaction(terminalRecoveryArtifact)), /malformed JSON/, 'terminal completion did not abort recovery')
+assert(sqlite.prepare('SELECT value FROM fees WHERE id=2').get().value === 'before' && sqlite.prepare('SELECT COUNT(*) AS count FROM audit_logs WHERE id=5').get().count === 0, 'terminal completion allowed a recovery mutation or audit')
 sqlite.close()
 
 const successStdout = JSON.stringify([{
@@ -105,6 +119,13 @@ assert(!Object.hasOwn(parsed, 'statement_changes'), 'transport synthesized unava
 assert(!parseWranglerImportResult({ exitCode: 0, stdout: successStdout, stderr: '' }, 4).confirmed_complete, 'wrong aggregate query count was accepted')
 assert(!parseWranglerImportResult({ exitCode: 1, stdout: '', stderr: 'remote error', timedOut: false }, 3).confirmed_complete, 'nonzero Wrangler exit was accepted')
 assert(!parseWranglerImportResult({ exitCode: -1, stdout: '', stderr: '', timedOut: true }, 3).confirmed_complete, 'Wrangler timeout was accepted')
+const privateFailureSentinel = `${firstArtifact.sql}\nC:\\private\\guarded-customer-row.sql\n${hostile.apostrophe}\n${hostile.khmer}\n${hostile.injection}`
+const privateFailure = parseWranglerImportResult({ exitCode: 1, stdout: privateFailureSentinel, stderr: privateFailureSentinel, timedOut: false }, 3)
+const serializedPrivateFailure = JSON.stringify(privateFailure)
+for (const privateValue of [firstArtifact.sql, 'guarded-customer-row.sql', hostile.apostrophe, hostile.khmer, hostile.injection]) {
+  assert(!serializedPrivateFailure.includes(privateValue), 'Wrangler failure result exposed private SQL, row data, or a temporary path')
+}
+assert(privateFailure.error_code === 'wrangler_import_process_failed', 'Wrangler failure did not return the fixed safe classification')
 
 let temporaryFilePath
 let invocation
@@ -121,6 +142,11 @@ assert(fileExecution.confirmed_complete, 'mocked file import did not confirm')
 assert(invocation.command === process.execPath && invocation.args.includes('--remote') && invocation.args.includes('--yes') && invocation.args.includes('--json'), 'Wrangler invocation flags are incomplete')
 assert(invocation.args.some((arg) => /wrangler\.js$/i.test(arg)) && invocation.args.some((arg) => /operator-wrangler\.toml$/i.test(arg)), 'pinned Wrangler binary/config were not used')
 assert(!existsSync(temporaryFilePath), 'temporary SQL file was retained after execution')
+await expectReject(
+  () => Promise.resolve(cleanupImportWorkDirectory(resolve('.'), resolve('unexpected.sql'))),
+  /unverified import temporary directory/,
+  'recursive cleanup accepted an unverified path',
+)
 
 const appliedInspect = async () => ({ state: 'applied' })
 const pendingInspect = async () => ({ state: 'pending' })
@@ -146,8 +172,11 @@ process.stdout.write(`${JSON.stringify({
     'lf_only_hashed_artifact',
     'guard_and_late_error_atomic_rollback',
     'independent_group_commit_boundary',
+    'terminal_completion_atomic_recovery_refusal',
     'aggregate_only_wrangler_result',
+    'private_failure_output_suppression',
     'pinned_cli_config_and_ephemeral_sql',
+    'recursive_cleanup_path_guard',
     'exact_post_state_reconciliation',
     'ambiguous_response_pause',
     'no_platform_proxy_transport',

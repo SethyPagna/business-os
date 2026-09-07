@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   APPLY_ACTION,
@@ -36,6 +36,7 @@ const EXPECTED_WRANGLER_VERSION = '4.116.0'
 const MAX_IMPORT_FILE_BYTES = 1_000_000
 const MAX_STATEMENT_BYTES = 100_000
 const IMPORT_TIMEOUT_MS = 5 * 60_000
+const IMPORT_TEMP_PREFIX = 'bos-historical-d1-import-'
 const AUDIT_COLUMNS = ['user_id', 'user_name', 'action', 'entity', 'entity_id', 'details', 'table_name', 'record_id', 'old_value', 'new_value']
 const EXPECTED_ACTIONS = new Set([START_ACTION, APPLY_ACTION, RECOVERY_ACTION, COMPLETE_ACTION])
 const QUERY_ENDPOINT = `https://api.cloudflare.com/client/v4/accounts/${EXPECTED_ACCOUNT_ID}/d1/database/${EXPECTED_DATABASE_ID}/query`
@@ -137,8 +138,10 @@ function validateUnitShape(unitId, phase, statements) {
   assert(unitId !== 'plan-completion', 'data-group phase cannot use the completion unit')
   assert(statements.every((statement) => statement.label === 'plan:start-audit' || statement.label.startsWith(`${unitId}:`)), 'data-group statement label does not match its unit')
   const related = unitId === 'sales-related'
-  const guardCount = related ? 2 : 1
-  assert(statements.slice(0, guardCount).every((statement) => statement.label.includes(`:${phase === 'apply' ? 'pre' : 'post'}-guard:`)), 'data-group guards are missing or out of order')
+  const rowGuardCount = related ? 2 : 1
+  const guardCount = rowGuardCount + (phase === 'recovery' ? 1 : 0)
+  if (phase === 'recovery') assert(statements[0].label === `${unitId}:completion-guard:plan`, 'recovery lacks the terminal-completion guard')
+  assert(statements.slice(phase === 'recovery' ? 1 : 0, guardCount).every((statement) => statement.label.includes(`:${phase === 'apply' ? 'pre' : 'post'}-guard:`)), 'data-group row guards are missing or out of order')
   const auditCount = phase === 'apply' && unitId === 'fees-001' ? 2 : 1
   const auditSlice = statements.slice(guardCount, guardCount + auditCount)
   assert(auditSlice.every((statement) => statement.label.endsWith('audit')), 'data-group audits are missing or out of order')
@@ -146,6 +149,20 @@ function validateUnitShape(unitId, phase, statements) {
   const updates = statements.slice(guardCount + auditCount)
   assert(updates.length === (related ? 2 : 1) && updates.every((statement) => statement.label.includes(`:${phase === 'apply' ? 'apply' : 'recover'}:`)), 'data-group updates are missing or out of order')
   assert(statements.length === guardCount + auditCount + updates.length, 'data-group statement count changed')
+}
+
+export function buildCompletionAbsenceGuard(manifest, group) {
+  assert(manifest?.execution?.run_id && group?.id, 'completion-absence guard inputs are missing')
+  return {
+    label: `${group.id}:completion-guard:plan`,
+    expected_changes: 0,
+    sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE entity='historical_metadata_repair' AND entity_id=${sqlString(manifest.execution.run_id)} AND record_id='plan' AND action=${sqlString(COMPLETE_ACTION)})=0 THEN 0 ELSE json('guard failed') END`,
+    params: [],
+  }
+}
+
+export function buildRecoveryImportStatements(manifest, group, rows) {
+  return [buildCompletionAbsenceGuard(manifest, group), ...buildRecoveryStatements(manifest, group, rows)]
 }
 
 export function buildImportArtifact(unitId, statements, phase = 'apply') {
@@ -184,7 +201,11 @@ export function parseWranglerImportResult(execution, expectedStatementCount) {
     exit_code: execution.exitCode,
     timed_out: Boolean(execution.timedOut),
     output_overflow: Boolean(execution.outputOverflow),
-    error: redact(execution.stderr || execution.stdout),
+    error_code: execution.timedOut
+      ? 'wrangler_import_timeout'
+      : execution.outputOverflow
+        ? 'wrangler_import_output_overflow'
+        : 'wrangler_import_process_failed',
   }
   let payload
   try { payload = JSON.parse(execution.stdout) } catch { return { confirmed_complete: false, exit_code: execution.exitCode, error: 'Wrangler stdout was not valid JSON' } }
@@ -212,6 +233,19 @@ export function parseWranglerImportResult(execution, expectedStatementCount) {
   }
 }
 
+export function cleanupImportWorkDirectory(work, filePath) {
+  const tempRoot = resolve(tmpdir())
+  const resolvedWork = resolve(work)
+  const resolvedFile = resolve(filePath)
+  const fromTempRoot = relative(tempRoot, resolvedWork)
+  assert(
+    fromTempRoot && !isAbsolute(fromTempRoot) && !fromTempRoot.startsWith('..') && dirname(resolvedWork) === tempRoot && basename(resolvedWork).startsWith(IMPORT_TEMP_PREFIX),
+    'refusing to remove an unverified import temporary directory',
+  )
+  assert(dirname(resolvedFile) === resolvedWork && resolvedFile.toLowerCase().endsWith('.sql'), 'refusing to remove an import directory with an unexpected artifact path')
+  rmSync(resolvedWork, { recursive: true, force: true })
+}
+
 function validateLocalRuntime() {
   assert(existsSync(operatorConfigPath) && readFileSync(operatorConfigPath, 'utf8').replaceAll('\r\n', '\n') === expectedOperatorConfig, 'operator Wrangler config changed')
   assert(existsSync(wranglerPackagePath) && existsSync(wranglerBinPath), 'pinned Wrangler installation is missing')
@@ -220,7 +254,7 @@ function validateLocalRuntime() {
 
 export async function executeWranglerFileImport(artifact, dependencies = {}) {
   validateLocalRuntime()
-  const work = mkdtempSync(join(tmpdir(), 'bos-historical-d1-import-'))
+  const work = mkdtempSync(join(resolve(tmpdir()), IMPORT_TEMP_PREFIX))
   const filePath = join(work, `${artifact.unit_id}-${artifact.sql_sha256.slice(0, 16)}.sql`)
   writeFileSync(filePath, artifact.sql, { flag: 'wx', mode: 0o600 })
   try {
@@ -244,7 +278,7 @@ export async function executeWranglerFileImport(artifact, dependencies = {}) {
     })
     return parseWranglerImportResult(execution, artifact.statement_count)
   } finally {
-    rmSync(work, { recursive: true, force: true })
+    cleanupImportWorkDirectory(work, filePath)
   }
 }
 
@@ -328,7 +362,10 @@ export function createRestInspector(manifest, token, fetchImpl = fetch) {
     const audits = await fetchAuditRows(fetchImpl, token, manifest, `${group.id}:audits`)
     const groupAuditRows = audits.filter((row) => row.record_id === group.id)
     const planAuditRows = audits.filter((row) => row.record_id === 'plan')
-    return { rows, groupAuditRows, planAuditRows, state: classifyGroup(manifest, group, rows, groupAuditRows, planAuditRows) }
+    const classified = classifyGroup(manifest, group, rows, groupAuditRows, planAuditRows)
+    const hasCompletion = planAuditRows.some((row) => row.action === COMPLETE_ACTION)
+    const state = classified === 'recovered' && hasCompletion ? 'inconsistent' : classified
+    return { rows, groupAuditRows, planAuditRows, state }
   }
 }
 
@@ -341,7 +378,7 @@ async function inspectAll(manifest, inspect) {
 export async function executeAndReconcile({ artifact, expectedState, pendingState, inspect, executeImport }) {
   let execution
   try { execution = await executeImport(artifact) }
-  catch (error) { execution = { confirmed_complete: false, error: redact(error?.message || error) } }
+  catch { execution = { confirmed_complete: false, error_code: 'wrangler_import_execution_exception' } }
   let after
   try { after = await inspect() }
   catch (error) {
@@ -409,7 +446,8 @@ export async function runFileImportTransport(args, dependencies = {}) {
     assert(group, '--recover-group does not name a manifest group')
     const before = await inspect(group)
     assert(before.state === 'applied', `group ${group.id} is ${before.state}; refusing recovery`)
-    const artifact = buildImportArtifact(group.id, buildRecoveryStatements(manifest, group, before.rows), 'recovery')
+    assert(!before.planAuditRows.some((row) => row.action === COMPLETE_ACTION), 'completed plan is terminal; refusing group recovery')
+    const artifact = buildImportArtifact(group.id, buildRecoveryImportStatements(manifest, group, before.rows), 'recovery')
     return executeAndReconcile({ artifact, expectedState: 'recovered', pendingState: 'applied', inspect: () => inspect(group), executeImport })
   }
 
