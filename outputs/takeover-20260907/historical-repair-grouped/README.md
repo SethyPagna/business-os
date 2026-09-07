@@ -44,3 +44,39 @@ node outputs/takeover-20260907/historical-repair-grouped/verify-grouped-repair.m
 ```
 
 The verifier uses a local SQLite fixture with all 4,333 targets and Sales column 65. It never loads Wrangler, opens a remote binding, or contacts Cloudflare.
+
+## Wrangler file-import transport
+
+`wrangler-file-import-transport.mjs` is the reviewed fallback for the unreliable `getPlatformProxy` remote-binding bridge. It does not use that bridge. Read-only state inspection goes through single-`SELECT` D1 REST calls; each write unit is passed separately to the installed Wrangler 4.116.0 CLI as `d1 execute --remote --file`.
+
+This distinction is deliberate. In Wrangler 4.116.0, local file execution splits SQL and calls a binding batch, while remote file execution hashes and uploads the raw file and drives the D1 `/import` `init`, `ingest`, and `poll` protocol. Cloudflare documents that imports block D1 for their duration. Wrangler and Cloudflare's D1 getting-started guide state that an import which fails to complete returns the database to its original state. Cloudflare's import guide also requires removing `BEGIN TRANSACTION` and `COMMIT` because D1 owns the transaction.
+
+Primary references:
+
+- [Wrangler 4.116.0 remote file implementation](https://github.com/cloudflare/workers-sdk/blob/wrangler%404.116.0/packages/wrangler/src/d1/execute.ts#L2287-L2489)
+- [Wrangler transaction handling](https://github.com/cloudflare/workers-sdk/blob/wrangler%404.116.0/packages/wrangler/src/d1/trimmer.ts#L289-L322)
+- [Cloudflare D1 remote file example and rollback message](https://developers.cloudflare.com/d1/get-started/#5-deploy-your-application)
+- [Cloudflare D1 import API and blocking behavior](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/import/)
+- [Cloudflare D1 import transaction restriction](https://developers.cloudflare.com/d1/best-practices/import-export-data/#convert-sqlite-database-files)
+- [Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
+
+The transport preserves the 44 reviewed business groups. It materializes only the single positional-JSON guard parameter into a quoted SQL string, rejects every remaining unbound placeholder and transaction/attachment statement, enforces LF-only output, and hashes the exact ephemeral SQL bytes. It uses these atomic file shapes:
+
+- first fee group: guard, plan-start audit, group audit, update (4 statements);
+- remaining fee groups: guard, group audit, update (3 statements each);
+- related Sales and sale-item group: two guards, group audit, two updates (5 statements);
+- completion: 45 exact full-row/audit guards and one completion audit (46 statements).
+
+The current reviewed inputs materialize to at most 37,800 bytes per apply-group file and 40,167 bytes per recovery-group file. The largest apply-group statement is 23,978 bytes. The completion file is 809,002 bytes and its largest statement is 24,907 bytes. These are below the operator's 1,000,000-byte file ceiling and Cloudflare's documented 100,000-byte per-statement and 5 GB file-import limits.
+
+Wrangler returns aggregate import metadata, not per-statement change counts. The transport therefore requires the exact core audit and full-row classification after every import. A confirmed CLI response must report the exact query count and a final bookmark, then the post-state must be exact. A process, network, polling, malformed-output, or post-read failure pauses the operator before the next group. It never blind-retries an ambiguous file. The independent REST postchecker remains the authority for manual reconciliation before an explicit resume.
+
+Every write invocation requires the reviewed manifest/source pins, the existing token-identity check, the run ID, manifest hash, recovery bookmark, and explicit acknowledgement that file import temporarily makes D1 unavailable. SQL files exist only in a restricted temporary directory and are deleted after the Wrangler process exits. The operator never prints SQL, row contents, or the API token.
+
+Local adversarial verification:
+
+```powershell
+node outputs/takeover-20260907/historical-repair-grouped/verify-wrangler-file-import-transport.mjs
+```
+
+This verifier covers apostrophes, Khmer text, JSON/control characters, SQL-injection sentinels, placeholder and transaction refusal, LF-only hashing, guard and later-statement rollback, independent group boundaries, aggregate-only result handling, temporary-file cleanup, and pause behavior after ambiguous responses. It mocks Wrangler and never opens a remote binding or performs a production write.
