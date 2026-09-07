@@ -172,12 +172,22 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
   const refundUsd = refundBasisLineExpr('ri.total_usd', 's.subtotal_usd', netSaleExpr('s.'))
   const refundKhr = refundBasisLineExpr('ri.total_khr', 's.subtotal_khr', netSaleKhrExpr('s.'))
 
-  // ONE return line, never pre-aggregated: `named_branch` is the branch that
-  // line was recorded against (routes/returns.ts writes return_items.branch_id
-  // on every insert path), and the allocation below needs it per line.
+  // ONE return line, never pre-aggregated: `named_branch` is the branch the
+  // reversal was recorded against, and the allocation below needs it per line.
+  //
+  // routes/returns.ts USUALLY writes return_items.branch_id, and leaves it NULL
+  // whenever neither the line nor the request carried a branch: all five of its
+  // insert paths resolve the column as `item.branch_id || <the request's
+  // branch> || null` (routes/returns.ts:1397, :1921, :1944, :2173, :2335).
+  // That is why this reads `COALESCE(ri.branch_id, r.branch_id)` -- the
+  // RETURN's own branch is the fallback three of those paths already apply
+  // themselves, and it is the name base 6e3abfea used here too (the old
+  // returnScope / returnBranchClause in routes/inventory.ts). Without it a
+  // NULL-branch line names nobody and smears proportionally over branches that
+  // had nothing come back.
   const returnLineColumns = `r.sale_id AS sale_id,
              ri.product_id AS product_id,
-             ri.branch_id AS named_branch,
+             COALESCE(ri.branch_id, r.branch_id) AS named_branch,
              ri.quantity AS qty_returned,
              ${refundUsd} AS refund_usd,
              ${refundKhr} AS refund_khr,
@@ -248,7 +258,7 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
         JOIN returns r ON r.id = ri.return_id
         JOIN sales s ON s.id = r.sale_id
         LEFT JOIN (${soldByBranch}
-        ) sbn ON sbn.sale_id = r.sale_id AND sbn.product_id = ri.product_id AND sbn.branch_id = ri.branch_id
+        ) sbn ON sbn.sale_id = r.sale_id AND sbn.product_id = ri.product_id AND sbn.branch_id = COALESCE(ri.branch_id, r.branch_id)
         ${returnLineWhere}
       ) rl
       JOIN (${soldByBranch}
