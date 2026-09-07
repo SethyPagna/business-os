@@ -463,7 +463,13 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                         <Icon className="h-4 w-4" />
                       </span>
                       <div className="min-w-0">
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-neutral-500">{item.label}</div>
+                        {/* The field name ("Phone", "Address", ...) is the
+                            only thing that says what the value beside it is,
+                            so it is real copy, not decoration: slate-400 is
+                            2.56:1 on this card and neutral-500 is 3.29:1 on
+                            the dark one. slate-500/neutral-400 is the muted
+                            pair the rest of the storefront settled on. */}
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">{item.label}</div>
                         <div className={`portal-contact-value text-sm font-medium text-slate-800 dark:text-neutral-100 ${item.key === 'address' ? 'portal-contact-value-address' : ''}`} title={item.value}>{item.value}</div>
                       </div>
                     </div>
@@ -763,7 +769,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
 
         {assistantResponse?.summary ? (
           <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/80">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantResults', 'Suggested matches')}</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">{copy('assistantResults', 'Suggested matches')}</div>
             <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-neutral-300">{assistantResponse.summary}</p>
             {/* Backend returns follow_up_questions (snake_case); the
                 camelCase followUpQuestions was pre-existing dead UI (this
@@ -773,7 +779,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 across the AI response contract. */}
             {(assistantResponse.followUpQuestions?.length || assistantResponse.follow_up_questions?.length) ? (
               <div className="mt-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(assistantResponse.followUpQuestions || assistantResponse.follow_up_questions || []).map((question) => (
                     <button key={question} type="button" className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm dark:bg-neutral-900 dark:text-neutral-200" onClick={() => setAssistantQuestion(question)}>
@@ -796,7 +802,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                     {item.image_path ? (
                       <img src={item.image_path} alt={item.name} className="h-16 w-16 rounded-2xl object-cover" />
                     ) : (
-                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400" aria-hidden="true">
                         <ShoppingBag className="h-5 w-5" />
                       </div>
                     )}

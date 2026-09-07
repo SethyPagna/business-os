@@ -245,6 +245,13 @@ runTest('no storefront file paints real copy in slate-400 on the white ground', 
     'PortalFilterCombobox.tsx',
     'PortalPromoStrip.tsx',
     'PortalPromotionsBanner.tsx',
+    // CatalogSecondaryTabs renders the Contact and AI-assistant sections of
+    // the public storefront and was missing from this list -- which is why it
+    // still painted the contact field names and both assistant headings in
+    // slate-400 after every other file had been converted. A sweep is only
+    // worth its green if it looks at the whole route.
+    'CatalogSecondaryTabs.tsx',
+    'PortalNoPaymentNotice.tsx',
     'catalogUi.tsx',
   ]) {
     const source = read(file)
@@ -267,6 +274,8 @@ runTest('dark mode no longer uses neutral-500 (4.15:1) for storefront copy', () 
     'CatalogProductsSection.tsx',
     'ProductDetailFlyout.tsx',
     'CatalogAccountSection.tsx',
+    'CatalogSecondaryTabs.tsx',
+    'PortalNoPaymentNotice.tsx',
   ]) {
     const source = read(file)
     for (const line of source.split(/\r?\n/)) {
