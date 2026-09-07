@@ -193,7 +193,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             <li>
               {T(
                 'merge_duplicates_trail_audit',
-                'Every merged product gets an atomic audit and undo record with the stock and linked-record changes.',
+                'Every merged product\u2019s catalog changes, audit record, and undo record are saved together.',
               )}
             </li>
             <li>
@@ -253,7 +253,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           {!previewLoading && !previewError && groups.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {T('merge_duplicates_preview_count', 'Found {groups} group(s), {products} duplicate product(s) that will be folded away.')
+                {T('merge_duplicates_preview_count', 'Found {groups} group(s) containing {products} duplicate product candidate(s). Blocked groups shown below remain unchanged.')
                   .replace('{groups}', String(groups.length))
                   .replace('{products}', String(duplicateProductCount))}
               </p>
@@ -345,7 +345,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <p className="text-gray-600 dark:text-gray-400">
             {T(
               'merge_duplicates_preview_staleness',
-              'This preview reflects the catalog now. Each case is checked again inside its merge transaction. Changed or blocked cases stay unmerged and can be resumed safely; large runs are saved in bounded batches.',
+              'This preview reflects the catalog now. Each case is checked again while it is saved. Changed or blocked cases stay unmerged and can be resumed; large runs are saved in bounded batches.',
             )}
           </p>
         </div>
@@ -361,7 +361,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <span>
             {T(
               'merge_duplicates_acknowledge',
-              'I understand this one confirmation starts a bounded, resumable merge; quantities and linked records move to the kept products, and completed cases can be undone safely.',
+              'I understand this one confirmation starts a bounded, resumable merge; quantities and linked records move to the kept products. Undo is available while linked records remain unchanged.',
             )}
           </span>
         </label>

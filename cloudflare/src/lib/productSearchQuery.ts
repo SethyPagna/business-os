@@ -43,6 +43,7 @@
 
 import {
   buildExactBarcodeMatchClause,
+  exactBarcodePredicateSql,
   buildExactBarcodeRankSql,
   buildFtsMatchExpression,
   buildHybridMatchClause,
@@ -50,10 +51,10 @@ import {
   buildShortWordFallbackClause,
   buildTrigramMatchExpression,
   normalizeSearchText,
-  normalizedBarcodeSql,
   PRODUCT_SEARCH_COLUMNS,
   PRODUCTS_FTS_BM25_SQL,
   searchTermBarcodeKey,
+  searchTermBarcodeKeys,
   tokenizeSearchTermGroups,
 } from './searchMatch'
 
@@ -143,7 +144,7 @@ function buildMatchTierSql(
     // under this prefix) -- the WHERE disjunct and this tier must agree on
     // what "the scanned code" is, so they share the value rather than
     // normalizing it twice.
-    branches.push(`WHEN ${normalizedBarcodeSql(opts.barcodeColumn)} = @${opts.prefix}barcodeKey THEN ${MATCH_TIER_EXACT_BARCODE}`)
+    branches.push(`WHEN ${exactBarcodePredicateSql(`${opts.prefix}barcodeKey`, opts.barcodeColumn)} THEN ${MATCH_TIER_EXACT_BARCODE}`)
   }
   if (nameKey) {
     const normalizedName = normalizedNameSql(opts.nameNormalizedColumn, opts.nameColumn)
@@ -180,6 +181,25 @@ export function buildProductSearchQuery(
   const termGroups = tokenizeSearchTermGroups(rawSearchText, 6, 8)
   if (!termGroups.length) return { hasSearchTerm: false, titleOnly }
 
+  // A checked UPC-E/UPC-A query is an exact scanner lookup. Letting it also
+  // enter FTS/trigram matching would re-admit an unrelated seven-digit
+  // internal code through the UPC-E's stripped digits. Keep name-only mode
+  // unchanged, but make barcode mode use only the guarded pair predicate.
+  const exactSearchKeys = titleOnly ? [] : searchTermBarcodeKeys(rawSearchText)
+  const guardedUpcPair = exactSearchKeys.some((key) => key.startsWith('upca:') || key.startsWith('upce:'))
+  if (guardedUpcPair) {
+    const exactBarcodeMatch = buildExactBarcodeMatchClause(rawSearchText, params, `${prefix}barcodeKey`, barcodeColumn)
+    return {
+      hasSearchTerm: true,
+      titleOnly,
+      whereClause: exactBarcodeMatch,
+      matchRankSql: exactBarcodeMatch ? buildExactBarcodeRankSql(`${prefix}barcodeKey`, barcodeColumn) : undefined,
+      matchTierSql: buildMatchTierSql(rawSearchText, params, {
+        prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: true,
+      }),
+    }
+  }
+
   // Compatibility path for a database that has not received the FTS
   // migrations yet: narrower and slower, but a catalog search must still
   // return rows instead of a 500 while migration catch-up runs. No index,
@@ -196,14 +216,12 @@ export function buildProductSearchQuery(
     if (!wordClauses.length) return { hasSearchTerm: true, titleOnly }
     // The exact-barcode tier needs its own bound value on this path too
     // (buildExactBarcodeMatchClause is not called here), so bind it.
-    if (!titleOnly) {
-      const key = searchTermBarcodeKey(rawSearchText)
-      if (key) params[`${prefix}barcodeKey`] = key
-    }
+    const exactBarcodeMatch = titleOnly ? undefined : buildExactBarcodeMatchClause(rawSearchText, params, `${prefix}barcodeKey`, barcodeColumn)
+    const fallbackWhere = wordClauses.join(mode === 'OR' ? ' OR ' : ' AND ')
     return {
       hasSearchTerm: true,
       titleOnly,
-      whereClause: `(${wordClauses.join(mode === 'OR' ? ' OR ' : ' AND ')})`,
+      whereClause: exactBarcodeMatch ? `((${fallbackWhere}) OR ${exactBarcodeMatch})` : `(${fallbackWhere})`,
       matchTierSql: buildMatchTierSql(rawSearchText, params, {
         prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: !titleOnly,
       }),

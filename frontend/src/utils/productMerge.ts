@@ -18,7 +18,7 @@ function parseMoney(value: unknown): { value?: number; missing?: true; issue?: '
 }
 
 function round4(value: number): number {
-  return Math.round((value + Number.EPSILON) * 10_000) / 10_000
+  return Math.ceil(value * 10_000 - 1e-9) / 10_000 || 0
 }
 
 export function resolveProductMergeEconomics(rows: ReadonlyArray<Record<string, unknown>>): {

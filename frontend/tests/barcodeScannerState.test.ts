@@ -68,6 +68,7 @@ await runTest('deriveScannerPresentation keeps dismissed prompts distinct from h
 await runTest('scanner starts only from an explicit button and always releases the camera', () => {
   const source = fs.readFileSync(new URL('../src/components/products/scanning/BarcodeScannerModal.tsx', import.meta.url), 'utf8')
   const modalSource = fs.readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
+  const searchButtonSource = fs.readFileSync(new URL('../src/components/shared/ScanSearchButton.tsx', import.meta.url), 'utf8')
   assert.match(source, /const video = await waitForVideoElement\(startToken\)/, 'camera startup must wait for React to commit the video element')
   assert.match(source, /decodeFromConstraints\([\s\S]*?video,[\s\S]*?\(result\)/, 'the iOS compatibility decoder must receive the mounted video element')
   const prepareBlock = source.slice(source.indexOf('const prepareScanner'), source.indexOf('const closeScanner'))
@@ -78,9 +79,17 @@ await runTest('scanner starts only from an explicit button and always releases t
   assert.doesNotMatch(permissionBlock, /startCamera\(/, 'permission changes must not auto-start the camera')
   assert.match(source, /onClick=\{\(\) => startCamera\(\{ preserveManualValue: true \}\)\}/, 'the visible camera action remains the sole start trigger')
   assert.match(source, /const closeScanner[\s\S]*?cleanup\(\)[\s\S]*?onClose\(\)/, 'closing the scanner must stop tracks before dismissing the modal')
+  assert.match(source, /const completeDetection = useCallback\([\s\S]*?detectionHandledRef\.current[\s\S]*?onDetected\(nextValue\)[\s\S]*?finally[\s\S]*?onClose\(\)/, 'every successful detection must publish once and close the scanner')
+  assert.match(source, /expectedStartToken\?\: number[\s\S]*?startTokenRef\.current !== expectedStartToken/, 'a stale decoder result must not publish after a new camera start or close')
+  assert.match(source, /const scanToken = startTokenRef\.current[\s\S]*?detector\.detect\(video\)[\s\S]*?startTokenRef\.current !== scanToken/, 'native detection must reject a result from an obsolete camera session')
+  assert.match(source, /handlePhotoSelection[\s\S]*?completeDetection\(nextValue\)/, 'photo barcode results must use the same terminal completion path')
+  assert.match(source, /nextPermissionState === 'denied'[\s\S]*?setStatus\('blocked'\)[\s\S]*?return/, 'a saved browser denial must not trigger another getUserMedia request loop')
+  assert.match(source, /detectionHandledRef\.current = false/, 'a newly opened scanner must be able to complete one fresh result')
   assert.match(source, /cleanup\(\)[\s\S]*?setPermissionState\(documentBlocked/, 'failed starts must stop partially-open camera tracks')
   assert.match(source, /<Modal[^>]*layer="nested"/, 'the camera dialog must sit above the workflow modal that opened it')
   assert.match(modalSource, /layer === 'nested' \? 'z-\[1070\]' : 'z-\[1050\]'/, 'nested tools must use a higher dialog layer')
+  const searchHandler = searchButtonSource.slice(searchButtonSource.indexOf('const handleDetected'), searchButtonSource.indexOf('}, [onDetected])'))
+  assert.doesNotMatch(searchHandler, /setOpen\(false\)/, 'the search wrapper must not issue a second close after the modal owns completion')
 })
 
 await runTest('branch transfer exposes the shared icon scanner in single and multi-product searches', () => {

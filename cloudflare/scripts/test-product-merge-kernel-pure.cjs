@@ -13,7 +13,17 @@ function load(rel) {
   return mod.exports
 }
 
-const { resolveProductMergeEconomics, parseMergeMoney, productMergeCaseKey, productMergeCasAssertion } = load('lib/productMerge.ts')
+const {
+  createProductMergeClusterPlan,
+  parseMergeMoney,
+  parseProductMergeClusterPlan,
+  productMergeCaseKey,
+  productMergeCasAssertion,
+  productMergePlanKeeperMatches,
+  productMergePlanSourceMemberMatches,
+  resolveProductMergeClusterPlanEconomics,
+  resolveProductMergeEconomics,
+} = load('lib/productMerge.ts')
 
 assert.equal(productMergeCaseKey(3, 9), '3:9')
 assert.throws(() => productMergeCaseKey(3, 3), /two different positive integer ids/)
@@ -24,8 +34,9 @@ assert.equal(cost([4, 4, 4, 5]).merged.cost_price_usd, 4.5, 'DISTINCT happens be
 assert.equal(cost([4, 5, 6]).merged.cost_price_usd, 5, 'whole-cluster mean is not pairwise 5.25')
 assert.equal(cost([0, 0]).merged.cost_price_usd, 0)
 assert.equal(cost([0, 4, 4]).merged.cost_price_usd, 4, 'zero is excluded when a recorded non-zero cost exists')
-assert.equal(cost([' 4.00001 ', '5.00002']).merged.cost_price_usd, 4.5, 'round once after the mean')
-assert.equal(cost([1.23454, 1.23455]).merged.cost_price_usd, 1.2345)
+assert.equal(cost([' 4.00001 ', '5.00002']).merged.cost_price_usd, 4.5001, 'round up once after the mean')
+assert.equal(cost([1.23454, 1.23455]).merged.cost_price_usd, 1.2346)
+assert.equal(cost([130.6595, 130.6596]).merged.cost_price_usd, 130.6596, 'owner rounding rule never rounds a mean down')
 assert.deepEqual(parseMergeMoney(''), { kind: 'missing' })
 assert.equal(cost(['12oops']).issues[0].code, 'malformed')
 assert.equal(cost([-2]).issues[0].code, 'negative')
@@ -39,6 +50,21 @@ assert.equal(prices.merged.selling_price_usd, 15)
 assert.equal(prices.merged.selling_price_khr, 50000)
 assert.equal(prices.merged.wholesale_price_usd, 9)
 
+const plannedRows = [
+  { id: 1, updated_at: 'u1', cost_price_usd: 4, cost_price_khr: 4000 },
+  { id: 2, updated_at: 'u2', cost_price_usd: 5, cost_price_khr: 5000 },
+  { id: 3, updated_at: 'u3', cost_price_usd: 6, cost_price_khr: 6000 },
+]
+const clusterPlan = createProductMergeClusterPlan('["tea","123"]', 1, plannedRows)
+assert.deepEqual(parseProductMergeClusterPlan(JSON.parse(JSON.stringify(clusterPlan))), clusterPlan)
+assert.equal(resolveProductMergeClusterPlanEconomics(clusterPlan).merged.cost_price_usd, 5)
+const retryKeeper = { id: 1, updated_at: 'after-first-fold', cost_price_usd: 5, cost_price_khr: 5000 }
+assert.equal(productMergePlanKeeperMatches(clusterPlan, retryKeeper), true)
+assert.equal(productMergePlanSourceMemberMatches(clusterPlan, plannedRows[2]), true)
+assert.equal(resolveProductMergeEconomics([retryKeeper, plannedRows[2]]).merged.cost_price_usd, 5.5, 'a fresh pairwise retry would drift')
+assert.equal(resolveProductMergeClusterPlanEconomics(clusterPlan).merged.cost_price_usd, 5, 'the durable source plan preserves the original whole-cluster mean')
+assert.equal(productMergePlanSourceMemberMatches(clusterPlan, { ...plannedRows[2], cost_price_usd: 7 }), false, 'a changed remaining member quarantines the plan')
+
 const guard = productMergeCasAssertion([
   { id: 1, name: 'A', barcode: '0123', is_active: 1, updated_at: 'u1' },
   { id: 2, name: 'A', barcode: '123', is_active: 1, updated_at: 'u2' },
@@ -51,7 +77,9 @@ const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'produ
 assert.match(route, /code: 'incompatible_product_identity'/)
 assert.match(route, /buildAtomicMergeHistoryStatements/)
 assert.match(route, /MAX_MERGES_PER_REQUEST = 25/)
-assert.match(route, /const economics = resolveProductMergeEconomics\(moneyRows\)/)
+assert.match(route, /readAppliedBulkClusterPlan/)
+assert.match(route, /resolveProductMergeClusterPlanEconomics\(clusterPlan\)/)
+assert.match(route, /resumedCluster: Boolean\(persistedPlan\)/)
 
 const undo = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'undoAppliers.ts'), 'utf8')
 assert.match(undo, /fingerprintPending: true/)
