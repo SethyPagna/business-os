@@ -197,7 +197,16 @@ export default function InventoryProductsSurface({
               <Fragment key={group.key}>
                 {group.items.length > 1 ? (
                   <tr className="border-t border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/50">
-                    <td colSpan={columnCount} className="px-3 py-1.5 font-semibold text-slate-600 dark:text-slate-300"><button type="button" className="min-h-11 text-left" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} <span className="ml-1 font-normal text-slate-400">{group.items.length}</span></button></td>
+                    {/* N36: the group title IS a product name (groupInventoryProducts
+                        sets `label: group.name`), so it scrolls like every other
+                        name cell. It needs the inner span rather than the class on
+                        the button, because this table is neither table-fixed nor
+                        colgroup'd: a nowrap block inside `colSpan={columnCount}`
+                        would push the whole 680px-min table wider. As a FLEX item
+                        the .scroll-x-clean span's `min-width: 0` lets it shrink
+                        below its text, so the row keeps its width and the name
+                        scrolls inside it. */}
+                    <td colSpan={columnCount} className="px-3 py-1.5 font-semibold text-slate-600 dark:text-slate-300"><button type="button" className="flex min-h-11 w-full items-center gap-1 text-left" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}><span className="shrink-0">{collapsed.has(group.key) ? '▸' : '▾'}</span><span className="scroll-x-clean">{group.label}</span><span className="ml-1 shrink-0 font-normal text-slate-400">{group.items.length}</span></button></td>
                   </tr>
                 ) : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => (
@@ -233,7 +242,11 @@ export default function InventoryProductsSurface({
           : error ? <div className="card p-6 text-center text-sm text-red-600">{error}</div>
             : groups.length === 0 ? <div className="card p-6 text-center text-sm text-gray-400">{t('no_data') || 'No data'}</div>
               : groups.map((group) => <div key={group.key} className="min-w-0 space-y-1">
-                {group.items.length > 1 ? <button type="button" className="min-h-11 w-full break-words text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
+                {/* N36: same group-title rule as this surface's desktop table
+                    above -- the label is the product name, so it scrolls in place
+                    instead of wrapping to a second row. min-h-11 stays: it is the
+                    44px touch target, not a wrapping affordance. */}
+                {group.items.length > 1 ? <button type="button" className="min-h-11 w-full scroll-x-clean text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-2 text-sm">
                   {/* N36: same shared class as this surface's desktop row above. */}
                   <div className="flex min-w-0 items-start justify-between gap-2"><span className="scroll-x-clean font-medium">{product.name || '—'}</span><strong>{quantity(product)}</strong></div>

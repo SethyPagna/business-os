@@ -116,6 +116,23 @@ const NAME_CELLS: Array<[string, string, string]> = [
   ['Products group title (mobile)', 'components/products/surfaces/ProductsListSurface.tsx', 'text-left text-sm font-semibold text-slate-800'],
   ['Inventory / Branches > Products desktop row', 'components/inventory/InventoryProductsSurface.tsx', 'font-medium text-slate-800 dark:text-slate-100'],
   ['Inventory / Branches > Products mobile row', 'components/inventory/InventoryProductsSurface.tsx', '{product.name || \'—\'}</span><strong>'],
+  // The GROUP TITLES on that same surface. `label: group.name` (line 58 of
+  // that file) IS the product name, so a group title there is a product-name
+  // cell exactly like the three group titles already in this list -- and both
+  // of them were still wrapping after the first pass.
+  //
+  // The desktop one cannot be excused by the argument that keeps the
+  // Products.tsx group title safe (a table-fixed table with a colgroup, where
+  // a spanning cell cannot widen anything): this table is
+  // `<table className="w-full border-collapse text-xs" style={{ minWidth: 680 }}>`
+  // -- NOT table-fixed, no colgroup -- so a long label inside the
+  // `colSpan={columnCount}` cell wraps and grows the header row.
+  //
+  // Markers: the FIRST `{group.label}` in the file is the desktop title
+  // (the mobile one is later and is reached by its own unique marker), and
+  // `({group.items.length})</button>` occurs only in the mobile title.
+  ['Inventory / Branches > Products desktop group title', 'components/inventory/InventoryProductsSurface.tsx', '{group.label}'],
+  ['Inventory / Branches > Products mobile group title', 'components/inventory/InventoryProductsSurface.tsx', '({group.items.length})</button>'],
   ['Products image-only view', 'components/products/ProductsImageOnlyView.tsx', 'text-sm font-medium text-gray-800 dark:text-gray-100'],
   // The expanded branch's own stock grid on the Branches page. This is a
   // SECOND "Branches > Products" surface, separate from the
