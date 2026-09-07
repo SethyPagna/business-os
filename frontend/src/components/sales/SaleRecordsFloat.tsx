@@ -231,7 +231,9 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecor
                       {/* The history convention: acting USERNAME, then the
                           dd/mm/yyyy HH:mm stamp. */}
                       <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-400">
-                        <span>{record.actor_username || (t('system') || 'System')}</span>
+                        <span>{record.provenance_unknown
+                          ? label('unknown', 'Unknown')
+                          : record.actor_username || (t('system') || 'System')}</span>
                         <span>{fmtDateTime24(record.at)}</span>
                         {/* HOW it was done. `via` is a Worker enum -- amend /
                             undo / redo -- not a display string: printing it raw

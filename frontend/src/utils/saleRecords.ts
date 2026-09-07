@@ -58,6 +58,7 @@ export interface SaleRecord {
   via?: string | null
   subject?: string | null
   summary?: string | null
+  provenance_unknown?: boolean
   before?: Record<string, unknown> | null
   after?: Record<string, unknown> | null
 }
