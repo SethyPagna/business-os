@@ -146,7 +146,7 @@ await test('ready cards retain existing financial formulas and distinct expense 
   // The hint is the sentence PLUS the equation with this period's numbers,
   // and the equation has to close on the value the card shows.
   const profitHint = card(view, 'profit').hint!
-  assert.match(profitHint, /^Gross profit = revenue − COGS \+ delivery fees charged − courier cost \(credit sales included\)\./)
+  assert.match(profitHint, /^Gross profit = revenue − COGS \+ delivery fees charged − courier cost \(Not Paid sales included\)\./)
   assert.equal(profitHint.split('\n').pop(), 'Gross profit $28.00 = Revenue $42.00 − COGS $12.00 − Delivery paid to couriers $2.00')
   assert.equal(equationResidual(28, profitTerms(sales().totals)), 0, 'the printed profit equation foots')
   const revenueHint = card(view, 'revenue').hint!
