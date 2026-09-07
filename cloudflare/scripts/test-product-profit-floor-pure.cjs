@@ -37,9 +37,9 @@
 //      back -- read qty 1 / revenue $10 / profit $6 while the two branch rows
 //      summed to more reversal than the sale ever had. The sale-level return
 //      is now APPORTIONED across the sale's branch lines (the branch it names
-//      first, up to what that branch recognised; the remainder proportionally
-//      over the others), so the branch slices partition the unfiltered row
-//      instead of each subtracting the whole.
+//      first, up to what that branch recognised; the remainder over what the
+//      other lines have left), so the branch slices add back up to the
+//      unfiltered row instead of each subtracting the whole.
 //                                    branch 1: qty 1 / $10 / $6 -> 3 / $30 / $18
 //   J  the same partial return with NO branch on the return LINE. Every insert
 //      path in routes/returns.ts resolves return_items.branch_id as
@@ -422,7 +422,17 @@ async function main() {
   // product rather than the two the fixture was built for: slicing the ledger
   // by branch must partition it, never duplicate or lose a reversal. A cap
   // alone cannot satisfy this -- it subtracts the same reversal once per
-  // branch, so the branch rows sum to more than the whole.
+  // branch, so the branch rows sum to more than the whole; nor can one share
+  // for every column -- splitting a refund by the UNIT share overpays a cheap
+  // branch line and the cap eats the excess, which is case K.
+  //
+  // The invariant holds for every sale whose reversals fit inside the branch
+  // lines they name, which is every sale in this fixture and every return the
+  // app writes against a sale it recognised. It is deliberately NOT asserted
+  // as unconditional: two return groups naming different branches that between
+  // them push more onto one line than that line recognised clamp on each side
+  // separately. See the ledger header -- an invariant that is false in a
+  // shipped comment is worse than no comment.
   const unfilteredSql = productSalesLedger.buildProductSalesLedgerSql({})
   const unfiltered = new Map(db.prepare(`SELECT * FROM (${unfilteredSql}) fin`).all({})
     .map((row) => [Number(row.product_id), row]))

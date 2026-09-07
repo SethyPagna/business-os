@@ -265,11 +265,17 @@ export async function attachInventoryProductMetrics(
       // APPORTIONMENT rather than a cap to get there: a customer return names
       // no sale LINE, so subtracting it whole at every branch the sale touched
       // is what reported "Net sold -2" here beside "0" in the pane. Each
-      // return line is now split across the sale's branch lines, so the branch
-      // rows partition the unfiltered figure instead of each reversing the
-      // whole. The per-(sale, product) caps stay behind that as a residual
-      // guard for the one case no scoping rule can fix -- a return line taking
-      // back more than the sale recognised for the product at all. A negative
+      // return group is now split across the sale's branch lines -- each column
+      // against its own denominator, units by the unit share and money by the
+      // share of the VALUE a branch recognised -- so the branch rows add back
+      // up to the unfiltered figure instead of each reversing the whole,
+      // wherever a reversal fits inside the sale it names (the ledger header
+      // states the two over-refund cases where both sides clamp separately).
+      // Units are allocated by largest remainder on top of that, because this
+      // route's qty_sold is rendered by the list with no formatting at all.
+      // The per-(sale, product) caps stay behind all of it as a residual guard
+      // for what no scoping rule can fix -- a return line taking back more
+      // than the sale recognised for the product at all. A negative
       // PROFIT survives only where it is true -- the product was sold below
       // cost -- and is not floored, here or in the sales kernel.
       profit_usd: revenueUsd - cogsUsd,

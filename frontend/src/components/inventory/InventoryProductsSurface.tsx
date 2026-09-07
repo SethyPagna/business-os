@@ -148,9 +148,14 @@ export default function InventoryProductsSurface({
   // customer return at every branch the sale touched (a sale split across
   // branches reported "Net sold -2" here beside "0" in the pane).
   // cloudflare/src/lib/productSalesLedger.ts now apportions each return over
-  // the sale's branch lines and makes qty_sold >= 0, revenue_usd >= 0 and
-  // cogs_usd >= 0 true by construction, so all four clamps are no-ops and the
-  // two surfaces agree cell for cell.
+  // the sale's branch lines -- each column against its own denominator, and
+  // units by largest remainder because Net sold below is rendered with no
+  // formatting at all -- and makes qty_sold >= 0, revenue_usd >= 0 and
+  // cogs_usd >= 0 true by construction. So all four clamps are no-ops and the
+  // two surfaces agree cell for cell. That agreement is about the four cells,
+  // not about the branch arithmetic behind them: the ledger's own header is
+  // where the branch slices are shown to add back up to the unfiltered row,
+  // and where the over-refund cases that no scoping rule reaches are named.
   //
   // A negative reaching this line therefore means one thing: the product was
   // genuinely sold below cost. That is real and stays visible (yellow). Do NOT
