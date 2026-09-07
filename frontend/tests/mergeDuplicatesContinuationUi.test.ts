@@ -80,8 +80,16 @@ assert.match(handler, /remaining >= remainingBefore/,
   'known remaining products must decrease before an ordinary continuation')
 assert.match(handler, /callCeiling = calls \+ additional/,
   'ordinary known-count continuation remains bounded by the Worker response')
-assert.match(handler, /if \(calls > 0 \|\| controller\.signal\.aborted\) await load\(true\)/,
-  'timeout, error, or abort reloads because a started request may already have committed')
+const catchAt = handler.indexOf('} catch (e) {')
+const finallyAt = handler.indexOf('} finally {', catchAt)
+assert.ok(catchAt > 0 && finallyAt > catchAt, 'unknown-outcome reconciliation stays inside the merge catch path')
+const catchBlock = handler.slice(catchAt, finallyAt)
+assert.match(catchBlock, /if \(calls > 0 \|\| controller\.signal\.aborted\) \{/,
+  'timeout, error, or abort reconciles because a started request may already have committed')
+const invalidateAt = catchBlock.indexOf('await productApi.invalidateProductReadCacheForReconciliation()')
+const reloadAt = catchBlock.indexOf('await load(true)', invalidateAt)
+assert.ok(invalidateAt > 0 && reloadAt > invalidateAt,
+  'unknown-outcome reconciliation invalidates fresh product reads before the authoritative reload')
 
 assert.match(source, /const active = mergeDuplicatesAbortRef\.current[\s\S]{0,100}active\?\.abort\(\)[\s\S]{0,120}setMergeDuplicatesReviewOpen\(false\)/,
   'closing the modal aborts the active request and closes immediately')
