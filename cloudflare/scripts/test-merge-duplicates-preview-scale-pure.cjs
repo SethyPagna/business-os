@@ -266,10 +266,12 @@ async function invokePreview(handler, user) {
   )
   const routeSource = fs.readFileSync(path.join(SRC, 'routes', 'products.ts'), 'utf8')
   assert.doesNotMatch(
-    routeSource.slice(routeSource.indexOf('function multiClusterComplexLinkStatements'), routeSource.indexOf('async function readMultiClusterComplexProductIds')),
+    routeSource.slice(routeSource.indexOf('function multiClusterComplexLinkPlan'), routeSource.indexOf('async function readMultiClusterComplexProductIds')),
     /\bUNION\b/i,
     'the linked-member map must not exceed D1 compound SELECT term limits',
   )
+  assert.match(routeSource, /MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS = 600/)
+  assert.match(routeSource, /assumedComplexIds: allIds\.slice\(MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS\)/)
   console.log(JSON.stringify({
     status: 'PASS',
     groups: response.body.groupCount,

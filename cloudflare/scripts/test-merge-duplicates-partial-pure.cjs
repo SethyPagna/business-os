@@ -208,6 +208,7 @@ async function budgetStopsBetweenWholeGroups() {
     const mergedCost = d1.db.prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=1').get()
     assert.equal(mergedCost.cost_price_usd, 5, 'the accepted plain 4/5/6 cluster keeps its one whole-cluster USD mean')
     assert.equal(mergedCost.cost_price_khr, 5000, 'the accepted plain 4/5/6 cluster keeps its one whole-cluster KHR mean')
+    assert.ok(adapter.state.statements <= 700, `the accepted first cluster used ${adapter.state.statements} counted D1 statements`)
   } finally {
     Date.now = realNow
   }
