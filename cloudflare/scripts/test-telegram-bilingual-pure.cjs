@@ -526,6 +526,69 @@ const lastSent = () => sent[sent.length - 1].body.text
     'Units on hand / ឯកតាក្នុងស្តុក: 0',
   ], `a shop with nothing low still printed a zero block:\n${lastSent()}`)
   console.log('PASS stock replies: the shared header shape, one figure per line, no pointer line')
+  // --- /fees leads with the SAME "Expenses" the other reports lead with ------
+  // One word, one sum -- the rule commit 00f6a44e established for the day
+  // summary against the shift report, applied to the third report that prints
+  // the word. `/fees` totalled the fees TABLE alone while `/report` and
+  // `/shift` total the fees plus the courier money actually paid out, so on a
+  // day with a $7.50 recorded delivery cost the same manager read
+  // "Expenses: $9.50" from `/fees` and "Expenses: $17.00" from `/report`, with
+  // nothing on either message accounting for the gap.
+  //
+  // Driven over a stub that HAS both halves: one $9.50 · 20,000៛ fee record
+  // and a sales row carrying delivery_actual_cost_usd 7.50 over 3 sales (an
+  // unrecorded cost is NULL, never 0, which is what the count is for).
+  const feeRecords = [{ fee_type: 'delivery', label: 'Tuk-tuk run', amount_usd: 9.5, amount_khr: 20000 }]
+  const spendingDb = {
+    prepare(sql) {
+      return {
+        // NOTE: the kernel's sale-level query also contains the string 'FROM
+        // fees' (the customer-refund join), so every branch below keys on a
+        // marker unique to the query it means, never on the table name alone.
+        all: async () => (/FROM settings/.test(sql) ? settingsRows : /SELECT fee_type/.test(sql) ? feeRecords : []),
+        // salesLevelTotals -- the one query that carries the courier payout.
+        get: async () => (/delivery_actual_cost_count/.test(sql) ? { tx_count: 12, recognized_net_usd: 486.25, delivery_actual_cost_usd: 7.5, delivery_actual_cost_count: 3 }
+          : /FROM fees WHERE fee_date/.test(sql) ? { count: 1, usd: 9.5, khr: 20000 }
+          : /FROM products/.test(sql) ? { products: 0, units: 0, out_of_stock: 0, low_stock: 0 }
+            : { count: 0, usd: 0, khr: 0, quantity: 0 }),
+      }
+    },
+  }
+  const spendingAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => spendingDb }, './businessDateWindow': businessDateWindow })
+  const spending = loadReal('lib/telegram.ts', {
+    './lowStockSettings': lowStockStub,
+    './db': { getDb: () => spendingDb },
+    './businessDateWindow': businessDateWindow,
+    './telegramLang': lang,
+    './saleTotals': saleTotals,
+    './nativeSaleChange': nativeSaleChange,
+    './salesAnalytics': spendingAnalytics,
+    './shiftReconciliation': reconciliationFor(() => spendingDb, spendingAnalytics),
+  })
+
+  await spending.handleTelegramWebhook(env, { message: { text: '/fees 06/09/2026', chat: { id: -100111 } } })
+  const feesReply = lastSent()
+  await spending.handleTelegramWebhook(env, { message: { text: '/report 06/09/2026', chat: { id: -100111 } } })
+  const dayReply = lastSent()
+  const expensesLine = (text) => text.split('\n').find((line) => line.startsWith(`Expenses${SEP}`))
+
+  assert.equal(expensesLine(feesReply), expensesLine(dayReply),
+    `/fees and /report print different sums under the same word:\n${feesReply}\n---\n${dayReply}`)
+  assert.equal(expensesLine(feesReply), 'Expenses / ចំណាយ: $17.00 · 20,000៛',
+    `the /fees total is not the fees table plus the recorded courier cost:\n${feesReply}`)
+  // And the split is shown, so the reader can see which half is which without
+  // sending a second command -- the same two lines the other two reports show.
+  assert.deepEqual(feesReply.split('\n'), [
+    '💸 Expenses / ចំណាយ — 06/09/2026',
+    RULE,
+    'Expenses / ចំណាយ: $17.00 · 20,000៛',
+    RULE,
+    'Delivery cost / ថ្លៃដើមដឹកជញ្ជូន: $7.50',
+    'Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛',
+    '• delivery — Tuk-tuk run: $9.50 · 20,000៛',
+  ], feesReply)
+  console.log('PASS /fees: one word, one sum -- the header matches /report byte for byte')
+
 
   const quiet = sent.length
   await wired.handleTelegramWebhook(env, { message: { text: 'good morning', chat: { id: -100999 } } })

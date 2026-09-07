@@ -425,10 +425,26 @@ async function salesReport(env: Env, date: string): Promise<string> {
 async function feesReport(env: Env, date: string): Promise<string> {
   const db = getDb(env); const stats = await dayStats(env, date)
   const fees = await db.prepare('SELECT fee_type, label, amount_usd, amount_khr FROM fees WHERE fee_date = @date ORDER BY id DESC LIMIT 8').all<{ fee_type: string; label: string | null; amount_usd: number; amount_khr: number }>({ date })
-  // Total, then the records themselves. The record COUNT is gone: the bullets
-  // under it are the records, so printing how many of them there are is the
-  // repeated figure the owner asked us to drop.
-  const lines = [reportTitle('💸', 'Expenses', 'ចំណាយ', date), RULE, labeled('expenses', money(stats.fees?.usd, stats.fees?.khr)), RULE]
+  // The SAME sum the day summary and the shift report lead with, through the
+  // same expenseBlock(): the fees table plus the courier money actually paid
+  // out. It was the fees table alone until Sep 8 2026, so on a day with a
+  // recorded delivery cost this report answered "Expenses: $9.50" to the
+  // manager /report had just told "Expenses: $17.00", and nothing on either
+  // message accounted for the gap. One word, one sum -- the rule the day
+  // header was already fixed to.
+  //
+  // Then the two component lines, so the split is visible here without a
+  // second command, and only then the fee records themselves. The record
+  // COUNT stays gone: the bullets under it are the records, so printing how
+  // many of them there are is the repeated figure the owner asked us to drop.
+  const expenses = expenseBlock({
+    otherUsd: stats.fees?.usd, otherKhr: stats.fees?.khr,
+    deliveryCostUsd: stats.sales?.deliveryCostUsd, deliveryCostRecorded: stats.sales?.deliveryCostRecorded,
+  })
+  // A day with nothing spent still states its total: this report's whole
+  // subject is that figure, and a blank where "$0.00" belongs reads as a
+  // failure to load rather than as an answer.
+  const lines = [reportTitle('💸', 'Expenses', 'ចំណាយ', date), RULE, expenses.header || labeled('expenses', money(0, 0)), RULE, ...expenses.components]
   if (!fees.length) lines.push(bi('No expense recorded on this day.', 'គ្មានចំណាយបានកត់ត្រាក្នុងថ្ងៃនេះទេ។'))
   for (const fee of fees) lines.push(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}: ${money(fee.amount_usd, fee.amount_khr)}`)
   return lines.join('\n')
