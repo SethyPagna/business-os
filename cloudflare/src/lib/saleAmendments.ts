@@ -103,6 +103,8 @@ export type { StockStatement }
 //   line_removed              the line goes, and the ledger becomes the only
 //                             record that it was ever on the sale.
 //   delivery_fee_changed      $1.50 -> $2.00.
+//   delivery_actual_cost_changed  $2.00 -> $2.50, a reporting-only change
+//                                to what the shop paid the courier.
 //
 // "Replace product X with Y" is NOT a sixth kind. It is stored as a
 // `line_removed` plus a `line_added` sharing one `group_id`, because that is
@@ -143,6 +145,7 @@ export const AMENDMENT_KINDS = [
   'line_quantity_decreased',
   'line_removed',
   'delivery_fee_changed',
+  'delivery_actual_cost_changed',
 ] as const
 export type AmendmentKind = (typeof AMENDMENT_KINDS)[number]
 
@@ -312,6 +315,10 @@ export type AmendableSaleRow = SaleMoneyRow & {
   created_at?: unknown
   branch_id?: unknown
   receipt_number?: unknown
+  is_delivery?: unknown
+  delivery_fee_usd?: unknown
+  delivery_actual_cost_usd?: unknown
+  delivery_actual_cost_khr?: unknown
 }
 
 /** True when the sale carries S4-2's sticky "completed without moving stock" flag. */
@@ -720,6 +727,65 @@ export function planDeliveryFeeChange(input: {
   }
 }
 
+/**
+ * Plan a correction to the shop-paid courier cost.  Unlike the customer fee,
+ * this never enters the sale total: it changes only the two reporting columns.
+ * `null` is supported as an explicit "not recorded" value so a mistaken cost
+ * can be cleared without pretending that zero was paid.
+ *
+ * `stamp` is the caller's mutation stamp and is NOT optional, because
+ * `updated_at` is not decoration here: every write on this sale carries
+ * `expected_updated_at`, and the client stores whatever the response says the
+ * new one is. If this statement wrote SQLite's `CURRENT_TIMESTAMP`
+ * ("2026-09-07 03:14:15") while the response reported the JS stamp
+ * ("2026-09-07T03:14:15.926Z"), the two could never be equal and the next edit
+ * of the same sale would be refused as a write conflict that never happened.
+ *
+ * The delivery-fee path avoids this only by accident of composition -- its
+ * plan writes CURRENT_TIMESTAMP too, and a later `saleMoneyUpdateStatement`
+ * in the same batch overwrites `updated_at` with the stamp. The actual-cost
+ * path has no money statement to save it, so it takes the stamp directly.
+ */
+export function planDeliveryActualCostChange(input: {
+  saleId: number | string
+  sale: AmendableSaleRow
+  newCostUsd: number | null
+  exchangeRate: number
+  stamp: string
+}): { statements: StockStatement[]; costBeforeUsd: number | null; costAfterUsd: number | null; costDeltaUsd: number } {
+  const exchangeRate = Number(input.exchangeRate) || 4100
+  const rawBefore = input.sale.delivery_actual_cost_usd
+  const parsedBefore = rawBefore === null || rawBefore === undefined || String(rawBefore).trim() === '' ? null : Number(rawBefore)
+  const costBeforeUsd = parsedBefore !== null && Number.isFinite(parsedBefore) && parsedBefore >= 0 ? round2(parsedBefore) : null
+  const costAfterUsd = input.newCostUsd === null ? null : round2(Math.max(0, Number(input.newCostUsd) || 0))
+  const costDeltaUsd = round2((costAfterUsd ?? 0) - (costBeforeUsd ?? 0))
+  // No fallback to CURRENT_TIMESTAMP: a fallback is how the two values drifted
+  // apart in the first place, and a blank stamp would null the column outright.
+  const stamp = String(input.stamp || '').trim()
+  if (!stamp) throw new Error('planDeliveryActualCostChange needs the mutation stamp the response reports as updated_at')
+  return {
+    statements: [{
+      sql: `UPDATE sales SET delivery_actual_cost_usd = @cost_usd, delivery_actual_cost_khr = @cost_khr, updated_at = @stamp WHERE id = @sale_id`,
+      params: {
+        sale_id: input.saleId,
+        cost_usd: costAfterUsd,
+        cost_khr: costAfterUsd === null ? null : calculatedKhr(costAfterUsd, exchangeRate),
+        stamp,
+      },
+    }],
+    costBeforeUsd,
+    costAfterUsd,
+    costDeltaUsd,
+  }
+}
+
+export function guardDeliveryActualCostAmendment(sale: AmendableSaleRow): DeliveryFeeGuardResult {
+  if (!Number(sale.is_delivery)) {
+    return { ok: false, error: 'This sale is not a delivery, so it has no courier cost to correct.' }
+  }
+  return { ok: true }
+}
+
 // ---------------------------------------------------------------------------
 // DECISION 4a: TAX on an amended sale.
 //
@@ -797,7 +863,7 @@ export function taxableBaseUsd(sale: AmendableSaleRow, subtotalUsd: number): num
 export type AmendedTaxResult = {
   taxUsd: number
   recomputed: boolean
-  reason: 'recomputed' | 'no_tax_on_sale' | 'tax_disabled' | 'no_rate' | 'rate_mismatch'
+  reason: 'recomputed' | 'no_tax_on_sale' | 'tax_disabled' | 'no_rate' | 'rate_mismatch' | 'not_applicable'
 }
 
 export function resolveAmendedTaxUsd(input: {
@@ -1022,7 +1088,7 @@ export function reversingKind(kind: AmendmentKind): AmendmentKind {
   if (kind === 'line_removed') return 'line_added'
   if (kind === 'line_quantity_increased') return 'line_quantity_decreased'
   if (kind === 'line_quantity_decreased') return 'line_quantity_increased'
-  return 'delivery_fee_changed'
+  return kind === 'delivery_actual_cost_changed' ? 'delivery_actual_cost_changed' : 'delivery_fee_changed'
 }
 
 // ---------------------------------------------------------------------------
