@@ -23,5 +23,7 @@ assert.match(legal, /event\.key !== 'Tab'[\s\S]{0,900}last\.focus\(\)[\s\S]{0,40
 assert.match(legal, /event\.key === 'Escape'[\s\S]{0,100}event\.preventDefault\(\)[\s\S]{0,100}onClose\(\)/, 'Escape does not use the same close lifecycle')
 assert.match(legal, /ref=\{dialogRef\}[\s\S]{0,160}aria-modal="true"[\s\S]{0,100}tabIndex=\{-1\}/, 'the modal itself cannot be focused when it has no controls')
 assert.match(legal, /if \(activePage\)[\s\S]{0,180}history\.replaceState[\s\S]{0,180}else[\s\S]{0,180}history\.pushState/, 'switching policy pages adds history entries that keep the reader open after Close')
+assert.match(legal, /baseDocumentTitleRef = useRef\(typeof document[\s\S]{0,160}document\.title\)/, 'direct legal links do not capture the catalogue title before the reader effect')
+assert.match(legal, /return \(\) => \{ document\.title = baseDocumentTitleRef\.current \}/, 'closing a direct legal link can leave the policy title behind')
 
 console.log('PASS legal reader traps modal focus, locks background interaction, and restores focus after close')
