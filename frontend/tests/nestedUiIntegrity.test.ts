@@ -72,13 +72,9 @@ assert.match(sectionSwitcher, /section-switcher max-w-full min-w-0/, 'shared sec
 assert.match(sectionSwitcher, /flex min-w-0 flex-wrap/, 'shared section switcher must wrap without horizontal scrolling')
 
 const pagination = read('components/shared/PaginationControls.tsx')
-// Every SINGLE-LINE PILL form of the pager must collapse its Back/Next words
-// to icon-only on narrow screens -- a pill has no room to wrap. Checked per
-// branch instead of as one whole-file count: a count silently turns into a
-// failure the moment another compliant pill branch is added, which is what the
-// centred storefront layout did.
+// The storefront's centered pager keeps Back/Next visible at 375px; the
+// compact admin pill still collapses them because it shares a denser row.
 for (const [name, from, to] of [
-  ['centered', "  if (layout === 'centered')", '  if (compact && rangeAsPageSize)'],
   ['compact range-as-page-size', '  if (compact && rangeAsPageSize)', '  if (compact)'],
 ] as const) {
   const start = pagination.indexOf(from)
@@ -92,6 +88,12 @@ for (const [name, from, to] of [
   )
   assert.doesNotMatch(branch, /<span>\{(?:back|next)Label\}<\/span>/, `${name} pager must not render an always-on Back/Next word`)
 }
+const centeredStart = pagination.indexOf("  if (layout === 'centered')")
+const centeredEnd = pagination.indexOf('  if (compact && rangeAsPageSize)', centeredStart)
+const centered = pagination.slice(centeredStart, centeredEnd)
+assert.equal((centered.match(/<span(?:\s+className="[^"]*")?>\{(?:back|next)Label\}<\/span>/g) || []).length, 2,
+  'centered pager keeps Back and Next visible on narrow storefronts')
+assert.doesNotMatch(centered, /hidden sm:inline/, 'centered pager labels must not disappear at 375px')
 assert.match(pagination, /onPageChange\?\.\(safePage\)/, 'pager must repair stale out-of-range controlled pages')
 
 const modal = read('components/shared/Modal.tsx')

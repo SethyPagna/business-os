@@ -20,7 +20,9 @@ const searchMatch = compile('searchMatch.ts')
 // The REAL gate kernel, not a stub: the import writer must refuse exactly
 // what routes/inventory.ts, routes/batches.ts and lib/stockSession.ts refuse.
 const stockReceiptGate = compile('stockReceiptGate.ts')
-const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch, './stockReceiptGate': stockReceiptGate })
+const branchRoles = compile('branchRoles.ts')
+const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branchRoles })
+const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch, './stockReceiptGate': stockReceiptGate, './branchRoleGuards': branchRoleGuards })
 
 function setup() {
   const sqlite = new Database(':memory:')
