@@ -7,6 +7,7 @@ import {
   parseCsvNumber,
   parseCsvRows,
 } from '../../../utils/csvImport.ts'
+import { barcodeSearchKeys } from '../../../utils/searchMatch.ts'
 
 export const PRODUCT_MONEY_FIELDS = [
   'selling_price_usd',
@@ -187,6 +188,32 @@ function normalizeComparableText(value: unknown): string {
   return normalizeText(value).toLocaleLowerCase()
 }
 
+const UPC_PAIR_KEY_PREFIX = /^upc[ae]:/
+
+/**
+ * Return the keys that are safe to use for barcode identity in an index.
+ *
+ * The shared search helper includes both a generic leading-zero key and, for
+ * a valid UPC-E/UPC-A pair, namespaced keys. A valid UPC-E such as 01234565
+ * must not collide with the unrelated seven-digit internal code 1234565, so
+ * paired codes use only their namespaced keys here. Short codes that the
+ * scanner helper intentionally declines still keep their exact normalized
+ * identity; existing imports commonly use values such as BC-1.
+ */
+function normalizeComparableBarcodeKeys(value: unknown): string[] {
+  const comparable = normalizeComparableText(value)
+  if (!comparable) return []
+  const keys = barcodeSearchKeys(comparable)
+  const pairKeys = keys.filter((key) => UPC_PAIR_KEY_PREFIX.test(key))
+  if (pairKeys.length) return [...new Set(pairKeys)].sort()
+  if (keys.length) return [...new Set(keys)].sort()
+  return [`exact:${comparable}`]
+}
+
+function normalizeComparableBarcodeSignature(value: unknown): string {
+  return normalizeComparableBarcodeKeys(value).join('|')
+}
+
 export const BLOCKING_PRODUCT_IMPORT_ISSUES = new Set([
   'invalid_barcode',
   'barcode_scientific_notation',
@@ -357,6 +384,7 @@ export function getProductImportDetailSignature(source: ImportRow = {}): string 
     .map((field) => {
       const value = normalized[field]
       if (typeof value === 'number') return `${field}:${Number.isFinite(value) ? value : 0}`
+      if (field === 'barcode') return `${field}:${normalizeComparableBarcodeSignature(value)}`
       return `${field}:${normalizeComparableText(value)}`
     })
     .join('|')
@@ -390,8 +418,7 @@ function buildExistingIndex(existingProducts: ImportRow[] = []) {
     }
     const sku = normalizeComparableText(product?.sku)
     if (sku) bySku.set(sku, product)
-    const barcode = normalizeComparableText(product?.barcode)
-    if (barcode) byBarcode.set(barcode, product)
+    normalizeComparableBarcodeKeys(product?.barcode).forEach((barcode) => byBarcode.set(barcode, product))
   })
   return { byName, bySku, byBarcode }
 }
@@ -407,7 +434,7 @@ function buildImportedIdentifierIndex(rows: ImportRow[] = []) {
   ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
     const rowIndex = Number(row?._import_row_index ?? index)
     add(bySku, normalizeComparableText(row?.sku), rowIndex)
-    add(byBarcode, normalizeComparableText(row?.barcode), rowIndex)
+    normalizeComparableBarcodeKeys(row?.barcode).forEach((barcode) => add(byBarcode, barcode, rowIndex))
   })
   return { bySku, byBarcode }
 }
@@ -596,12 +623,14 @@ export function analyzeProductImportRows(rows: ImportRow[] = [], existingProduct
     }
     const nameKey = normalizeImportProductName(row.name)
     const skuKey = normalizeComparableText(row.sku)
-    const barcodeKey = normalizeComparableText(row.barcode)
+    const barcodeKeys = normalizeComparableBarcodeKeys(row.barcode)
     const sameNameProducts = byName.get(nameKey) || []
     const skuMatch = skuKey ? bySku.get(skuKey) : null
-    const barcodeMatch = barcodeKey ? byBarcode.get(barcodeKey) : null
+    const barcodeMatch = barcodeKeys.map((barcode) => byBarcode.get(barcode)).find(Boolean) || null
     const sameFileSkuRows = skuKey ? (importedIdentifiers.bySku.get(skuKey) || []) : []
-    const sameFileBarcodeRows = barcodeKey ? (importedIdentifiers.byBarcode.get(barcodeKey) || []) : []
+    const sameFileBarcodeRows = Array.from(new Set(
+      barcodeKeys.flatMap((barcode) => importedIdentifiers.byBarcode.get(barcode) || []),
+    )).sort((left, right) => left - right)
     const sameFileIdentifierFields = [
       sameFileSkuRows.length > 1 ? 'sku' : '',
       sameFileBarcodeRows.length > 1 ? 'barcode' : '',
