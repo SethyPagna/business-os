@@ -51,6 +51,37 @@ const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'create-produ
 
 type Translate = (key: string) => string
 type AddProductsMode = 'new' | 'existing'
+export type CreateProductsSessionPermissionRequirement = {
+  permissionKey: 'products' | 'inventory'
+  actionKey: 'add' | 'adjust'
+}
+
+export type CreateProductsSessionMinimizeDetails = {
+  draftKey: string
+  mode: AddProductsMode
+  requiredPermissions: CreateProductsSessionPermissionRequirement[]
+}
+
+export function createProductsSessionPermissionRequirements(
+  rows: Array<{ kind: 'receive' | 'create_receive' | 'created_zero'; status: 'queued' | 'saved'; quantity: number }>,
+  mode: AddProductsMode,
+): CreateProductsSessionPermissionRequirement[] {
+  const queued = rows.filter((row) => row.status === 'queued')
+  const required: CreateProductsSessionPermissionRequirement[] = []
+  if (queued.some((row) => row.kind === 'create_receive' || row.kind === 'created_zero')) {
+    required.push({ permissionKey: 'products', actionKey: 'add' })
+  }
+  if (queued.some((row) => row.kind === 'receive' || (row.kind === 'create_receive' && row.quantity > 0))) {
+    required.push({ permissionKey: 'inventory', actionKey: 'adjust' })
+  }
+  if (!required.length) {
+    required.push(mode === 'new'
+      ? { permissionKey: 'products', actionKey: 'add' }
+      : { permissionKey: 'inventory', actionKey: 'adjust' })
+  }
+  return required
+}
+
 const STOCK_SESSION_MAX_LINES = 25
 const STOCK_SESSION_MAX_BYTES = 64 * 1024
 
@@ -115,7 +146,7 @@ type CreateProductsSessionModalProps = {
   onPrepareProduct: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>
   onCreateProduct: (payload: Record<string, unknown>) => Promise<number | string>
   onClose: () => void
-  onMinimize?: (label: string) => void
+  onMinimize?: (label: string, details: CreateProductsSessionMinimizeDetails) => void
   onDone: () => void
   notify: (message: string, kind?: string) => void
   t: Translate
@@ -277,11 +308,10 @@ export default function CreateProductsSessionModal({
   const [submittedItems, setSubmittedItems] = useState<InventoryStockSessionLine[] | null>(() => draft?.submittedItems || null)
   const [submissionErrorCode, setSubmissionErrorCode] = useState(draft?.submissionErrorCode || '')
   const [step, setStep] = useState<'header' | 'items'>(draft?.step === 'items' ? 'items' : 'header')
-  const firstAvailableMode: AddProductsMode = allowNew ? 'new' : 'existing'
   const restoredMode = draft?.mode === 'new' || draft?.mode === 'existing' ? draft.mode : initialMode
-  const [mode, setMode] = useState<AddProductsMode>(
-    (restoredMode === 'new' && allowNew) || (restoredMode === 'existing' && allowExisting) ? restoredMode : firstAvailableMode,
-  )
+  // Keep the drafted operation exact. A permission change while parked must
+  // not turn New into Existing (or the reverse) behind the operator's back.
+  const [mode, setMode] = useState<AddProductsMode>(restoredMode)
   const [itemFormOpen, setItemFormOpen] = useState(false)
   const [itemFormSeq, setItemFormSeq] = useState(() => rows.length)
   const [editingLineId, setEditingLineId] = useState<string | null>(null)
@@ -767,7 +797,11 @@ export default function CreateProductsSessionModal({
   const canStart = canStartCreateProductsSession(header)
   const preserveAndMinimize = onMinimize ? () => {
     writeDraft()
-    onMinimize(tr('create_products_session_title', 'Add/Create Products Session'))
+    onMinimize(tr('create_products_session_title', 'Add/Create Products Session'), {
+      draftKey,
+      mode,
+      requiredPermissions: createProductsSessionPermissionRequirements(rows, mode),
+    })
   } : undefined
 
   const editingNewProduct: ProductFormState | null = editingNewLine ? {
