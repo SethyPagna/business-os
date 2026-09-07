@@ -77,6 +77,16 @@ function makeAdapter(d1, hooks = {}) {
     },
     async batch(statements) {
       state.statements += statements.length
+      if (hooks.failAfterFinalized && state.finalized >= hooks.failAfterFinalized
+        && statements.some((entry) => /SELECT id, name, barcode,[\s\S]*FROM products WHERE id = @id/i.test(entry.sql))) {
+        throw new Error('D1_ERROR: D1 DB is overloaded. Requests queued for too long.')
+      }
+      if (statements.every((entry) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(entry.sql))) {
+        return statements.map((entry) => ({
+          success: true,
+          results: d1.prepare(entry.sql).all(entry.params || {}),
+        }))
+      }
       const result = await d1.batch(statements)
       if (statements.some((entry) => /UPDATE action_history SET reversible=1,status='undoable'/i.test(entry.sql))) {
         state.finalized += 1
@@ -94,6 +104,7 @@ function loadMergeHandler(adapter) {
     './productDetailRule': detail, './sqlBinding': sqlBinding, './db': {},
   })
   const economics = loadTs('lib/productMerge.ts')
+  const snapshots = loadTs('lib/productMergeSnapshot.ts', { './db': {} })
   const actor = loadTs('lib/actorSnapshot.ts')
   const permissions = loadTs('lib/permissions.ts')
   const never = () => { throw new Error('unrelated undo branch invoked') }
@@ -115,6 +126,7 @@ function loadMergeHandler(adapter) {
   const app = loadTs('routes/products.ts', {
     hono: { Hono: CapturingHono }, '../lib/db': { getDb: () => adapter }, '../lib/audit': { audit: async () => {} },
     '../lib/productDetailRule': detail, '../lib/productIdentity': identity, '../lib/productMerge': economics,
+    '../lib/productMergeSnapshot': snapshots,
     '../lib/undoAppliers': undo, '../lib/sqlBinding': sqlBinding, '../lib/actorSnapshot': actor, '../lib/permissions': permissions,
   }).default
   const route = app.routes.find((entry) => entry.method === 'POST' && entry.path === '/merge-duplicates')
