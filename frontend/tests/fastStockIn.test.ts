@@ -57,7 +57,7 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   assert.doesNotMatch(modalSource, /apiFetch|fetch\(/)
   assert.equal((modalSource.match(/receiveBatchStock\(/g) || []).length, 1) // exactly one call site
   assert.match(modalSource, /status: 'queued'/)
-  assert.match(modalSource, /const editLine = \(line: ReceivedLine\)/)
+  assert.match(modalSource, /(?:const editLine = \(line: ReceivedLine\)|function editLine\(line: ReceivedLine\))/)
   assert.match(modalSource, /const removeLine = \(key: string\)/)
   // N27: a saved ADD still shows its lot code; remove / set lines say what
   // they did instead (there is no lot to name)
@@ -68,6 +68,18 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   assert.match(modalSource, /searchInputRef\.current\?\.focus\(\)/)
   // Enter in the qty field is the fast path
   assert.match(modalSource, /if \(event\.key === 'Enter'\) addLine\(\)/)
+})
+
+runTest('the same product cannot be added twice in one stock session', () => {
+  assert.match(modalSource, /findSessionProductDuplicate\(duplicateRows, candidate, editingKey\)/,
+    'selecting a duplicate redirects before another line is opened')
+  assert.match(modalSource, /findSessionProductDuplicate\(duplicateRows, picked, editingKey\)/,
+    'Add rechecks the rule immediately before queueing')
+  assert.match(modalSource, /create_products_session_duplicate', 'Duplicate: You added this item already\.'/)
+  assert.match(modalSource, /duplicate\.row\.status !== 'saved'\) editLine\(duplicate\.row\)/,
+    'queued duplicates reopen for quantity editing; saved lines remain immutable')
+  assert.match(modalSource, /sessionDuplicateCheck=\{\(candidate\) => Boolean\(findSessionProductDuplicate\(duplicateRows, candidate\)\)\}/,
+    'nested scanned-product creation sees saved and queued session lines too')
 })
 
 runTest('changed cost offers and uses the existing price-variant path', () => {
