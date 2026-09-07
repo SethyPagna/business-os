@@ -122,7 +122,14 @@ The generated repair SQL is executable against a local SQLite rehearsal database
 
 The operator prepends those 45 guards to the 46 prepared write statements and submits all 91 statements through one `D1Database.batch()` call. Every guard must report zero changes. If any target row changes after the pre-read, the corresponding guard raises an error before the audit insert or branch updates, rolling back the whole batch. Unrelated application writes can continue; a legitimate concurrent edit to one of the target rows is preserved and causes this repair attempt to refuse cleanly. D1 batch is the transaction boundary; the operator never sends the local `BEGIN IMMEDIATE` or `COMMIT` lines to D1. Cloudflare documents that `D1Database.batch()` runs statements sequentially as a transaction and aborts or rolls back the entire sequence when a statement fails: <https://developers.cloudflare.com/d1/worker-api/d1-database/#batch>.
 
-Before apply, confirm the account supports at least 91 D1 queries in one invocation. Cloudflare currently documents a 50-query limit for Workers Free and 1,000 for Workers Paid, so this exact atomic operator requires Paid or another confirmed limit of at least 91: <https://developers.cloudflare.com/d1/platform/limits/>. Do not split the batch to fit a lower limit, because that would remove the atomic race protection.
+Before apply, prove that the exact account, database, remote-binding proxy, and `D1Database.batch()` transport accept at least 91 statements by running the dedicated read-only probe through the existing token wrapper:
+
+```powershell
+node cloudflare/scripts/with-wrangler-auth.cjs node `
+  outputs/takeover-20260907/historical-repair-evidence/probe-historical-repair-capacity.mjs
+```
+
+The probe accepts no arguments and submits one batch of 91 parameterized `SELECT` statements. It checks all returned markers, requires every statement to report zero changes, and disposes the proxy on success or failure. This reliably exercises the same per-invocation statement-count boundary and remote D1 batch path as the operator's 91-statement atomic call. It does not prove write permission, repair SQL correctness, payload size, or execution duration; those remain covered by the reviewed bundle and apply-time gates. Cloudflare currently documents a 50-query limit for Workers Free and 1,000 for Workers Paid: <https://developers.cloudflare.com/d1/platform/limits/>. Do not split the repair batch to fit a lower limit, because that would remove the atomic race protection.
 
 Cloudflare documents that `getPlatformProxy()` is a Node.js API, accepts an exact Wrangler `configPath`, supports D1 bindings, and can enable remote bindings: <https://developers.cloudflare.com/workers/wrangler/api/#getplatformproxy>. The REST D1 query endpoint accepts a batch-shaped request but its API reference does not state the same rollback guarantee, so this plan does not use the REST query endpoint, dashboard SQL, `wrangler d1 execute --remote`, or `D1Database.exec()` as its production transaction boundary: <https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/>.
 
