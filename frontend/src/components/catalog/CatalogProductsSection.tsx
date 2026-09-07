@@ -303,8 +303,15 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   // the per-page chooser lives inside the pill, with the storefront's page
   // size held in component state rather than in the URL, so a shopper on
   // 100/page who narrowed to 12 products had no way back short of reloading
-  // the site. The pill renders whenever there is anything to show; on one
-  // page its arrows are simply disabled.
+  // the site.
+  //
+  // The chooser has since left the pill for the Filters panel, so a
+  // single-page result no longer needs a pager to reach it -- and the pill
+  // stopped rendering on one page. That rule is NOT re-implemented here:
+  // this stays "is there anything to page", and the `centered` layout returns
+  // null on totalPages <= 1 itself (PaginationControls). One rule, one place;
+  // duplicating the count gate here is exactly how the two mounts came to
+  // disagree in the first place.
   const showPager = pagerState(effectivePage, totalProducts, effectivePageSize, CATALOG_DEFAULT_PAGE_SIZE).visible
   const visiblePromotionItems = useMemo(
     () => Array.isArray(promotionItems)

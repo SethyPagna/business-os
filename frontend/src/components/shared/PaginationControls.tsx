@@ -221,6 +221,20 @@ export default function PaginationControls({
     // flex child told it may collapse below its content is the one thing that
     // could undo the floor.
     const pageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
+    // A pager with one page is not a pager. `state.visible` above is
+    // deliberately "there is something to page" rather than "there is more
+    // than one page", because the ADMIN pill carries the per-page chooser
+    // inside itself and hiding it would take that control away. This layout
+    // carries no chooser -- the owner struck it off the row and it is a
+    // Filters field now -- so on an 8-product result the shopper was shown
+    // [< Back disabled][1][/ 1][Next > disabled], twice, above and below the
+    // grid. Nothing it can do, and two rows of it.
+    //
+    // The rule is therefore per-layout, and it lives here rather than in the
+    // kernel: `visible` is shared with four other layouts that still need it
+    // to mean what it means. The result count is unaffected -- it is the
+    // Filters summary line, not this row.
+    if (totalPages <= 1) return null
     return (
       <div className={`flex w-full justify-center ${className}`}>
         <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">

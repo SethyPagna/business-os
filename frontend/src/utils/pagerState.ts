@@ -11,9 +11,14 @@
 // to 12 products therefore lost the only control that could put it back, with
 // no way to reach it short of reloading the site.
 //
-// Whether a pager is worth rendering and whether its arrows are dead are two
+// (That chooser has since left the storefront pill entirely -- it is a field
+// in the Filters panel -- which is why the `centered` layout may now hide
+// itself on a single page while the admin pill still may not. See `visible`.)
+//
+// Whether there is anything to page and whether the arrows are dead are two
 // different questions, and only the second one is about page COUNT. This
-// module answers both, once.
+// module answers both, once. Whether a given pager should RENDER is a third
+// question, and it belongs to the layout, not here.
 
 export type PagerNumericInput = number | string | null | undefined
 
@@ -32,13 +37,27 @@ export interface PagerState {
   end: number
   backDisabled: boolean
   nextDisabled: boolean
-  /** Whether the pager should render at all.
+  /** Whether there is anything to page at all.
    *
    * Deliberately "there is something to page", NOT "there is more than one
-   * page": the pill also carries the per-page chooser, so hiding it on a
-   * single page takes away the control that changes how many items a page
-   * holds. On one page both arrows are simply disabled, which is what a pager
-   * at the end of a list already looks like. */
+   * page", because the ADMIN pill (`compact rangeAsPageSize`) carries the
+   * per-page chooser inside itself: hiding it on a single page takes away the
+   * one control that changes how many rows a page holds. There, one page just
+   * means two dead arrows, which is what the end of any list looks like.
+   *
+   * That is NOT the same question as "should this pager render", and the two
+   * were the same fact here until Sep 6 2026. Rendering is now decided
+   * per-layout, by each layout, in PaginationControls:
+   *
+   *   - the admin layouts render on a single page, for the reason above;
+   *   - the storefront `centered` layout returns null on a single page,
+   *     because its chooser moved OFF the row into the Filters panel, so what
+   *     an 8-product result got was two identical rows of dead arrows with
+   *     nothing behind them.
+   *
+   * The comment that stood here justified one shared rule with "the pill also
+   * carries the per-page chooser". That stopped being true for the storefront
+   * the moment the chooser moved, and this file was not revisited. */
   visible: boolean
 }
 
