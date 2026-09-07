@@ -33,6 +33,8 @@ const operatorConfigPath = join(operatorDir, 'operator-wrangler.toml')
 const wranglerPackagePath = join(root, 'cloudflare/node_modules/wrangler/package.json')
 const wranglerBinPath = join(root, 'cloudflare/node_modules/wrangler/bin/wrangler.js')
 const EXPECTED_WRANGLER_VERSION = '4.116.0'
+const EXPECTED_WRANGLER_BANNER_TEXT = ` ⛅️ wrangler ${EXPECTED_WRANGLER_VERSION}`
+const EXPECTED_WRANGLER_BANNER = `\n${EXPECTED_WRANGLER_BANNER_TEXT}\n${'─'.repeat(EXPECTED_WRANGLER_BANNER_TEXT.length)}\n`
 const MAX_IMPORT_FILE_BYTES = 1_000_000
 const MAX_STATEMENT_BYTES = 100_000
 const IMPORT_TIMEOUT_MS = 5 * 60_000
@@ -194,6 +196,28 @@ export function buildImportArtifact(unitId, statements, phase = 'apply') {
   }
 }
 
+function parseWranglerJsonStdout(stdout) {
+  const raw = String(stdout || '')
+  const withoutBom = raw.startsWith('\ufeff') ? raw.slice(1) : raw
+  const bom = withoutBom !== raw
+  const attempts = [{ framing: bom ? 'utf8_bom_json' : 'json', text: withoutBom }]
+  if (withoutBom.startsWith(EXPECTED_WRANGLER_BANNER)) attempts.push({
+    framing: bom ? 'utf8_bom_wrangler_4_116_banner_json' : 'wrangler_4_116_banner_json',
+    text: withoutBom.slice(EXPECTED_WRANGLER_BANNER.length),
+  })
+  for (const attempt of attempts) {
+    try { return { payload: JSON.parse(attempt.text), framing: attempt.framing } } catch { /* refuse below */ }
+  }
+  return {
+    payload: null,
+    framing: withoutBom.startsWith(EXPECTED_WRANGLER_BANNER) ? 'invalid_after_wrangler_4_116_banner' : bom ? 'invalid_after_utf8_bom' : 'unrecognized',
+    diagnostic: {
+      stdout_bytes: Buffer.byteLength(raw),
+      stdout_sha256: sha256(raw),
+    },
+  }
+}
+
 export function parseWranglerImportResult(execution, expectedStatementCount) {
   assert(execution && Number.isInteger(execution.exitCode), 'Wrangler execution did not return an exit code')
   if (execution.timedOut || execution.outputOverflow || execution.exitCode !== 0) return {
@@ -207,8 +231,15 @@ export function parseWranglerImportResult(execution, expectedStatementCount) {
         ? 'wrangler_import_output_overflow'
         : 'wrangler_import_process_failed',
   }
-  let payload
-  try { payload = JSON.parse(execution.stdout) } catch { return { confirmed_complete: false, exit_code: execution.exitCode, error: 'Wrangler stdout was not valid JSON' } }
+  const parsedStdout = parseWranglerJsonStdout(execution.stdout)
+  if (!parsedStdout.payload) return {
+    confirmed_complete: false,
+    exit_code: execution.exitCode,
+    error_code: 'wrangler_import_unrecognized_stdout_framing',
+    stdout_framing: parsedStdout.framing,
+    ...parsedStdout.diagnostic,
+  }
+  const payload = parsedStdout.payload
   const item = Array.isArray(payload) && payload.length === 1 ? payload[0] : null
   const aggregate = item?.results?.[0]
   const numQueries = Number(aggregate?.['Total queries executed'])
@@ -223,6 +254,7 @@ export function parseWranglerImportResult(execution, expectedStatementCount) {
   return {
     confirmed_complete: true,
     exit_code: execution.exitCode,
+    stdout_framing: parsedStdout.framing,
     num_queries: numQueries,
     final_bookmark: finalBookmark,
     aggregate: {
@@ -273,7 +305,12 @@ export async function executeWranglerFileImport(artifact, dependencies = {}) {
         `--config=${operatorConfigPath}`,
       ],
       cwd: root,
-      env: process.env,
+      env: {
+        ...process.env,
+        NO_COLOR: '1',
+        WRANGLER_LOG: 'log',
+        WRANGLER_WRITE_LOGS: 'false',
+      },
       timeoutMs: IMPORT_TIMEOUT_MS,
     })
     return parseWranglerImportResult(execution, artifact.statement_count)

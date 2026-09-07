@@ -73,6 +73,10 @@ The current reviewed inputs materialize to at most 37,800 bytes per apply-group 
 
 Wrangler returns aggregate import metadata, not per-statement change counts. The transport therefore requires the exact core audit and full-row classification after every import. A confirmed CLI response must report the exact query count and a final bookmark, then the post-state must be exact. A process, network, polling, malformed-output, or post-read failure pauses the operator before the next group. It never blind-retries an ambiguous file. The independent REST postchecker remains the authority for manual reconciliation before an explicit resume.
 
+Wrangler 4.116's installed command source disables its banner and progress logs in JSON mode, then restores the inherited logger level before writing one pretty-printed JSON array through the logger. An inherited `WRANGLER_LOG=error` or `none` can therefore suppress that final JSON even when the import succeeds. The transport pins only the child process to `WRANGLER_LOG=log`, `WRANGLER_WRITE_LOGS=false`, and `NO_COLOR=1`; this preserves the authenticated environment, emits the result, prevents a Wrangler disk log, and keeps progress suppressed during JSON execution.
+
+The transport accepts that JSON document directly. As a narrow compatibility fallback, it also accepts exactly the standard Wrangler 4.116 banner bytes followed by that one document, plus an optional leading UTF-8 BOM. It rejects arbitrary prefixes, altered banners, trailing output, and multiple JSON documents. An unrecognized successful-process framing reports only its byte count, SHA-256, and a fixed framing class; it never returns the raw stdout.
+
 Every write invocation requires the reviewed manifest/source pins, the existing token-identity check, the run ID, manifest hash, recovery bookmark, and explicit acknowledgement that file import temporarily makes D1 unavailable. SQL files exist only in a restricted temporary directory and are deleted after the Wrangler process exits. The operator never prints SQL, row contents, or the API token.
 
 Local adversarial verification:

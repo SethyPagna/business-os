@@ -115,6 +115,25 @@ const successStdout = JSON.stringify([{
 }])
 const parsed = parseWranglerImportResult({ exitCode: 0, stdout: successStdout, stderr: '', timedOut: false }, firstArtifact.statement_count)
 assert(parsed.confirmed_complete && parsed.num_queries === 3 && parsed.aggregate.rows_written === 2, 'valid Wrangler aggregate was rejected')
+assert(parsed.stdout_framing === 'json', 'plain Wrangler JSON framing was not classified exactly')
+const wranglerBannerText = ' ⛅️ wrangler 4.116.0'
+const exactWranglerBanner = `\n${wranglerBannerText}\n${'─'.repeat(wranglerBannerText.length)}\n`
+const bannerParsed = parseWranglerImportResult({ exitCode: 0, stdout: `${exactWranglerBanner}${successStdout}`, stderr: '', timedOut: false }, firstArtifact.statement_count)
+assert(bannerParsed.confirmed_complete && bannerParsed.stdout_framing === 'wrangler_4_116_banner_json', 'exact Wrangler 4.116 banner framing was rejected')
+const bomParsed = parseWranglerImportResult({ exitCode: 0, stdout: `\ufeff${successStdout}`, stderr: '', timedOut: false }, firstArtifact.statement_count)
+assert(bomParsed.confirmed_complete && bomParsed.stdout_framing === 'utf8_bom_json', 'UTF-8 BOM JSON framing was rejected')
+for (const invalidStdout of [
+  '',
+  `arbitrary banner\n${successStdout}`,
+  `${exactWranglerBanner}${successStdout}\n${successStdout}`,
+  `${successStdout}\ntrailing output`,
+  `\n ⛅️ wrangler 4.116.0 (update available 5.0.0)\n${'─'.repeat(44)}\n${successStdout}`,
+]) {
+  const rejected = parseWranglerImportResult({ exitCode: 0, stdout: invalidStdout, stderr: '', timedOut: false }, firstArtifact.statement_count)
+  assert(!rejected.confirmed_complete && rejected.error_code === 'wrangler_import_unrecognized_stdout_framing', 'unreviewed or multiple stdout framing was accepted')
+  assert(Number.isInteger(rejected.stdout_bytes) && /^[a-f0-9]{64}$/.test(rejected.stdout_sha256), 'rejected framing lacks content-free structural diagnostics')
+  if (invalidStdout) assert(!JSON.stringify(rejected).includes(invalidStdout), 'rejected framing exposed raw stdout')
+}
 assert(!Object.hasOwn(parsed, 'statement_changes'), 'transport synthesized unavailable per-statement changes')
 assert(!parseWranglerImportResult({ exitCode: 0, stdout: successStdout, stderr: '' }, 4).confirmed_complete, 'wrong aggregate query count was accepted')
 assert(!parseWranglerImportResult({ exitCode: 1, stdout: '', stderr: 'remote error', timedOut: false }, 3).confirmed_complete, 'nonzero Wrangler exit was accepted')
@@ -141,6 +160,7 @@ const fileExecution = await executeWranglerFileImport(firstArtifact, {
 assert(fileExecution.confirmed_complete, 'mocked file import did not confirm')
 assert(invocation.command === process.execPath && invocation.args.includes('--remote') && invocation.args.includes('--yes') && invocation.args.includes('--json'), 'Wrangler invocation flags are incomplete')
 assert(invocation.args.some((arg) => /wrangler\.js$/i.test(arg)) && invocation.args.some((arg) => /operator-wrangler\.toml$/i.test(arg)), 'pinned Wrangler binary/config were not used')
+assert(invocation.env.WRANGLER_LOG === 'log' && invocation.env.WRANGLER_WRITE_LOGS === 'false' && invocation.env.NO_COLOR === '1', 'Wrangler child output/log framing environment is not pinned')
 assert(!existsSync(temporaryFilePath), 'temporary SQL file was retained after execution')
 await expectReject(
   () => Promise.resolve(cleanupImportWorkDirectory(resolve('.'), resolve('unexpected.sql'))),
@@ -174,6 +194,8 @@ process.stdout.write(`${JSON.stringify({
     'independent_group_commit_boundary',
     'terminal_completion_atomic_recovery_refusal',
     'aggregate_only_wrangler_result',
+    'strict_wrangler_json_framing',
+    'pinned_wrangler_child_output_environment',
     'private_failure_output_suppression',
     'pinned_cli_config_and_ephemeral_sql',
     'recursive_cleanup_path_guard',
