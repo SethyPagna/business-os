@@ -197,19 +197,15 @@ assert.match(
 )
 console.log(`PASS the column budget gives Product ${product} and still leaves Reason ${Math.round(reasonPx)}px at the ${FLOOR}px floor`)
 
-// (d) The clipped name is REVEALABLE, through the shared component -- not a
-// bare `title`, which shows no affordance and cannot be opened by tap.
-assert.match(sc, /import TruncatedText from '\.\.\/shared\/TruncatedText\.tsx'/, 'the ledger must use the shared TruncatedText')
-assert.match(sc, /<TruncatedText text=\{row\.product_name\}/, 'the desktop product name must render through TruncatedText')
-// Scoped to a CLIPPED name: the mobile card wraps the name in full
-// (`break-words`, no clamp), so its tooltip reveals nothing that is hidden and
-// is not this rule's business. A clipped one is.
-const titledName = sc.split('\n').filter((line) => (
-  /\{row\.product_name\}<\/span>/.test(line) &&
-  /title=\{row\.product_name\}/.test(line) &&
-  /\btruncate\b|dense-cell-truncate|line-clamp/.test(line)
-))
-assert.deepEqual(titledName, [], `a clipped product name is still a dead-end title tooltip:\n${titledName.join('\n')}`)
+// (d) The clipped name is REVEALABLE through the delegated controller mounted
+// by the app shell. The ledger keeps the dense title contract so an ordinary
+// row tap still opens the movement; press-and-hold or hover reveals the name.
+assert.doesNotMatch(sc, /import TruncatedText/, 'the ledger must not install a competing per-cell reveal component')
+assert.match(
+  sc,
+  /<span className="block dense-cell-truncate font-semibold[^"]*" title=\{row\.product_name\}>\{row\.product_name\}<\/span>/,
+  'the desktop product name must opt into the delegated dense-cell reveal',
+)
 
 // The receipt line is NOT the same rule. Owner ruling (Sep 6 2026), after the
 // first round shipped it through TruncatedText: a receipt id is shown in FULL,
