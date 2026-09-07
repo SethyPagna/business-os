@@ -87,6 +87,33 @@ async function main() {
   assert.equal(batches.at(-1).length, 2)
   assert.deepEqual([...writeOff.keys()], [9102, 9103])
 
+  const collisionSnapshot = (count) => ({
+    ...snapshot,
+    canonicalBatchRows: Array.from({ length: count }, (_, index) => ({
+      id: 20_000 + index,
+      batch_key: `collision-${index}`,
+      batch_number: index + 1,
+    })),
+    duplicateBatchRows: Array.from({ length: count }, (_, index) => ({
+      id: 30_000 + index,
+      batch_key: `collision-${index}`,
+      batch_number: index + 1,
+    })),
+  })
+  const beforeBoundedLots = batches.length
+  await readProductMergeDependentLotSnapshots(adapter, collisionSnapshot(20), 'merge')
+  assert.equal(batches.length, beforeBoundedLots + 1)
+  assert.equal(batches.at(-1).length, 80, 'twenty colliding lots fit the bounded dependent read batch')
+
+  const beforeOversizedLots = batches.length
+  await assert.rejects(
+    readProductMergeDependentLotSnapshots(adapter, collisionSnapshot(21), 'merge'),
+    (error) => error?.code === 'merge_read_batch_statement_limit'
+      && error.statementCount === 84
+      && error.maxStatements === 80,
+  )
+  assert.equal(batches.length, beforeOversizedLots, 'oversized dependent reads fail before a D1 batch call')
+
   for (const statementGroup of batches) {
     for (const sql of statementGroup) {
       const binds = (sql.match(/@\w+|\?/g) || []).length
