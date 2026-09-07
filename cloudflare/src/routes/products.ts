@@ -2557,23 +2557,8 @@ export async function readMergeIdentityDiff(
   }
 }
 
-// OWNER RULING (N15, 2026-09-06): two costs more than COST_OUTLIER_RATIO apart
-// are not one product's cost written twice, they are one cost and one probable
-// typo -- so the merge REFUSES rather than averaging or silently keeping the
-// dearer. (Until this change the fold kept the dearer and merely reported it,
-// which meant the stored cost equalled neither row's own figure and nobody had
-// to agree to that.) The refusal is the same on both merge routes.
-export const mergeCostRefusal = (identity: MergeIdentityDiff): MergedCostOutlier | null =>
-  identity.costOutliers[0] ?? null
-
 export const mergeNumericRefusal = (identity: MergeIdentityDiff): ProductMergeNumericIssue | null =>
   identity.numericIssues[0] ?? null
-
-export function mergeCostRefusalMessage(dupName: string | null, outlier: MergedCostOutlier): string {
-  return `"${dupName}" and the product you are keeping record costs too far apart to be one product's cost `
-    + `(${outlier.min} and ${outlier.max}). Averaging them would store a cost nobody paid, so this merge is refused -- `
-    + 'correct whichever figure is wrong, then merge.'
-}
 
 // A merge rewrites the very rows a stock-in session's undo/redo asserts on:
 // lib/stockSession.ts rebuilds the session postimage through `IN (SELECT
@@ -3623,7 +3608,6 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     readMergeIdentityDiff(db, keepId, mergeId),
     mergeBlockedByReversibleStockSession(db, [keepId, mergeId]),
   ])
-  const costOutlier = mergeCostRefusal(identity)
   const numericIssue = mergeNumericRefusal(identity)
   return c.json({
     success: true,
@@ -3640,8 +3624,6 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
       ? { code: 'incompatible_product_identity' }
       : numericIssue
         ? { code: 'invalid_merge_numeric', field: numericIssue.field, rowId: numericIssue.rowId }
-      : costOutlier
-      ? { code: 'cost_outlier_review', field: String(costOutlier.field), min: costOutlier.min, max: costOutlier.max }
       : blockingSession
         ? { code: 'stock_session_reversible', operationId: blockingSession.operationId }
         : null,
@@ -3700,18 +3682,6 @@ app.post('/possible-duplicates/merge', async (c) => {
       error: productMergeNumericError(identity.numericIssues),
       identity,
       numericIssue,
-    }, 409)
-  }
-  // Cost first: a pair whose costs cannot be one cost is not a merge decision
-  // at all, whatever the operator says about the stock.
-  const costOutlier = mergeCostRefusal(identity)
-  if (costOutlier) {
-    return c.json({
-      success: false,
-      code: 'cost_outlier_review',
-      error: mergeCostRefusalMessage(dup.name, costOutlier),
-      identity,
-      costOutlier: { field: String(costOutlier.field), min: costOutlier.min, max: costOutlier.max },
     }, 409)
   }
   const blockingSession = await mergeBlockedByReversibleStockSession(db, [keeper.id, dup.id])

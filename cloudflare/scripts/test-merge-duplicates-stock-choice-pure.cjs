@@ -108,6 +108,11 @@ function loadProductsRoute(d1) {
   // kernel is which identity it picks.
   const realActorSnapshot = loadTs(path.join('lib', 'actorSnapshot.ts'), {})
   const realDetailRule = loadTs(path.join('lib', 'productDetailRule.ts'), {})
+  const realSqlBinding = loadTs(path.join('lib', 'sqlBinding.ts'), {})
+  const realProductIdentity = loadTs(path.join('lib', 'productIdentity.ts'), {
+    './db': {}, './sqlBinding': realSqlBinding, './productDetailRule': realDetailRule,
+  })
+  const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), {})
   const realUndoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
     './actorSnapshot': realActorSnapshot,
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
@@ -123,6 +128,9 @@ function loadProductsRoute(d1) {
     '../lib/audit': { audit: async (_env, _uid, _uname, action, entity, id, detail) => { auditCalls.push({ action, entity, id, detail }) } },
     '../lib/undoAppliers': realUndoAppliers,
     '../lib/productDetailRule': realDetailRule,
+    '../lib/productIdentity': realProductIdentity,
+    '../lib/productMerge': realProductMerge,
+    '../lib/sqlBinding': realSqlBinding,
   })
   return { mod, adapter, auditCalls, MERGE_REPARENT_TABLES: realUndoAppliers.MERGE_REPARENT_TABLES }
 }
@@ -420,7 +428,7 @@ async function main() {
       const routeSrc = fs.readFileSync(path.join(SRC, 'routes', 'products.ts'), 'utf8')
       const at = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
       assert.ok(at > 0, 'the review merge route must exist')
-      const block = routeSrc.slice(at, at + 4500)
+      const block = routeSrc.slice(at)
       const guardAt = block.indexOf('stock_choice_required')
       const foldAt = block.indexOf('foldDuplicateProductInto(')
       assert.ok(guardAt > 0, 'the guard must exist')

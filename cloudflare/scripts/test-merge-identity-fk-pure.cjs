@@ -109,6 +109,7 @@ function loadProductsRoute(d1) {
   const adapter = dbAdapter(d1)
   const realDetailRule = loadTs(path.join('lib', 'productDetailRule.ts'), {})
   const realSqlBinding = loadTs(path.join('lib', 'sqlBinding.ts'), {})
+  const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), {})
   const realUndoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
@@ -128,6 +129,7 @@ function loadProductsRoute(d1) {
       './db': {}, './sqlBinding': realSqlBinding, './productDetailRule': realDetailRule,
     }),
     '../lib/sqlBinding': realSqlBinding,
+    '../lib/productMerge': realProductMerge,
   })
   return { mod, adapter, undoAppliers: realUndoAppliers, MERGE_REPARENT_TABLES: realUndoAppliers.MERGE_REPARENT_TABLES }
 }
@@ -429,29 +431,23 @@ async function main() {
     d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER })
   })
 
-  // ---- 4. The cost refusal ------------------------------------------------
-  await check('DISCRIMINATING: costs too far apart to be one cost REFUSE the merge', async () => {
+  // ---- 4. Every valid non-zero cost participates in the DISTINCT mean -----
+  await check('DISCRIMINATING: wide valid costs still use the explicit DISTINCT mean rule', async () => {
     d1.db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group)
                    VALUES (303, 'Zero Twin', '3614274226546', 200, 1, 0)`).run()
     d1.db.prepare('UPDATE products SET cost_price_usd = 2 WHERE id = @id').run({ id: KEEPER })
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 303)
-    const refusal = mod.mergeCostRefusal(identity)
-    // Pre-fix: the fold kept the dearer (200) and merely reported it, so the
-    // kept row ended up costing a figure neither row had recorded and nobody
-    // had agreed to.
-    assert.ok(refusal, 'a $2 item and a $200 item are not one product\'s cost written twice')
-    assert.equal(refusal.min, 2)
-    assert.equal(refusal.max, 200)
-    const message = mod.mergeCostRefusalMessage('Zero Twin', refusal)
-    assert.ok(message.includes('2') && message.includes('200'), 'the refusal must name both figures')
-    assert.ok(/refused/i.test(message), 'and say plainly that nothing was merged')
+    assert.equal(identity.costAfter.cost_price_usd, 101)
+    assert.deepEqual(identity.costOutliers, [])
+    assert.deepEqual(identity.numericIssues, [])
     d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER })
   })
 
-  await check('NEGATIVE CONTROL: an ordinary restock price difference is NOT refused', async () => {
+  await check('NEGATIVE CONTROL: an ordinary restock price difference uses the same mean', async () => {
     d1.db.prepare('UPDATE products SET cost_price_usd = 5 WHERE id = @id').run({ id: KEEPER })
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 302)
-    assert.equal(mod.mergeCostRefusal(identity), null, '5 and 7.9 average to 6.45 -- exactly what the mean is for')
+    assert.equal(identity.costAfter.cost_price_usd, 6.45, '5 and 7.9 average to 6.45 -- exactly what the mean is for')
+    assert.deepEqual(identity.numericIssues, [])
     d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER })
   })
 
@@ -516,28 +512,27 @@ async function main() {
     assert.ok(/mergeBlockedByReversibleStockSession/.test(block), 'the reviewer must learn about a blocking session before choosing')
   })
 
-  await check('POST /possible-duplicates/merge enforces both refusals before folding', () => {
+  await check('POST /possible-duplicates/merge enforces identity, numeric and session blockers before folding', () => {
     const at = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
     const foldAt = routeSrc.indexOf('foldDuplicateProductInto(', at)
-    const costAt = routeSrc.indexOf("code: 'cost_outlier_review'", at)
+    const numericAt = routeSrc.indexOf("code: 'invalid_merge_numeric'", at)
     const sessionAt = routeSrc.indexOf("code: 'stock_session_reversible'", at)
-    assert.ok(costAt > at && costAt < foldAt, 'the cost refusal must run BEFORE anything is written')
+    assert.ok(numericAt > at && numericAt < foldAt, 'invalid numeric storage must be refused before anything is written')
     assert.ok(sessionAt > at && sessionAt < foldAt, 'so must the stock-session guard')
     assert.ok(/stock_choice_required[\s\S]{0,600}identity,/.test(routeSrc.slice(at, foldAt)),
       'the 400 refusal must carry identity too -- the dialog it opens is otherwise blind')
   })
 
-  await check('the whole-catalog merge applies the same cost refusal, and reports what it skipped', () => {
+  await check('the whole-catalog merge preflights blockers and reports what it skipped', () => {
     const at = routeSrc.indexOf("app.post('/merge-duplicates'")
     assert.ok(at > 0)
     const block = routeSrc.slice(at, routeSrc.indexOf("app.post('/possible-duplicates", at) > at
       ? routeSrc.indexOf("app.post('/possible-duplicates", at) : at + 12000)
-    assert.ok(/mergeCostRefusal\(/.test(block), 'the bulk run must refuse the same pairs the pair route refuses')
     assert.ok(/refusals\.push\(/.test(block), 'and say which pairs it left alone rather than skipping them silently')
     assert.ok(/mergeBlockedByReversibleStockSession\(db, \[canonicalId, dup\.id\]\)/.test(block),
       'the session guard applies to the bulk run too -- one rule, both doors')
-    assert.ok(block.indexOf('mergeCostRefusal(') < block.indexOf('await foldDuplicateProductInto('),
-      'the refusal must run BEFORE the fold -- reporting an outlier the fold already wrote is the old behaviour')
+    assert.ok(block.indexOf('let groupBlocker') < block.indexOf('await foldDuplicateProductInto('),
+      'the blocker preflight must run before the first fold')
   })
 
   await check('the bulk PREVIEW shows the cost it would write', () => {
@@ -545,9 +540,9 @@ async function main() {
     assert.ok(at > 0)
     const block = routeSrc.slice(at, routeSrc.indexOf("app.post('/merge-duplicates'", at))
     assert.ok(/costBefore/.test(block) && /costAfter/.test(block), 'a dry run that hides the cost change is not a dry run')
-    assert.ok(/costRefusals: costSkips/.test(block), 'and it must name the pairs the run will refuse')
-    assert.ok(/resolveMergedCostDetail\(\[running,/.test(block),
-      'the preview must fold pairwise in the run order -- a mean of means is not the mean')
+    assert.ok(/costRefusals: economics\.issues\.map/.test(block), 'and it must name invalid stored numeric values that block a group')
+    assert.ok(/resolveProductMergeEconomics\(costRows\)/.test(block),
+      'the preview must compute one global mean from the whole cluster')
   })
 
   console.log(failed ? `\n${failed} check(s) FAILED` : '\nall checks passed')
