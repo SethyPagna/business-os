@@ -297,9 +297,9 @@ export function localizeTelegramLine(line: string): string {
   if (!entry) return text
   let value = text.slice(split + 2)
   // routes/fees.ts puts a bare ISO `fee_date` on its Date line while every
-  // other message uses mm/dd/yyyy. Normalising the one unambiguous shape here
+  // other message uses dd/mm/yyyy. Normalising the one unambiguous shape here
   // gives the whole feed ONE date convention without editing that route.
-  if (entry.en === 'Date') value = value.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1')
+  if (entry.en === 'Date') value = value.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')
   if (entry.localizeValue) value = localizeTelegramValue(value)
   return `${entry.en}${BILINGUAL_SEPARATOR}${entry.km}: ${value}`
 }
