@@ -57,10 +57,12 @@ import {
 import {
   AMENDMENT_WINDOW_SETTING_KEY,
   amendmentEntryStatement,
+  guardDeliveryAddition,
   guardDeliveryActualCostAmendment,
   guardDeliveryFeeAmendment,
   guardSaleAmendment,
   planDeliveryFeeChange,
+  planDeliveryAddition,
   planDeliveryActualCostChange,
   planLineQuantityDecrease,
   planLineQuantityIncrease,
@@ -2562,6 +2564,28 @@ app.post('/:id/items', async (c) => {
 // see how it got that way. Hiding the trail from the people who reconcile the
 // books would defeat it.
 // ---------------------------------------------------------------------------
+app.get('/delivery-options', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'amend') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const search = String(c.req.query('search') || '').trim().toLowerCase()
+  const pattern = `%${search.replace(/[%_]/g, '\\$&')}%`
+  const rows = await getDb(c.env).prepare(`
+    SELECT id,name,phone,area,address
+    FROM delivery_contacts
+    WHERE @search=''
+      OR lower(COALESCE(name,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(address,'')) LIKE @pattern ESCAPE '\\'
+    ORDER BY lower(COALESCE(name,'')) ASC, id ASC
+    LIMIT 25
+  `).all<Record<string, unknown>>({ search, pattern })
+  return c.json({ items: rows })
+})
+
+// ---------------------------------------------------------------------------
 app.get('/:id/amendments', async (c) => {
   const db = getDb(c.env)
   if (!canReadSales(c.get('user'))) {
@@ -2578,7 +2602,7 @@ app.get('/:id/amendments', async (c) => {
       amount_before_usd, amount_after_usd, amount_delta_usd,
       total_before_usd, total_after_usd,
       units_moved, stock_skipped, via, reverses_amendment_id, undo_action_id,
-      note, user_id, user_name, created_at
+      note, before_json, after_json, user_id, user_name, created_at
     FROM sale_amendments WHERE sale_id = ? ORDER BY id ASC
   `).all<LedgerRow>([saleId])
 
@@ -2629,7 +2653,7 @@ app.get('/:id/records', async (c) => {
     SELECT id, kind, group_id, product_name,
       quantity_before, quantity_after, amount_before_usd, amount_after_usd,
       total_before_usd, total_after_usd, units_moved, stock_skipped, via,
-      note, user_name, created_at
+      note, before_json, after_json, user_name, created_at
     FROM sale_amendments WHERE sale_id = ? ORDER BY id ASC
   `).all<SaleRecordLedgerRow>([saleId])
 
@@ -2758,7 +2782,7 @@ app.get('/:id/records', async (c) => {
 // lib/saleAmendments.ts's DECISION 2: a line's unit price, the manual and
 // membership discounts, tax, and the tender.
 // ---------------------------------------------------------------------------
-const AMENDMENT_REQUEST_KINDS = new Set(['line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_replaced', 'delivery_fee_changed', 'delivery_actual_cost_changed'])
+const AMENDMENT_REQUEST_KINDS = new Set(['line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_replaced', 'delivery_fee_changed', 'delivery_actual_cost_changed', 'delivery_added'])
 
 app.post('/:id/amendments', async (c) => {
   const db = getDb(c.env)
@@ -2773,6 +2797,7 @@ app.post('/:id/amendments', async (c) => {
     quantity?: number
     delivery_fee_usd?: number
     delivery_actual_cost_usd?: number | string | null
+    delivery_contact_id?: number
     replacement?: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number }
     notes?: string
     client_request_id?: string
@@ -2794,6 +2819,7 @@ app.post('/:id/amendments', async (c) => {
     quantity: body.quantity ?? null,
     delivery_fee_usd: body.delivery_fee_usd ?? null,
     delivery_actual_cost_usd: body.delivery_actual_cost_usd ?? null,
+    delivery_contact_id: body.delivery_contact_id ?? null,
     replacement: body.replacement ?? null,
     notes: String(body.notes || '').trim().slice(0, 500) || null,
     expected_exchange_rate: body.expected_exchange_rate,
@@ -2896,6 +2922,166 @@ app.post('/:id/amendments', async (c) => {
   const mutationStamp = new Date().toISOString()
   const mutationOperationId = crypto.randomUUID()
   const moneyBeforeSnapshot = amendmentMoneyBefore(sale)
+
+  // ---- Add delivery to a sale that was recorded as a counter sale. Driver,
+  // customer fee and optional courier cost are one reviewed act and therefore
+  // one atomic write, one immutable ledger row and one idempotency receipt.
+  if (kind === 'delivery_added') {
+    const deliveryGuard = guardDeliveryAddition(sale)
+    if (!deliveryGuard.ok) return c.json({ error: deliveryGuard.error }, 400)
+    const contactId = body.delivery_contact_id
+    if (typeof contactId !== 'number' || !Number.isSafeInteger(contactId) || contactId <= 0) {
+      return c.json({ error: 'Choose a delivery driver for this sale.' }, 400)
+    }
+    const contactRow = await db.prepare(`
+      SELECT id,name,phone,COALESCE(NULLIF(address,''),area) AS delivery_address
+      FROM delivery_contacts WHERE id=?
+    `).get<{ id: number; name: string | null; phone: string | null; delivery_address: string | null }>([contactId])
+    if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.' }, 409)
+
+    const feeRaw = body.delivery_fee_usd
+    if (typeof feeRaw !== 'number' && typeof feeRaw !== 'string') {
+      return c.json({ error: 'Delivery amount must be a number.' }, 400)
+    }
+    const costRaw = body.delivery_actual_cost_usd
+    if (costRaw !== null && costRaw !== undefined && typeof costRaw !== 'number' && typeof costRaw !== 'string') {
+      return c.json({ error: 'Delivery amount must be a number.' }, 400)
+    }
+    const feeParsed = parseDeliveryAmountUsd(feeRaw)
+    if (!feeParsed.ok) return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
+    const costParsed = parseDeliveryAmountUsd(costRaw)
+    if (!costParsed.ok && costParsed.code !== 'blank') {
+      return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
+    }
+    const actualCostUsd = costParsed.ok ? costParsed.usd : null
+    const deliveryPlan = planDeliveryAddition({
+      saleId,
+      sale,
+      contact: {
+        id: Number(contactRow.id),
+        name: contactRow.name ?? null,
+        phone: contactRow.phone ?? null,
+        address: contactRow.delivery_address ?? null,
+      },
+      feeUsd: feeParsed.usd,
+      actualCostUsd,
+      exchangeRate,
+      stamp: mutationStamp,
+    })
+    const taxPlan = planAmendedTax({
+      saleId, sale, settings: moneySettings.tax,
+      subtotalBeforeUsd, subtotalAfterUsd: subtotalBeforeUsd, exchangeRate,
+    })
+    const money = recomputeSaleMoneyAfterAmendment({
+      sale,
+      subtotalUsd: subtotalBeforeUsd,
+      deliveryFeeUsdOverride: feeParsed.usd,
+      isDeliveryOverride: true,
+      deliveryFeePaidByOverride: 'customer',
+      taxUsdOverride: taxPlan.taxUsdOverride,
+      changeExchangeRate: moneySettings.changeExchangeRate,
+      exchangeRateOverride: exchangeRate,
+    })
+    const moneyAfterSnapshot = amendmentMoneyAfter(
+      sale, money, exchangeRate, mutationStamp, taxPlan.outcome.taxUsd, feeParsed.usd,
+    )
+    const recordBefore = {
+      ...deliveryPlan.before,
+      total_usd: totalBeforeUsd,
+      total_khr: nullableNumber(sale.total_khr),
+    }
+    const recordAfter = {
+      ...deliveryPlan.after,
+      total_usd: money.totalUsd,
+      total_khr: money.totalKhr,
+    }
+    const response = {
+      ...buildAmendmentResponsePayload({
+        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0,
+        stockSkipped, tax: taxPlan.outcome,
+      }, mutationStamp),
+      isDelivery: 1,
+      deliveryContactId: contactRow.id,
+      deliveryContactName: contactRow.name ?? null,
+      deliveryContactPhone: contactRow.phone ?? null,
+      deliveryContactAddress: contactRow.delivery_address ?? null,
+      deliveryFeeUsd: feeParsed.usd,
+      deliveryFeeKhr: receiptKhrFromUsd(feeParsed.usd, exchangeRate),
+      deliveryFeePaidBy: 'customer',
+      deliveryActualCostUsd: actualCostUsd,
+      deliveryActualCostKhr: actualCostUsd === null ? null : receiptKhrFromUsd(actualCostUsd, exchangeRate),
+    }
+    const contactReferenceGuard = bulkAssertion(`EXISTS(
+      SELECT 1 FROM delivery_contacts
+      WHERE id=@id
+        AND COALESCE(name,'')=COALESCE(@name,'')
+        AND COALESCE(phone,'')=COALESCE(@phone,'')
+        AND COALESCE(NULLIF(address,''),area,'')=COALESCE(@address,'')
+    )`, {
+      id: contactRow.id,
+      name: contactRow.name,
+      phone: contactRow.phone,
+      address: contactRow.delivery_address,
+    })
+    try {
+      await db.batch([
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        amendmentSettingsGuard(moneySettings),
+        contactReferenceGuard,
+        saleRevisionGuard(saleId, Number(sale.write_revision)),
+        ...deliveryPlan.statements,
+        ...taxPlan.statements,
+        rebaseSaleLineKhrStatement(saleId, exchangeRate),
+        saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
+        amendmentEntryStatement({
+          saleId,
+          kind: 'delivery_added',
+          totalBeforeUsd,
+          totalAfterUsd: money.totalUsd,
+          stockSkipped,
+          note,
+          before: recordBefore,
+          after: recordAfter,
+          userId: user?.id ?? null,
+          userName: actorSnapshot(user),
+        }),
+        saleMutationReceiptStatement({
+          operationId: mutationOperationId,
+          actorId: Number(user.id),
+          saleId,
+          kind: 'amendment',
+          requestId: amendmentRequestId,
+          requestDigest: amendmentDigest,
+          requestJson: amendmentCanonical,
+          before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore, delivery: recordBefore },
+          after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate, delivery: recordAfter },
+          response,
+          stamp: mutationStamp,
+        }),
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      ])
+    } catch (error) {
+      const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+        WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
+        .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+      if (/constraint/i.test(String(error))) {
+        return c.json({ error: 'The sale, driver, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
+      }
+      return c.json({ error: `Failed to add delivery: ${(error as Error).message || ''}` }, 500)
+    }
+    await auditAmendment(c, user, saleId, sale, {
+      kind,
+      before: recordBefore,
+      after: recordAfter,
+      outside_window: guard.outsideWindow,
+      notes: note,
+    })
+    return c.json(response)
+  }
 
   // ---- The actual courier cost: a reporting-only amendment. It deliberately
   // does NOT recompute the sale total: this is what the shop paid the driver,

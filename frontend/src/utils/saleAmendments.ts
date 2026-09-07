@@ -41,6 +41,8 @@ export interface SaleAmendmentRow {
   stock_skipped?: number | null
   via?: string | null
   note?: string | null
+  before_json?: string | null
+  after_json?: string | null
   user_name?: string | null
   created_at?: string | null
 }
@@ -84,6 +86,16 @@ export interface AmendmentDisplayRow {
 
 const MONEY_KINDS = new Set(['delivery_fee_changed', 'delivery_actual_cost_changed'])
 
+function snapshot(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
 function num(value: unknown): number {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
@@ -113,8 +125,45 @@ export function toAmendmentDisplayRow(
   row: SaleAmendmentRow,
   fmtUSD: (value: number) => string,
   deliveryLabel = 'Delivery',
+  deliveryParts: { feeLabel?: string; actualCostLabel?: string; notRecordedLabel?: string } = {},
 ): AmendmentDisplayRow {
   const kind = String(row.kind || '')
+  if (kind === 'delivery_added') {
+    const before = snapshot(row.before_json)
+    const after = snapshot(row.after_json)
+    const beforeFee = num(before.delivery_fee_usd)
+    const afterFee = num(after.delivery_fee_usd)
+    const beforeCost = before.delivery_actual_cost_usd === null || before.delivery_actual_cost_usd === undefined
+      ? null : num(before.delivery_actual_cost_usd)
+    const afterCost = after.delivery_actual_cost_usd === null || after.delivery_actual_cost_usd === undefined
+      ? null : num(after.delivery_actual_cost_usd)
+    const feeLabel = deliveryParts.feeLabel || 'Fee'
+    const actualCostLabel = deliveryParts.actualCostLabel || 'Actual cost'
+    const notRecordedLabel = deliveryParts.notRecordedLabel || 'Not recorded'
+    const composite = (name: unknown, fee: number, cost: number | null): string => [
+      String(name || '—'),
+      `${feeLabel}: ${fmtUSD(fee)}`,
+      `${actualCostLabel}: ${cost === null ? notRecordedLabel : fmtUSD(cost)}`,
+    ].join(' · ')
+    return {
+      id: num(row.id),
+      groupId: row.group_id ?? null,
+      kind,
+      family: 'money',
+      subject: deliveryLabel,
+      beforeText: composite(before.delivery_contact_name, beforeFee, beforeCost),
+      afterText: composite(after.delivery_contact_name, afterFee, afterCost),
+      deltaText: `+${deliveryLabel}`,
+      isIncrease: true,
+      isRemoval: false,
+      unitsMoved: 0,
+      stockNote: null,
+      via: String(row.via || 'amend'),
+      actor: row.user_name || null,
+      at: row.created_at || null,
+      note: row.note || null,
+    }
+  }
   const family: 'quantity' | 'money' = MONEY_KINDS.has(kind) ? 'money' : 'quantity'
   const isRemoval = kind === 'line_removed'
 
@@ -180,9 +229,10 @@ export function toAmendmentDisplayRows(
   rows: SaleAmendmentRow[] | null | undefined,
   fmtUSD: (value: number) => string,
   deliveryLabel = 'Delivery',
+  deliveryParts: { feeLabel?: string; actualCostLabel?: string; notRecordedLabel?: string } = {},
 ): AmendmentDisplayRow[] {
   if (!Array.isArray(rows)) return []
-  return rows.map((row) => toAmendmentDisplayRow(row, fmtUSD, deliveryLabel))
+  return rows.map((row) => toAmendmentDisplayRow(row, fmtUSD, deliveryLabel, deliveryParts))
 }
 
 /**

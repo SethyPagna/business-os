@@ -93,6 +93,7 @@ export const SALE_RECORD_KINDS = [
   'item_price_changed',
   'delivery_fee_changed',
   'delivery_cost_changed',
+  'delivery_added',
   'discount_changed',
   'customer_changed',
   'payment_settled',
@@ -390,6 +391,8 @@ export interface SaleRecordLedgerRow {
   stock_skipped?: number | null
   via?: string | null
   note?: string | null
+  before_json?: unknown
+  after_json?: unknown
   user_name?: string | null
   created_at?: string | null
 }
@@ -404,6 +407,7 @@ const LEDGER_KIND_TO_RECORD_KIND: Record<string, SaleRecordKind> = {
   // RECORD kind is the shorter 'delivery_cost_changed': the float's labels are
   // this vocabulary, and normalizing here is exactly what the mapping is for.
   delivery_actual_cost_changed: 'delivery_cost_changed',
+  delivery_added: 'delivery_added',
 }
 
 /** "Delivery", as the subject of the two money kinds. */
@@ -412,6 +416,23 @@ const DELIVERY_SUBJECT = 'delivery'
 export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
   const ledgerKind = String(row.kind || '')
   const kind = LEDGER_KIND_TO_RECORD_KIND[ledgerKind] || 'other'
+  if (ledgerKind === 'delivery_added') {
+    const before = parseDetails(row.before_json)
+    const after = parseDetails(row.after_json)
+    return {
+      id: `amendment:${row.id}`,
+      source: 'ledger',
+      at: text(row.created_at),
+      at_ms: atMs(row.created_at),
+      actor_username: text(row.user_name),
+      kind,
+      via: text(row.via) || 'amend',
+      subject: text(after?.delivery_contact_name) || DELIVERY_SUBJECT,
+      summary: 'Delivery added to sale',
+      before,
+      after,
+    }
+  }
   const money = kind === 'delivery_fee_changed' || kind === 'delivery_cost_changed'
   const at = text(row.created_at)
   const subject = money ? DELIVERY_SUBJECT : text(row.product_name)

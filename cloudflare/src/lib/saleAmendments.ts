@@ -146,6 +146,7 @@ export const AMENDMENT_KINDS = [
   'line_removed',
   'delivery_fee_changed',
   'delivery_actual_cost_changed',
+  'delivery_added',
 ] as const
 export type AmendmentKind = (typeof AMENDMENT_KINDS)[number]
 
@@ -319,6 +320,11 @@ export type AmendableSaleRow = SaleMoneyRow & {
   delivery_fee_usd?: unknown
   delivery_actual_cost_usd?: unknown
   delivery_actual_cost_khr?: unknown
+  delivery_contact_id?: unknown
+  delivery_contact_name?: unknown
+  delivery_contact_phone?: unknown
+  delivery_contact_address?: unknown
+  total_khr?: unknown
 }
 
 /** True when the sale carries S4-2's sticky "completed without moving stock" flag. */
@@ -786,6 +792,105 @@ export function guardDeliveryActualCostAmendment(sale: AmendableSaleRow): Delive
   return { ok: true }
 }
 
+export type DeliveryContactSnapshot = {
+  id: number
+  name: string | null
+  phone: string | null
+  address: string | null
+}
+
+export function guardDeliveryAddition(sale: AmendableSaleRow): DeliveryFeeGuardResult {
+  if (Number(sale.is_delivery)) {
+    return { ok: false, error: 'This sale already has delivery. Edit its driver or delivery amounts instead.' }
+  }
+  return { ok: true }
+}
+
+/**
+ * Convert a recorded counter sale to a delivery in one write. The customer
+ * fee and courier cost are stored together with the authoritative contact
+ * snapshot, while the caller recomputes the customer total through the shared
+ * sale-money kernel. This plan never emits inventory statements.
+ */
+export function planDeliveryAddition(input: {
+  saleId: number | string
+  sale: AmendableSaleRow
+  contact: DeliveryContactSnapshot
+  feeUsd: number
+  actualCostUsd: number | null
+  exchangeRate: number
+  stamp: string
+}): { statements: StockStatement[]; before: Record<string, unknown>; after: Record<string, unknown> } {
+  const exchangeRate = Number(input.exchangeRate) || 4100
+  const rawFeeUsd = Number(input.feeUsd)
+  if (!Number.isFinite(rawFeeUsd) || rawFeeUsd < 0) throw new Error('Delivery fee must be a non-negative number')
+  const feeUsd = round2(rawFeeUsd)
+  const rawActualCostUsd = input.actualCostUsd === null ? null : Number(input.actualCostUsd)
+  if (rawActualCostUsd !== null && (!Number.isFinite(rawActualCostUsd) || rawActualCostUsd < 0)) {
+    throw new Error('Actual delivery cost must be a non-negative number or null')
+  }
+  const actualCostUsd = rawActualCostUsd === null ? null : round2(rawActualCostUsd)
+  const stamp = String(input.stamp || '').trim()
+  if (!stamp) throw new Error('planDeliveryAddition needs the mutation stamp the response reports as updated_at')
+  const before = {
+    is_delivery: Number(input.sale.is_delivery) === 1,
+    delivery_contact_id: input.sale.delivery_contact_id ?? null,
+    delivery_contact_name: input.sale.delivery_contact_name ?? null,
+    delivery_contact_phone: input.sale.delivery_contact_phone ?? null,
+    delivery_contact_address: input.sale.delivery_contact_address ?? null,
+    delivery_fee_usd: numberOrNull(input.sale.delivery_fee_usd),
+    delivery_fee_khr: numberOrNull((input.sale as Record<string, unknown>).delivery_fee_khr),
+    delivery_fee_paid_by: (input.sale as Record<string, unknown>).delivery_fee_paid_by ?? null,
+    delivery_actual_cost_usd: numberOrNull(input.sale.delivery_actual_cost_usd),
+    delivery_actual_cost_khr: numberOrNull(input.sale.delivery_actual_cost_khr),
+    exchange_rate: numberOrNull((input.sale as Record<string, unknown>).exchange_rate),
+  }
+  const after = {
+    is_delivery: true,
+    delivery_contact_id: input.contact.id,
+    delivery_contact_name: input.contact.name,
+    delivery_contact_phone: input.contact.phone,
+    delivery_contact_address: input.contact.address,
+    delivery_fee_usd: feeUsd,
+    delivery_fee_khr: calculatedKhr(feeUsd, exchangeRate),
+    delivery_fee_paid_by: 'customer',
+    delivery_actual_cost_usd: actualCostUsd,
+    delivery_actual_cost_khr: actualCostUsd === null ? null : calculatedKhr(actualCostUsd, exchangeRate),
+    exchange_rate: exchangeRate,
+  }
+  return {
+    statements: [{
+      sql: `UPDATE sales SET
+              is_delivery = 1,
+              delivery_contact_id = @contact_id,
+              delivery_contact_name = @contact_name,
+              delivery_contact_phone = @contact_phone,
+              delivery_contact_address = @contact_address,
+              delivery_fee_usd = @fee_usd,
+              delivery_fee_khr = @fee_khr,
+              delivery_fee_paid_by = 'customer',
+              delivery_actual_cost_usd = @cost_usd,
+              delivery_actual_cost_khr = @cost_khr,
+              updated_at = @stamp
+            WHERE id = @sale_id`,
+      params: {
+        sale_id: input.saleId,
+        contact_id: input.contact.id,
+        contact_name: input.contact.name,
+        contact_phone: input.contact.phone,
+        contact_address: input.contact.address,
+        fee_usd: feeUsd,
+        fee_khr: calculatedKhr(feeUsd, exchangeRate),
+        cost_usd: actualCostUsd,
+        cost_khr: actualCostUsd === null ? null : calculatedKhr(actualCostUsd, exchangeRate),
+        stamp,
+      },
+    }],
+    before,
+    after,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // DECISION 4a: TAX on an amended sale.
 //
@@ -930,6 +1035,9 @@ export function recomputeSaleMoneyAfterAmendment(input: {
   subtotalUsd: number
   /** Set only by a delivery_fee_changed amendment; otherwise the stored fee. */
   deliveryFeeUsdOverride?: number | null
+  /** Set only when a counter sale is atomically converted to delivery. */
+  isDeliveryOverride?: boolean | null
+  deliveryFeePaidByOverride?: string | null
   /** Set when resolveAmendedTaxUsd recomputed; otherwise the stored amount. */
   taxUsdOverride?: number | null
   changeExchangeRate?: unknown
@@ -938,6 +1046,12 @@ export function recomputeSaleMoneyAfterAmendment(input: {
   const overrides: Partial<AmendableSaleRow> = {}
   if (input.deliveryFeeUsdOverride !== null && input.deliveryFeeUsdOverride !== undefined) {
     overrides.delivery_fee_usd = input.deliveryFeeUsdOverride
+  }
+  if (input.isDeliveryOverride !== null && input.isDeliveryOverride !== undefined) {
+    overrides.is_delivery = input.isDeliveryOverride ? 1 : 0
+  }
+  if (input.deliveryFeePaidByOverride !== null && input.deliveryFeePaidByOverride !== undefined) {
+    ;(overrides as Record<string, unknown>).delivery_fee_paid_by = input.deliveryFeePaidByOverride
   }
   if (input.taxUsdOverride !== null && input.taxUsdOverride !== undefined) {
     overrides.tax_usd = input.taxUsdOverride
@@ -1020,6 +1134,8 @@ export type AmendmentEntry = {
   reversesAmendmentId?: number | null
   undoActionId?: number | null
   note?: string | null
+  before?: Record<string, unknown> | null
+  after?: Record<string, unknown> | null
   userId?: number | string | null
   userName?: string | null
 }
@@ -1040,14 +1156,14 @@ export function amendmentEntryStatement(entry: AmendmentEntry): StockStatement {
             amount_before_usd, amount_after_usd, amount_delta_usd,
             total_before_usd, total_after_usd,
             units_moved, stock_skipped, via, reverses_amendment_id, undo_action_id,
-            note, user_id, user_name
+            note, before_json, after_json, user_id, user_name
           ) VALUES (
             @sale_id, @group_id, @kind, @sale_item_id, @product_id, @product_name,
             @quantity_before, @quantity_after, @quantity_delta,
             @amount_before_usd, @amount_after_usd, @amount_delta_usd,
             @total_before_usd, @total_after_usd,
             @units_moved, @stock_skipped, @via, @reverses_amendment_id, @undo_action_id,
-            @note, @user_id, @user_name
+            @note, @before_json, @after_json, @user_id, @user_name
           )`,
     params: {
       sale_id: entry.saleId,
@@ -1070,6 +1186,8 @@ export function amendmentEntryStatement(entry: AmendmentEntry): StockStatement {
       reverses_amendment_id: entry.reversesAmendmentId ?? null,
       undo_action_id: entry.undoActionId ?? null,
       note: entry.note ? String(entry.note).slice(0, 500) : null,
+      before_json: entry.before ? JSON.stringify(entry.before) : null,
+      after_json: entry.after ? JSON.stringify(entry.after) : null,
       user_id: entry.userId ?? null,
       user_name: entry.userName ?? null,
     },
@@ -1088,7 +1206,9 @@ export function reversingKind(kind: AmendmentKind): AmendmentKind {
   if (kind === 'line_removed') return 'line_added'
   if (kind === 'line_quantity_increased') return 'line_quantity_decreased'
   if (kind === 'line_quantity_decreased') return 'line_quantity_increased'
-  return kind === 'delivery_actual_cost_changed' ? 'delivery_actual_cost_changed' : 'delivery_fee_changed'
+  if (kind === 'delivery_actual_cost_changed') return 'delivery_actual_cost_changed'
+  if (kind === 'delivery_added') return 'delivery_added'
+  return 'delivery_fee_changed'
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,6 +1240,8 @@ export type LedgerRow = {
   stock_skipped: number | null
   via: string | null
   note: string | null
+  before_json?: string | null
+  after_json?: string | null
   user_id: number | null
   user_name: string | null
   created_at: string | null
@@ -1137,6 +1259,16 @@ export type AmendmentSummary = {
   /** The delivery fee's first-known and latest values, when it was amended. */
   deliveryFeeBeforeUsd: number | null
   deliveryFeeAfterUsd: number | null
+}
+
+function amendmentSnapshot(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
 }
 
 /**
@@ -1168,6 +1300,13 @@ export function summarizeAmendments(rows: LedgerRow[]): AmendmentSummary {
   let deliveryFeeAfterUsd: number | null = null
 
   for (const row of entries) {
+    if (row.kind === 'delivery_added') {
+      const before = amendmentSnapshot(row.before_json)
+      const after = amendmentSnapshot(row.after_json)
+      if (deliveryFeeBeforeUsd === null) deliveryFeeBeforeUsd = numberOrNull(before.delivery_fee_usd)
+      deliveryFeeAfterUsd = numberOrNull(after.delivery_fee_usd)
+      continue
+    }
     if (row.kind === 'delivery_fee_changed') {
       if (deliveryFeeBeforeUsd === null) deliveryFeeBeforeUsd = numberOrNull(row.amount_before_usd)
       deliveryFeeAfterUsd = numberOrNull(row.amount_after_usd)
