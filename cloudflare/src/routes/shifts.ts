@@ -49,8 +49,9 @@ function bodyBranchId(body: Record<string, unknown>, fallback: number | null): n
   return body.branch_id == null || String(body.branch_id).trim() === '' ? fallback : parseBranchId(body.branch_id)
 }
 function requiredMoney(value: unknown): number | null {
-  if (value == null || value === '') return null
-  const n = Number(value)
+  if (typeof value !== 'number' && typeof value !== 'string') return null
+  if (typeof value === 'string' && value.trim() === '') return null
+  const n = Number(typeof value === 'string' ? value.trim() : value)
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null
 }
 /**
@@ -73,8 +74,10 @@ function requiredMoney(value: unknown): number | null {
  * decides whether the close is allowed.
  */
 function countedMoney(value: unknown): { ok: true; value: number | null } | { ok: false } {
-  if (value == null || value === '') return { ok: true, value: null }
-  const n = Number(value)
+  if (value == null) return { ok: true, value: null }
+  if (typeof value !== 'number' && typeof value !== 'string') return { ok: false }
+  if (typeof value === 'string' && value.trim() === '') return { ok: true, value: null }
+  const n = Number(typeof value === 'string' ? value.trim() : value)
   return Number.isFinite(n) && n >= 0 ? { ok: true, value: Math.round(n * 100) / 100 } : { ok: false }
 }
 function optionalText(value: unknown): string | null {
