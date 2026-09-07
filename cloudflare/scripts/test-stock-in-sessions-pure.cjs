@@ -33,7 +33,13 @@ db.exec(`
     (5,2,'Lip Oil B',1,'Shop','add',1,8,8,102,7,'Za','2026-09-01 05:00:00',2),
     (6,2,'Lip Oil B',1,'Shop','remove',1,NULL,NULL,'revert:5',7,'Za','2026-09-01 05:01:00',2),
     (7,1,'Lip Oil A',1,'Shop','stock_in',4,9,36,103,7,'Za','2026-09-02 03:00:00',1),
-    (8,2,'Lip Oil B',1,'Shop','stock_in',2,8,16,103,7,'Za','2026-09-02 03:00:01',2);
+    (8,2,'Lip Oil B',1,'Shop','stock_in',2,8,16,103,7,'Za','2026-09-02 03:00:01',2),
+    -- Free goods: the operator DECLARED a cost, and it was zero. Recorded.
+    (9,1,'Lip Oil A',1,'Shop','add',6,0,0,104,7,'Za','2026-09-03 03:00:00',1),
+    (10,2,'Lip Oil B',1,'Shop','add',2,8,16,104,7,'Za','2026-09-03 03:00:01',2),
+    -- Nobody recorded what this cost. Not recorded, and not free.
+    (11,1,'Lip Oil A',1,'Shop','add',6,NULL,NULL,105,7,'Za','2026-09-04 03:00:00',1),
+    (12,2,'Lip Oil B',1,'Shop','add',2,8,16,105,7,'Za','2026-09-04 03:00:01',2);
 `)
 
 // The unified "Add products" session (POST /api/inventory/sessions, migration
@@ -50,12 +56,29 @@ assert.ok(
 )
 
 const list = kernel.buildStockInSessionListQuery('')
-assert.doesNotMatch(kernel.STOCK_IN_SESSION_FROM_SQL, /CAST\(rx\.reference_id AS TEXT\)/, 'revert lookup must preserve the reference_id index')
+assert.doesNotMatch(list.groupedSql, /CAST\(rx\.reference_id AS TEXT\)/, 'revert lookup must preserve the reference_id index')
 const groups = db.prepare(`${list.groupedSql} ORDER BY created_at DESC`).bind(list.params).all()
-assert.equal(groups.length, 4, 'two explicit sessions, one legacy-string session and one legacy timestamp group; reverted receipt excluded')
+assert.equal(groups.length, 6, 'four explicit sessions (incl. the free-goods and unpriced pair), one legacy-string session and one legacy timestamp group; reverted receipt excluded')
 assert.equal(groups.find((row) => row.session_key === 'session:100').line_count, 2)
 assert.equal(groups.find((row) => row.session_key === 'session:100').movement_cost_usd, 69)
 assert.equal(groups.some((row) => row.session_key === 'session:102'), false)
+
+// Zero cost is a RECORDED value, not a missing one. The two are one column
+// apart in the list -- movement_cost_usd is the money, lines_without_movement
+// _cost is the 'we never wrote this down' counter that drives the surfaces'
+// em-dash -- and a reader that treats `total_cost_usd > 0` as 'recorded'
+// answers identically for a free-goods receipt and an unpriced one. Session
+// 104 is free goods (declared 0), session 105 is unpriced (NULL): they must
+// come back different, and the money must not move either way.
+const freeGoodsSession = groups.find((row) => row.session_key === 'session:104')
+const unpricedSession = groups.find((row) => row.session_key === 'session:105')
+assert.ok(freeGoodsSession && unpricedSession, 'both zero-cost shapes must be listed')
+assert.equal(freeGoodsSession.lines_without_movement_cost, 0, 'a declared $0.00 line IS recorded')
+assert.equal(unpricedSession.lines_without_movement_cost, 1, 'a NULL-cost line is NOT recorded')
+assert.equal(freeGoodsSession.movement_cost_usd, 16, 'a declared zero adds nothing to the money')
+assert.equal(unpricedSession.movement_cost_usd, 16, 'an unrecorded cost adds nothing to the money either')
+assert.equal(freeGoodsSession.line_count, 2)
+assert.equal(unpricedSession.line_count, 2)
 
 const legacyStringSession = groups.find((row) => row.session_key === 'session:103')
 assert.ok(legacyStringSession, 'a session written with the legacy stock_in movement type must still appear in the list')

@@ -85,9 +85,9 @@ function loadReceiptComponent(source: string): unknown {
     if (id.includes('receiptAppliedConfig')) return require('../src/utils/receiptAppliedConfig.ts')
     if (id.includes('receiptTextContrast')) return require('../src/utils/receiptTextContrast.ts')
     if (id.includes('receiptItemColumns')) return require('../src/utils/receiptItemColumns.ts')
-    // N21 (salesfix lane): the customer address renders through the shared
-    // Contact Options kernel, which decides whether the address row prints at
-    // all -- so it is loaded for real, like the other row-deciding modules.
+    // Real: the receipt prints the sale's DISPLAY address, and this kernel is
+    // what turns a stored options blob into one (see contactDisplayAddress.test
+    // .ts). Stubbed away, the customer row silently renders nothing.
     if (id.includes('contactOptionUtils')) return require('../src/components/contacts/contactOptionUtils.ts')
     if (id.includes('ReceiptQrCodes')) {
       return { __esModule: true, default: () => null, normalizeQrSocialLinksForReceipt: () => [] }

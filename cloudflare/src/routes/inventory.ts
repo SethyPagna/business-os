@@ -1478,7 +1478,17 @@ app.post('/adjust', async (c) => {
 
   if (!productId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (!['add', 'remove', 'set'].includes(type)) return c.json({ error: 'Invalid stock action' }, 400)
-  if (!(quantity > 0)) return c.json({ error: 'Quantity must be a positive number' }, 400)
+  // N27: an add or a remove is a MOVEMENT, so zero is meaningless and refused.
+  // A set is a TARGET -- "this branch now holds exactly N" -- and zero is a
+  // number an operator counts: the last one sold, a branch being emptied, a
+  // miscount corrected down to nothing. The conversion below already knows how
+  // to reach zero (it posts the difference as a remove, or answers no-op when
+  // the branch is already there); it was simply unreachable, because this guard
+  // sits above it. Non-negative, not "any number" -- a branch cannot hold less
+  // than nothing.
+  if (type === 'set' ? !(quantity >= 0) : !(quantity > 0)) {
+    return c.json({ error: type === 'set' ? 'Quantity cannot be negative' : 'Quantity must be a positive number' }, 400)
+  }
   // Every stock change needs a documented cause -- no add/remove/set can go
   // through undocumented. Checked here, once, ahead of any DB work, so
   // there's no path (direct API call included) that can move stock without

@@ -324,3 +324,35 @@ export const STOCK_RECEIPT_GATE_FALLBACKS: Record<StockReceiptGateCode, string> 
   cost_negative: 'Unit cost cannot be negative.',
   free_goods_required: 'A $0.00 unit cost needs the Free goods box ticked.',
 }
+
+/** The pack key of a quantity refusal on a stock-adjust surface. */
+export type StockAdjustQuantityCode = 'invalid_quantity' | 'fast_stockin_set_qty'
+
+/**
+ * ONE rule for "may this quantity be posted", read by every stock-adjust
+ * surface (the Inventory page's per-row adjust, the Products page's
+ * StockAdjustModal, and the fast stock-in flow) and by nothing else.
+ *
+ * An add and a remove are MOVEMENTS -- zero moves nothing, so zero is a typo.
+ * A set is a TARGET, and zero is a number an operator counts: the last one
+ * sold, a branch being emptied. routes/inventory.ts enforces exactly this
+ * split (`type === 'set' ? !(quantity >= 0) : !(quantity > 0)`), so this is
+ * the same rule read early rather than a second rule that happens to agree.
+ *
+ * Blank is never "set to zero": `Number('')` is 0, and an empty box must
+ * refuse rather than silently empty a branch.
+ *
+ * Returns the pack key of the refusal, or null when the quantity is postable.
+ */
+export function stockAdjustQuantityError(type: string, rawQuantity: unknown): StockAdjustQuantityCode | null {
+  const raw = String(rawQuantity ?? '').trim()
+  const quantity = raw ? Number(raw) : Number.NaN
+  if (type === 'set') return Number.isFinite(quantity) && quantity >= 0 ? null : 'fast_stockin_set_qty'
+  return Number.isFinite(quantity) && quantity > 0 ? null : 'invalid_quantity'
+}
+
+/** English fallbacks for tr(), so a missing pack entry still says something real. */
+export const STOCK_ADJUST_QUANTITY_FALLBACKS: Record<StockAdjustQuantityCode, string> = {
+  invalid_quantity: 'Invalid quantity',
+  fast_stockin_set_qty: 'Quantity must be 0 or more',
+}

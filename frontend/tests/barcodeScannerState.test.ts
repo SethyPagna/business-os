@@ -121,7 +121,7 @@ await runTest('stock workflow scanners stay inside their active product picker',
 
   assert.match(ledgerSource, /const stockWorkflowOpen = adjustType !== null \|\| fastStockInOpen/)
   assert.match(ledgerSource, /const blurLedgerSearch = useCallback\([\s\S]*?activeElement\.blur\(\)/)
-  assert.match(ledgerSource, /openAdjust: openStockAdjustment/)
+  assert.match(ledgerSource, /const openFastStockIn = useCallback\(\(nextMode: StockMode = 'add'\) => \{\s*blurLedgerSearch\(\)/)
   assert.match(ledgerSource, /<SearchInput id="stock-ledger-search"[^>]*disabled=\{stockWorkflowOpen\}/)
   assert.match(
     ledgerSource,

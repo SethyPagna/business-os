@@ -384,13 +384,16 @@ export default function InventoryStockModals({
                     ? `${t('adjust_set') || 'Set'} ${t('stock') || 'Stock'} (${t('total') || 'Total'}) *`
                     : `${t('quantity') || 'Quantity'} *`}
                 </label>
+                {/* A set may be typed down to 0 (an emptied branch); an add or a
+                    remove of 0 moves nothing, so the floor follows the type --
+                    the same split utils/stockReceiptFields.ts enforces on submit. */}
                 <input
                   id="inventory-adjust-quantity"
                   name="inventory_adjust_quantity"
                   className="input text-sm"
                   type="number"
                   step="any"
-                  min="0"
+                  min={adjustForm.type === 'set' ? 0 : 1}
                   value={adjustForm.quantity}
                   onChange={e => setAdjustForm(f=>({...f, quantity:e.target.value}))} />
                 {adjustForm.type === 'set' && setDifference != null ? (

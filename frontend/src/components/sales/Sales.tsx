@@ -206,6 +206,7 @@ interface SaleAmendmentRequest {
   sale_item_id?: number
   quantity?: number
   delivery_fee_usd?: number
+  delivery_actual_cost_usd?: number | string | null
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
   client_request_id: string
