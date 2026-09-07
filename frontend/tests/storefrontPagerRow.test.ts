@@ -152,7 +152,97 @@ runTest('the row reads as words at 375px, and still cannot wrap', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 3. Tap targets -- computed, not eyeballed
+// 3. Focus -- resolved through the class constants, not grepped
+// ---------------------------------------------------------------------------
+
+// The row builds its classes from `const arrowButtonClass = ...` and friends,
+// so a grep for a utility next to `<button` finds nothing whether the style
+// is there or not -- which is how this branch shipped with no focus style at
+// all. Substitute the constants first, then read each opening tag.
+function resolvedCenteredBranch(): string {
+  const branch = centeredBranch()
+  const consts: Record<string, string> = {}
+  const declaration = /const (\w+) = ['`]([^'`\n]*)['`]/g
+  let found: RegExpExecArray | null
+  while ((found = declaration.exec(branch)) !== null) consts[found[1]] = found[2]
+  assert.ok(Object.keys(consts).length >= 2, 'the branch should still hoist its shared classes into constants')
+  let resolved = branch
+  // A constant may be built from another (arrowButtonClass embeds the ring),
+  // so substitute to a fixed point rather than once.
+  for (let pass = 0; pass < 5; pass += 1) {
+    const next = resolved.replace(/\$\{(\w+)\}/g, (whole, name) => (consts[name] === undefined ? whole : consts[name]))
+    if (next === resolved) break
+    resolved = next
+  }
+  assert.doesNotMatch(resolved, /\$\{arrowButtonClass\}/, 'the resolver must actually have inlined the shared button class')
+  return resolved
+}
+
+// Each focusable opening TAG. Sliced to the next `<` rather than to the next
+// `>`, because these attributes hold arrow functions and the `=>` in one would
+// end the tag three attributes early.
+function focusableTags(source: string): Array<{ tag: string; text: string }> {
+  const tags: Array<{ tag: string; text: string }> = []
+  const opener = /<(button|input)\b/g
+  let found: RegExpExecArray | null
+  while ((found = opener.exec(source)) !== null) {
+    const nextTag = source.indexOf('<', found.index + 1)
+    tags.push({ tag: found[1], text: source.slice(found.index, nextTag < 0 ? source.length : nextTag) })
+  }
+  return tags
+}
+
+runTest('the focus reader can tell a ringed control from a bare one (positive control)', () => {
+  // An instrument that reports every case the same way is indistinguishable
+  // from a broken one, so hand it a fixture holding one of each: a control
+  // whose ring arrives through a constant, and one that kills the outline and
+  // puts nothing back -- which is what the page field used to do.
+  const fixture = [
+    "  const ringed = \'h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500\'",
+    "  const bare = \'h-10 outline-none\'",
+    "  <button className={`${ringed}`} onClick={() => go()}>",
+    "    <Icon />",
+    "  <input className={`${bare}`} onChange={(event) => set(event)} />",
+  ].join('\n')
+  const consts: Record<string, string> = {}
+  const declaration = /const (\w+) = ['`]([^'`\n]*)['`]/g
+  let found: RegExpExecArray | null
+  while ((found = declaration.exec(fixture)) !== null) consts[found[1]] = found[2]
+  const resolved = fixture.replace(/\$\{(\w+)\}/g, (whole, name) => (consts[name] === undefined ? whole : consts[name]))
+  const tags = focusableTags(resolved)
+  assert.equal(tags.length, 2, 'the reader must find both controls despite the arrow functions in their attributes')
+  assert.match(tags[0].text, /focus-visible:ring-2/, 'and see the ring that arrived through a constant')
+  assert.doesNotMatch(tags[1].text, /focus-visible:ring-2/, 'and see that the bare one has none')
+  assert.match(tags[1].text, /outline-none/, 'while still seeing that it suppresses the UA outline -- the exact defect shape')
+})
+
+runTest('every focusable control on the pager row shows a focus ring', () => {
+  const resolved = resolvedCenteredBranch()
+  const tags = focusableTags(resolved)
+  assert.equal(tags.length, 3, 'Back, Next and the page field are the three focusable controls on this row')
+  for (const { tag, text } of tags) {
+    assert.match(
+      text,
+      /focus-visible:ring-2/,
+      `a <${tag}> on the storefront pager has no focus indicator. This is the only navigation control on the page the whole catalogue is browsed through, so keyboard paging would be invisible.`,
+    )
+    assert.match(text, /focus-visible:ring-inset/, 'an outset ring is clipped by the rounded-full pill edge')
+  }
+})
+
+runTest('nothing on the row kills the UA outline without replacing it', () => {
+  for (const { tag, text } of focusableTags(resolvedCenteredBranch())) {
+    if (!/outline-none/.test(text)) continue
+    assert.match(
+      text,
+      /focus-visible:ring/,
+      `a <${tag}> suppresses the browser focus outline and puts nothing back, which is strictly worse than leaving the UA default alone.`,
+    )
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 4. Tap targets -- computed, not eyeballed
 // ---------------------------------------------------------------------------
 
 // Tailwind's spacing scale: h-N is N * 0.25rem, and this app pins html to
@@ -179,7 +269,7 @@ runTest('every hit area in the storefront pill is at least 40px', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 4. Behaviour that must NOT change
+// 5. Behaviour that must NOT change
 // ---------------------------------------------------------------------------
 
 runTest('the chosen page size is written by exactly the same two calls, from its new home', () => {

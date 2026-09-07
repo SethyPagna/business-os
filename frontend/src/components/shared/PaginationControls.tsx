@@ -196,7 +196,16 @@ export default function PaginationControls({
     // Rows are h-10 (40px) rather than the admin's 32: this is the phone-
     // first shopping surface, and 36px arrows were under the tap-target
     // floor on the one page the whole catalogue is browsed through.
-    const arrowButtonClass = 'inline-flex h-10 shrink-0 items-center gap-0.5 px-3 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    //
+    // FOCUS. This branch declared no focus style at all: the arrows had
+    // none, and the page field killed the UA outline with `outline-none` and
+    // put nothing back, so keyboard paging through the catalogue was
+    // invisible. `ring-inset`, not a plain ring: the pill is rounded-full and
+    // the arrows sit flush against its edge, where an outset ring is clipped
+    // by the rounding on exactly the corners it most needs to show.
+    // `focus-visible` so a mouse click does not paint it.
+    const focusRingClass = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500'
+    const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 px-3 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${focusRingClass}`
     const countClass = 'h-10 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-10 text-slate-500 dark:text-slate-400'
     // The page box takes its width from what it prints. `ch` is the width of
     // "0" in the current font, which is the right unit for a numeric field.
@@ -223,7 +232,7 @@ export default function PaginationControls({
                   inputMode="numeric"
                   aria-label={pageLabel}
                   style={{ width: `calc(${pageDigits}ch + 0.5rem)` }}
-                  className="h-10 min-w-0 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                  className={`h-10 min-w-0 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100 ${focusRingClass}`}
                   value={pageDraft}
                   onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                   onBlur={(event) => commitPageDraft(event.currentTarget.value)}
