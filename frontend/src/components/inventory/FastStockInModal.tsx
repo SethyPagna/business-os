@@ -28,6 +28,7 @@ import { buildProductGroups, type ProductGroup, type ProductRecord } from '../..
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
+import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
 
 // Keep product creation inside this receiving flow rather than sending the
 // operator to a separate page. The standard ProductForm and create transport
@@ -207,6 +208,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // recorded a mode; they stay adds rather than reading as 'changes'.
   const [received, setReceived] = useState<ReceivedLine[]>(() => (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', createdProduct: Boolean(line.createdProduct) })))
   const [editingKey, setEditingKey] = useState('')
+  const duplicateRows = useMemo(() => received.map((line) => ({
+    ...line,
+    name: line.productName,
+    barcode: line.product.barcode,
+  })), [received])
   // Set by editLine, consumed by the lot-options effect once that product's
   // lots have loaded. Without it the effect's own setBatchChoice('new') wins
   // the race and the reopened line loses the lot it was queued against.
@@ -359,6 +365,12 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const zeroCostNeedsDeclaration = pendingReceiptGate === 'free_goods_required'
 
   const pick = (candidate: ProductCandidate) => {
+    const duplicate = findSessionProductDuplicate(duplicateRows, candidate, editingKey)
+    if (duplicate) {
+      notify(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'), 'error')
+      if (duplicate.row.status !== 'saved') editLine(duplicate.row)
+      return
+    }
     setPicked(candidate)
     setCandidates([])
     setQuery(String(candidate.name || ''))
@@ -447,6 +459,12 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     const rawQuantity = quantity.trim()
     const qty = Math.floor(Number(rawQuantity)) || 0
     if (!picked) { notify(tr('fast_stockin_pick_product', 'Pick a product first'), 'error'); return }
+    const duplicate = findSessionProductDuplicate(duplicateRows, picked, editingKey)
+    if (duplicate) {
+      notify(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'), 'error')
+      if (duplicate.row.status !== 'saved') editLine(duplicate.row)
+      return
+    }
     if (!branchId) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
     // N27: an add and a remove are MOVEMENTS -- zero moves nothing. A set is a
     // TARGET, and zero is a number an operator counts: the last one sold, a
@@ -518,7 +536,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     resetLine()
   }
 
-  const editLine = (line: ReceivedLine) => {
+  function editLine(line: ReceivedLine) {
     if (saving || line.status === 'saved') return
     setEditingKey(line.key)
     setMode(line.mode)
@@ -703,6 +721,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           categories={createCategories}
           units={scannedCreateUnits}
           branches={scannedCreateBranches}
+          sessionDuplicateCheck={(candidate) => Boolean(findSessionProductDuplicate(duplicateRows, candidate))}
           onSave={(payload) => createProductForScannedBarcode((payload || {}) as Record<string, unknown>)}
           onClose={() => setCreateBarcode('')}
           t={(key: string) => tr(key, key)}
