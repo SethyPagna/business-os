@@ -229,6 +229,36 @@ await runTest('the banner action is gated by the same permission the Worker rout
   assert.match(km.dated_reconciliation_permission_required, /[ក-៿]/, 'km pack value must actually be Khmer script')
 })
 
+// Parity: the client-side gate above pins only the client half. Without
+// reading the Worker route file too, a divergence there (a guard weakened
+// or removed on one of the four /dated-stock-count/* handlers) would go
+// undetected forever. This mirrors the exact guard string and requires all
+// four matches, not merely "at least one".
+await runTest('the client permission gate matches all four Worker route guards, not just one', () => {
+  const inventoryRoutesSource = fs.readFileSync(
+    new URL('../../cloudflare/src/routes/inventory.ts', import.meta.url),
+    'utf8'
+  )
+  const routeGuardMatches = inventoryRoutesSource.match(
+    /app\.post\('\/dated-stock-count\/[^']*'[\s\S]{0,400}?getActionTier\(user, 'inventory', 'stock_count'\) !== 'full'/g
+  ) ?? []
+  assert.equal(
+    routeGuardMatches.length,
+    4,
+    `expected exactly 4 /dated-stock-count/* handlers guarded by getActionTier(user, 'inventory', 'stock_count') !== 'full', found ${routeGuardMatches.length}`
+  )
+
+  const permissionActionsSource = fs.readFileSync(
+    new URL('../src/utils/permissionActions.ts', import.meta.url),
+    'utf8'
+  )
+  assert.match(
+    permissionActionsSource,
+    /\{ key: 'stock_count', tKey: 'perm_act_inventory_stock_count', label: '[^']*', review: 'block' \}/,
+    "permissionActions.ts's stock_count row must still carry review: 'block' -- that is what makes can('inventory','stock_count') true only at the 'full' tier, matching the route guard"
+  )
+})
+
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)
