@@ -26,8 +26,9 @@ import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
-import BranchForm, { branchFormWorkKey } from './BranchForm'
+import BranchForm, { branchFormDraftBaseKey, branchFormWorkKey } from './BranchForm'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -42,6 +43,7 @@ import {
   reparkDeniedRestore,
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
+import { flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -109,6 +111,7 @@ interface BranchRecord {
   notes?: string | null
   is_default?: BranchFlag | null
   is_active?: BranchFlag | null
+  updated_at?: string | null
 }
 
 interface BranchFormPayload {
@@ -341,6 +344,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // utils/permissionActions.ts. Add/edit/delete DO queue for that tier, so
   // they stay available; only transfer is withheld.
   const canTransferStock = can('branches', 'transfer')
+  const canAddBranch = can('branches', 'add')
+  const canEditBranch = can('branches', 'edit')
   // Same grant Inventory's own adjust/receive affordances check, because
   // POST /api/batches sits behind 'inventory' server-side -- a button the
   // server would 403 is worse than no button.
@@ -384,6 +389,58 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // D4b receive entry point: which product card's "receive" was clicked,
   // and into which branch (preselected in the shared modal).
   const [receiveTarget, setReceiveTarget] = useState<{ product: BranchStockProduct; branchId: string } | null>(null)
+  const restoreBranchForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
+    const branchId = entry.payload?.branchId
+    const isEdit = (typeof branchId === 'number' || typeof branchId === 'string') && String(branchId).trim() !== ''
+    if ((isEdit && !canEditBranch) || (!isEdit && !canAddBranch)) {
+      reparkDeniedRestore(entry)
+      notify(tr('access_denied', 'Access denied'), 'warning')
+      return false
+    }
+
+    let currentBranch: BranchRecord | null = null
+    if (isEdit) {
+      try {
+        const result = await branchApi.getBranches()
+        currentBranch = Array.isArray(result)
+          ? result.filter(isBranchRecord).find((branch) => String(branch.id) === String(branchId)) || null
+          : null
+      } catch {
+        reparkDeniedRestore(entry)
+        notify(tr('failed_to_load_data', 'Failed to load data'), 'warning')
+        return false
+      }
+      if (!currentBranch) {
+        reparkDeniedRestore(entry)
+        notify(tr('branch_not_found', 'Branch not found'), 'warning')
+        return false
+      }
+    }
+
+    setSelected(currentBranch)
+    setModal('form')
+    return true
+  }, [branchApi, canAddBranch, canEditBranch, notify, tr])
+
+  useEffect(() => {
+    const pending = consumePendingRestore('branch_form')
+    if (pending) {
+      void restoreBranchForm(pending).then((restored) => {
+        if (restored) markRestoreHandled('branch_form')
+      })
+    }
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'branch_form') return
+      const entry = detail.entry as MinimizedWorkEntry | undefined
+      if (!entry) return
+      void restoreBranchForm(entry).then((restored) => {
+        if (restored) markRestoreHandled('branch_form')
+      })
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreBranchForm])
   const restoreReceiveBatch = useCallback((entry: MinimizedWorkEntry): boolean => {
     if (!canReceiveStock) return false
     const payload = entry.payload || {}
@@ -928,6 +985,26 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     }
   }
 
+  const branchDraftKey = scopedWorkDraftKey(branchFormDraftBaseKey(selected?.id))
+  const canMinimizeBranchForm = selected ? canEditBranch : canAddBranch
+  const preserveBranchForm = () => {
+    flushPendingWorkDraft(branchDraftKey)
+    const isEdit = selected != null
+    minimizeWork({
+      key: branchFormWorkKey(selected?.id),
+      kind: 'branch_form',
+      pageId: 'branches',
+      label: isEdit
+        ? `${tr('edit_branch', 'Edit Branch')} — ${selected.name || selected.id}`
+        : tr('add_branch', 'Add Branch'),
+      payload: { branchId: selected?.id ?? null },
+      draftKey: branchDraftKey,
+      requiredPermission: { permissionKey: 'branches', actionKey: isEdit ? 'edit' : 'add' },
+    })
+    setModal(null)
+    setSelected(null)
+  }
+
   const handleDelete = async (branch: BranchRecord) => {
     if (!beginSingleAction(deleteInFlightRef)) return
     if (!window.confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) {
@@ -1311,7 +1388,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               <span>{tr('transfer', 'Transfer')}</span>
             </button>
           ) : null}
-          {tab === 'branches' ? <button
+          {tab === 'branches' && canAddBranch ? <button
             className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-700 bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:border-blue-800 hover:bg-blue-700"
             onClick={() => { setSelected(null); setModal('form') }}
             title={tr('add_branch', 'Add Branch')}
@@ -1491,14 +1568,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                           >
                             <Warehouse className="h-3.5 w-3.5" />
                           </button>
-                          <button
+                          {canEditBranch ? <button
                             onClick={() => { setSelected(branch); setModal('form') }}
                             className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                             title={tr('edit', 'Edit')}
                             aria-label={tr('edit', 'Edit')}
                           >
                             <Pencil className="h-3.5 w-3.5" />
-                          </button>
+                          </button> : null}
                           {!branch.is_default ? (
                             <button
                               onClick={() => handleDelete(branch)}
@@ -1822,7 +1899,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       ) : null}
 
       {modal === 'form' ? (
-        <Modal title={selected ? `${tr('edit_branch', 'Edit Branch')}: ${selected.name}` : `+ ${tr('add_branch', 'Add Branch')}`} onClose={() => setModal(null)} unsavedChanges={{ workKey: branchFormWorkKey(selected?.id) }}>
+        <Modal
+          title={selected ? `${tr('edit_branch', 'Edit Branch')}: ${selected.name}` : `+ ${tr('add_branch', 'Add Branch')}`}
+          onClose={() => setModal(null)}
+          onMinimize={canMinimizeBranchForm ? preserveBranchForm : undefined}
+          headerExtra={canMinimizeBranchForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveBranchForm} /> : null}
+          unsavedChanges={{ workKey: branchFormWorkKey(selected?.id) }}
+        >
           <BranchForm branch={selected} onSave={handleSaveBranch} onClose={() => setModal(null)} />
         </Modal>
       ) : null}

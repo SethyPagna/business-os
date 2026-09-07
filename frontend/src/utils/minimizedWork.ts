@@ -18,6 +18,7 @@ export type MinimizedWorkKind =
   | 'fast_stockin'
   | 'receive_batch'
   | 'create_products_session'
+  | 'branch_form'
   | 'product_detail'
 
 export type MinimizedWorkPermission = {

@@ -23,6 +23,8 @@ const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   // Receive drafts are per product. New chips always carry their exact
   // actor-scoped key; an older chip cannot safely guess which one to clear.
   receive_batch: null,
+  // Branch add/edit drafts are keyed by entity and new chips carry that key.
+  branch_form: null,
   // detail tabs manage their own keyed drafts; nothing global to clear
   product_detail: null,
 }

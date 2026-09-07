@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { useFormDirty } from '../../utils/formDirty.ts'
+import {
+  clearWorkDraft,
+  flushPendingWorkDraft,
+  readWorkDraft,
+  scheduleWorkDraftWrite,
+  scopedWorkDraftKey,
+} from '../../utils/workDrafts.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 
 // S4-21: the registry key for this form's unsaved work. Exported so the
@@ -9,6 +16,10 @@ import { useModalClose } from '../shared/modalCloseContext.ts'
 // two hand-written literals would drift and the ✕ would stop guarding.
 export function branchFormWorkKey(branchId?: string | number | null): string {
   return `branch-form-${branchId ?? 'new'}`
+}
+
+export function branchFormDraftBaseKey(branchId?: string | number | null): string {
+  return `branch_${branchId ?? 'new'}`
 }
 
 type BranchFlag = 0 | 1
@@ -22,6 +33,7 @@ interface BranchRecord {
   notes?: string | null
   is_default?: BranchFlag | boolean | null
   is_active?: BranchFlag | boolean | null
+  updated_at?: string | null
 }
 
 interface BranchFormState {
@@ -44,9 +56,8 @@ const useApp = useAppHook as () => {
   t: (key: string) => string | undefined
 }
 
-export default function BranchForm({ branch, onSave, onClose }: BranchFormProps) {
-  const { t } = useApp()
-  const [form, setForm] = useState<BranchFormState>({
+function initialBranchForm(branch?: BranchRecord | null): BranchFormState {
+  return {
     name: branch?.name || '',
     location: branch?.location || '',
     phone: branch?.phone || '',
@@ -54,7 +65,39 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
     notes: branch?.notes || '',
     is_default: branch?.is_default || 0,
     is_active: branch?.is_active ?? 1,
-  })
+  }
+}
+
+function restoreBranchForm(base: BranchFormState, draft?: Partial<BranchFormState> | null): BranchFormState {
+  if (!draft || typeof draft !== 'object') return base
+  return {
+    name: typeof draft.name === 'string' ? draft.name : base.name,
+    location: typeof draft.location === 'string' ? draft.location : base.location,
+    phone: typeof draft.phone === 'string' ? draft.phone : base.phone,
+    manager: typeof draft.manager === 'string' ? draft.manager : base.manager,
+    notes: typeof draft.notes === 'string' ? draft.notes : base.notes,
+    is_default: typeof draft.is_default === 'boolean' || draft.is_default === 0 || draft.is_default === 1
+      ? draft.is_default
+      : base.is_default,
+    is_active: typeof draft.is_active === 'boolean' || draft.is_active === 0 || draft.is_active === 1
+      ? draft.is_active
+      : base.is_active,
+  }
+}
+
+export default function BranchForm({ branch, onSave, onClose }: BranchFormProps) {
+  const { t } = useApp()
+  const draftKey = scopedWorkDraftKey(branchFormDraftBaseKey(branch?.id))
+  const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<BranchFormState>>> | undefined>(undefined)
+  if (restoredDraftRef.current === undefined) {
+    restoredDraftRef.current = readWorkDraft<Partial<BranchFormState>>(draftKey, {
+      notOlderThanMs: branch?.updated_at ? Date.parse(branch.updated_at) || 0 : 0,
+    })
+  }
+  const [form, setForm] = useState<BranchFormState>(() => restoreBranchForm(
+    initialBranchForm(branch),
+    restoredDraftRef.current?.data,
+  ))
   const [saving, setSaving] = useState(false)
   const [nameTouched, setNameTouched] = useState(false)
 
@@ -65,7 +108,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
   const { dirty } = useFormDirty(form, String(branch?.id ?? 'new'))
   const savedRef = useRef(false)
   const dirtyRef = useRef(false)
-  dirtyRef.current = dirty && !savedRef.current
+  dirtyRef.current = (dirty || !!restoredDraftRef.current) && !savedRef.current
   const requestClose = useModalClose(onClose)
   useEffect(() => registerDirtyWork({
     key: branchFormWorkKey(branch?.id),
@@ -74,8 +117,20 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
     isDirty: () => dirtyRef.current,
     // No save hook: saving runs required-name validation, which would
     // surface an error on a page the operator is trying to leave.
+    discard: () => clearWorkDraft(draftKey),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [branch?.id])
+  }), [branch?.id, draftKey])
+
+  useEffect(() => () => {
+    // This cleanup is declared before the writer cleanup so a minimize or
+    // guarded navigation flushes the last typed value before unmount.
+    flushPendingWorkDraft(draftKey)
+  }, [draftKey])
+
+  useEffect(() => {
+    if (!dirtyRef.current) return
+    return scheduleWorkDraftWrite(draftKey, form)
+  }, [draftKey, form])
 
   const set = <Key extends keyof BranchFormState>(key: Key, value: BranchFormState[Key]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -94,6 +149,8 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
       // bug). Latched before onClose, never after.
       savedRef.current = true
       dirtyRef.current = false
+      restoredDraftRef.current = null
+      clearWorkDraft(draftKey)
       onClose()
     } finally {
       setSaving(false)
