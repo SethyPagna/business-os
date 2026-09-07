@@ -426,7 +426,7 @@ app.post('/:id/rewire', async (c) => {
   // A product whose gallery ALREADY holds the target image must not end up
   // with two identical rows -- drop the would-be duplicates first, then
   // repoint the rest. Covers are a single column, no such hazard.
-  const statements = [
+  const statements = canChangeProductImages ? [
     {
       sql: `DELETE FROM product_images WHERE image_path = @from AND product_id IN (
               SELECT product_id FROM product_images WHERE image_path = @to)`,
@@ -434,15 +434,16 @@ app.post('/:id/rewire', async (c) => {
     },
     { sql: 'UPDATE product_images SET image_path = @to WHERE image_path = @from', params: { from: fromPath, to: toPath } },
     { sql: 'UPDATE products SET image_path = @to, updated_at = CURRENT_TIMESTAMP WHERE image_path = @from', params: { from: fromPath, to: toPath } },
-    { sql: 'UPDATE users SET avatar_path = @to WHERE avatar_path = @from', params: { from: fromPath, to: toPath } },
-  ]
+  ] : []
+  const avatarStatementIndex = statements.length
+  statements.push({ sql: 'UPDATE users SET avatar_path = @to WHERE avatar_path = @from', params: { from: fromPath, to: toPath } })
   const results = await db.batch(statements)
   const changesAt = (index: number) => Number((results[index] as { changes?: number; meta?: { changes?: number } })?.changes ?? (results[index] as { meta?: { changes?: number } })?.meta?.changes ?? 0)
   const rewired = {
-    gallery_duplicates_removed: changesAt(0),
-    gallery: changesAt(1),
-    products: changesAt(2),
-    avatars: changesAt(3),
+    gallery_duplicates_removed: canChangeProductImages ? changesAt(0) : 0,
+    gallery: canChangeProductImages ? changesAt(1) : 0,
+    products: canChangeProductImages ? changesAt(2) : 0,
+    avatars: changesAt(avatarStatementIndex),
   }
 
   const settingRows = await db.prepare('SELECT value FROM settings').all<{ value: string }>()
