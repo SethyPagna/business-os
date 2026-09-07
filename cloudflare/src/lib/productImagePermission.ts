@@ -1,8 +1,55 @@
 import { sanitizeMediaList, sanitizeMediaPath } from './media'
+import type { D1Compat } from './db'
 
 export type ProductImageState = {
   image_path?: unknown
   image_gallery?: unknown
+}
+
+export class ProductImageAssetError extends Error {
+  readonly code = 'missing_image_asset'
+  constructor(readonly path: string) {
+    super(`Image asset ${path} does not exist.`)
+    this.name = 'ProductImageAssetError'
+  }
+}
+
+function decodedUploadPathCandidate(path: string): string {
+  if (!path.startsWith('/uploads/')) return path
+  try {
+    return decodeURI(path)
+  } catch (_) {
+    return path
+  }
+}
+
+/** Resolve submitted upload identities exactly, then by one legacy decode. */
+export async function resolveProductImageFields(db: D1Compat, body: Record<string, unknown>): Promise<void> {
+  const hasPrimary = Object.prototype.hasOwnProperty.call(body, 'image_path')
+  const hasGallery = Object.prototype.hasOwnProperty.call(body, 'image_gallery')
+  if (!hasPrimary && !hasGallery) return
+  const primary = hasPrimary ? sanitizeMediaPath(body.image_path, '') : ''
+  const gallery = hasGallery ? sanitizeMediaList(body.image_gallery) : []
+  const supplied = [...new Set([primary, ...gallery].filter((path) => path.startsWith('/uploads/')))]
+  if (!supplied.length) return
+
+  const candidates = [...new Set(supplied.flatMap((path) => [path, decodedUploadPathCandidate(path)]))]
+  const assetPaths = new Set<string>()
+  for (let offset = 0; offset < candidates.length; offset += 90) {
+    const chunk = candidates.slice(offset, offset + 90)
+    const rows = await db.prepare(`SELECT public_path FROM file_assets WHERE public_path IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ public_path: string }>(chunk)
+    for (const row of rows) assetPaths.add(String(row.public_path))
+  }
+  const resolved = new Map<string, string>()
+  for (const path of supplied) {
+    const decoded = decodedUploadPathCandidate(path)
+    const canonical = assetPaths.has(path) ? path : decoded !== path && assetPaths.has(decoded) ? decoded : ''
+    if (!canonical) throw new ProductImageAssetError(path)
+    resolved.set(path, canonical)
+  }
+  if (primary) body.image_path = resolved.get(primary) || primary
+  if (hasGallery) body.image_gallery = gallery.map((path) => resolved.get(path) || path)
 }
 
 function sameOrderedPaths(left: string[], right: string[]): boolean {

@@ -62,6 +62,7 @@ function freshState(requester) {
     updated: [],
     synced: [],
     audits: 0,
+    assetPaths: new Set(['/uploads/one.png', '/uploads/two.png', '/uploads/three.png', '/uploads/new.png']),
   }
 }
 
@@ -75,7 +76,10 @@ function loadReviewApply(state, updateChanges = 1) {
           if (/SELECT id FROM products/i.test(sql)) return state.current ? { id: state.current.id } : undefined
           return undefined
         },
-        async all() {
+        async all(params = []) {
+          if (/SELECT public_path FROM file_assets/i.test(sql)) {
+            return [...state.assetPaths].filter((public_path) => params.includes(public_path)).map((public_path) => ({ public_path }))
+          }
           if (/FROM product_images/i.test(sql)) return state.currentGallery.map((image_path) => ({ image_path }))
           return []
         },
@@ -147,6 +151,21 @@ async function main() {
     assert.equal(state.synced.length, 0)
     assert.equal(state.audits, 1)
     console.log('PASS unchanged queued images are stripped and the non-image edit still applies')
+  }
+
+  {
+    const state = freshState(role({ products: 'review', 'products:image': false }))
+    state.current.image_path = '/uploads/ក្រែម ខ្មែរ.webp'
+    state.currentGallery = ['/uploads/ក្រែម ខ្មែរ.webp']
+    state.assetPaths = new Set(['/uploads/ក្រែម ខ្មែរ.webp'])
+    const { applyApprovedPendingAction } = loadReviewApply(state)
+    await applyApprovedPendingAction({}, pending('update', {
+      description: 'approved', image_path: '/uploads/%E1%9E%80%E1%9F%92%E1%9E%9A%E1%9F%82%E1%9E%98%20%E1%9E%81%E1%9F%92%E1%9E%98%E1%9F%82%E1%9E%9A.webp',
+      image_gallery: ['/uploads/%E1%9E%80%E1%9F%92%E1%9E%9A%E1%9F%82%E1%9E%98%20%E1%9E%81%E1%9F%92%E1%9E%98%E1%9F%82%E1%9E%9A.webp'],
+    }), reviewer)
+    assert.deepEqual(state.updated, [{ description: 'approved' }])
+    assert.equal(state.synced.length, 0)
+    console.log('PASS legacy queued Khmer alias resolves before approval-time permission comparison')
   }
 
   {

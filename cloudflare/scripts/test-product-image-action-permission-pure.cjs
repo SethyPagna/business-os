@@ -61,7 +61,7 @@ function role(grants) {
   }
 }
 
-function freshState(user) {
+function freshState(user, assetPaths = ['/uploads/one.png', '/uploads/two.png', '/uploads/three.png', '/uploads/new.png']) {
   return {
     user,
     current: { id: 77, image_path: '/uploads/one.png', description: 'old' },
@@ -71,6 +71,7 @@ function freshState(user) {
     updated: [],
     synced: [],
     dbWrites: 0,
+    assetPaths: new Set(assetPaths),
   }
 }
 
@@ -78,7 +79,10 @@ function loadProductsRoute(state) {
   const db = {
     prepare(sql) {
       return {
-        async all() {
+        async all(params = []) {
+          if (/SELECT public_path FROM file_assets/i.test(sql)) {
+            return [...state.assetPaths].filter((public_path) => params.includes(public_path)).map((public_path) => ({ public_path }))
+          }
           if (/FROM product_images/i.test(sql)) return state.currentGallery.map((image_path) => ({ image_path }))
           return []
         },
@@ -197,6 +201,46 @@ async function main() {
     assert.deepEqual(state.updated[0], { description: 'new' })
     assert.equal(state.synced.length, 0)
     console.log('PASS unchanged full-form images are omitted and products:edit still succeeds')
+  }
+
+  {
+    const state = freshState(role({ products: true, 'products:image': false }), [
+      '/uploads/Lovenude Lip Stain.webp', '/uploads/two.png',
+    ])
+    state.current.image_path = '/uploads/Lovenude Lip Stain.webp'
+    state.currentGallery = ['/uploads/Lovenude Lip Stain.webp', '/uploads/two.png']
+    const response = await request(state, '/77', 'PUT', {
+      description: 'new', image_path: '/uploads/Lovenude%20Lip%20Stain.webp',
+      image_gallery: ['/uploads/Lovenude%20Lip%20Stain.webp', '/uploads/two.png'],
+    })
+    assert.equal(response.status, 200, await response.clone().text())
+    assert.deepEqual(state.updated[0], { description: 'new' })
+    console.log('PASS one-layer legacy alias resolves before unchanged-image permission comparison')
+  }
+
+  {
+    const state = freshState(role({ products: true, 'products:image': false }), [
+      '/uploads/Lovenude%20Lip%20Stain.webp', '/uploads/Lovenude Lip Stain.webp',
+    ])
+    state.current.image_path = '/uploads/Lovenude Lip Stain.webp'
+    state.currentGallery = ['/uploads/Lovenude Lip Stain.webp']
+    const response = await request(state, '/77', 'PUT', {
+      image_path: '/uploads/Lovenude%20Lip%20Stain.webp', image_gallery: ['/uploads/Lovenude%20Lip%20Stain.webp'],
+    })
+    assert.equal(response.status, 403)
+    assert.equal(state.updated.length + state.synced.length, 0)
+    console.log('PASS exact percent identity wins over a decoded alias and remains a real change')
+  }
+
+  {
+    const state = freshState(role({ products: true }))
+    const response = await request(state, '/77', 'PUT', {
+      image_path: '/uploads/missing.png', image_gallery: ['/uploads/missing.png'],
+    })
+    assert.equal(response.status, 409)
+    assert.equal((await response.json()).code, 'missing_image_asset')
+    assert.equal(state.updated.length + state.synced.length, 0)
+    console.log('PASS a missing upload identity is rejected before product writes')
   }
 
   {

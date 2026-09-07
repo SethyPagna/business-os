@@ -42,7 +42,7 @@ import {
   buildIssueStateClauses,
 } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { omitUnchangedProductImageFields, productImageFieldsChanged } from '../lib/productImagePermission'
+import { omitUnchangedProductImageFields, productImageFieldsChanged, resolveProductImageFields, ProductImageAssetError } from '../lib/productImagePermission'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -1586,6 +1586,12 @@ app.post('/', async (c) => {
       supplied: imageLimitError.supplied,
     }, 409)
   }
+  try {
+    await resolveProductImageFields(getDb(c.env), body)
+  } catch (error) {
+    if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
+    throw error
+  }
 
   const changesImages = productImageFieldsChanged(body)
   if (imagePermissionDenied(user, changesImages)) {
@@ -1782,6 +1788,12 @@ app.put('/:id', async (c) => {
       limit: imageLimitError.limit,
       supplied: imageLimitError.supplied,
     }, 409)
+  }
+  try {
+    await resolveProductImageFields(getDb(c.env), body)
+  } catch (error) {
+    if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
+    throw error
   }
 
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
@@ -2103,6 +2115,12 @@ app.post('/variant', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+  try {
+    await resolveProductImageFields(getDb(c.env), body)
+  } catch (error) {
+    if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
+    throw error
+  }
   const changesImages = productImageFieldsChanged({ image_path: body.image_path })
   if (imagePermissionDenied(user, changesImages)) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
