@@ -3318,6 +3318,7 @@ type DuplicatePreviewCatalog = {
   stockByProductId: Map<number, DuplicatePreviewStockRow[]>
   activeBatchCountByProductId: Map<number, number>
   complexLinkedProductIds: Set<number>
+  appliedPlansByKeeperId: Map<number, ProductMergeClusterPlan[]>
 }
 
 const MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS = 600
@@ -3400,7 +3401,7 @@ async function readDuplicatePreviewCatalog(
     const { sql, params } = buildInClause('id', chunk)
     return {
       sql: `
-      SELECT p.id, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => `p.${field}`).join(', ')},
+      SELECT p.id, p.updated_at, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => `p.${field}`).join(', ')},
              bs.branch_id, bs.quantity,
              (SELECT COUNT(*) FROM product_batches pb
               WHERE pb.variant_product_id=p.id AND pb.is_active=1) AS active_batch_count
@@ -3414,11 +3415,25 @@ async function readDuplicatePreviewCatalog(
   })
   const complexLinkPlan = multiClusterComplexLinkPlan(groups)
   const complexLinkStatements = complexLinkPlan.statements
+  const keeperIdsJson = JSON.stringify([...new Set(groups.map((group) => group.canonical.id))])
+  const appliedPlanStatement = {
+    sql: `
+      SELECT id, payload_json
+      FROM undo_snapshots
+      WHERE kind='product.merge' AND status='applied'
+        AND CAST(json_extract(payload_json,'$.bulkClusterPlan.keeperId') AS INTEGER) IN (
+          SELECT CAST(value AS INTEGER) FROM json_each(@keeperIdsJson)
+        )
+      ORDER BY id DESC
+    `,
+    params: { keeperIdsJson },
+  }
   const batchedResults = readStatements.length || complexLinkStatements.length
-    ? await db.batch([...readStatements, ...complexLinkStatements])
+    ? await db.batch([...readStatements, ...complexLinkStatements, appliedPlanStatement])
     : []
   const readResults = batchedResults.slice(0, readStatements.length)
-  const complexLinkResults = batchedResults.slice(readStatements.length)
+  const complexLinkResults = batchedResults.slice(readStatements.length, readStatements.length + complexLinkStatements.length)
+  const appliedPlanRows = (batchedResults[readStatements.length + complexLinkStatements.length]?.results || []) as Array<{ payload_json?: unknown }>
   const rows = readResults.flatMap((result) => Array.isArray(result.results)
     ? result.results as Record<string, unknown>[]
     : [])
@@ -3426,6 +3441,7 @@ async function readDuplicatePreviewCatalog(
   const moneyByProductId = new Map<number, Record<string, unknown>>()
   const stockByProductId = new Map<number, DuplicatePreviewStockRow[]>()
   const activeBatchCountByProductId = new Map<number, number>()
+  const appliedPlansByKeeperId = new Map<number, ProductMergeClusterPlan[]>()
   const complexLinkedProductIds = new Set([...complexLinkPlan.assumedComplexIds, ...complexLinkResults.flatMap((result) => Array.isArray(result.results)
     ? result.results.map((row) => Number((row as { product_id?: unknown }).product_id))
     : []).filter((id) => Number.isSafeInteger(id) && id > 0)])
@@ -3435,6 +3451,7 @@ async function readDuplicatePreviewCatalog(
     if (!moneyByProductId.has(productId)) {
       moneyByProductId.set(productId, {
         id: productId,
+        updated_at: row.updated_at,
         ...Object.fromEntries([...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => [field, row[field]])),
       })
       activeBatchCountByProductId.set(productId, Number(row.active_batch_count) || 0)
@@ -3444,7 +3461,17 @@ async function readDuplicatePreviewCatalog(
     if (!stockByProductId.has(productId)) stockByProductId.set(productId, [])
     stockByProductId.get(productId)!.push({ branch_id: branchId, quantity: Number(row.quantity) || 0 })
   }
-  return { moneyByProductId, stockByProductId, activeBatchCountByProductId, complexLinkedProductIds }
+  for (const row of appliedPlanRows) {
+    try {
+      const payload = JSON.parse(String(row.payload_json || '{}')) as { bulkClusterPlan?: unknown }
+      const plan = parseProductMergeClusterPlan(payload.bulkClusterPlan)
+      if (!plan) continue
+      const plans = appliedPlansByKeeperId.get(plan.keeperId)
+      if (plans) plans.push(plan)
+      else appliedPlansByKeeperId.set(plan.keeperId, [plan])
+    } catch {}
+  }
+  return { moneyByProductId, stockByProductId, activeBatchCountByProductId, complexLinkedProductIds, appliedPlansByKeeperId }
 }
 
 app.get('/merge-duplicates/preview', async (c) => {
@@ -3499,13 +3526,30 @@ app.get('/merge-duplicates/preview', async (c) => {
         cost_price_usd: Number(canonicalCost.cost_price_usd) || 0,
         cost_price_khr: Number(canonicalCost.cost_price_khr) || 0,
       }
-      const economics = resolveProductMergeEconomics(costRows)
+      const identityKey = JSON.stringify([normalizeProductGroupName(group.canonical.name), identityBarcodeKey(group.canonical.barcode)])
+      const persistedPlan = selectAppliedBulkClusterPlan(
+        previewCatalog.appliedPlansByKeeperId.get(group.canonical.id) || [],
+        group.canonical.id,
+        identityKey,
+        duplicateIds,
+      )
+      const hasPlanConflict = Boolean(persistedPlan) && (
+        [group.canonical.id, ...duplicateIds].some((id) => !persistedPlan!.memberIds.includes(id))
+        || !productMergePlanKeeperMatches(persistedPlan!, canonicalCost)
+        || duplicateIds.some((id) => !productMergePlanSourceMemberMatches(persistedPlan!, costById.get(id) || {}))
+      )
+      const economics = persistedPlan && !hasPlanConflict
+        ? resolveProductMergeClusterPlanEconomics(persistedPlan)
+        : resolveProductMergeEconomics(costRows)
       const costAfter = {
-        cost_price_usd: Number(economics.merged.cost_price_usd ?? costBefore.cost_price_usd) || 0,
-        cost_price_khr: Number(economics.merged.cost_price_khr ?? costBefore.cost_price_khr) || 0,
+        cost_price_usd: hasPlanConflict ? costBefore.cost_price_usd : Number(economics.merged.cost_price_usd ?? costBefore.cost_price_usd) || 0,
+        cost_price_khr: hasPlanConflict ? costBefore.cost_price_khr : Number(economics.merged.cost_price_khr ?? costBefore.cost_price_khr) || 0,
       }
       const groupMemberIds = [group.canonical.id, ...duplicateIds]
-      const mergeBlockers = group.duplicates.length > MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER ? [{
+      const mergeBlockers = hasPlanConflict ? [{
+          code: 'merge_cluster_plan_conflict',
+          error: 'This partially saved identity group changed after its original plan. Review it before resuming; no further member will be merged.',
+        }] : group.duplicates.length > MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER ? [{
           code: 'cluster_exceeds_atomic_limit',
           error: `This ${group.duplicates.length + 1}-row identity cluster exceeds the safe atomic merge limit and needs a dedicated manifest.`,
         }] : group.duplicates.length > 1 && groupMemberIds.some((id) => previewCatalog.complexLinkedProductIds.has(id)) ? [{
@@ -3564,15 +3608,28 @@ async function readAppliedBulkClusterPlan(
     ORDER BY id DESC
     LIMIT 50
   `).all<{ payload_json: string }>({ keeperId, identityKey })
-  for (const row of rows) {
-    try {
-      const payload = JSON.parse(String(row.payload_json || '{}')) as { bulkClusterPlan?: unknown }
-      const plan = parseProductMergeClusterPlan(payload.bulkClusterPlan)
-      // A completed old plan is not reused for a newly imported member of the
-      // same identity. A partial plan is applicable only while at least one of
-      // its original duplicate ids is still active in this group.
-      if (plan && activeDuplicateIds.some((id) => plan.memberIds.includes(id))) return plan
-    } catch {}
+  const candidates: ProductMergeClusterPlan[] = []
+  for (const row of rows) try {
+    const payload = JSON.parse(String(row.payload_json || '{}')) as { bulkClusterPlan?: unknown }
+    const plan = parseProductMergeClusterPlan(payload.bulkClusterPlan)
+    if (plan) candidates.push(plan)
+  } catch {}
+  return selectAppliedBulkClusterPlan(candidates, keeperId, identityKey, activeDuplicateIds)
+}
+
+function selectAppliedBulkClusterPlan(
+  candidates: readonly ProductMergeClusterPlan[],
+  keeperId: number,
+  identityKey: string,
+  activeDuplicateIds: readonly number[],
+): ProductMergeClusterPlan | null {
+  if (!activeDuplicateIds.length) return null
+  for (const plan of candidates) {
+    // A completed old plan is not reused for a newly imported member of the
+    // same identity. A partial plan is applicable only while at least one of
+    // its original duplicate ids is still active in this group.
+    if (plan.keeperId === keeperId && plan.identityKey === identityKey
+      && activeDuplicateIds.some((id) => plan.memberIds.includes(id))) return plan
   }
   return null
 }

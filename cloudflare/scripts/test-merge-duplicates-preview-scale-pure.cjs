@@ -177,6 +177,41 @@ function seedCatalog() {
       id,variant_product_id,batch_key,lot_code,batch_number,received_at,unit_cost_usd,is_active
     ) VALUES(?,?,?,?,?,?,?,1)`)
     insertBatch.run(9001, complexIds[1], 'complex-a', 'COMPLEX-A', 1, '2026-01-01', 5)
+
+    // Simulate the durable state after the first case of the 4/5/6 cluster
+    // committed but the request stopped before member 6. The active keeper is
+    // already the synthetic whole-cluster result (5), so recomputing from only
+    // keeper 5 + remaining source 6 would drift to 5.5. Preview must recover
+    // the saved immutable plan in one catalog-wide batched read.
+    const plannedRows = raw.prepare(`
+      SELECT id, updated_at, cost_price_usd, cost_price_khr,
+             selling_price_usd, selling_price_khr,
+             wholesale_price_usd, wholesale_price_khr
+      FROM products WHERE id IN (?,?,?) ORDER BY id
+    `).all(...fixtureGroups[0])
+    const moneyFields = [
+      'cost_price_usd', 'cost_price_khr', 'selling_price_usd',
+      'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr',
+    ]
+    const bulkClusterPlan = {
+      version: 1,
+      identityKey: JSON.stringify(['scale item 0000', '880000000000']),
+      keeperId: fixtureGroups[0][0],
+      memberIds: [...fixtureGroups[0]],
+      members: plannedRows.map((row) => ({
+        id: row.id,
+        updated_at: row.updated_at,
+        money: Object.fromEntries(moneyFields.map((field) => [field, row[field]])),
+      })),
+    }
+    raw.prepare(`UPDATE products SET
+      cost_price_usd=5, cost_price_khr=5000,
+      selling_price_usd=12, selling_price_khr=48000,
+      wholesale_price_usd=10, wholesale_price_khr=40000
+      WHERE id=?`).run(fixtureGroups[0][0])
+    raw.prepare('UPDATE products SET is_active=0 WHERE id=?').run(fixtureGroups[0][1])
+    raw.prepare(`INSERT INTO undo_snapshots(kind,status,payload_json)
+      VALUES('product.merge','applied',?)`).run(JSON.stringify({ bulkClusterPlan }))
     raw.exec('COMMIT')
     return { d1, fixtureGroups, productCount: nextId - 1 }
   } catch (error) {
@@ -209,8 +244,8 @@ async function invokePreview(handler, user) {
   assert.equal(response.status, 200)
   assert.equal(response.body.success, true)
   assert.equal(response.body.groupCount, GROUP_COUNT)
-  assert.equal(response.body.duplicateProductCount, 2_027)
-  assert.equal(response.body.mergeableDuplicateProductCount, 1_998)
+  assert.equal(response.body.duplicateProductCount, 2_026)
+  assert.equal(response.body.mergeableDuplicateProductCount, 1_997)
   assert.equal(response.body.blockedGroupCount, 3)
   assert.equal(response.body.costRefusalCount, 1)
   assert.equal(response.body.batchLimit, 25)
@@ -221,16 +256,14 @@ async function invokePreview(handler, user) {
   assert.equal(meanGroup.canonicalName, 'Scale Item 0000')
   assert.equal(meanGroup.canonicalBarcode, '880000000000')
   assert.deepEqual(meanGroup.caseKeys, [
-    `${fixtureGroups[0][0]}:${fixtureGroups[0][1]}`,
     `${fixtureGroups[0][0]}:${fixtureGroups[0][2]}`,
   ])
   assert.deepEqual(meanGroup.duplicates, [
-    { id: fixtureGroups[0][1], name: 'Scale Item 0000', barcode: '880000000000', quantity: 0, batchCount: 0 },
     { id: fixtureGroups[0][2], name: 'Scale Item 0000', barcode: '880000000000', quantity: 0, batchCount: 0 },
   ])
   assert.equal(meanGroup.totalQuantityToMove, 0)
   assert.deepEqual(meanGroup.branchBreakdown, [])
-  assert.deepEqual(meanGroup.costBefore, { cost_price_usd: 4, cost_price_khr: 4000 })
+  assert.deepEqual(meanGroup.costBefore, { cost_price_usd: 5, cost_price_khr: 5000 })
   assert.deepEqual(meanGroup.costAfter, { cost_price_usd: 5, cost_price_khr: 5000 })
   assert.equal(meanGroup.mergeable, true)
   assert.deepEqual(meanGroup.mergeBlockers, [])
@@ -252,13 +285,14 @@ async function invokePreview(handler, user) {
   assert.equal(invalidCost.costRefusals[0].field, 'cost_price_usd')
   assert.equal(invalidCost.costRefusals[0].code, 'negative')
 
-  // 4,027 unique member ids fit in 41 100-bind reads. Sixteen additional
+  // 4,026 active member ids fit in 41 100-bind reads. Sixteen additional
   // simple SELECTs map every potentially linked member of a multi-row cluster,
+  // one JSON-bound snapshot-plan read preserves any partial cluster economics,
   // plus one duplicate detector query and one branch-name query. This bound is deliberately
   // independent of group count; the old per-group route executes 6,002.
-  assert.ok(adapter.metrics.queries <= 59, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
+  assert.ok(adapter.metrics.queries <= 60, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
   assert.equal(adapter.metrics.batchRoundTrips, 1, 'preview hydration and the linked-member map must share one D1 round trip')
-  assert.equal(adapter.metrics.maxBatchStatements, 57)
+  assert.equal(adapter.metrics.maxBatchStatements, 58)
   assert.ok(adapter.metrics.maxBoundParams <= 100, `preview bound ${adapter.metrics.maxBoundParams} params in one statement`)
   assert.ok(
     adapter.metrics.sql.some((sql) => /FROM products p LEFT JOIN branch_stock/i.test(sql)),
