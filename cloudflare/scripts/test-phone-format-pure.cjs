@@ -161,10 +161,9 @@ async function realDbChecks() {
   rawDb.prepare("INSERT INTO suppliers (name, phone) VALUES ('Acknowledged Exact', '066 111 222')").run()
   const strictGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { name: 'Acknowledged Exact', phones: ['066111222'] })
   assert.throws(() => rawDb.prepare(strictGuard.sql).run(strictGuard.params), /UNIQUE constraint failed/, 'an unacknowledged owner aborts the write guard')
-  const acknowledgedMatches = await lib.findContactDuplicates(db, 'suppliers', { name: 'Acknowledged Exact', phones: ['066111222'] })
-  const acknowledgedReview = lib.buildContactDuplicateReview(acknowledgedMatches)
-  const decision = { action: 'create_separate', ...acknowledgedReview }
-  const allowedGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { name: 'Acknowledged Exact', phones: ['+855 66 111 222'] }, decision)
+  const acknowledgedState = await lib.findContactDuplicateState(db, 'suppliers', { name: 'Acknowledged Exact', phones: ['066111222'] })
+  const decision = { action: 'create_separate', ...acknowledgedState.review }
+  const allowedGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { name: 'Acknowledged Exact', phones: ['+855 66 111 222'] }, decision, acknowledgedState.snapshots)
   assert.strictEqual(rawDb.prepare(allowedGuard.sql).get(allowedGuard.params).contact_duplicate_guard, 1, 'an exact full candidate snapshot explicitly acknowledged by staff is allowed')
   rawDb.prepare("UPDATE suppliers SET name='Renamed Concurrently' WHERE name='Acknowledged Exact'").run()
   assert.throws(() => rawDb.prepare(allowedGuard.sql).get(allowedGuard.params), /malformed JSON/, 'a concurrent rename invalidates the earlier exact-match acknowledgement')
