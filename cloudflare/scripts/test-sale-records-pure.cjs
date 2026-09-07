@@ -1,8 +1,8 @@
 // A sale's RECORDS list: the union of every writer that changes a sale (N41,
 // lib/saleRecords.ts + migration 0129).
 //
-// The owner asked for one line under every sale row -- "Records n" -- opening a
-// float that says who changed what, with before and after. A sale is changed by
+// The expanded sale detail opens "Records n", a float that says who changed
+// what, with before and after. A sale is changed by
 // four different writers that each record themselves somewhere different, so the
 // interesting failures are all failures of the UNION, and every case here is
 // chosen because a plausible simpler implementation gets it WRONG:
@@ -111,6 +111,11 @@ const SALE = {
   receipt_number: '20260906-090000',
   sale_status: 'cancelled',
   total_usd: 12.5,
+  payment_method: 'Cash',
+  payment_details: JSON.stringify([{ method: 'Cash', amount_usd: 12.5, amount_khr: 0 }]),
+  amount_paid_usd: 12.5,
+  amount_paid_khr: 0,
+  items: [{ product_name: 'Serum', quantity: 1, applied_price_usd: 12.5, total_usd: 12.5 }],
 }
 
 const LEDGER = [
@@ -246,6 +251,40 @@ runTest('settling a credit sale is its own kind, and cancelling is not just "sta
     details: JSON.stringify({ oldStatus: 'completed', newStatus: 'awaiting_delivery' }),
   })
   assert.strictEqual(plain.kind, 'status_changed')
+})
+
+runTest('sale creation includes products and original tender amounts', () => {
+  const created = saleCreatedRecord(SALE)
+  assert.deepStrictEqual(created.after.products, [
+    { product: 'Serum', quantity: 1, unit_price_usd: 12.5, line_total_usd: 12.5 },
+  ])
+  assert.strictEqual(created.after.payment_method, 'Cash')
+  assert.strictEqual(created.after.amount_paid_usd, 12.5)
+  assert.deepStrictEqual(created.after.payment_details, [{ method: 'Cash', amount_usd: 12.5, amount_khr: 0 }])
+})
+
+runTest('a payment correction is one rich record, not a status-only duplicate', () => {
+  const at = '2026-09-06 12:30:00'
+  const generic = {
+    id: 700, action: 'update', user_name: 'dara', created_at: at,
+    details: JSON.stringify({ oldStatus: 'awaiting_payment', newStatus: 'completed' }),
+  }
+  const explicit = {
+    id: 701, action: 'sale_settlement', user_name: 'dara', created_at: at,
+    details: JSON.stringify({
+      paymentCorrection: true,
+      before: { sale_status: 'awaiting_payment', payment_method: null, payment_details: null, amount_paid_usd: 0, amount_paid_khr: 0 },
+      after: { sale_status: 'completed', payment_method: 'ABA', payment_details: '[{"method":"ABA","amount_usd":90,"amount_khr":0}]', amount_paid_usd: 90, amount_paid_khr: 0 },
+    }),
+  }
+  const records = buildSaleRecords({ sale: SALE, audit: [generic, explicit] })
+  const payments = records.filter((record) => record.kind === 'payment_settled')
+  assert.strictEqual(payments.length, 1, 'the matching generic status audit is the explicit settlement twin')
+  assert.strictEqual(payments[0].summary, 'Payment corrected')
+  assert.strictEqual(payments[0].before.payment_method, null)
+  assert.strictEqual(payments[0].after.payment_method, 'ABA')
+  assert.strictEqual(payments[0].after.amount_paid_usd, 90)
+  assert.deepStrictEqual(payments[0].after.payment_details, [{ method: 'ABA', amount_usd: 90, amount_khr: 0 }])
 })
 
 runTest('a customer swap reports both ids', () => {
@@ -520,6 +559,7 @@ function seedRecords(sqlite) {
   // An audit row about a DIFFERENT sale and a row about another entity: both
   // must be invisible to sale 77's count.
   sqlite.prepare(`INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (600,'admin','update','sale','78','{"oldStatus":"completed","newStatus":"cancelled"}','2026-09-06 19:00:00')`).run()
+  sqlite.prepare(`INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (602,'admin','sale_payment_correction_opened','sale','78','{"oldStatus":"completed","newStatus":"cancelled"}','2026-09-06 19:00:00')`).run()
   sqlite.prepare("INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (601,'admin','update','product','77','{}','2026-09-06 19:00:00')").run()
 
   sqlite.prepare("INSERT INTO sale_bulk_operations (id, actor_id, request_id, request_json, receipt_json, history_id) VALUES ('op-abc',1,'r1',@req,@rec,90)")
@@ -666,7 +706,7 @@ runTest('the Worker route is actually wired to this module', () => {
   // the row that the float cannot account for.
   assert.match(ROUTES, /COALESCE\(r\.return_scope,'customer'\) = 'customer'/)
   assert.match(buildSaleRecordsCountSql('?'), /COALESCE\(return_scope, 'customer'\) = 'customer'/)
-  assert.match(buildSaleRecordsCountSql('?'), /json_extract\(details, '\$\.applier'\) = 'sale\.add_items'/,
+  assert.match(buildSaleRecordsCountSql('?'), /json_extract\(a\.details, '\$\.applier'\) = 'sale\.add_items'/,
     'the count SQL must drop the add-items undo twin the classifier drops')
 })
 
@@ -677,6 +717,8 @@ runTest('the records route is gated on READING a sale, not on amending one', () 
   // All four sources, or the union is a union of three.
   assert.match(body, /FROM sale_amendments/)
   assert.match(body, /FROM audit_logs/)
+  assert.match(body, /FROM sale_items WHERE sale_id = \?/, 'sale creation must include the products actually recorded')
+  assert.match(body, /payment_method, payment_details, amount_paid_usd, amount_paid_khr/, 'sale creation must include its original tender')
   assert.match(body, /FROM sale_bulk_members/)
   assert.match(body, /buildSaleRecords\(/)
   // The TEXT bind, in the route as well as in the count SQL.

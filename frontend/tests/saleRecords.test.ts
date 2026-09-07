@@ -160,8 +160,8 @@ runTest('a missing count is an em dash, never 0 -- "nothing ever happened" is ne
   assert.equal(saleRecordsCount({}), null, 'an older cached row must not claim zero')
   assert.equal(saleRecordsCount(null), null)
   assert.equal(saleRecordsCount({ records_count: -1 }), null)
-  const surface = read('../src/components/sales/SalesListSurface.tsx')
-  assert.match(surface, /count === null \? '—' : count/, 'the line must print an em dash for a missing count')
+  const detail = read('../src/components/sales/SaleDetailModal.tsx')
+  assert.match(detail, /saleRecordsCount\(sale\) \?\? '—'/, 'the detail control must print an em dash for a missing count')
 })
 
 runTest('a malformed response degrades to visible rows rather than an empty list', () => {
@@ -174,17 +174,13 @@ runTest('a malformed response degrades to visible rows rather than an empty list
 
 // ---- the surfaces -------------------------------------------------------
 
-runTest('the Records line is on EVERY sale row, at both breakpoints, from one component', () => {
+runTest('Records is inside the expanded sale detail and absent from collapsed rows', () => {
   const surface = read('../src/components/sales/SalesListSurface.tsx')
-  assert.match(surface, /function SaleRecordsLine\(/, 'the line must be one component, not a copy per layout')
-  const uses = surface.match(/<SaleRecordsLine\b/g) || []
-  assert.equal(uses.length, 2, 'the desktop table row and the phone card must BOTH render it')
-  // Desktop: its own row under the sale's row. A bare <div> inside <tbody> is
-  // hoisted out of the table box by the browser.
-  assert.match(surface, /<td colSpan=\{columnCount - 1\}[\s\S]{0,200}<SaleRecordsLine/, 'the desktop line must be a row of the table')
-  assert.match(surface, /openSaleRecords\?: \(sale: SaleRecord\) => void/, 'the surface must take the open callback')
-  // Opening the float must not also toggle selection or open the detail modal.
-  assert.match(surface, /onClick=\{\(event\) => \{ event\.stopPropagation\(\); onOpen\(sale\) \}\}/, 'the line must not fall through to the row click')
+  assert.doesNotMatch(surface, /SaleRecordsLine|openSaleRecords|sale_records/, 'collapsed desktop rows and phone cards must not carry a Records line')
+  const detail = read('../src/components/sales/SaleDetailModal.tsx')
+  assert.match(detail, /onOpenRecords\?: \(sale: SaleDetail\) => void/, 'expanded details own the Records callback')
+  assert.match(detail, /onClick=\{\(\) => onOpenRecords\(sale\)\}/, 'the detail control opens this sale history')
+  assert.equal((detail.match(/t\('sale_records'\)/g) || []).length, 1, 'expanded detail has one Records entry')
 })
 
 runTest('the float is the SHARED float, read-only, with one close affordance', () => {
@@ -262,7 +258,8 @@ runTest('the "how" badge is translated, not the Worker enum printed raw', () => 
 runTest('the float is wired into the Sales page and fetches the union endpoint', () => {
   const sales = read('../src/components/sales/Sales.tsx')
   assert.match(sales, /import\('\.\/SaleRecordsFloat'\)/, 'the float must be code-split like the other sale modals')
-  assert.match(sales, /openSaleRecords=\{\(sale\) => setRecordsSale\(sale as SaleRecord\)\}/, 'the list must be able to open it')
+  assert.match(sales, /onOpenRecords=\{\(sale\) => \{[\s\S]*setRecordsSale\(sale as SaleRecord\)[\s\S]*setDetailSale\(null\)/, 'expanded detail opens Records without stacking two dialogs')
+  assert.match(sales, /const sale = recordsSale[\s\S]*setRecordsSale\(null\)[\s\S]*setDetailSale\(sale\)/, 'closing Records returns to the expanded sale detail')
   assert.match(sales, /\{recordsSale \?/, 'and the page must render it')
   const transport = read('../src/api/salesTransport.ts')
   assert.match(transport, /\/api\/sales\/\$\{encodeId\(id\)\}\/records/, 'the float reads the union endpoint, not /amendments')

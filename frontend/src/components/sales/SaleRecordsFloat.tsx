@@ -74,6 +74,10 @@ const KIND_FALLBACKS: Record<string, string> = {
 
 const FIELD_FALLBACKS: Record<string, string> = {
   amount: 'Amount',
+  amount_paid: 'Amount paid',
+  amount_paid_khr: 'Amount paid (KHR)',
+  change: 'Change',
+  change_khr: 'Change (KHR)',
   total: 'Sale total',
   quantity: 'Quantity',
   status: 'Status',
@@ -84,6 +88,8 @@ const FIELD_FALLBACKS: Record<string, string> = {
   reason: 'Reason',
   note: 'Note',
   payment_method: 'Payment method',
+  payment_details: 'Payment details',
+  products: 'Products',
   action: 'Action',
   stock: 'Stock',
 }

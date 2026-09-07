@@ -101,6 +101,10 @@ export type SaleRecordFieldFormat = 'money' | 'quantity' | 'status' | 'text'
  */
 const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }> = {
   amount_usd: { key: 'amount', format: 'money' },
+  amount_paid_usd: { key: 'amount_paid', format: 'money' },
+  amount_paid_khr: { key: 'amount_paid_khr', format: 'quantity' },
+  change_usd: { key: 'change', format: 'money' },
+  change_khr: { key: 'change_khr', format: 'quantity' },
   total_usd: { key: 'total', format: 'money' },
   quantity: { key: 'quantity', format: 'quantity' },
   sale_status: { key: 'status', format: 'status' },
@@ -114,6 +118,8 @@ const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }
   cancel_reason: { key: 'reason', format: 'text' },
   cancel_note: { key: 'note', format: 'text' },
   payment_method: { key: 'payment_method', format: 'text' },
+  payment_details: { key: 'payment_details', format: 'text' },
+  products: { key: 'products', format: 'text' },
   direction: { key: 'action', format: 'text' },
   stock_skipped: { key: 'stock', format: 'text' },
 }

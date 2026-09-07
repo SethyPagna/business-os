@@ -179,6 +179,18 @@ export interface SaleRecordSaleRow {
   /** The status the sale held before a return moved it. Source of the "before". */
   status_before_return?: unknown
   total_usd?: unknown
+  payment_method?: unknown
+  payment_details?: unknown
+  amount_paid_usd?: unknown
+  amount_paid_khr?: unknown
+  change_usd?: unknown
+  change_khr?: unknown
+  items?: Array<{
+    product_name?: unknown
+    quantity?: unknown
+    applied_price_usd?: unknown
+    total_usd?: unknown
+  }>
 }
 
 /**
@@ -205,7 +217,22 @@ export function saleCreatedRecord(sale: SaleRecordSaleRow): SaleRecord {
     after: {
       receipt_number: text(sale.receipt_number),
       sale_status: text(sale.sale_status),
+      products: (sale.items || []).map((item) => ({
+        product: text(item.product_name),
+        quantity: numberOrNull(item.quantity),
+        unit_price_usd: numberOrNull(item.applied_price_usd),
+        line_total_usd: numberOrNull(item.total_usd),
+      })),
       total_usd: numberOrNull(sale.total_usd),
+      payment_method: text(sale.payment_method),
+      payment_details: (() => {
+        if (Array.isArray(sale.payment_details)) return sale.payment_details
+        try { return sale.payment_details ? JSON.parse(String(sale.payment_details)) : null } catch (_) { return null }
+      })(),
+      amount_paid_usd: numberOrNull(sale.amount_paid_usd),
+      amount_paid_khr: numberOrNull(sale.amount_paid_khr),
+      change_usd: numberOrNull(sale.change_usd),
+      change_khr: numberOrNull(sale.change_khr),
     },
   }
 }
@@ -337,6 +364,33 @@ export function auditRecord(row: SaleRecordAuditRow): SaleRecord | null {
     via: null,
   }
 
+  if (action === 'sale_settlement') {
+    const beforeState = details.before && typeof details.before === 'object'
+      ? details.before as Record<string, unknown> : {}
+    const afterState = details.after && typeof details.after === 'object'
+      ? details.after as Record<string, unknown> : {}
+    return {
+      ...base,
+      kind: 'payment_settled',
+      subject: null,
+      summary: details.paymentCorrection ? 'Payment corrected' : 'Payment settled',
+      before: {
+        sale_status: text(beforeState.sale_status),
+        payment_method: text(beforeState.payment_method),
+        payment_details: parsePaymentDetails(beforeState.payment_details),
+        amount_paid_usd: numberOrNull(beforeState.amount_paid_usd),
+        amount_paid_khr: numberOrNull(beforeState.amount_paid_khr),
+      },
+      after: {
+        sale_status: text(afterState.sale_status),
+        payment_method: text(afterState.payment_method),
+        payment_details: parsePaymentDetails(afterState.payment_details),
+        amount_paid_usd: numberOrNull(afterState.amount_paid_usd),
+        amount_paid_khr: numberOrNull(afterState.amount_paid_khr),
+      },
+    }
+  }
+
   // An undo/redo replay of an action that keeps its own state elsewhere
   // (lib/saleSettlementAction.ts). It writes no ledger entry, so this row is
   // the only trace and 'undone' is its kind rather than a qualifier.
@@ -398,6 +452,17 @@ export function auditRecord(row: SaleRecordAuditRow): SaleRecord | null {
     summary: action || 'Changed',
     before: null,
     after: Object.keys(details).length ? details : null,
+  }
+}
+
+function parsePaymentDetails(value: unknown): unknown {
+  if (Array.isArray(value)) return value
+  if (value === null || value === undefined || value === '') return null
+  try {
+    const parsed = JSON.parse(String(value))
+    return Array.isArray(parsed) ? parsed : null
+  } catch (_) {
+    return null
   }
 }
 
@@ -574,7 +639,37 @@ export function buildSaleRecords(input: {
 }): SaleRecord[] {
   const records: SaleRecord[] = [saleCreatedRecord(input.sale)]
   for (const row of input.ledger || []) records.push(ledgerRecord(row))
+  const explicitTransitions = (input.audit || []).flatMap((row) => {
+    const action = String(row.action || '')
+    const details = parseDetails(row.details) || {}
+    let before: unknown
+    let after: unknown
+    if (action === 'sale_payment_correction_opened') {
+      before = details.oldStatus
+      after = details.newStatus
+    } else if (action === 'sale_settlement') {
+      before = details.before && typeof details.before === 'object' ? (details.before as Record<string, unknown>).sale_status : null
+      after = details.after && typeof details.after === 'object' ? (details.after as Record<string, unknown>).sale_status : null
+    } else return []
+    return [{
+      actor: text(row.user_name) || '',
+      at: atMs(row.created_at),
+      before: text(before) || '',
+      after: text(after) || '',
+    }]
+  })
   for (const row of input.audit || []) {
+    if (String(row.action || '') === 'update') {
+      const details = parseDetails(row.details) || {}
+      const transitionAt = atMs(row.created_at)
+      if (explicitTransitions.some((candidate) => (
+        candidate.actor === (text(row.user_name) || '')
+        && candidate.before === (text(details.oldStatus) || '')
+        && candidate.after === (text(details.newStatus) || '')
+        && candidate.at !== null && transitionAt !== null
+        && Math.abs(candidate.at - transitionAt) <= 2000
+      ))) continue
+    }
     const record = auditRecord(row)
     if (record) records.push(record)
   }
@@ -619,13 +714,29 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
       SELECT sale_id AS sale_id, COUNT(*) AS n
         FROM sale_amendments WHERE sale_id IN (${placeholders}) GROUP BY sale_id
       UNION ALL
-      SELECT CAST(entity_id AS INTEGER) AS sale_id, COUNT(*) AS n
-        FROM audit_logs
-        WHERE entity = 'sale' AND entity_id IN (${placeholders})
-          AND COALESCE(json_extract(details, '$.action'), '') <> 'amend'
-          AND NOT (action IN ('action_undo','action_redo')
-                   AND json_extract(details, '$.applier') = 'sale.add_items')
-        GROUP BY entity_id
+      SELECT CAST(a.entity_id AS INTEGER) AS sale_id, COUNT(*) AS n
+        FROM audit_logs a
+        WHERE a.entity = 'sale' AND a.entity_id IN (${placeholders})
+          AND COALESCE(json_extract(a.details, '$.action'), '') <> 'amend'
+          AND NOT (a.action IN ('action_undo','action_redo')
+                   AND json_extract(a.details, '$.applier') = 'sale.add_items')
+          AND NOT (a.action = 'update' AND EXISTS (
+            SELECT 1 FROM audit_logs explicit
+            WHERE explicit.entity = a.entity
+              AND explicit.entity_id = a.entity_id
+              AND COALESCE(explicit.user_name, '') = COALESCE(a.user_name, '')
+              AND ABS((julianday(explicit.created_at) - julianday(a.created_at)) * 86400) <= 2
+              AND (
+                (explicit.action = 'sale_payment_correction_opened'
+                  AND COALESCE(json_extract(explicit.details, '$.oldStatus'), '') = COALESCE(json_extract(a.details, '$.oldStatus'), '')
+                  AND COALESCE(json_extract(explicit.details, '$.newStatus'), '') = COALESCE(json_extract(a.details, '$.newStatus'), ''))
+                OR
+                (explicit.action = 'sale_settlement'
+                  AND COALESCE(json_extract(explicit.details, '$.before.sale_status'), '') = COALESCE(json_extract(a.details, '$.oldStatus'), '')
+                  AND COALESCE(json_extract(explicit.details, '$.after.sale_status'), '') = COALESCE(json_extract(a.details, '$.newStatus'), ''))
+              )
+          ))
+        GROUP BY a.entity_id
       UNION ALL
       SELECT sale_id AS sale_id, COUNT(*) AS n
         FROM sale_bulk_members WHERE sale_id IN (${placeholders}) GROUP BY sale_id
