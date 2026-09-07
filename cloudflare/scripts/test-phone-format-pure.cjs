@@ -158,6 +158,19 @@ async function realDbChecks() {
   passed += 1
   console.log('PASS name-only limit cannot crowd a hard phone owner out of duplicate detection')
 
+  rawDb.prepare("INSERT INTO suppliers (name, phone) VALUES ('Acknowledged Exact', '066 111 222')").run()
+  const acknowledged = rawDb.prepare("SELECT id, name FROM suppliers WHERE name='Acknowledged Exact'").get()
+  const strictGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { phones: ['066111222'] })
+  assert.throws(() => rawDb.prepare(strictGuard.sql).run(strictGuard.params), /UNIQUE constraint failed/, 'an unacknowledged owner aborts the write guard')
+  const allowedGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { phones: ['+855 66 111 222'] }, [acknowledged])
+  assert.strictEqual(rawDb.prepare(allowedGuard.sql).run(allowedGuard.params).meta.changes, 0, 'an exact id+name snapshot explicitly acknowledged by staff is allowed')
+  rawDb.prepare("UPDATE suppliers SET name='Renamed Concurrently' WHERE id=@id").run({ id: acknowledged.id })
+  assert.throws(() => rawDb.prepare(allowedGuard.sql).run(allowedGuard.params), /UNIQUE constraint failed/, 'a concurrent rename invalidates the earlier exact-match acknowledgement')
+  const clearGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { phones: ['097000000'] })
+  assert.strictEqual(rawDb.prepare(clearGuard.sql).run(clearGuard.params).meta.changes, 0, 'a free canonical phone passes the write-time guard')
+  passed += 1
+  console.log('PASS atomic duplicate guard blocks races and preserves only the acknowledged exact id/name snapshot')
+
   rawDb.prepare(`UPDATE customers SET address='[{"label":"Other","phone":"+855 77 888 999","address":"Somewhere"}]' WHERE name='Dara'`).run()
   const optionMatches = await lib.findContactDuplicates(db, 'customers', { name: 'Another person', phones: ['077888999'] })
   assert.strictEqual(optionMatches.length, 1)
