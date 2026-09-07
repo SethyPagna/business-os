@@ -88,7 +88,7 @@ const SEVERITY_TEXT: Record<ContactDuplicateSeverity, string> = {
 }
 
 function ClusterCard({
-  cluster, t, table, dismissing, merging, selected, selectable, canResolveConflicts, onToggleSelect, onResolve, onDismiss, onReopen, onMergeInto,
+  cluster, t, table, dismissing, merging, selected, selectable, canResolveConflicts, canMergeDuplicates, onToggleSelect, onResolve, onDismiss, onReopen, onMergeInto,
 }: {
   cluster: ContactDuplicateCluster
   t: TranslateFn
@@ -98,6 +98,7 @@ function ClusterCard({
   selected: boolean
   selectable: boolean
   canResolveConflicts: boolean
+  canMergeDuplicates: boolean
   onToggleSelect: () => void
   onResolve: (name: string) => void
   onDismiss: () => void
@@ -192,7 +193,7 @@ function ClusterCard({
                 })() : null}
               </div>
               <div className="flex flex-shrink-0 items-center gap-1">
-                {canResolveConflicts && cluster.contacts.length >= 2 ? (
+                {canMergeDuplicates && cluster.contacts.length >= 2 ? (
                   <button
                     type="button"
                     onClick={() => setPendingAction({ kind: 'merge', keeper: contact })}
@@ -266,6 +267,7 @@ function ClusterCard({
 export default function DuplicatesTab({ t, notify, active = true, onResolve, includeSuppliers = true }: DuplicatesTabProps) {
   const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
   const canResolveConflicts = can('contacts', 'resolve_conflicts')
+  const canMergeDuplicates = canResolveConflicts && can('contacts', 'merge')
   // Supplier privacy (Part 383 R2): without the contacts_suppliers grant
   // the supplier duplicates scan isn't offered (its endpoint would 403
   // server-side anyway).
@@ -386,6 +388,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // the first failed merge rather than silently leaving some records
   // merged and others not with no indication which.
   const handleMergeInto = async (cluster: ContactDuplicateCluster, keeper: ContactDuplicateClusterEntry) => {
+    if (!canMergeDuplicates) return
     const others = cluster.contacts.filter((contact) => contact.id !== keeper.id)
     if (!others.length) return
     const id = clusterKey(table, cluster)
@@ -449,6 +452,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // this" flow), so those are skipped here and left for individual
   // resolution rather than guessing at a keeper.
   const bulkMerge = async () => {
+    if (!canMergeDuplicates) return
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(table, cluster)))
     if (!targets.length) return
     const mergeable = targets.filter((cluster) => cluster.contacts.length === 2)
@@ -652,15 +656,17 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
               <span className="font-medium text-blue-700 dark:text-blue-300">
                 {replaceVars(t('duplicates_bulk_selected_count') || '{count} selected', { count: selectedKeys.size })}
               </span>
-              <button
-                type="button"
-                onClick={() => void bulkMerge()}
-                disabled={bulkBusy}
-                className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
-              >
-                <Merge className="mr-1 inline h-3.5 w-3.5" />
-                {bulkBusy ? (t('saving') || 'Saving...') : (t('duplicates_bulk_merge_action') || 'Merge selected')}
-              </button>
+              {canMergeDuplicates ? (
+                <button
+                  type="button"
+                  onClick={() => void bulkMerge()}
+                  disabled={bulkBusy}
+                  className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
+                >
+                  <Merge className="mr-1 inline h-3.5 w-3.5" />
+                  {bulkBusy ? (t('saving') || 'Saving...') : (t('duplicates_bulk_merge_action') || 'Merge selected')}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void bulkDismiss()}
@@ -687,6 +693,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
                   selected={selectedKeys.has(id)}
                   selectable={canResolveConflicts && !bulkBusy}
                   canResolveConflicts={canResolveConflicts}
+                  canMergeDuplicates={canMergeDuplicates}
                   onToggleSelect={() => toggleSelected(id)}
                   onResolve={(name) => onResolve?.(TABLE_TO_TAB[table], name)}
                   onDismiss={() => void handleDismiss(cluster)}
