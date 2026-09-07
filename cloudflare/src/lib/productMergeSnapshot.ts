@@ -53,6 +53,17 @@ export type ProductMergeLotSnapshot = {
 
 type KeyedRead = { key: string; sql: string; params?: BindParams }
 
+export const PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS = 80
+
+export class ProductMergeReadBatchLimitError extends Error {
+  readonly code = 'merge_read_batch_statement_limit'
+
+  constructor(readonly statementCount: number, readonly maxStatements: number) {
+    super(`Product merge dependent read batch requires ${statementCount} statements; limit is ${maxStatements}.`)
+    this.name = 'ProductMergeReadBatchLimitError'
+  }
+}
+
 function resultRows(result: D1Result | undefined): Array<Record<string, unknown>> {
   return Array.isArray(result?.results) ? result.results as Array<Record<string, unknown>> : []
 }
@@ -145,6 +156,7 @@ export async function readProductMergeDependentLotSnapshots(
   db: ProductMergeDb,
   snapshot: ProductMergeCaseSnapshot,
   stockDisposition: 'merge' | 'write_off',
+  maxStatements = PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS,
 ): Promise<Map<number, ProductMergeLotSnapshot>> {
   const keeperBatchIdByKey = new Map(snapshot.canonicalBatchRows.map((row) => [row.batch_key, Number(row.id)]))
   const reads: KeyedRead[] = []
@@ -168,6 +180,9 @@ export async function readProductMergeDependentLotSnapshots(
     }
   }
   if (!reads.length) return new Map()
+  if (!Number.isSafeInteger(maxStatements) || maxStatements <= 0 || reads.length > maxStatements) {
+    throw new ProductMergeReadBatchLimitError(reads.length, maxStatements)
+  }
   const rows = await runProductMergeReadBatch(db, reads)
   const result = new Map<number, ProductMergeLotSnapshot>()
   for (const { duplicateBatchId, keeperBatchId } of requested) {
