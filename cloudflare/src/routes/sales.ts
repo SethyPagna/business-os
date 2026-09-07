@@ -2614,10 +2614,17 @@ app.get('/:id/records', async (c) => {
   // status_before_return is what the sale was BEFORE a return moved it, and it
   // is the only "before" the returns source can honestly report.
   const sale = await db.prepare(`
-    SELECT id, receipt_number, sale_status, status_before_return, cashier_name, total_usd, created_at
+    SELECT id, receipt_number, sale_status, status_before_return, cashier_name, total_usd,
+      payment_method, payment_details, amount_paid_usd, amount_paid_khr,
+      change_usd, change_khr, created_at
     FROM sales WHERE id = ?
   `).get<SaleRecordSaleRow>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  sale.items = await db.prepare(`
+    SELECT product_name, quantity, applied_price_usd, total_usd
+    FROM sale_items WHERE sale_id = ? ORDER BY id ASC
+  `).all<{ product_name?: unknown; quantity?: unknown; applied_price_usd?: unknown; total_usd?: unknown }>([saleId])
 
   const ledger = await db.prepare(`
     SELECT id, kind, group_id, product_name,

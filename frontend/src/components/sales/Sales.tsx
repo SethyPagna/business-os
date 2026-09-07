@@ -2066,10 +2066,6 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         selectedIds={selectedIds}
         selectionModeActive={selectionModeActive}
         getSaleLongPressState={getSaleLongPressState}
-        // Not gated by a write permission: the Worker gates GET /records on
-        // READING a sale, so whoever can see this list can see how a row on it
-        // got that way. Same rule as the amendment history in the detail modal.
-        openSaleRecords={(sale) => setRecordsSale(sale as SaleRecord)}
         setDetailSale={(sale) => setDetailSale(sale as SaleRecord)}
         setSelectedSale={(sale) => setSelectedSale(sale as SaleRecord)}
         showSalesActionGroups={showSalesActionGroups}
@@ -2115,6 +2111,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             // gates it on read access), so it is passed unconditionally.
             onAmend={canAmendSales ? handleAmendSale : undefined}
             onLoadAmendments={loadSaleAmendments}
+            onOpenRecords={(sale) => {
+              setRecordsSale(sale as SaleRecord)
+              setDetailSale(null)
+            }}
             onPrint={(sale) => setSelectedSale(sale as SaleRecord)}
             // Gated exactly like the write callbacks above: without
             // `returns:add` the prop is omitted and the action never renders.
@@ -2130,7 +2130,11 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         <Suspense fallback={null}>
           <SaleRecordsFloat
             sale={recordsSale}
-            onClose={() => setRecordsSale(null)}
+            onClose={() => {
+              const sale = recordsSale
+              setRecordsSale(null)
+              setDetailSale(sale)
+            }}
             t={t}
             fmtUSD={fmtUSD}
           />

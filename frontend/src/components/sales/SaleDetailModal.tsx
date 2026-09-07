@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Mouse
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
 import { searchProducts } from '../../api/methods.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
@@ -57,6 +58,7 @@ import {
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { saleRecordsCount } from '../../utils/saleRecords.ts'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -149,6 +151,7 @@ interface SaleDetail {
   delivery_contact_address?: string | null
   credit_due_date?: string | null
   payment_correction_allowed?: number | boolean | null
+  records_count?: number | string | null
 }
 
 type ParsedPayment = { method: string; amount_usd: number; amount_khr: number }
@@ -254,6 +257,7 @@ interface SaleDetailModalProps {
   // when the history could not be fetched, which the view shows differently
   // from "this sale was never amended".
   onLoadAmendments?: (saleId: string | number) => Promise<SaleAmendmentRow[] | null>
+  onOpenRecords?: (sale: SaleDetail) => void
   t: TranslateFn
   fmtUSD: MoneyFormatter
   fmtKHR: MoneyFormatter
@@ -298,6 +302,7 @@ export default function SaleDetailModal({
   onAddItems,
   onAmend,
   onLoadAmendments,
+  onOpenRecords,
   t,
   fmtUSD,
   fmtKHR,
@@ -1339,6 +1344,21 @@ export default function SaleDetailModal({
                 number they both explain. */}
 
           </div>
+
+          {onOpenRecords ? (
+            <button
+              type="button"
+              onClick={() => onOpenRecords(sale)}
+              className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-left text-sm font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-700 dark:text-gray-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
+              title={t('records_open') || 'Show who changed this sale'}
+            >
+              <span className="inline-flex items-center gap-2">
+                <History className="h-4 w-4" />
+                <span>{t('sale_records') || 'Records'}</span>
+              </span>
+              <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{saleRecordsCount(sale) ?? '—'}</span>
+            </button>
+          ) : null}
 
           {/* Items AND the money summary in ONE table: the tfoot amounts sit in
               the same column as the line totals above them, which is the whole
