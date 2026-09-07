@@ -84,6 +84,9 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/fileAssets': { buildUniqueStoredName: (n) => n },
   '../lib/media': { sanitizeMediaList: (l) => l },
   '../lib/uploadSecurity': { detectBufferKind: () => null },
+  // routes/portal.ts serves staff-only submission screenshots straight from
+  // R2 (N45); this stub keeps the route graph loadable here.
+  '../lib/r2': { serveObject: async () => new Response(null, { status: 404 }) },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/portalAi': { generatePortalAiResponse: async () => ({}), getPortalAiUsageStatus: () => ({}) },
   '../lib/searchMatch': {},

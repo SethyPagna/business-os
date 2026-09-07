@@ -138,6 +138,11 @@ async function main() {
   const guard = { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit }
   const portal = load('routes/portal.ts', {
     '../lib/requestBodyGuard': guard, '../lib/auth': auth,
+    // N45: /submissions now needs a storefront session (and portal.ts serves
+    // staff-only screenshots from R2). Signed OUT here, which is the case
+    // this file cares about: nothing downstream may run for a stranger.
+    '../lib/portalSession': { getPortalAccount: async () => null, createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {} },
+    '../lib/r2': { serveObject: async () => new Response(null, { status: 404 }) },
     '../lib/rateLimit': { getClientIp: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
     '../lib/db': { getDb: () => ({ prepare: (sql) => {
       assert.match(sql, /^SELECT key, value FROM settings$/)
@@ -228,8 +233,10 @@ async function main() {
     const response = await send(route, limit + 1, '1')
     assert.equal(response.status, 413, route)
     assert.equal(response.headers.get('x-frame-options'), 'SAMEORIGIN')
-    // At the exact limit the real parser/validator runs (blank body -> 400).
-    assert.equal((await send(route, limit)).status, 400, route)
+    // At the exact limit the real handler runs. /ai/chat is public and
+    // reaches its validator (blank body -> 400); /submissions is not public
+    // any more and stops at the session check (N45).
+    assert.equal((await send(route, limit)).status, route.endsWith('/submissions') ? 401 : 400, route)
     enabled = false
     assert.equal((await send(route, limit + 1)).status, 403, route)
     enabled = true; allowed = false
@@ -242,8 +249,11 @@ async function main() {
   const screenshotBody = new TextEncoder().encode(JSON.stringify({ screenshots, membershipNumber: '' }))
   assert.ok(screenshotBody.byteLength < large)
   const screenshotResponse = await worker.fetch(streamRequest('https://unit.test/api/portal/submissions', screenshotBody).request, env, ctx)
-  assert.equal(screenshotResponse.status, 400)
-  assert.equal((await screenshotResponse.json()).error, 'Membership number is required')
+  // Was 400 'Membership number is required': a body-supplied membership number
+  // used to be the whole gate. It is now a session, and a stranger carrying a
+  // 16MB payload of valid-looking screenshots gets no further than 401.
+  assert.equal(screenshotResponse.status, 401)
+  assert.equal((await screenshotResponse.json()).code, 'portal_unauthenticated')
   assert.equal(calls.effect, 0)
   console.log('PASS request admission: byte boundaries, cancellation, parser preservation, exact scope, real index/portal/backups, 401/403/429 and no downstream effects')
 }

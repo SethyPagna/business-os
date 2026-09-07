@@ -38,6 +38,17 @@ const REPROCESS_BATCH = 25
 
 const IMAGE_KEY_RE = /\.(jpe?g|png|webp|avif|gif|bmp|tiff?)$/i
 
+// N45: objects a CUSTOMER uploaded (share-submission screenshots) must not
+// be sent to a third-party optimisation service. They still go through the
+// same normalization ladder -- Cloudflare Images is the platform already
+// holding the bytes -- but the Cloudinary rung is closed to them. Matches
+// PORTAL_SUBMISSION_PREFIX in routes/portal.ts plus the legacy uploads/
+// filenames written before submissions moved to their own prefix.
+export function isUserGeneratedKey(key: string): boolean {
+  const value = String(key || '')
+  return value.startsWith('private/portal-submissions/') || /portal-submission-/.test(value)
+}
+
 export type SweepResult = {
   examined: number
   oversized: number
@@ -150,7 +161,7 @@ export async function reprocessAuditedImages(env: Env): Promise<ReprocessResult>
       continue
     }
     const source = await object.arrayBuffer()
-    const result = await optimizeImage(env, source, key.split('/').pop() || 'image')
+    const result = await optimizeImage(env, source, key.split('/').pop() || 'image', { allowExternalProviders: !isUserGeneratedKey(key) })
 
     if (!result.ok || !result.bytes) {
       failed += 1
@@ -230,7 +241,7 @@ export async function normalizeStoredImage(env: Env, key: string): Promise<Norma
     await upsert({ byteSize: source.byteLength, status: 'ok' })
     return 'skipped'
   }
-  const result = await optimizeImage(env, source, key.split('/').pop() || 'image')
+  const result = await optimizeImage(env, source, key.split('/').pop() || 'image', { allowExternalProviders: !isUserGeneratedKey(key) })
   if (!result.ok || !result.bytes) {
     await upsert({ byteSize: source.byteLength, status: 'failed', reason: String(result.reason || 'unknown').slice(0, 120), provider: result.provider })
     return 'failed'

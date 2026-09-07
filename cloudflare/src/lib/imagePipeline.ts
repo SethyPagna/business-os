@@ -240,6 +240,11 @@ export async function optimizeImage(
   env: Env,
   source: ArrayBuffer,
   fileName = 'image',
+  // N45: Cloudflare Images is the same processor that already hosts the
+  // object; Cloudinary is a separate US company the bytes are UPLOADED to.
+  // A caller handling something a customer photographed sets this false, so
+  // their image is optimised in-house or not at all.
+  options: { allowExternalProviders?: boolean } = {},
 ): Promise<OptimizeResult> {
   // Already inside the band: the cheapest possible answer, and the most
   // common one once a backfill has run.
@@ -271,6 +276,10 @@ export async function optimizeImage(
     if (result.reason === 'quota_exhausted') {
       recordAnalytics(env, { kind: 'image_provider_exhausted', labels: ['cloudflare'], values: [] })
     }
+  }
+
+  if (options.allowExternalProviders === false) {
+    return { ok: false, provider: 'none', reason: 'external_provider_not_permitted' }
   }
 
   const cloudinaryBudget = await readQuota(env, 'cloudinary_transform')

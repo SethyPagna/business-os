@@ -11,6 +11,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { detectBufferKind } from '../lib/uploadSecurity'
+import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
@@ -342,7 +343,13 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     redeemValueKhr: normalizeRedeemValueKhr(settings.customer_portal_redeem_value_khr, exchangeRate),
     membershipInfoText: settings.customer_portal_membership_info_text
       || 'Membership points are reviewed and applied by staff during checkout. Redemption uses whole units only.',
-    submissionEnabled: normalizeBoolean(settings.customer_portal_submission_enabled, true),
+    // N45: OFF until the merchant turns it on. This flag gates a route that
+    // accepts customer photographs; a feature that collects personal data
+    // must not be live on every install merely because nobody said no. The
+    // stored setting still wins in both directions, so an install that has
+    // already switched it on is unaffected -- only the ABSENT setting's
+    // meaning changes.
+    submissionEnabled: normalizeBoolean(settings.customer_portal_submission_enabled, false),
     submissionRewardPoints: Math.max(0, Math.floor(toNumber(settings.customer_portal_submission_reward_points, 5))),
     submissionInstructions: settings.customer_portal_submission_instructions
       || 'Share the business on social media, then upload screenshots here for staff review.',
@@ -1102,7 +1109,17 @@ function normalizePortalSubmissionRows(rows: Array<Record<string, unknown>>): Su
     } catch (_) {
       screenshots = []
     }
-    return { ...(entry as SubmissionRow), screenshots }
+    // A private key is not a URL. The reviewer gets a link to the staff-only
+    // route instead, positional so the key itself never leaves the Worker;
+    // rows written before N45 still hold '/uploads/...' paths and pass
+    // through unchanged so the existing queue keeps rendering.
+    const id = entry.id
+    const resolved = screenshots.map((entry_, index) => (
+      String(entry_ || '').startsWith(PORTAL_SUBMISSION_PREFIX)
+        ? `/api/portal/submissions/${id}/screenshot/${index}`
+        : String(entry_ || '')
+    ))
+    return { ...(entry as SubmissionRow), screenshots: resolved }
   })
 }
 
@@ -1135,7 +1152,12 @@ function sanitizeScreenshots(value: unknown): string[] {
     if (safe.length >= 8) break
     const normalized = String(entry || '').trim()
     if (!normalized || normalized.length > 2_000_000) continue
-    if (normalized.startsWith('/uploads/') || DATA_IMAGE_RE.test(normalized)) safe.push(normalized)
+    // Inline images ONLY (N45). This used to also wave through any string
+    // starting '/uploads/', which let a submitter attach an object they did
+    // not upload -- any catalogue asset, or another customer's screenshot --
+    // to their own submission. The storefront has only ever sent data URLs
+    // (readImageFilesAsDataUrls), so nothing legitimate used that branch.
+    if (DATA_IMAGE_RE.test(normalized)) safe.push(normalized)
   }
   return safe
 }
@@ -1159,9 +1181,21 @@ function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; mimeType: string 
   }
 }
 
-// Persists any inline data-URL screenshots to R2 (same bucket/prefix as
-// lib/fileAssets.ts's uploads) and returns public paths; already-stored
-// `/uploads/...` paths pass through unchanged.
+// Customer screenshots are personal data: they carry the submitter's own
+// social profile and, routinely, other people's names and faces. They used
+// to be written to `uploads/`, which index.ts's GET /uploads/* serves to
+// anyone with the link, unauthenticated, under a one-year immutable cache
+// header -- a public image host for other people's photographs, with no
+// delete path anywhere in the codebase.
+//
+// They now go under a prefix nothing public serves. The only way back out is
+// GET /submissions/:id/screenshot/:index below, which is staff-only; the
+// value stored in screenshots_json is the R2 KEY, never a URL, so a leaked
+// database row is not by itself a link to the image (N45).
+export const PORTAL_SUBMISSION_PREFIX = 'private/portal-submissions/'
+
+// Persists inline data-URL screenshots to R2 under that private prefix and
+// returns their object keys.
 async function materializePortalScreenshots(env: Env, screenshots: string[]): Promise<string[]> {
   const resolved: string[] = []
   for (const entry of screenshots) {
@@ -1171,10 +1205,10 @@ async function materializePortalScreenshots(env: Env, screenshots: string[]): Pr
       // This is the one upload path in the app that previously skipped
       // magic-byte validation (see lib/uploadSecurity.ts) -- every other
       // upload route (files.ts, products.ts, users.ts, importJobs.ts)
-      // already checks that the file's real bytes match its claimed type,
-      // but this one is also the only *unauthenticated* upload path
-      // (anyone can submit a "screenshot" with a membership number,
-      // no login), so it's the highest-value place to close the gap.
+      // already checks that the file's real bytes match its claimed type.
+      // It was ALSO the only unauthenticated upload path until N45 put a
+      // portal session in front of it; the byte check stays regardless,
+      // because a signed-in stranger is still a stranger.
       // sanitizeScreenshots already restricted the claimed mime type to
       // image/(png|jpeg|webp|gif) via DATA_IMAGE_RE -- this confirms the
       // decoded bytes actually are that kind of file, not just labeled as
@@ -1182,14 +1216,19 @@ async function materializePortalScreenshots(env: Env, screenshots: string[]): Pr
       // publicly at /uploads/*.
       if (detectBufferKind(decoded.bytes) !== 'image') continue
       const storedName = buildUniqueStoredName(`portal-submission-${Date.now()}.jpg`)
-      const objectKey = `uploads/${storedName}`
+      const objectKey = `${PORTAL_SUBMISSION_PREFIX}${storedName}`
       await env.ASSETS.put(objectKey, decoded.bytes, { httpMetadata: { contentType: decoded.mimeType } })
-      // K3: same on-upload normalization every other image entry point gets.
+      // Same on-upload normalization every other image entry point gets (K3).
+      // The Cloudinary rung of that ladder is closed for this prefix -- see
+      // isUserGeneratedKey() in lib/imageAudit.ts -- so a customer screenshot
+      // is resized by the platform that already holds it and is never
+      // uploaded to a third-party optimiser (N45).
       await enqueueImageNormalization(env, objectKey)
-      resolved.push(`/uploads/${storedName}`)
+      resolved.push(objectKey)
       continue
     }
-    resolved.push(entry)
+    // Anything that is not an inline image was already dropped by
+    // sanitizeScreenshots; nothing else may become a stored screenshot.
   }
   return resolved
 }
@@ -1359,7 +1398,9 @@ app.put('/account/wishlist', async (c) => {
 // The account system replaces it; the storefront shows a privacy message in
 // its place, and this endpoint refuses so the data path can't be reached
 // directly either. findCustomerByMembership is retained — /submissions still
-// uses it — but nothing here returns customer rows anymore.
+// resolves a SIGNED-IN account's own customer row through it (N45; the
+// membership number comes from the session, never from a request body) — but
+// nothing here returns customer rows anymore.
 app.get('/membership/:membershipNumber', async (c) => {
   return c.json({
     error: 'This feature is not built into the account structure for privacy and security purposes.',
@@ -1367,28 +1408,86 @@ app.get('/membership/:membershipNumber', async (c) => {
   }, 403)
 })
 
+// How many screenshots one customer may submit per rolling 24 hours. The
+// per-IP window above bounds a flood from one machine; this bounds the
+// storage one ACCOUNT can consume however many machines it uses. Three is a
+// generous reading of the feature (share a post, prove it once).
+export const PORTAL_SUBMISSION_DAILY_CAP = 3
+const PORTAL_SUBMISSION_CAP_WINDOW_MS = 24 * 60 * 60 * 1000
+
+// Resolve the CRM customer a signed-in portal account speaks for. The link
+// is the account row itself -- contact_id when the signup folded a contact,
+// otherwise the membership id the account was issued -- so the caller never
+// gets to name a customer.
+async function resolveSubmissionCustomer(env: Env, account: { contact_id: number | null; membership_id: string }) {
+  if (account.contact_id) {
+    const row = await getDb(env).prepare(
+      'SELECT id, name, membership_number FROM customers WHERE id = @id LIMIT 1',
+    ).get<{ id: number; name: string | null; membership_number: string | null }>({ id: account.contact_id })
+    if (row) return row
+  }
+  const byMembership = await findCustomerByMembership(env, account.membership_id || '')
+  return byMembership ? { id: byMembership.id, name: byMembership.name, membership_number: byMembership.membership_number } : null
+}
+
 app.post('/submissions', async (c) => {
+  // Was: an UNAUTHENTICATED endpoint that accepted a membership number from
+  // the request body, looked it up, and wrote whatever images came with it.
+  // Membership numbers are a gap-filling LC-##### sequence (lib/
+  // membershipNumber.ts) -- guessable in order -- so the only thing standing
+  // between the open internet and an image-hosting write was counting. It
+  // now needs a real session, and the customer comes from that session's
+  // account, never from the body (N45).
   const rate = await checkRateLimit(c.env, 'portal:submissions', getClientIp(c.req.raw), 12, 15 * 60 * 1000)
   if (!rate.allowed) {
     c.header('Retry-After', String(rate.retryAfterSeconds))
     return c.json({ error: `Too many requests. Try again in ${rate.retryAfterSeconds} seconds.` }, 429)
   }
 
+  // Order is deliberate. The feature switch and the byte ceiling are
+  // cheap and answer the same for everyone (/config already publishes
+  // whether submissions are on), so they run before anything that costs a
+  // database round-trip; the session check is what actually gates the write.
   const settings = await loadSettingsMap(c.env)
   const config = buildPortalConfig(settings, c.env)
   if (!config.submissionEnabled) return c.json({ error: 'Customer submissions are currently disabled' }, 403)
 
   const rejection = await admitRequestBody(c, PORTAL_SCREENSHOT_BODY_BYTES)
   if (rejection) return rejection
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const membershipNumber = String(body.membershipNumber || '').trim()
-  if (!membershipNumber) return c.json({ error: 'Membership number is required' }, 400)
 
-  const customer = await findCustomerByMembership(c.env, membershipNumber)
-  if (!customer) return c.json({ error: 'Membership not found' }, 404)
+  const account = await getPortalAccount(c)
+  if (!account) {
+    return c.json({ error: 'Please sign in to your account before sharing a screenshot.', code: 'portal_unauthenticated' }, 401)
+  }
+
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
 
   const screenshots = sanitizeScreenshots(body.screenshots)
   if (!screenshots.length) return c.json({ error: 'At least one screenshot is required' }, 400)
+
+  const customer = await resolveSubmissionCustomer(c.env, account)
+  if (!customer) {
+    // A signed-in account whose CRM row cannot be resolved (an unfolded
+    // signup, a merged/deleted contact). Uniform 202: the caller is told the
+    // submission was received and nothing is written or uploaded, so this
+    // branch is not distinguishable from a successful one by response shape
+    // or timing class, and never reports on someone else's record.
+    return c.json({ received: true }, 202)
+  }
+
+  const db = getDb(c.env)
+  const cutoff = new Date(Date.now() - PORTAL_SUBMISSION_CAP_WINDOW_MS).toISOString().slice(0, 19).replace('T', ' ')
+  const recent = await db.prepare(
+    'SELECT COUNT(*) AS n FROM customer_share_submissions WHERE customer_id = @cid AND created_at >= @cutoff',
+  ).get<{ n: number }>({ cid: customer.id, cutoff })
+  if (Number(recent?.n || 0) >= PORTAL_SUBMISSION_DAILY_CAP) {
+    c.header('Retry-After', String(Math.ceil(PORTAL_SUBMISSION_CAP_WINDOW_MS / 1000)))
+    return c.json({
+      error: `You can share up to ${PORTAL_SUBMISSION_DAILY_CAP} screenshots a day. Please try again tomorrow.`,
+      code: 'submission_daily_cap',
+    }, 429)
+  }
+
   const persistedScreenshots = await materializePortalScreenshots(c.env, screenshots)
   if (!persistedScreenshots.length) {
     return c.json({ error: 'Screenshot upload failed validation. Please upload a real image file.' }, 400)
@@ -1397,14 +1496,13 @@ app.post('/submissions', async (c) => {
   const platform = String(body.platform || '').trim().slice(0, 120)
   const note = String(body.note || '').trim().slice(0, 4000)
 
-  const db = getDb(c.env)
   const result = await db.prepare(`
     INSERT INTO customer_share_submissions (
       customer_id, membership_number, customer_name, platform, note, screenshots_json, status
     ) VALUES (@customerId, @membershipNumber, @customerName, @platform, @note, @screenshotsJson, 'pending')
   `).run({
-    customerId: customer.id || null,
-    membershipNumber: customer.membership_number || membershipNumber,
+    customerId: customer.id,
+    membershipNumber: customer.membership_number || account.membership_id,
     customerName: customer.name || '',
     platform: platform || null,
     note: note || null,
@@ -1435,6 +1533,33 @@ app.get('/submissions/review', requireAuth, async (c) => {
       created_at DESC
   `).all()
   return c.json(normalizePortalSubmissionRows(rows as unknown as Array<Record<string, unknown>>))
+})
+
+// The ONLY way a stored submission screenshot leaves the Worker. Staff-only,
+// positional (the reviewer never learns the object key), and explicitly
+// uncacheable -- the default in lib/r2.ts is a year of immutable public
+// caching, which is right for a catalogue image and wrong for a photograph
+// of somebody's phone screen (N45).
+app.get('/submissions/:id/screenshot/:index', requireAuth, async (c) => {
+  if (!canManagePortalSubmissions(c.get('user'))) return c.json({ error: 'Forbidden' }, 403)
+  const id = Number(c.req.param('id'))
+  const index = Number(c.req.param('index'))
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(index) || index < 0) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+  const row = await getDb(c.env).prepare(
+    'SELECT screenshots_json FROM customer_share_submissions WHERE id = @id LIMIT 1',
+  ).get<{ screenshots_json: string | null }>({ id })
+  if (!row) return c.json({ error: 'Not found' }, 404)
+  let keys: unknown[] = []
+  try { keys = JSON.parse(String(row.screenshots_json || '[]')) } catch { keys = [] }
+  const key = String(Array.isArray(keys) ? keys[index] ?? '' : '')
+  // Only keys this route wrote are servable. A legacy `/uploads/...` value is
+  // already public through index.ts and must not gain a second door here,
+  // and the prefix check is what stops a crafted row addressing any other
+  // object in the bucket.
+  if (!key.startsWith(PORTAL_SUBMISSION_PREFIX)) return c.json({ error: 'Not found' }, 404)
+  return serveObject(c.env.ASSETS, key, c.req.raw, 'private, no-store')
 })
 
 app.patch('/submissions/:id/review', requireAuth, async (c) => {

@@ -73,7 +73,7 @@ export async function listObjects(bucket: R2Bucket, prefix: string) {
 // Serves an R2 object as an HTTP response, honoring conditional requests
 // (If-None-Match / If-Modified-Since) so browsers and CDNs can cache
 // uploaded assets without re-downloading them.
-export async function serveObject(bucket: R2Bucket, key: string, request: Request): Promise<Response> {
+export async function serveObject(bucket: R2Bucket, key: string, request: Request, cacheControl?: string): Promise<Response> {
   const object = await bucket.get(key, {
     onlyIf: request.headers,
   })
@@ -83,7 +83,10 @@ export async function serveObject(bucket: R2Bucket, key: string, request: Reques
   const headers = new Headers()
   object.writeHttpMetadata(headers)
   headers.set('etag', object.httpEtag)
-  headers.set('cache-control', 'public, max-age=31536000, immutable')
+  // Immutable-for-a-year is right for content-addressed catalogue assets, and
+  // wrong for anything a person uploaded about themselves: a caller that serves
+  // user-generated or access-controlled bytes passes its own policy in (N45).
+  headers.set('cache-control', cacheControl || 'public, max-age=31536000, immutable')
   if (!('body' in object)) {
     // Conditional request matched -- object unchanged.
     return new Response(null, { status: 304, headers })

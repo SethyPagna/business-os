@@ -53,6 +53,16 @@
 // signup) were quietly minting the wrong shape. Restored to LC- gap-filling
 // everywhere; the random path is gone, not kept as a fallback.
 
+// WHAT A MEMBERSHIP NUMBER IS NOT (N45): gap-filling means these numbers are
+// dense and sequential -- LC-00001..LC-04966 are all live today, and the next
+// one handed out is the smallest free integer. Anyone can enumerate the whole
+// customer base by counting. That is fine for an account NUMBER and fatal for
+// anything treating it as proof of identity, so no route may accept a bare
+// membership number as authentication. POST /api/portal/submissions did
+// exactly that until N45 (an unauthenticated public write gated only by
+// guessing a number in order); it now requires a bos_portal session and reads
+// the number off the account.
+
 import type { D1Compat } from './db'
 
 export const MEMBERSHIP_PREFIX = 'LC-'
