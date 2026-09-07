@@ -305,6 +305,31 @@ runTest('durable mutation receipt preserves the original tender after audit rete
   assert.strictEqual(record.after.amount_paid_usd, 0)
 })
 
+runTest('legacy mutable creation fields are unknown when no durable before snapshot survives', () => {
+  const current = {
+    ...SALE,
+    sale_status: 'completed',
+    payment_method: 'Card',
+    payment_details: JSON.stringify([{ method: 'Card', amount_usd: 12.5 }]),
+    amount_paid_usd: 12.5,
+    amount_paid_khr: 0,
+    change_usd: 1,
+    change_khr: 4000,
+  }
+  const record = saleCreatedRecord(reconstructSaleCreation({ sale: current }))
+  assert.strictEqual(record.after.sale_status, null)
+  assert.strictEqual(record.after.payment_method, null)
+  assert.strictEqual(record.after.payment_details, null)
+  assert.strictEqual(record.after.amount_paid_usd, null)
+  assert.strictEqual(record.after.amount_paid_khr, null)
+  assert.strictEqual(record.after.change_usd, null)
+  assert.strictEqual(record.after.change_khr, null)
+  assert.strictEqual(record.after.total_usd, 12.5, 'total remains known without an amendment')
+  assert.deepStrictEqual(record.after.products, [
+    { product: 'Serum', quantity: 1, unit_price_usd: 12.5, line_total_usd: 12.5 },
+  ], 'product lines remain known without a line amendment')
+})
+
 runTest('a payment correction is one rich record, not a status-only duplicate', () => {
   const at = '2026-09-06 12:30:00'
   const generic = {
