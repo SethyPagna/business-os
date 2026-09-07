@@ -163,7 +163,7 @@ async function run() {
     assert.match(queueSource, /if \(kind === 'optimize-image'\) \{[\s\S]*?await normalizeStoredImage\(env, assetKey\)/)
     const producerCounts = [
       ['routes/files.ts', 1], ['routes/users.ts', 1], ['routes/products.ts', 1],
-      ['routes/portal.ts', 1], ['routes/importJobs.ts', 2],
+      ['routes/portal.ts', 0], ['routes/importJobs.ts', 2],
     ]
     for (const [rel, count] of producerCounts) {
       const source = fs.readFileSync(path.join(cloudflareRoot, 'src', rel), 'utf8')
@@ -175,6 +175,18 @@ async function run() {
     // import staging keys stay out of the uploads/ audit scope
     const importSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'importJobs.ts'), 'utf8')
     assert.match(importSource, /if \(addToLibrary\) await enqueueImageNormalization/)
+    // Portal submission screenshots are private evidence. Sending them to the
+    // shared optimizer would allow its public-provider fallback to disclose
+    // customer images, so zero producers here is a privacy boundary.
+    const portalSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'portal.ts'), 'utf8')
+    const portalScreenshotWriter = portalSource.slice(
+      portalSource.indexOf('async function materializePortalScreenshots'),
+      portalSource.indexOf('// 10-fail-per-flow lockout'),
+    )
+    assert.match(portalSource, /PORTAL_SUBMISSION_PREFIX = 'private\/portal-submissions\/'/)
+    assert.match(portalScreenshotWriter, /await env\.ASSETS\.put\(objectKey, decoded\.bytes/)
+    assert.doesNotMatch(portalScreenshotWriter, /enqueueImageNormalization\(/)
+    assert.match(portalSource, /headers\.set\('cache-control', 'private, no-store'\)/)
   })
 
   console.log(`\n${passed} check(s) passed.`)
