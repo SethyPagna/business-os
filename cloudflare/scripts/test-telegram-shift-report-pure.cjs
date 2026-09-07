@@ -138,7 +138,7 @@ assert.deepEqual(lines, [
   'Delivery fee / ថ្លៃដឹក: $12.00',
   // POSITIVE, and the word "credit" alone. Never $-38.00, and never taken
   // off the Sales or Profit lines above it.
-  'Credit / ឥណទាន: $38.00',
+  'Not Paid / ប្រាក់ជំពាក់: $38.00',
   RULE,
   'Invoices / វិក្កយបត្រ: 24',
   'Cancelled / បានបោះបង់: 1',
@@ -196,7 +196,7 @@ const quiet = telegram.formatShiftReport('Sunrise Mart', { ...openShift, opening
 }, NOW)
 check(`a quiet shift drops every zero line (${quiet.split('\n').length} lines)`,
   quiet.includes('Sales / ការលក់: $0.00') && quiet.includes('Profit / ចំណេញ: $0.00')
-  && !quiet.includes('Credit') && !quiet.includes('Delivery') && !quiet.includes('Refunds')
+  && !quiet.includes('Not Paid') && !quiet.includes('Delivery') && !quiet.includes('Refunds')
   && !quiet.includes('Cancelled') && !quiet.includes('Edited'), quiet)
 
 // ---- 3. bilingual structure parity -----------------------------------------
@@ -261,7 +261,7 @@ assert.deepEqual(daySections.slice(0, 7), [
   'Profit / ចំណេញ: $142.60',
   'Expenses / ចំណាយ: $17.00 · 20,000៛',
   'Delivery fee / ថ្លៃដឹក: $12.00',
-  'Credit / ឥណទាន: $38.00',
+  'Not Paid / ប្រាក់ជំពាក់: $38.00',
 ], daySummary)
 check(`the day summary leads with the SAME five totals in the same order (${daySections.length} lines)`, true)
 // The day's Expenses total is arithmetic, exactly as the shift's is above:

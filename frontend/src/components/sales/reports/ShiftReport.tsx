@@ -28,7 +28,7 @@ export default function ShiftReport(p: ReportViewProps) {
       { Section: tr('shift_registered_cash', 'Registered cash'), Line: tr('shift_registered_end', 'END'), USD: registered.end.usd ?? '', KHR: registered.end.khr ?? '' },
       ...shiftFigureRows(shiftFiguresOf(shift)).map((row) => ({
         Section: tr('shift_report_figures', 'Business results'),
-        Line: tr(row.key, row.key === 'credit_awaiting_payment' ? 'Credit' : row.key),
+        Line: tr(row.key, row.key === 'credit_awaiting_payment' ? 'Not Paid' : row.key),
         USD: row.usd,
         KHR: row.khr ?? '',
       })),
@@ -52,7 +52,7 @@ export default function ShiftReport(p: ReportViewProps) {
     <ReportFrame
       title={tr(view.labelKey, view.fallback)}
       count={shift?.shift_code}
-      hint={{ label: tr('shift_report', 'Shift Report'), text: tr('shift_report_hint', 'Registered OPEN and END cash is report-only. Business results come from sales, COGS, profit, delivery, expenses, refunds, and positive Credit.') }}
+      hint={{ label: tr('shift_report', 'Shift Report'), text: tr('shift_report_hint', 'Registered OPEN and END cash is report-only. Business results come from sales, COGS, profit, delivery, expenses, refunds, and positive Not Paid.') }}
       actions={shift ? (
         <div className="flex items-center gap-2">
           <ShiftHistoryPanel branchId={branchId} compact label={tr('shift_history', 'Shift history')} />
