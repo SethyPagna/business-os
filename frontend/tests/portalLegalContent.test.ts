@@ -170,12 +170,28 @@ assert.doesNotMatch(fallback, /\{legalName\}/)
 const rights = interpolateLegal(PORTAL_LEGAL_EN.portal_legal_footer_rights, details, 2026)
 assert.equal(rights, '© 2026 Leang Beauty. All rights reserved.')
 // No rendered string may leave an unfilled placeholder once interpolated.
-for (const key of [...rendered, 'portal_legal_template_notice', 'portal_legal_footer_rights', 'portal_legal_last_updated']) {
+for (const key of [...rendered, 'portal_legal_template_notice', 'portal_legal_footer_rights', 'portal_legal_footer_content_concerns', 'portal_legal_last_updated']) {
   for (const target of ['en', 'km']) {
     const filled = interpolateLegal(legalText(target, key), details, 2026)
     assert.doesNotMatch(filled, /\{(name|legalName|registration|address|phone|email|year|date)\}/, `${target}.${key} left a placeholder unfilled`)
   }
 }
+
+// The takedown line is the site's only route for a person who appears in a
+// picture they never agreed to. It has to carry a real address and a named
+// window -- "contact us" with no deadline is a sentiment, not an undertaking
+// -- and the footer must hide it entirely when no address is configured,
+// because a promise with nowhere to send it is worse than no promise.
+const takedown = interpolateLegal(PORTAL_LEGAL_EN.portal_legal_footer_content_concerns, details, 2026)
+assert.match(takedown, /2 business days/, 'the takedown line must state a window')
+assert.match(takedown, /hello@example\.com/, 'the takedown line must resolve to the configured address')
+assert.match(PORTAL_LEGAL_KM.portal_legal_footer_content_concerns, /\{email\}/, 'the Khmer takedown line must interpolate the same address')
+const footerSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'legal', 'LegalPages.tsx'), 'utf8')
+assert.match(
+  footerSource,
+  /details\.email \? \([\s\S]{0,200}portal_legal_footer_content_concerns/,
+  'the takedown line must render only when an address is configured',
+)
 
 // 7. day-first date, and a consent version tied to it
 assert.match(PORTAL_LEGAL_LAST_UPDATED_ISO, /^\d{4}-\d{2}-\d{2}$/)

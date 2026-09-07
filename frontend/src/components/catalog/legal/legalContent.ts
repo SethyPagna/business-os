@@ -141,6 +141,7 @@ const EN: Record<string, string> = {
   portal_legal_identity_phone: 'Phone',
   portal_legal_identity_email: 'Email',
   portal_legal_footer_rights: '© {year} {name}. All rights reserved.',
+  portal_legal_footer_content_concerns: 'Something on this site about you, or a photo you did not agree to? Write to {email} and we will take down a disputed image within 2 business days while we look into it.',
   portal_legal_footer_landmark: 'Site information and policies',
 
   // --- Privacy Policy ------------------------------------------------------
@@ -257,6 +258,7 @@ const KM: Record<string, string> = {
   portal_legal_identity_phone: 'ទូរស័ព្ទ',
   portal_legal_identity_email: 'អ៊ីមែល',
   portal_legal_footer_rights: '© {year} {name}។ រក្សាសិទ្ធិគ្រប់យ៉ាង។',
+  portal_legal_footer_content_concerns: 'មានអ្វីមួយនៅលើគេហទំព័រនេះទាក់ទងនឹងអ្នក ឬរូបភាពដែលអ្នកមិនបានយល់ព្រម? សូមសរសេរមក {email} យើងនឹងដកចេញរូបភាពដែលមានវិវាទក្នុងរយៈពេល ២ថ្ងៃធ្វើការ ខណៈយើងកំពុងពិនិត្យ។',
   portal_legal_footer_landmark: 'ព័ត៌មាននិងគោលការណ៍របស់គេហទំព័រ',
 
   portal_legal_privacy_who_h: 'យើងជានរណា',

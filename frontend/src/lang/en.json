@@ -5839,6 +5839,7 @@
   "portal_legal_identity_address": "Address",
   "portal_legal_identity_phone": "Phone",
   "portal_legal_identity_email": "Email",
+  "portal_legal_footer_content_concerns": "Something on this site about you, or a photo you did not agree to? Write to {email} and we will take down a disputed image within 2 business days while we look into it.",
   "portal_legal_footer_rights": "© {year} {name}. All rights reserved.",
   "portal_legal_footer_landmark": "Site information and policies",
   "portal_legal_privacy_who_h": "Who we are",

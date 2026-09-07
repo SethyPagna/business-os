@@ -251,6 +251,16 @@ export default function PortalFooter({
                   : <span>{details.email}</span>
               ) : null}
             </div>
+            {/* A takedown route, in the one place every page of the site
+                ends. A storefront that publishes photographs -- product
+                shots, and the screenshots customers send in -- needs
+                somewhere for the person in one of them to write, and a
+                named window is what makes it an undertaking rather than a
+                sentiment. Hidden when no address is configured: a promise
+                with nowhere to send it is worse than no promise. */}
+            {details.email ? (
+              <div className="pt-1">{fill('portal_legal_footer_content_concerns')}</div>
+            ) : null}
             <div className="pt-1 text-[11px] text-slate-400 dark:text-neutral-500">{fill('portal_legal_footer_rights')}</div>
           </div>
 
