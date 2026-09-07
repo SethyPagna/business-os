@@ -6,7 +6,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, computeImportImageMatch, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, computeImportImageMatch, getProductImportReplaceColumns, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
@@ -17,6 +17,7 @@ import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactR
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { sanitizeMediaPath } from '../lib/media'
+import { resolveProductImagePathIdentities } from '../lib/productImagePermission'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -137,8 +138,11 @@ async function productImportChangesImages(env: Env, job: Record<string, unknown>
     if (row.action === 'create' || !Number.isInteger(existingId) || existingId <= 0) return true
     if (result?.plannedMode === 'merge_stock') continue
     if (policy.import_mode === 'replace_columns') {
-      const replaceColumns = Array.isArray(policy.replace_columns) ? policy.replace_columns : []
-      if (!replaceColumns.includes('image_path')) continue
+      const replaceColumns = getProductImportReplaceColumns(job.policy_json as string)
+      // An empty normalized selection falls through to the exhaustive update
+      // in importEngine. Only a real, non-empty selection that omits the image
+      // column proves the analyzed image will not be written.
+      if (replaceColumns.length && !replaceColumns.includes('image_path')) continue
     }
     updates.push({ id: existingId, imagePath: nextImagePath })
   }
@@ -153,7 +157,14 @@ async function productImportChangesImages(env: Env, job: Record<string, unknown>
       .all<{ id: number; image_path: string | null }>(chunk)
     for (const current of currentRows) currentById.set(Number(current.id), sanitizeMediaPath(current.image_path, ''))
   }
-  return updates.some((entry) => currentById.get(entry.id) !== entry.imagePath)
+  const identities = await resolveProductImagePathIdentities(db, [
+    ...updates.map((entry) => entry.imagePath),
+    ...currentById.values(),
+  ])
+  return updates.some((entry) => {
+    const currentPath = currentById.get(entry.id) || ''
+    return (identities.get(currentPath) || currentPath) !== (identities.get(entry.imagePath) || entry.imagePath)
+  })
 }
 
 async function requireChangedProductImportImageAction(c: any, job: Record<string, unknown>) {
