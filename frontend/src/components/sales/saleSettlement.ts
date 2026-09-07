@@ -15,6 +15,16 @@ export type SettlementPayload = {
   payment_details: Array<{ method: string; amount_usd: number; amount_khr: number }>
 }
 
+export function advanceSettlementReviewVersion<T extends { expectedUpdatedAt: string }>(
+  review: T,
+  mutationResult: unknown,
+): T {
+  if (!mutationResult || typeof mutationResult !== 'object') return review
+  const result = mutationResult as { statusUpdatedAt?: unknown }
+  const updatedAt = typeof result.statusUpdatedAt === 'string' ? result.statusUpdatedAt.trim() : ''
+  return updatedAt ? { ...review, expectedUpdatedAt: updatedAt } : review
+}
+
 const RETIRED_METHODS = new Set(['pi pay', 'transfer'])
 
 function amount(value: unknown): number {
