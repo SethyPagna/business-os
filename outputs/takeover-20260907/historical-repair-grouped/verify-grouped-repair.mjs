@@ -10,6 +10,7 @@ import {
   COMPLETE_ACTION,
   EXPECTED_ACCOUNT_ID,
   RECOVERY_ACTION,
+  START_ACTION,
   applyAllPending,
   applyGroup,
   assert,
@@ -124,6 +125,7 @@ function writeBuilderInputs(sqlite) {
 }
 
 function count(sqlite, sql, ...params) { return Number(sqlite.prepare(sql).get(...params).count) }
+const auditColumns = ['user_id', 'user_name', 'action', 'entity', 'entity_id', 'details', 'table_name', 'record_id', 'old_value', 'new_value']
 async function expectReject(run, pattern, label) {
   let error
   try { await run() } catch (caught) { error = caught }
@@ -215,8 +217,8 @@ try {
 
   const ambiguousSqlite = createFixture(join(work, 'ambiguous.sqlite'))
   const ambiguousBinding = makeD1(ambiguousSqlite, { ambiguous: ({ batchCall }) => batchCall === 1 })
-  const ambiguous = await applyGroup(ambiguousBinding.d1, manifest, manifest.groups[1])
-  assert(ambiguous.status === 'applied_after_ambiguous_response' && (await inspectGroup(ambiguousBinding.d1, manifest, manifest.groups[1])).state === 'applied', 'ambiguous committed group was not reconciled from audit and hash')
+  const ambiguous = await applyGroup(ambiguousBinding.d1, manifest, manifest.groups[0])
+  assert(ambiguous.status === 'applied_after_ambiguous_response' && (await inspectGroup(ambiguousBinding.d1, manifest, manifest.groups[0])).state === 'applied', 'ambiguous committed group was not reconciled from exact audit payload and hash')
   ambiguousSqlite.close()
 
   const pausedSqlite = createFixture(join(work, 'ambiguous-pause.sqlite'))
@@ -247,17 +249,56 @@ try {
 
   const recoverySqlite = createFixture(join(work, 'recovery.sqlite'))
   const recoveryBinding = makeD1(recoverySqlite)
-  await applyGroup(recoveryBinding.d1, manifest, manifest.groups[1])
-  const recovered = await recoverGroup(recoveryBinding.d1, manifest, manifest.groups[1])
-  assert(recovered.status === 'recovered_and_verified' && (await inspectGroup(recoveryBinding.d1, manifest, manifest.groups[1])).state === 'recovered', 'group recovery did not restore exact pre-state')
+  await applyGroup(recoveryBinding.d1, manifest, manifest.groups[0])
+  const recovered = await recoverGroup(recoveryBinding.d1, manifest, manifest.groups[0])
+  assert(recovered.status === 'recovered_and_verified' && (await inspectGroup(recoveryBinding.d1, manifest, manifest.groups[0])).state === 'recovered', 'group recovery did not restore exact pre-state')
   assert(count(recoverySqlite, 'SELECT COUNT(*) AS count FROM audit_logs WHERE action=?', APPLY_ACTION) === 1 && count(recoverySqlite, 'SELECT COUNT(*) AS count FROM audit_logs WHERE action=?', RECOVERY_ACTION) === 1, 'recovery deleted or failed to append audit history')
+  recoverySqlite.prepare('UPDATE audit_logs SET new_value=? WHERE action=? AND record_id=?').run('{"forged":"recovery"}', RECOVERY_ACTION, manifest.groups[0].id)
+  assert((await inspectGroup(recoveryBinding.d1, manifest, manifest.groups[0])).state === 'inconsistent', 'tampered recovery audit payload was accepted as recovered')
+  await expectReject(() => recoverGroup(recoveryBinding.d1, manifest, manifest.groups[0]), /inconsistent/, 'recovery replay accepted a tampered recovery audit payload')
   recoverySqlite.close()
 
   const relatedSqlite = createFixture(join(work, 'related-rollback.sqlite'))
   const relatedBinding = makeD1(relatedSqlite, { fail: ({ statementIndex }) => statementIndex === 4 })
+  await applyGroup(relatedBinding.d1, manifest, manifest.groups[0])
   await expectReject(() => applyGroup(relatedBinding.d1, manifest, manifest.groups.at(-1)), /explicit resume/, 'related group failure did not stop safely')
-  assert(count(relatedSqlite, 'SELECT COUNT(*) AS count FROM sales WHERE branch_id IS NOT NULL') === 0 && count(relatedSqlite, 'SELECT COUNT(*) AS count FROM sale_items WHERE branch_id IS NOT NULL') === 0 && count(relatedSqlite, 'SELECT COUNT(*) AS count FROM audit_logs') === 0, 'Sales and sale-items did not roll back together')
+  assert(count(relatedSqlite, 'SELECT COUNT(*) AS count FROM sales WHERE branch_id IS NOT NULL') === 0 && count(relatedSqlite, 'SELECT COUNT(*) AS count FROM sale_items WHERE branch_id IS NOT NULL') === 0 && count(relatedSqlite, 'SELECT COUNT(*) AS count FROM audit_logs WHERE record_id=?', manifest.groups.at(-1).id) === 0, 'Sales and sale-items did not roll back together')
   relatedSqlite.close()
+
+  const tamperedApplySqlite = createFixture(join(work, 'tampered-apply-audit.sqlite'))
+  const tamperedApplyBinding = makeD1(tamperedApplySqlite)
+  await applyGroup(tamperedApplyBinding.d1, manifest, manifest.groups[0])
+  tamperedApplySqlite.prepare('UPDATE audit_logs SET details=? WHERE action=? AND record_id=?').run('{"forged":true}', APPLY_ACTION, manifest.groups[0].id)
+  assert((await inspectGroup(tamperedApplyBinding.d1, manifest, manifest.groups[0])).state === 'inconsistent', 'tampered apply audit payload was accepted as applied')
+  await expectReject(() => recoverGroup(tamperedApplyBinding.d1, manifest, manifest.groups[0]), /inconsistent/, 'recovery accepted a tampered apply audit payload')
+  assert(tamperedApplyBinding.state.batchCalls === 1 && count(tamperedApplySqlite, 'SELECT COUNT(*) AS count FROM audit_logs WHERE action=?', RECOVERY_ACTION) === 0, 'tampered apply audit reached recovery batch')
+  tamperedApplySqlite.close()
+
+  const tamperedStartSqlite = createFixture(join(work, 'tampered-start-audit.sqlite'))
+  const tamperedStartBinding = makeD1(tamperedStartSqlite)
+  await applyGroup(tamperedStartBinding.d1, manifest, manifest.groups[0])
+  tamperedStartSqlite.prepare('UPDATE audit_logs SET user_name=? WHERE action=? AND record_id=\'plan\'').run('forged actor', START_ACTION)
+  await expectReject(() => applyGroup(tamperedStartBinding.d1, manifest, manifest.groups[1]), /inconsistent/, 'later group accepted a tampered plan-start audit payload')
+  assert(tamperedStartBinding.state.batchCalls === 1 && count(tamperedStartSqlite, 'SELECT COUNT(*) AS count FROM fees WHERE branch_id=2') === 99, 'tampered plan-start audit reached a later mutation batch')
+  tamperedStartSqlite.close()
+
+  const concurrentAuditSqlite = createFixture(join(work, 'concurrent-audit-tamper.sqlite'))
+  const concurrentAuditBinding = makeD1(concurrentAuditSqlite)
+  await applyGroup(concurrentAuditBinding.d1, manifest, manifest.groups[0])
+  await expectReject(() => applyGroup(concurrentAuditBinding.d1, manifest, manifest.groups[1], {
+    afterPreRead: async () => concurrentAuditSqlite.prepare("UPDATE audit_logs SET details=? WHERE action=? AND record_id='plan'").run('{"concurrent":"tamper"}', START_ACTION),
+  }), /manual inspection/, 'atomic apply guard did not reject a plan-start audit changed after pre-read')
+  assert(concurrentAuditBinding.state.batchCalls === 2 && count(concurrentAuditSqlite, 'SELECT COUNT(*) AS count FROM fees WHERE branch_id=2') === 99 && count(concurrentAuditSqlite, 'SELECT COUNT(*) AS count FROM audit_logs WHERE record_id=?', manifest.groups[1].id) === 0, 'concurrent audit tamper allowed branch or group-audit mutation')
+  concurrentAuditSqlite.close()
+
+  const recoveryDuplicateSqlite = createFixture(join(work, 'recovery-duplicate-audit.sqlite'))
+  const recoveryDuplicateBinding = makeD1(recoveryDuplicateSqlite)
+  await applyGroup(recoveryDuplicateBinding.d1, manifest, manifest.groups[0])
+  await expectReject(() => recoverGroup(recoveryDuplicateBinding.d1, manifest, manifest.groups[0], {
+    afterPreRead: async () => recoveryDuplicateSqlite.prepare("INSERT INTO audit_logs(action,entity,entity_id,record_id,details) VALUES (?,'historical_metadata_repair',?,?,?)").run(APPLY_ACTION, manifest.execution.run_id, manifest.groups[0].id, '{"forged":"duplicate"}'),
+  }), /manual inspection/, 'atomic recovery guard accepted an extra forged apply audit after pre-read')
+  assert(recoveryDuplicateBinding.state.batchCalls === 2 && count(recoveryDuplicateSqlite, 'SELECT COUNT(*) AS count FROM audit_logs WHERE action=?', RECOVERY_ACTION) === 0 && count(recoveryDuplicateSqlite, 'SELECT COUNT(*) AS count FROM fees WHERE branch_id=2') === 99, 'duplicate apply audit allowed recovery mutation')
+  recoveryDuplicateSqlite.close()
 
   const completionDriftSqlite = createFixture(join(work, 'completion-drift.sqlite'))
   const completionDriftBinding = makeD1(completionDriftSqlite)
@@ -266,6 +307,28 @@ try {
   await expectReject(() => completePlan(completionDriftBinding.d1, manifest), /cannot complete plan/, 'completion ignored full-row drift')
   assert(count(completionDriftSqlite, 'SELECT COUNT(*) AS count FROM audit_logs WHERE action=?', COMPLETE_ACTION) === 0, 'completion audit persisted despite drift')
   completionDriftSqlite.close()
+
+  const exactCompletionAudit = fullSqlite.prepare(`SELECT ${auditColumns.join(',')} FROM audit_logs WHERE action=? AND record_id='plan'`).get(COMPLETE_ACTION)
+  const terminalPendingSqlite = createFixture(join(work, 'terminal-pending.sqlite'))
+  terminalPendingSqlite.prepare(`INSERT INTO audit_logs (${auditColumns.join(',')}) VALUES (${auditColumns.map(() => '?').join(',')})`).run(...auditColumns.map((column) => exactCompletionAudit[column]))
+  const terminalPendingBinding = makeD1(terminalPendingSqlite)
+  assert((await inspectGroup(terminalPendingBinding.d1, manifest, manifest.groups[0])).state === 'inconsistent', 'terminal completion audit allowed a group to classify as pending')
+  await expectReject(() => applyGroup(terminalPendingBinding.d1, manifest, manifest.groups[0]), /inconsistent/, 'terminal completion audit allowed a pending group to apply')
+  assert(terminalPendingBinding.state.batchCalls === 0, 'terminal completion audit reached a mutation batch')
+  terminalPendingSqlite.close()
+
+  fullSqlite.prepare('UPDATE audit_logs SET old_value=? WHERE action=? AND record_id=\'plan\'').run('{"forged":"completion"}', COMPLETE_ACTION)
+  await expectReject(() => completePlan(fullBinding.d1, manifest), /cannot complete plan|content or count is invalid/, 'completed-plan replay accepted a tampered completion audit payload')
+
+  const completionDuplicateSqlite = createFixture(join(work, 'completion-duplicate-audit.sqlite'))
+  const completionDuplicateBinding = makeD1(completionDuplicateSqlite)
+  for (const group of manifest.groups) await applyGroup(completionDuplicateBinding.d1, manifest, group)
+  await expectReject(() => completePlan(completionDuplicateBinding.d1, manifest, {
+    afterPreRead: async () => completionDuplicateSqlite.prepare("INSERT INTO audit_logs(action,entity,entity_id,record_id,details) VALUES (?,'historical_metadata_repair',?,'plan',?)").run(START_ACTION, manifest.execution.run_id, '{"forged":"duplicate"}'),
+  }), /explicit resume/, 'atomic completion guard accepted an extra forged plan-start audit after pre-read')
+  assert(count(completionDuplicateSqlite, 'SELECT COUNT(*) AS count FROM audit_logs WHERE action=?', COMPLETE_ACTION) === 0 && count(completionDuplicateSqlite, 'SELECT COUNT(*) AS count FROM fees WHERE branch_id=2') === 4255, 'duplicate plan-start audit allowed completion mutation or rolled back applied data')
+  await expectReject(() => completePlan(completionDuplicateBinding.d1, manifest), /cannot complete plan/, 'completion retry treated a terminal duplicate plan audit as resumable')
+  completionDuplicateSqlite.close()
 
   const groupOneRows = { fees: fullSqlite.prepare(`SELECT * FROM fees WHERE id IN (${manifest.groups[0].tables.fees.ids.join(',')}) ORDER BY id`).all() }
   const representative = [
@@ -289,7 +352,7 @@ try {
     groups: manifest.groups.length,
     full_apply_batches: fullBinding.state.batchCalls,
     atomic_shapes: { first_fee: 4, remaining_fee: 3, related: 5, completion: 46 },
-    checks: ['builder_double_read_and_65_columns', 'review_and_unpinned_fail_closed', 'all_groups_and_idempotent_resume', 'fee_atomic_rollback', 'ambiguous_commit_reconciliation_and_pause', 'target_drift_refusal', 'unrelated_row_concurrency', 'duplicate_audit_refusal', 'group_recovery', 'related_sales_items_atomicity', 'completion_full_row_drift', 'sqlite_expression_depth_100', 'token_redaction'],
+    checks: ['builder_double_read_and_65_columns', 'review_and_unpinned_fail_closed', 'all_groups_and_idempotent_resume', 'fee_atomic_rollback', 'ambiguous_commit_reconciliation_and_pause', 'target_drift_refusal', 'unrelated_row_concurrency', 'exact_audit_payload_and_duplicate_refusal', 'atomic_audit_interleaving_guards', 'group_recovery', 'terminal_completion_refusal', 'related_sales_items_atomicity', 'completion_full_row_drift', 'sqlite_expression_depth_100', 'token_redaction'],
     remote_binding_opened: false,
     production_write: false,
   }, null, 2)}\n`)

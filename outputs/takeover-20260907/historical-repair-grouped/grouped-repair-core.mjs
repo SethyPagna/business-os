@@ -280,8 +280,37 @@ export function fullRowGuard(table, rows, columns, label, extraConditions = []) 
   }
 }
 
-function auditSql(manifest, action, recordId, details, oldValue, newValue) {
-  return `INSERT INTO audit_logs (user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value) VALUES (NULL,${sqlString(EXPECTED_ACTOR.user_name)},${sqlString(action)},'historical_metadata_repair',${sqlString(manifest.execution.run_id)},${sqlString(JSON.stringify(details))},'historical_metadata_repair',${sqlString(recordId)},${sqlString(JSON.stringify(oldValue))},${sqlString(JSON.stringify(newValue))})`
+function expectedAuditRow(manifest, action, recordId, details, oldValue, newValue) {
+  return {
+    user_id: null,
+    user_name: EXPECTED_ACTOR.user_name,
+    action,
+    entity: 'historical_metadata_repair',
+    entity_id: manifest.execution.run_id,
+    details: JSON.stringify(details),
+    table_name: 'historical_metadata_repair',
+    record_id: recordId,
+    old_value: JSON.stringify(oldValue),
+    new_value: JSON.stringify(newValue),
+  }
+}
+
+function auditSql(row) {
+  const columns = Object.keys(row)
+  const values = columns.map((column) => row[column] === null ? 'NULL' : sqlString(row[column]))
+  return `INSERT INTO audit_logs (${columns.join(',')}) VALUES (${values.join(',')})`
+}
+
+function auditRowCondition(row) {
+  return balancedAnd(Object.entries(row).map(([column, value]) => value === null ? `${safeIdentifier(column)} IS NULL` : `${safeIdentifier(column)}=${sqlString(value)}`))
+}
+
+function exactAuditCondition(row) {
+  const keyCondition = balancedAnd(['action', 'entity', 'entity_id', 'record_id'].map((column) => `${safeIdentifier(column)}=${sqlString(row[column])}`))
+  return balancedAnd([
+    `(SELECT COUNT(*) FROM audit_logs WHERE ${auditRowCondition(row)})=1`,
+    `(SELECT COUNT(*) FROM audit_logs WHERE ${keyCondition})=1`,
+  ])
 }
 
 function auditDetails(manifest, group, phase) {
@@ -323,30 +352,45 @@ function updateStatement(group, table, recovery = false) {
 }
 
 function applyAuditStatement(manifest, group) {
+  const row = expectedApplyAuditRow(manifest, group)
   return {
     label: `${group.id}:apply-audit`,
     expected_changes: 1,
-    sql: auditSql(manifest, APPLY_ACTION, group.id, auditDetails(manifest, group, 'apply'), Object.fromEntries(Object.entries(group.tables).map(([table, descriptor]) => [table, { full_row_sha256: descriptor.pre_full_row_sha256 }])), Object.fromEntries(Object.entries(group.tables).map(([table, descriptor]) => [table, { full_row_sha256: descriptor.post_full_row_sha256 }]))),
+    sql: auditSql(row),
     params: [],
   }
+}
+
+function expectedApplyAuditRow(manifest, group) {
+  return expectedAuditRow(manifest, APPLY_ACTION, group.id, auditDetails(manifest, group, 'apply'), Object.fromEntries(Object.entries(group.tables).map(([table, descriptor]) => [table, { full_row_sha256: descriptor.pre_full_row_sha256 }])), Object.fromEntries(Object.entries(group.tables).map(([table, descriptor]) => [table, { full_row_sha256: descriptor.post_full_row_sha256 }])))
 }
 
 function startAuditStatement(manifest) {
+  const row = expectedStartAuditRow(manifest)
   return {
     label: 'plan:start-audit',
     expected_changes: 1,
-    sql: auditSql(manifest, START_ACTION, 'plan', auditDetails(manifest, null, 'started'), { status: 'prepared' }, { status: 'started', group_count: 44 }),
+    sql: auditSql(row),
     params: [],
   }
 }
 
+function expectedStartAuditRow(manifest) {
+  return expectedAuditRow(manifest, START_ACTION, 'plan', auditDetails(manifest, null, 'started'), { status: 'prepared' }, { status: 'started', group_count: 44 })
+}
+
 function recoveryAuditStatement(manifest, group) {
+  const row = expectedRecoveryAuditRow(manifest, group)
   return {
     label: `${group.id}:recovery-audit`,
     expected_changes: 1,
-    sql: auditSql(manifest, RECOVERY_ACTION, group.id, auditDetails(manifest, group, 'recovery'), Object.fromEntries(Object.entries(group.tables).map(([table, descriptor]) => [table, { full_row_sha256: descriptor.post_full_row_sha256 }])), Object.fromEntries(Object.entries(group.tables).map(([table, descriptor]) => [table, { full_row_sha256: descriptor.pre_full_row_sha256 }]))),
+    sql: auditSql(row),
     params: [],
   }
+}
+
+function expectedRecoveryAuditRow(manifest, group) {
+  return expectedAuditRow(manifest, RECOVERY_ACTION, group.id, auditDetails(manifest, group, 'recovery'), Object.fromEntries(Object.entries(group.tables).map(([table, descriptor]) => [table, { full_row_sha256: descriptor.post_full_row_sha256 }])), Object.fromEntries(Object.entries(group.tables).map(([table, descriptor]) => [table, { full_row_sha256: descriptor.pre_full_row_sha256 }])))
 }
 
 export function buildApplyStatements(manifest, group, rows) {
@@ -356,6 +400,7 @@ export function buildApplyStatements(manifest, group, rows) {
     `(SELECT COUNT(*) FROM branches WHERE id=2 AND name='Shop' AND is_active=1 AND is_default=1)=1`,
   ]
   if (group.ordinal === 1) auditConditions.push(`(SELECT COUNT(*) FROM audit_logs WHERE ${planAuditCondition(manifest, START_ACTION)})=0`)
+  else auditConditions.push(exactAuditCondition(expectedStartAuditRow(manifest)))
   const guards = Object.keys(group.tables).map((table, index) => fullRowGuard(table, rows[table], manifest.schema_columns[table], `${group.id}:pre-guard:${table}`, index === 0 ? auditConditions : []))
   const statements = [...guards]
   if (group.ordinal === 1) statements.push(startAuditStatement(manifest))
@@ -366,34 +411,43 @@ export function buildApplyStatements(manifest, group, rows) {
 
 export function buildRecoveryStatements(manifest, group, rows) {
   const auditConditions = [
-    `(SELECT COUNT(*) FROM audit_logs WHERE ${auditKeyCondition(manifest, group, APPLY_ACTION)})=1`,
+    exactAuditCondition(expectedApplyAuditRow(manifest, group)),
     `(SELECT COUNT(*) FROM audit_logs WHERE ${auditKeyCondition(manifest, group, RECOVERY_ACTION)})=0`,
+    exactAuditCondition(expectedStartAuditRow(manifest)),
   ]
   const guards = Object.keys(group.tables).map((table, index) => fullRowGuard(table, rows[table], manifest.schema_columns[table], `${group.id}:post-guard:${table}`, index === 0 ? auditConditions : []))
   return [...guards, recoveryAuditStatement(manifest, group), ...Object.keys(group.tables).map((table) => updateStatement(group, table, true))]
 }
 
 function completeAuditStatement(manifest) {
+  const row = expectedCompleteAuditRow(manifest)
   return {
     label: 'plan:complete-audit',
     expected_changes: 1,
-    sql: auditSql(manifest, COMPLETE_ACTION, 'plan', auditDetails(manifest, null, 'completed'), { status: 'started', group_count: 44 }, { status: 'completed', group_count: 44 }),
+    sql: auditSql(row),
     params: [],
   }
 }
 
+function expectedCompleteAuditRow(manifest) {
+  return expectedAuditRow(manifest, COMPLETE_ACTION, 'plan', auditDetails(manifest, null, 'completed'), { status: 'started', group_count: 44 }, { status: 'completed', group_count: 44 })
+}
+
 export function buildCompletionStatements(manifest, groupRows) {
   assert(groupRows && typeof groupRows === 'object', 'completion rows are required')
-  const groupIds = manifest.groups.map((group) => sqlString(group.id)).join(',')
   const extra = [
-    `(SELECT COUNT(*) FROM audit_logs WHERE action=${sqlString(APPLY_ACTION)} AND entity='historical_metadata_repair' AND entity_id=${sqlString(manifest.execution.run_id)} AND record_id IN (${groupIds}))=44`,
-    `(SELECT COUNT(DISTINCT record_id) FROM audit_logs WHERE action=${sqlString(APPLY_ACTION)} AND entity='historical_metadata_repair' AND entity_id=${sqlString(manifest.execution.run_id)} AND record_id IN (${groupIds}))=44`,
+    exactAuditCondition(expectedStartAuditRow(manifest)),
     `(SELECT COUNT(*) FROM audit_logs WHERE action=${sqlString(RECOVERY_ACTION)} AND entity_id=${sqlString(manifest.execution.run_id)})=0`,
-    `(SELECT COUNT(*) FROM audit_logs WHERE ${planAuditCondition(manifest, START_ACTION)})=1`,
     `(SELECT COUNT(*) FROM audit_logs WHERE ${planAuditCondition(manifest, COMPLETE_ACTION)})=0`,
   ]
   const guards = []
-  for (const group of manifest.groups) for (const table of Object.keys(group.tables)) guards.push(fullRowGuard(table, groupRows[group.id][table], manifest.schema_columns[table], `complete:${group.id}:${table}`, guards.length === 0 ? extra : []))
+  for (const group of manifest.groups) for (const [table, descriptor] of Object.entries(group.tables)) {
+    const groupAuditConditions = table === Object.keys(group.tables)[0]
+      ? [exactAuditCondition(expectedApplyAuditRow(manifest, group)), `(SELECT COUNT(*) FROM audit_logs WHERE ${auditKeyCondition(manifest, group, RECOVERY_ACTION)})=0`]
+      : []
+    guards.push(fullRowGuard(table, groupRows[group.id][table], manifest.schema_columns[table], `complete:${group.id}:${table}`, [...(guards.length === 0 ? extra : []), ...groupAuditConditions]))
+    assert(rowsHash(groupRows[group.id][table]) === descriptor.post_full_row_sha256, `completion input ${group.id} ${table} hash mismatch`)
+  }
   assert(guards.length === 45, 'completion must contain exactly 45 full-row guards')
   return [...guards, completeAuditStatement(manifest)]
 }
@@ -404,9 +458,14 @@ async function allRows(db, sql, params = []) {
   return result.results
 }
 
-async function readAuditCounts(db, manifest, group) {
-  const rows = await allRows(db, `SELECT action,COUNT(*) AS count FROM audit_logs WHERE entity='historical_metadata_repair' AND entity_id=? AND record_id=? AND action IN (?,?,?) GROUP BY action`, [manifest.execution.run_id, group.id, APPLY_ACTION, RECOVERY_ACTION, COMPLETE_ACTION])
-  return Object.fromEntries(rows.map((row) => [row.action, Number(row.count)]))
+const AUDIT_COLUMNS = ['user_id', 'user_name', 'action', 'entity', 'entity_id', 'details', 'table_name', 'record_id', 'old_value', 'new_value']
+
+async function readGroupAuditRows(db, manifest, group) {
+  return allRows(db, `SELECT ${AUDIT_COLUMNS.join(',')} FROM audit_logs WHERE entity='historical_metadata_repair' AND entity_id=? AND record_id=? AND action IN (?,?) ORDER BY id`, [manifest.execution.run_id, group.id, APPLY_ACTION, RECOVERY_ACTION])
+}
+
+async function readPlanAuditRows(db, manifest) {
+  return allRows(db, `SELECT ${AUDIT_COLUMNS.join(',')} FROM audit_logs WHERE entity='historical_metadata_repair' AND entity_id=? AND record_id='plan' AND action IN (?,?) ORDER BY id`, [manifest.execution.run_id, START_ACTION, COMPLETE_ACTION])
 }
 
 export async function readGroupRows(db, group) {
@@ -415,19 +474,31 @@ export async function readGroupRows(db, group) {
   return result
 }
 
-export function classifyGroup(group, rows, auditCounts) {
+const auditRowMatches = (actual, expected) => stableJson(actual) === stableJson(expected)
+const exactActionRows = (rows, action, expected) => {
+  const selected = rows.filter((row) => row.action === action)
+  return selected.length === 1 && auditRowMatches(selected[0], expected)
+}
+
+export function classifyGroup(manifest, group, rows, groupAuditRows, planAuditRows) {
   const matches = (field) => Object.entries(group.tables).every(([table, descriptor]) => rows[table]?.length === descriptor.count && rowsHash(rows[table]) === descriptor[field])
-  const applyCount = Number(auditCounts[APPLY_ACTION] || 0)
-  const recoveryCount = Number(auditCounts[RECOVERY_ACTION] || 0)
-  if (applyCount === 0 && recoveryCount === 0 && matches('pre_full_row_sha256')) return 'pending'
-  if (applyCount === 1 && recoveryCount === 0 && matches('post_full_row_sha256')) return 'applied'
-  if (applyCount === 1 && recoveryCount === 1 && matches('pre_full_row_sha256')) return 'recovered'
+  const applyRows = groupAuditRows.filter((row) => row.action === APPLY_ACTION)
+  const recoveryRows = groupAuditRows.filter((row) => row.action === RECOVERY_ACTION)
+  const startRows = planAuditRows.filter((row) => row.action === START_ACTION)
+  const completeRows = planAuditRows.filter((row) => row.action === COMPLETE_ACTION)
+  const startExact = exactActionRows(planAuditRows, START_ACTION, expectedStartAuditRow(manifest))
+  const completeIntegrity = completeRows.length === 0 || exactActionRows(planAuditRows, COMPLETE_ACTION, expectedCompleteAuditRow(manifest))
+  if (!completeIntegrity || startRows.length > 1 || applyRows.length > 1 || recoveryRows.length > 1) return 'inconsistent'
+  const pendingStartValid = group.ordinal === 1 ? startRows.length === 0 : startExact
+  if (completeRows.length === 0 && applyRows.length === 0 && recoveryRows.length === 0 && pendingStartValid && matches('pre_full_row_sha256')) return 'pending'
+  if (startExact && exactActionRows(groupAuditRows, APPLY_ACTION, expectedApplyAuditRow(manifest, group)) && recoveryRows.length === 0 && matches('post_full_row_sha256')) return 'applied'
+  if (startExact && exactActionRows(groupAuditRows, APPLY_ACTION, expectedApplyAuditRow(manifest, group)) && exactActionRows(groupAuditRows, RECOVERY_ACTION, expectedRecoveryAuditRow(manifest, group)) && matches('pre_full_row_sha256')) return 'recovered'
   return 'inconsistent'
 }
 
 export async function inspectGroup(db, manifest, group) {
-  const [rows, auditCounts] = await Promise.all([readGroupRows(db, group), readAuditCounts(db, manifest, group)])
-  return { rows, auditCounts, state: classifyGroup(group, rows, auditCounts) }
+  const [rows, groupAuditRows, planAuditRows] = await Promise.all([readGroupRows(db, group), readGroupAuditRows(db, manifest, group), readPlanAuditRows(db, manifest)])
+  return { rows, groupAuditRows, planAuditRows, state: classifyGroup(manifest, group, rows, groupAuditRows, planAuditRows) }
 }
 
 export async function executeStatements(db, statements) {
@@ -480,9 +551,12 @@ export async function recoverGroup(db, manifest, group, dependencies = {}) {
   return { group_id: group.id, status: 'recovered_and_verified', statement_count: statements.length }
 }
 
-async function completionAuditCount(db, manifest) {
-  const rows = await allRows(db, `SELECT COUNT(*) AS count FROM audit_logs WHERE ${planAuditCondition(manifest, COMPLETE_ACTION)}`)
-  return Number(rows[0]?.count || 0)
+async function completionAuditState(db, manifest) {
+  const rows = await readPlanAuditRows(db, manifest)
+  const selected = rows.filter((row) => row.action === COMPLETE_ACTION)
+  if (selected.length === 0) return 'absent'
+  if (selected.length === 1 && auditRowMatches(selected[0], expectedCompleteAuditRow(manifest))) return 'exact'
+  return 'invalid'
 }
 
 export async function completePlan(db, manifest, dependencies = {}) {
@@ -492,20 +566,20 @@ export async function completePlan(db, manifest, dependencies = {}) {
     assert(inspected.state === 'applied', `cannot complete plan while group ${group.id} is ${inspected.state}`)
     groupRows[group.id] = inspected.rows
   }
-  const existing = await completionAuditCount(db, manifest)
-  if (existing === 1) return { status: 'already_completed' }
-  assert(existing === 0, 'completion audit count is invalid')
+  const existing = await completionAuditState(db, manifest)
+  if (existing === 'exact') return { status: 'already_completed' }
+  assert(existing === 'absent', 'completion audit content or count is invalid')
   const statements = buildCompletionStatements(manifest, groupRows)
   await dependencies.afterPreRead?.({ groupRows, statements })
   let execution
   try { execution = await executeStatements(db, statements) }
   catch (error) {
-    const count = await completionAuditCount(db, manifest)
-    if (count === 1) return { status: 'completed_after_ambiguous_response', statement_count: statements.length }
-    if (count === 0) throw new Error('completion batch failed without an observed audit; explicit resume is required')
+    const state = await completionAuditState(db, manifest)
+    if (state === 'exact') return { status: 'completed_after_ambiguous_response', statement_count: statements.length }
+    if (state === 'absent') throw new Error('completion batch failed without an observed audit; explicit resume is required')
     throw new Error('completion batch failed with an invalid audit count; manual inspection is required')
   }
-  assert(await completionAuditCount(db, manifest) === 1, 'completion audit was not persisted exactly once')
+  assert(await completionAuditState(db, manifest) === 'exact', 'completion audit was not persisted exactly once with exact content')
   assert(execution.mismatches.length === 0, 'completion batch committed with unexpected change metadata')
   return { status: 'completed_and_verified', statement_count: statements.length }
 }
