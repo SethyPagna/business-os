@@ -43,6 +43,16 @@ function resolveKnownProductImagePath(path: string, assetPaths: ReadonlySet<stri
   return decoded !== path && assetPaths.has(decoded) ? decoded : path
 }
 
+/** Resolve known upload identities in one bounded query set; unknown values stay unchanged. */
+export async function resolveProductImagePathIdentities(
+  db: D1Compat,
+  paths: readonly unknown[],
+): Promise<Map<string, string>> {
+  const sanitized = [...new Set(paths.map((path) => sanitizeMediaPath(path, '')).filter(Boolean))]
+  const assetPaths = await loadProductImageAssetPaths(db, sanitized.filter((path) => path.startsWith('/uploads/')))
+  return new Map(sanitized.map((path) => [path, resolveKnownProductImagePath(path, assetPaths)]))
+}
+
 /** Resolve submitted upload identities exactly, then by one legacy decode. */
 export async function resolveProductImageFields(db: D1Compat, body: Record<string, unknown>): Promise<void> {
   const hasPrimary = Object.prototype.hasOwnProperty.call(body, 'image_path')
@@ -84,8 +94,8 @@ export async function productImageFieldsChangedResolved(
     currentPrimary,
     ...currentGallery,
   ].filter((path) => path.startsWith('/uploads/')))]
-  const assetPaths = await loadProductImageAssetPaths(db, uploadPaths)
-  const resolvePath = (path: string) => resolveKnownProductImagePath(path, assetPaths)
+  const identities = await resolveProductImagePathIdentities(db, uploadPaths)
+  const resolvePath = (path: string) => identities.get(path) || path
   const resolvedSubmitted: ProductImageState = {}
   if (Object.prototype.hasOwnProperty.call(submitted, 'image_path')) resolvedSubmitted.image_path = resolvePath(submittedPrimary)
   if (Object.prototype.hasOwnProperty.call(submitted, 'image_gallery')) resolvedSubmitted.image_gallery = submittedGallery.map(resolvePath)

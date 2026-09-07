@@ -38,6 +38,8 @@ function loadTs(relativePath, stubs = {}) {
 
 const permissions = loadTs('lib/permissions.ts')
 const media = loadTs('lib/media.ts')
+const sqlBinding = loadTs('lib/sqlBinding.ts')
+const productImagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 
 function role(grants) {
   return {
@@ -73,6 +75,7 @@ function freshState(user, options = {}) {
     analyzedRows: options.analyzedRows || [],
     currentProducts: options.currentProducts || [{ id: 77, image_path: '/uploads/old.png' }],
     lateImagePaths: options.lateImagePaths || {},
+    assetPaths: new Set(options.assetPaths || ['/uploads/old.png', '/uploads/new.png', '/uploads/override.png']),
     dbWrites: 0,
     batches: 0,
     queue: [],
@@ -106,8 +109,11 @@ function loadImportRoute(state) {
     staging,
     prepare(sql) {
       return {
-        async all() {
+        async all(params = {}) {
           if (/SELECT id, image_path FROM products WHERE id IN/i.test(sql)) return state.currentProducts
+          if (/SELECT public_path FROM file_assets/i.test(sql)) {
+            return [...state.assetPaths].filter((public_path) => Object.values(params).includes(public_path)).map((public_path) => ({ public_path }))
+          }
           return []
         },
         async get() {
@@ -125,6 +131,10 @@ function loadImportRoute(state) {
     PREFLIGHT_MAX_ROWS: 1000,
     SERIOUS_IMPORT_WARNING_KINDS: [],
     IMPORT_WARNING_LABELS: {},
+    getProductImportReplaceColumns: (policyJson) => {
+      const requested = JSON.parse(policyJson || '{}').replace_columns
+      return Array.isArray(requested) ? [...new Set(requested.filter((value) => value === 'image_path' || value === 'selling_price_usd'))] : []
+    },
     computeImportImageMatch: async () => ({
       rowImagePaths: new Map(Object.entries(state.lateImagePaths).map(([rowNumber, imagePath]) => [Number(rowNumber), imagePath])),
       rowGalleryPaths: new Map(), matched: [], unmatched: [], overLimit: [], renamePlan: new Map(),
@@ -137,6 +147,7 @@ function loadImportRoute(state) {
     '../lib/permissions': permissions,
     '../lib/media': media,
     '../lib/importEngine': importEngine,
+    '../lib/productImagePermission': productImagePermission,
     '../lib/importLifecycleGate': {
       canEditImportDecisions: () => true,
       canReplaceImportCsv: () => true,
@@ -251,6 +262,41 @@ async function main() {
     assert.equal(response.status, 200)
     assert.equal(state.queue.length, 1)
     console.log('PASS replace-columns excluding image_path ignores analyzed image data')
+  }
+
+  for (const replaceColumns of [[], ['bogus']]) {
+    const state = freshState(blocked(), {
+      policy: { import_mode: 'replace_columns', replace_columns: replaceColumns },
+      analyzedRows: [resultRow('update', '/uploads/new.png')],
+    })
+    const response = await request(state, '/job-1/approve')
+    assert.equal(response.status, 403)
+    assert.equal(state.dbWrites + state.queue.length, 0)
+    console.log(`PASS replace-columns ${JSON.stringify(replaceColumns)} follows the exhaustive apply fallback and blocks an image change`)
+  }
+
+  {
+    const state = freshState(blocked(), {
+      analyzedRows: [resultRow('update', '/uploads/Love Nude.webp')],
+      currentProducts: [{ id: 77, image_path: '/uploads/Love%20Nude.webp' }],
+      assetPaths: ['/uploads/Love Nude.webp'],
+    })
+    const response = await request(state, '/job-1/approve')
+    assert.equal(response.status, 200)
+    assert.equal(state.queue.length, 1)
+    console.log('PASS a one-layer legacy alias of the same image asset does not require image authority')
+  }
+
+  {
+    const state = freshState(blocked(), {
+      analyzedRows: [resultRow('update', '/uploads/Love%20Nude.webp')],
+      currentProducts: [{ id: 77, image_path: '/uploads/Love Nude.webp' }],
+      assetPaths: ['/uploads/Love Nude.webp', '/uploads/Love%20Nude.webp'],
+    })
+    const response = await request(state, '/job-1/approve')
+    assert.equal(response.status, 403)
+    assert.equal(state.queue.length, 0)
+    console.log('PASS two exact percent/space asset identities remain a real image change')
   }
 
   {
