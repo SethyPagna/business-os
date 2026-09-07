@@ -1,3 +1,11 @@
+> **September 7 first functional release deployed:** 821efc94ce7a,
+> Worker 498efadb-f833-471d-a8b7-b4326950bd26 at 100%, 09:54:13 UTC.
+> Migrations 0128–0132 applied and preservation checks pass. 306 frontend files,
+> 274 backend suites, types/i18n/build and frozen browser smoke pass.
+> Live Sales bootstrap timeout is being diagnosed (F36); delivery addition F32
+> follows separately. Historical correction/duplicate merge remain pending.
+> Current task register below supersedes older undeployed takeover statements.
+
 # progress.md — business-os
 
 > **Current owner task register:** [every request, addition, status and owner](docs/fleet/2026-09-07-owner-task-register.md).
