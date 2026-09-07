@@ -1,0 +1,11 @@
+name = "business-os-grouped-historical-repair-operator"
+main = "run-grouped-historical-repair.mjs"
+compatibility_date = "2026-09-07"
+account_id = "743e5b727d139e85ed11679097f6f99e"
+
+# Execution-only remote binding. Review mode never opens this binding.
+[[d1_databases]]
+binding = "DB"
+database_name = "business-os"
+database_id = "49795be9-eabe-43f1-8e16-b86faed60cb1"
+remote = true
