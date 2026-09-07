@@ -3,6 +3,7 @@ import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Modal from '../shared/Modal.tsx'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
@@ -23,14 +24,15 @@ import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { getPermissionTierFromMap, parsePermissionMap } from '../../utils/permissions.ts'
 import { isActionOverriddenOff } from '../../utils/permissionActions.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
 import {
   canStartCreateProductsSession,
   createProductsSessionDefaults,
   emptyCreateProductsHeader,
+  findSessionProductDuplicate,
   isCreateProductsHeaderDirty,
-  isSameQueuedProduct,
   summarizeCreateProductsSession,
   type CreateProductsHeader,
   type CreateProductsSessionDraft,
@@ -113,6 +115,7 @@ type CreateProductsSessionModalProps = {
   onPrepareProduct: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>
   onCreateProduct: (payload: Record<string, unknown>) => Promise<number | string>
   onClose: () => void
+  onMinimize?: (label: string) => void
   onDone: () => void
   notify: (message: string, kind?: string) => void
   t: Translate
@@ -235,6 +238,7 @@ export default function CreateProductsSessionModal({
   onPrepareProduct,
   onCreateProduct,
   onClose,
+  onMinimize,
   onDone,
   notify,
   t,
@@ -334,6 +338,17 @@ export default function CreateProductsSessionModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryRows, rows.length, header, branchSelectOptions, t])
 
+  const closeDirtyRef = useRef(false)
+  closeDirtyRef.current = isCreateProductsHeaderDirty(header, resolvedDefaultBranchId) || rows.length > 0 || step === 'items'
+
+  useEffect(() => registerDirtyWork({
+    key: `create-products-session-${draftKey}`,
+    pageId: 'products',
+    label: tr('create_products_session_title', 'Add/Create Products Session'),
+    isDirty: () => closeDirtyRef.current,
+    discard: () => clearWorkDraft(draftKey),
+  }), [draftKey])
+
   useEffect(() => scheduleWorkDraftWrite<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
     step, receivedDate, freeGoods, mode, query, submittedItems, submissionErrorCode,
@@ -427,6 +442,13 @@ export default function CreateProductsSessionModal({
     window.setTimeout(() => searchInputRef.current?.focus(), 0)
   }
   const selectExistingProduct = (product: ProductCandidate) => {
+    const duplicate = findSessionProductDuplicate(rows, product, editingLineId)
+    if (duplicate) {
+      notify(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'), 'error')
+      closeExistingOptions()
+      openQueuedLine(duplicate.row)
+      return
+    }
     setSelectedProduct(product); setLineUnitCost(String(currentCost(product))); setLineExpiryDate(String(product.expiry_date || ''))
   }
 
@@ -485,7 +507,7 @@ export default function CreateProductsSessionModal({
 
   const writeDraft = () => writeWorkDraft<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
-    step: 'items', receivedDate, mode, query, submittedItems, submissionErrorCode,
+    step, receivedDate, freeGoods, mode, query, submittedItems, submissionErrorCode,
   })
   const openItemForm = () => {
     if (submissionLocked) return
@@ -493,7 +515,7 @@ export default function CreateProductsSessionModal({
   }
   const closeItemForm = () => { setItemFormOpen(false); setEditingLineId(null) }
 
-  const openQueuedLine = (line: SessionLine) => {
+  function openQueuedLine(line: SessionLine) {
     // submittedItems is the exact payload whose outcome may be unknown. It is
     // immutable until the same request resolves or a definitive no-write
     // response unlocks it; never offer an editor that can diverge from it.
@@ -542,12 +564,9 @@ export default function CreateProductsSessionModal({
     const receiptSupplier = String(payload.supplier ?? header.supplierName ?? '').trim()
     const receiptGate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName: receiptSupplier, unitCostUsd: costText, freeGoods })
     if (receiptGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]))
-    // Name + FOLDED barcode + cost. The barcode fold is what stops the same
-    // article queued once as '0748485110011' and once as '748485110011'
-    // becoming two catalog rows (utils/createProductsSession.ts).
-    const queuedTwin = rows.find((row) => row.kind === 'create_receive'
-      && isSameQueuedProduct(row, { name, barcode, unitCostUsd: cost }))
-    if (queuedTwin) throw new Error(tr('create_match_twin_title', 'Product already exists'))
+    if (findSessionProductDuplicate(rows, { name, barcode })) {
+      throw new Error(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'))
+    }
     setSaving(true)
     try {
       if (quantity === 0 && !canCommitProductAdd) {
@@ -610,9 +629,9 @@ export default function CreateProductsSessionModal({
       freeGoods,
     })
     if (editGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[editGate], STOCK_RECEIPT_GATE_FALLBACKS[editGate]))
-    const queuedTwin = rows.find((row) => row.lineId !== lineId && row.kind === 'create_receive'
-      && isSameQueuedProduct(row, { name, barcode, unitCostUsd: cost }))
-    if (queuedTwin) throw new Error(tr('create_match_twin_title', 'Product already exists'))
+    if (findSessionProductDuplicate(rows, { name, barcode }, lineId)) {
+      throw new Error(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'))
+    }
     setSaving(true)
     try {
       const prepared = await onPrepareProduct(payload)
@@ -745,10 +764,11 @@ export default function CreateProductsSessionModal({
     } finally { setSaving(false) }
   }
 
-  const headerDirty = isCreateProductsHeaderDirty(header, resolvedDefaultBranchId)
   const canStart = canStartCreateProductsSession(header)
-  const closeIsGuarded = headerDirty && rows.length === 0 && !submissionLocked
-  const requestClose = () => { if (!saving) { if (!rows.length && !submissionLocked) clearWorkDraft(draftKey); onClose() } }
+  const preserveAndMinimize = onMinimize ? () => {
+    writeDraft()
+    onMinimize(tr('create_products_session_title', 'Add/Create Products Session'))
+  } : undefined
 
   const editingNewProduct: ProductFormState | null = editingNewLine ? {
     ...(editingNewLine.product || {}),
@@ -793,7 +813,13 @@ export default function CreateProductsSessionModal({
 
   return (
     <>
-      <Modal title={step === 'header' ? tr('create_products_session_title', 'Add/Create Products Session') : `${tr('create_products_session_title', 'Add/Create Products Session')} · ${summary.items}`} onClose={requestClose} size="lg" unsavedChanges={{ dirty: closeIsGuarded }}>
+      <Modal
+        title={step === 'header' ? tr('create_products_session_title', 'Add/Create Products Session') : `${tr('create_products_session_title', 'Add/Create Products Session')} · ${summary.items}`}
+        onClose={onClose}
+        onMinimize={preserveAndMinimize}
+        headerExtra={preserveAndMinimize ? <MinimizeButton disabled={saving} tr={(key, fallback) => tr(key, fallback || key)} onMinimize={preserveAndMinimize} /> : undefined}
+        size="lg"
+        unsavedChanges={{ workKey: `create-products-session-${draftKey}` }}>
         <div ref={parentContentRef} className="space-y-4">
             <div className={`rounded-xl border p-3 ${step === 'header' ? 'border-blue-200 bg-blue-50/40 dark:border-blue-800 dark:bg-blue-900/10' : 'border-gray-200 dark:border-gray-700'}`}>
               {/* N1: the explanation used to be a paragraph under this title,
@@ -869,7 +895,7 @@ export default function CreateProductsSessionModal({
         </div>
       </Modal>
 
-      {itemFormOpen ? <Suspense fallback={null}><ProductForm key={editingNewLine ? `create-products-line-${editingNewLine.lineId}` : `create-products-item-${itemFormSeq}`} product={editingNewProduct} createDefaults={itemCreateDefaults} showReceivedDate draftScope={editingNewLine ? `create-products-session-${sessionIdRef.current}-line-${editingNewLine.lineId}` : `create-products-session-${sessionIdRef.current}-item-${itemFormSeq}`} modalLayer="nested" categories={categories} units={itemUnits} branches={branches} brandOptions={brandOptions} groupCandidates={groupCandidates} onSave={(payload) => editingNewLine ? saveEditedNewLine(editingNewLine.lineId, (payload || {}) as unknown as Record<string, unknown>) : saveNewItem((payload || {}) as unknown as Record<string, unknown>)} onClose={closeItemForm} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} /></Suspense> : null}
+      {itemFormOpen ? <Suspense fallback={null}><ProductForm key={editingNewLine ? `create-products-line-${editingNewLine.lineId}` : `create-products-item-${itemFormSeq}`} product={editingNewProduct} createDefaults={itemCreateDefaults} showReceivedDate draftScope={editingNewLine ? `create-products-session-${sessionIdRef.current}-line-${editingNewLine.lineId}` : `create-products-session-${sessionIdRef.current}-item-${itemFormSeq}`} modalLayer="nested" categories={categories} units={itemUnits} branches={branches} brandOptions={brandOptions} groupCandidates={groupCandidates} sessionDuplicateCheck={(candidate) => Boolean(findSessionProductDuplicate(rows, candidate, editingLineId))} onSave={(payload) => editingNewLine ? saveEditedNewLine(editingNewLine.lineId, (payload || {}) as unknown as Record<string, unknown>) : saveNewItem((payload || {}) as unknown as Record<string, unknown>)} onClose={closeItemForm} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} /></Suspense> : null}
 
       {editingExistingLine ? (
         <Modal title={`${tr('edit', 'Edit')}: ${editingExistingLine.name}`} onClose={() => { setEditingLineId(null); resetExistingCandidate() }} size="md" layer="nested" unsavedChanges={{ dirty: editingExistingDirty }}>
