@@ -55,6 +55,31 @@ await runTest('Sales page owns and cancels the transport signal at timeout and i
   assert.match(source, /useEffect\(\(\) => \(\) => \{[\s\S]{0,220}loadAbortRef\.current\?\.abort\(\)[\s\S]{0,180}invalidateTrackedRequest\(loadRequestRef\)/)
 })
 
+await runTest('Sales only replays a queued filter refresh after the active request succeeds', () => {
+  const source = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  const helperMatch = source.match(/function resolvePendingSalesLoad\([\s\S]*?\n\}/)
+  assert.ok(helperMatch, 'queued-load settlement policy must stay explicit and testable')
+  const runnableHelper = helperMatch[0]
+    .replace('pending: PendingSalesLoad | null', 'pending')
+    .replace('completedSuccessfully: boolean', 'completedSuccessfully')
+    .replace('): PendingSalesLoad | null', ')')
+  const resolvePendingSalesLoad = new Function(`${runnableHelper}; return resolvePendingSalesLoad`)() as (
+    pending: { silent: boolean } | null,
+    completedSuccessfully: boolean,
+  ) => { silent: boolean } | null
+
+  const pendingForeground = { silent: false }
+  const pendingBackground = { silent: true }
+  assert.equal(resolvePendingSalesLoad(pendingForeground, false), null, 'a failed foreground request must consume its queued foreground retry')
+  assert.equal(resolvePendingSalesLoad(pendingBackground, false), null, 'a failed background request must not start another automatic request')
+  assert.equal(resolvePendingSalesLoad(pendingForeground, true), pendingForeground, 'a successful stale query still needs the newest foreground filters')
+  assert.equal(resolvePendingSalesLoad(pendingBackground, true), pendingBackground, 'a successful request still coalesces one pending sync refresh')
+
+  assert.match(source, /let completedSuccessfully = false[\s\S]*setSales\(rows\)[\s\S]{0,180}completedSuccessfully = true/)
+  assert.match(source, /const pending = resolvePendingSalesLoad\(pendingLoadRef\.current, completedSuccessfully\)[\s\S]{0,220}pendingLoadRef\.current = null[\s\S]{0,220}if \(pending\)/)
+  assert.match(source, /\{loadError && !loading \? \([\s\S]{0,500}role="alert"[\s\S]{0,500}onClick=\{\(\) => loadSales\(false\)\}/, 'a failed refresh with retained rows must expose the manual Retry action')
+})
+
 await runTest('Sales retries an immediate network failure and accepts the successful retry', async () => {
   resetReadState()
   const originalFetch = globalThis.fetch
