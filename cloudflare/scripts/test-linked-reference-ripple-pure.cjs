@@ -36,10 +36,11 @@ check('contact rename and merge advance every dependent version namespace', () =
 })
 
 check('merge repoints stable ids and refreshes operational display snapshots', () => {
-  const source = compact(readWorker('src/routes/contacts.ts'))
+  const source = compact(`${readWorker('src/routes/contacts.ts')}\n${readWorker('src/lib/contactMerge.ts')}`)
   assert.match(source, /UPDATE sales SET customer_id = @keepId, customer_name = @keeperName, customer_phone = @keeperPhone, customer_address = @keeperAddress WHERE customer_id = @mergeId/)
   assert.match(source, /UPDATE returns SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId/)
   assert.match(source, /UPDATE sales SET delivery_contact_id = @keepId, delivery_contact_name = @keeperName WHERE delivery_contact_id = @mergeId/)
+  assert.match(source, /UPDATE fees SET delivery_contact_id = @keepId/)
   assert.match(source, /lower\(trim\(COALESCE\(supplier, ''\)\)\) = @mergedNameLower/)
 })
 
