@@ -107,9 +107,13 @@ check('image paths are read for the CURRENT WINDOW, not all at once', () => {
   )
 })
 
-check('the rename plan is read once per run, not carried through every chunk', () => {
+check('the rename plan is read once per authorized run, not carried through every chunk', () => {
   assert.match(engine, /const renamePlanEntries = await readImageRenamePlan\(db, jobId\)/)
-  assert.match(engine, /isFreshStart && job\.type === 'products' && imageMatchCache\?\.hasRenamePlan/)
+  assert.match(
+    engine,
+    /isFreshStart && job\.type === 'products' && authority\.allowProductImageWrites && imageMatchCache\?\.hasRenamePlan/,
+    'only a fresh, image-authorized apply may load and execute the persisted rename plan',
+  )
 })
 
 check('a re-run replaces the previous match rather than merging into it', () => {
