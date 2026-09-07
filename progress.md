@@ -1,5 +1,11 @@
 # progress.md — business-os
 
+> **Owner additions recorded September 7:** next verified checkpoint deployment
+> requested; keep new GitHub commits scoped to individual fixes. Added same-session
+> duplicate feedback, sale-row eye removal, branch-vs-total stock alert parity and
+> refresh, consistent action minimization/permissions, and chart/stat gross/net
+> clarity. Assignments and acceptance details are in the active takeover ledger.
+
 > **Active September 7 Codex takeover:** Isolated integration base `ea9f0d1b`
 > preserves checkpoint 2 and prior Codex work. Sales, identity, media/stock,
 > accounting, reports, portal, and remaining-lane writers have disjoint
