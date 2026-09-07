@@ -153,3 +153,15 @@ export function markRestoreHandled(kind: MinimizedWorkKind): void {
     pendingRestoreScope = null
   }
 }
+
+/**
+ * A permission can be revoked between the chrome's click-time check and the
+ * destination host handling the restore event. Put the exact entry back and
+ * consume its pending replay so a later permission change cannot reopen it
+ * without another explicit operator action.
+ */
+export function reparkDeniedRestore(entry: MinimizedWorkEntry): void {
+  markRestoreHandled(entry.kind)
+  const { minimizedAt: _previousMinimizedAt, ...parked } = entry
+  minimizeWork(parked)
+}
