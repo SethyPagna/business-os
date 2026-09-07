@@ -300,7 +300,7 @@ const counted = (count: unknown, noun: 'movement(s)' | 'unit(s)'): string =>
  * is the repeated figure the owner asked us to take out ("no explanation just
  * arrange all reports more concise").
  */
-function expenseBlock(input: { otherUsd: unknown; otherKhr: unknown; deliveryCostUsd: unknown; deliveryCostRecorded: unknown }): { header: string | null; components: string[] } {
+function expenseBlock(input: { otherUsd: unknown; otherKhr: unknown; deliveryCostUsd: unknown; deliveryCostRecorded: unknown }): { header: string | null; components: string[]; courierUsd: number } {
   const courierUsd = Number(input.deliveryCostRecorded) > 0 ? round2(Number(input.deliveryCostUsd) || 0) : 0
   const otherUsd = round2(Number(input.otherUsd) || 0)
   const otherKhr = Number(input.otherKhr) || 0
@@ -309,6 +309,10 @@ function expenseBlock(input: { otherUsd: unknown; otherKhr: unknown; deliveryCos
   return {
     header: totalUsd || otherKhr ? labeled('expenses', money(totalUsd, otherKhr)) : null,
     components: split ? [labeled('deliveryCost', usd(courierUsd)), labeled('expensesOther', money(otherUsd, otherKhr))] : [],
+    // The courier part on its own, for the ONE caller whose whole subject is
+    // this total and which therefore has to attribute every dollar of it --
+    // see feesReport below. Nobody else reads it.
+    courierUsd,
   }
 }
 
@@ -445,7 +449,21 @@ async function feesReport(env: Env, date: string): Promise<string> {
   // subject is that figure, and a blank where "$0.00" belongs reads as a
   // failure to load rather than as an answer.
   const lines = [reportTitle('💸', 'Expenses', 'ចំណាយ', date), RULE, expenses.header || labeled('expenses', money(0, 0)), RULE, ...expenses.components]
-  if (!fees.length) lines.push(bi('No expense recorded on this day.', 'គ្មានចំណាយបានកត់ត្រាក្នុងថ្ងៃនេះទេ។'))
+  // The split above prints only when the total genuinely has two parts, which
+  // is right for the day summary and the shift report: with one part the total
+  // IS that part, and naming it twice is the repeated figure the owner asked
+  // us to drop. It is NOT right here, because this report's list is the fee
+  // RECORDS and a courier payout is not one of them -- it can never appear
+  // among the bullets. So on a day whose only spending was the courier, name
+  // it: otherwise the one report dedicated to spending states $7.50 and
+  // attributes none of it.
+  if (!expenses.components.length && expenses.courierUsd > 0) lines.push(labeled('deliveryCost', usd(expenses.courierUsd)))
+  // The empty-state sentence answers the total the header just stated, not the
+  // fee TABLE it used to be keyed on. A day whose spending was all courier has
+  // no fee record and a non-zero total, so the old `!fees.length` guard put
+  // "No expense recorded on this day." two lines under "Expenses: $7.50" --
+  // the message denying the figure it had just printed.
+  if (!fees.length && !expenses.header) lines.push(bi('No expense recorded on this day.', 'គ្មានចំណាយបានកត់ត្រាក្នុងថ្ងៃនេះទេ។'))
   for (const fee of fees) lines.push(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}: ${money(fee.amount_usd, fee.amount_khr)}`)
   return lines.join('\n')
 }

@@ -589,6 +589,57 @@ const lastSent = () => sent[sent.length - 1].body.text
   ], feesReply)
   console.log('PASS /fees: one word, one sum -- the header matches /report byte for byte')
 
+  // --- the courier-only day: the branch the stub above could never reach ---
+  // `spendingDb` carries BOTH halves of the total, so the report never had to
+  // answer for a day whose ONLY spending is the courier payout: no fee record
+  // at all, the fees aggregate flat zero, `delivery_actual_cost_usd` 7.50 over
+  // 3 sales. On that day the header states $7.50 -- and until Sep 8 2026 the
+  // message that stated it also said "No expense recorded on this day.", two
+  // lines apart, because the sentence was keyed on the fee-record LIST while
+  // the header above it totals the list PLUS the courier money. It also
+  // attributed the $7.50 to nothing: the split prints only when the total has
+  // two parts, and the fee bullets below can never account for a courier
+  // payout, which is not a fee record.
+  const courierOnlyDb = {
+    prepare(sql) {
+      return {
+        // No fee records: `SELECT fee_type ...` falls through to the empty list.
+        all: async () => (/FROM settings/.test(sql) ? settingsRows : []),
+        get: async () => (/delivery_actual_cost_count/.test(sql) ? { tx_count: 12, recognized_net_usd: 486.25, delivery_actual_cost_usd: 7.5, delivery_actual_cost_count: 3 }
+          : /FROM fees WHERE fee_date/.test(sql) ? { count: 0, usd: 0, khr: 0 }
+          : /FROM products/.test(sql) ? { products: 0, units: 0, out_of_stock: 0, low_stock: 0 }
+            : { count: 0, usd: 0, khr: 0, quantity: 0 }),
+      }
+    },
+  }
+  const courierOnlyAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => courierOnlyDb }, './businessDateWindow': businessDateWindow })
+  const courierOnly = loadReal('lib/telegram.ts', {
+    './lowStockSettings': lowStockStub,
+    './db': { getDb: () => courierOnlyDb },
+    './businessDateWindow': businessDateWindow,
+    './telegramLang': lang,
+    './saleTotals': saleTotals,
+    './nativeSaleChange': nativeSaleChange,
+    './salesAnalytics': courierOnlyAnalytics,
+    './shiftReconciliation': reconciliationFor(() => courierOnlyDb, courierOnlyAnalytics),
+  })
+  await courierOnly.handleTelegramWebhook(env, { message: { text: '/fees 06/09/2026', chat: { id: -100111 } } })
+  const courierOnlyReply = lastSent()
+  assert.deepEqual(courierOnlyReply.split('\n'), [
+    '💸 Expenses / ចំណាយ — 06/09/2026',
+    RULE,
+    'Expenses / ចំណាយ: $7.50',
+    RULE,
+    'Delivery cost / ថ្លៃដើមដឹកជញ្ជូន: $7.50',
+  ], courierOnlyReply)
+  // The rule behind that shape, stated so it cannot be satisfied by accident:
+  // a message never states a non-zero total and then denies the spending.
+  const emptyState = /No expense recorded/.test(courierOnlyReply)
+  const zeroTotal = expensesLine(courierOnlyReply) === `Expenses${SEP}ចំណាយ: $0.00`
+  assert.ok(!(emptyState && !zeroTotal),
+    `/fees denies spending it has just totalled:\n${courierOnlyReply}`)
+  console.log('PASS /fees: a courier-only day is attributed, and never denied')
+
 
   const quiet = sent.length
   await wired.handleTelegramWebhook(env, { message: { text: 'good morning', chat: { id: -100999 } } })
