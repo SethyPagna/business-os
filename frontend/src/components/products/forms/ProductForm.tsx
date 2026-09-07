@@ -9,6 +9,7 @@ import Trash2Icon from 'lucide-react/dist/esm/icons/trash-2.js'
 import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
 import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
+import { ModalCloseContext } from '../../shared/modalCloseContext.ts'
 import MinimizeButton from '../../shared/MinimizeButton.tsx'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
@@ -255,6 +256,11 @@ interface PickImageFilesOptions {
   capture?: string
 }
 
+type ProductFormDraftPayload = {
+  form: Partial<ProductFormState>
+  imageList: string[]
+}
+
 interface NumericInputOptions {
   allowDecimal?: boolean
   allowNegative?: boolean
@@ -335,6 +341,21 @@ function normalizeGallery(product?: ProductFormState | null, limit = MAX_PRODUCT
     if (list.length >= limit) break
   }
   return list
+}
+
+export function normalizeProductFormDraft(value: unknown): { form: Partial<ProductFormState>; imageList?: string[] } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { form: {} }
+  const record = value as Record<string, unknown>
+  if (record.form && typeof record.form === 'object' && !Array.isArray(record.form)) {
+    return {
+      form: record.form as Partial<ProductFormState>,
+      imageList: Array.isArray(record.imageList)
+        ? normalizeGallery({ image_gallery: record.imageList }, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
+        : undefined,
+    }
+  }
+  const form = record as Partial<ProductFormState>
+  return { form, imageList: normalizeGallery(form, ADMIN_MAX_PRODUCT_GALLERY_IMAGES) }
 }
 
 // Mirrors cloudflare/src/lib/importImageMatch.ts's buildImageDisplayName --
@@ -579,6 +600,10 @@ export default function ProductForm({
   // limit controls additions; it must not truncate positions 4-5 merely
   // because someone edited an unrelated product field.
   const [imageList, setImageList] = useState(() => normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
+  const formRef = useRef(form)
+  const imageListRef = useRef(imageList)
+  formRef.current = form
+  imageListRef.current = imageList
   const [imageRenderVersions, setImageRenderVersions] = useState<Record<string, string>>({})
   const imageHydrationKeyRef = useRef(draftKey)
   const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
@@ -774,7 +799,9 @@ export default function ProductForm({
   useEffect(() => {
     if (imageHydrationKeyRef.current !== draftKey) {
       imageHydrationKeyRef.current = draftKey
-      setImageList(normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
+      const nextImages = normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
+      imageListRef.current = nextImages
+      setImageList(nextImages)
       setImageRenderVersions({})
     }
     const resetKey = `${draftKey}:${initialTab || 'basic'}`
@@ -984,13 +1011,18 @@ export default function ProductForm({
     // reads Part 388's original { form } field for existing drafts).
     {
       const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? Date.parse(String((product as Record<string, unknown>).updated_at)) : 0
-      const draft = readWorkDraft<Partial<ProductFormState>>(draftKey, { notOlderThanMs: serverEditedAt || 0 })
+      const draft = readWorkDraft<Partial<ProductFormState> | ProductFormDraftPayload>(draftKey, { notOlderThanMs: serverEditedAt || 0 })
       const legacyDraft = !draft && legacyDraftKey
-        ? readWorkDraft<Partial<ProductFormState>>(legacyDraftKey, { notOlderThanMs: serverEditedAt || 0 })
+        ? readWorkDraft<Partial<ProductFormState> | ProductFormDraftPayload>(legacyDraftKey, { notOlderThanMs: serverEditedAt || 0 })
         : null
       const restoredDraft = draft || legacyDraft
       if (restoredDraft?.data) {
-        setForm((current) => ({ ...current, ...restoredDraft.data }))
+        const restored = normalizeProductFormDraft(restoredDraft.data)
+        setForm((current) => ({ ...current, ...restored.form }))
+        if (canManageImages && restored.imageList) {
+          imageListRef.current = restored.imageList
+          setImageList(restored.imageList)
+        }
         formDirtyRef.current = true
         restoredLegacyDraftKeyRef.current = legacyDraft?.data ? legacyDraftKey : null
         // (no notify prop here -- the restored values themselves are the signal)
@@ -1020,9 +1052,29 @@ export default function ProductForm({
 
   useEffect(() => {
     if (!formDirtyRef.current) return
-    return scheduleWorkDraftWrite(draftKey, form)
+    return scheduleWorkDraftWrite<ProductFormDraftPayload>(draftKey, {
+      form,
+      imageList: normalizeGallery({ image_gallery: imageList }, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, draftKey])
+  }, [form, imageList, draftKey])
+
+  function updateImageList(
+    change: (current: string[]) => string[],
+    options: { persistImmediately?: boolean } = {},
+  ): string[] {
+    const current = imageListRef.current
+    const next = normalizeGallery({ image_gallery: change(current) }, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
+    if (next.length === current.length && next.every((path, index) => path === current[index])) return current
+    imageListRef.current = next
+    formDirtyRef.current = true
+    setImageList(next)
+    if (options.persistImmediately) {
+      scheduleWorkDraftWrite<ProductFormDraftPayload>(draftKey, { form: formRef.current, imageList: next })
+      flushPendingWorkDraft(draftKey)
+    }
+    return next
+  }
 
   function setNumericField(key: keyof ProductFormState, value: unknown, options?: NumericInputOptions): void {
     setField(key, sanitizeNumericInput(value, options))
@@ -1041,24 +1093,17 @@ export default function ProductForm({
   async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
     if (!canManageImages || imageUploading || imageUploadInFlightRef.current) return
     imageUploadInFlightRef.current = true
+    setImageUploading(true)
     try {
-      const remaining = Math.max(0, imageLimit - imageList.length)
-      if (!remaining) {
-        imageUploadInFlightRef.current = false
-        return
-      }
+      const remaining = Math.max(0, imageLimit - imageListRef.current.length)
+      if (!remaining) return
       const files = await pickImageFiles(remaining, options)
-      if (!files.length) {
-        imageUploadInFlightRef.current = false
-        return
-      }
-      setImageUploading(true)
-      const stagedImages: string[] = []
+      if (!files.length) return
       const productNameForNaming = String(form.name || '').trim()
       // Position/total are computed against the gallery's final size (existing
       // images already on the product + every file in this batch), not just
       // this batch alone -- see buildGalleryImageName above.
-      const existingCount = imageList.length
+      const existingCount = imageListRef.current.length
       const totalAfterBatch = Math.min(imageLimit, existingCount + files.length)
       for (const [index, file] of files.entries()) {
         const uploaded = await withLoaderTimeout(
@@ -1077,27 +1122,26 @@ export default function ProductForm({
         const publicPath = canonicalizePersistedMediaPath(rawPath)
         if (!publicPath) throw new Error(tr('image_upload_missing_path', 'Image upload completed without a stored file path.', 'ការបង្ហោះរូបភាពបានបញ្ចប់ ប៉ុន្តែមិនមានទីតាំងឯកសារដែលបានរក្សាទុកទេ។'))
         const renderVersion = String(uploaded?.cache_version || uploaded?.asset?.updated_at || uploaded?.asset?.created_at || '').trim()
-        if (renderVersion) setImageRenderVersions((current) => ({ ...current, [publicPath]: renderVersion }))
-        stagedImages.push(publicPath)
+        if (aliveRef.current && renderVersion) setImageRenderVersions((current) => ({ ...current, [publicPath]: renderVersion }))
+        // Persist every successful file before starting the next one. A later
+        // failure can report honestly without orphaning earlier uploads from
+        // the restorable product draft.
+        updateImageList(
+          (current) => current.includes(publicPath) || current.length >= imageLimit ? current : [...current, publicPath],
+          { persistImmediately: true },
+        )
       }
-      setImageList((current) => {
-        const next = [...current]
-        stagedImages.forEach((url) => {
-          if (!next.includes(url) && next.length < imageLimit) next.push(url)
-        })
-        return next
-      })
     } catch (error) {
       alert(getErrorMessage(error, tr('image_upload_failed', 'Image upload failed', 'ការបង្ហោះរូបភាពបានបរាជ័យ')))
     } finally {
       imageUploadInFlightRef.current = false
-      setImageUploading(false)
+      if (aliveRef.current) setImageUploading(false)
     }
   }
 
   function removeImage(index: number): void {
     if (!canManageImages) return
-    setImageList((current) => current.filter((_, idx) => idx !== index))
+    updateImageList((current) => current.filter((_, idx) => idx !== index))
   }
 
   // Drag-to-reorder for the gallery grid (Part 242), mirrored off the same
@@ -1109,7 +1153,7 @@ export default function ProductForm({
   // same reorder without a mouse.
   function reorderImage(fromIndex: number, toIndex: number): void {
     if (!canManageImages) return
-    setImageList((current) => {
+    updateImageList((current) => {
       if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= current.length || toIndex < 0 || toIndex >= current.length) return current
       const next = [...current]
       const [moved] = next.splice(fromIndex, 1)
@@ -1124,7 +1168,7 @@ export default function ProductForm({
 
   function setPrimaryImage(index: number): void {
     if (!canManageImages) return
-    setImageList((current) => {
+    updateImageList((current) => {
       if (index < 0 || index >= current.length) return current
       const next = [...current]
       const [primary] = next.splice(index, 1)
@@ -1139,7 +1183,7 @@ export default function ProductForm({
     // (e.g. a future keyboard-submit path) that doesn't go through the
     // disabled button. See the button's own comment for the bug this
     // closes: saving mid-upload used the stale pre-upload imageList.
-    if (saving || saveInFlightRef.current || imageUploading) return
+    if (saving || saveInFlightRef.current || imageUploading || imageUploadInFlightRef.current) return
     if (!String(form.name || '').trim()) {
       alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
       return
@@ -1197,6 +1241,9 @@ export default function ProductForm({
     void _ignoredSku
     void _ignoredParentId
     void _ignoredIsGroup
+    const savableImageList = canManageImages
+      ? imageListRef.current
+      : normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
     const payload: ProductSavePayload = {
       ...manualForm,
       selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
@@ -1226,8 +1273,8 @@ export default function ProductForm({
       // Positions 4-5 may be an existing admin-created gallery. They are
       // preserved on ordinary edits; all add paths above still stop at the
       // caller's 3/5 action limit.
-      image_gallery: imageList.map((path) => canonicalizePersistedMediaPath(path)).filter(Boolean).slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
-      image_path: canonicalizePersistedMediaPath(imageList[0]),
+      image_gallery: savableImageList.map((path) => canonicalizePersistedMediaPath(path)).filter(Boolean).slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
+      image_path: canonicalizePersistedMediaPath(savableImageList[0]),
     }
     // D6: renaming an EXISTING product that shares its name with siblings
     // asks whether the whole group carries (9.1's regroup) or only this
@@ -1343,6 +1390,7 @@ export default function ProductForm({
     [isCreateMode, nameLocked, createMatches, product?.id],
   )
   const preserveAndMinimize = onMinimize ? () => {
+    if (imageUploading || imageUploadInFlightRef.current) return
     // The shared unsaved prompt may offer Minimize only through an explicit
     // preservation capability. Finish this form's pending debounce before the
     // parent parks/closes it; an already-fired debounce is already durable.
@@ -1373,6 +1421,7 @@ export default function ProductForm({
       title={isEditMode ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product?.name || ''}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
       onClose={onClose}
       onMinimize={preserveAndMinimize}
+      closeDisabled={imageUploading}
       layer={modalLayer}
       wide
       headerExtra={(
@@ -1388,7 +1437,7 @@ export default function ProductForm({
               breakpoint. Only the minimize control remains up here. */}
           {preserveAndMinimize ? (
             <MinimizeButton
-              disabled={saving}
+              disabled={saving || imageUploading}
               tr={tr}
               onMinimize={preserveAndMinimize}
             />
@@ -2026,9 +2075,13 @@ export default function ProductForm({
         <button type="button" className="btn-primary min-h-11 flex-1" onClick={saveForm} disabled={saving || imageUploading}>
           {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
         </button>
-        <button type="button" className="btn-secondary min-h-11" onClick={onClose} disabled={saving}>
-          {t('cancel')}
-        </button>
+        <ModalCloseContext.Consumer>
+          {(requestClose) => (
+            <button type="button" className="btn-secondary min-h-11" onClick={requestClose || onClose} disabled={saving || imageUploading}>
+              {t('cancel')}
+            </button>
+          )}
+        </ModalCloseContext.Consumer>
         {/* Delete lives in this same row now (was only reachable from the
             separate read-only detail sheet before) -- deliberately NOT
             flex-1 like Save, and icon-only with no text label, so its tap
@@ -2043,7 +2096,7 @@ export default function ProductForm({
             type="button"
             className="btn-danger min-h-11 shrink-0 px-2.5"
             onClick={onDelete}
-            disabled={saving}
+            disabled={saving || imageUploading}
             aria-label={t('delete') || 'Delete'}
             title={t('delete') || 'Delete'}
           >
@@ -2065,7 +2118,10 @@ export default function ProductForm({
                 if (!canonicalPath) return
                 const renderVersion = String(asset?.updated_at || '').trim()
                 if (renderVersion) setImageRenderVersions((current) => ({ ...current, [canonicalPath]: renderVersion }))
-                setImageList((current) => current.includes(canonicalPath) || current.length >= imageLimit ? current : [...current, canonicalPath])
+                updateImageList(
+                  (current) => current.includes(canonicalPath) || current.length >= imageLimit ? current : [...current, canonicalPath],
+                  { persistImmediately: true },
+                )
               }}
             />
           ) : null}
