@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildCacheBustedMediaPath, createInitialUploadState, reduceUploadState } from '../src/utils/mediaUpload.ts'
+import { buildCacheBustedMediaPath, canonicalizePersistedMediaPath, createInitialUploadState, reduceUploadState } from '../src/utils/mediaUpload.ts'
 import { logicalAssetDisplayName, logicalAssetDownloadPath, logicalAssetKey } from '../src/components/files/libraryLogicalRows.ts'
 
 let failed = 0
@@ -20,6 +20,13 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 await runTest('cache busted media path appends upload version without duplicating query separators', () => {
   assert.equal(buildCacheBustedMediaPath('/uploads/logo.png', 'abc'), '/uploads/logo.png?v=abc')
   assert.equal(buildCacheBustedMediaPath('/uploads/logo.png?old=1', 'abc'), '/uploads/logo.png?old=1&v=abc')
+})
+
+await runTest('persisted media identity strips render-only versions from upload paths', () => {
+  assert.equal(canonicalizePersistedMediaPath('/uploads/logo.png?v=abc#preview'), '/uploads/logo.png')
+  assert.equal(canonicalizePersistedMediaPath('uploads/logo.png?updated=1'), '/uploads/logo.png')
+  assert.equal(canonicalizePersistedMediaPath('https://cdn.example.com/signed.png?token=keep'), 'https://cdn.example.com/signed.png?token=keep')
+  assert.equal(canonicalizePersistedMediaPath('', 'blob:preview'), 'blob:preview')
 })
 
 await runTest('upload reducer tracks per-field progress and cancellation', () => {

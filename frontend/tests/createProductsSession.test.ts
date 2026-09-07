@@ -236,6 +236,8 @@ runTest('positive new and existing lines use one atomic stock-session write', ()
   assert.doesNotMatch(modalSource, /kind: '(?:transfer|remove|set)'/, 'unfinished stock commands must not leak into Add products')
   assert.match(inventoryWriteTransportSource, /export function createInventorySession/)
   assert.match(inventoryWriteTransportSource, /'POST', '\/api\/inventory\/sessions'/)
+  assert.match(inventoryWriteTransportSource, /INVENTORY_SESSION_TIMEOUT_MS\s*=\s*60_000/)
+  assert.match(inventoryWriteTransportSource, /'\/api\/inventory\/sessions', payload, INVENTORY_SESSION_TIMEOUT_MS/)
   assert.match(inventoryWriteTransportSource, /route\([\s\S]*?null,[\s\S]*?true,?\s*\)/, 'stock sessions stay network-only writes')
 })
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { normalizeDashboardGrossMetrics } from '../src/api/dashboardTransport.ts'
 
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
 const branchesHub = fs.readFileSync(new URL('../src/components/branches/BranchesHubPage.tsx', import.meta.url), 'utf8')
@@ -32,7 +33,10 @@ assert.match(dashboard, /onOpenHour=\{openHourDetail\}/, 'dashboard best-hour ca
 assert.match(dashboard, /onOpenHour\(hour, index \+ 1\)/, 'dashboard best-hour rows should open a detail view')
 assert.match(dashboard, /const openInventoryOverview = useCallback\(/, 'dashboard should expose a direct inventory follow-through action')
 assert.match(dashboard, /DASHBOARD_INVENTORY_FOCUS_KEY/, 'dashboard should persist a focused inventory handoff when drilling into stock alerts')
-assert.match(dashboard, /review_in_inventory', 'Review in inventory'/, 'dashboard preview-truncated stock cards should offer an explicit inventory review action')
+assert.match(dashboard, /DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX/, 'dashboard stock alerts should append another family page near the list bottom')
+assert.match(dashboard, /getDashboardStockAlerts\(\{ state, page, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE \}\)/, 'dashboard-only users must load stock alert pages through the dashboard-authorized endpoint')
+assert.match(dashboard, /lowStockListRef\.current\.scrollTop = 0[\s\S]{0,120}outOfStockListRef\.current\.scrollTop = 0/, 'leaving an alert page must reset both scroll positions')
+assert.match(dashboard, /setLowStockRows\(\[\]\)[\s\S]{0,120}setOutOfStockRows\(\[\]\)/, 'leaving the dashboard must clear both alert lists')
 assert.match(dashboard, /triggerClassName="flex w-full min-w-0 items-center justify-center gap-1\.5 rounded-lg px-2 py-1 !min-h-9 sm:px-3"/, 'dashboard date picker should stay compact on mobile')
 assert.match(dashboard, /min-h-7[^"]*px-2\.5 py-1 text-\[11px\] font-semibold/, 'dashboard export control should stay compact on mobile')
 assert.doesNotMatch(dashboard, /RANGE_PRESETS/, 'dashboard should not restore the removed preset-chip controls')
@@ -58,6 +62,24 @@ assert.ok((dashboard.match(/compact-analytics-legend/g) || []).length >= 2, 'thr
 assert.doesNotMatch(dashboard, /getBusinessTimezoneOffsetHours/, 'business-hour analytics must not apply the UTC+7 offset twice')
 assert.match(dashboard, /summary\?\.expiring_count/, 'expiry preview badge should show the complete backend count, not the ten-row preview length')
 assert.match(dashboard, /createPortal\([\s\S]*recentSaleDetail[\s\S]*document\.body/, 'dashboard sale details should portal above the page layer')
+assert.match(dashboard, /rpt_pending_credit', 'Credit'/, 'credit is a positive revenue annotation in the dashboard drill')
+assert.match(dashboard, /normalizeDashboardGrossMetrics\(row\)/, 'period trend rows must use the same pre-discount gross normalization as the headline')
+assert.match(dashboard, /analytics: displayAnalytics/, 'dashboard exports must receive the normalized headline and trend metrics')
+
+const normalized = normalizeDashboardGrossMetrics({
+  gross_sales_usd: 90,
+  item_discount_usd: 10,
+  discount_usd: 5,
+  total_discount_usd: 15,
+  revenue_usd: 85,
+  pending_revenue_usd: 25,
+})
+assert.equal(normalized.gross_sales_usd, 100, 'gross adds recognized item discount exactly once')
+assert.equal(normalized.discount_usd, 15, 'discounts use the complete discount field exactly once')
+assert.equal(normalized.revenue_usd, 85, 'revenue keeps server kernel arithmetic')
+assert.equal(normalized.pending_revenue_usd, 25, 'credit stays included and positive')
+assert.equal(normalizeDashboardGrossMetrics({ gross_sales_usd: 90, item_discount_usd: 10, discount_usd: 5 }).discount_usd, 15, 'legacy payloads derive total discounts from invoice plus item discounts')
+assert.equal(normalizeDashboardGrossMetrics({ gross_sales_usd: 100, item_discount_usd: 0, discount_usd: 0 }).gross_sales_usd, 100, 'zero discounts may legitimately leave gross equal to revenue')
 // Aug 31 2026: the Branches hub's Products slice was removed as redundant
 // with the Products page, so the handoff chain is now: Dashboard writes the
 // inventory-focus key -> BranchesHubPage consumes it and FORWARDS a

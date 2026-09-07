@@ -17,7 +17,7 @@ import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRange
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
-import { getAnalytics, getDashboard, getDashboardStartup } from '../../api/dashboardTransport.ts'
+import { getAnalytics, getDashboard, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 import { listImportJobs } from '../../api/importJobsTransport.ts'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
@@ -138,6 +138,8 @@ interface DashboardPeriodRow {
   revenue_usd?: number
   gross_sales_usd?: number
   discount_usd?: number
+  item_discount_usd?: number
+  total_discount_usd?: number
   tax_usd?: number
   delivery_usd?: number
   delivery_actual_cost_usd?: number
@@ -252,6 +254,7 @@ interface DashboardApi {
   getDashboard: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
   getAnalytics: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStartup: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
+  getDashboardStockAlerts: (params: { state: DashboardStockAlertState; page: number; pageSize: number }) => Promise<unknown>
 }
 
 type DashboardExportModule = typeof import('./dashboardExport.ts')
@@ -261,7 +264,7 @@ const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
 function getDashboardApi(): DashboardApi {
-  return { getDashboard, getAnalytics, getDashboardStartup }
+  return { getDashboard, getAnalytics, getDashboardStartup, getDashboardStockAlerts }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -274,6 +277,8 @@ const DASHBOARD_CHART_POINT_LIMIT = 180
 const DASHBOARD_SUMMARY_TIMEOUT_MS = 30000
 const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000
 const DASHBOARD_STARTUP_TIMEOUT_MS = 30000
+const DASHBOARD_STOCK_ALERT_PAGE_SIZE = 10
+const DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX = 64
 const EMPTY_DASHBOARD_SUMMARY: DashboardSummary = {
   today_count: 0,
   today_total: 0,
@@ -692,6 +697,16 @@ export default function Dashboard() {
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
   const [productDetail, setProductDetail]       = useState<DashboardProduct | null>(null)
+  const [lowStockRows, setLowStockRows] = useState<DashboardProduct[]>([])
+  const [outOfStockRows, setOutOfStockRows] = useState<DashboardProduct[]>([])
+  const [lowStockPage, setLowStockPage] = useState(0)
+  const [outOfStockPage, setOutOfStockPage] = useState(0)
+  const [lowStockHasMore, setLowStockHasMore] = useState(false)
+  const [outOfStockHasMore, setOutOfStockHasMore] = useState(false)
+  const [lowStockLoadingMore, setLowStockLoadingMore] = useState(false)
+  const [outOfStockLoadingMore, setOutOfStockLoadingMore] = useState(false)
+  const [lowStockLoadError, setLowStockLoadError] = useState('')
+  const [outOfStockLoadError, setOutOfStockLoadError] = useState('')
   // Every list card fills its row height and scrolls in place (see
   // CARD_LIST_BODY) instead of a per-card show-all toggle, so those show-all
   // flags were removed.
@@ -709,6 +724,12 @@ export default function Dashboard() {
   const analyticsRequestRef = useRef(0)
   const startupRequestRef = useRef(0)
   const refreshRequestRef = useRef(0)
+  const lowStockRequestRef = useRef(0)
+  const outOfStockRequestRef = useRef(0)
+  const lowStockLoadInFlightRef = useRef(false)
+  const outOfStockLoadInFlightRef = useRef(false)
+  const lowStockListRef = useRef<HTMLDivElement | null>(null)
+  const outOfStockListRef = useRef<HTMLDivElement | null>(null)
   const analyticsLoadingRef = useRef(true)
   const startupLoadingRef = useRef(false)
   const startupAttemptedRef = useRef(false)
@@ -833,6 +854,50 @@ export default function Dashboard() {
     }
   }, [getCurrentDashboardRange])
 
+  const loadStockAlertPage = useCallback(async (state: DashboardStockAlertState, page: number) => {
+    const requestRef = state === 'low' ? lowStockRequestRef : outOfStockRequestRef
+    const inFlightRef = state === 'low' ? lowStockLoadInFlightRef : outOfStockLoadInFlightRef
+    if (inFlightRef.current) return null
+    inFlightRef.current = true
+    const requestId = beginTrackedRequest(requestRef)
+    const setLoadingMore = state === 'low' ? setLowStockLoadingMore : setOutOfStockLoadingMore
+    const setLoadError = state === 'low' ? setLowStockLoadError : setOutOfStockLoadError
+    setLoadingMore(true)
+    setLoadError('')
+    try {
+      const data = await withLoaderTimeout(
+        () => getDashboardApi().getDashboardStockAlerts({ state, page, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE }),
+        state === 'low' ? 'Low-stock alerts' : 'Out-of-stock alerts',
+        DASHBOARD_SUMMARY_TIMEOUT_MS,
+      ) as { items?: unknown[]; page?: number; hasMore?: boolean } | null
+      if (!isTrackedRequestCurrent(requestRef, requestId)) return null
+      if (!data || !Array.isArray(data.items)) throw new Error('Dashboard stock alerts returned an invalid response.')
+      const nextRows = data.items.filter((item): item is DashboardProduct => !!item && typeof item === 'object')
+      const mergeRows = (current: DashboardProduct[]) => {
+        const byId = new Map(current.map((item) => [String(item.id), item]))
+        nextRows.forEach((item) => byId.set(String(item.id), item))
+        return Array.from(byId.values())
+      }
+      if (state === 'low') {
+        setLowStockRows(mergeRows)
+        setLowStockPage(Math.max(1, Number(data.page) || page))
+        setLowStockHasMore(Boolean(data.hasMore))
+      } else {
+        setOutOfStockRows(mergeRows)
+        setOutOfStockPage(Math.max(1, Number(data.page) || page))
+        setOutOfStockHasMore(Boolean(data.hasMore))
+      }
+      return data
+    } catch (error) {
+      if (!isTrackedRequestCurrent(requestRef, requestId)) return null
+      setLoadError(getErrorMessage(error, 'Could not load more stock alerts.'))
+      return null
+    } finally {
+      inFlightRef.current = false
+      if (isTrackedRequestCurrent(requestRef, requestId)) setLoadingMore(false)
+    }
+  }, [])
+
   const loadAnalytics = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const requestId = beginTrackedRequest(analyticsRequestRef)
     const shouldClearLoading = !silent || analyticsLoadingRef.current
@@ -914,6 +979,41 @@ export default function Dashboard() {
       markLoading: summary == null,
     })
   }, [isActive, loadSummary]) // eslint-disable-line
+
+  useEffect(() => {
+    if (!isActive) {
+      invalidateTrackedRequest(lowStockRequestRef)
+      invalidateTrackedRequest(outOfStockRequestRef)
+      lowStockLoadInFlightRef.current = false
+      outOfStockLoadInFlightRef.current = false
+      setLowStockRows([])
+      setOutOfStockRows([])
+      setLowStockPage(0)
+      setOutOfStockPage(0)
+      setLowStockHasMore(false)
+      setOutOfStockHasMore(false)
+      setLowStockLoadingMore(false)
+      setOutOfStockLoadingMore(false)
+      setLowStockLoadError('')
+      setOutOfStockLoadError('')
+      if (lowStockListRef.current) lowStockListRef.current.scrollTop = 0
+      if (outOfStockListRef.current) outOfStockListRef.current.scrollTop = 0
+      return
+    }
+
+    const initialLowRows = Array.isArray(summary?.low_stock) ? summary.low_stock : []
+    const initialOutRows = Array.isArray(summary?.out_of_stock) ? summary.out_of_stock : []
+    setLowStockRows(initialLowRows)
+    setOutOfStockRows(initialOutRows)
+    setLowStockPage(initialLowRows.length ? 1 : 0)
+    setOutOfStockPage(initialOutRows.length ? 1 : 0)
+    setLowStockHasMore(Boolean(summary?.low_stock_preview_truncated || Number(summary?.low_stock_count || 0) > initialLowRows.length))
+    setOutOfStockHasMore(Boolean(summary?.out_of_stock_preview_truncated || Number(summary?.out_of_stock_count || 0) > initialOutRows.length))
+    setLowStockLoadError('')
+    setOutOfStockLoadError('')
+    if (lowStockListRef.current) lowStockListRef.current.scrollTop = 0
+    if (outOfStockListRef.current) outOfStockListRef.current.scrollTop = 0
+  }, [isActive, summary?.low_stock, summary?.low_stock_count, summary?.low_stock_preview_truncated, summary?.out_of_stock, summary?.out_of_stock_count, summary?.out_of_stock_preview_truncated])
 
   useEffect(() => {
     if (!isActive) {
@@ -1050,20 +1150,22 @@ export default function Dashboard() {
   const staleSummaryNotice = summaryReady && summaryError
   const staleAnalyticsNotice = analyticsReady && analyticsError
   const calcTrend = (curr: number, prev: number) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
+  const displayTotals = useMemo(
+    () => normalizeDashboardGrossMetrics(analytics?.totals || {}),
+    [analytics?.totals],
+  )
   const aRevenue  = analytics?.totals?.revenue_usd || 0
-  const aGrossSales = analytics?.totals?.gross_sales_usd || 0
-  const aDiscounts = analytics?.totals?.discount_usd || 0
+  const aGrossSales = Number(displayTotals.gross_sales_usd) || 0
+  const aDiscounts = Number(displayTotals.discount_usd) || 0
+  const aItemDiscounts = analytics?.totals?.item_discount_usd || 0
+  const aInvoiceDiscounts = analytics?.totals?.discount_usd || 0
   const aStoreDiscounts = analytics?.totals?.store_discount_usd || 0
-  const aMemberDiscounts = analytics?.totals?.membership_discount_usd || Math.max(0, aDiscounts - aStoreDiscounts)
+  const aMemberDiscounts = analytics?.totals?.membership_discount_usd || Math.max(0, aInvoiceDiscounts - aStoreDiscounts)
   const aTax = analytics?.totals?.tax_usd || 0
   const aDelivery = analytics?.totals?.delivery_usd || 0
   const aStockValue = summary?.stock_value_usd || 0
   const lowStockCount = summary?.low_stock_count ?? summary?.low_stock?.length ?? 0
   const outOfStockCount = summary?.out_of_stock_count ?? summary?.out_of_stock?.length ?? 0
-  const lowStockPreviewLimit = Number(summary?.low_stock_preview_limit || summary?.low_stock?.length || 0)
-  const outOfStockPreviewLimit = Number(summary?.out_of_stock_preview_limit || summary?.out_of_stock?.length || 0)
-  const lowStockPreviewTruncated = !!summary?.low_stock_preview_truncated
-  const outOfStockPreviewTruncated = !!summary?.out_of_stock_preview_truncated
   const aStoreDelivery = analytics?.totals?.store_delivery_usd || 0
   // P6: actual courier money out vs what customers were charged --
   // staff-only figures (this whole page is permission-gated), never on
@@ -1072,6 +1174,10 @@ export default function Dashboard() {
   const aDeliveryActualCount = analytics?.totals?.delivery_actual_cost_count || 0
   const aDeliverySales = analytics?.totals?.delivery_sale_count || 0
   const aDeliveryMargin = analytics?.totals?.delivery_margin_usd ?? (aDelivery - aDeliveryActual)
+  // Positive annotation: this amount is already included in revenue and
+  // profit by the server kernel. Showing it here must never add or subtract
+  // it from either headline.
+  const aCredit = analytics?.totals?.pending_revenue_usd || 0
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
@@ -1099,13 +1205,16 @@ export default function Dashboard() {
   // front of this bundle gets the identity read backwards rather than a
   // formula that silently fails to foot.
   const aFormulaTotals: DashboardMetricMap = {
-    ...(analytics?.totals || {}),
+    ...displayTotals,
     net_sales_usd: analytics?.totals?.net_sales_usd ?? (aRevenue + aKernelRefund),
   }
   const aItemsRet  = analytics?.periodReturns?.items_returned || 0
   const aSupplierReturns = analytics?.periodSupplierReturns?.return_count || 0
   const aSupplierLossUsd = analytics?.periodSupplierReturns?.loss_usd || 0
-  const chartData = analytics?.periodData || []
+  const chartData = useMemo(
+    () => (analytics?.periodData || []).map((row) => normalizeDashboardGrossMetrics(row) as DashboardPeriodRow),
+    [analytics?.periodData],
+  )
   const chartRenderData = useMemo(() => downsampleChartRows(chartData), [chartData])
   const topList   = topMode === 'qty' ? (analytics?.topProductsQty || []) : (analytics?.topProducts || [])
   const revenueFlowLabel = translateOr('revenue_flow', 'Revenue Flow')
@@ -1131,7 +1240,7 @@ export default function Dashboard() {
   const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Revenue − COGS + delivery fees charged − courier costs')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')
   const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points')
-  const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aRefundUsd)}`
+  const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aKernelRefund)}`
   const collectedExampleText = `${fmtUSD(aRevenue + aTax + aDelivery)} = ${fmtUSD(aRevenue)} + ${fmtUSD(aTax)} + ${fmtUSD(aDelivery)}`
   const rangeLabel = (() => {
     return `${customStart} - ${customEnd}`
@@ -1289,6 +1398,7 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         // reader to subtract it a second time.
         { label: translateOr('rpt_net_sales', 'Net sales'), value: fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aKernelRefund) },
+        ...(aCredit > 0 ? [{ label: translateOr('rpt_pending_credit', 'Credit'), value: fmtUSD(aCredit) }] : []),
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
@@ -1303,6 +1413,7 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
       color: aStoreDiscounts > 0 ? 'text-amber-600' : 'text-gray-500',
       details: [
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
+        { label: translateOr('rpt_item_discounts', 'Item discounts'), value: fmtUSD(aItemDiscounts) },
         { label: translateOr('store_discounts', 'Store discounts'), value: fmtUSD(aStoreDiscounts) },
         { label: translateOr('membership_discounts', 'Membership discounts'), value: fmtUSD(aMemberDiscounts) },
         { label: translateOr('discount_rate', 'Discount rate'), value: `${aDiscountRate.toFixed(1)}%` },
@@ -1418,7 +1529,9 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     aDelivery,
     aDiscounts,
     aGrossSales,
+    aItemDiscounts,
     aItemsRet,
+    aKernelRefund,
     aMemberDiscounts,
     aPrevRevenue,
     aPrevTxCount,
@@ -1462,9 +1575,15 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
+  const displayAnalytics = useMemo(() => analytics ? {
+    ...analytics,
+    totals: displayTotals,
+    periodData: chartData,
+  } : null, [analytics, chartData, displayTotals])
+
   const buildDashboardExportContext = useCallback(() => ({
     activeChart,
-    analytics,
+    analytics: displayAnalytics,
     chartData,
     collectedExampleText,
     collectedFormulaText,
@@ -1488,7 +1607,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     translateOr,
   }), [
     activeChart,
-    analytics,
+    displayAnalytics,
     chartData,
     collectedExampleText,
     collectedFormulaText,
@@ -1511,13 +1630,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     topMode,
     translateOr,
   ])
-
-  const lowStockPreviewLabel = lowStockPreviewTruncated
-    ? `${lowStockPreviewLimit} / ${lowStockCount} ${t('items') || 'items'}`
-    : `${lowStockCount} ${t('items') || 'items'}`
-  const outOfStockPreviewLabel = outOfStockPreviewTruncated
-    ? `${outOfStockPreviewLimit} / ${outOfStockCount} ${t('items') || 'items'}`
-    : `${outOfStockCount} ${t('items') || 'items'}`
 
   const buildExportAll = useCallback(async () => {
     const { exportDashboardFull } = await loadDashboardExportModule()
@@ -1984,10 +2096,20 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded-full font-medium">{lowStockCount}</span>
             )}
           </div>
-          <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
-            {!summary?.low_stock?.length
+          <div
+            ref={lowStockListRef}
+            className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}
+            aria-busy={lowStockLoadingMore}
+            onScroll={(event) => {
+              const node = event.currentTarget
+              if (node.scrollHeight - node.scrollTop - node.clientHeight <= DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX && lowStockHasMore) {
+                void loadStockAlertPage('low', lowStockPage + 1)
+              }
+            }}
+          >
+            {!lowStockRows.length
               ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
-              : summary.low_stock.map(p => (
+              : lowStockRows.map(p => (
                 <button
                   key={p.id}
                   type="button"
@@ -2002,14 +2124,11 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 </button>
               ))}
           </div>
-          {lowStockPreviewTruncated ? (
-            <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700">
-              <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                <span>{translateOr('showing_preview', 'Showing preview')} {lowStockPreviewLabel}</span>
-                <button type="button" className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-700" onClick={() => openInventoryOverview('low')}>
-                  {translateOr('review_in_inventory', 'Review in inventory')}
-                </button>
-              </div>
+          {lowStockLoadingMore || lowStockLoadError ? (
+            <div className="border-t border-gray-100 px-4 py-2 text-center text-[11px] text-slate-500 dark:border-gray-700">
+              {lowStockLoadingMore
+                ? (t('loading') || 'Loading...')
+                : <button type="button" className="font-semibold text-blue-600 hover:underline dark:text-blue-400" onClick={() => void loadStockAlertPage('low', lowStockPage + 1)}>{lowStockLoadError} {translateOr('try_again', 'Try again')}</button>}
             </div>
           ) : null}
         </div>
@@ -2022,10 +2141,20 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">{outOfStockCount}</span>
             )}
           </div>
-          <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
-            {!summary?.out_of_stock?.length
+          <div
+            ref={outOfStockListRef}
+            className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}
+            aria-busy={outOfStockLoadingMore}
+            onScroll={(event) => {
+              const node = event.currentTarget
+              if (node.scrollHeight - node.scrollTop - node.clientHeight <= DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX && outOfStockHasMore) {
+                void loadStockAlertPage('out', outOfStockPage + 1)
+              }
+            }}
+          >
+            {!outOfStockRows.length
               ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
-              : summary.out_of_stock.map(p => (
+              : outOfStockRows.map(p => (
                 <button
                   key={p.id}
                   type="button"
@@ -2040,14 +2169,11 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 </button>
               ))}
           </div>
-          {outOfStockPreviewTruncated ? (
-            <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700">
-              <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                <span>{translateOr('showing_preview', 'Showing preview')} {outOfStockPreviewLabel}</span>
-                <button type="button" className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-700" onClick={() => openInventoryOverview('out')}>
-                  {translateOr('review_in_inventory', 'Review in inventory')}
-                </button>
-              </div>
+          {outOfStockLoadingMore || outOfStockLoadError ? (
+            <div className="border-t border-gray-100 px-4 py-2 text-center text-[11px] text-slate-500 dark:border-gray-700">
+              {outOfStockLoadingMore
+                ? (t('loading') || 'Loading...')
+                : <button type="button" className="font-semibold text-blue-600 hover:underline dark:text-blue-400" onClick={() => void loadStockAlertPage('out', outOfStockPage + 1)}>{outOfStockLoadError} {translateOr('try_again', 'Try again')}</button>}
             </div>
           ) : null}
         </div>

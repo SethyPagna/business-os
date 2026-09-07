@@ -61,6 +61,13 @@ export type InventoryStockSessionReceipt = {
   }>
 }
 
+// Atomic stock-session commits can include many validated product and lot
+// writes in one idempotent Worker transaction. Give only this replay-safe
+// endpoint enough time to return its immutable receipt; legacy per-line
+// stock mutations retain the shared short timeout because they do not carry
+// this session-level replay contract.
+export const INVENTORY_SESSION_TIMEOUT_MS = 60_000
+
 function getDevicePayload(): InventoryPayload {
   return { ...getClientDeviceInfo() }
 }
@@ -81,7 +88,7 @@ export function adjustStock(payload: InventoryPayload = {}): Promise<unknown> {
 export function createInventorySession(payload: InventoryStockSessionRequest): Promise<InventoryStockSessionReceipt> {
   return route(
     'inventory:session:create',
-    () => apiFetch('POST', '/api/inventory/sessions', payload),
+    () => apiFetch('POST', '/api/inventory/sessions', payload, INVENTORY_SESSION_TIMEOUT_MS),
     null,
     true,
   ) as Promise<InventoryStockSessionReceipt>

@@ -38,6 +38,35 @@ const REPROCESS_BATCH = 25
 
 const IMAGE_KEY_RE = /\.(jpe?g|png|webp|avif|gif|bmp|tiff?)$/i
 
+async function syncFileAssetMetadata(
+  db: ReturnType<typeof getDb>,
+  key: string,
+  fields: { byteSize: number; contentType?: string | null; optimized?: boolean; provider?: string | null },
+): Promise<void> {
+  if (!key.startsWith('uploads/')) return
+  const storedName = key.slice('uploads/'.length)
+  if (!storedName) return
+  await db.prepare(`
+    UPDATE file_assets SET
+      original_byte_size = CASE WHEN @optimized = 1 THEN COALESCE(original_byte_size, byte_size) ELSE original_byte_size END,
+      optimized_byte_size = CASE WHEN @optimized = 1 THEN @byteSize ELSE optimized_byte_size END,
+      byte_size = @byteSize,
+      mime_type = COALESCE(@contentType, mime_type),
+      media_type = CASE WHEN @contentType LIKE 'image/%' THEN 'image' ELSE media_type END,
+      optimization_status = CASE WHEN @optimized = 1 THEN 'optimized' ELSE optimization_status END,
+      optimization_note = CASE WHEN @optimized = 1 THEN @optimizationNote ELSE optimization_note END,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE stored_name = @storedName OR public_path = @publicPath
+  `).run({
+    byteSize: Math.max(0, Number(fields.byteSize) || 0),
+    contentType: fields.contentType || null,
+    optimized: fields.optimized ? 1 : 0,
+    optimizationNote: fields.optimized ? `Optimized by ${fields.provider || 'media pipeline'}` : null,
+    storedName,
+    publicPath: `/${key}`,
+  })
+}
+
 export type SweepResult = {
   examined: number
   oversized: number
@@ -187,6 +216,12 @@ export async function reprocessAuditedImages(env: Env): Promise<ReprocessResult>
         byte_size = @byteSize, optimized_at = CURRENT_TIMESTAMP, checked_at = CURRENT_TIMESTAMP
       WHERE key = @key
     `).run({ key, provider: result.provider, originalSize: source.byteLength, byteSize: result.byteSize || 0 })
+    await syncFileAssetMetadata(db, key, {
+      byteSize: result.byteSize || result.bytes.byteLength,
+      contentType: result.contentType || 'image/webp',
+      optimized: true,
+      provider: result.provider,
+    })
   }
 
   if (optimized || failed) {
@@ -228,6 +263,10 @@ export async function normalizeStoredImage(env: Env, key: string): Promise<Norma
   const source = await object.arrayBuffer()
   if (!needsOptimization(source.byteLength)) {
     await upsert({ byteSize: source.byteLength, status: 'ok' })
+    await syncFileAssetMetadata(db, key, {
+      byteSize: source.byteLength,
+      contentType: object.httpMetadata?.contentType || null,
+    })
     return 'skipped'
   }
   const result = await optimizeImage(env, source, key.split('/').pop() || 'image')
@@ -244,6 +283,12 @@ export async function normalizeStoredImage(env: Env, key: string): Promise<Norma
   })
   await consumeQuota(env, 'r2_class_a', 1)
   await upsert({ byteSize: result.byteSize || 0, status: 'optimized', provider: result.provider, originalSize: source.byteLength, optimized: true })
+  await syncFileAssetMetadata(db, key, {
+    byteSize: result.byteSize || result.bytes.byteLength,
+    contentType: result.contentType || 'image/webp',
+    optimized: true,
+    provider: result.provider,
+  })
   recordAnalytics(env, { kind: 'image_reprocess', labels: ['on_upload'], values: [1, 0, source.byteLength - (result.byteSize || 0)] })
   return 'optimized'
 }

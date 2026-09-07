@@ -48,6 +48,11 @@ assert.match(variant, /btn-primary min-h-11 flex-1/, 'Add-row save action must p
 
 assert.match(workerProducts, /MAX_PRODUCT_IMAGE_UPLOAD_BYTES = 12 \* 1024 \* 1024/, 'server must allow a bounded raw-image fallback when browser compression cannot decode the source')
 assert.doesNotMatch(workerProducts, /Please try again, or pick a smaller\/simpler source photo/, 'image upload failure must not blame the operator for client compression failure')
+assert.match(form, /const publicPath = canonicalizePersistedMediaPath\(rawPath\)/, 'uploads must persist the canonical library identity')
+assert.match(form, /setImageRenderVersions/, 'cache-busting versions must stay in render-only state')
+assert.match(form, /buildCacheBustedMediaPath\(image, imageRenderVersions\[image\]\)/, 'rendering may cache-bust the canonical persisted path')
+assert.doesNotMatch(form, /appendImage\(buildCacheBustedMediaPath/, 'a cache-busted render URL must never be persisted as product identity')
+assert.match(form, /image_upload_missing_path/, 'an upload response without a stored path must report an honest error')
 
 console.log('PASS Product form/create/stock/grouping/image-upload contract')
 

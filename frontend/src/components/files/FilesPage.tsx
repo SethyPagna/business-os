@@ -120,6 +120,11 @@ interface FileAsset {
 interface FilesResponse {
   items?: FileAsset[]
   total?: number | string
+  physicalStorage?: {
+    totalBytes: number
+    fileCount: number
+    countsByType: { image: number; video: number; document: number; file: number }
+  } | null
 }
 
 interface ProviderMeta {
@@ -658,6 +663,7 @@ export default function FilesPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(() => getDefaultFilesPageSize())
   const [totalFiles, setTotalFiles] = useState(0)
+  const [physicalStorage, setPhysicalStorage] = useState<NonNullable<FilesResponse['physicalStorage']> | null>(null)
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
@@ -883,6 +889,7 @@ export default function FilesPage() {
       const nextFiles = result.items
       setFiles(nextFiles)
       setTotalFiles(Number(result?.total || nextFiles.length || 0))
+      setPhysicalStorage(result.physicalStorage || null)
       filesLoadedOnceRef.current = true
       setSelectedAssetIds((current) => {
         const validIds = new Set(nextFiles.map(logicalAssetKey))
@@ -1479,6 +1486,19 @@ export default function FilesPage() {
               {tr('library_view_only_hint', 'You can browse and preview the library. Uploading, downloading, renaming, and deleting need Full Access to Library.')}
             </div>
           )}
+
+          {physicalStorage ? (
+            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <span className="font-semibold text-slate-800 dark:text-slate-100">
+                {tr('physical_storage', 'Physical storage', 'ទំហំផ្ទុកជាក់ស្តែង')}: {formatFileSize(physicalStorage.totalBytes)}
+              </span>
+              <span>{physicalStorage.fileCount} {tr('stored_files', 'stored files', 'ឯកសារដែលបានរក្សាទុក')}</span>
+              <span>{physicalStorage.countsByType.image} {tr('images', 'images')}</span>
+              <span>{physicalStorage.countsByType.video} {tr('videos', 'videos')}</span>
+              <span>{physicalStorage.countsByType.document} {tr('documents', 'documents')}</span>
+              <span>{physicalStorage.countsByType.file} {tr('other', 'other')}</span>
+            </div>
+          ) : null}
 
           {/* Search row, select-all summary, and bulk-action bar all pin to
               the top of the page's scroll container while scrolling (Aug 11

@@ -60,7 +60,7 @@ function makeEnv(db, { optimizeResult, queue } = {}) {
   const store = new Map()
   const env = {
     ASSETS: {
-      get: async (key) => store.has(key) ? { arrayBuffer: async () => store.get(key) } : null,
+      get: async (key) => store.has(key) ? { arrayBuffer: async () => store.get(key), httpMetadata: { contentType: 'image/png' } } : null,
       put: async (key, bytes) => { store.set(key, bytes) },
     },
     MEDIA_QUEUE: queue,
@@ -98,6 +98,8 @@ async function run() {
   await check('an oversized image optimizes: written back smaller, upserted optimized', async () => {
     const smaller = new ArrayBuffer(200 * 1024)
     const { env, audit, store } = makeEnv(db, { optimizeResult: { ok: true, bytes: smaller, byteSize: smaller.byteLength, contentType: 'image/webp', provider: 'cloudflare' } })
+    await db.prepare(`INSERT INTO file_assets (original_name, stored_name, public_path, mime_type, media_type, byte_size)
+      VALUES ('big.png', 'big.png', '/uploads/big.png', 'image/png', 'image', 1048576)`).run()
     store.set('uploads/big.png', new ArrayBuffer(1024 * 1024))
     const outcome = await audit.normalizeStoredImage(env, 'uploads/big.png')
     assert.equal(outcome, 'optimized')
@@ -107,6 +109,15 @@ async function run() {
     assert.equal(row.byte_size, 200 * 1024)
     assert.equal(row.original_size, 1024 * 1024)
     assert.ok(row.optimized_at)
+    const asset = await db.prepare(`SELECT byte_size, original_byte_size, optimized_byte_size, mime_type, media_type, optimization_status FROM file_assets WHERE stored_name = 'big.png'`).get()
+    assert.deepEqual({ ...asset }, {
+      byte_size: 200 * 1024,
+      original_byte_size: 1024 * 1024,
+      optimized_byte_size: 200 * 1024,
+      mime_type: 'image/webp',
+      media_type: 'image',
+      optimization_status: 'optimized',
+    })
   })
 
   await check('a not-smaller result is never stored (no_saving), a failure leaves bytes untouched', async () => {
