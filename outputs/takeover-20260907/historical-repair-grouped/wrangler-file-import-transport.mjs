@@ -35,6 +35,8 @@ const wranglerBinPath = join(root, 'cloudflare/node_modules/wrangler/bin/wrangle
 const EXPECTED_WRANGLER_VERSION = '4.116.0'
 const EXPECTED_WRANGLER_BANNER_TEXT = ` ⛅️ wrangler ${EXPECTED_WRANGLER_VERSION}`
 const EXPECTED_WRANGLER_BANNER = `\n${EXPECTED_WRANGLER_BANNER_TEXT}\n${'─'.repeat(EXPECTED_WRANGLER_BANNER_TEXT.length)}\n`
+const EXPECTED_WRANGLER_IMPORT_CHECK = '├ Checking if file needs uploading\n│\n'
+const EXPECTED_WRANGLER_UPLOAD_FILE = new RegExp(`^├ 🌀 Uploading ${EXPECTED_DATABASE_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.[0-9a-f]{16}\\.sql\\n│ 🌀 Uploading complete\\.\\n│\\n`)
 const MAX_IMPORT_FILE_BYTES = 1_000_000
 const MAX_STATEMENT_BYTES = 100_000
 const IMPORT_TIMEOUT_MS = 5 * 60_000
@@ -198,19 +200,40 @@ export function buildImportArtifact(unitId, statements, phase = 'apply') {
 
 function parseWranglerJsonStdout(stdout) {
   const raw = String(stdout || '')
-  const withoutBom = raw.startsWith('\ufeff') ? raw.slice(1) : raw
-  const bom = withoutBom !== raw
-  const attempts = [{ framing: bom ? 'utf8_bom_json' : 'json', text: withoutBom }]
-  if (withoutBom.startsWith(EXPECTED_WRANGLER_BANNER)) attempts.push({
-    framing: bom ? 'utf8_bom_wrangler_4_116_banner_json' : 'wrangler_4_116_banner_json',
-    text: withoutBom.slice(EXPECTED_WRANGLER_BANNER.length),
-  })
+  const rawWithoutBom = raw.startsWith('\ufeff') ? raw.slice(1) : raw
+  const bom = rawWithoutBom !== raw
+  const withoutCrlf = rawWithoutBom.replaceAll('\r\n', '')
+  const windowsCrlf = rawWithoutBom.includes('\r\n') && !withoutCrlf.includes('\r') && !withoutCrlf.includes('\n')
+  const normalized = windowsCrlf ? rawWithoutBom.replaceAll('\r\n', '\n') : rawWithoutBom
+  const basePrefix = `${bom ? 'utf8_bom_' : ''}${windowsCrlf ? 'windows_crlf_' : ''}`
+  const attempts = [{ framing: `${basePrefix}json`, text: normalized }]
+  const addProgressAttempts = (text, framingPrefix) => {
+    if (!text.startsWith(EXPECTED_WRANGLER_IMPORT_CHECK)) return
+    const afterCheck = text.slice(EXPECTED_WRANGLER_IMPORT_CHECK.length)
+    attempts.push({ framing: `${framingPrefix}cached_import_json`, text: afterCheck })
+    const upload = afterCheck.match(EXPECTED_WRANGLER_UPLOAD_FILE)
+    if (upload) attempts.push({ framing: `${framingPrefix}upload_progress_json`, text: afterCheck.slice(upload[0].length) })
+  }
+  addProgressAttempts(normalized, `${basePrefix}wrangler_4_116_`)
+  if (normalized.startsWith(EXPECTED_WRANGLER_BANNER)) {
+    const afterBanner = normalized.slice(EXPECTED_WRANGLER_BANNER.length)
+    const framingPrefix = `${basePrefix}wrangler_4_116_banner_`
+    attempts.push({ framing: `${basePrefix}wrangler_4_116_banner_json`, text: afterBanner })
+    addProgressAttempts(afterBanner, framingPrefix)
+  }
   for (const attempt of attempts) {
     try { return { payload: JSON.parse(attempt.text), framing: attempt.framing } } catch { /* refuse below */ }
   }
+  const afterKnownBanner = normalized.startsWith(EXPECTED_WRANGLER_BANNER)
+    ? normalized.slice(EXPECTED_WRANGLER_BANNER.length)
+    : normalized
   return {
     payload: null,
-    framing: withoutBom.startsWith(EXPECTED_WRANGLER_BANNER) ? 'invalid_after_wrangler_4_116_banner' : bom ? 'invalid_after_utf8_bom' : 'unrecognized',
+    framing: afterKnownBanner.startsWith(EXPECTED_WRANGLER_IMPORT_CHECK)
+      ? 'invalid_after_wrangler_4_116_import_progress'
+      : normalized.startsWith(EXPECTED_WRANGLER_BANNER)
+        ? 'invalid_after_wrangler_4_116_banner'
+        : bom ? 'invalid_after_utf8_bom' : 'unrecognized',
     diagnostic: {
       stdout_bytes: Buffer.byteLength(raw),
       stdout_sha256: sha256(raw),

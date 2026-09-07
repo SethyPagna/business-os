@@ -12,6 +12,7 @@ import {
   materializeStatement,
   parseWranglerImportResult,
 } from './wrangler-file-import-transport.mjs'
+import { EXPECTED_DATABASE_ID } from './grouped-repair-core.mjs'
 
 const require = createRequire(resolve('cloudflare/package.json'))
 const Database = require('better-sqlite3')
@@ -122,12 +123,28 @@ const bannerParsed = parseWranglerImportResult({ exitCode: 0, stdout: `${exactWr
 assert(bannerParsed.confirmed_complete && bannerParsed.stdout_framing === 'wrangler_4_116_banner_json', 'exact Wrangler 4.116 banner framing was rejected')
 const bomParsed = parseWranglerImportResult({ exitCode: 0, stdout: `\ufeff${successStdout}`, stderr: '', timedOut: false }, firstArtifact.statement_count)
 assert(bomParsed.confirmed_complete && bomParsed.stdout_framing === 'utf8_bom_json', 'UTF-8 BOM JSON framing was rejected')
+const importCheck = '├ Checking if file needs uploading\n│\n'
+const uploadProgress = `${importCheck}├ 🌀 Uploading ${EXPECTED_DATABASE_ID}.4f7ebd2a89aaf4ac.sql\n│ 🌀 Uploading complete.\n│\n`
+const uploadParsed = parseWranglerImportResult({ exitCode: 0, stdout: `${uploadProgress}${successStdout}`, stderr: '', timedOut: false }, firstArtifact.statement_count)
+assert(uploadParsed.confirmed_complete && uploadParsed.stdout_framing === 'wrangler_4_116_upload_progress_json', 'observed Wrangler 4.116 upload-progress framing was rejected')
+const windowsUploadStdout = `${uploadProgress}${JSON.stringify(JSON.parse(successStdout), null, 2)}\n`.replaceAll('\n', '\r\n')
+const windowsUploadParsed = parseWranglerImportResult({ exitCode: 0, stdout: windowsUploadStdout, stderr: '', timedOut: false }, firstArtifact.statement_count)
+assert(windowsUploadParsed.confirmed_complete && windowsUploadParsed.stdout_framing === 'windows_crlf_wrangler_4_116_upload_progress_json', 'observed Windows Wrangler upload-progress framing was rejected')
+const cachedParsed = parseWranglerImportResult({ exitCode: 0, stdout: `${importCheck}${successStdout}`, stderr: '', timedOut: false }, firstArtifact.statement_count)
+assert(cachedParsed.confirmed_complete && cachedParsed.stdout_framing === 'wrangler_4_116_cached_import_json', 'source-proven cached-import framing was rejected')
+const bannerUploadParsed = parseWranglerImportResult({ exitCode: 0, stdout: `${exactWranglerBanner}${uploadProgress}${successStdout}`, stderr: '', timedOut: false }, firstArtifact.statement_count)
+assert(bannerUploadParsed.confirmed_complete && bannerUploadParsed.stdout_framing === 'wrangler_4_116_banner_upload_progress_json', 'exact banner plus upload-progress framing was rejected')
 for (const invalidStdout of [
   '',
   `arbitrary banner\n${successStdout}`,
   `${exactWranglerBanner}${successStdout}\n${successStdout}`,
   `${successStdout}\ntrailing output`,
   `\n ⛅️ wrangler 4.116.0 (update available 5.0.0)\n${'─'.repeat(44)}\n${successStdout}`,
+  `${importCheck}├ 🌀 Uploading 00000000-0000-0000-0000-000000000000.4f7ebd2a89aaf4ac.sql\n│ 🌀 Uploading complete.\n│\n${successStdout}`,
+  `${importCheck}├ 🌀 Uploading ${EXPECTED_DATABASE_ID}.4F7EBD2A89AAF4AC.sql\n│ 🌀 Uploading complete.\n│\n${successStdout}`,
+  `${uploadProgress}${successStdout}\ntrailing output`,
+  `${uploadProgress}${successStdout}\n${successStdout}`,
+  `${importCheck.replaceAll('\n', '\r\n')}${successStdout}\n`,
 ]) {
   const rejected = parseWranglerImportResult({ exitCode: 0, stdout: invalidStdout, stderr: '', timedOut: false }, firstArtifact.statement_count)
   assert(!rejected.confirmed_complete && rejected.error_code === 'wrangler_import_unrecognized_stdout_framing', 'unreviewed or multiple stdout framing was accepted')
@@ -195,6 +212,7 @@ process.stdout.write(`${JSON.stringify({
     'terminal_completion_atomic_recovery_refusal',
     'aggregate_only_wrangler_result',
     'strict_wrangler_json_framing',
+    'strict_wrangler_import_progress_framing',
     'pinned_wrangler_child_output_environment',
     'private_failure_output_suppression',
     'pinned_cli_config_and_ephemeral_sql',
