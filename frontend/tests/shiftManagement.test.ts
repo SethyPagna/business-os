@@ -219,6 +219,13 @@ ok(!/onClick=\{dismiss\}/.test(gate) && /onClose=\{dismiss\}/.test(gate),
 
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
+assert.equal(en.shift_counted_cash, 'Closing cash')
+assert.equal(km.shift_counted_cash, 'សាច់ប្រាក់បិទវេន')
+assert.equal(en.shift_recon_counted, 'Closing cash')
+assert.equal(km.shift_recon_counted, 'សាច់ប្រាក់បិទវេន')
+assert.equal(en.credit_awaiting_payment, 'Not Paid')
+assert.equal(km.credit_awaiting_payment, 'ប្រាក់ជំពាក់')
+checks += 6
 const usedShiftKeys = [...new Set([...`${modal}\n${summary}`.matchAll(/\bt\('([^']+)'\)/g)].map((match) => match[1]).filter((key) => key.startsWith('shift_')))]
 ok(usedShiftKeys.every((key) => key in en || key === 'shift_registered_cash_hint'), 'every popup shift key exists in English or is in the locale handoff')
 ok(usedShiftKeys.every((key) => key in km || key === 'shift_registered_cash_hint'), 'every popup shift key exists in Khmer or is in the locale handoff')
