@@ -108,13 +108,29 @@ const worker = (path: string) => readFileSync(new URL(`../../cloudflare/${path}`
 
 const salesRoutes = worker('src/routes/sales.ts')
 const contactsRoutes = worker('src/routes/contacts.ts')
+const contactMerge = worker('src/lib/contactMerge.ts')
 const bulkUpdate = worker('src/lib/saleBulkUpdate.ts')
 const pos = read('src/components/pos/POS.tsx')
 
 // PATCH /api/sales/:id/customer
 assert.match(salesRoutes, /customer_address: contactDisplayAddress\(customer\?\.address/, 'the sale customer link must snapshot the display address')
-// Duplicate merge, and the rename/edit cascade.
-assert.match(contactsRoutes, /keeperAddress: contactDisplayAddress\(keeper\.address/, 'the customer merge must repoint the display address')
+// Duplicate merge now delegates its atomic write plan to contactMerge.ts.
+// Pin both halves: the route must pass the current rows to that planner, and
+// the planner must resolve the address from the final keeper after blank-field
+// backfill. That preserves a merged contact's address when the original keeper
+// had none, while still preventing Contact Options JSON from reaching sales.
+assert.match(
+  contactsRoutes,
+  /const plan = buildContactMergePlan\(\{[\s\S]*?keeper,[\s\S]*?merged,/,
+  'the customer merge route must delegate the current contact rows to the atomic planner',
+)
+assert.match(contactMerge, /const finalKeeper = \{ \.\.\.keeper, \.\.\.backfill \}/, 'the merge planner must compute the post-backfill keeper')
+assert.match(
+  contactMerge,
+  /keeperAddress: contactDisplayAddress\(finalKeeper\.address\) \|\| null/,
+  'the customer merge plan must repoint the post-backfill display address',
+)
+// Rename/edit cascade.
 assert.match(contactsRoutes, /const customerAddress = contactDisplayAddress\(/, 'the customer edit cascade must write the display address')
 // Bulk "set customer on N sales".
 assert.match(bulkUpdate, /address: contactDisplayAddress\(/, 'the bulk customer update must snapshot the display address')
@@ -141,7 +157,7 @@ assert.match(
   'the sales importer must normalize the address column it stores',
 )
 
-for (const [label, source] of [['routes/sales.ts', salesRoutes], ['routes/contacts.ts', contactsRoutes], ['lib/saleBulkUpdate.ts', bulkUpdate], ['routes/returns.ts', returnsRoutes], ['lib/importEngine.ts', importEngine]] as const) {
+for (const [label, source] of [['routes/sales.ts', salesRoutes], ['routes/contacts.ts', contactsRoutes], ['lib/contactMerge.ts', contactMerge], ['lib/saleBulkUpdate.ts', bulkUpdate], ['routes/returns.ts', returnsRoutes], ['lib/importEngine.ts', importEngine]] as const) {
   assert.match(source, /contactDisplayAddress/, `${label} must import the kernel`)
 }
 
