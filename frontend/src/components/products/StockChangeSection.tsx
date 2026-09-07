@@ -542,12 +542,23 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     const clock = dateOnly ? '' : fmtClock24(row.created_at)
     const timeUnknown = dateOnly || clock === '—' || clock === ''
     const model = buildHistoryRowModel(row)
+    // The card carries the receipt's copy control, and CopyableId renders a
+    // <button>. So the card itself cannot be a <button>: an interactive
+    // control nested inside another is invalid HTML and undefined in the
+    // accessibility tree -- the copy target then has the right geometry at
+    // 375px and is still unreachable by VoiceOver/TalkBack, which is the
+    // failure the compact hit-area ring was added to remove. This is the
+    // clickable-row shape the desktop <tr> below, FeesPage.tsx and
+    // StockInSessionsSection.tsx already use.
     return (
-      <button
+      <div
         key={row.id}
-        type="button"
+        role="button"
+        tabIndex={0}
         onClick={() => openDetail(row)}
-        className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(row) } }}
+        aria-label={`${row.product_name}, ${signedLabel(row)}`}
+        className="flex w-full cursor-pointer items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -619,7 +630,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             {row.before_qty} <span className="text-gray-300 dark:text-gray-600">→</span> <span className="font-semibold text-gray-800 dark:text-gray-100">{row.after_qty}</span>
           </div>
         </div>
-      </button>
+      </div>
     )
   }
 

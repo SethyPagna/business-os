@@ -274,6 +274,29 @@ assert.match(
   /\$\{compact \? 'h-4 w-4' : 'h-6 w-6'\}/,
   'the expander must not inflate the compact button itself -- the dense row keeps its 16px visual box',
 )
+// ...and it must be REACHABLE, not merely large enough. CopyableId's copy
+// control is itself a <button> (CopyableId.tsx), so the mobile card must NOT
+// be a <button> of its own: a button nested in a button is invalid HTML and
+// undefined in the accessibility tree, which defeats the 24px ring above --
+// the target can be geometrically correct and still be unreachable by
+// VoiceOver/TalkBack, which is the failure the ring was added to remove.
+// The card therefore uses this repo's established clickable-row shape (the
+// same one the desktop <tr> below, FeesPage.tsx and StockInSessionsSection.tsx
+// use): role="button" + tabIndex + an Enter/Space onKeyDown.
+const cardSource = sc.slice(sc.indexOf('const renderCard'), sc.indexOf('const renderDesktopRows'))
+assert.ok(cardSource.includes('<CopyableId'), 'the mobile card must still render the receipt through CopyableId')
+// Comments stripped first: the card's own prose NAMES the tag it must not be,
+// and a pin that reads prose as code is pinning the wording.
+const cardCode = cardSource.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n')
+assert.ok(
+  !/<button\b/.test(cardCode.slice(0, cardCode.indexOf('<CopyableId'))),
+  'the mobile ledger card nests CopyableId\'s <button> inside a <button> of its own -- an interactive control inside an interactive control',
+)
+assert.match(
+  cardSource,
+  /role="button"[\s\S]{0,200}onKeyDown/,
+  'the mobile card must use the repo clickable-row shape: role="button" with a keyboard opener beside it',
+)
 // The receipt must not go back through a clipping wrapper on either surface.
 assert.ok(
   !/<TruncatedText text=\{referenceText\(row\)\}/.test(sc),
