@@ -165,6 +165,7 @@ runTest('the two branchRoles.ts copies are the same code', () => {
 
 const salesSource = read('src/routes/sales.ts')
 const returnsSource = read('src/routes/returns.ts')
+const salesImportSource = read('src/lib/salesImportCommit.ts')
 const branchesSource = read('src/routes/branches.ts')
 const inventorySource = read('src/routes/inventory.ts')
 
@@ -173,11 +174,14 @@ runTest('every path that writes a sale line asks the guard first', () => {
   // three checks. Counting them is what catches a fourth writer being added
   // later without one.
   assert.equal((salesSource.match(/firstUnsellableBranch\(/g) || []).length, 3)
-  assert.equal((returnsSource.match(/firstUnsellableBranch\(/g) || []).length, 1)
+  assert.equal((returnsSource.match(/branchCanSell\(/g) || []).length, 1)
   assert.match(salesSource, /SHOP_ONLY_SALE_ERROR \}, 400\)/)
   assert.match(salesSource, /from '\.\.\/lib\/branchRoleGuards'/)
   assert.match(returnsSource, /WAREHOUSE_NOT_SELLABLE_ERROR \}, 400\)/)
   assert.match(returnsSource, /from '\.\.\/lib\/branchRoleGuards'/)
+  assert.match(returnsSource, /!branchCanSell\(replacementBranch\.name\)/)
+  assert.match(salesImportSource, /!branchCanSell\(saleBranch\.name\)/)
+  assert.match(salesImportSource, /throw new Error\(WAREHOUSE_NOT_SELLABLE_ERROR\)/)
 })
 
 runTest('sale writers require one real active Shop header and identical line branches', () => {
@@ -189,6 +193,10 @@ runTest('sale writers require one real active Shop header and identical line bra
   assert.match(salesSource, /COALESCE\(is_active,1\)=1/)
   assert.match(salesSource, /firstUnsellableBranch\(\[amendmentBranch\]\)/)
   assert.match(salesSource, /branchCanSell\(cancellationBranch\.name\)/, 'automatic cancellation expenses inherit a verified Shop sale link')
+  assert.match(returnsSource, /lineBranchId !== replacementHeaderBranchId/)
+  assert.match(returnsSource, /branchId: Number\(rep\.branch_id \?\? replacementHeaderBranchId\)/)
+  assert.match(salesImportSource, /branchId !== saleHeaderBranchId/)
+  assert.match(salesImportSource, /branch_id: saleHeaderBranchId/)
 })
 
 runTest('the guard runs before the write, not after it', () => {

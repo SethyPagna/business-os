@@ -94,8 +94,10 @@ let activeUser = FAKE_USER
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+const branchRolesKernel = loadReal('lib/branchRoles.ts')
 const returnsRoute = loadReal('routes/returns.ts', {
-  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
+  '../lib/branchRoles': branchRolesKernel,
   '../lib/actorSnapshot': actorSnapshotKernel,
   // N21: the display-address kernel, REAL. A stub resolves every address to
   // undefined and would make the assertion below agree with itself.
@@ -146,7 +148,8 @@ async function check(name, fn) {
 
 function seed() {
   rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;')
-  rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Main\', 1, 1)').run()
+  rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Shop\', 1, 1)').run()
+  rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (2, \'Warehouse\', 1, 0)').run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, selling_price_usd) VALUES (2, 'Different Serum', 1, 0, 10)").run()
   rawDb.prepare("INSERT INTO sales (id, branch_id) VALUES (1, 1)").run()
@@ -385,6 +388,36 @@ async function main() {
     assert.strictEqual(replacementAllocation.quantity, 2)
     const move = rawDb.prepare("SELECT quantity FROM inventory_movements WHERE movement_type = 'replacement_out' AND reference_id = @id").get({ id: json.id })
     assert.strictEqual(move.quantity, -2)
+  })
+
+  await check('replacement sale rejects missing, Warehouse, and mixed branch identities before writes', async () => {
+    for (const replacement of [
+      { product_id: 2, quantity: 1, branch_id: 999, applied_price_usd: 10 },
+      { product_id: 2, quantity: 1, branch_id: 2, applied_price_usd: 10 },
+      { product_id: 2, quantity: 1, applied_price_usd: 10 },
+    ]) {
+      seed()
+      const beforeSales = rawDb.prepare('SELECT COUNT(*) n FROM sales').get().n
+      const { status, json } = await req('POST', '/', {
+        items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+        replacement_items: [replacement],
+        reason: 'Rejected replacement branch',
+      })
+      assert.strictEqual(status, 400, JSON.stringify(json))
+      assert.match(String(json?.error || ''), /Only allow Shop sale/)
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM sales').get().n, beforeSales)
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    }
+
+    seed()
+    const { status, json } = await req('POST', '/', {
+      branch_id: 1,
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 2, applied_price_usd: 10 }],
+      reason: 'Mixed replacement branches',
+    })
+    assert.strictEqual(status, 400, JSON.stringify(json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
   })
 
   await check('a same-value replacement records a normal sale, carries the auto note, and keeps its hand-picked lot', async () => {
