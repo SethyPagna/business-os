@@ -946,7 +946,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const { classifyProducts } = moduleObj.exports
   assert.strictEqual(typeof classifyProducts, 'function', 'classifyProducts should be exported from importEngine.ts')
 
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -1064,7 +1064,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // that file's header explicitly warns about taking shortcuts on.
 {
   const { classifyProducts } = moduleObj.exports
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -1150,7 +1150,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const { classifyProducts } = moduleObj.exports
   const { dateToBatchCode } = batchCodeModuleObj.exports
 
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }], batches = []) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }], batches = []) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -1288,7 +1288,72 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(unique[0].plannedMode, 'merge_stock', 'same-batch receipt must not replace catalog cost/details')
   }
 
-  console.log('PASS classifyProducts reads batch dates, applies the one-owner same-batch receipt exception, and blocks ambiguous batch ownership')
+  {
+    const baseRow = row({ name: 'Branch Guard Product', sku: 'BG-1', stock_quantity: 1 }, 1)
+    const unknown = await classifyProducts(makeFakeProductsDb([], [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [{ ...baseRow, branch: 'New Branch' }], 'job-branch-unknown', null, noImages)
+    assert.strictEqual(unknown[0].action, 'error', 'product import must leave an unknown branch for review')
+    assert.match(unknown[0].message, /New Branch/)
+    assert.strictEqual(unknown[0].data.branch_name_pending, undefined)
+
+    const warehouse = await classifyProducts(makeFakeProductsDb([], [{ id: 2, name: 'Warehouse', is_default: 1, is_active: 1 }]), [{ ...baseRow, branch: ' warehouse ' }], 'job-branch-warehouse', null, noImages)
+    assert.strictEqual(warehouse[0].action, 'create')
+    assert.strictEqual(warehouse[0].data.branch_id, 2)
+
+    const ambiguous = await classifyProducts(makeFakeProductsDb([], [
+      { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
+      { id: 2, name: ' shop ', is_default: 0, is_active: 1 },
+    ]), [{ ...baseRow, branch: 'Shop' }], 'job-branch-ambiguous', null, noImages)
+    assert.strictEqual(ambiguous[0].action, 'error', 'duplicate canonical branch identity must never resolve by row order')
+
+    const blank = await classifyProducts(makeFakeProductsDb([], [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [baseRow], 'job-branch-default', null, noImages)
+    assert.strictEqual(blank[0].action, 'create')
+    assert.strictEqual(blank[0].data.branch_id, 1)
+  }
+
+  console.log('PASS classifyProducts reads batch dates, applies the one-owner same-batch receipt exception, blocks ambiguous batch ownership, and resolves only canonical branches')
+}
+
+// Inventory movements share the canonical branch rule. Unknown names stay
+// review errors, blank uses one canonical default, and Warehouse remains a
+// valid stock location.
+{
+  const { classifyInventory, validateResolvedImportBranches } = moduleObj.exports
+  const product = { id: 1, sku: 'INV-1', barcode: 'BC-INV-1', name: 'Inventory Item', stock_quantity: 4, cost_price_usd: 1, cost_price_khr: 0 }
+  const makeDb = (branches) => ({
+    prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [product] : String(sql).includes('FROM branches') ? branches : [] }),
+  })
+  const input = (branch) => [{ _rowNumber: 1, sku: 'INV-1', quantity: 2, ...(branch === undefined ? {} : { branch }) }]
+
+  const unknown = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input('New Branch'), 'add')
+  assert.strictEqual(unknown[0].action, 'error')
+  assert.match(unknown[0].message, /New Branch/)
+  assert.strictEqual(unknown[0].data.branch_name_pending, undefined)
+
+  const warehouse = await classifyInventory(makeDb([{ id: 2, name: 'Warehouse', is_default: 1, is_active: 1 }]), input('WAREHOUSE'), 'add')
+  assert.strictEqual(warehouse[0].action, 'create')
+  assert.strictEqual(warehouse[0].data.branch_id, 2)
+
+  const blank = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'add')
+  assert.strictEqual(blank[0].action, 'create')
+  assert.strictEqual(blank[0].data.branch_id, 1)
+
+  await validateResolvedImportBranches(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), blank)
+  await assert.rejects(
+    () => validateResolvedImportBranches(makeDb([
+      { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
+      { id: 2, name: ' shop ', is_default: 0, is_active: 1 },
+    ]), blank),
+    /ambiguous/,
+  )
+  await assert.rejects(
+    () => validateResolvedImportBranches(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [{ ...blank[0], data: { ...blank[0].data, branch_name_pending: 'Unknown' } }]),
+    /unresolved branch/,
+  )
+
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'importEngine.ts'), 'utf8')
+  const resolverBody = source.slice(source.indexOf('async function validateResolvedImportBranches'), source.indexOf('// Same-batch duplicate merge'))
+  assert.ok(!/INSERT INTO branches|Main Branch|backfillBranchStockForNewBranch/.test(resolverBody), 'apply-time branch resolver must remain validation-only')
+  console.log('PASS classifyInventory and apply branch validation never create unknown or synthetic branches')
 }
 
 // -- classifyContacts: customer membership-number auto-assignment
@@ -2240,7 +2305,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // real UPDATE write, which both read off this same object).
 {
   const { classifyProducts } = moduleObj.exports
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -2345,7 +2410,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // test file doesn't have -- not covered here, flagged in progress.md.
 {
   const { classifyProducts } = moduleObj.exports
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -2468,7 +2533,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
         all: async () => {
           if (/FROM import_job_files/.test(sql)) return []
           if (/FROM products/.test(sql)) return []
-          if (/FROM branches/.test(sql)) return [{ id: 1, name: 'Main Branch', is_default: 1 }]
+          if (/FROM branches/.test(sql)) return [{ id: 1, name: 'Shop', is_default: 1 }]
           return []
         },
       }),
@@ -2493,7 +2558,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
         all: async () => {
           if (/FROM import_job_files/.test(sql)) return []
           if (/FROM products/.test(sql)) return []
-          if (/FROM branches/.test(sql)) return [{ id: 1, name: 'Main Branch', is_default: 1 }]
+          if (/FROM branches/.test(sql)) return [{ id: 1, name: 'Shop', is_default: 1 }]
           return []
         },
       }),
@@ -2547,7 +2612,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   }
 
   // End-to-end through the real classify: matched row, blank cost cell.
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []

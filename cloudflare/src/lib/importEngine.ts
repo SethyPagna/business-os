@@ -88,7 +88,7 @@ import { applyUnifiedStockAdd, applyUnifiedStockSale, batchIdentity, ensureUnifi
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
-import { branchCanSell } from './branchRoles'
+import { branchCanSell, branchRoleFromName, type BranchRole } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import {
   normalizeImageMatchKey,
@@ -511,20 +511,42 @@ export function makeStopwatch() {
   }
 }
 
-// Reserved marker (not a valid branch name a CSV could realistically
-// contain) used in ImportRowResult.data.branch_name_pending to mean "no
-// branch was named for this row AND no default branch exists yet" --
-// distinct from a real pending name, which means "this specific name
-// needs to be created". See resolveAndCreateBranches in runImportApply.
-const DEFAULT_BRANCH_SENTINEL = '\u0000__default_branch__'
-
-
 function str(value: unknown): string {
   return value == null ? '' : String(value).trim()
 }
 
 function lower(value: unknown): string {
   return str(value).toLowerCase()
+}
+
+type ImportBranchRow = { id: number; name: string; is_default?: number | null; is_active?: number | null }
+
+function indexCanonicalImportBranches(rows: ImportBranchRow[]): {
+  byRole: Map<Exclude<BranchRole, 'other'>, ImportBranchRow[]>
+  uniqueDefault: ImportBranchRow | null
+} {
+  const byRole = new Map<Exclude<BranchRole, 'other'>, ImportBranchRow[]>([['shop', []], ['warehouse', []]])
+  const defaults: ImportBranchRow[] = []
+  for (const row of rows) {
+    if (Number(row.is_active ?? 1) !== 1) continue
+    const role = branchRoleFromName(row.name)
+    if (role === 'other') continue
+    byRole.get(role)!.push(row)
+    if (Number(row.is_default ?? 0) === 1) defaults.push(row)
+  }
+  return { byRole, uniqueDefault: defaults.length === 1 ? defaults[0] : null }
+}
+
+function resolveCanonicalImportBranch(
+  index: ReturnType<typeof indexCanonicalImportBranches>,
+  requestedName: unknown,
+): ImportBranchRow | null {
+  const name = str(requestedName)
+  if (!name) return index.uniqueDefault
+  const role = branchRoleFromName(name)
+  if (role === 'other') return null
+  const matches = index.byRole.get(role) || []
+  return matches.length === 1 ? matches[0] : null
 }
 
 function toBool01(value: unknown, fallback = 1): number {
@@ -1502,9 +1524,7 @@ export async function classifyProducts(
   // classifyInventory's lookup below) so runImportApply always has one to
   // write, instead of leaving new products branchless the way this used to.
   const branchRows = await db.prepare(`SELECT id, name, is_default FROM branches WHERE is_active = 1`).all<{ id: number; name: string; is_default: number }>()
-  const importBranchByName = new Map<string, number>()
-  for (const branch of branchRows) importBranchByName.set(lower(branch.name), branch.id)
-  const importDefaultBranchId = (branchRows.find((b) => b.is_default) || branchRows[0] || null)?.id ?? null
+  const canonicalImportBranches = indexCanonicalImportBranches(branchRows)
 
   const results: ImportRowResult[] = []
   for (const row of rows) {
@@ -1755,38 +1775,23 @@ export async function classifyProducts(
       if (resolvedImage) data.image_path = resolvedImage
     }
     const importBranchName = str(row.branch_name || row.branch)
-    const explicitImportBranchId = importBranchName ? importBranchByName.get(lower(importBranchName)) ?? null : null
-    // Extra keys here (branch_id, branch_id_explicit, branch_name_pending)
-    // ride along in `data` purely for runImportApply to read -- they
-    // aren't products columns, so the UPDATE/INSERT statements built from
-    // named @placeholders simply never reference them.
-    //
-    // Three cases, matching the "create it if it's genuinely new, reuse
-    // it if it's just a different case, fall back to default (creating
-    // one if needed) if no branch was named at all" rule:
-    // 1. CSV named a branch that already exists (case-insensitively) ->
-    //    use its id, nothing to create.
-    // 2. CSV named a branch that does NOT exist yet -> branch_id stays
-    //    null here and branch_name_pending carries the name so
-    //    runImportApply (the only place with write access -- see its own
-    //    "no data-table writes" comment on analyze) can create it for
-    //    real and resolve the id before building the INSERT/UPDATE batch.
-    // 3. CSV named no branch at all -> use the org's default branch; if
-    //    there isn't one yet either (brand-new deployment, zero branches),
-    //    branch_name_pending is set to the reserved DEFAULT_BRANCH_SENTINEL
-    //    so apply-time creates a first "Main Branch" and uses it.
-    if (importBranchName && explicitImportBranchId == null) {
-      data.branch_id = null
-      data.branch_id_explicit = 1
-      data.branch_name_pending = importBranchName
-    } else if (!importBranchName && importDefaultBranchId == null) {
-      data.branch_id = null
-      data.branch_id_explicit = 0
-      data.branch_name_pending = DEFAULT_BRANCH_SENTINEL
-    } else {
-      data.branch_id = explicitImportBranchId ?? importDefaultBranchId
-      data.branch_id_explicit = explicitImportBranchId != null ? 1 : 0
+    const importBranch = resolveCanonicalImportBranch(canonicalImportBranches, importBranchName)
+    if (!importBranch) {
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: sku || barcode || name,
+        existingId: null,
+        message: importBranchName
+          ? `Branch "${importBranchName}" must uniquely match an existing active Shop or Warehouse.`
+          : 'A blank branch requires exactly one active canonical default Shop or Warehouse.',
+        changes: {},
+        data: row,
+      })
+      continue
     }
+    data.branch_id = Number(importBranch.id)
+    data.branch_id_explicit = importBranchName ? 1 : 0
 
     const skuMatch = sku ? bySku.get(lower(sku)) || null : null
     const barcodeCandidates = !skuMatch && barcode ? byBarcode.get(identityBarcodeKey(barcode)) || null : null
@@ -2561,7 +2566,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
-  const branches = await db.prepare(`SELECT id, name FROM branches`).all<{ id: number; name: string }>()
+  const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<ImportBranchRow>()
   // Identity rule (same shape as classifyProducts): an sku/barcode can be
   // legitimately reused across DIFFERENT-name products, so these maps hold
   // every candidate instead of last-write-wins, and a row that names its
@@ -2583,8 +2588,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     const nameKey = normalizeProductGroupName(product.name)
     if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
   }
-  const branchByName = new Map<string, number>()
-  for (const branch of branches) branchByName.set(lower(branch.name), branch.id)
+  const canonicalImportBranches = indexCanonicalImportBranches(branches)
 
   const pickCompatible = (candidates: (typeof products)[number][] | undefined, rowName: string): { product: (typeof products)[number] | null; message: string | null } => {
     if (!candidates?.length) return { product: null, message: null }
@@ -2677,12 +2681,22 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     }
 
     const branchName = str(row.branch_name || row.branch)
-    const matchedBranchId = branchName ? branchByName.get(lower(branchName)) ?? null : null
-    // Same three-case rule as classifyProducts above: a named branch that
-    // doesn't exist yet gets created at apply time (branch_id null +
-    // branch_name_pending set) rather than the movement silently landing
-    // with no branch at all, which is what happened before -- a typo'd or
-    // new branch name in the CSV used to just disappear from the record.
+    const matchedBranch = resolveCanonicalImportBranch(canonicalImportBranches, branchName)
+    if (!matchedBranch) {
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: sku || barcode || rowName,
+        existingId: product.id,
+        message: branchName
+          ? `Branch "${branchName}" must uniquely match an existing active Shop or Warehouse.`
+          : 'A blank branch requires exactly one active canonical default Shop or Warehouse.',
+        changes: {},
+        data: row,
+      })
+      continue
+    }
+    const matchedBranchId = Number(matchedBranch.id)
     // Optional per-row date -- same inline parse-and-validate pattern as
     // classifyContacts' `created_at` and classifySales' `sale_date`: an
     // unparseable or blank cell just leaves this null, which
@@ -2701,15 +2715,12 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       product_id: product.id,
       product_name: product.name,
       branch_id: matchedBranchId,
-      branch_name: matchedBranchId ? branchName : null,
+      branch_name: matchedBranch.name,
       movement_type: movementType,
       quantity: Math.abs(signedQuantity),
       signedQuantity,
       reason: str(row.reason) || 'import',
       created_at: movementDate,
-    }
-    if (branchName && matchedBranchId == null) {
-      data.branch_name_pending = branchName
     }
     // 'add' only: an optional unit cost on the row updates the product's
     // cost price, same as receiving stock at a manual product edit
@@ -3401,7 +3412,7 @@ function applyProductDetailFieldRules(data: Record<string, unknown>, match: Reco
 // (does nothing for an unmatched row: `match` is null, nothing to compare
 // against, so the CSV's own value is used and the row creates a new
 // product exactly like 'merge' mode would). Deliberately does not touch
-// stock_quantity/branch_id/branch_id_explicit/branch_name_pending or any
+// stock_quantity/branch_id/branch_id_explicit or any
 // other non-PRODUCT_REPLACE_COLUMNS key still sitting in `data` -- those
 // aren't in the allow-list this function iterates, so they pass through
 // untouched here; materializeImportChunk's own 'fill_blank' branch is
@@ -4247,95 +4258,23 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
 // matching the original's own per-row-group commit shape rather than one
 // giant single-table lock across types).
 
-// Creates any branches that classifyProducts/classifyInventory flagged as
-// missing (via data.branch_name_pending), then mutates `actionable` in
-// place so every row ends up with a real branch_id. Only called from
-// runImportApply -- analyze must stay writes-free (see its own comment),
-// so a CSV that names an unrecognized branch shows up in the preview with
-// a null branch_id and only gets a real row once the operator actually
-// applies the import.
-//
-// Re-checks the DB immediately before inserting (not just the branchRows
-// snapshot classify took earlier) so two rows naming the same new branch
-// -- or a branch someone else created by hand between analyze and apply
-// -- don't produce two rows for what should be one branch. Names are
-// deduped case-insensitively among themselves too, preserving whichever
-// casing appeared first in the file.
-// Gives every already-existing active product an explicit 0 row at a
-// just-created branch.
-//
-// Without this, a branch created part-way through an import is invisible to
-// every product created before it: runImportApply seeds "all other active
-// branches at 0" from a branch list loaded once per chunk, so a product
-// written in chunk 1 never learns about a branch that first appeared in
-// chunk 5. Measured on a real 8,727-row file, which names three branches:
-// exactly one product -- the very first row -- ended up with no row for the
-// last branch to be created. Small, but it violates "auto creates for all
-// standalone and child rows, no exceptions", and a product with no
-// branch_stock row is invisible to any branch-filtered POS/Inventory view
-// rather than showing an honest 0.
-//
-// Mirrors routes/branches.ts's identical back-fill on the manual
-// create-branch path; awaited rather than fire-and-forget because an import
-// is already a background job and a partially-seeded catalog is exactly the
-// silent partial write the project's rules forbid.
-async function backfillBranchStockForNewBranch(db: D1Compat, branchId: number): Promise<void> {
-  await db.prepare(`
-    INSERT INTO branch_stock (product_id, branch_id, quantity)
-    SELECT p.id, @branchId, 0 FROM products p
-    WHERE p.is_active = 1
-      AND NOT EXISTS (SELECT 1 FROM branch_stock bs WHERE bs.product_id = p.id AND bs.branch_id = @branchId)
-  `).run({ branchId })
-}
-
-async function resolveAndCreateBranches(db: D1Compat, actionable: ImportRowResult[]): Promise<void> {
-  const pendingNames = new Map<string, string>() // lower(name) -> first-seen-casing name
-  let needsDefault = false
-  for (const r of actionable) {
-    const pending = (r.data as Record<string, unknown>).branch_name_pending as string | undefined
-    if (!pending) continue
-    if (pending === DEFAULT_BRANCH_SENTINEL) needsDefault = true
-    else if (!pendingNames.has(lower(pending))) pendingNames.set(lower(pending), pending)
-  }
-  if (!pendingNames.size && !needsDefault) return
-
-  const resolvedByLowerName = new Map<string, number>()
-  for (const [lowerName, name] of pendingNames) {
-    const existing = await db.prepare(`SELECT id FROM branches WHERE lower(name) = @name LIMIT 1`).get<{ id: number }>({ name: lowerName })
-    if (existing) {
-      resolvedByLowerName.set(lowerName, existing.id)
-      continue
+// Analyze resolves only existing active canonical branches. Revalidate the
+// selected ids immediately before apply so an imported row can never create
+// a branch, fall back to a synthetic Main Branch, or write after its branch
+// identity was deactivated/renamed/duplicated during review.
+export async function validateResolvedImportBranches(db: D1Compat, actionable: ImportRowResult[]): Promise<void> {
+  const rows = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<ImportBranchRow>()
+  const index = indexCanonicalImportBranches(rows)
+  for (const result of actionable) {
+    const data = result.data as Record<string, unknown>
+    if (data.branch_name_pending != null) throw new Error('Import contains an unresolved branch; review it before applying.')
+    const branchId = Number(data.branch_id)
+    const row = rows.find((candidate) => Number(candidate.id) === branchId)
+    const role = row ? branchRoleFromName(row.name) : 'other'
+    const matches = role === 'other' ? [] : index.byRole.get(role) || []
+    if (!Number.isSafeInteger(branchId) || branchId <= 0 || !row || Number(row.is_active ?? 0) !== 1 || role === 'other' || matches.length !== 1) {
+      throw new Error('Import branch is missing, inactive, non-canonical, or ambiguous; review the import before applying.')
     }
-    const inserted = await db.prepare(`INSERT INTO branches (name, is_active) VALUES (@name, 1)`).run({ name })
-    resolvedByLowerName.set(lowerName, inserted.lastInsertRowid)
-    await backfillBranchStockForNewBranch(db, inserted.lastInsertRowid)
-  }
-
-  let defaultBranchId: number | null = null
-  if (needsDefault) {
-    const existingDefault = await db.prepare(`SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1`).get<{ id: number }>()
-    if (existingDefault) {
-      defaultBranchId = existingDefault.id
-    } else {
-      const inserted = await db.prepare(`INSERT INTO branches (name, is_default, is_active) VALUES ('Main Branch', 1, 1)`).run()
-      defaultBranchId = inserted.lastInsertRowid
-      await backfillBranchStockForNewBranch(db, defaultBranchId)
-    }
-  }
-
-  for (const r of actionable) {
-    const d = r.data as Record<string, unknown>
-    const pending = d.branch_name_pending as string | undefined
-    if (!pending) continue
-    if (pending === DEFAULT_BRANCH_SENTINEL) {
-      d.branch_id = defaultBranchId
-    } else {
-      const resolvedId = resolvedByLowerName.get(lower(pending)) ?? null
-      d.branch_id = resolvedId
-      if ('branch_id_explicit' in d) d.branch_id_explicit = resolvedId != null ? 1 : 0
-      if ('branch_name' in d) d.branch_name = resolvedId != null ? pending : null
-    }
-    delete d.branch_name_pending
   }
 }
 
@@ -5562,13 +5501,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
 
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
     if (job.type === 'products' || job.type === 'inventory' || job.type === 'sales') {
-      await resolveAndCreateBranches(db, actionable)
-      // resolveAndCreateBranches only writes the resolved id onto the row's
-      // own data.branch_id (see its comment) -- classifySales' line items
-      // are nested one level deeper (data.items[]), each carrying its own
-      // copy of the same order-level branch_id (see classifySales' "mirrors
-      // the order's single branch column" comment), so that copy needs the
-      // same resolution mirrored onto it explicitly.
+      await validateResolvedImportBranches(db, actionable)
+      // Sales line items are nested one level deeper (data.items[]), each
+      // carrying its own copy of the same validated order-level branch_id.
       if (job.type === 'sales') {
         for (const r of actionable) {
           const d = r.data as Record<string, unknown> & { branch_id: number | null; items: Array<Record<string, unknown>> }
@@ -5655,10 +5590,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // seedBranchStockForNewProduct in productWrites.ts, which already
       // fixes this same gap for the manual Add Product form -- this
       // mirrors that fix for the bulk-import create path, which never
-      // called it). Fetched once per chunk, not per row -- resolveAndCreateBranches
-      // above may just have created a brand-new branch this same chunk, so
-      // this has to run after it, not reuse classifyProducts' earlier
-      // snapshot.
+      // called it). Fetched once per chunk, after the selected canonical
+      // branch ids have been revalidated.
       const allActiveBranchIds = createRows.length
         ? (await db.prepare(`SELECT id FROM branches WHERE is_active = 1`).all<{ id: number }>()).map((b) => b.id)
         : []

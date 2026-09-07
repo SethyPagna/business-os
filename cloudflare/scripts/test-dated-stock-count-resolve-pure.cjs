@@ -65,7 +65,8 @@ function loadReal(relPath) {
   return mod.exports
 }
 
-// datedStockCountResolve.ts's relative imports: ./sqlBinding, ./batchCode and
+// datedStockCountResolve.ts's relative imports: ./sqlBinding, ./batchCode,
+// ./branchRoles and
 // ./productIdentity (which reaches ./productDetailRule for the barcode fold).
 const relMap = {
   './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
@@ -79,6 +80,8 @@ const relMap = {
   './productIdentity.ts': () => loadReal('lib/productIdentity.ts'),
   './productDetailRule': () => loadReal('lib/productDetailRule.ts'),
   './productDetailRule.ts': () => loadReal('lib/productDetailRule.ts'),
+  './branchRoles': () => loadReal('lib/branchRoles.ts'),
+  './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
 }
 const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
@@ -116,14 +119,14 @@ async function testAsync(name, fn) {
   }
 }
 
-function seedBranch(rawDb, id, name) {
-  rawDb.prepare('INSERT INTO branches (id, name, is_active) VALUES (@id, @name, 1)').run({ id, name })
+function seedBranch(rawDb, id, name, isDefault = 0, isActive = 1) {
+  rawDb.prepare('INSERT INTO branches (id, name, is_default, is_active) VALUES (@id, @name, @isDefault, @isActive)').run({ id, name, isDefault, isActive })
 }
 function seedProduct(rawDb, { id, name, sku = null, barcode = null }) {
   rawDb.prepare('INSERT INTO products (id, name, sku, barcode, is_active) VALUES (@id, @name, @sku, @barcode, 1)').run({ id, name, sku, barcode })
 }
 function row(overrides = {}) {
-  return { rowNumber: 1, date: '2026-08-10', branchName: 'Main', productName: 'Widget', count: 5, ...overrides }
+  return { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Widget', count: 5, ...overrides }
 }
 
 async function main() {
@@ -190,7 +193,7 @@ async function main() {
 
   await testAsync('a parsed row with a NaN count is reported invalid_count by resolveDatedStockCountRows, not silently dropped', async () => {
     const { db, rawDb } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     const parsed = parseRawDatedCountRows({ rows: [{ date: '2026-08-10', branchName: 'Main', sku: 'A', count: 'garbage' }] })
     assert.ok('rows' in parsed)
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, parsed.rows)
@@ -201,7 +204,7 @@ async function main() {
 
   await testAsync('resolves by exact SKU match (case-insensitive), preferred over barcode/name', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 10, name: 'Widget', sku: 'WID-001', barcode: '999' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ sku: 'wid-001', barcode: 'not-this', productName: 'not this either' })])
     assert.strictEqual(unresolved.length, 0, JSON.stringify(unresolved))
@@ -212,7 +215,7 @@ async function main() {
 
   await testAsync('falls back to barcode when no SKU is given', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 11, name: 'Gadget', barcode: '12345' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '12345', productName: 'unrelated name' })])
     assert.strictEqual(unresolved.length, 0, JSON.stringify(unresolved))
@@ -221,7 +224,7 @@ async function main() {
 
   await testAsync('falls back to exact case-insensitive name when no SKU or barcode is given', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 12, name: 'Eye Shadow Palette' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ productName: 'eye shadow palette' })])
     assert.strictEqual(unresolved.length, 0, JSON.stringify(unresolved))
@@ -230,7 +233,7 @@ async function main() {
 
   await testAsync('a barcode shared by two real products is reported ambiguous, not silently guessed', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 13, name: 'Product A', barcode: '777' })
     seedProduct(rawDb, { id: 14, name: 'Product B', barcode: '777' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '777' })])
@@ -241,7 +244,7 @@ async function main() {
 
   await testAsync('a name matching two real products is reported ambiguous_name with both candidates and link/create options, not silently guessed', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 15, name: 'Duplicate Name' })
     seedProduct(rawDb, { id: 16, name: 'Duplicate Name' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Duplicate Name' })])
@@ -254,7 +257,7 @@ async function main() {
 
   await testAsync('a product_not_found row suggests create_new only', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     const { unresolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Never Seen' })])
     assert.strictEqual(unresolved.length, 1)
     assert.strictEqual(unresolved[0].reason, 'product_not_found')
@@ -263,7 +266,7 @@ async function main() {
 
   await testAsync('an ambiguous_barcode row carries both candidateProductIds and link/create options', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 30, name: 'A', barcode: '111' })
     seedProduct(rawDb, { id: 31, name: 'B', barcode: '111' })
     const { unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '111', productName: null })])
@@ -275,7 +278,7 @@ async function main() {
 
   await testAsync('a row with no imported price never gets a priceConflict, even when the matched product has a stored price', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 40, name: 'Widget' })
     rawDb.prepare('UPDATE products SET selling_price_usd = 9.99 WHERE id = 40').run()
     const { resolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Widget' })])
@@ -285,7 +288,7 @@ async function main() {
 
   await testAsync('a row with an imported price matching the current price never gets a priceConflict', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 41, name: 'Widget' })
     rawDb.prepare('UPDATE products SET selling_price_usd = 9.99 WHERE id = 41').run()
     const { resolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Widget', sellingPriceUsd: 9.99 })])
@@ -294,7 +297,7 @@ async function main() {
 
   await testAsync('a row with an imported price differing from the current price gets a priceConflict defaulting to merge', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 42, name: 'Widget' })
     rawDb.prepare('UPDATE products SET selling_price_usd = 9.99, selling_price_khr = 40000 WHERE id = 42').run()
     const { resolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Widget', sellingPriceUsd: 12.5 })])
@@ -309,7 +312,7 @@ async function main() {
 
   await testAsync('an unmatched product is reported, never auto-created', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Nonexistent Thing' })])
     assert.strictEqual(resolved.length, 0)
     assert.strictEqual(unresolved.length, 1)
@@ -318,28 +321,57 @@ async function main() {
     assert.strictEqual(count, 0)
   })
 
-  await testAsync('an unknown branch name is auto-created (matches importEngine.ts\'s existing convention) and reported in branchesCreated', async () => {
+  await testAsync('an unknown branch remains unresolved and creates no branch', async () => {
     const { rawDb, db } = freshDb()
     seedProduct(rawDb, { id: 17, name: 'Widget' })
     const { resolved, unresolved, branchesCreated } = await resolveDatedStockCountRows(db, [row({ branchName: 'New Warehouse', productName: 'Widget' })])
-    assert.strictEqual(unresolved.length, 0, JSON.stringify(unresolved))
-    assert.strictEqual(resolved.length, 1)
-    assert.strictEqual(branchesCreated.length, 1)
-    assert.strictEqual(branchesCreated[0].name, 'New Warehouse')
-    const branchRow = rawDb.prepare('SELECT id, is_active FROM branches WHERE lower(name) = @name').get({ name: 'new warehouse' })
-    assert.strictEqual(branchRow.id, resolved[0].branchId)
-    assert.strictEqual(branchRow.is_active, 1)
+    assert.strictEqual(resolved.length, 0)
+    assert.strictEqual(unresolved[0].reason, 'branch_not_found')
+    assert.strictEqual(unresolved[0].raw.branchName, 'New Warehouse')
+    assert.deepStrictEqual(branchesCreated, [])
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM branches').get().n, 0)
   })
 
-  await testAsync('an existing branch (any casing) is matched, not duplicated', async () => {
+  await testAsync('an existing canonical branch (any casing) is matched, not duplicated', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main Branch')
+    seedBranch(rawDb, 1, 'Warehouse')
     seedProduct(rawDb, { id: 18, name: 'Widget' })
-    const { resolved, branchesCreated } = await resolveDatedStockCountRows(db, [row({ branchName: 'main branch', productName: 'Widget' })])
+    const { resolved, branchesCreated } = await resolveDatedStockCountRows(db, [row({ branchName: ' warehouse ', productName: 'Widget' })])
     assert.strictEqual(resolved[0].branchId, 1)
     assert.strictEqual(branchesCreated.length, 0)
     const count = rawDb.prepare('SELECT COUNT(*) AS n FROM branches').get().n
     assert.strictEqual(count, 1)
+  })
+
+  await testAsync('a blank branch resolves only through one active canonical default', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Shop', 1)
+    seedBranch(rawDb, 2, 'Warehouse', 0)
+    seedProduct(rawDb, { id: 181, name: 'Widget' })
+    const result = await resolveDatedStockCountRows(db, [row({ branchName: '', productName: 'Widget' })])
+    assert.strictEqual(result.unresolved.length, 0, JSON.stringify(result.unresolved))
+    assert.strictEqual(result.resolved[0].branchId, 1)
+    assert.deepStrictEqual(result.branchesCreated, [])
+  })
+
+  await testAsync('a blank branch with ambiguous canonical defaults remains unresolved', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Shop', 1)
+    seedBranch(rawDb, 2, 'Warehouse', 1)
+    seedProduct(rawDb, { id: 182, name: 'Widget' })
+    const result = await resolveDatedStockCountRows(db, [row({ branchName: '', productName: 'Widget' })])
+    assert.strictEqual(result.resolved.length, 0)
+    assert.strictEqual(result.unresolved[0].reason, 'missing_branch')
+  })
+
+  await testAsync('duplicate active canonical names are ambiguous and never selected by row order', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Shop')
+    seedBranch(rawDb, 2, ' shop ')
+    seedProduct(rawDb, { id: 183, name: 'Widget' })
+    const result = await resolveDatedStockCountRows(db, [row({ productName: 'Widget' })])
+    assert.strictEqual(result.resolved.length, 0)
+    assert.strictEqual(result.unresolved[0].reason, 'branch_not_found')
   })
 
   await testAsync('an invalid date is reported and does not reach the DB lookups', async () => {
@@ -352,7 +384,7 @@ async function main() {
 
   await testAsync('an mm/dd/yyyy date is normalized to ISO, same as datedStockCountRoute.ts\'s own parser', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 19, name: 'Widget' })
     const { resolved } = await resolveDatedStockCountRows(db, [row({ date: '08/16/2026', productName: 'Widget' })])
     assert.strictEqual(resolved[0].date, '2026-08-16')
@@ -374,7 +406,7 @@ async function main() {
 
   await testAsync('multiple rows resolve independently -- one bad row does not block the others in the same batch', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 20, name: 'Widget' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [
       row({ rowNumber: 1, productName: 'Widget' }),
@@ -392,7 +424,7 @@ async function main() {
   // though the catalog holds exactly that article.
   await testAsync('a padded sheet barcode resolves to the bare stored one', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 50, name: 'Padded Twin', barcode: '748485110011' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '0748485110011', productName: null })])
     assert.deepStrictEqual(unresolved, [])
@@ -402,7 +434,7 @@ async function main() {
 
   await testAsync('a bare sheet barcode resolves to the zero-padded stored one', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 51, name: 'Stored Padded', barcode: '0885909950805' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '885909950805', productName: null })])
     assert.deepStrictEqual(unresolved, [])
@@ -412,7 +444,7 @@ async function main() {
 
   await testAsync('the fold still never resolves a code that differs by more than padding', async () => {
     const { rawDb, db } = freshDb()
-    seedBranch(rawDb, 1, 'Main')
+    seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 52, name: 'Different Article', barcode: '748485110012' })
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '0748485110011', productName: null })])
     assert.deepStrictEqual(resolved, [])
