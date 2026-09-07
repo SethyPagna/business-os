@@ -846,7 +846,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
   // history row; ordinary status changes keep the local reversible entry.
-  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<boolean | { exchangeRateChanged: number } | { settlementError: string }> => {
+  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<boolean | { exchangeRateChanged: number } | { settlementError: string } | { statusUpdatedAt: string }> => {
     // View-only (Part 557): status changes are Full-Access only. The backend
     // already refuses these through sales.status, so this matching client
     // guard also honors a Full role whose one action was switched off.
@@ -902,6 +902,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       const mutationResult = await runSaleStatusMutation(saleId, newStatus, isSettlementRequest ? undefined : notes, extra) as {
         actionHistoryId?: string | number | null
         actionKind?: string | null
+        updated_at?: string | null
       } | null
       const hasServerSettlementHistory = mutationResult?.actionKind === 'sale.settlement'
         && mutationResult.actionHistoryId != null
@@ -921,7 +922,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           redo: () => handleStatusChange(saleId, newStatus, notes || 'Redo sale status update', false, extra),
         })
       }
-      return true
+      const statusUpdatedAt = String(mutationResult?.updated_at || '').trim()
+      return statusUpdatedAt ? { statusUpdatedAt } : true
     } catch (error) {
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
         const current = (error as { current?: unknown }).current
