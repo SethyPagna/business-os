@@ -23,6 +23,14 @@
 //                             write ONE audit row keyed by the operation id,
 //                             not by sale, so without this join a sale that was
 //                             cancelled in a bulk action shows no record of it.
+//   returns           (0001)  a return REWRITES sales.sale_status to
+//                             'returned' / 'partial_return' and back
+//                             (routes/returns.ts:1658, :2558,
+//                             lib/returnBulkAction.ts:253) while auditing only
+//                             entity 'return' (returns.ts:2563,
+//                             returnBulkAction.ts:272) -- so the change the
+//                             shop asks about most often leaves no trace in
+//                             any of the three tables above.
 //   sales.created_at          the sale itself. Nothing audits a sale's own
 //                             creation, so it is synthesized from the row --
 //                             which is also why "Records" is never 0: a sale
@@ -42,15 +50,28 @@
 //    mirrors is richer and permanent.
 // 2. KIND IS WHAT CHANGED; VIA IS HOW IT WAS DONE. An undo does not get its own
 //    kind that hides which line moved: it keeps `item_qty_changed` and carries
-//    via 'undo'. `undone` is reserved for the replays that write no ledger entry
-//    of their own (the settlement applier's action_undo / action_redo rows).
+//    via 'undo'. `undone` is for the replays whose audit row is their ONLY
+//    trace -- today that is the settlement applier, which writes no ledger
+//    entry (lib/saleSettlementAction.ts:193).
+//    The undo appliers are NOT uniform in this, which is the trap: the
+//    sale.add_items applier writes a ledger entry (undoAppliers.ts:486-496 and
+//    :1197-1213, kind 'line_removed' via 'undo') AND an action_undo/action_redo
+//    audit row (:361-380, batched at :561; the non-atomic path audits at
+//    :1284-1290), both describing the same reversal. So rule 1 applies to it as
+//    well and its audit row is suppressed here -- otherwise one undo reads as
+//    two records, the richer of which ("Item removed", with the quantities) is
+//    shadowed by a contentless "Undone".
 //
 // WHAT IS NOT IN THE LIST, and why -- named rather than left silent:
 //
-//   returns          A return is its own record with its own screen, and it
-//                    does not change the sale row; the sale detail already
-//                    shows "Refunded by returns". Folding them in here would
-//                    make one refund show up in two ledgers.
+//   supplier returns A return whose `return_scope` is 'supplier' is filtered
+//                    out of every sale-status computation
+//                    (returns.ts:1653, :2550, returnBulkAction.ts:254), so it
+//                    never touched the sale row. Listing it would be a
+//                    fabricated record, not a missing one.
+//   the return's own line items, refund tender and restock decisions: those
+//                    belong to the return's own screen. What appears here is
+//                    only the return's effect ON THE SALE -- its status.
 //   reprints         Printing changes nothing.
 //   cache/version    Not a change to the sale.
 //   audit rows older than the retention window (lib/audit.ts, 21 days by
@@ -84,7 +105,7 @@ export const SALE_RECORD_KINDS = [
 ] as const
 export type SaleRecordKind = (typeof SALE_RECORD_KINDS)[number]
 
-export type SaleRecordSource = 'sale' | 'ledger' | 'audit' | 'bulk'
+export type SaleRecordSource = 'sale' | 'ledger' | 'audit' | 'bulk' | 'return'
 
 export interface SaleRecord {
   /**
@@ -155,6 +176,8 @@ export interface SaleRecordSaleRow {
   cashier_name?: unknown
   receipt_number?: unknown
   sale_status?: unknown
+  /** The status the sale held before a return moved it. Source of the "before". */
+  status_before_return?: unknown
   total_usd?: unknown
 }
 
@@ -275,16 +298,35 @@ export interface SaleRecordAuditRow {
 }
 
 /**
+ * The appliers whose undo/redo ALSO writes an amendment ledger entry, so that
+ * their audit row is the twin of a richer record rather than a record of its
+ * own. Kept as a set rather than a boolean check so the next applier that grows
+ * a ledger write is one line here, next to the reason.
+ *
+ * 'sale.add_items' is undoAppliers.ts's SALE_ADD_ITEMS_ACTION_KIND; it is
+ * spelled out rather than imported because this module is the pure half and
+ * undoAppliers.ts pulls in the D1 binding, the broadcaster and eight more
+ * modules. scripts/test-sale-records-pure.cjs asserts the two spellings agree.
+ */
+const LEDGER_WRITING_APPLIERS = new Set(['sale.add_items'])
+
+/**
  * Classify one audit row, or return null when it must not appear.
  *
- * The ONE suppression: `details.action === 'amend'`. Every amendment writes a
- * ledger entry AND this row; showing both would report one correction twice.
+ * TWO suppressions, both of them rule 1 -- one act, one record:
+ *   `details.action === 'amend'`  the twin every amendment writes.
+ *   an action_undo / action_redo replay by an applier that also writes a
+ *   ledger entry (LEDGER_WRITING_APPLIERS). A settlement replay writes none,
+ *   so it stays and becomes kind 'undone'.
  */
 export function auditRecord(row: SaleRecordAuditRow): SaleRecord | null {
   const details = parseDetails(row.details) || {}
   if (text(details.action) === 'amend') return null
 
   const action = String(row.action || '')
+  if ((action === 'action_undo' || action === 'action_redo')
+    && LEDGER_WRITING_APPLIERS.has(String(text(details.applier) || ''))) return null
+
   const at = text(row.created_at)
   const base = {
     id: `audit:${row.id}`,
@@ -430,6 +472,75 @@ export function bulkRecord(row: SaleRecordBulkRow, saleId: number | string): Sal
 }
 
 // ---------------------------------------------------------------------------
+// Source 5: the returns that rewrote this sale's status.
+//
+// Three writers move sales.sale_status without auditing the SALE:
+//   routes/returns.ts:1658          creating a return
+//   routes/returns.ts:2558          editing one (which can restore the status)
+//   lib/returnBulkAction.ts:253     the bulk cancel/restore
+// Each audits entity 'return' instead (returns.ts:2563,
+// returnBulkAction.ts:272), so audit_logs WHERE entity='sale' cannot see them
+// and a sale that was fully refunded this morning would read "Records 1".
+//
+// WHAT THIS SOURCE HONESTLY KNOWS, and what it refuses to guess:
+//
+// The three writers derive 'returned' vs 'partial_return' from the sum of every
+// live return against the sale's lines, and they OVERWRITE the one column that
+// holds the answer. So only the newest live return can be matched to the status
+// the sale actually carries now (`is_current`, computed by the caller's SQL);
+// for an earlier one the answer was overwritten and is gone. That record still
+// appears -- it changed the sale -- but its status pair is left null rather
+// than back-filled with a number that would look authoritative and be wrong.
+// ---------------------------------------------------------------------------
+export interface SaleRecordReturnRow {
+  id: number | string
+  return_number?: string | null
+  status?: string | null
+  return_scope?: string | null
+  total_refund_usd?: number | null
+  cashier_name?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  /** 1 when this is the newest non-cancelled customer-scope return on the sale. */
+  is_current?: number | null
+}
+
+/** True when this return is one of the ones that move sales.sale_status. */
+export function returnTouchesSale(row: SaleRecordReturnRow): boolean {
+  return (text(row.return_scope) || 'customer') === 'customer'
+}
+
+export function returnRecord(row: SaleRecordReturnRow, sale: SaleRecordSaleRow): SaleRecord {
+  const cancelled = (text(row.status) || 'completed') === 'cancelled'
+  const current = Number(row.is_current || 0) === 1
+  const saleStatus = text(sale.sale_status)
+  const returnedNow = saleStatus === 'returned' || saleStatus === 'partial_return'
+  // A cancelled return's ACT is the cancellation, which happened at updated_at;
+  // created_at would file it hours before, next to the return it undid.
+  const at = cancelled ? (text(row.updated_at) || text(row.created_at)) : text(row.created_at)
+  const after = cancelled ? null : current && returnedNow ? saleStatus : null
+  const label = row.return_number ? text(row.return_number) : null
+  return {
+    id: `return:${row.id}`,
+    source: 'return',
+    at,
+    at_ms: atMs(at),
+    actor_username: text(row.cashier_name),
+    kind: 'status_changed',
+    via: null,
+    subject: label || `#${row.id}`,
+    summary: cancelled ? 'Return cancelled'
+      : after === 'partial_return' ? 'Partial return'
+      : 'Returned',
+    before: { sale_status: cancelled ? null : current && returnedNow ? text(sale.status_before_return) : null },
+    after: {
+      sale_status: after,
+      refund_usd: numberOrNull(row.total_refund_usd),
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The union.
 // ---------------------------------------------------------------------------
 
@@ -459,6 +570,7 @@ export function buildSaleRecords(input: {
   ledger?: SaleRecordLedgerRow[]
   audit?: SaleRecordAuditRow[]
   bulk?: SaleRecordBulkRow[]
+  returns?: SaleRecordReturnRow[]
 }): SaleRecord[] {
   const records: SaleRecord[] = [saleCreatedRecord(input.sale)]
   for (const row of input.ledger || []) records.push(ledgerRecord(row))
@@ -467,6 +579,9 @@ export function buildSaleRecords(input: {
     if (record) records.push(record)
   }
   for (const row of input.bulk || []) records.push(bulkRecord(row, input.sale.id))
+  for (const row of input.returns || []) {
+    if (returnTouchesSale(row)) records.push(returnRecord(row, input.sale))
+  }
   return orderSaleRecords(records)
 }
 
@@ -474,13 +589,16 @@ export function buildSaleRecords(input: {
 // The list-row count.
 //
 // The Sales list shows "Records n" on every row, so this must never be a query
-// per sale. It is ONE statement over the whole page: three grouped counts
+// per sale. It is ONE statement over the whole page: four grouped counts
 // UNIONed and re-summed, plus the +1 every sale gets for its own creation.
 //
-// The audit half applies the SAME suppression the detail read applies -- an
-// `action: 'amend'` row is the ledger entry's twin -- or the count on the row
-// would be larger than the list inside the float, which is precisely the kind
-// of quiet disagreement that makes a number untrustworthy.
+// The audit half applies BOTH suppressions the detail read applies -- an
+// `action: 'amend'` row is the ledger entry's twin, and so is the
+// action_undo/action_redo row a ledger-writing applier leaves behind
+// (LEDGER_WRITING_APPLIERS above) -- or the count on the row would be larger
+// than the list inside the float, which is precisely the kind of quiet
+// disagreement that makes a number untrustworthy. The returns half carries the
+// same customer-scope filter for the same reason.
 //
 // `audit_logs.entity_id` is a TEXT column and `sale_amendments.sale_id` is an
 // INTEGER one, so the SAME id has to be bound with two different types in the
@@ -505,23 +623,32 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
         FROM audit_logs
         WHERE entity = 'sale' AND entity_id IN (${placeholders})
           AND COALESCE(json_extract(details, '$.action'), '') <> 'amend'
+          AND NOT (action IN ('action_undo','action_redo')
+                   AND json_extract(details, '$.applier') = 'sale.add_items')
         GROUP BY entity_id
       UNION ALL
       SELECT sale_id AS sale_id, COUNT(*) AS n
         FROM sale_bulk_members WHERE sale_id IN (${placeholders}) GROUP BY sale_id
+      UNION ALL
+      SELECT sale_id AS sale_id, COUNT(*) AS n
+        FROM returns
+        WHERE sale_id IN (${placeholders})
+          AND COALESCE(return_scope, 'customer') = 'customer'
+        GROUP BY sale_id
     )
     GROUP BY sale_id
   `
 }
 
 /** How many `IN (...)` lists buildSaleRecordsCountSql binds each id into. */
-export const SALE_RECORDS_COUNT_BINDS_PER_ID = 3
+export const SALE_RECORDS_COUNT_BINDS_PER_ID = 4
 
 /**
  * The bind list for buildSaleRecordsCountSql, in statement order: the ledger's
  * INTEGER ids, then the audit table's TEXT ids, then the bulk table's INTEGER
- * ids. See the note above for why the middle list is stringified.
+ * ids, then the returns table's INTEGER ids. See the note above for why the
+ * second list is stringified.
  */
 export function saleRecordsCountBinds(ids: Array<number | string>): Array<number | string> {
-  return [...ids, ...ids.map((id) => String(id)), ...ids]
+  return [...ids, ...ids.map((id) => String(id)), ...ids, ...ids]
 }

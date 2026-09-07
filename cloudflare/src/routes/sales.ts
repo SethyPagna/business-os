@@ -88,6 +88,7 @@ import {
   buildSaleRecords,
   buildSaleRecordsCountSql,
   saleRecordsCountBinds,
+  type SaleRecordReturnRow,
   SALE_RECORDS_COUNT_BINDS_PER_ID,
   SALE_RECORDS_SELF_COUNT,
   type SaleRecordAuditRow,
@@ -2515,12 +2516,13 @@ app.get('/:id/amendments', async (c) => {
 //
 // This is NOT GET /:id/amendments with a different name. That endpoint reads
 // one table and answers "how was this sale corrected". A sale is changed by
-// four writers that each record themselves somewhere else -- the amendment
-// ledger, audit_logs, the bulk-operation receipt, and the act of ringing the
-// sale up at all -- and a reader who only sees the ledger is told nothing about
-// the sale that was cancelled in a bulk action, which is precisely the change
-// they came to ask about. lib/saleRecords.ts holds the meaning and every
-// classification rule; this route holds only the four reads.
+// five writers that each record themselves somewhere else -- the amendment
+// ledger, audit_logs, the bulk-operation receipt, the returns that rewrite
+// sales.sale_status, and the act of ringing the sale up at all -- and a reader
+// who only sees the ledger is told nothing about the sale that was cancelled in
+// a bulk action or refunded this morning, which is precisely the change they
+// came to ask about. lib/saleRecords.ts holds the meaning and every
+// classification rule; this route holds only the five reads.
 //
 // Read-gated exactly like /:id/amendments: whoever may view the sale may see
 // how it got that way. Hiding the trail from the people who reconcile the books
@@ -2534,8 +2536,10 @@ app.get('/:id/records', async (c) => {
   const saleId = Number(c.req.param('id'))
   if (!Number.isFinite(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
 
+  // status_before_return is what the sale was BEFORE a return moved it, and it
+  // is the only "before" the returns source can honestly report.
   const sale = await db.prepare(`
-    SELECT id, receipt_number, sale_status, cashier_name, total_usd, created_at
+    SELECT id, receipt_number, sale_status, status_before_return, cashier_name, total_usd, created_at
     FROM sales WHERE id = ?
   `).get<SaleRecordSaleRow>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
@@ -2571,7 +2575,27 @@ app.get('/:id/records', async (c) => {
     WHERE m.sale_id = ?
   `).all<SaleRecordBulkRow>([saleId])
 
-  const records = buildSaleRecords({ sale, ledger, audit: auditRows, bulk })
+  // The returns gap: routes/returns.ts:1658, :2558 and lib/returnBulkAction.ts
+  // :253 rewrite sales.sale_status while auditing entity 'return', so neither
+  // of the reads above can see the change. `is_current` marks the newest live
+  // return -- the only one whose outcome still matches the status column,
+  // because each writer overwrote the previous answer.
+  const returnRows = await db.prepare(`
+    SELECT r.id, r.return_number, r.status, r.return_scope, r.total_refund_usd,
+      r.cashier_name, r.created_at, r.updated_at,
+      CASE WHEN COALESCE(r.status,'completed') <> 'cancelled'
+        AND NOT EXISTS (
+          SELECT 1 FROM returns r2
+          WHERE r2.sale_id = r.sale_id AND r2.id > r.id
+            AND COALESCE(r2.status,'completed') <> 'cancelled'
+            AND COALESCE(r2.return_scope,'customer') = 'customer'
+        ) THEN 1 ELSE 0 END AS is_current
+    FROM returns r
+    WHERE r.sale_id = ? AND COALESCE(r.return_scope,'customer') = 'customer'
+    ORDER BY r.id ASC
+  `).all<SaleRecordReturnRow>([saleId])
+
+  const records = buildSaleRecords({ sale, ledger, audit: auditRows, bulk, returns: returnRows })
   return c.json({ saleId, records, count: records.length })
 })
 
