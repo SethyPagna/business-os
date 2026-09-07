@@ -138,8 +138,17 @@ function makeBucket() {
   }
 }
 
-// A 1x1 PNG, so detectBufferKind() sees real image magic bytes.
-const PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+// A 1x1 PNG with a synthetic text metadata chunk. The route must keep the
+// real image payload while removing the sentinel before R2 storage.
+const PNG_METADATA_SENTINEL = 'GPS=11.5564,104.9282;Artist=private-person'
+const BASE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+const textPayload = Buffer.from(`Comment\0${PNG_METADATA_SENTINEL}`)
+const textChunk = Buffer.alloc(12 + textPayload.length)
+textChunk.writeUInt32BE(textPayload.length, 0)
+textChunk.write('tEXt', 4, 'ascii')
+textPayload.copy(textChunk, 8)
+const PNG_WITH_METADATA = Buffer.concat([BASE_PNG.subarray(0, -12), textChunk, BASE_PNG.subarray(-12)])
+const PNG_DATA_URL = `data:image/png;base64,${PNG_WITH_METADATA.toString('base64')}`
 
 async function sha256Hex(text) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
@@ -155,7 +164,13 @@ const dbModule = { getDb: () => db }
 // through waitUntil, so a no-op keeps the request path honest.
 const broadcastModule = { broadcast: async () => {} }
 // The AI provider is a different lane's surface entirely.
-const portalAiModule = { generatePortalAiResponse: async () => ({ answer: '' }) }
+let portalAiFailure = null
+const portalAiModule = {
+  generatePortalAiResponse: async () => {
+    if (portalAiFailure) throw portalAiFailure
+    return { answer: '' }
+  },
+}
 // Image normalization is a queue; the assertion that submissions must NOT be
 // enqueued is made below by checking this counter stays at zero.
 let normalizationCalls = 0
@@ -202,7 +217,10 @@ async function makeSignedInAccount({ name, phone, membershipId, withCustomer = t
     customerId = Number(res.meta.last_row_id)
   }
   const account = rawDb.prepare(
-    'INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES (@m, @n, @p, @h, @c)',
+    `INSERT INTO portal_accounts (
+      membership_id, name, phone, password_hash, contact_id,
+      consent_version, consent_at, consent_locale
+    ) VALUES (@m, @n, @p, @h, @c, 'portal-legal-2026-09-07', CURRENT_TIMESTAMP, 'en')`,
   ).run({ m: membershipId, n: name, p: phone.replace(/\D/g, ''), h: 'x', c: customerId })
   const accountId = Number(account.meta.last_row_id)
   const token = `token-${membershipId}`
@@ -238,8 +256,41 @@ async function run() {
     business_email: 'test@example.invalid',
   })) setSetting(key, value)
 
+  await check('anonymous AI failures do not disclose provider messages or endpoints', async () => {
+    portalAiFailure = new Error('Provider https://secret.vendor.invalid/v1 failed: account quota abc-123')
+    const res = await request('/ai/chat', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ question: 'Which cleanser?', dataUseConsent: true }),
+    })
+    portalAiFailure = null
+    assert.strictEqual(res.status, 502)
+    const payload = await res.json()
+    assert.deepStrictEqual(payload, {
+      error: 'The assistant is temporarily unavailable. Please try again later.',
+      code: 'portal_ai_unavailable',
+    })
+    const exposed = JSON.stringify(payload)
+    assert.doesNotMatch(exposed, /secret\.vendor|quota|abc-123/i)
+  })
+
   const alice = await makeSignedInAccount({ name: 'Alice', phone: '012 100 100', membershipId: 'LC-90001' })
   const orphan = await makeSignedInAccount({ name: 'Orphan', phone: '012 200 200', membershipId: 'LC-90002', withCustomer: false })
+
+  await check('a session accepted under an older policy cannot write until sign-in records current consent', async () => {
+    rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-older', consent_at = CURRENT_TIMESTAMP WHERE id = ?").run([alice.accountId])
+    const before = rawDb.prepare('SELECT COUNT(*) AS n FROM customer_share_submissions').get().n
+    const res = await request('/submissions', {
+      method: 'POST', headers: { ...JSON_HEADERS, cookie: alice.cookie }, body: submissionBody(),
+    })
+    assert.strictEqual(res.status, 428)
+    const payload = await res.json()
+    assert.strictEqual(payload.code, 'portal_consent_required')
+    assert.strictEqual(payload.consentVersion, 'portal-legal-2026-09-07')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM customer_share_submissions').get().n, before)
+    assert.strictEqual(bucket.objects.size, 0)
+    rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-2026-09-07', consent_at = CURRENT_TIMESTAMP WHERE id = ?").run([alice.accountId])
+  })
 
   await check('a stranger cannot write: no session is 401, and nothing is stored', async () => {
     const before = rawDb.prepare('SELECT COUNT(*) AS n FROM customer_share_submissions').get().n
@@ -289,6 +340,10 @@ async function run() {
     const stored = JSON.parse(rawDb.prepare('SELECT screenshots_json FROM customer_share_submissions WHERE id = ?').get([firstId]).screenshots_json)
     assert.deepStrictEqual(stored, keys, 'the row must store the object key')
     assert.ok(!stored[0].startsWith('/'), 'the row must not store a fetchable path')
+    const storedObject = bucket.objects.get(keys[0])
+    assert.strictEqual(storedObject.contentType, 'image/png')
+    assert.doesNotMatch(Buffer.from(storedObject.bytes).toString('latin1'), /GPS=|private-person/, 'PNG text metadata reached R2')
+    assert.ok(Buffer.from(storedObject.bytes).includes(Buffer.from('IDAT')), 'the minimized object lost its pixel-data chunk')
     assert.strictEqual(normalizationCalls, 0, 'a customer screenshot was sent to the shared normalization pipeline, which can use Cloudinary')
   })
 
