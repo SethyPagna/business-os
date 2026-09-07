@@ -199,7 +199,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     // http(s) or a site-relative path. Checked here so the author is told
     // what is wrong with their link instead of getting a bare 400 back.
     if (form.link_type === 'url' && !isSafeLinkUrl(form.link_url)) {
-      return copy('portal_legal_promotion_link_scheme', 'Enter a link URL that starts with http:// or https://')
+      return copy('promotion_link_url_scheme', 'Enter a link URL that starts with http:// or https://')
     }
     if (form.starts_at && form.ends_at && form.starts_at > form.ends_at) return copy('endDateAfterStart', 'End date must be after start date')
     return null

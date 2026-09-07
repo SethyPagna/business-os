@@ -296,6 +296,7 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   // Read-only viewers and page chrome.
   'components/catalog/ProductDetailFlyout.tsx': 'read-only viewer',
   'components/catalog/PublicCatalogPage.tsx': 'storefront drawers -- the cart and wishlist persist, the drawers only show them',
+  'components/catalog/legal/LegalPages.tsx': 'read-only policy viewer -- it renders the privacy, terms and cookie text and takes no input at all',
   'components/inventory/ProductDetailModal.tsx': 'read-only viewer',
   'components/navigation/Sidebar.tsx': 'navigation chrome, not a modal',
   'components/products/surfaces/ProductDescriptionDetailModal.tsx': 'read-only viewer',

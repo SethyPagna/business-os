@@ -6014,5 +6014,5 @@
   "portal_legal_store_map_consent_p": "Whether you chose to load the store map on this device.",
   "suggestions_none_yet": "Nothing saved yet — type a new one.",
   "suggestions_no_match": "No match — type to add a new one.",
-  "portal_legal_promotion_link_scheme": "Enter a link URL that starts with http:// or https://"
+  "promotion_link_url_scheme": "Enter a link URL that starts with http:// or https://"
 }
