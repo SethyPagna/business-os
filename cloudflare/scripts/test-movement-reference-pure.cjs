@@ -323,4 +323,54 @@ assert.ok(/\$\{SESSION_ACTOR_SQL\} AS user_name/.test(sessionSrc), 'the stock-in
 assert.ok(!/MAX\(m\.user_name\) AS user_name/.test(sessionSrc), 'the stock-in session list still groups on the raw snapshot')
 ok(true, 'the stock-in session list and detail resolve the actor through the shared expression')
 
+// ---- every harness that loads routes/inventory.ts stubs every import ------
+//
+// Why this guard exists. A harness that transpiles a route in-process passes
+// its OWN `require` to the generated module, so a relative specifier like
+// '../lib/movementActorName' resolves from cloudflare/scripts/, not from
+// cloudflare/src/routes/ -- there is no such file, and Node throws
+// MODULE_NOT_FOUND at load. Every relative import in the route therefore has
+// to appear as a key in that harness's override map.
+//
+// This lane added three imports to routes/inventory.ts (movementActorName,
+// movementReference, movementSearch) and updated three of the four harnesses
+// that load it. The fourth, test-stock-set-zero-pure.cjs, died with
+// `Cannot find module '../lib/movementActorName'` before a single check ran --
+// a module error wearing a test failure's clothes, and one that says nothing
+// about the rule the harness exists to prove. The next import would repeat it.
+//
+// So the rule is checked mechanically, from the same two facts the loader
+// uses: the requires that SURVIVE transpilation of the route (a type-only
+// import is elided and needs no stub), and the literal keys each harness
+// spells. It is discriminating by construction -- it is exactly the hand
+// computation that found the break, and it was red against the tree that had
+// it.
+{
+  const ts = require('typescript')
+  const routeRel = 'routes/inventory.ts'
+  const transpiled = ts.transpileModule(
+    fs.readFileSync(path.join(cloudflareRoot, 'src', routeRel), 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
+  ).outputText
+  const needed = [...new Set(
+    [...transpiled.matchAll(/require\("(\.\.?\/[^"]+)"\)/g)].map((m) => m[1]),
+  )].sort()
+  assert.ok(needed.length >= 20, 'the require scan found almost nothing -- this guard would pass vacuously')
+
+  const harnesses = fs.readdirSync(__dirname)
+    .filter((name) => /^test-.*\.cjs$/.test(name))
+    .filter((name) => fs.readFileSync(path.join(__dirname, name), 'utf8').includes(`loadReal('${routeRel}'`))
+  assert.ok(harnesses.length >= 4, `expected several harnesses to load ${routeRel}, found ${harnesses.length}`)
+
+  for (const name of harnesses) {
+    const src = fs.readFileSync(path.join(__dirname, name), 'utf8')
+    const missing = needed.filter((spec) => !src.includes(`'${spec}'`))
+    assert.equal(
+      missing.length, 0,
+      `${name} loads ${routeRel} but stubs none of: ${missing.join(', ')} -- it will die with MODULE_NOT_FOUND before any check runs`,
+    )
+  }
+  ok(true, `every harness loading ${routeRel} stubs all ${needed.length} of its relative imports (${harnesses.length} harnesses)`)
+}
+
 console.log('\nOK ' + checks + ' checks')
