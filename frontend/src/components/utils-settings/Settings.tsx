@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
-import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { resolveTaxEnabled } from '../../utils/taxSettings.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
@@ -697,7 +697,7 @@ export default function Settings() {
   const formatPreviewDateTime = (value: Date | string | number) => {
     const date = value instanceof Date ? value : new Date(value)
     if (Number.isNaN(date.getTime())) return '--'
-    return date.toLocaleString('en-US', {
+    return fmtDayFirst(date, {
       hour12: false,
       year: 'numeric',
       month: '2-digit',

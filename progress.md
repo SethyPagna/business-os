@@ -1,5 +1,14 @@
 # progress.md — business-os
 
+> **Active September 7 Codex takeover:** Isolated integration base `ea9f0d1b`
+> preserves checkpoint 2 and prior Codex work. Sales, identity, media/stock,
+> accounting, reports, portal, and remaining-lane writers have disjoint
+> ownership. See `docs/fleet/2026-09-07-codex-takeover.md` for current findings,
+> actual checks and outstanding work. No combined candidate is certified,
+> deployed or applied to production data yet. Original shared worktrees are
+> preserved. Current production Worker version is independently confirmed as
+> `6c3f9a35-9b38-4f00-bc7d-bae28bb0ef76` at 100% traffic.
+
 ## Active continuation — production usability, September 5
 
 DEPLOYED September5 15:35:48UTC — ROUND1 c999e909f4fe91533df84365f1f8eda4015bef76.

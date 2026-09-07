@@ -1,7 +1,7 @@
 import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDateTime24, fmtDayFirst } from '../../utils/formatters.ts'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Cloud from 'lucide-react/dist/esm/icons/cloud.js'
@@ -711,7 +711,7 @@ function formatDateTime(raw: unknown): string {
   const value = rawValue.includes('T') || rawValue.endsWith('Z') ? rawValue : `${rawValue.replace(' ', 'T')}Z`
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return rawValue
-  return date.toLocaleString('en-US', {
+  return fmtDayFirst(date, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

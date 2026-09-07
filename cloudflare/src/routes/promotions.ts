@@ -6,7 +6,7 @@ import { audit } from '../lib/audit'
 import { hasPermission, getPermissionTier, getActionTier } from '../lib/permissions'
 import { bumpVersion } from '../lib/cache'
 import { normalizePromotionRule, isRuleActive } from '../lib/promotionRules'
-import { normalizeToIsoDate } from '../lib/batchCode'
+import { normalizeTypedDate } from '../lib/batchCode'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -68,7 +68,7 @@ function normalizeRuleWrite(body: RuleInput = {}) {
   const dateOnly = (v: unknown) => {
     const raw = String(v || '').trim()
     if (!raw) return null
-    return normalizeToIsoDate(raw)
+    return normalizeTypedDate(raw)
   }
   const uses = TYPE_USES[ruleType as keyof typeof TYPE_USES]
   return {
