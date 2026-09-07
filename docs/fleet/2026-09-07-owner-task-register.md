@@ -76,10 +76,10 @@ Every shipped row must eventually record its actual deployment version.
 
 | F41 | Idle import polling writes to D1 and immediate retries amplify database overload. | Integrated db158f6c; independent PASS, backend 280/280 / sales | Skip no-op reaper writes when no stale jobs exist; preserve guarded stale recovery. Fail overload once instead of immediately retrying it. |
 
-| F42 | Contacts duplicates: supplier creation in stock sessions, raw versus spaced customer phone numbers, obsolete membership IDs; inspect existing fixes before correction. | Active read-only diagnosis / accounting | Trace all writers and safe identity criteria; no blind contact deletion or membership reassignment. |
-| F43 | Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree. | Active scope / accounting | Respect valid number length/country prefixes; compare canonical digits, preserve caret/edit/paste behavior. |
-| F44 | Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere. | Queued implementation / responsive | Supersedes N39/F13 wording only; preserve recognized revenue/profit and internal status values. |
-| F45 | Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors. | Active diagnosis / minimize | Attribute each error from evidence; do not label extension/injected scripts as application bugs without proof. |
+| F42 | Contacts duplicates: supplier creation in stock sessions, raw versus spaced customer phone numbers, obsolete membership IDs; inspect existing fixes before correction. | Confirmed canonical-phone/import bugs; implementation active / accounting | Stock-in does not auto-create suppliers. Spaced/raw/+855 duplicate matching and import lookup-key freshness are inconsistent. Legacy membership IDs remain; no blind deletion or reassignment. |
+| F43 | Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree. | Frontend integrated 5801abb2; independent review and backend parity pending | Progressive spacing, prefixes, paste and caret covered in seven create/edit/quick-add fields. |
+| F44 | Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere. | Stability candidate 560bfbcb; deployment pending | Supersedes N39/F13 unpaid-state wording. Internal values/accounting unchanged; distinct Store Credit, supplier credit and overpayment concepts preserved. |
+| F45 | Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors. | Stability candidate 560bfbcb; independent PASS | Cooldown lacked wake-up and actual logout did not disconnect. Both corrected. content.js listener is extension noise; VM startTime ownership unproven. |
 | F46 | Bulk conflict multi-select processes slowly one by one; present combined before/after review and efficient bounded execution. | Queued after F39/F40 / identity | Distinguish conflict-resolution workflow from duplicate merge; keep atomicity, scope, audits and accurate partial progress. |
 
 ## Public portal and legal requests
@@ -125,3 +125,9 @@ Every shipped row must eventually record its actual deployment version.
 Detailed evidence: [takeover ledger](2026-09-07-codex-takeover.md), individual Git
 commits, and private local `outputs/takeover-20260907/` reports. Local checks do not
 stand in for deployment, and missing historical evidence is never fabricated.
+
+## Stability release candidate and repair transport
+
+- Public fix branch codex/release-stability-20260907 at 560bfbcbbc6730e9bba305bec6b70af752579ad9 contains only F41, F44 and F45, separate from F39/F40. GitHub pushed. Backend 280/280 passed; frontend 307/309 initially passed, two stale assertions corrected and focused rerun passed 3/3; both types, i18n, build and deploy dry-run passed. Deployment remains unconfirmed after asset-upload network failure; root retry is active.
+- F39/F40 independent review found post-commit finalizer errors, unknown first-request timeout handling, normal-budget confirmation regression, and whole-cluster workload-bound gaps. Corrections are integrated progressively; not yet certified or deployed. Complex multi-product clusters must be refused before any fold unless a reviewed whole-cluster plan fits the bound. Their eventual correction remains open.
+- Three grouped historical execution attempts through the remote development proxy failed. Each full REST postcheck reports 44 pending, 0 applied, 0 audits, 0 violations across all 4,333 target rows. Private atomic file-import transport is being prepared with the same reviewed manifest and audit/full-row guards; no historical repair is claimed complete.
