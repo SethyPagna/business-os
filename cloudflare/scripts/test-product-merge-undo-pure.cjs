@@ -38,6 +38,7 @@ const LIB_DIR = path.join(cloudflareRoot, 'src', 'lib')
 // its own) and the whole point of it is WHICH identity it picks, so a stub
 // would be testing the stub.
 let actorSnapshotCache = null
+let productMergeCache = null
 function loadRealActorSnapshot() {
   if (actorSnapshotCache) return actorSnapshotCache
   const file = path.join(LIB_DIR, 'actorSnapshot.ts')
@@ -49,6 +50,18 @@ function loadRealActorSnapshot() {
   new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
   actorSnapshotCache = mod.exports
   return actorSnapshotCache
+}
+function loadRealProductMerge() {
+  if (productMergeCache) return productMergeCache
+  const file = path.join(LIB_DIR, 'productMerge.ts')
+  const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'productMerge.ts',
+  })
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  productMergeCache = mod.exports
+  return productMergeCache
 }
 function loadUndoAppliers(d1) {
   const readBatches = []
@@ -76,6 +89,7 @@ function loadUndoAppliers(d1) {
   }
   const stubs = {
     './actorSnapshot': loadRealActorSnapshot(),
+    './productMerge': loadRealProductMerge(),
     // Bulk status replay is outside this suite; fail if it is invoked.
     './saleBulkStatus': {
       replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-product-merge-undo-pure.cjs') },
@@ -576,6 +590,126 @@ async function run() {
 
 }
 
+// A bounded bulk cluster may be applied one duplicate at a time, but its cost
+// is resolved once from every original member. Redo must therefore replay the
+// saved cluster economics rather than average the keeper's restored 4 with the
+// current duplicate's 5 (which would drift to 4.5 and lose the original 6).
+async function runSavedClusterEconomics() {
+  console.log('\n-- saved bulk-cluster economics across undo/redo --')
+  const d1 = openDb(loadAll())
+  const undo = loadUndoAppliers(d1)
+  const productMerge = loadRealProductMerge()
+  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+
+  run1(`INSERT INTO products (
+    id, name, barcode, is_active,
+    selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr,
+    cost_price_usd, cost_price_khr, stock_quantity
+  ) VALUES
+    (1,'Planned Item','PLAN-1',1,10,41000,9,36900,4,4000,0),
+    (2,'Planned Item','PLAN-1',1,10,41000,9,36900,5,5000,0),
+    (3,'Planned Item','PLAN-1',1,10,41000,9,36900,6,6000,0)`)
+
+  const planRows = d1.db.prepare(`
+    SELECT id, updated_at,
+           selling_price_usd, selling_price_khr,
+           wholesale_price_usd, wholesale_price_khr,
+           cost_price_usd, cost_price_khr
+      FROM products
+     WHERE id IN (1,2,3)
+     ORDER BY id
+  `).all()
+  const clusterPlan = productMerge.createProductMergeClusterPlan('planned item\u0001plan-1', 1, planRows)
+  const plannedEconomics = productMerge.resolveProductMergeClusterPlanEconomics(clusterPlan)
+  assert.equal(plannedEconomics.merged.cost_price_usd, 5)
+  assert.equal(plannedEconomics.merged.cost_price_khr, 5000)
+
+  const observedRedoCosts = []
+  const foldWithEconomics = async (_env, _db, _user, keeper, dup, branchNameById, ctx, _stockDisposition, economicsOverride) => {
+    const before = d1.db.prepare(`
+      SELECT selling_price_usd, selling_price_khr,
+             wholesale_price_usd, wholesale_price_khr,
+             cost_price_usd, cost_price_khr
+        FROM products WHERE id = ?
+    `).get(keeper.id)
+    const result = await foldForward(d1, keeper, dup, branchNameById, ctx)
+    const economics = economicsOverride || productMerge.resolveProductMergeEconomics([
+      { id: keeper.id, ...before },
+      d1.db.prepare(`
+        SELECT id, selling_price_usd, selling_price_khr,
+               wholesale_price_usd, wholesale_price_khr,
+               cost_price_usd, cost_price_khr
+          FROM products WHERE id = ?
+      `).get(dup.id),
+    ])
+    if (economicsOverride) observedRedoCosts.push(economics.merged.cost_price_usd)
+    run1(`UPDATE products
+             SET selling_price_usd=@sellingUsd,
+                 selling_price_khr=@sellingKhr,
+                 wholesale_price_usd=@wholesaleUsd,
+                 wholesale_price_khr=@wholesaleKhr,
+                 cost_price_usd=@costUsd,
+                 cost_price_khr=@costKhr,
+                 updated_at=CURRENT_TIMESTAMP
+           WHERE id=@id`, {
+      id: keeper.id,
+      sellingUsd: economics.merged.selling_price_usd ?? before.selling_price_usd,
+      sellingKhr: economics.merged.selling_price_khr ?? before.selling_price_khr,
+      wholesaleUsd: economics.merged.wholesale_price_usd ?? before.wholesale_price_usd,
+      wholesaleKhr: economics.merged.wholesale_price_khr ?? before.wholesale_price_khr,
+      costUsd: economics.merged.cost_price_usd ?? before.cost_price_usd,
+      costKhr: economics.merged.cost_price_khr ?? before.cost_price_khr,
+    })
+    result.reversal.keeperPricingBefore = {
+      selling_price_usd: Number(before.selling_price_usd),
+      selling_price_khr: Number(before.selling_price_khr),
+      wholesale_price_usd: Number(before.wholesale_price_usd),
+      wholesale_price_khr: Number(before.wholesale_price_khr),
+      cost_price_usd: Number(before.cost_price_usd),
+      cost_price_khr: Number(before.cost_price_khr),
+    }
+    return result
+  }
+  undo.registerMergeFold(foldWithEconomics)
+
+  const first = await foldWithEconomics(
+    {}, undo.__testDbAdapter, { id: 42 },
+    { id: 1, name: 'Planned Item' },
+    { id: 2, name: 'Planned Item', image_path: null },
+    new Map(), 'bounded duplicate cleanup', 'merge', plannedEconomics,
+  )
+  first.reversal.bulkClusterPlan = clusterPlan
+  const recorded = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, first.reversal)
+  const applier = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: recorded.snapshotId })
+  assert.ok(applier, 'product.merge applier must resolve for a planned cluster fold')
+  observedRedoCosts.length = 0
+
+  await check('4/5/6 cluster redo keeps the original mean at 5 across repeated undo/redo', async () => {
+    assert.equal(d1.db.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 5)
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      await applier.run(
+        { applier: 'product.merge', snapshot_id: recorded.snapshotId },
+        { env: {}, user: { id: 42 }, direction: 'undo' },
+      )
+      assert.equal(d1.db.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 4)
+      assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
+
+      await applier.run(
+        { applier: 'product.merge', snapshot_id: recorded.snapshotId },
+        { env: {}, user: { id: 42 }, direction: 'redo' },
+      )
+      const redone = d1.db.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id=1').get()
+      assert.equal(redone.cost_price_usd, 5)
+      assert.notEqual(redone.cost_price_usd, 4.5)
+      assert.equal(redone.cost_price_khr, 5000)
+      const saved = JSON.parse(d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(recorded.snapshotId).payload_json)
+      assert.deepEqual(saved.bulkClusterPlan, clusterPlan, 'redo snapshot must retain the immutable original cluster plan')
+    }
+    assert.deepEqual(observedRedoCosts, [5, 5], 'every redo uses the saved 4/5/6 cluster mean')
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=3').get().is_active, 1, 'the remaining cluster member is untouched')
+  })
+}
+
 // --------------------------------------------------------------------------
 // Bulk composite: the whole-catalog POST /merge-duplicates folds MANY dups in
 // ONE run and records ONE undoable action (recordBulkMergeUndoSnapshot +
@@ -709,6 +843,7 @@ async function runBulk() {
 
 async function main() {
   await run()
+  await runSavedClusterEconomics()
   await runBulk()
   console.log(`\n${passed} check(s) passed.`)
 }

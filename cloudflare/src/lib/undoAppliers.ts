@@ -26,6 +26,11 @@ import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAct
 import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
 import { actorSnapshot } from './actorSnapshot'
+import {
+  parseProductMergeClusterPlan,
+  resolveProductMergeClusterPlanEconomics,
+  type ProductMergeEconomics,
+} from './productMerge'
 
 export const SALE_ADD_ITEMS_ACTION_KIND = 'sale.add_items'
 
@@ -346,11 +351,31 @@ export type MergeFoldFn = (
   branchNameById: Map<number, string>,
   mergeContext: string,
   stockDisposition?: MergeStockDisposition,
+  economicsOverride?: ProductMergeEconomics,
 ) => Promise<{ reversal: MergeReversal }>
 
 let mergeFoldFn: MergeFoldFn | null = null
 export function registerMergeFold(fn: MergeFoldFn): void {
   mergeFoldFn = fn
+}
+
+function savedBulkClusterEconomics(reversal: MergeReversal): ProductMergeEconomics | undefined {
+  if (!Object.prototype.hasOwnProperty.call(reversal, 'bulkClusterPlan')) return undefined
+  const plan = parseProductMergeClusterPlan(reversal.bulkClusterPlan)
+  if (!plan || plan.keeperId !== Number(reversal.keeperId) || !plan.memberIds.includes(Number(reversal.dupId))) {
+    throw new UndoConflictError('This merge has an invalid saved cluster plan, so it cannot be redone safely.')
+  }
+  const economics = resolveProductMergeClusterPlanEconomics(plan)
+  if (economics.issues.length) {
+    throw new UndoConflictError('This merge has invalid saved cluster economics, so it cannot be redone safely.')
+  }
+  return economics
+}
+
+function preserveBulkClusterPlan(source: MergeReversal, fresh: MergeReversal): void {
+  if (Object.prototype.hasOwnProperty.call(source, 'bulkClusterPlan')) {
+    fresh.bulkClusterPlan = source.bulkClusterPlan
+  }
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -1230,6 +1255,7 @@ async function redoBulkMergeFolds(
     ])
     if (!keeper || !dupRow) throw new Error('One of the merged products no longer exists, so this merge cannot be redone.')
     if (!keeper.is_active || !dupRow.is_active) throw new Error('One of the merged products is no longer active, so this merge cannot be redone.')
+    const economicsOverride = savedBulkClusterEconomics(r)
     const { reversal: one } = await mergeFoldFn!(
       env, db, user,
       { id: keeperId, name: keeper.name },
@@ -1239,7 +1265,9 @@ async function redoBulkMergeFolds(
       // A redo must repeat the operator's ORIGINAL stock decision, never
       // silently fall back to merging stock the reviewer chose to write off.
       r.stockDisposition === 'write_off' ? 'write_off' : 'merge',
+      economicsOverride,
     )
+    preserveBulkClusterPlan(r, one)
     fresh.push(one)
     keeperIds.add(keeperId)
   }
@@ -1692,6 +1720,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         ])
         if (!keeper || !dupRow) throw new Error('One of the two products no longer exists, so the merge cannot be redone.')
         if (!keeper.is_active || !dupRow.is_active) throw new Error('One of the two products is no longer active, so the merge cannot be redone.')
+        const economicsOverride = savedBulkClusterEconomics(reversal)
         const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
         const { reversal: fresh } = await mergeFoldFn(
           ctx.env, db, ctx.user,
@@ -1702,7 +1731,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           // Repeat the operator's ORIGINAL stock decision on redo; a merge the
           // reviewer settled as a write-off must not come back as a stock fold.
           reversal.stockDisposition === 'write_off' ? 'write_off' : 'merge',
+          economicsOverride,
         )
+        preserveBulkClusterPlan(reversal, fresh)
         await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })
         fresh.mergedStateFingerprint = await mergeStateFingerprint(db, [fresh])
         await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify(fresh), id: snapshotId })
