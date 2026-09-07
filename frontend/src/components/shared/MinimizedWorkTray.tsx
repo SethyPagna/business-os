@@ -32,7 +32,7 @@ const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
 const useApp = useAppHook as unknown as () => {
   can: (permissionKey: string, actionKey: string) => boolean
   language: string
-  navigateTo: (pageId: string) => void
+  navigateTo: (pageId: string, anchor?: string) => void
   notify: (message: string, type?: string) => void
   t: (key: string) => string
 }
@@ -52,7 +52,7 @@ export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'de
       notify(tr('access_denied', 'Access denied', 'គ្មានសិទ្ធិចូលប្រើ'), 'error')
       return
     }
-    navigateTo(entry.pageId)
+    navigateTo(entry.pageId, entry.anchor)
     dispatchRestore(entry)
   }
   const dismiss = (entry: MinimizedWorkEntry) => {
