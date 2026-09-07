@@ -81,8 +81,9 @@ import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
 import { buildProductSupplierOptions } from '../products/helpers/productSupplierOptions.ts'
-import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
+import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import { resolveSaleBranch } from './productSheetState.ts'
+import { branchCanSell } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -781,6 +782,9 @@ export default function POS() {
   // The currently visible order. Derived, not stored separately.
   const resolvedActiveId = activeId && orders.find(o => o.id === activeId) ? activeId : orders[0]?.id
   const active = orders.find(o => o.id === resolvedActiveId) || orders[0] || normalizeOrder({}, 1)
+  const ordersRef = useRef(orders)
+  ordersRef.current = orders
+  const branchBatchValidationRef = useRef(new Map<string, number>())
   const loyaltyAccrual = resolveOrderLoyaltyAccrual(active.loyaltyAccrual, settings.loyalty_points_enabled)
 
 // Sync payment method default when settings load
@@ -2571,11 +2575,17 @@ export default function POS() {
     })
   }
 
-  const updateItemBranch = (cartLineId: string | number, branchId: string) => {
+  const updateItemBranch = async (cartLineId: string | number, branchId: string) => {
     const nextBranchId = branchId ? parseInt(branchId, 10) : null
     const item = active.cart.find((entry) => getCartLineId(entry) === cartLineId)
     const product = productsById.get(Number(item?.id))
     if (!item || !product) return
+    const targetBranch = nextBranchId == null ? null : branchesById.get(nextBranchId)
+    if (!targetBranch || !branchCanSell(targetBranch.name)) {
+      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+      return
+    }
+    const targetBranchId = Number(targetBranch.id)
     // Must check the TARGET branch's own stock directly via
     // getBranchStockQty, not through getDisplayStock -- getDisplayStock
     // gives first priority to the active branch filter (primaryBranchFilterId)
@@ -2585,16 +2595,62 @@ export default function POS() {
     // targeting. That let a line be moved to a zero-stock branch as long
     // as the originally-selected/filtered branch still had stock. Bypass
     // that fallback chain entirely for this check.
-    const available = nextBranchId != null
-      ? getBranchStockQty(product, nextBranchId)
-      : Number(product.stock_quantity || 0)
+    const available = getBranchStockQty(product, targetBranchId)
     if (item.quantity > available) {
       const branchName = branchesById.get(Number(nextBranchId))?.name || t('selected_branch') || 'selected branch'
       notify(`${t('not_enough_stock') || 'Not enough stock'} (${branchName})`, 'error')
       return
     }
 
-    patchActive({ cart: active.cart.map((entry) => getCartLineId(entry) === cartLineId ? { ...entry, branch_id: nextBranchId } : entry) })
+    const originalBranchId = item.branch_id == null ? null : Number(item.branch_id)
+    if (originalBranchId === targetBranchId) return
+
+    // A selected received-date lot belongs to one product+branch identity.
+    // Never carry it blindly to another branch. Re-read the target branch's
+    // available lots and keep this exact lot only when it exists there and
+    // still covers the current quantity. A miss or failed lookup leaves the
+    // line unchanged so checkout can never receive stale batch metadata.
+    if (item.batch_id) {
+      const requestKey = String(cartLineId)
+      const requestId = (branchBatchValidationRef.current.get(requestKey) || 0) + 1
+      branchBatchValidationRef.current.set(requestKey, requestId)
+      try {
+        const response = await getProductBatches(Number(product.id), targetBranchId, true)
+        if (branchBatchValidationRef.current.get(requestKey) !== requestId) return
+        const currentOrder = ordersRef.current.find((order) => order.id === resolvedActiveId)
+        const currentItem = currentOrder?.cart.find((entry) => getCartLineId(entry) === cartLineId)
+        if (!currentItem
+          || Number(currentItem.batch_id || 0) !== Number(item.batch_id)
+          || (currentItem.branch_id == null ? null : Number(currentItem.branch_id)) !== originalBranchId) return
+        const targetBatch = response.batches.find((batch) => Number(batch.id) === Number(currentItem.batch_id))
+        if (!targetBatch || Number(targetBatch.quantity || 0) < currentItem.quantity) {
+          notify(t('no_batches_for_branch') || 'No received dates for this branch', 'error')
+          return
+        }
+        setOrders((previous) => previous.map((order) => order.id !== resolvedActiveId ? order : {
+          ...order,
+          cart: order.cart.map((entry) => getCartLineId(entry) !== cartLineId ? entry : {
+            ...entry,
+            branch_id: targetBranchId,
+            batch_id: targetBatch.id,
+            batch_expiry_date: targetBatch.expiry_date ?? null,
+            batch_available_quantity: Number(targetBatch.quantity || 0),
+          }),
+        }))
+      } catch (error) {
+        if (branchBatchValidationRef.current.get(requestKey) === requestId) notify(getErrorMessage(error), 'error')
+      }
+      return
+    }
+
+    // A plain line has no batch identity to carry. Clear every optional batch
+    // display/cap field while switching so legacy drafts with partial stale
+    // metadata cannot leak a previous branch's received date into checkout.
+    patchActive({
+      cart: active.cart.map((entry) => getCartLineId(entry) === cartLineId
+        ? { ...entry, branch_id: targetBranchId, batch_id: null, batch_label: null, batch_expiry_date: null, batch_available_quantity: undefined }
+        : entry),
+    })
   }
 
 // Totals derived from the active order

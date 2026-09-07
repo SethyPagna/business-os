@@ -2,6 +2,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { computeCartLineSavings } from './posCore.ts'
 import AppSelect from '../shared/AppSelect'
+import { branchCanSell } from '../../utils/branchRoles.ts'
 
 type Translate = (key: string) => string | undefined
 type CurrencyFormatter = (value: number) => string
@@ -209,6 +210,7 @@ export default function CartItem({
                 ...branches.map((branch) => ({
                   value: branch.id,
                   label: `${branch.name}${branch.is_default ? ' *' : ''}`,
+                  disabled: !branchCanSell(branch.name),
                 })),
               ]}
             />
