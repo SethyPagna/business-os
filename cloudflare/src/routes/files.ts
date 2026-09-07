@@ -5,7 +5,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
-import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
+import { getMediaType, buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { audit } from '../lib/audit'
@@ -142,7 +142,6 @@ app.get('/', async (c) => {
   // Count/page the logical rows, not physical objects. Otherwise a page can
   // render more cards than pageSize and its "x / total" indicator lies as
   // soon as one photo is shared by two products.
-  const totalRow = await db.prepare(`${LOGICAL_LIBRARY_CTE} SELECT COUNT(*) AS count FROM logical_assets ${whereSql}`).get<{ count: number }>(params)
   // usage_count cross-references each asset's public_path against every place
   // a file can be referenced elsewhere in the app: a product's cover image,
   // its gallery, a user's avatar, and any business/portal setting (logo,
@@ -152,7 +151,8 @@ app.get('/', async (c) => {
   // zero and the frontend's canDelete flag always undefined/false --
   // deleting was silently disabled for every file in the Library, in-use or
   // not.
-  const [rawItems, settingValues] = await Promise.all([
+  const [totalRow, rawItems, settingValues, physicalStorageRow] = await Promise.all([
+    db.prepare(`${LOGICAL_LIBRARY_CTE} SELECT COUNT(*) AS count FROM logical_assets ${whereSql}`).get<{ count: number }>(params),
     db.prepare(`
     ${LOGICAL_LIBRARY_CTE}
     SELECT id, original_name, stored_name, public_path, mime_type, media_type, byte_size,
@@ -166,6 +166,19 @@ app.get('/', async (c) => {
     LIMIT @limit OFFSET @offset
     `).all(params),
     db.prepare('SELECT value FROM settings').all<{ value: string }>(),
+    // Physical storage is intentionally aggregated from file_assets, not
+    // logical_assets: one R2 object can be presented under several product
+    // names, but its bytes must be counted exactly once.
+    db.prepare(`
+      SELECT
+        COUNT(*) AS file_count,
+        COALESCE(SUM(CASE WHEN byte_size > 0 THEN byte_size ELSE 0 END), 0) AS total_bytes,
+        COALESCE(SUM(CASE WHEN media_type = 'image' THEN 1 ELSE 0 END), 0) AS image_count,
+        COALESCE(SUM(CASE WHEN media_type = 'video' THEN 1 ELSE 0 END), 0) AS video_count,
+        COALESCE(SUM(CASE WHEN media_type = 'document' THEN 1 ELSE 0 END), 0) AS document_count,
+        COALESCE(SUM(CASE WHEN media_type NOT IN ('image', 'video', 'document') OR media_type IS NULL THEN 1 ELSE 0 END), 0) AS other_count
+      FROM file_assets
+    `).get<Record<string, unknown>>(),
   ])
 
   // User-reported gap: the delete lock previously gave no reason beyond a
@@ -196,7 +209,13 @@ app.get('/', async (c) => {
     }
   })
 
-  return c.json({ items, total: totalRow?.count || 0, page, pageSize })
+  return c.json({
+    items,
+    total: totalRow?.count || 0,
+    page,
+    pageSize,
+    physicalStorage: normalizePhysicalStorageSummary(physicalStorageRow),
+  })
 })
 
 app.post('/upload', async (c) => {

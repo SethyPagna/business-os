@@ -19,6 +19,19 @@ type FileListResponse = {
   page_size?: unknown
   hasMore?: unknown
   has_more?: unknown
+  physicalStorage?: unknown
+  physical_storage?: unknown
+}
+
+export type PhysicalFileStorageSummary = {
+  totalBytes: number
+  fileCount: number
+  countsByType: {
+    image: number
+    video: number
+    document: number
+    file: number
+  }
 }
 
 type FileListMeta = {
@@ -27,6 +40,7 @@ type FileListMeta = {
   page: number
   pageSize: number
   hasMore: boolean
+  physicalStorage: PhysicalFileStorageSummary | null
 }
 
 type FileListParams = QueryParams & {
@@ -83,12 +97,29 @@ function normalizeFileListResult(result: unknown, params: FileListParams): unkno
   const items = Array.isArray(response?.items) ? response.items : (Array.isArray(result) ? result : [])
   if (!params.includeMeta) return items
 
+  const rawPhysical = response?.physicalStorage || response?.physical_storage
+  const physical = rawPhysical && typeof rawPhysical === 'object'
+    ? rawPhysical as Record<string, unknown>
+    : null
+  const rawCounts = physical?.countsByType && typeof physical.countsByType === 'object'
+    ? physical.countsByType as Record<string, unknown>
+    : {}
   return {
     items,
     total: Number(response?.total || items.length || 0),
     page: Number(response?.page || params.page || 1),
     pageSize: Number(response?.pageSize || response?.page_size || params.pageSize || params.limit || items.length || 0),
     hasMore: Boolean(response?.hasMore || response?.has_more),
+    physicalStorage: physical ? {
+      totalBytes: Math.max(0, Number(physical.totalBytes ?? physical.total_bytes) || 0),
+      fileCount: Math.max(0, Number(physical.fileCount ?? physical.file_count) || 0),
+      countsByType: {
+        image: Math.max(0, Number(rawCounts.image) || 0),
+        video: Math.max(0, Number(rawCounts.video) || 0),
+        document: Math.max(0, Number(rawCounts.document) || 0),
+        file: Math.max(0, Number(rawCounts.file) || 0),
+      },
+    } : null,
   }
 }
 

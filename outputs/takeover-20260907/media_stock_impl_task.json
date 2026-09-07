@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "run_id": "takeover-20260907",
+  "task_id": "media-stock-impl-20260907",
+  "role": "implementation-worker",
+  "objective": "Implement the finite atomic stock-session timeout, canonical product-media identity, physical Library storage metrics, optimized-image metadata parity, dashboard stock-alert pagination/reset behavior, and positive Credit dashboard UI on the pinned integration base.",
+  "base_sha": "ea9f0d1b7d67891be519fbe74c91a8bdf4102593",
+  "mode": "workspace_write",
+  "ownership": {
+    "include": [
+      "frontend/src/api/inventoryWriteTransport.ts",
+      "frontend/tests/createProductsSession.test.ts",
+      "frontend/src/components/products/forms/ProductForm.tsx",
+      "frontend/src/api/productImageUploadTransport.ts",
+      "frontend/src/components/files/FilePickerModal.tsx",
+      "frontend/src/components/files/FilesPage.tsx",
+      "frontend/src/api/fileTransport.ts",
+      "frontend/src/utils/mediaUpload.ts",
+      "frontend/tests/mediaUploadHelpers.test.ts",
+      "frontend/tests/productFormContract.test.ts",
+      "cloudflare/src/routes/files.ts",
+      "cloudflare/src/lib/fileAssets.ts",
+      "cloudflare/src/lib/libraryLogicalAssets.ts",
+      "cloudflare/src/lib/imageAudit.ts",
+      "cloudflare/scripts/test-image-normalize-pure.cjs",
+      "cloudflare/scripts/test-library-logical-assets-pure.cjs",
+      "frontend/src/components/dashboard/Dashboard.tsx",
+      "frontend/src/api/dashboardTransport.ts",
+      "frontend/tests/dashboardDataReliability.test.ts",
+      "cloudflare/src/routes/compat.ts",
+      "cloudflare/src/lib/familyStockStats.ts",
+      "cloudflare/scripts/test-dashboard-stock-alert-pagination-pure.cjs",
+      "cloudflare/src/routes/batches.ts",
+      "cloudflare/scripts/test-batches-received-date-pure.cjs",
+      "outputs/takeover-20260907/media_stock_impl_task.json",
+      "outputs/takeover-20260907/media_stock_impl_result.json"
+    ],
+    "exclude": [
+      "cloudflare/src/routes/products.ts",
+      "cloudflare/src/lib/productWrites.ts",
+      "cloudflare/src/lib/undoAppliers.ts",
+      "frontend/src/components/sales",
+      "frontend/src/components/portal",
+      "frontend/src/lang",
+      "cloudflare/src/lang"
+    ]
+  },
+  "worktree": "C:/Users/mrkl6/Downloads/bos-takeover-media-20260907",
+  "branch": "codex/takeover-media-20260907",
+  "dependencies": [],
+  "acceptance_criteria": [
+    "Atomic create-products inventory sessions use a focused 60000 ms client timeout and retain the same client_request_id across retries; unsafe legacy per-line Fast Stock-In requests are unchanged.",
+    "Product upload, camera, file, and Library attachment flows persist canonical same-origin /uploads identity while cache busting remains render-only and failure messages remain accurate.",
+    "Library exposes physical stored bytes and file counts by type without double-counting logical product references, and image optimization synchronizes file_assets byte_size and MIME metadata.",
+    "Dashboard-only authorized users can page family-aware low/out stock alerts with stable order; the UI appends near the list bottom and resets rows, cursors, loading state, and inner scroll position when Dashboard becomes inactive.",
+    "Dashboard renders Credit as a positive metric using already-computed API fields without changing sales/accounting arithmetic.",
+    "Operator-facing batch received-date edits parse ambiguous slash dates explicitly day-first and preserve the derived batch code lineage.",
+    "Focused tests and both affected package typechecks pass."
+  ],
+  "verification": [
+    "node tests/createProductsSession.test.ts",
+    "node tests/mediaUploadHelpers.test.ts",
+    "node tests/productFormContract.test.ts",
+    "node tests/dashboardDataReliability.test.ts",
+    "node cloudflare/scripts/test-image-normalize-pure.cjs",
+    "node cloudflare/scripts/test-library-logical-assets-pure.cjs",
+    "node cloudflare/scripts/test-dashboard-stock-alert-pagination-pure.cjs",
+    "node cloudflare/scripts/test-batches-received-date-pure.cjs",
+    "npm run typecheck in frontend",
+    "npm run typecheck in cloudflare"
+  ],
+  "side_effect_policy": "workspace_only",
+  "delegation": {
+    "allowed": true,
+    "max_depth": 1
+  }
+}

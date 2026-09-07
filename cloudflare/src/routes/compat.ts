@@ -11,12 +11,14 @@ import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
-import { getFamilyStockStats } from '../lib/familyStockStats'
-import { loadLowStockConfig, lowStockThresholdSql } from '../lib/lowStockSettings'
+import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
+import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
+const DASHBOARD_STOCK_ALERT_PAGE_SIZE = 10
+const DASHBOARD_STOCK_ALERT_MAX_PAGE_SIZE = 50
 
 // Shared gate matching backend's requirePermission/requireAnyPermission for
 // the system/backup/audit endpoints below -- previously these only checked
@@ -227,7 +229,6 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   // two are rendered together on Dashboard.tsx, so they must be built from
   // the same number or the card contradicts its own heading.
   const lowStockConfig = await loadLowStockConfig(env)
-  const lowThresholdSql = lowStockThresholdSql(lowStockConfig, 'p.low_stock_threshold')
   const { startDate, endDate } = dateRange(query)
   const branchId = query.branchId || null
   const params = branchId ? { startDate, endDate, branchId } : { startDate, endDate }
@@ -256,7 +257,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   // -- previously a flat COUNT(*)/SUM() here counted every variant row (and
   // group-header placeholder rows) individually, overcounting vs. those
   // listing pages whenever grouped products existed.
-  const [todaySales, allSales, todayReturns, inventory, lowStock, outOfStock, expiring, expiringCount, recentSales] = await Promise.all([
+  const [todaySales, allSales, todayReturns, inventory, lowStockPage, outOfStockPage, expiring, expiringCount, recentSales] = await Promise.all([
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
@@ -292,20 +293,8 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
       params,
       qtyExpr: 'COALESCE(p.stock_quantity, 0)',
     }),
-    db.prepare(`
-      SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
-      FROM products p
-      WHERE p.is_active = 1 AND COALESCE(stock_quantity, 0) <= ${lowThresholdSql} AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)
-      ORDER BY stock_quantity ASC, lower(name) ASC
-      LIMIT 10
-    `).all(params),
-    db.prepare(`
-      SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
-      FROM products p
-      WHERE p.is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)
-      ORDER BY stock_quantity ASC, lower(name) ASC
-      LIMIT 10
-    `).all(params),
+    getFamilyStockAlertPage({ db, lowStock: lowStockConfig, state: 'low', page: 1, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE }),
+    getFamilyStockAlertPage({ db, lowStock: lowStockConfig, state: 'out', page: 1, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE }),
     db.prepare(`
       SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
       FROM products p
@@ -342,8 +331,12 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     out_of_stock_count: inventory.out_of_stock,
     stock_value_usd: inventory.stock_value_usd,
     stock_value_khr: inventory.stock_value_khr,
-    low_stock: lowStock || [],
-    out_of_stock: outOfStock || [],
+    low_stock: lowStockPage.items,
+    out_of_stock: outOfStockPage.items,
+    low_stock_preview_limit: DASHBOARD_STOCK_ALERT_PAGE_SIZE,
+    out_of_stock_preview_limit: DASHBOARD_STOCK_ALERT_PAGE_SIZE,
+    low_stock_preview_truncated: lowStockPage.hasMore,
+    out_of_stock_preview_truncated: outOfStockPage.hasMore,
     expiring_products: expiring || [],
     expiring_count: num((expiringCount as Record<string, unknown>)?.count),
     recent_sales: (recentSales || []).map((sale) => ({
@@ -505,6 +498,27 @@ app.get('/dashboard', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
   return c.json(await dashboardSummary(c.env, c.req.query()))
+})
+app.get('/dashboard/stock-alerts', async (c) => {
+  const denied = denyUnless(c, 'dashboard')
+  if (denied) return denied
+  const rawState = String(c.req.query('state') || '').toLowerCase()
+  if (rawState !== 'low' && rawState !== 'out') {
+    return c.json({ error: 'state must be low or out' }, 400)
+  }
+  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1', 10) || 1)
+  const pageSize = Math.min(
+    DASHBOARD_STOCK_ALERT_MAX_PAGE_SIZE,
+    Math.max(1, Number.parseInt(c.req.query('pageSize') || String(DASHBOARD_STOCK_ALERT_PAGE_SIZE), 10) || DASHBOARD_STOCK_ALERT_PAGE_SIZE),
+  )
+  const result = await getFamilyStockAlertPage({
+    db: getDb(c.env),
+    lowStock: await loadLowStockConfig(c.env),
+    state: rawState as FamilyStockAlertState,
+    page,
+    pageSize,
+  })
+  return c.json(result)
 })
 app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
