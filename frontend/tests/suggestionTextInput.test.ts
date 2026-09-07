@@ -39,6 +39,9 @@ function check(name: string, fn: () => void): void {
 }
 
 const read = (rel: string): string => fs.readFileSync(new URL(`../src/${rel}`, import.meta.url), 'utf8')
+// Repo-root relative. One claim in this lane spans both packages, and the only
+// way it cannot drift is for the same test to read both sides of it.
+const readRepo = (rel: string): string => fs.readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8')
 
 // The exact matcher the old private supplier field used, kept here as the
 // POSITIVE CONTROL: a test that only ever exercises the new code cannot tell
@@ -247,6 +250,31 @@ check('every hint in the family answers to the same gate (one rule, one implemen
   assert.match(sessionModal, /emptyHint=\{suggestionEmptyState\(brandOptions\.length > 0, brandOptions\.length\) === 'no-match'/, 'the create-products header Brand is gated too')
   const variantModal = read('components/products/forms/VariantFormModal.tsx')
   assert.match(variantModal, /suggestionEmptyState\(/, "the variant form's Supplier is gated too")
+})
+
+check('DISCRIMINATING: the supplier rows promise exactly what the read behind them returns', () => {
+  // Round-2 defect: the rows mapped a second "meta" line from supplier.company,
+  // and the comment above them sold it as the way to tell two contacts with the
+  // same personal name apart. But the ONLY supplier read this form is allowed
+  // to make is fields=names -- deliberately the one shape reachable without the
+  // contacts_suppliers permission -- and that answers SELECT id, name. The line
+  // could never render online; only a stale offline mirror (written by the
+  // full read, which needs that permission) could ever have produced one, so
+  // the "disambiguator" was present or absent depending on who you were and
+  // whether you had been offline. Pinning BOTH sides here is what stops the
+  // claim and the read drifting apart again.
+  const contactsRoute = readRepo('cloudflare/src/routes/contacts.ts')
+  assert.match(
+    contactsRoute,
+    /fields \|\| ''\) === 'names'[\s\S]{0,400}SELECT id, name FROM/,
+    'fields=names really is id + name only',
+  )
+  assert.match(productForm, /getSuppliers\(\{ fields: 'names' \}\)/, 'and that is the read ProductForm makes')
+  const supplierAt = productForm.indexOf('const supplierSuggestionOptions')
+  assert.ok(supplierAt > 0, 'the supplier option mapping must exist')
+  const block = productForm.slice(Math.max(0, supplierAt - 700), supplierAt + 500)
+  assert.doesNotMatch(block, /supplier\.company/, 'a column that read never returns may not be mapped')
+  assert.match(block, /name-only/, 'and the comment says name-only rather than promising a company line')
 })
 
 check('the list is a real combobox for keyboard and screen readers', () => {

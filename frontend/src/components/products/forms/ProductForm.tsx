@@ -103,10 +103,10 @@ export interface GroupCandidate {
   name?: string | null
 }
 
+// Exactly the two columns /api/suppliers?fields=names returns.
 interface SupplierOption {
   id: EntityId
   name?: string | null
-  company?: string | null
 }
 
 export interface ProductFormState extends GroupCandidate {
@@ -719,15 +719,20 @@ export default function ProductForm({
       .filter(Boolean),
     [brandOptionsProvided, brandOptions, fallbackBrands],
   )
-  // Supplier rows keep their company as the second line so two contacts with
-  // the same personal name are distinguishable. Free text stays legal: this
-  // form records a supplier NAME on the product, it does not link a contact.
+  // Supplier rows are name-only, because the read behind them is: this form
+  // asks /api/suppliers?fields=names, which cloudflare/src/routes/contacts.ts
+  // answers with SELECT id, name -- deliberately, since that is the ONLY shape
+  // of the endpoint reachable without the contacts_suppliers permission, and a
+  // product form must work for a stock clerk who does not have it. A company
+  // second line therefore has nothing to render from here; it was mapped once
+  // and never appeared. The contact id still rides along on the row key, so a
+  // pick can be told from typing. Free text stays legal: this form records a
+  // supplier NAME on the product, it does not link a contact.
   const supplierSuggestionOptions = useMemo<SuggestionOption[]>(
     () => supplierList
       .map((supplier) => ({
         value: String(supplier.name || '').trim(),
         key: `supplier-${supplier.id}`,
-        meta: String(supplier.company || '').trim() || undefined,
       }))
       .filter((option) => option.value !== ''),
     [supplierList],
