@@ -22,7 +22,8 @@ import { computeSaleTotals } from '../lib/saleTotals'
 import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
 // A replacement line is an ordinary sale line, so the warehouse may not
 // carry one -- the same rule, and the same message, POST /sales enforces.
-import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
+import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
+import { branchCanSell } from '../lib/branchRoles'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 // N21: sales.customer_address holds the DISPLAY address; the replacement sale
@@ -972,8 +973,8 @@ app.post('/', async (c) => {
     const sale = await db.prepare('SELECT receipt_number, customer_id, customer_name, customer_phone, customer_address, branch_id, branch_name, exchange_rate, sale_status, status_before_return FROM sales WHERE id = ?').get<typeof saleMeta>([body.sale_id])
     if (sale) saleMeta = sale
   }
-  const branchId = body.branch_id || saleMeta.branch_id || null
-  const branchName = branchId
+  const branchId = body.branch_id || saleMeta.branch_id || replacementInputs[0]?.branch_id || null
+  let branchName = branchId
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([branchId]))?.name || saleMeta.branch_name || null
     : saleMeta.branch_name || null
 
@@ -981,18 +982,22 @@ app.post('/', async (c) => {
   // the same rule every other sale line does: the warehouse may not sell.
   // Checked against the branch each line actually resolves to, which is the
   // line's own branch_id when it names one and the return's otherwise.
-  const replacementBranchIds = [...new Set(
-    replacementInputs
-      .map((rep) => Number(rep.branch_id || branchId) || null)
-      .filter((id): id is number => !!id),
-  )]
-  if (replacementBranchIds.length) {
-    const replacementBranchRows = await selectInChunks(replacementBranchIds, 0, (chunk) => db
-      .prepare(`SELECT id, name FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ id: number; name: string }>(chunk))
-    if (firstUnsellableBranch(replacementBranchRows)) {
+  const replacementHeaderBranchId = Number(branchId)
+  if (replacementInputs.length) {
+    if (!Number.isSafeInteger(replacementHeaderBranchId) || replacementHeaderBranchId <= 0
+      || replacementInputs.some((rep) => {
+        const lineBranchId = Number(rep.branch_id ?? replacementHeaderBranchId)
+        return !Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== replacementHeaderBranchId
+      })) {
       return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
     }
+    const replacementBranch = await db.prepare(
+      'SELECT id, name, is_active FROM branches WHERE id = ? LIMIT 1',
+    ).get<{ id: number; name: string | null; is_active: number | null }>([replacementHeaderBranchId])
+    if (!replacementBranch || Number(replacementBranch.is_active ?? 0) !== 1 || !branchCanSell(replacementBranch.name)) {
+      return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
+    }
+    branchName = replacementBranch.name
   }
 
   const productIds = [...new Set([
@@ -1016,7 +1021,7 @@ app.post('/', async (c) => {
     return {
       productId: Number(rep.product_id),
       productName: rep.product_name?.trim() || meta?.name || `product #${rep.product_id}`,
-      branchId: Number(rep.branch_id) || 0,
+      branchId: Number(rep.branch_id ?? replacementHeaderBranchId),
       batchId: Number.isFinite(Number(rep.batch_id)) && Number(rep.batch_id) > 0 ? Number(rep.batch_id) : null,
       quantity,
       priceUsd,
