@@ -115,9 +115,15 @@ export function resolveAffordanceTarget(closest: ClosestFn): { element: unknown;
 // (Products.tsx renderDesktopProductRow / renderMobileProductCard). A copy
 // field that claims the click there does not add an affordance, it deletes
 // one: the row stops being selectable wherever a copyable value happens to
-// be drawn. So a copy field inside a clickable surface answers the gestures
-// the surface does NOT use -- double-click on a pointer device,
-// press-and-hold on touch -- and leaves the plain click to the row.
+// be drawn. So a copy field inside a clickable surface answers only the
+// gesture the surface genuinely leaves spare, which on a product row is
+// press-and-hold ON TOUCH and nothing else: outside selection mode the row
+// spreads utils/longPress.ts, so the tap opens the product, the pointer hold
+// enters select mode, and a pointer DOUBLE-click is those two -- its first
+// press-release pair has already put the detail modal over the row, so the
+// second click never reaches the trigger. Copying on a pointer device
+// happens in that detail modal, one click away, where nothing underneath
+// wants the pointer at all.
 //
 // Where nothing underneath wants it (the two product detail modals, the
 // StatsStrip labels, the Stock-in line rows) a plain click opens the panel,
@@ -603,10 +609,10 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     // that same rule, and inside a clickable surface it is false, which
     // leaves the row every event it had before this lane existed.
     //
-    // Where it DOES take the press, it has to do something with it: the hint
-    // on every trigger ("Double-click or hold to copy") promises a hold, and
-    // a pointer device only gets one if the press is armed here. Touch
-    // already routed through the same detector below.
+    // Where it DOES take the press, it has to do something with it: those
+    // are exactly the triggers `syncCopyHint` attaches the hint to, and the
+    // hint promises a hold. A pointer device only gets one if the press is
+    // armed here. Touch already routed through the same detector below.
     if (found?.kind === 'copy' && pressWillOpenFloat(found)) {
       event.stopPropagation()
       pressElement = found.element

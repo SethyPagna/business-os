@@ -11,9 +11,10 @@ export type CopyFloatLabels = AffordanceLabels
 /** Attributes that turn any element into a copy-float trigger. */
 export type CopyFloatProps = Record<string, string> | Record<string, never>
 
-// Copy affordance for a product's NAME, BRAND, SUPPLIER and BARCODE:
-// double-click on a pointer device, press-and-hold on touch, both opening
-// the one shared float with the full value and a Copy button.
+// Copy affordance for a product's NAME, BRAND, SUPPLIER and BARCODE: a
+// press-and-hold on touch, and on a pointer device a click, a double-click
+// or a hold wherever the surface underneath is not already using them --
+// all opening the one shared float with the full value and a Copy button.
 //
 // WHICH gestures a given trigger answers depends on the surface it lands
 // in, not on this hook, so this hook does not name any.
