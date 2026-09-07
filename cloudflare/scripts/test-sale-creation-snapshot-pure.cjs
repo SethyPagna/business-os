@@ -98,6 +98,19 @@ assert.throws(
   /at least one product line/,
 )
 assert.throws(
+  () => subject.buildSaleCreationSnapshot({ ...validInput, origin: 'future' }),
+  /origin is invalid/,
+)
+assert.throws(
+  () => subject.buildSaleCreationSnapshot({ ...validInput, saleAt: 'not-a-date' }),
+  /sale_at is invalid/,
+)
+assert.equal(
+  JSON.parse(subject.buildSaleCreationSnapshot({ ...validInput, isDelivery: '0' })).delivery.is_delivery,
+  false,
+  'string zero must not become a delivery sale',
+)
+assert.throws(
   () => subject.buildSaleCreationSnapshot({
     ...validInput,
     items: Array.from({ length: subject.MAX_SALE_CREATION_SNAPSHOT_LINES + 1 }, () => validInput.items[0]),

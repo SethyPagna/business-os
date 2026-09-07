@@ -132,6 +132,9 @@ function utf8Bytes(value: string): number {
 }
 
 export function buildSaleCreationSnapshot(input: SaleCreationSnapshotInput): string {
+  if (!SALE_CREATION_ORIGINS.has(input.origin)) {
+    throw new SaleCreationSnapshotError('Sale creation snapshot origin is invalid.')
+  }
   if (!Array.isArray(input.items) || input.items.length === 0) {
     throw new SaleCreationSnapshotError('Sale creation snapshot requires at least one product line.')
   }
@@ -142,11 +145,15 @@ export function buildSaleCreationSnapshot(input: SaleCreationSnapshotInput): str
   if (!recordedAt || !Number.isFinite(Date.parse(recordedAt))) {
     throw new SaleCreationSnapshotError('Sale creation snapshot recorded_at is invalid.')
   }
+  const saleAt = text(input.saleAt)
+  if (saleAt && !Number.isFinite(Date.parse(saleAt))) {
+    throw new SaleCreationSnapshotError('Sale creation snapshot sale_at is invalid.')
+  }
   const snapshot: SaleCreationSnapshotV1 = {
     version: SALE_CREATION_SNAPSHOT_VERSION,
     origin: input.origin,
     recorded_at: recordedAt,
-    sale_at: text(input.saleAt),
+    sale_at: saleAt,
     receipt_number: text(input.receiptNumber),
     actor: { id: actorId(input.actor), username: actorSnapshot(input.actor) },
     cashier: { id: id(input.cashierId), username: text(input.cashierName) },
