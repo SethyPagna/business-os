@@ -15,14 +15,15 @@
 //   3. counted sent as empty strings        -> 200, stored as NULL
 //   4. one currency counted, the other blank-> 200, that one stored, other NULL
 //
-// and the one that must still fail:
+// and the values that must still fail:
 //
 //   5. a negative count                     -> 400 (a typo is not "uncounted")
+//   6. boolean/array/object count values     -> 400 (never JS-coerced into money)
 //
 // plus the two adjacent paths a blank count used to strand:
 //
-//   6. POST /:id/close (the Shifts popup's historic close) accepts blank too
-//   7. PATCH /:id can still amend a shift that was closed WITHOUT a count --
+//   7. POST /:id/close (the Shifts popup's historic close) accepts blank too
+//   8. PATCH /:id can still amend a shift that was closed WITHOUT a count --
 //      before this, such a row was permanently unamendable.
 //
 // Discriminating: at 01f0c93c both close routes ran `requiredMoney`, which
@@ -142,7 +143,8 @@ function scenario() {
     assert.equal(res.status, 201)
     return (await res.json()).shift
   }
-  return { call, row, open }
+  const shiftCount = () => sqlite.prepare('SELECT COUNT(*) AS n FROM shift_sessions').get().n
+  return { call, row, open, shiftCount }
 }
 
 async function main() {
@@ -184,8 +186,8 @@ async function main() {
   {
     const { call, row, open } = scenario()
     const shift = await open()
-    const res = await call('POST', '/close', { branch_id: 1, closing_counted_usd: '', closing_counted_khr: '' })
-    assert.equal(res.status, 200, 'blank count fields close the shift')
+    const res = await call('POST', '/close', { branch_id: 1, closing_counted_usd: '  \t', closing_counted_khr: '' })
+    assert.equal(res.status, 200, 'empty and whitespace-only count fields close the shift')
     assert.equal(row(shift.id).closing_counted_usd, null)
     assert.equal(row(shift.id).closing_counted_khr, null)
   }
@@ -211,10 +213,53 @@ async function main() {
     assert.equal(notANumber.status, 400, 'a non-numeric count is refused')
   }
 
-  // ---- 6. the historic close (Shifts popup) accepts blank too ------------
+  // ---- 6. JSON containers/primitives are never coerced into money --------
   {
     const { call, row, open } = scenario()
     const shift = await open()
+    for (const malformed of [true, false, [5], { value: 5 }]) {
+      const res = await call('POST', '/close', {
+        branch_id: 1, closing_counted_usd: malformed, closing_counted_khr: 0,
+      })
+      assert.equal(res.status, 400, `${JSON.stringify(malformed)} is not a monetary count`)
+      assert.equal(row(shift.id).closed_at, null, 'a malformed close wrote nothing')
+      assert.equal(row(shift.id).closing_counted_usd, null, 'a malformed value was never persisted')
+    }
+  }
+
+  // Primitive numeric strings remain accepted after trimming.
+  {
+    const { call, row, open } = scenario()
+    const shift = await open()
+    const res = await call('POST', '/close', {
+      branch_id: 1, closing_counted_usd: ' 12.50 ', closing_counted_khr: '40000',
+    })
+    assert.equal(res.status, 200, 'numeric strings are accepted as the documented transport representation')
+    assert.equal(row(shift.id).closing_counted_usd, 12.5)
+    assert.equal(row(shift.id).closing_counted_khr, 40000)
+  }
+
+  // Required opening floats use the same strict primitive contract.
+  {
+    const { call, shiftCount } = scenario()
+    for (const malformed of [true, [10], { value: 10 }, '   ']) {
+      const res = await call('POST', '/open', {
+        branch_id: 1, opening_float_usd: malformed, opening_float_khr: 10000,
+      })
+      assert.equal(res.status, 400, `${JSON.stringify(malformed)} is not a valid opening float`)
+      assert.equal(shiftCount(), 0, 'a malformed opening float created no shift')
+    }
+  }
+
+  // ---- 7. the historic close (Shifts popup) accepts blank too ------------
+  {
+    const { call, row, open } = scenario()
+    const shift = await open()
+    const malformed = await call('POST', `/${shift.id}/close`, {
+      expected_revision: shift.revision, closed_at: new Date().toISOString(), closing_counted_usd: [5],
+    })
+    assert.equal(malformed.status, 400, 'the historical close rejects a container count')
+    assert.equal(row(shift.id).closed_at, null, 'the rejected historical close wrote nothing')
     const res = await call('POST', `/${shift.id}/close`, {
       expected_revision: shift.revision, closed_at: new Date().toISOString(),
     })
@@ -224,7 +269,7 @@ async function main() {
     assert.ok(negative.closed_at, 'the historic close committed')
   }
 
-  // ---- 7. an uncounted closed shift is still amendable -------------------
+  // ---- 8. an uncounted closed shift is still amendable -------------------
   {
     const { call, row, open } = scenario()
     const shift = await open()
@@ -241,6 +286,17 @@ async function main() {
     assert.equal(amend.status, 200, 'a shift closed without a count must stay amendable')
     assert.equal(row(shift.id).opening_note, 'Counted by the morning cashier')
     assert.equal(row(shift.id).closing_counted_usd, null, 'the amend did not invent a count')
+
+    const amended = row(shift.id)
+    const malformed = await call('PATCH', `/${shift.id}`, {
+      expected_revision: amended.revision,
+      reason: 'Malformed recount',
+      opened_at: amended.opened_at,
+      closed_at: amended.closed_at,
+      closing_counted_usd: { value: 5 },
+    })
+    assert.equal(malformed.status, 400, 'an amendment rejects an object count')
+    assert.equal(row(shift.id).closing_counted_usd, null, 'the rejected amendment persisted no count')
   }
 
   // ---- the source carries no variance gate ------------------------------
