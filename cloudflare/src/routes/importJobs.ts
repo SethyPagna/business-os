@@ -165,28 +165,51 @@ app.get('/queue/status', async (c) => {
 // the ~150-row chunk cadence, so this never fires on a job that's still
 // genuinely being worked) is auto-marked failed with a clear last_error,
 // which moves it out of ACTIVE_STATUSES on the very next poll without
-// anyone having to act on it. Runs as a narrow, self-limiting UPDATE (WHERE
-// status IN (...) AND updated_at older than the cutoff) ahead of every
-// list call -- once a row is reaped it no longer matches that WHERE clause,
-// so this is a no-op write on every poll after the first for a given job.
+// anyone having to act on it. A cheap read first checks whether either reap
+// class exists, so ordinary tracker polling does not open write transactions
+// when there is nothing to reap. The UPDATE predicates repeat the status and
+// cutoff checks and remain authoritative if a worker refreshes a candidate
+// after this read.
 const STALLED_IMPORT_JOB_REAP_MINUTES = 20
 
 export async function reapStalledImportJobs(env: Env): Promise<void> {
   const db = getDb(env)
-  await db.prepare(`
-    UPDATE import_jobs
-    SET status = 'failed', phase = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
-        last_error = 'Stalled: no progress update received for over ${STALLED_IMPORT_JOB_REAP_MINUTES} minutes (the background worker likely crashed or was reset mid-import). Safe to retry.'
-    WHERE status IN ('pending', 'queued', 'analyzing', 'running', 'applying', 'approved')
-      AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
-  `).run().catch(() => { /* best-effort housekeeping -- a failed reap shouldn't break the list endpoint */ })
-  await db.prepare(`
-    UPDATE import_jobs
-    SET status = 'cancelled', phase = 'cancelled', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
-        last_error = COALESCE(NULLIF(last_error, ''), 'Cancel never confirmed by the worker -- treated as cancelled after a long timeout.')
-    WHERE status = 'cancelling'
-      AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
-  `).run().catch(() => {})
+  const candidates = await db.prepare(`
+    SELECT
+      EXISTS(
+        SELECT 1 FROM import_jobs
+        WHERE status IN ('pending', 'queued', 'analyzing', 'running', 'applying', 'approved')
+          AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
+      ) AS active_stale,
+      EXISTS(
+        SELECT 1 FROM import_jobs
+        WHERE status = 'cancelling'
+          AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
+      ) AS cancelling_stale
+  `).get<{ active_stale: number; cancelling_stale: number }>().catch(() => undefined)
+
+  // Reaping is best-effort housekeeping. If this probe fails, let the list
+  // query run and report its own result/error instead of masking list data.
+  if (!candidates) return
+
+  if (Number(candidates.active_stale || 0) > 0) {
+    await db.prepare(`
+      UPDATE import_jobs
+      SET status = 'failed', phase = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+          last_error = 'Stalled: no progress update received for over ${STALLED_IMPORT_JOB_REAP_MINUTES} minutes (the background worker likely crashed or was reset mid-import). Safe to retry.'
+      WHERE status IN ('pending', 'queued', 'analyzing', 'running', 'applying', 'approved')
+        AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
+    `).run().catch(() => { /* best-effort housekeeping -- a failed reap shouldn't break the list endpoint */ })
+  }
+  if (Number(candidates.cancelling_stale || 0) > 0) {
+    await db.prepare(`
+      UPDATE import_jobs
+      SET status = 'cancelled', phase = 'cancelled', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+          last_error = COALESCE(NULLIF(last_error, ''), 'Cancel never confirmed by the worker -- treated as cancelled after a long timeout.')
+      WHERE status = 'cancelling'
+        AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
+    `).run().catch(() => {})
+  }
 }
 
 app.get('/', async (c) => {
