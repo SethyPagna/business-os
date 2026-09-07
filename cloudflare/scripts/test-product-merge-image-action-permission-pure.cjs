@@ -84,7 +84,15 @@ function loadProductsRoute(state) {
         async run() { throw new Error('permission test unexpectedly reached a write') },
       }
     },
-    async batch() { throw new Error('permission test unexpectedly reached a batch write') },
+    async batch(statements) {
+      assert.ok(statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql)),
+        'permission test unexpectedly reached a batch write')
+      const results = []
+      for (const { sql, params } of statements) {
+        results.push({ success: true, results: await db.prepare(sql).all(params || {}) })
+      }
+      return results
+    },
   }
   const requireAuth = async (c, next) => { c.set('user', c.env.TEST_USER); await next() }
   const identity = {
