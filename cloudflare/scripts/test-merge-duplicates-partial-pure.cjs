@@ -255,11 +255,28 @@ async function oversizedWritePlanRefusesBeforeMutation() {
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
 }
 
+async function oversizedDependentReadRefusesBeforeMutation() {
+  const d1 = seedGroups([1])
+  const insertBatch = d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(?,?,?,?,1)')
+  for (let ordinal = 1; ordinal <= 21; ordinal += 1) {
+    insertBatch.run(1000 + ordinal, 1, `shared-${ordinal}`, ordinal)
+    insertBatch.run(2000 + ordinal, 2, `shared-${ordinal}`, ordinal)
+  }
+  const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.complete, true)
+  assert.equal(result.body.mergedProducts, 0)
+  assert.equal(result.body.refusals[0]?.code, 'merge_case_exceeds_safe_limit')
+  assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+}
+
 ;(async () => {
   await overloadAfterEight()
   await budgetStopsBetweenWholeGroups()
   await oversizedFirstClusterIsRefusedWhole()
   await postCommitHistoryLookupFailureRemainsReported()
   await oversizedWritePlanRefusesBeforeMutation()
+  await oversizedDependentReadRefusesBeforeMutation()
   console.log('PASS merge route reports committed partial work and stops only between complete clusters')
 })().catch((error) => { console.error(error); process.exitCode = 1 })
