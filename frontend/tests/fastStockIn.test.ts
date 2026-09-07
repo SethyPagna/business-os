@@ -59,7 +59,9 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   assert.match(modalSource, /status: 'queued'/)
   assert.match(modalSource, /const editLine = \(line: ReceivedLine\)/)
   assert.match(modalSource, /const removeLine = \(key: string\)/)
-  assert.match(modalSource, /status: 'saved', detail: result\?\.lotCode/)
+  // N27: a saved ADD still shows its lot code; remove / set lines say what
+  // they did instead (there is no lot to name)
+  assert.match(modalSource, /status: 'saved', detail: line\.mode === 'remove'[^]*?: line\.mode === 'set'[^]*?: result\?\.lotCode/)
   assert.match(modalSource, /status: 'error', detail: message/)
   // Add clears the line and refocuses for the next product
   assert.match(modalSource, /const resetLine = \(\) => \{/)
@@ -77,6 +79,28 @@ runTest('changed cost offers and uses the existing price-variant path', () => {
   assert.match(modalSource, /sessionId: sessionIdRef\.current/, 'variant receipts remain in the same stock-in session')
   assert.match(modalSource, /const sessionCostTotal = received\.reduce/, 'the shipment exposes its total recorded cost')
   assert.match(modalSource, /Total cost'\)}: \$\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
+})
+
+runTest('known zero catalog cost is prefetched and the two read surfaces agree on missing', () => {
+  assert.match(modalSource, /candidate\.cost_price_usd != null[\s\S]*candidate\.purchase_price_usd/)
+  assert.match(modalSource, /Number\.isFinite\(cost\) && cost >= 0/)
+  assert.match(modalSource, /tr\('cost_price_usd', 'Cost price \$'\)/)
+  assert.match(sessionsSource, /movementTotal != null && Number\.isFinite\(movementTotal\) && movementTotal >= 0/)
+  // The SQL that decides recorded-vs-missing is tested where it can be RUN,
+  // against real rows: cloudflare/scripts/test-stock-in-sessions-pure.cjs seeds
+  // a declared-$0.00 session beside an unpriced one and asserts they come back
+  // different. A regex over the query text here would only restate the
+  // implementation and would pass forever whatever the kernel then answered.
+  //
+  // What DOES belong here is the pair that can silently split: the desktop
+  // table cell and the phone card render the same figure, and the zero-cost
+  // ruling was once half-applied -- $0.00 on a phone, an em-dash on the table.
+  // Both must test for null only, and neither may go back to reading a
+  // recorded $0.00 as 'not recorded'.
+  assert.equal((sessionsSource.match(/unitCost == null \?/g) || []).length, 2,
+    'the table cell and the card must both test for null only')
+  assert.equal((sessionsSource.match(/unitCost == null \|\| Number\(unitCost\) <= 0/g) || []).length, 0,
+    'a recorded $0.00 unit cost is a cost, on both surfaces')
 })
 
 runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only after real writes', () => {
