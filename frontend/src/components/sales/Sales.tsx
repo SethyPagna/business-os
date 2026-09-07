@@ -219,6 +219,7 @@ interface SaleItemAddition {
 
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
 type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
+type SaleStatusUiResult = boolean | { exchangeRateChanged: number } | { settlementError: string } | { statusUpdatedAt: string }
 
 interface SalesApi {
   updateSaleStatus: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<unknown>
@@ -420,7 +421,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // the same for handleBulkStatusUpdate. `skipStock` (admin + unlock) rides
   // back as the request's skip_stock flag.
   const [statusPrompt, setStatusPrompt] = useState<
-    | { mode: 'single'; saleId: number; newStatus: string; notes: string; recordHistory: boolean; label: string; fromLabel: string; movesStock: boolean; alreadySkipped: boolean }
+    | { mode: 'single'; saleId: number; newStatus: string; notes: string; recordHistory: boolean; label: string; fromLabel: string; movesStock: boolean; alreadySkipped: boolean; resolve: (result: SaleStatusUiResult) => void }
     | { mode: 'bulk'; nextStatus: string; sales: SaleRecord[]; requestSales: SaleRecord[]; sourceStatus: string; label: string; fromLabel: string; mixed: boolean; movesStock: boolean; alreadySkipped: boolean }
     | null
   >(null)
@@ -846,7 +847,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
   // history row; ordinary status changes keep the local reversible entry.
-  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<boolean | { exchangeRateChanged: number } | { settlementError: string } | { statusUpdatedAt: string }> => {
+  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<SaleStatusUiResult> => {
     // View-only (Part 557): status changes are Full-Access only. The backend
     // already refuses these through sales.status, so this matching client
     // guard also honors a Full role whose one action was switched off.
@@ -876,24 +877,27 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     // S4-2: the confirmation is a real dialog now, not window.confirm --
     // it has to show the old status and the new one, and carry the
     // admin-only "Don't touch stock" lock. Same shape as the cancel prompt
-    // above: first entry opens it and returns, the dialog calls back with
-    // confirmed=true (and skip_stock folded into `extra` when the admin
-    // unlocked and ticked it). An undo/redo replay (recordHistory=false)
+    // above: first entry opens it and keeps the caller's promise pending,
+    // then the dialog resolves that same request with the confirmed write's
+    // result. This is how an open detail receives the authoritative updated_at
+    // for a following payment write. An undo/redo replay (recordHistory=false)
     // and the already-collected cancel payload skip the dialog, exactly as
     // the old window.confirm did.
     if (recordHistory && !extra && !confirmed) {
-      setStatusPrompt({
-        mode: 'single',
-        saleId: numericId,
-        newStatus,
-        notes,
-        recordHistory,
-        label: String(previousSale?.receipt_number || `#${numericId}`),
-        fromLabel: getStatusLabel(previousStatus, t),
-        movesStock: transitionMovesStock(previousStatus, newStatus),
-        alreadySkipped: Number(previousSale?.stock_skipped || 0) === 1,
+      return await new Promise<SaleStatusUiResult>((resolve) => {
+        setStatusPrompt({
+          mode: 'single',
+          saleId: numericId,
+          newStatus,
+          notes,
+          recordHistory,
+          label: String(previousSale?.receipt_number || `#${numericId}`),
+          fromLabel: getStatusLabel(previousStatus, t),
+          movesStock: transitionMovesStock(previousStatus, newStatus),
+          alreadySkipped: Number(previousSale?.stock_skipped || 0) === 1,
+          resolve,
+        })
       })
-      return false
     }
     const actionKey = String(numericId)
     if (!beginKeyedAction(statusActionRef, actionKey)) return false
@@ -2236,7 +2240,11 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             canSkipStock={isAdmin}
             alreadySkipped={statusPrompt.alreadySkipped}
             saving={statusConfirmSaving}
-            onClose={() => { if (!statusConfirmSaving) setStatusPrompt(null) }}
+            onClose={() => {
+              if (statusConfirmSaving) return
+              if (statusPrompt.mode === 'single') statusPrompt.resolve(false)
+              setStatusPrompt(null)
+            }}
             onConfirm={async (skipStock) => {
               if (!statusPrompt || statusConfirmSaving) return
               // skip_stock only ever leaves here when an admin unlocked and
@@ -2246,7 +2254,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
               setStatusConfirmSaving(true)
               try {
                 if (statusPrompt.mode === 'single') {
-                  await handleStatusChange(statusPrompt.saleId, statusPrompt.newStatus, statusPrompt.notes, statusPrompt.recordHistory, skipExtra, true)
+                  const result = await handleStatusChange(statusPrompt.saleId, statusPrompt.newStatus, statusPrompt.notes, statusPrompt.recordHistory, skipExtra, true)
+                  statusPrompt.resolve(result)
                 } else {
                   await handleScopedBulkStatusUpdate(statusPrompt.nextStatus, skipExtra, true, false, statusPrompt.sales, statusPrompt.sourceStatus, statusPrompt.requestSales)
                 }

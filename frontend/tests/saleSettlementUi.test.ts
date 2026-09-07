@@ -174,6 +174,19 @@ assert.match(modalSource, /showNotes=\{!needsPaymentEntry\}/, 'settlement hides 
 assert.match(workflowSource, /showNotes \? <div>[\s\S]*?sale-status-notes/, 'the workflow conditionally renders its existing notes draft')
 assert.match(modalSource, /settlementError[\s\S]*?setPayError\(settlementError\)/, 'a failed settlement remains visible inside its review')
 assert.match(salesSource, /mutationResult\?\.updated_at[\s\S]*?\{ statusUpdatedAt \}/, 'a successful status write returns its authoritative sale version to the open detail')
+const singleStatusPromptBranch = salesSource.slice(
+  salesSource.indexOf('if (recordHistory && !extra && !confirmed)'),
+  salesSource.indexOf('const actionKey = String(numericId)'),
+)
+assert.match(singleStatusPromptBranch, /return await new Promise<SaleStatusUiResult>/, 'the original detail request remains pending while its parent confirmation is open')
+assert.match(singleStatusPromptBranch, /setStatusPrompt\([\s\S]*?resolve,/, 'the single-sale confirmation retains the original detail request resolver')
+const statusConfirmSurface = salesSource.slice(
+  salesSource.indexOf('{statusPrompt ? ('),
+  salesSource.indexOf('{pendingBulkFieldRequest ? ('),
+)
+assert.match(statusConfirmSurface, /const result = await handleStatusChange\([\s\S]*?true\)[\s\S]*?statusPrompt\.resolve\(result\)/, 'the confirmed parent write returns its authoritative result to the original detail flow')
+assert.match(statusConfirmSurface, /statusPrompt\.mode === 'single'\) statusPrompt\.resolve\(false\)[\s\S]*?setStatusPrompt\(null\)/, 'cancelling the parent confirmation releases the original detail request without a mutation')
+assert.doesNotMatch(statusConfirmSurface, /if \(statusPrompt\.mode === 'single'\) \{\s*await handleStatusChange/, 'the confirmed single-sale result must never be discarded')
 assert.match(modalSource, /setSettlementSession\(\(current\) => advanceSettlementReviewVersion\(current, result\)\)/, 'the next same-modal payment review advances to the committed status version')
 assert.match(modalSource, /settlementSession\.exchangeRate/, 'the editor and coverage preview use the frozen settings rate')
 assert.match(modalSource, /useCloseGuard\(\{ dirty: settlementDirty \}/, 'edited tender rows are protected by the standard close guard')
