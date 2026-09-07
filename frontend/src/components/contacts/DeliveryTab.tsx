@@ -20,7 +20,7 @@ import Modal from '../shared/Modal'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
-import { formatPhoneInputElement, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
+import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
@@ -240,7 +240,7 @@ function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEdi
         </div>
         <div>
           <label htmlFor={fieldId('phone')} className="block text-xs text-gray-400 mb-0.5">{t('phone') || 'Phone'}</label>
-          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" inputMode="tel" className="input text-xs py-1" placeholder={t('phone_number') || 'Phone number'} value={option.phone} onChange={e => set('phone', formatPhoneInputElement(e.currentTarget))} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => set('phone', phone))} />
+          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" inputMode="tel" className="input text-xs py-1" placeholder={t('phone_number') || 'Phone number'} value={option.phone} onChange={e => set('phone', formatPhoneInputElement(e.currentTarget))} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => set('phone', phone))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => set('phone', phone))} />
         </div>
       </div>
       <div>

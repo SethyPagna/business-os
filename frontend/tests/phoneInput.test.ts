@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { formatPhoneInputEdit, formatPhoneInputValue, handlePhoneInputKeyDown } from '../src/utils/phoneInput.ts'
+import { formatPhoneInputEdit, formatPhoneInputValue, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../src/utils/phoneInput.ts'
 
 assert.equal(formatPhoneInputValue(''), '')
 assert.equal(formatPhoneInputValue('0'), '0')
@@ -26,7 +26,13 @@ globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
   return 1
 }) as typeof requestAnimationFrame
 
-function deletionEvent(value: string, caret: number, key: 'Backspace' | 'Delete', composing = false) {
+function deletionEvent(
+  value: string,
+  caret: number,
+  key: 'Backspace' | 'Delete',
+  composing = false,
+  modifiers: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean } = {},
+) {
   let prevented = false
   let selection: [number, number] = [caret, caret]
   const input = {
@@ -42,9 +48,34 @@ function deletionEvent(value: string, caret: number, key: 'Backspace' | 'Delete'
     currentTarget: input,
     preventDefault() { prevented = true },
     nativeEvent: { isComposing: composing, keyCode: composing ? 229 : 0 },
+    ...modifiers,
   }
   let nextValue = value
   const handled = handlePhoneInputKeyDown(event, (next) => {
+    nextValue = next
+    input.value = next
+  })
+  return { handled, prevented, nextValue, selection }
+}
+
+function beforeInputEvent(value: string, caret: number, inputType: string, composing = false) {
+  let prevented = false
+  let selection: [number, number] = [caret, caret]
+  const input = {
+    value,
+    selectionStart: caret,
+    selectionEnd: caret,
+    setSelectionRange(start: number, end: number) {
+      selection = [start, end]
+    },
+  } as HTMLInputElement
+  const event = {
+    currentTarget: input,
+    preventDefault() { prevented = true },
+    nativeEvent: { inputType, isComposing: composing },
+  }
+  let nextValue = value
+  const handled = handlePhoneInputBeforeInput(event, (next) => {
     nextValue = next
     input.value = next
   })
@@ -71,6 +102,59 @@ assert.deepEqual(
   { handled: false, prevented: false, nextValue: '012 345', selection: [4, 4] },
   'IME composition is never intercepted',
 )
+assert.deepEqual(
+  deletionEvent('012 345', 4, 'Backspace', false, { ctrlKey: true }),
+  { handled: false, prevented: false, nextValue: '012 345', selection: [4, 4] },
+  'modified Backspace remains a native word deletion',
+)
+assert.deepEqual(
+  deletionEvent('012 345', 3, 'Delete', false, { metaKey: true }),
+  { handled: false, prevented: false, nextValue: '012 345', selection: [3, 3] },
+  'modified Delete remains native',
+)
+assert.deepEqual(
+  beforeInputEvent('012 345', 4, 'deleteContentBackward'),
+  { handled: true, prevented: true, nextValue: '013 45', selection: [2, 2] },
+  'a virtual-keyboard backward deletion removes the intended digit in one event',
+)
+assert.deepEqual(
+  beforeInputEvent('012 345', 3, 'deleteContentForward'),
+  { handled: true, prevented: true, nextValue: '012 45', selection: [3, 3] },
+  'a virtual-keyboard forward deletion removes the intended digit in one event',
+)
+assert.deepEqual(
+  beforeInputEvent('012 345', 4, 'deleteContentBackward', true),
+  { handled: false, prevented: false, nextValue: '012 345', selection: [4, 4] },
+  'composing beforeinput deletion remains native',
+)
+
+{
+  const input = {
+    value: '012 345',
+    selectionStart: 4,
+    selectionEnd: 4,
+    setSelectionRange() {},
+  } as unknown as HTMLInputElement
+  let writes = 0
+  let beforeInputPrevented = false
+  const onValue = (nextValue: string) => {
+    writes += 1
+    input.value = nextValue
+  }
+  assert.equal(handlePhoneInputKeyDown({
+    key: 'Backspace',
+    currentTarget: input,
+    preventDefault() {},
+    nativeEvent: { isComposing: false, keyCode: 0 },
+  }, onValue), true)
+  assert.equal(handlePhoneInputBeforeInput({
+    currentTarget: input,
+    preventDefault() { beforeInputPrevented = true },
+    nativeEvent: { inputType: 'deleteContentBackward', isComposing: false },
+  }, onValue), true)
+  assert.equal(writes, 1, 'a browser that emits keydown and beforeinput must delete only once')
+  assert.equal(beforeInputPrevented, true, 'the duplicate beforeinput mutation is cancelled')
+}
 
 globalThis.requestAnimationFrame = originalRequestAnimationFrame
 assert.deepEqual(
@@ -99,5 +183,6 @@ const combinedSource = contactSources.join('\n')
 assert.equal((combinedSource.match(/autoComplete="tel"/g) || []).length, 7, 'all seven owned primary, option, and POS quick-add phone inputs remain telephone inputs')
 assert.equal((combinedSource.match(/formatPhoneInputElement\(/g) || []).length, 7, 'all seven owned phone inputs format progressively')
 assert.equal((combinedSource.match(/handlePhoneInputKeyDown\(event/g) || []).length, 7, 'all seven owned phone inputs handle deletion across inserted spaces')
+assert.equal((combinedSource.match(/handlePhoneInputBeforeInput\(event/g) || []).length, 7, 'all seven owned phone inputs support beforeinput-only virtual keyboards')
 
 console.log('phone input tests passed')

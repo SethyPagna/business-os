@@ -8,7 +8,26 @@ type PhoneInputKeyEvent = {
   key: string
   currentTarget: HTMLInputElement
   preventDefault: () => void
+  ctrlKey?: boolean
+  metaKey?: boolean
+  altKey?: boolean
   nativeEvent?: { isComposing?: boolean; keyCode?: number }
+}
+
+type PhoneInputBeforeInputEvent = {
+  currentTarget: HTMLInputElement
+  preventDefault: () => void
+  nativeEvent?: unknown
+}
+
+type PhoneDeleteDirection = 'backward' | 'forward'
+
+const handledKeyDownInputs = new WeakSet<HTMLInputElement>()
+const modifiedKeyDownInputs = new WeakSet<HTMLInputElement>()
+
+function markForNextBeforeInput(group: WeakSet<HTMLInputElement>, input: HTMLInputElement): void {
+  group.add(input)
+  setTimeout(() => group.delete(input), 0)
 }
 
 function hasLeadingPlus(value: string): boolean {
@@ -107,17 +126,12 @@ export function formatPhoneInputElement(input: HTMLInputElement): string {
   return edit.value
 }
 
-/**
- * Makes deletion across an auto-inserted separator take one key press.
- * Native editing remains in charge for selections, composition, and keys that
- * are not immediately beside a formatting space.
- */
-export function handlePhoneInputKeyDown(event: PhoneInputKeyEvent, onValue: (value: string) => void): boolean {
-  if (event.nativeEvent?.isComposing || event.nativeEvent?.keyCode === 229) return false
-  const direction = event.key === 'Backspace' ? 'backward' : event.key === 'Delete' ? 'forward' : null
-  if (!direction) return false
-
-  const input = event.currentTarget
+function applyPhoneSeparatorDeletion(
+  input: HTMLInputElement,
+  direction: PhoneDeleteDirection,
+  preventDefault: () => void,
+  onValue: (value: string) => void,
+): boolean {
   const start = input.selectionStart
   const end = input.selectionEnd
   if (start == null || end == null || start !== end) return false
@@ -135,8 +149,49 @@ export function handlePhoneInputKeyDown(event: PhoneInputKeyEvent, onValue: (val
   const unformatted = `${input.value.slice(0, digitIndex)}${input.value.slice(digitIndex + 1)}`
   const rawCaret = direction === 'backward' ? digitIndex : start
   const edit = formatPhoneInputEdit(unformatted, rawCaret, rawCaret)
-  event.preventDefault()
+  preventDefault()
   onValue(edit.value)
   restorePhoneInputSelection(input, edit)
   return true
+}
+
+/**
+ * Makes deletion across an auto-inserted separator take one key press.
+ * Native editing remains in charge for selections, composition, and keys that
+ * are not immediately beside a formatting space.
+ */
+export function handlePhoneInputKeyDown(event: PhoneInputKeyEvent, onValue: (value: string) => void): boolean {
+  if (event.nativeEvent?.isComposing || event.nativeEvent?.keyCode === 229) return false
+  const direction = event.key === 'Backspace' ? 'backward' : event.key === 'Delete' ? 'forward' : null
+  if (!direction) return false
+
+  if (event.ctrlKey || event.metaKey || event.altKey) {
+    markForNextBeforeInput(modifiedKeyDownInputs, event.currentTarget)
+    return false
+  }
+
+  const handled = applyPhoneSeparatorDeletion(event.currentTarget, direction, () => event.preventDefault(), onValue)
+  if (handled) markForNextBeforeInput(handledKeyDownInputs, event.currentTarget)
+  return handled
+}
+
+/** Handles beforeinput-only deletion from virtual keyboards and assistive input. */
+export function handlePhoneInputBeforeInput(event: PhoneInputBeforeInputEvent, onValue: (value: string) => void): boolean {
+  const nativeEvent = event.nativeEvent as { inputType?: unknown; isComposing?: unknown } | undefined
+  if (nativeEvent?.isComposing === true) return false
+  const inputType = String(nativeEvent?.inputType || '')
+  const direction = inputType === 'deleteContentBackward'
+    ? 'backward'
+    : inputType === 'deleteContentForward'
+      ? 'forward'
+      : null
+  if (!direction) return false
+
+  const input = event.currentTarget
+  if (modifiedKeyDownInputs.has(input)) return false
+  if (handledKeyDownInputs.has(input)) {
+    event.preventDefault()
+    return true
+  }
+  return applyPhoneSeparatorDeletion(input, direction, () => event.preventDefault(), onValue)
 }
