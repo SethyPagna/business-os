@@ -19,6 +19,8 @@ function compileSubject() {
   const localRequire = (request) => {
     if (request === './db') return {}
     if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
+    if (request === './branchRoles') return compileLib('branchRoles', localRequire)
+    if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)
     // The REAL receipt-number module, not a stub: an imported sale's receipt
     // id and its legacy-label routing are exactly what this test checks.
     if (request === './receiptNumber') return compileLib('receiptNumber', localRequire)
@@ -39,7 +41,8 @@ function filterParams(sql, params = {}) {
 function setup() {
   const sqlite = new Database(':memory:')
   for (const migration of loadAll()) sqlite.exec(migration)
-  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main Branch', 1)`).run()
+  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
+  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (2, 'Warehouse', 1)`).run()
   sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run()
   sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run()
   sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (20, 10, 'lot-a', 'LOT-A', 1, 1)`).run()
@@ -61,7 +64,7 @@ function setup() {
 
 function saleData(overrides = {}) {
   return {
-    receipt_number: 'R-100', cashier_id: null, cashier_name: 'Admin', branch_id: 1, branch_name: 'Main Branch',
+    receipt_number: 'R-100', cashier_id: null, cashier_name: 'Admin', branch_id: 1, branch_name: 'stale imported name',
     customer_id: null, customer_name: 'Dara', customer_phone: '012345678', customer_address: null,
     payment_method: 'Cash', payment_currency: 'USD', exchange_rate: 4100, notes: null,
     subtotal_usd: 10, subtotal_khr: 41000, discount_usd: 0, discount_khr: 0, tax_usd: 0, tax_khr: 0,
@@ -107,6 +110,25 @@ function saleData(overrides = {}) {
   assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, '20260828-143000')
   assert.equal(normal.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5, 'ordinary history import never deducts current stock')
   assert.equal(normal.sqlite.prepare(`SELECT status FROM import_sales_commits`).get().status, 'applied')
+  assert.deepEqual(
+    normal.sqlite.prepare(`SELECT branch_id, branch_name, json_extract(items, '$[0].branch_id') item_branch_id FROM sales WHERE client_request_id = 'sales-import:job-1:2'`).get(),
+    { branch_id: 1, branch_name: 'Shop', item_branch_id: 1 },
+  )
+
+  for (const [index, data] of [
+    saleData({ branch_id: 2, branch_name: 'Shop', items: [{ ...saleData().items[0], branch_id: 2 }] }),
+    saleData({ branch_id: 999, branch_name: 'Shop', items: [{ ...saleData().items[0], branch_id: 999 }] }),
+    saleData({ items: [{ ...saleData().items[0], branch_id: 2 }] }),
+    saleData({ branch_id: null, items: [{ ...saleData().items[0], branch_id: null }] }),
+  ].entries()) {
+    const rejected = setup()
+    await assert.rejects(
+      () => subject.applyHistoricalSaleImport(rejected.db, { jobId: `job-rejected-${index}`, rowNumber: 3, data, nowIso: input.nowIso }),
+      /Only allow Shop sale/,
+    )
+    assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+    assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+  }
 
   const returned = setup()
   const returnedData = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })

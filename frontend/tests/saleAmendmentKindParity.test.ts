@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-// The amendment request shape is declared THREE times -- the transport that
-// sends it, the modal that builds it, and the page that passes the callback
-// down. They are structurally coupled: the page's declaration is the parameter
-// type of the handler it hands to the modal, so a kind the modal can raise but
-// the page has never heard of is a compile error, not a runtime one.
+// The transport owns the shared amendment request shape. The modal still has
+// a compatible local construction shape, while Sales imports the transport
+// contract for the callback it passes down. Pin both arrangements so a new
+// amendment kind cannot leave either caller behind.
 //
 // 4e58891f added 'delivery_actual_cost_changed' to the transport and the modal
 // and left the page behind, and the whole package stopped typechecking. Only
@@ -46,7 +45,8 @@ function amendmentKinds(source: string, where: string): string[] {
 }
 
 runTest('every SaleAmendmentRequest declaration knows the same amendment kinds', () => {
-  const entries = Object.entries(sources).map(([where, source]) => [where, amendmentKinds(source, where)] as const)
+  const declarationSources = Object.entries(sources).filter(([where]) => where !== 'components/sales/Sales.tsx')
+  const entries = declarationSources.map(([where, source]) => [where, amendmentKinds(source, where)] as const)
   const [baseWhere, baseKinds] = entries[0]
   assert.ok(baseKinds.includes('delivery_actual_cost_changed'), 'the actual-delivery-cost amendment should be declared')
   for (const [where, kinds] of entries.slice(1)) {
@@ -54,8 +54,15 @@ runTest('every SaleAmendmentRequest declaration knows the same amendment kinds',
   }
 })
 
+runTest('Sales imports and uses the canonical transport request type', () => {
+  const sales = sources['components/sales/Sales.tsx']
+  assert.match(sales, /type SaleAmendmentRequest \} from '\.\.\/\.\.\/api\/salesTransport\.ts'/)
+  assert.doesNotMatch(sales, /interface SaleAmendmentRequest/)
+  assert.match(sales, /request: SaleAmendmentRequest/)
+})
+
 runTest('the pages that pass a delivery cost also declare the field it travels in', () => {
-  for (const [where, source] of Object.entries(sources)) {
+  for (const [where, source] of Object.entries(sources).filter(([where]) => where !== 'components/sales/Sales.tsx')) {
     const body = /interface SaleAmendmentRequest \{[\s\S]*?\n\}/.exec(source)
     assert.ok(body, `${where} should declare interface SaleAmendmentRequest`)
     assert.match((body as RegExpExecArray)[0], /delivery_actual_cost_usd\?:/, `${where} should carry delivery_actual_cost_usd`)

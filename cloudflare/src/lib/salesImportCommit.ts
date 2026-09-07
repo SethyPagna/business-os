@@ -1,6 +1,8 @@
 import type { D1Compat } from './db'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RETURN_STATUSES } from './salesStatus'
+import { branchCanSell } from './branchRoles'
+import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 
 // 100, not 50, since Part 388: the real Aug-28 sales history holds three
 // genuine receipts of 86/58/55 lines (big wholesale orders) that the old
@@ -50,6 +52,23 @@ export async function applyHistoricalSaleImport(
     SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key
   `).get<{ status: string }>({ job_id: jobId, group_key: groupKey })
   if (existing?.status === 'applied') return { alreadyApplied: true, clientRequestId }
+
+  // A reviewed import still creates a real sale. Resolve the recorded branch
+  // from the database rather than trusting the CSV's branch_name snapshot,
+  // and require every line to use that same active Shop.
+  const saleHeaderBranchId = Number(d.branch_id)
+  const lineBranchIds = d.items.map((item) => Number(item.branch_id ?? saleHeaderBranchId))
+  if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0
+    || lineBranchIds.some((branchId) => !Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId)) {
+    throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
+  }
+  const saleBranch = await db.prepare(`
+    SELECT id, name, is_active FROM branches WHERE id = @branchId LIMIT 1
+  `).get<{ id: number; name: string | null; is_active: number | null }>({ branchId: saleHeaderBranchId })
+  if (!saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch.name)) {
+    throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
+  }
+  const normalizedItems: Array<Record<string, unknown>> = d.items.map((item) => ({ ...item, branch_id: saleHeaderBranchId }))
 
   // A sales CSV's receipt_number column carries whatever the source system
   // called the order -- very often the old system's `NNNNNN@YYYY-MM-DD`
@@ -112,16 +131,18 @@ export async function applyHistoricalSaleImport(
     params: {
       ...common,
       ...d,
+      branch_id: saleHeaderBranchId,
+      branch_name: saleBranch.name,
       receipt_number: receiptNumber,
       legacy_receipt_number: legacyReceiptNumber,
       loyalty_accrual: input.accrueLoyalty ? 1 : 0,
-      items_json: JSON.stringify(d.items),
+      items_json: JSON.stringify(normalizedItems),
       created_at: createdAt,
     },
   }]
 
   const isReturnGroup = RETURN_STATUSES.has(d.sale_status)
-  for (const item of d.items) {
+  for (const item of normalizedItems) {
     statements.push({
       sql: `INSERT INTO sale_items (
               sale_id, product_id, product_name, sku, quantity,
@@ -139,7 +160,7 @@ export async function applyHistoricalSaleImport(
               @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr,
               @branch_id, @batch_id, @batch_label, @batch_expiry_date, @returned_quantity
             WHERE ${pendingGuard}`,
-      params: { ...common, ...item },
+      params: { ...common, ...item, branch_id: saleHeaderBranchId },
     })
 
     const returnedQuantity = Number(item.returned_quantity) || 0
