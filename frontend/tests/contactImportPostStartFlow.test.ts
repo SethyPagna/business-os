@@ -93,6 +93,8 @@ await runTest('contact conflict screen wires server search, sort, filters, pagin
   assert.match(source, /target_existing_id: selectedTargetId/, 'a one-row merge saves the exact reviewed contact id')
   assert.match(source, /target_existing_id: targetId/, 'bulk merge also saves one exact target per row')
   assert.match(source, /contactMatchCandidates/, 'ambiguous legacy names render the server-provided candidate set')
+  assert.match(source, /<AppSelect[\s\S]*contacts_import_conflict_choose_target/, 'candidate choice uses the shared accessible picker')
+  assert.doesNotMatch(source, /<select/, 'contact review does not bypass the shared select component')
   assert.match(source, /contacts_import_conflict_target_required/, 'save is blocked until an ambiguous row has an explicit target')
   assert.match(source, /row\.decision\?\.target_existing_id/, 'a saved target restores after pagination or reopening')
   assert.match(source, /unresolvedContactConflicts/)
