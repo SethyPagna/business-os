@@ -58,6 +58,7 @@ function setup() {
   sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (20, 10, 'lot-a', 'LOT-A', 1, 1)`).run()
   sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (20, 1, 5)`).run()
 
+  let beforeBatch = null
   const db = {
     prepare(sql) {
       return {
@@ -65,11 +66,16 @@ function setup() {
       }
     },
     batch(statements) {
+      if (beforeBatch) {
+        const hook = beforeBatch
+        beforeBatch = null
+        hook()
+      }
       const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(filterParams(sql, params))))
       return Promise.resolve(run())
     },
   }
-  return { sqlite, db }
+  return { sqlite, db, setBeforeBatch(hook) { beforeBatch = hook } }
 }
 
 function saleData(overrides = {}) {
@@ -150,6 +156,55 @@ function saleData(overrides = {}) {
     assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
     assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
   }
+
+  const duplicateShop = setup()
+  duplicateShop.sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (3, ' shop ', 1)`).run()
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(duplicateShop.db, { jobId: 'job-duplicate-shop', rowNumber: 3, data: saleData(), nowIso: input.nowIso, actor }),
+    /Only allow Shop sale/,
+  )
+  assert.equal(duplicateShop.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(duplicateShop.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+
+  // The classifier's batch match is only a preview. The atomic writer must
+  // reject direct/stale calls when the batch is for another product,
+  // inactive, renamed, or not allocated at the sale's Shop.
+  for (const [index, mutate, data = saleData()] of [
+    [0, (sqlite) => {
+      sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity) VALUES (11, 'Other', 'SKU-2', 0)`).run()
+    }, saleData({ items: [{ ...saleData().items[0], product_id: 11, product_name: 'Other', sku: 'SKU-2' }] })],
+    [1, (sqlite) => sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()],
+    [2, (sqlite) => sqlite.prepare(`UPDATE product_batches SET lot_code = 'LOT-RENAMED' WHERE id = 20`).run()],
+    [3, (sqlite) => sqlite.prepare(`DELETE FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1`).run()],
+  ]) {
+    const invalidBatch = setup()
+    mutate(invalidBatch.sqlite)
+    await assert.rejects(
+      () => subject.applyHistoricalSaleImport(invalidBatch.db, { jobId: `job-invalid-batch-${index}`, rowNumber: 4, data, nowIso: input.nowIso, actor }),
+      /batch\/lot/,
+    )
+    assert.equal(invalidBatch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+    assert.equal(invalidBatch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
+    assert.equal(invalidBatch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+  }
+
+  // Interpose a catalog mutation after the writer's authoritative pre-read
+  // but immediately before D1Database.batch. The in-batch reference guard
+  // must make the entire transaction a no-op, including its commit marker.
+  const racedBatch = setup()
+  racedBatch.setBeforeBatch(() => {
+    racedBatch.sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()
+  })
+  const racedReturn = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(racedBatch.db, { jobId: 'job-raced-batch', rowNumber: 5, data: racedReturn, nowIso: input.nowIso, actor }),
+    /changed before the atomic write/,
+  )
+  assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
+  assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+  assert.equal(racedBatch.sqlite.prepare('SELECT stock_quantity FROM products WHERE id = 10').get().stock_quantity, 5)
+  assert.equal(racedBatch.sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1').get().quantity, 5)
 
   const returned = setup()
   const returnedData = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
