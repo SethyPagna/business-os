@@ -18,7 +18,7 @@ import Modal from '../shared/Modal.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
-import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
@@ -705,7 +705,12 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   ), 0)
   // X/backdrop keep the draft (reopen later, shipment intact); only the
   // explicit Done button completes the batch and clears it.
-  const closeIfIdle = () => { if (!saving) { if (successCount > 0) onDone(); onClose() } }
+  const closeIfIdle = () => {
+    if (saving) return
+    flushPendingWorkDraft(fastStockInDraftKey)
+    if (successCount > 0) onDone()
+    onClose()
+  }
   const closeBackdropIfIdle = () => { if (!selectedGroup) closeIfIdle() }
 
   // The receiver stays mounted (and its session state stays in memory) while
@@ -743,7 +748,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               <MinimizeButton
                 disabled={saving}
                 tr={tr}
-                onMinimize={() => { onMinimize(tr('fast_stockin_title', 'Fast stock-in')); onClose() }}
+                onMinimize={() => {
+                  flushPendingWorkDraft(fastStockInDraftKey)
+                  onMinimize(tr('fast_stockin_title', 'Fast stock-in'))
+                  onClose()
+                }}
               />
             ) : null}
             <button type="button" onClick={closeIfIdle} disabled={saving} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
