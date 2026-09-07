@@ -354,9 +354,11 @@ type MergeDuplicateProductsResult = ProductApiResponse & {
   mergedProducts?: number
   undoPendingCount?: number
   remainingProductsBefore?: number
-  remainingProducts?: number
-  maxAdditionalRequests?: number
+  remainingProducts?: number | null
+  maxAdditionalRequests?: number | null
   processedCaseKeys?: string[]
+  mergeOperationIds?: string[]
+  undoPendingOperationIds?: string[]
   refusals?: Array<{
     caseKey?: string
     mergedId?: number
@@ -1933,8 +1935,13 @@ function ProductsFullEditor() {
     let completed = false
     try {
       while (calls < callCeiling) {
-        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal }) as MergeDuplicateProductsResult | undefined
+        // Count the attempt before awaiting it. apiFetch owns an internal
+        // timeout controller, so a timed-out write does not necessarily mark
+        // this caller's controller aborted even though the server may already
+        // have committed complete atomic cases. Every started POST therefore
+        // takes the authoritative reload path on an unknown outcome.
         calls += 1
+        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal }) as MergeDuplicateProductsResult | undefined
         if (result?.success === false) throw new Error(result.error || 'Failed to merge duplicate products')
         mergedGroups += Number(result?.mergedGroups || 0)
         mergedProducts += Number(result?.mergedProducts || 0)

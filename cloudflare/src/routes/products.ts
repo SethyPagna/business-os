@@ -23,7 +23,7 @@ import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRul
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, registerMergeFold, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
-import { readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots } from '../lib/productMergeSnapshot'
+import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots } from '../lib/productMergeSnapshot'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2762,6 +2762,9 @@ export async function foldDuplicateProductInto(
   returnsReparented: number
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
+  operationId: string | null
+  committed: boolean
+  historyResolved: boolean
   actionHistoryId: number | null
   undoReady: boolean
   reversal: MergeReversal
@@ -3219,6 +3222,23 @@ export async function foldDuplicateProductInto(
     ...(atomicHistory?.bulkClusterPlan ? { bulkClusterPlan: atomicHistory.bulkClusterPlan } : {}),
   }
 
+  const chunksOf80 = (count: number) => Math.ceil(Math.max(0, count) / 80)
+  const fingerprintStatementCount = 7
+    + chunksOf80(new Set([
+      ...repointedBatches.map((batch) => batch.id),
+      ...foldedBatches.flatMap((batch) => [batch.dupBatchId, batch.keeperBatchId]),
+      ...writtenOffBatches.map((batch) => batch.batchId),
+    ]).size)
+    + (adjustmentMovementMarker ? 1 : chunksOf80(reversal.adjustmentMovementIds?.length || 0))
+    + reparentedByTable.reduce((count, entry) => count + chunksOf80(new Set(entry.ids).size), 0)
+    + chunksOf80(new Set(promotionRulesBefore.map((rule) => rule.id)).size)
+    + chunksOf80(new Set(reparentedChildProductIds).size)
+    + chunksOf80(new Set(foldedBatches.flatMap((batch) => batch.saleAllocationIds || [])).size)
+    + chunksOf80(new Set(foldedBatches.flatMap((batch) => batch.returnAllocationIds || [])).size)
+  if (fingerprintStatementCount > PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS) {
+    throw new Error('merge_case_fingerprint_statement_budget_exceeded')
+  }
+
   // Product stock caches and durable history belong to this case's transaction.
   // A failure at any later statement rolls the graph mutations back as well.
   statements.push(
@@ -3226,6 +3246,11 @@ export async function foldDuplicateProductInto(
     { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } },
   )
   if (atomicHistory) statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails))
+
+  // Keep each atomic write batch within the same conservative 100-statement
+  // bound used by the catalog's D1 query chunking. Refuse before the first
+  // write so an unusually linked product cannot create an ambiguous outcome.
+  if (statements.length > 100) throw new Error('merge_case_statement_budget_exceeded')
 
   try {
     await db.batch(statements)
@@ -3256,7 +3281,7 @@ export async function foldDuplicateProductInto(
 
   if (!atomicHistory) await audit(env, user?.id ?? null, actorSnapshot(user), 'merge_duplicate', 'product', dup.id, auditDetails)
   const atomicRecord = atomicHistory
-    ? await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal)
+    ? await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db)
     : null
 
   return {
@@ -3272,6 +3297,9 @@ export async function foldDuplicateProductInto(
     returnsReparented,
     reparentedSaleItemIds,
     reparentedMovementIds,
+    operationId: atomicRecord?.operationId ?? null,
+    committed: atomicRecord?.committed ?? true,
+    historyResolved: atomicRecord?.historyResolved ?? !atomicHistory,
     actionHistoryId: atomicRecord?.actionHistoryId ?? null,
     undoReady: atomicRecord?.fingerprintReady ?? !atomicHistory,
     reversal,
@@ -3560,7 +3588,7 @@ app.post('/merge-duplicates', async (c) => {
       success: true, complete: true, stalled: false, madeProgress: false,
       batchLimit: 25, mergedGroups: 0, mergedProducts: 0,
       remainingProductsBefore: 0, remainingProducts: 0,
-      remainingGroupCount: 0, maxAdditionalRequests: 0, requestId, processedCaseKeys: [], actionHistoryIds: [], undoPendingCount: 0, groups: [], refusals: [],
+      remainingGroupCount: 0, maxAdditionalRequests: 0, requestId, processedCaseKeys: [], actionHistoryIds: [], mergeOperationIds: [], undoPendingOperationIds: [], undoPendingCount: 0, groups: [], refusals: [],
     })
   }
   if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
@@ -3581,6 +3609,8 @@ app.post('/merge-duplicates', async (c) => {
   }> = []
   let mergedProductsCount = 0
   const actionHistoryIds: number[] = []
+  const mergeOperationIds: string[] = []
+  const undoPendingOperationIds: string[] = []
   const processedCaseKeys: string[] = []
   let undoPendingCount = 0
   let completedGroupsForBudget = 0
@@ -3704,7 +3734,11 @@ app.post('/merge-duplicates', async (c) => {
           { operationId, bulkClusterPlan: clusterPlan, resumedCluster: Boolean(persistedPlan) || mergedIds.length > 0 },
         )
         if (result.actionHistoryId) actionHistoryIds.push(result.actionHistoryId)
-        if (!result.undoReady) undoPendingCount += 1
+        if (result.operationId) mergeOperationIds.push(result.operationId)
+        if (!result.undoReady) {
+          undoPendingCount += 1
+          if (result.operationId) undoPendingOperationIds.push(result.operationId)
+        }
       } catch (error) {
         if (isProductMergeInfrastructureError(error)) {
           if (mergedIds.length > 0) {
@@ -3715,13 +3749,18 @@ app.post('/merge-duplicates', async (c) => {
           break mergeGroups
         }
         const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
+        const exceedsBudget = /merge_case_statement_budget_exceeded|merge_case_fingerprint_statement_budget_exceeded|merge_read_batch_statement_limit/.test(String(error))
         refusals.push({
           caseKey: productMergeCaseKey(canonicalId, dup.id),
           keeperId: canonicalId,
           mergedId: dup.id,
           mergedName: dup.name,
-          code: conflict ? 'merge_state_conflict' : 'merge_failed',
-          error: conflict ? 'The product changed during this case; refresh and resume.' : String(error),
+          code: conflict ? 'merge_state_conflict' : exceedsBudget ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
+          error: conflict
+            ? 'The product changed during this case; refresh and resume.'
+            : exceedsBudget
+              ? 'This product has too many linked stock or history rows for one safe merge case and remains unchanged.'
+              : String(error),
         })
         break
       }
@@ -3755,14 +3794,18 @@ app.post('/merge-duplicates', async (c) => {
   const madeProgress = remainingProducts == null
     ? mergedProductsCount > 0
     : remainingProducts < remainingProductsBefore
-  const stalled = remainingProducts != null && remainingProducts > 0 && !madeProgress
+  const refusedCaseKeys = new Set(refusals.map((refusal) => refusal.caseKey))
+  const onlyRefusedCasesRemain = remainingGroups != null && remainingGroups.every((group) =>
+    group.duplicates.every((duplicate) => refusedCaseKeys.has(productMergeCaseKey(group.canonical.id, duplicate.id))))
+  const complete = remainingProducts === 0 || onlyRefusedCasesRemain
+  const stalled = !complete && remainingProducts != null && remainingProducts > 0 && !madeProgress
 
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({
     success: true,
-    complete: remainingProducts === 0,
+    complete,
     interrupted: interruptionCode != null,
     interruptionCode,
     error: interruptionCode ? productMergeInterruptionMessage(interruptionCode) : undefined,
@@ -3791,6 +3834,8 @@ app.post('/merge-duplicates', async (c) => {
     // answer; a non-empty one is work left for a person, and the UI says so.
     refusals,
     actionHistoryIds,
+    mergeOperationIds,
+    undoPendingOperationIds,
     undoPendingCount,
   })
 })

@@ -24,6 +24,8 @@ export type MergeDuplicateProductsChunkResult = {
   requestId: string | null
   processedCaseKeys: string[]
   actionHistoryIds: number[]
+  mergeOperationIds: string[]
+  undoPendingOperationIds: string[]
   undoPendingCount: number
   refusals: Array<{ caseKey: string; keeperId: number; mergedId: number; mergedName: string | null; code: string; error: string }>
 }

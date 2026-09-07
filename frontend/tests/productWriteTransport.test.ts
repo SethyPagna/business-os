@@ -13,6 +13,8 @@ assert.equal(mergeDuplicateChunkCanContinueAutomatically({ interruptionCode: 'me
 
 const here = dirname(fileURLToPath(import.meta.url))
 const products = readFileSync(join(here, '..', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
+assert.match(products, /calls \+= 1\s+const result = await productApi\.mergeDuplicates/, 'a first-request timeout still records a possibly committed write attempt')
+assert.match(products, /if \(calls > 0 \|\| controller\.signal\.aborted\) await load\(true\)/, 'every started unknown-outcome POST reloads authoritative state')
 const stopAt = products.indexOf('if (mergeDuplicateChunkRequiresManualResume(result))')
 const continueAt = products.indexOf('const remainingBefore = Number(result?.remainingProductsBefore)', stopAt)
 assert.ok(stopAt > 0 && continueAt > stopAt, 'an interrupted successful response must stop before automatic continuation')
