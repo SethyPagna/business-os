@@ -497,7 +497,18 @@ export function classifyGroup(manifest, group, rows, groupAuditRows, planAuditRo
 }
 
 export async function inspectGroup(db, manifest, group) {
-  const [rows, groupAuditRows, planAuditRows] = await Promise.all([readGroupRows(db, group), readGroupAuditRows(db, manifest, group), readPlanAuditRows(db, manifest)])
+  const tables = Object.entries(group.tables)
+  const queries = [
+    ...tables.map(([table, descriptor]) => ({ sql: `SELECT * FROM ${safeIdentifier(table)} WHERE id IN (${idLiterals(descriptor.ids)}) ORDER BY id`, params: [] })),
+    { sql: `SELECT ${AUDIT_COLUMNS.join(',')} FROM audit_logs WHERE entity='historical_metadata_repair' AND entity_id=? AND record_id=? AND action IN (?,?) ORDER BY id`, params: [manifest.execution.run_id, group.id, APPLY_ACTION, RECOVERY_ACTION] },
+    { sql: `SELECT ${AUDIT_COLUMNS.join(',')} FROM audit_logs WHERE entity='historical_metadata_repair' AND entity_id=? AND record_id='plan' AND action IN (?,?) ORDER BY id`, params: [manifest.execution.run_id, START_ACTION, COMPLETE_ACTION] },
+  ]
+  const results = await db.batch(queries.map((query) => db.prepare(query.sql).bind(...query.params)))
+  assert(Array.isArray(results) && results.length === queries.length, 'D1 inspection batch result count mismatch')
+  assert(results.every((result) => result?.success !== false && Array.isArray(result?.results)), 'D1 inspection batch did not return rows')
+  const rows = Object.fromEntries(tables.map(([table], index) => [table, sortRows(results[index].results)]))
+  const groupAuditRows = results[tables.length].results
+  const planAuditRows = results[tables.length + 1].results
   return { rows, groupAuditRows, planAuditRows, state: classifyGroup(manifest, group, rows, groupAuditRows, planAuditRows) }
 }
 

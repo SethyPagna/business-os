@@ -79,7 +79,7 @@ function rowsFromDb(sqlite) {
 }
 
 function makeD1(sqlite, options = {}) {
-  const state = { batchCalls: 0, statementCounts: [], disposed: false }
+  const state = { batchCalls: 0, readBatchCalls: 0, allCalls: 0, statementCounts: [], readStatementCounts: [], disposed: false }
   return {
     state,
     d1: {
@@ -88,20 +88,22 @@ function makeD1(sqlite, options = {}) {
           sql,
           params: [],
           bind(...params) { this.params = params; return this },
-          async all() { return { results: sqlite.prepare(this.sql).all(...this.params) } },
+          async all() { state.allCalls += 1; return { results: sqlite.prepare(this.sql).all(...this.params) } },
         }
       },
       async batch(statements) {
-        const batchCall = ++state.batchCalls
-        state.statementCounts.push(statements.length)
+        const readOnly = statements.every((statement) => /^\s*SELECT\b/i.test(statement.sql))
+        const batchCall = readOnly ? ++state.readBatchCalls : ++state.batchCalls
+        if (readOnly) state.readStatementCounts.push(statements.length)
+        else state.statementCounts.push(statements.length)
         const result = sqlite.transaction(() => statements.map((statement, statementIndex) => {
-          if (options.fail?.({ batchCall, statementIndex, statement })) throw new Error('injected atomic failure')
+          if (!readOnly && options.fail?.({ batchCall, statementIndex, statement })) throw new Error('injected atomic failure')
           const prepared = sqlite.prepare(statement.sql)
           if (prepared.reader) return { success: true, meta: { changes: 0 }, results: prepared.all(...statement.params) }
           const info = prepared.run(...statement.params)
           return { success: true, meta: { changes: info.changes }, results: [] }
         }))()
-        if (options.ambiguous?.({ batchCall, statements })) throw new Error('injected ambiguous response after commit')
+        if (!readOnly && options.ambiguous?.({ batchCall, statements })) throw new Error('injected ambiguous response after commit')
         return result
       },
     },
@@ -171,6 +173,16 @@ try {
     'confirm-bookmark': manifest.execution.time_travel_bookmark,
   }, { getPlatformProxy: async () => { nonReviewedOpenedRemote = true; throw new Error('must not open') } }), /reviewed operator pin/, 'manifest outside the reviewed pin did not fail closed')
   assert(!nonReviewedOpenedRemote, 'manifest outside the reviewed pin opened a binding')
+
+  const inspectionSqlite = createFixture(join(work, 'inspection-batch.sqlite'))
+  const inspectionBinding = makeD1(inspectionSqlite)
+  const inspectedFee = await inspectGroup(inspectionBinding.d1, manifest, manifest.groups[0])
+  const inspectedRelated = await inspectGroup(inspectionBinding.d1, manifest, manifest.groups.at(-1))
+  assert(inspectedFee.state === 'pending' && inspectedFee.rows.fees.length === 99, 'fee inspection batch changed classifier data or order')
+  assert(inspectedRelated.rows.sales.length === 22 && inspectedRelated.rows.sale_items.length === 56, 'related inspection batch changed table result order')
+  assert(inspectionBinding.state.readBatchCalls === 2 && inspectionBinding.state.allCalls === 0 && inspectionBinding.state.batchCalls === 0, 'inspection used overlapping all() calls or a write batch')
+  assert(JSON.stringify(inspectionBinding.state.readStatementCounts) === JSON.stringify([3, 4]), 'inspection batch statement shape changed')
+  inspectionSqlite.close()
 
   pristine.close()
   pristine = null
@@ -359,7 +371,7 @@ try {
     groups: manifest.groups.length,
     full_apply_batches: fullBinding.state.batchCalls,
     atomic_shapes: { first_fee: 4, remaining_fee: 3, related: 5, completion: 46 },
-    checks: ['builder_double_read_and_65_columns', 'reviewed_manifest_and_lineage_pins', 'non_reviewed_manifest_fails_closed', 'all_groups_and_idempotent_resume', 'fee_atomic_rollback', 'ambiguous_commit_reconciliation_and_pause', 'target_drift_refusal', 'unrelated_row_concurrency', 'exact_audit_payload_and_duplicate_refusal', 'atomic_audit_interleaving_guards', 'group_recovery', 'terminal_completion_refusal', 'related_sales_items_atomicity', 'completion_full_row_drift', 'sqlite_expression_depth_100', 'token_redaction'],
+    checks: ['builder_double_read_and_65_columns', 'reviewed_manifest_and_lineage_pins', 'non_reviewed_manifest_fails_closed', 'single_read_batch_inspection', 'all_groups_and_idempotent_resume', 'fee_atomic_rollback', 'ambiguous_commit_reconciliation_and_pause', 'target_drift_refusal', 'unrelated_row_concurrency', 'exact_audit_payload_and_duplicate_refusal', 'atomic_audit_interleaving_guards', 'group_recovery', 'terminal_completion_refusal', 'related_sales_items_atomicity', 'completion_full_row_drift', 'sqlite_expression_depth_100', 'token_redaction'],
     remote_binding_opened: false,
     production_write: false,
   }, null, 2)}\n`)
