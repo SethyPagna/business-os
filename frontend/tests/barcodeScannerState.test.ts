@@ -81,6 +81,36 @@ await runTest('scanner starts only from an explicit button and always releases t
   assert.match(source, /cleanup\(\)[\s\S]*?setPermissionState\(documentBlocked/, 'failed starts must stop partially-open camera tracks')
   assert.match(source, /<Modal[^>]*layer="nested"/, 'the camera dialog must sit above the workflow modal that opened it')
   assert.match(modalSource, /layer === 'nested' \? 'z-\[1070\]' : 'z-\[1050\]'/, 'nested tools must use a higher dialog layer')
+
+  // FOUR completion paths, one contract: release the camera, then hand the
+  // RAW scanned text to the caller. Consolidating this test dropped the
+  // ZXing and manual-entry assertions, leaving two of the four paths
+  // unpinned -- and they are the two that matter most to the 2026-09-06
+  // leading-zero report, because ZXing is the decoder that reports a UPC-E
+  // as its own eight digits and manual entry is what an operator falls back
+  // to when the camera cannot read the symbol.
+  //
+  // Written to accept EITHER spelling of the handoff -- the direct
+  // `onDetected(raw)` this tree has, or the guarded `completeDetection(raw,
+  // token)` / detectionHandledRef form the scanner-lifecycle work in the
+  // main checkout introduces -- so the paths stay pinned across that rename
+  // instead of the assertion being deleted again to make room for it.
+  const handoff = String.raw`(?:onDetected|completeDetection)\(`
+  assert.match(
+    source,
+    new RegExp(String.raw`getText\?\.\(\) \|\| ''\)\.trim\(\)[\s\S]{0,400}?${handoff}raw`),
+    'the ZXing decode path must complete through the shared handoff',
+  )
+  assert.match(
+    source,
+    new RegExp(String.raw`onClick=\{\(\) => \{[\s\S]{0,400}?const nextValue = String\(manualValue[\s\S]{0,400}?${handoff}nextValue`),
+    'manual entry must complete through the same handoff, not its own',
+  )
+  // ...and neither path may re-type the value on the way through. Number()
+  // on a scanned code is the leading-zero bug at its source.
+  for (const forbidden of [/\bNumber\s*\(/, /\bparseInt\s*\(/, /\bparseFloat\s*\(/]) {
+    assert.doesNotMatch(source, forbidden, 'the scanner must never coerce a scanned code to a number')
+  }
 })
 
 await runTest('branch transfer exposes the shared icon scanner in single and multi-product searches', () => {
