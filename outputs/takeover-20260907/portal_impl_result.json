@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "task_id": "portal-policy-accessibility-20260907",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "/root/portal_impl"
+  },
+  "status": "completed",
+  "summary": "Implemented the public portal policy, privacy, consent, seller-readiness, third-party disclosure, safe-link, retention, and accessibility slice. Browsing remains available with an explicit readiness warning; account/submission consent and abuse-key persistence fail closed when their required migration or HMAC secret is absent. No production action was performed.",
+  "base_sha": "ea9f0d1b7d67891be519fbe74c91a8bdf4102593",
+  "changes": [
+    "Added bilingual public Privacy, Terms, and Cookie pages plus the footer Policies control and verified-identity presentation.",
+    "Added durable account and screenshot consent with prepared append-only migrations 0130 and 0131, policy versions, timestamps, locales, authenticated ownership, private screenshot access, and bounded retention.",
+    "Replaced raw portal abuse identifiers with secret-keyed HMAC keys that fail closed when the secret is absent or weak; stopped storing raw session IP/user-agent data.",
+    "Added explicit pre-request notices for Google Maps, Google Translate, and the configured AI provider; removed review/citation output and unsupported efficacy/authenticity claims.",
+    "Added seller publication-readiness fields without substituting the trade name, while preserving public catalogue browsing and gating AI/submission data collection.",
+    "Added safe external-link normalization at editor, frontend render, and public API boundaries.",
+    "Added public portal focus, contrast, alt-text, landmark, zoom, touch, truncation reveal, 375px brand wrapping, and document-scroll behavior; the catalogue keeps default page size 50 and exposes no page-size selector.",
+    "Added an exact root-owned English/Khmer language delta and a policy/readiness operations document."
+  ],
+  "commits": [
+    "56cbf73d82013ade202910469d8d536208a9fb8e"
+  ],
+  "evidence": [
+    {
+      "claim": "Production seller identity remains incomplete and is not invented.",
+      "source": "Read-only production settings evidence supplied by the lead and policy record",
+      "locator": "docs/policies/public-portal-policy.md#confirmed-seller-details",
+      "observed": "Trade name Leang Cosmetics, address 136 St 215, Phnom Penh, and phone 017 611 168 were verified; email, registered legal name, and registration number remain absent."
+    },
+    {
+      "claim": "Consent writes fail closed before schema readiness and persist the policy version when ready.",
+      "source": "Focused real SQLite route/account tests",
+      "locator": "cloudflare/scripts/test-portal-legal-consent-pure.cjs; cloudflare/scripts/test-portal-submissions-guard-pure.cjs",
+      "observed": "9 account-consent groups and 14 submission guard/retention groups passed, including no pre-migration success and no unresolved-account success."
+    },
+    {
+      "claim": "Customer screenshots are private and never enter the Cloudinary-capable normalization queue.",
+      "source": "Portal route and focused fake-R2 route test",
+      "locator": "cloudflare/src/routes/portal.ts materializePortalScreenshots; cloudflare/scripts/test-portal-submissions-guard-pure.cjs",
+      "observed": "Objects use private/portal-submissions keys, require authenticated staff retrieval, use no-store responses, and the normalization call counter remains zero."
+    },
+    {
+      "claim": "Portal abuse keys require a strong secret and are non-enumerable scoped HMACs.",
+      "source": "Focused module test",
+      "locator": "cloudflare/scripts/test-portal-abuse-key-pure.cjs",
+      "observed": "Missing/short secrets returned null; stable scoped HMAC-SHA256 keys differed across scopes and contained no raw identifier."
+    },
+    {
+      "claim": "The owned portal frontend builds and typechecks.",
+      "source": "Local package commands",
+      "locator": "frontend package at commit 56cbf73d",
+      "observed": "TypeScript completed with exit 0 and Vite transformed 1081 modules and built successfully."
+    }
+  ],
+  "verification": [
+    {
+      "command": "npm run typecheck",
+      "scope": "frontend package",
+      "exit_code": 0,
+      "expected": "tsc --noEmit succeeds",
+      "observed": "Succeeded with no diagnostics."
+    },
+    {
+      "command": "npm run build",
+      "scope": "frontend production build",
+      "exit_code": 0,
+      "expected": "Public runtime generation and Vite build succeed",
+      "observed": "1081 modules transformed; build completed in 28.84s with existing chunk warnings."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "cloudflare package",
+      "exit_code": 0,
+      "expected": "tsc --noEmit succeeds",
+      "observed": "Succeeded with no diagnostics."
+    },
+    {
+      "command": "node scripts/test-portal-accounts-pure.cjs; node scripts/test-portal-legal-consent-pure.cjs; node scripts/test-portal-session-retention-pure.cjs; node scripts/test-portal-abuse-key-pure.cjs; node scripts/test-portal-ai-scoring-pure.cjs; node scripts/test-portal-submissions-guard-pure.cjs; node scripts/test-error-reporting-pure.cjs",
+      "scope": "portal Worker account, consent, retention, HMAC, AI, submission, and Sentry-minimization behavior",
+      "exit_code": 0,
+      "expected": "All focused checks pass",
+      "observed": "17 account, 9 consent, 7 session, 1 HMAC, 19 AI, 14 submission, and 20 error-reporting check groups passed."
+    },
+    {
+      "command": "node --experimental-strip-types tests/portalContrast.test.ts; node --experimental-strip-types tests/portalTranslateCookieScope.test.ts; node --experimental-strip-types tests/promotionLinkUrlParity.test.ts; node --experimental-strip-types tests/storefrontTruncationReveal.test.ts",
+      "scope": "owned frontend behavior independent of root-owned language packs",
+      "exit_code": 0,
+      "expected": "Contrast, cookie scope, safe links, and truncation behavior pass",
+      "observed": "All focused checks passed."
+    },
+    {
+      "command": "git diff --cached --check",
+      "scope": "committed owned patch",
+      "exit_code": 0,
+      "expected": "No whitespace errors",
+      "observed": "No output."
+    }
+  ],
+  "risks": [
+    "Publication readiness is false until the missing verified registered name, registration number, and email are supplied; target markets and qualified legal review remain unknown.",
+    "Production is still at migration 0127 according to the supplied read-only schema evidence. Migrations 0128 through 0131 must be reviewed and applied in order only after explicit authorization.",
+    "Account/auth/submission protection requires a strong production PORTAL_ABUSE_HMAC_SECRET; affected writes intentionally return 503 without it.",
+    "The integrated language packs and shared pager/CSS slice must be merged before combined certification."
+  ],
+  "blockers": [],
+  "not_done": [
+    "No deployment, remote migration, secret write, remote D1 write, or production data mutation was performed.",
+    "Root-owned en.json/km.json were not edited; isolated language-parity tests therefore remain red until portal_language_delta.json is merged.",
+    "Shared PaginationControls.tsx, pagerState.ts, main.css, and their pager/scroll tests were released to the lineage owner and are not in this commit.",
+    "Authenticated integrated browser certification is delegated to the lead after cherry-pick."
+  ],
+  "handoff": "Cherry-pick 56cbf73d, merge outputs/takeover-20260907/portal_language_delta.json into both root-owned packs, integrate the settings parity and shared pager/CSS commits, then run combined i18n/tests and authenticated 375px keyboard/browser QA. Before any release, verify registered identity/email/target markets/legal review, review migrations 0128-0131 in order, and provision PORTAL_ABUSE_HMAC_SECRET.",
+  "workspace": {
+    "branch": "codex/takeover-portal-20260907",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-takeover-portal-20260907",
+    "dirty_before": [
+      "Owned portal implementation changes prepared from reviewed source commits"
+    ],
+    "dirty_after": [
+      "Unstaged line-ending-only generated public runtime files from build",
+      "Unstaged shared pager/scroll test changes now owned by lineage"
+    ]
+  }
+}
