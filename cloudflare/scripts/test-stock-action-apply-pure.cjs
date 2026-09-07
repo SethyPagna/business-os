@@ -46,6 +46,7 @@ const REAL = new Set([
   'stockReceiptGate',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
+  'branchRoles', 'branchRoleGuards',
 ])
 
 // Functional stubs for the D1/Env/queue/cache/broadcast modules that can't
