@@ -141,6 +141,10 @@ export default function PortalFooter({
   const pushedRef = useRef(false)
   const policiesTriggerRef = useRef<HTMLButtonElement | null>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
+  // Capture the catalogue title before a direct ?legal= reader's first
+  // effect can replace it. Effect reruns must never promote a policy title to
+  // the restoration target.
+  const baseDocumentTitleRef = useRef(typeof document === 'undefined' ? '' : document.title)
 
   // One resolver for every string on these pages: the portal language pack
   // first (so a future translation of portal_legal_* just works), then the
@@ -229,12 +233,11 @@ export default function PortalFooter({
   // Title + scroll position while a policy page is open.
   useEffect(() => {
     if (typeof document === 'undefined' || !activePage) return undefined
-    const previousTitle = document.title
     document.title = `${text(LEGAL_PAGE_TITLE_KEY[activePage])} · ${details.name}`
     try {
       window.scrollTo({ top: 0, behavior: 'auto' })
     } catch { /* older browsers */ }
-    return () => { document.title = previousTitle }
+    return () => { document.title = baseDocumentTitleRef.current }
   }, [activePage, text, details.name])
 
   // Restore focus only after the reader has unmounted. A footer menu item is
