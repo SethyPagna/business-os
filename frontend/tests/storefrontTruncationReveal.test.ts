@@ -129,14 +129,23 @@ runTest('the cart and the wishlist both reveal the name through the shared compo
 })
 
 runTest('the reveal is usable by touch, not hover alone', () => {
-  // The whole point on a phone: there is no hover on a touch screen, and the
-  // cart panel is a phone surface first.
+  // The component delegates its float and input handling to the one shared
+  // controller. Lock the complete connection down: click, hover, keyboard,
+  // and the long-press gesture available on touch screens. This replaces the
+  // retired component-local createPortal/onClick implementation.
   const component = read('../src/components/shared/TruncatedText.tsx')
-  assert.match(component, /onClick=\{overflowing \?/, 'tap opens it')
-  assert.match(component, /onMouseEnter=\{overflowing \?/, 'hover opens it on a pointer')
-  assert.match(component, /onFocus=\{overflowing \?/, 'and the keyboard reaches it')
-  assert.match(component, /setOverflowing\(el\.scrollWidth > el\.clientWidth \+ 1\)/, 'and none of that appears when the text already fits')
-  assert.match(component, /createPortal\(/, 'the panel escapes the overlay that clipped the text')
+  const controller = read('../src/components/shared/textAffordances.ts')
+  assert.match(component, /ensureTextAffordances\(\)/, 'the storefront wrapper mounts the delegated controller')
+  assert.ok(component.includes('[REVEAL_ATTR]: text'), 'the storefront wrapper opts its full text into the controller')
+  assert.match(component, /title=\{clipped \? text : undefined\}/, 'a value that fits does not gain a redundant reveal')
+  assert.match(component, /tabIndex=\{clipped \? 0 : undefined\}/, 'the keyboard reaches only a clipped value')
+  assert.match(controller, /document\.addEventListener\('click'[\s\S]*?apply\(\{ type: 'click'/, 'click opens through the controller')
+  assert.match(controller, /document\.addEventListener\('mouseover'[\s\S]*?type: 'hover-in'/, 'hover opens through the controller')
+  assert.match(controller, /document\.addEventListener\('touchstart'[\s\S]*?press\.onTouchStart/, 'touch arms the shared long-press reveal')
+  assert.match(controller, /onLongPress:[\s\S]*?kind: pressKind/, 'a touch hold preserves reveal rather than hardcoding copy')
+  assert.match(controller, /event\.key !== 'Enter' && event\.key !== ' '/, 'Enter and Space activate the reveal')
+  assert.match(controller, /document\.body\.appendChild\(host\)/, 'the shared float escapes the overlay that clipped the text')
+  assert.doesNotMatch(component, /createPortal\(/, 'the storefront wrapper must not recreate a second tooltip implementation')
 })
 
 if (failed > 0) {
