@@ -25,7 +25,8 @@ import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
 import { branchCanSell } from '../lib/branchRoles'
 import type { Env } from '../index'
-import { actorSnapshot } from '../lib/actorSnapshot'
+import { actorId, actorSnapshot } from '../lib/actorSnapshot'
+import { buildSaleCreationSnapshot } from '../lib/saleCreationSnapshot'
 // N21: sales.customer_address holds the DISPLAY address; the replacement sale
 // below copies the SOURCE sale's snapshot, which for a row written before that
 // fix is still the Contact Options JSON.
@@ -1253,6 +1254,36 @@ app.post('/', async (c) => {
       const replacementClientRequestId = clientRequestId
         ? `${clientRequestId.slice(0, 96)}:replacement`
         : `return_${returnId}_replacement`
+      const replacementRecordedAt = new Date().toISOString()
+      const replacementPaymentDetails = customerTenderUsd > 0
+        ? [{ method: replacementPaymentMethod, amount_usd: customerTenderUsd, amount_khr: 0 }]
+        : []
+      const replacementCreationSnapshot = buildSaleCreationSnapshot({
+        origin: 'return_replacement',
+        recordedAt: replacementRecordedAt,
+        saleAt: replacementRecordedAt,
+        receiptNumber: replacementReceiptNumber,
+        actor: user,
+        cashierId: actorId(user),
+        cashierName: actorSnapshot(user),
+        saleStatus: 'completed',
+        items: replacementLines.map((line) => ({
+          product_id: line.productId,
+          product_name: line.productName,
+          quantity: line.quantity,
+          applied_price_usd: line.priceUsd,
+          total_usd: line.totalUsd,
+        })),
+        totalUsd: replacementTotals.totalUsd,
+        paymentMethod: replacementPaymentMethod,
+        paymentDetails: replacementPaymentDetails,
+        amountPaidUsd: replacementTotals.amountPaidUsd,
+        amountPaidKhr: replacementTotals.amountPaidKhr,
+        changeUsd: 0,
+        changeKhr: 0,
+        isDelivery: false,
+        deliveryFeeUsd: 0,
+      })
       const replacementSaleInsert = await db.prepare(`
         INSERT INTO sales (
           receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
@@ -1262,7 +1293,7 @@ app.post('/', async (c) => {
           total_usd, total_khr, amount_paid_usd, amount_paid_khr, change_usd, change_khr,
           membership_discount_usd, membership_discount_khr, membership_points_redeemed,
           is_delivery, loyalty_accrual, sale_status, notes, items, search_normalized,
-          source_return_id, updated_at
+          source_return_id, creation_snapshot_json, updated_at
         ) VALUES (
           @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
           @customer_id, @customer_name, @customer_phone, @customer_address,
@@ -1271,7 +1302,7 @@ app.post('/', async (c) => {
           @total_usd, @total_khr, @amount_paid_usd, @amount_paid_khr, 0, 0,
           0, 0, 0,
           0, 1, 'completed', @notes, @items, @search_normalized,
-          @source_return_id, CURRENT_TIMESTAMP
+          @source_return_id, @creation_snapshot_json, CURRENT_TIMESTAMP
         )
       `).run({
         receipt_number: replacementReceiptNumber,
@@ -1285,9 +1316,7 @@ app.post('/', async (c) => {
         customer_phone: saleMeta.customer_phone || null,
         customer_address: contactDisplayAddress(saleMeta.customer_address) || null,
         payment_method: replacementPaymentMethod,
-        payment_details: JSON.stringify(customerTenderUsd > 0
-          ? [{ method: replacementPaymentMethod, amount_usd: customerTenderUsd, amount_khr: 0 }]
-          : []),
+        payment_details: JSON.stringify(replacementPaymentDetails),
         exchange_rate: exchangeRate,
         subtotal_usd: replacementSubtotalUsd,
         subtotal_khr: replacementSubtotalKhr,
@@ -1320,6 +1349,7 @@ app.post('/', async (c) => {
           ...replacementLines.map((line) => line.productName),
         ].filter(Boolean).join(' ')),
         source_return_id: returnId,
+        creation_snapshot_json: replacementCreationSnapshot,
       })
       replacementSaleId = replacementSaleInsert.lastInsertRowid
       await db.prepare('UPDATE returns SET replacement_sale_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([replacementSaleId, returnId])

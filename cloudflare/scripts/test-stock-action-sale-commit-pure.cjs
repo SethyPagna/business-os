@@ -20,12 +20,15 @@ const searchMatch = compile('searchMatch.ts')
 const stockReceiptGate = compile('stockReceiptGate.ts')
 const branchRoles = compile('branchRoles.ts')
 const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branchRoles })
+const actorSnapshot = compile('actorSnapshot.ts')
+const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
 const subject = compile('stockActionCommit.ts', {
   './db': {},
   './batchCode': batchCode,
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  './saleCreationSnapshot': saleCreationSnapshot,
 })
 
 function setup() {
@@ -43,7 +46,7 @@ function setup() {
     CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,
       cashier_name TEXT, branch_id INTEGER, branch_name TEXT, payment_method TEXT, payment_currency TEXT,
       subtotal_usd REAL, total_usd REAL, amount_paid_usd REAL, sale_status TEXT, notes TEXT,
-      items TEXT, created_at TEXT, updated_at TEXT);
+      items TEXT, creation_snapshot_json TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE sale_items (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER, product_id INTEGER,
       product_name TEXT, quantity REAL, unit TEXT, applied_price_usd REAL, cost_price_usd REAL,
       total_usd REAL, branch_id INTEGER, price_mode TEXT, base_price_usd REAL, batch_id INTEGER,
@@ -92,6 +95,8 @@ const base = {
   jobId: 'job-sale',
   saleGroupKey: 'sale',
   date: '08/27/2026',
+  actor: { id: 52, username: 'stock-importer', name: 'Ignored Full Name' },
+  recordedAt: '2026-09-07T13:00:00.000Z',
   lines: [
     { rowNumber: 2, productId: 10, productName: 'Serum', branchId: 1, branchName: 'Shop', quantity: 2, sellingPriceUsd: 10 },
     { rowNumber: 3, productId: 10, productName: 'Serum', branchId: 1, branchName: 'Shop', quantity: 4, sellingPriceUsd: 11, costPriceUsd: 5 },
@@ -116,6 +121,17 @@ const base = {
   assert.strictEqual(sqlite.prepare(`SELECT SUM(quantity) AS n FROM sale_item_batch_allocations`).get().n, 6)
   assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_guards`).get().n, 0)
   assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_commits WHERE status = 'applied'`).get().n, 1)
+  const creation = JSON.parse(sqlite.prepare('SELECT creation_snapshot_json FROM sales').get().creation_snapshot_json)
+  assert.equal(creation.version, 1)
+  assert.equal(creation.origin, 'stock_action_import')
+  assert.equal(creation.recorded_at, base.recordedAt)
+  assert.equal(creation.sale_at, '2026-08-27')
+  assert.deepEqual(creation.actor, { id: 52, username: 'stock-importer' })
+  assert.deepEqual(creation.products, [
+    { product_id: 10, product: 'Serum', sku: null, quantity: 2, unit_price_usd: 10, line_total_usd: 20 },
+    { product_id: 10, product: 'Serum', sku: null, quantity: 4, unit_price_usd: 11, line_total_usd: 44 },
+  ])
+  assert.equal(creation.total_usd, 64)
 
   const explicit = setup()
   await subject.applyUnifiedStockSale(explicit.db, {
