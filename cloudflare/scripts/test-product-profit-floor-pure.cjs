@@ -51,6 +51,15 @@
 //      r.branch_id)` -- the fallback base 6e3abfea carried as returnScope --
 //      puts it back where it belongs.
 //                        branch 1: qty 1.8 / $18 -> 3 / $30 (base: qty 1 / $10)
+//   K  a reversal that names NO branch at all, over a sale whose two branch
+//      lines are worth wildly different money: 1 unit at $1 at branch 1 and
+//      1 unit at $99 at branch 2, one $50 refund. Splitting the refund by the
+//      UNIT share gives each branch $25 -- more than branch 1 ever took --
+//      and the per-branch cap then swallows the excess, so the branch rows
+//      read $0 and $74 against an unfiltered $50: the slice stopped being a
+//      partition. Money is apportioned by each line share of the VALUE (and
+//      returned cost by its share of the COST), so it reads $0.50 + $49.50.
+//                              branch 1 + branch 2: $74 -> $50 = unfiltered
 //
 // Plus the two positive controls, without which a "nothing is negative any
 // more" sweep would be indistinguishable from a broken instrument:
@@ -160,8 +169,9 @@ function setupDatabase() {
       (7,'G: an ordinary sale and return','g',1,0,0,0,0,0),
       (8,'H: one sale, two branches, all of it returned','h',1,0,0,0,0,0),
       (9,'I: one sale, two branches, a partial return at one of them','i',1,0,0,0,0,0),
-      (10,'J: the return line names no branch, the return does','j',1,0,0,0,0,0);
-    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0),(9,1,0),(9,2,0),(10,1,0),(10,2,0);
+      (10,'J: the return line names no branch, the return does','j',1,0,0,0,0,0),
+      (11,'K: one sale, two branches worth very different money','k',1,0,0,0,0,0);
+    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0),(9,1,0),(9,2,0),(10,1,0),(10,2,0),(11,1,0),(11,2,0);
 
     -- A: the sale is in AUGUST, the return is inside the September window.
     INSERT INTO sales VALUES (100,1,'completed','2026-08-01 03:00:00',100,400000,0,0,0,0);
@@ -234,6 +244,17 @@ function setupDatabase() {
     INSERT INTO sale_items VALUES (111,109,10,2,2,20,80000,4,16000);
     INSERT INTO returns VALUES (208,109,2,'completed','customer','2026-09-05 04:00:00');
     INSERT INTO return_items VALUES (208,208,10,NULL,2,20,80000,4,16000,1,'restock');
+
+    -- K: the two branch lines of this sale are worth $1 and $99, and neither
+    -- the return line nor the return row names a branch, so the whole $50
+    -- refund is apportioned. By VALUE that is $0.50 and $49.50; by UNITS it
+    -- is $25 each, which is $24 more than branch 1 ever recognised -- the cap
+    -- then eats the excess and the two branch rows sum to $74, not $50.
+    INSERT INTO sales VALUES (110,1,'completed','2026-09-05 03:00:00',100,400000,0,0,0,0);
+    INSERT INTO sale_items VALUES (112,110,11,1,1,1,4000,0.5,2000);
+    INSERT INTO sale_items VALUES (113,110,11,2,1,99,396000,0.5,2000);
+    INSERT INTO returns VALUES (209,110,NULL,'completed','customer','2026-09-05 04:00:00');
+    INSERT INTO return_items VALUES (209,209,11,NULL,1,50,200000,0.5,2000,1,'restock');
   `)
   return d1
 }
@@ -242,7 +263,7 @@ const round2 = (value) => Math.round(value * 100) / 100
 
 async function main() {
   const db = dbAdapter(setupDatabase())
-  const items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((id) => ({ id }))
+  const items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((id) => ({ id }))
   await attachInventoryProductMetrics(db, items, {
     branchId: '1', startDate: '2026-09-05', endDate: '2026-09-05',
   })
@@ -277,6 +298,9 @@ async function main() {
 
   assert.deepEqual(at(10), { qty_sold: 3, revenue_usd: 30, revenue_khr: 120000, cogs_usd: 12, profit_usd: 18 },
     'J: return_items.branch_id is NULL, so the reversal is named by the branch on the RETURN row -- branch 1 keeps the three units it sold (without the COALESCE fallback: qty 1.8 / $18)')
+
+  assert.deepEqual([at(11).revenue_usd, at(11).revenue_khr, at(11).cogs_usd], [0.5, 2000, 0.25],
+    "K: branch 1 recognised $1 of a $100 sale, so it carries $0.50 of a $50 refund -- by VALUE. By units it carried $25, which the cap cut back to $1 and left the two branches summing to $74")
 
   // ---- the positive controls ----------------------------------------------
   assert.deepEqual(at(6), { qty_sold: 1, revenue_usd: 5, revenue_khr: 20000, cogs_usd: 9, profit_usd: -4 },
@@ -342,8 +366,8 @@ async function main() {
   // quietly ignored @branchId.
   const branchScopedSql = productSalesLedger.buildProductSalesLedgerSql({ branchScoped: true })
   const branchTwo = db.prepare(`SELECT * FROM (${branchScopedSql}) fin ORDER BY fin.product_id`).all({ branchId: 2 })
-  assert.deepEqual(branchTwo.map((row) => Number(row.product_id)), [8, 9, 10],
-    'the branch-scoped shape really filters on @branchId: only cases H, I and J have a branch-2 sale line')
+  assert.deepEqual(branchTwo.map((row) => Number(row.product_id)), [8, 9, 10, 11],
+    'the branch-scoped shape really filters on @branchId: only cases H, I, J and K have a branch-2 sale line')
   const branchTwoById = new Map(branchTwo.map((row) => [Number(row.product_id), row]))
   assert.equal(round2(Number(branchTwoById.get(8).qty_sold)), 0,
     'H at branch 2: the 2 units branch 2 sold are the 2 the branch-1 line could not absorb, so branch 2 nets to 0 (base: -3)')
@@ -355,6 +379,10 @@ async function main() {
     [round2(Number(branchTwoById.get(10).qty_sold)), round2(Number(branchTwoById.get(10).revenue_usd)), round2(Number(branchTwoById.get(10).cogs_usd))],
     [0, 0, 0],
     'J at branch 2: the return names branch 2 through the return row, so the whole reversal lands there -- 2 sold, 2 back, nothing left')
+  assert.deepEqual(
+    [round2(Number(branchTwoById.get(11).revenue_usd)), round2(Number(branchTwoById.get(11).revenue_khr))],
+    [49.5, 198000],
+    "K at branch 2: the $99 line carries $49.50 of the $50 refund, so the two branches partition it (unit share: $74 here and $0 at branch 1)")
   const branchThree = db.prepare(`SELECT * FROM (${branchScopedSql}) fin`).all({ branchId: 3 })
   assert.equal(branchThree.length, 0, 'a branch with no sale lines returns nothing')
 
@@ -369,8 +397,8 @@ async function main() {
   const branchOneById = new Map(db.prepare(`SELECT * FROM (${branchScopedSql}) fin`).all({ branchId: 1 })
     .map((row) => [Number(row.product_id), row]))
   const columnOf = (row, column) => (row ? Number(row[column]) || 0 : 0)
-  for (const productId of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
-    for (const column of ['qty_sold', 'revenue_usd', 'cogs_usd']) {
+  for (const productId of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
+    for (const column of ['qty_sold', 'revenue_usd', 'revenue_khr', 'cogs_usd', 'cogs_khr']) {
       assert.equal(
         round2(columnOf(branchOneById.get(productId), column) + columnOf(branchTwoById.get(productId), column)),
         round2(columnOf(unfiltered.get(productId), column)),

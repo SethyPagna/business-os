@@ -103,8 +103,10 @@ assert.doesNotMatch(workerRoute, /return_to_stock = 1/,
   'the restock test is lib/returnsStock.ts\'s rule (RESTOCKED_RETURN_LINE), not a hand-written boolean that misses stock_action')
 assert.match(workerLedger, /JOIN sales s ON s\.id = r\.sale_id/,
   'the return side joins through the sale, which is what carries the recognition and window scope onto it -- branch is NOT among them: `si.branch_id = @branchId` is a sale-LINE clause, and nothing on the return side inherits it')
-assert.match(workerLedger, /SUM\(qty\) OVER \(PARTITION BY sale_id, product_id\)/,
+assert.match(workerLedger, /SUM\(l\.qty_sold\) OVER \(PARTITION BY l\.sale_id, l\.product_id\)/,
   'so the branch-scoped read apportions each return across the sale\'s branch lines instead, against a denominator that deliberately ignores the branch filter -- subtracting the whole return at every branch is what reported Net sold -2')
+assert.match(workerLedger, /groupShare\('rg\.refund_usd', 'rg\.named_net_usd', 'sb\.net_usd', 'sb\.sale_net_usd'\)/,
+  'and each column is apportioned against its OWN denominator: money by the share of the net VALUE a branch recognised, never by its share of the UNITS -- a $50 refund over 1 unit at $1 and 1 unit at $99 is $0.50 and $49.50, not $25 each')
 assert.match(workerLedger, /MIN\(sold\.net_usd, COALESCE\(ret\.refund_usd, 0\)\)/,
   'a reversal is capped at what the sale recognised for that product, so revenue_usd >= 0 by construction')
 assert.match(workerLedger, /MAX\(0, sold\.cogs_usd - COALESCE\(ret\.cogs_returned_usd, 0\)\)/,

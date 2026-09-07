@@ -58,13 +58,30 @@
 // and two units brought back, branch 1 -- which had nothing come back -- read
 // 1 unit and $10 instead of 3 and $30, and the two branch rows between them
 // reversed more than the sale ever had. When `branchScoped` is set, each
-// return line is now APPORTIONED over the sale's branch lines for the product:
-// the branch the return itself names takes it first, capped at what that
-// branch recognised, and whatever it cannot absorb spreads over the sale's
-// other branch lines in proportion to what each recognised. The shares of one
-// return line sum to exactly 1, so for every column
-// `SUM over branches == the unfiltered figure`: slicing by branch partitions
-// the ledger instead of duplicating its reversals.
+// reversals of one sale for one product are grouped by the branch they NAME
+// (COALESCE(ri.branch_id, r.branch_id)) and APPORTIONED over the sale's branch
+// lines: the named branch takes the reversal first, up to what it recognised,
+// and the rest spreads over the capacity the other lines have left.
+//
+// Each COLUMN is apportioned against its OWN denominator -- units by the unit
+// share, money by each line's share of the sale's net VALUE for the product,
+// returned cost by its share of the COST. One share for all three is a defect
+// in its own right: a $50 refund split by UNITS over a sale of 1 unit at $1
+// and 1 unit at $99 puts $25 on the branch that took $1, and the per-branch
+// cap then swallows the excess, so the branch rows read $0 and $74 against an
+// unfiltered $50.
+//
+// What that buys, stated exactly rather than absolutely: the shares of ONE
+// return group sum to 1, so for every column the branch rows add back up to
+// the unfiltered row whenever the sale has a single return group, or every
+// group's reversal fits inside the branch line it names -- which is every
+// return the app writes against a sale it recognised. Past that lies the
+// over-refund regime the residual caps below exist for: a reversal larger than
+// the whole sale recognised clamps every branch row AND the unfiltered row to
+// 0, so they still agree; two groups naming different branches that between
+// them push more onto one line than that line recognised clamp separately and
+// can differ by the excess. No scoping rule makes that arithmetic, and an
+// unconditional invariant written here would simply be false.
 //
 // NON-NEGATIVITY, by construction rather than by clamp. Per (sale, product):
 //   * net value is floored at 0 -- a line whose apportioned discounts exceed
@@ -172,114 +189,144 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
   const refundUsd = refundBasisLineExpr('ri.total_usd', 's.subtotal_usd', netSaleExpr('s.'))
   const refundKhr = refundBasisLineExpr('ri.total_khr', 's.subtotal_khr', netSaleKhrExpr('s.'))
 
-  // ONE return line, never pre-aggregated: `named_branch` is the branch the
-  // reversal was recorded against, and the allocation below needs it per line.
-  //
-  // routes/returns.ts USUALLY writes return_items.branch_id, and leaves it NULL
-  // whenever neither the line nor the request carried a branch: all five of its
-  // insert paths resolve the column as `item.branch_id || <the request's
-  // branch> || null` (routes/returns.ts:1397, :1921, :1944, :2173, :2335).
-  // That is why this reads `COALESCE(ri.branch_id, r.branch_id)` -- the
-  // RETURN's own branch is the fallback three of those paths already apply
-  // themselves, and it is the name base 6e3abfea used here too (the old
-  // returnScope / returnBranchClause in routes/inventory.ts). Without it a
-  // NULL-branch line names nobody and smears proportionally over branches that
-  // had nothing come back.
-  const returnLineColumns = `r.sale_id AS sale_id,
-             ri.product_id AS product_id,
-             COALESCE(ri.branch_id, r.branch_id) AS named_branch,
-             ri.quantity AS qty_returned,
-             ${refundUsd} AS refund_usd,
-             ${refundKhr} AS refund_khr,
-             CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END AS cogs_returned_usd,
-             CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_khr * ri.quantity ELSE 0 END AS cogs_returned_khr`
-  const returnLineWhere = `WHERE ${saleScope}
-          AND COALESCE(r.status, 'completed') <> 'cancelled'
-          AND COALESCE(r.return_scope, 'customer') = 'customer'`
+  // ONE sold-side aggregate, written once and read twice: as the figures
+  // themselves (`sold`, with the caller's branch filter applied) and -- with
+  // that filter deliberately OFF -- as the denominators the apportionment
+  // divides by. They have to be the same expression, or a branch's share would
+  // be measured against a different number from the one it is subtracted from.
+  const soldLinesSql = (scope: string, byBranch: boolean) => `
+      SELECT si.sale_id AS sale_id,
+             si.product_id AS product_id,
+             si.branch_id AS branch_id,
+             SUM(si.quantity) AS qty_sold,
+             SUM(${storeDiscountUsd}) AS store_discount_usd,
+             SUM(${storeDiscountKhr}) AS store_discount_khr,
+             SUM(${memberDiscountUsd}) AS membership_discount_usd,
+             SUM(${memberDiscountKhr}) AS membership_discount_khr,
+             MAX(0, SUM(si.total_usd - ${allDiscountUsd})) AS net_usd,
+             MAX(0, SUM(si.total_khr - ${allDiscountKhr})) AS net_khr,
+             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
+             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
+      FROM sale_items si
+      ${soldIdsJoin}
+      JOIN sales s ON s.id = si.sale_id
+      WHERE ${scope}
+      GROUP BY si.sale_id, si.product_id${byBranch ? ', si.branch_id' : ''}`
 
   // Every branch line of the sale for that product, NEVER branch-filtered,
-  // with the sale's whole total for the product beside each branch's share of
-  // it. This is the denominator the apportionment divides by, so it has to see
-  // the branches the caller's scope excludes.
+  // with the sale's whole figure for the product beside each branch's share of
+  // it -- in UNITS, in MONEY and in COST, because each column is apportioned
+  // against its own denominator.
   const soldByBranch = `
-        SELECT sale_id, product_id, branch_id, qty,
-               SUM(qty) OVER (PARTITION BY sale_id, product_id) AS sale_qty
-        FROM (
-          SELECT si.sale_id AS sale_id, si.product_id AS product_id, si.branch_id AS branch_id,
-                 SUM(si.quantity) AS qty
-          FROM sale_items si
-          ${soldIdsJoin}
-          JOIN sales s ON s.id = si.sale_id
-          WHERE ${saleScope}
-          GROUP BY si.sale_id, si.product_id, si.branch_id
-        ) sale_lines`
+        SELECT l.sale_id AS sale_id, l.product_id AS product_id, l.branch_id AS branch_id,
+               l.qty_sold AS qty_sold, l.net_usd AS net_usd, l.net_khr AS net_khr,
+               l.cogs_usd AS cogs_usd, l.cogs_khr AS cogs_khr,
+               SUM(l.qty_sold) OVER (PARTITION BY l.sale_id, l.product_id) AS sale_qty,
+               SUM(l.net_usd) OVER (PARTITION BY l.sale_id, l.product_id) AS sale_net_usd,
+               SUM(l.net_khr) OVER (PARTITION BY l.sale_id, l.product_id) AS sale_net_khr,
+               SUM(l.cogs_usd) OVER (PARTITION BY l.sale_id, l.product_id) AS sale_cogs_usd,
+               SUM(l.cogs_khr) OVER (PARTITION BY l.sale_id, l.product_id) AS sale_cogs_khr
+        FROM (${soldLinesSql(saleScope, true)}
+        ) l`
 
-  // The share of ONE return line that belongs to the branch line `sb`.
+  const returnScopeWhere = `WHERE ${saleScope}
+          AND COALESCE(r.status, 'completed') <> 'cancelled'
+          AND COALESCE(r.return_scope, 'customer') = 'customer'`
+  const returnMeasures = `SUM(ri.quantity) AS qty_returned,
+               SUM(${refundUsd}) AS refund_usd,
+               SUM(${refundKhr}) AS refund_khr,
+               SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
+               SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr`
+  const returnFrom = `FROM return_items ri
+        ${returnIdsJoin}
+        JOIN returns r ON r.id = ri.return_id
+        JOIN sales s ON s.id = r.sale_id
+        ${returnScopeWhere}`
+
+  // The reversals of one sale for one product, grouped by the branch they
+  // NAME -- COALESCE(ri.branch_id, r.branch_id), for the reason above.
   //
-  //   * the branch the return names takes it, capped at what that branch
-  //     recognised for this (sale, product) -- MIN(returned, that branch's
-  //     units) -- and takes it whole when the sale has no other branch line to
-  //     give the remainder to;
-  //   * whatever the named branch could not absorb spreads over the sale's
-  //     OTHER branch lines for the product, in proportion to what each
-  //     recognised;
-  //   * a return naming a branch that sold none of this product on this sale,
-  //     or naming none at all, has named_qty 0, so the whole line spreads
+  // routes/returns.ts USUALLY writes return_items.branch_id, and leaves it
+  // NULL whenever neither the line nor the request carried a branch: all five
+  // of its insert paths resolve the column as `item.branch_id || <the
+  // request's branch> || null` (routes/returns.ts:1397, :1921, :1944, :2173,
+  // :2335). That is why the fallback is here -- the RETURN's own branch is the
+  // name three of those paths already apply themselves, and it is the name
+  // base 6e3abfea used too (the old returnScope / returnBranchClause in
+  // routes/inventory.ts). Without it a NULL-branch line names nobody and
+  // smears proportionally over branches that had nothing come back.
+  const retGroupsSql = `
+        SELECT r.sale_id AS sale_id,
+               ri.product_id AS product_id,
+               COALESCE(ri.branch_id, r.branch_id) AS named_branch,
+               ${returnMeasures}
+        ${returnFrom}
+        GROUP BY r.sale_id, ri.product_id, COALESCE(ri.branch_id, r.branch_id)`
+
+  // ONE return group's share of the branch line `sb`, for ONE column, against
+  // that column's OWN denominator:
+  //
+  //   * the branch the group names absorbs the reversal first, up to what that
+  //     branch recognised in this column -- MIN(group, named);
+  //   * whatever it cannot absorb spreads over the RESIDUAL capacity of the
+  //     sale's branch lines: what each recognised, less what the step above
+  //     already took from it. Dividing by residual capacity rather than by the
+  //     whole is what keeps the spill off a branch line that is already full,
+  //     where the cap further down would swallow it and the branch rows would
+  //     stop adding up to the unfiltered row;
+  //   * a group naming a branch that sold none of this product on this sale,
+  //     or naming none at all, has named = 0, so the whole group spreads
   //     proportionally -- the plain apportionment.
   //
-  // The shares of one return line therefore sum to exactly 1 across the sale's
-  // branch lines, which is what makes the per-branch columns add back up to
-  // the unfiltered ones.
-  const namedShare = `CASE
-              WHEN COALESCE(sb.sale_qty, 0) <= 0 THEN 0
-              WHEN sb.sale_qty <= rl.named_qty THEN 1
-              WHEN rl.qty_returned > 0 THEN MIN(rl.qty_returned, rl.named_qty) * 1.0 / rl.qty_returned
-              ELSE rl.named_qty * 1.0 / sb.sale_qty
-            END`
-  const branchShare = `CASE
-            WHEN COALESCE(sb.sale_qty, 0) <= 0 THEN 0
-            WHEN sb.branch_id = rl.named_branch THEN (${namedShare})
-            WHEN sb.sale_qty - rl.named_qty > 0 THEN (1 - (${namedShare})) * sb.qty * 1.0 / (sb.sale_qty - rl.named_qty)
-            ELSE 0
-          END`
+  // Applied to `qty_sold` this is the UNIT share; applied to `net_*` it is the
+  // VALUE share, and to `cogs_*` the COST share. They are three different
+  // splits of one return group and they have to be: multiplying a refund by
+  // the unit share hands a branch money out of proportion to the value it
+  // recognised, which is how a sale of 1 unit at $1 and 1 unit at $99 met a
+  // $50 refund and reported $0 at one branch and $74 at the other against an
+  // unfiltered $50.
+  const groupShare = (groupCol: string, namedCol: string, branchCol: string, saleCol: string) => {
+    const take = `MIN(${groupCol}, ${namedCol})`
+    const own = `CASE WHEN sb.branch_id = rg.named_branch THEN ${take} ELSE 0 END`
+    return `(${own}) + CASE WHEN (${saleCol} - ${take}) > 0
+               THEN (${groupCol} - ${take}) * ((${branchCol}) - (${own})) / (${saleCol} - ${take})
+               ELSE 0 END`
+  }
+  const qtyShare = groupShare('rg.qty_returned', 'rg.named_qty', 'sb.qty_sold', 'sb.sale_qty')
+  const refundUsdShare = groupShare('rg.refund_usd', 'rg.named_net_usd', 'sb.net_usd', 'sb.sale_net_usd')
+  const refundKhrShare = groupShare('rg.refund_khr', 'rg.named_net_khr', 'sb.net_khr', 'sb.sale_net_khr')
+  const cogsUsdShare = groupShare('rg.cogs_returned_usd', 'rg.named_cogs_usd', 'sb.cogs_usd', 'sb.sale_cogs_usd')
+  const cogsKhrShare = groupShare('rg.cogs_returned_khr', 'rg.named_cogs_khr', 'sb.cogs_khr', 'sb.sale_cogs_khr')
 
   const retSql = branchScoped ? `
-      SELECT rl.sale_id AS sale_id, rl.product_id AS product_id, sb.branch_id AS branch_id,
-             SUM(rl.qty_returned * (${branchShare})) AS qty_returned,
-             SUM(rl.refund_usd * (${branchShare})) AS refund_usd,
-             SUM(rl.refund_khr * (${branchShare})) AS refund_khr,
-             SUM(rl.cogs_returned_usd * (${branchShare})) AS cogs_returned_usd,
-             SUM(rl.cogs_returned_khr * (${branchShare})) AS cogs_returned_khr
+      SELECT rg.sale_id AS sale_id, rg.product_id AS product_id, sb.branch_id AS branch_id,
+             SUM(${qtyShare}) AS qty_returned,
+             SUM(${refundUsdShare}) AS refund_usd,
+             SUM(${refundKhrShare}) AS refund_khr,
+             SUM(${cogsUsdShare}) AS cogs_returned_usd,
+             SUM(${cogsKhrShare}) AS cogs_returned_khr
       FROM (
-        SELECT ${returnLineColumns},
-               COALESCE(sbn.qty, 0) AS named_qty
-        FROM return_items ri
-        ${returnIdsJoin}
-        JOIN returns r ON r.id = ri.return_id
-        JOIN sales s ON s.id = r.sale_id
-        LEFT JOIN (${soldByBranch}
-        ) sbn ON sbn.sale_id = r.sale_id AND sbn.product_id = ri.product_id AND sbn.branch_id = COALESCE(ri.branch_id, r.branch_id)
-        ${returnLineWhere}
-      ) rl
+        SELECT g.sale_id AS sale_id, g.product_id AS product_id, g.named_branch AS named_branch,
+               g.qty_returned AS qty_returned, g.refund_usd AS refund_usd, g.refund_khr AS refund_khr,
+               g.cogs_returned_usd AS cogs_returned_usd, g.cogs_returned_khr AS cogs_returned_khr,
+               COALESCE(nb.qty_sold, 0) AS named_qty,
+               COALESCE(nb.net_usd, 0) AS named_net_usd,
+               COALESCE(nb.net_khr, 0) AS named_net_khr,
+               COALESCE(nb.cogs_usd, 0) AS named_cogs_usd,
+               COALESCE(nb.cogs_khr, 0) AS named_cogs_khr
+        FROM (${retGroupsSql}
+        ) g
+        LEFT JOIN (${soldLinesSql(saleScope, true)}
+        ) nb ON nb.sale_id = g.sale_id AND nb.product_id = g.product_id AND nb.branch_id = g.named_branch
+      ) rg
       JOIN (${soldByBranch}
-      ) sb ON sb.sale_id = rl.sale_id AND sb.product_id = rl.product_id
+      ) sb ON sb.sale_id = rg.sale_id AND sb.product_id = rg.product_id
       WHERE sb.branch_id = @branchId
-      GROUP BY rl.sale_id, rl.product_id, sb.branch_id` : `
-      SELECT rl.sale_id AS sale_id, rl.product_id AS product_id,
-             SUM(rl.qty_returned) AS qty_returned,
-             SUM(rl.refund_usd) AS refund_usd,
-             SUM(rl.refund_khr) AS refund_khr,
-             SUM(rl.cogs_returned_usd) AS cogs_returned_usd,
-             SUM(rl.cogs_returned_khr) AS cogs_returned_khr
-      FROM (
-        SELECT ${returnLineColumns}
-        FROM return_items ri
-        ${returnIdsJoin}
-        JOIN returns r ON r.id = ri.return_id
-        JOIN sales s ON s.id = r.sale_id
-        ${returnLineWhere}
-      ) rl
-      GROUP BY rl.sale_id, rl.product_id`
+      GROUP BY rg.sale_id, rg.product_id, sb.branch_id` : `
+      SELECT r.sale_id AS sale_id, ri.product_id AS product_id,
+             ${returnMeasures}
+      ${returnFrom}
+      GROUP BY r.sale_id, ri.product_id`
 
   return `
     SELECT sold.product_id AS product_id,
@@ -315,24 +362,7 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
            SUM(sold.net_khr) AS gross_revenue_khr,
            SUM(sold.cogs_usd) AS gross_cogs_usd,
            SUM(sold.cogs_khr) AS gross_cogs_khr
-    FROM (
-      SELECT si.sale_id AS sale_id,
-             si.product_id AS product_id,
-             si.branch_id AS branch_id,
-             SUM(si.quantity) AS qty_sold,
-             SUM(${storeDiscountUsd}) AS store_discount_usd,
-             SUM(${storeDiscountKhr}) AS store_discount_khr,
-             SUM(${memberDiscountUsd}) AS membership_discount_usd,
-             SUM(${memberDiscountKhr}) AS membership_discount_khr,
-             MAX(0, SUM(si.total_usd - ${allDiscountUsd})) AS net_usd,
-             MAX(0, SUM(si.total_khr - ${allDiscountKhr})) AS net_khr,
-             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
-      FROM sale_items si
-      ${soldIdsJoin}
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${soldScope}
-      GROUP BY si.sale_id, si.product_id${branchScoped ? ', si.branch_id' : ''}
+    FROM (${soldLinesSql(soldScope, branchScoped)}
     ) sold
     LEFT JOIN (${retSql}
     ) ret ON ret.sale_id = sold.sale_id AND ret.product_id = sold.product_id${branchScoped ? ' AND ret.branch_id = sold.branch_id' : ''}
