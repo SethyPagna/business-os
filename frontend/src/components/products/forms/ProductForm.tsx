@@ -29,7 +29,7 @@ import {
 } from '../helpers/productNameSuggestions.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch, getProductFilters } from '../../../api/methods.ts'
-import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
+import { buildCacheBustedMediaPath, canonicalizePersistedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -195,7 +195,7 @@ interface FilePickerModalProps {
   // Only offered in create mode; the label is the typed name so the chip
   // reads "Add product — Dior 999", not a bare generic.
   onMinimize?: (label: string) => void
-  onSelect: (publicPath: string) => void
+  onSelect: (publicPath: string, asset?: { updated_at?: string }) => void
   layer?: 'default' | 'nested'
 }
 
@@ -326,7 +326,7 @@ function normalizeGallery(product?: ProductFormState | null, limit = MAX_PRODUCT
   const seen = new Set<string>()
   const list: string[] = []
   for (const entry of source) {
-    const value = String(entry || '').trim()
+    const value = canonicalizePersistedMediaPath(entry)
     if (!value || seen.has(value)) continue
     seen.add(value)
     list.push(value)
@@ -576,6 +576,7 @@ export default function ProductForm({
   // limit controls additions; it must not truncate positions 4-5 merely
   // because someone edited an unrelated product field.
   const [imageList, setImageList] = useState(() => normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
+  const [imageRenderVersions, setImageRenderVersions] = useState<Record<string, string>>({})
   const imageHydrationKeyRef = useRef(draftKey)
   const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
   const lastTabResetKeyRef = useRef<string>(`${draftKey}:${initialTab || 'basic'}`)
@@ -771,6 +772,7 @@ export default function ProductForm({
     if (imageHydrationKeyRef.current !== draftKey) {
       imageHydrationKeyRef.current = draftKey
       setImageList(normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
+      setImageRenderVersions({})
     }
     const resetKey = `${draftKey}:${initialTab || 'basic'}`
     if (lastTabResetKeyRef.current !== resetKey) {
@@ -1062,8 +1064,11 @@ export default function ProductForm({
           PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,
         )
         const rawPath = uploaded?.public_path || uploaded?.path || uploaded?.asset?.public_path || uploaded?.data?.path || ''
-        const publicPath = buildCacheBustedMediaPath(rawPath, uploaded?.cache_version || uploaded?.asset?.updated_at || uploaded?.asset?.created_at || '')
-        if (publicPath) stagedImages.push(publicPath)
+        const publicPath = canonicalizePersistedMediaPath(rawPath)
+        if (!publicPath) throw new Error(tr('image_upload_missing_path', 'Image upload completed without a stored file path.', 'ការបង្ហោះរូបភាពបានបញ្ចប់ ប៉ុន្តែមិនមានទីតាំងឯកសារដែលបានរក្សាទុកទេ។'))
+        const renderVersion = String(uploaded?.cache_version || uploaded?.asset?.updated_at || uploaded?.asset?.created_at || '').trim()
+        if (renderVersion) setImageRenderVersions((current) => ({ ...current, [publicPath]: renderVersion }))
+        stagedImages.push(publicPath)
       }
       setImageList((current) => {
         const next = [...current]
@@ -1207,8 +1212,8 @@ export default function ProductForm({
       // Positions 4-5 may be an existing admin-created gallery. They are
       // preserved on ordinary edits; all add paths above still stop at the
       // caller's 3/5 action limit.
-      image_gallery: imageList.slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
-      image_path: imageList[0] || '',
+      image_gallery: imageList.map((path) => canonicalizePersistedMediaPath(path)).filter(Boolean).slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
+      image_path: canonicalizePersistedMediaPath(imageList[0]),
     }
     // D6: renaming an EXISTING product that shares its name with siblings
     // asks whether the whole group carries (9.1's regroup) or only this
@@ -1457,7 +1462,7 @@ export default function ProductForm({
                       }}
                       onDragEnd={() => setDragImageIndex(null)}
                     >
-                      <img src={image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" />
+                      <img src={buildCacheBustedMediaPath(image, imageRenderVersions[image]) || image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" />
                       {index === 0 ? (
                         <span className="absolute left-1 top-1 rounded bg-blue-600/90 px-1 py-0.5 text-[9px] font-medium text-white">
                           {tr('primary', 'Primary', 'រូបសំខាន់')}
@@ -2027,7 +2032,13 @@ export default function ProductForm({
               title={tr('choose_product_image', 'Choose product image', 'ជ្រើសរើសរូបភាពផលិតផល')}
               layer={modalLayer}
               onClose={() => setFilePickerOpen(false)}
-              onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= imageLimit ? current : [...current, publicPath])}
+              onSelect={(publicPath, asset) => {
+                const canonicalPath = canonicalizePersistedMediaPath(publicPath)
+                if (!canonicalPath) return
+                const renderVersion = String(asset?.updated_at || '').trim()
+                if (renderVersion) setImageRenderVersions((current) => ({ ...current, [canonicalPath]: renderVersion }))
+                setImageList((current) => current.includes(canonicalPath) || current.length >= imageLimit ? current : [...current, canonicalPath])
+              }}
             />
           ) : null}
           {scannerField ? (
