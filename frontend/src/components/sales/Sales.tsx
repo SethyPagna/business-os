@@ -752,7 +752,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       return
     }
     aliveRef.current = true
-    loadSales(loadedOnceRef.current)
+    // Entering Sales or changing a visible filter is an active user read.
+    // Keep already loaded rows on failure, but do not hide that failure behind
+    // a silent refresh: the existing error surface includes the Retry action.
+    loadSales(false)
   }, [clearLoadWatchdog, isActive, loadSales])
 
   useEffect(() => {
