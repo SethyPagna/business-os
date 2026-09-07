@@ -85,10 +85,10 @@ const formSource = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
 assert.doesNotMatch(formSource, /Math\.min\(5, existingCount/)
 assert.doesNotMatch(formSource, /next\.length < 5/)
 assert.match(formSource, /Math\.min\(imageLimit, existingCount/)
-assert.match(formSource, /next\.length < imageLimit/)
+assert.match(formSource, /current\.length >= imageLimit \? current : \[\.\.\.current, publicPath\]/)
 assert.match(
   formSource,
-  /image_gallery: imageList\.map\(\(path\) => canonicalizePersistedMediaPath\(path\)\)\.filter\(Boolean\)\.slice\(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES\)/,
+  /image_gallery: savableImageList\.map\(\(path\) => canonicalizePersistedMediaPath\(path\)\)\.filter\(Boolean\)\.slice\(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES\)/,
   'the editor persists canonical library paths before applying the administrator gallery cap',
 )
 
