@@ -197,7 +197,8 @@ const closedCancelledReport = telegram.formatShiftReport('Shop', closedThenCance
 assert.equal(telegram.shiftFilters(closedThenCancelled, Date.parse('2026-09-05T12:00:00.000Z')).createdTo, closedThenCancelled.closed_at)
 assert.ok(closedCancelledReport.includes('To / ទៅ: 04/09/2026 17:02'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Cancelled at / បោះបង់នៅ: 05/09/2026 09:30'), closedCancelledReport)
-assert.ok(closedCancelledReport.includes('Counted cash / សាច់ប្រាក់បានរាប់: $75.00 · 100,000៛'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('Closing cash / សាច់ប្រាក់បិទវេន: $75.00 · 100,000៛'), closedCancelledReport)
+assert.ok(!closedCancelledReport.includes('Counted cash / សាច់ប្រាក់បានរាប់:'), closedCancelledReport)
 // ... beside the OPENING count, which is the half the owner said was missing.
 assert.ok(closedCancelledReport.includes('Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Invoices / វិក្កយបត្រ: 3'), closedCancelledReport)
