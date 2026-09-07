@@ -82,7 +82,12 @@ test('groups apply only after EVERY row is decided, with exactly one Keep', () =
 
 test('Resolve edits IN PLACE via a float — the tab never navigates away', () => {
   assert.match(src, /const \[editTarget, setEditTarget\] = useState<ClusterProduct \| null>/)
-  assert.match(src, /updateProduct\(editTarget\.id, \{/)
+  // The body used to be an inline object literal. N34's link-over prompt has
+  // to be able to send the operator's "keep them separate" answer on the same
+  // save, so the literal became `keepSeparate ? withKeepSeparateDecision(body)
+  // : body`. What this test is about is unchanged and still pinned: the edit
+  // goes to editTarget.id, in place, from this surface.
+  assert.match(src, /await updateProduct\(editTarget\.id, keepSeparate \? withKeepSeparateDecision\(body\) : body\)/)
   assert.match(src, /<Modal title=/, 'the edit float is the shared Modal')
   assert.ok(!src.includes('onResolve'), 'no navigation-out prop remains')
 })

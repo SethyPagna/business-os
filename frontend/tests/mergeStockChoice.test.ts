@@ -179,8 +179,20 @@ test('there is ONE shared flow, and all three twin-resolving surfaces use it', (
 })
 
 test('saving a product into an existing twin offers the merge instead of dead-ending', () => {
-  assert.match(productForm, /duplicateCollisionFrom\(error\)/)
-  assert.match(productForm, /'duplicate_product'/, 'the 409 the server sends is what opens the merge')
+  // duplicateCollisionFrom was a ProductForm-local reader of the 409, and the
+  // Conflicts editor had a second one. N34 needed BOTH to understand the same
+  // structured refusal (which candidates, which answers this door accepts), so
+  // the reader moved into helpers/identityLinkOver.ts as identityCollisionFrom
+  // and the response code moved with it -- which is why the code literal is no
+  // longer in the form. Pinning it here would now be pinning the copy's
+  // absence as a failure.
+  assert.match(productForm, /identityCollisionFrom\(error\)/)
+  const linkOverHelper = read('components', 'products', 'helpers', 'identityLinkOver.ts')
+  assert.match(linkOverHelper, /'duplicate_product'/, 'the 409 the server sends is what opens the merge')
+  assert.ok(
+    !/'duplicate_product'/.test(productForm) && !/'duplicate_product'/.test(duplicatesTab),
+    'ONE reader of the refusal: a second copy in a surface drifts the moment the Worker adds a resolution',
+  )
   assert.match(productForm, /if \(outcome === 'merged'\)/)
 })
 

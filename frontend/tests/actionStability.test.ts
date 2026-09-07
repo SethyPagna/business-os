@@ -705,11 +705,34 @@ await runTest('product variant creation uses shared guard and bounded mutation',
   assert.match(source, /if \(!beginSingleAction\(saveInFlightRef, \{ blocked: saving \}\)\) return/)
   assert.match(source, /finishSingleAction\(saveInFlightRef\)[\s\S]*return[\s\S]*setSaving\(true\)/, 'blank-name validation should release the guard before returning')
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)[\s\S]*setSaving\(false\)/)
-  assert.ok(mutationLines.length === 1, 'variant modal should have one variant create mutation path')
-  assert.ok(
-    mutationLines.every((line) => line.includes('runVariantMutation')),
-    `unbounded variant mutation lines:\n${mutationLines.filter((line) => !line.includes('runVariantMutation')).join('\n')}`,
-  )
+  // TWO create calls now, not one: the variant door gained N34's identity
+  // question, so there is the ordinary save and the retry that carries the
+  // operator's "keep them separate" answer after the Worker's 409. The point
+  // of this count was never "exactly one call" -- it was "no forgotten door".
+  assert.ok(mutationLines.length === 2,
+    'variant modal has exactly two create paths: the save, and the keep-separate retry after the 409')
+  assert.ok(mutationLines.some((line) => /withKeepSeparateDecision\(payload\)/.test(line)),
+    'the second path is the kept-separate retry, not an unnoticed duplicate of the first')
+  // Boundedness was checked by asking whether runVariantMutation appeared on
+  // the SAME LINE as the call. That is a fact about formatting, not about the
+  // code: both calls are wrapped, and both fail a same-line grep now that the
+  // wrapper's argument list is spread over three lines. The check is what
+  // matters, so it is now structural -- every call site must sit inside a
+  // runVariantMutation( ... ) -- and it is controlled against a synthetic
+  // unwrapped call, because a boundedness check that cannot fail is worse
+  // than none.
+  const boundedCallSites = (text: string) => {
+    const sites = [...text.matchAll(/getProductVariantApi\(\)\.createProductVariant\(/g)].map((m) => m.index ?? 0)
+    return sites.length > 0
+      && sites.every((at) => /runVariantMutation\(\s*(\r?\n\s*)?\(\) =>\s*$/.test(text.slice(Math.max(0, at - 120), at)))
+  }
+  const UNWRAPPED_CONTROL = [
+    '      const response = await getProductVariantApi().createProductVariant(payload)',
+  ].join('\n')
+  assert.equal(boundedCallSites(UNWRAPPED_CONTROL), false,
+    'CONTROL: the boundedness probe must reject a bare createProductVariant call, or it proves nothing')
+  assert.ok(boundedCallSites(source),
+    'every variant create must run inside runVariantMutation, which is what bounds it with withLoaderTimeout')
 })
 
 await runTest('product page save and delete actions use shared guards and bounded mutations', () => {
