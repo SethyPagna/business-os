@@ -95,6 +95,20 @@ type MoneyFormatter = (value: number | string) => string
 type SalesGroupMode = 'time' | 'time+action'
 type SortDirection = 'asc' | 'desc'
 
+type PendingSalesLoad = { silent: boolean }
+
+// A trailing load represents newer filters or a sync event that arrived while
+// the current request was in flight. It is safe to replay after a successful
+// response, but replaying it after a timeout/failure immediately clears the
+// error and starts another foreground deadline. Keep the failed state stable
+// until the user explicitly retries; their retry reads the latest filters.
+function resolvePendingSalesLoad(
+  pending: PendingSalesLoad | null,
+  completedSuccessfully: boolean,
+): PendingSalesLoad | null {
+  return completedSuccessfully ? pending : null
+}
+
 interface SaleItemRecord {
   id?: number | string
   product_id?: number | string
@@ -444,7 +458,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // first page locally (historical receipts outside that page show "No data
   // found"). Products already uses the same one-slot trailing-load pattern:
   // coalesce bursts, then run once more with the latest callback/filters.
-  const pendingLoadRef = useRef<{ silent: boolean } | null>(null)
+  const pendingLoadRef = useRef<PendingSalesLoad | null>(null)
   const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
   const loadWatchdogRef = useRef<number | undefined>(undefined)
   const statusActionRef = useRef<Set<string>>(new Set())
@@ -543,6 +557,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const requestId = beginTrackedRequest(loadRequestRef)
     const controller = new AbortController()
     loadAbortRef.current = controller
+    let completedSuccessfully = false
     const promise = (async () => {
       if (!silent && aliveRef.current) {
         setLoading(true)
@@ -577,6 +592,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           setSales(rows)
           loadedOnceRef.current = true
           setLoadError(null)
+          completedSuccessfully = true
         }
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -600,9 +616,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     })()
     const wrappedPromise = promise.finally(() => {
       if (loadPromiseRef.current === wrappedPromise) loadPromiseRef.current = null
-      const pending = pendingLoadRef.current
+      const pending = resolvePendingSalesLoad(pendingLoadRef.current, completedSuccessfully)
+      // Always consume a queued automatic load. On failure, the visible Retry
+      // action starts one deliberate request with the latest filters instead.
+      pendingLoadRef.current = null
       if (pending) {
-        pendingLoadRef.current = null
         queueMicrotask(() => {
           const nextLoad = latestLoadRef.current || loadSales
           nextLoad(Boolean(pending.silent)).catch(() => {})
@@ -2072,6 +2090,15 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           }}
         />
       </div>
+
+      {loadError && !loading ? (
+        <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => loadSales(false)} className="btn-secondary px-3 py-1 text-xs">
+            {t('retry') || 'Retry'}
+          </button>
+        </div>
+      ) : null}
 
 
       <SalesListSurface
