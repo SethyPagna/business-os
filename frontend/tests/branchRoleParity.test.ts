@@ -69,14 +69,12 @@ runTest('both packages answer identically for every branch-name shape', () => {
   }
 })
 
-runTest('the rule itself: only the warehouse is refused a sale', () => {
+runTest('the rule itself: only the exact Shop may sell', () => {
   assert.equal(branchRoleFromName('  WAREHOUSE '), 'warehouse')
   assert.equal(branchCanSell('  WAREHOUSE '), false)
   assert.equal(branchCanSell('Shop'), true)
-  // An unrecognised name is not evidence of a stock-only branch: refusing it
-  // would break every deployment that calls its shop something else.
-  assert.equal(branchCanSell('Depot'), true)
-  assert.equal(branchCanSell(null), true)
+  assert.equal(branchCanSell('Depot'), false)
+  assert.equal(branchCanSell(null), false)
 })
 
 runTest('the rule itself: stock moves warehouse -> shop', () => {

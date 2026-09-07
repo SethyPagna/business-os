@@ -653,7 +653,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                         {fee.sale_receipt_number || fee.sale_id ? (
                           <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             <Receipt className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{fee.sale_receipt_number || `#${fee.sale_id}`}</span>
+                            <span className="truncate">{fee.sale_receipt_number ? `${fee.sale_receipt_number} · Sale ID #${fee.sale_id}` : `Sale ID #${fee.sale_id}`}</span>
                           </span>
                         ) : null}
                         {fee.branch_name ? (
@@ -725,7 +725,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   {fee.sale_receipt_number || fee.sale_id ? (
                     <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       <Receipt className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{fee.sale_receipt_number || `#${fee.sale_id}`}</span>
+                      <span className="truncate">{fee.sale_receipt_number ? `${fee.sale_receipt_number} · Sale ID #${fee.sale_id}` : `Sale ID #${fee.sale_id}`}</span>
                     </span>
                   ) : null}
                 </div>

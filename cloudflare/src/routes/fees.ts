@@ -8,6 +8,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
+import { branchCanSell } from '../lib/branchRoles'
 import type { Env } from '../index'
 
 // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
@@ -95,6 +96,44 @@ async function requireDeliveryContact(db: ReturnType<typeof getDb>, value: unkno
   const row = await db.prepare('SELECT id FROM delivery_contacts WHERE id = @id').get<{ id: number }>({ id })
   if (!row) throw new Error('INVALID_DELIVERY_CONTACT')
   return id
+}
+
+type FeeLink = { saleId: number | null; branchId: number }
+
+async function resolveFeeLink(
+  db: ReturnType<typeof getDb>,
+  saleValue: unknown,
+  branchValue: unknown,
+): Promise<FeeLink> {
+  const saleId = optionalPositiveId(saleValue)
+  const requestedBranchId = optionalPositiveId(branchValue)
+  if (saleValue !== undefined && saleValue !== null && saleValue !== '' && saleId == null) {
+    throw new Error('INVALID_SALE')
+  }
+  if (branchValue !== undefined && branchValue !== null && branchValue !== '' && requestedBranchId == null) {
+    throw new Error('INVALID_BRANCH')
+  }
+
+  if (saleId != null) {
+    const sale = await db.prepare(`
+      SELECT s.id, s.branch_id, b.name AS branch_name, b.is_active AS branch_active
+      FROM sales s LEFT JOIN branches b ON b.id=s.branch_id
+      WHERE s.id=@saleId
+    `).get<{ id: number; branch_id: number | null; branch_name: string | null; branch_active: number | null }>({ saleId })
+    const saleBranchId = Number(sale?.branch_id)
+    if (!sale || !Number.isSafeInteger(saleBranchId) || saleBranchId <= 0
+      || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name)) {
+      throw new Error('INVALID_SALE')
+    }
+    if (requestedBranchId != null && requestedBranchId !== saleBranchId) throw new Error('SALE_BRANCH_MISMATCH')
+    return { saleId, branchId: saleBranchId }
+  }
+
+  if (requestedBranchId == null) throw new Error('BRANCH_REQUIRED')
+  const branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=@id')
+    .get<{ id: number; name: string | null; is_active: number | null }>({ id: requestedBranchId })
+  if (!branch || Number(branch.is_active ?? 0) !== 1 || !branchCanSell(branch.name)) throw new Error('INVALID_BRANCH')
+  return { saleId: null, branchId: requestedBranchId }
 }
 
 // Labels are reusable tags (the /labels endpoint below feeds them back as
@@ -394,8 +433,16 @@ app.post('/', async (c) => {
   const amountUsd = round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0))
   const amountKhr = round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0))
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
-  const saleId = body.sale_id != null && body.sale_id !== '' ? Number(body.sale_id) : null
-  const branchId = body.branch_id != null && body.branch_id !== '' ? Number(body.branch_id) : null
+  let saleId: number | null
+  let branchId: number
+  try {
+    ({ saleId, branchId } = await resolveFeeLink(db, body.sale_id, body.branch_id))
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'SALE_BRANCH_MISMATCH') return c.json({ error: 'The linked sale and expense must use the same Shop branch.' }, 400)
+    if (code === 'INVALID_SALE') return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
+    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+  }
   let deliveryContactId: number | null
   try {
     deliveryContactId = await requireDeliveryContact(db, body.delivery_contact_id ?? body.deliveryContactId)
@@ -410,13 +457,17 @@ app.post('/', async (c) => {
     VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)
   `).run({
     feeType, label, amountUsd, amountKhr, feeDate,
-    saleId: Number.isFinite(saleId as number) ? saleId : null,
-    branchId: Number.isFinite(branchId as number) ? branchId : null,
+    saleId,
+    branchId,
     deliveryContactId, notes, createdBy: user.id, createdByName: user.username || null, now,
   })
 
   const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id: result.lastInsertRowid })
-  await audit(c.env, user.id, user.username || null, 'create', 'fee', result.lastInsertRowid, { fee_type: feeType, amount_usd: amountUsd, amount_khr: amountKhr })
+  await audit(c.env, user.id, user.username || null, 'create', 'fee', result.lastInsertRowid, {
+    after: fee,
+    sale_id: saleId,
+    branch_id: branchId,
+  })
   await broadcast(c.env, 'fees', { type: 'created', id: result.lastInsertRowid })
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'fees',
@@ -460,8 +511,20 @@ app.put('/:id', async (c) => {
   const amountUsd = body.amount_usd !== undefined || body.amountUsd !== undefined ? round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0)) : existing.amount_usd
   const amountKhr = body.amount_khr !== undefined || body.amountKhr !== undefined ? round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0)) : existing.amount_khr
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
-  const saleId = body.sale_id !== undefined ? (body.sale_id === null || body.sale_id === '' ? null : Number(body.sale_id)) : existing.sale_id
-  const branchId = body.branch_id !== undefined ? (body.branch_id === null || body.branch_id === '' ? null : Number(body.branch_id)) : existing.branch_id
+  let saleId: number | null
+  let branchId: number
+  try {
+    ({ saleId, branchId } = await resolveFeeLink(
+      db,
+      body.sale_id !== undefined ? body.sale_id : existing.sale_id,
+      body.branch_id !== undefined ? body.branch_id : existing.branch_id,
+    ))
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'SALE_BRANCH_MISMATCH') return c.json({ error: 'The linked sale and expense must use the same Shop branch.' }, 400)
+    if (code === 'INVALID_SALE') return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
+    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+  }
   let deliveryContactId = existing.delivery_contact_id
   if (body.delivery_contact_id !== undefined || body.deliveryContactId !== undefined) {
     try {
@@ -481,7 +544,12 @@ app.put('/:id', async (c) => {
   `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id })
 
   const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
-  await audit(c.env, user.id, user.username || null, 'update', 'fee', id, { fee_type: feeType, amount_usd: amountUsd, amount_khr: amountKhr })
+  await audit(c.env, user.id, user.username || null, 'update', 'fee', id, {
+    before: existing,
+    after: fee,
+    sale_id: saleId,
+    branch_id: branchId,
+  })
   await broadcast(c.env, 'fees', { type: 'updated', id })
   return c.json({ fee })
 })
@@ -500,7 +568,7 @@ app.delete('/:id', async (c) => {
   const db = getDb(c.env)
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
-  const existing = await db.prepare(`SELECT id FROM fees WHERE id = @id`).get<{ id: number }>({ id })
+  const existing = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   if (!existing) return c.json({ error: 'Fee not found' }, 404)
 
   const pendingId = await maybeQueueForReview(c.env, user, 'fees', {
@@ -515,7 +583,7 @@ app.delete('/:id', async (c) => {
   }
 
   await db.prepare(`DELETE FROM fees WHERE id = @id`).run({ id })
-  await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, null)
+  await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null })
   await broadcast(c.env, 'fees', { type: 'deleted', id })
   return c.json({ success: true })
 })

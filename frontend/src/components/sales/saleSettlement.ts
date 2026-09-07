@@ -52,9 +52,9 @@ export function configuredSettlementMethods(raw: unknown): string[] {
     })
 }
 
-export function settlementRowsIssue(rows: readonly SettlementRow[], configured: readonly string[]): 'method' | 'amount' | null {
+export function settlementRowsIssue(rows: readonly SettlementRow[], configured: readonly string[], replaceRecorded = false): 'method' | 'amount' | null {
   for (const row of rows) {
-    const recorded = row.id.startsWith('recorded-')
+    const recorded = row.id.startsWith('recorded-') && !replaceRecorded
     if (!recorded && !configured.some((method) => paymentMethodIdentity(method) === paymentMethodIdentity(row.method))) return 'method'
     const usd = row.usd.trim() === '' ? 0 : Number(row.usd)
     const khr = row.khr.trim() === '' ? 0 : Number(row.khr)
@@ -175,12 +175,12 @@ export function initialSettlementRows(input: {
   return rows
 }
 
-export function buildSettlementPayload(rows: readonly SettlementRow[], configured: readonly string[]): SettlementPayload | null {
+export function buildSettlementPayload(rows: readonly SettlementRow[], configured: readonly string[], replaceRecorded = false): SettlementPayload | null {
   const details = rows
     .map((row) => ({
       method: canonicalSettlementMethod(row.method, configured),
-      amount_usd: row.id.startsWith('recorded-') ? roundUsd(amount(row.usd)) : Math.round((amount(row.usd) + Number.EPSILON) * 100) / 100,
-      amount_khr: row.id.startsWith('recorded-') ? roundLegacyKhr(amount(row.khr)) : Math.round(amount(row.khr)),
+      amount_usd: row.id.startsWith('recorded-') && !replaceRecorded ? roundUsd(amount(row.usd)) : Math.round((amount(row.usd) + Number.EPSILON) * 100) / 100,
+      amount_khr: row.id.startsWith('recorded-') && !replaceRecorded ? roundLegacyKhr(amount(row.khr)) : Math.round(amount(row.khr)),
     }))
     .filter((row) => row.method && (row.amount_usd > 0 || row.amount_khr > 0))
   if (!details.length) return null

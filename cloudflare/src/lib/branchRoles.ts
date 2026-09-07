@@ -23,12 +23,11 @@ export function branchRoleFromName(name: unknown): BranchRole {
 }
 
 // A branch that may appear on a SALE line (POS, add-items-to-sale, a
-// return's replacement line). Only the warehouse is refused: an
-// unrecognised branch name is not evidence that it is stock-only, and
-// refusing it would break every deployment that names its shop
-// something else.
+// replacement line). Sales are intentionally Shop-only: stock held at the
+// Warehouse or any other/missing branch must be transferred to the canonical
+// Shop first. Unknown and blank names are refused rather than guessed.
 export function branchCanSell(name: unknown): boolean {
-  return branchRoleFromName(name) !== 'warehouse'
+  return branchRoleFromName(name) === 'shop'
 }
 
 // Transfers move stock OUT of the warehouse and INTO the shop: the shop

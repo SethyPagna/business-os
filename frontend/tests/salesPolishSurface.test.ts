@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const salesSurface = readFileSync(new URL('../src/components/sales/SalesListSurface.tsx', import.meta.url), 'utf8')
+const salesPage = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
 const detail = readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
 const reports = readFileSync(new URL('../src/components/sales/ReportsHub.tsx', import.meta.url), 'utf8')
 const contactsShared = readFileSync(new URL('../src/components/contacts/shared.tsx', import.meta.url), 'utf8')
@@ -38,6 +39,9 @@ assert.match(salesSurface, /border-collapse text-xs/)
 assert.match(salesSurface, /setDetailSale\(sale\)/)
 assert.match(salesSurface, /flex flex-nowrap items-center justify-end/)
 assert.match(salesSurface, /space-y-2 md:hidden/, 'sales mobile cards remain separate from the dense desktop table through tablet widths')
+assert.doesNotMatch(salesPage, /CurrentShiftSummary/, 'the full current-shift block no longer occupies the space above sales stats')
+assert.equal((salesPage.match(/<ShiftHistoryModal/g) || []).length, 1, 'the compact header exposes one Shift action')
+assert.match(salesPage, /rangeActions=\{\([\s\S]*?<ShiftHistoryModal[\s\S]*?<SectionExportAction>/, 'Shift and export stay together in the responsive stats-header actions')
 
 assert.match(contactsShared, /border-collapse text-xs/)
 assert.match(contactsShared, /space-y-2 md:hidden/, 'contact mobile cards remain separate from the dense desktop table')

@@ -317,6 +317,29 @@ export function getSaleAmendments(id: number | string): Promise<unknown> {
   )
 }
 
+/**
+ * N41: one sale's RECORDS (GET /api/sales/:id/records) -- every change anybody
+ * ever made to it, from every writer that records itself somewhere different.
+ *
+ * NOT getSaleAmendments with a longer name. That one reads the amendment
+ * ledger and answers "how was this sale corrected"; this one unions the ledger
+ * with audit_logs, the bulk-operation receipt and the sale's own creation, so a
+ * sale cancelled inside a bulk action -- which writes nothing the ledger can
+ * see -- still says who cancelled it and when.
+ *
+ * No local fallback, for the same reason the amendment history has none: an
+ * empty list fabricated offline reads as "nobody ever touched this sale",
+ * which is a wrong answer rather than a missing one.
+ */
+export function getSaleRecords(id: number | string): Promise<unknown> {
+  return route(
+    `sales:records:${id}`,
+    () => apiFetch('GET', `/api/sales/${encodeId(id)}/records`),
+    null,
+    { raceLocalFallback: false },
+  )
+}
+
 export function getSalesExport(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   return route(

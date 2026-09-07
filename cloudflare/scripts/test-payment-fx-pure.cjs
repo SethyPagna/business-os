@@ -11,7 +11,7 @@ const actual = new Set(['actorSnapshot','movementBranchName',
   'db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
   'productBatches','batchCode','salesStatus','conflictControl','searchMatch','financialPrecision',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
-  'nativeSaleChange',
+  'nativeSaleChange','deliveryAmounts','saleRecords',
   'receiptNumber','clientTimestamp',
   // N21: routes/sales.ts resolves the display address through this kernel on
   // every write. A stub makes contactDisplayAddress undefined and the route
@@ -220,6 +220,60 @@ async function run() {
   assert.deepEqual(Object.values(f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get()), [0,null])
   assert.equal(f.sql.prepare('SELECT value FROM settings WHERE key=\'exchange_rate\'').get().value, '4300')
   console.log('PASS undo restores exact nullable 4100 snapshot and redo restores captured 4200 without current settings recomputation')
+
+  const correction = fixture(); seed(correction)
+  const deniedCorrection = await correction.call('/1/status', {
+    sale_status: 'completed',
+    expected_updated_at: 'sale-v1',
+    expected_exchange_rate: 4200,
+    client_request_id: 'payment-correction-without-reopen',
+    replace_existing_payment: true,
+    payment_details: [{ method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }],
+  })
+  assert.equal(deniedCorrection.status, 409, JSON.stringify(deniedCorrection))
+  assert.equal(deniedCorrection.body.code, 'payment_correction_not_allowed')
+
+  correction.sql.prepare("UPDATE sales SET sale_status='completed',updated_at='correction-v1' WHERE id=1").run()
+  const correctionStockBefore = correction.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
+  const reopened = await correction.call('/1/status', {
+    sale_status: 'awaiting_payment',
+    expected_updated_at: 'correction-v1',
+  })
+  assert.equal(reopened.status, 200, JSON.stringify(reopened))
+  assert.equal(correction.sql.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='sale_payment_correction_opened' AND entity_id='1'").get().n, 1)
+  const reopenedRevision = correction.sql.prepare('SELECT updated_at FROM sales WHERE id=1').get().updated_at
+  const corrected = await correction.call('/1/status', {
+    sale_status: 'completed',
+    expected_updated_at: reopenedRevision,
+    expected_exchange_rate: 4200,
+    client_request_id: 'payment-correction-after-reopen',
+    replace_existing_payment: true,
+    payment_details: [{ method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }],
+  })
+  assert.equal(corrected.status, 200, JSON.stringify(corrected))
+  assert.equal(corrected.body.paymentCorrection, true)
+  assert.equal(corrected.body.payment_method, 'ABA Bank')
+  assert.deepEqual(JSON.parse(corrected.body.payment_details), [{ method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }])
+  assert.equal(correction.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, correctionStockBefore)
+  assert.equal(correction.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+  const correctionReceipt = correction.sql.prepare("SELECT * FROM sale_mutation_receipts WHERE request_id='payment-correction-after-reopen'").get()
+  assert.ok(correctionReceipt)
+  assert.equal(JSON.parse(correctionReceipt.request_json).replace_existing_payment, true)
+  assert.equal(JSON.parse(correctionReceipt.before_json).payment_method, 'Legacy Cash')
+  assert.equal(JSON.parse(correctionReceipt.after_json).payment_method, 'ABA Bank')
+  const correctionHistory = correction.sql.prepare('SELECT * FROM action_history WHERE id=?').get(corrected.body.actionHistoryId)
+  assert.match(correctionHistory.label, /^Corrected payment for sale /)
+  await settlementAction.replaySaleSettlementAction(correction.env, user, 'undo', corrected.body.actionHistoryId, 0, { operation_id: correctionReceipt.id })
+  assert.deepEqual(
+    Object.values(correction.sql.prepare('SELECT sale_status,payment_method,amount_paid_usd FROM sales WHERE id=1').get()),
+    ['awaiting_payment','Legacy Cash',1.2346],
+  )
+  await settlementAction.replaySaleSettlementAction(correction.env, user, 'redo', corrected.body.actionHistoryId, 1, { operation_id: correctionReceipt.id })
+  assert.deepEqual(
+    Object.values(correction.sql.prepare('SELECT sale_status,payment_method,amount_paid_usd FROM sales WHERE id=1').get()),
+    ['completed','ABA Bank',5],
+  )
+  console.log('PASS completed-to-awaiting marker authorizes one atomic payment replacement with receipt, stock invariance, undo, and redo')
 
   const raced = fixture(); seed(raced)
   raced.barrier(() => raced.sql.prepare("UPDATE sales SET notes='concurrent' WHERE id=1").run())
