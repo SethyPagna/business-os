@@ -321,7 +321,7 @@ async function main() {
     assert.deepEqual(f.sql.prepare('SELECT batch_id,movement_id,quantity FROM stock_session_members').get(), { batch_id: null, movement_id: null, quantity: 0 })
     const history = f.sql.prepare('SELECT undo_payload FROM action_history').get()
     assert.deepEqual(Object.fromEntries(Object.entries(JSON.parse(history.undo_payload)).filter(([key]) => key.startsWith('requires_'))), {
-      requires_product_add: 1, requires_inventory_adjust: 0,
+      requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0,
     })
 
     for (const [label, actor] of [
@@ -338,6 +338,31 @@ async function main() {
       assert.deepEqual(receiptState(denied.sql), before, label)
       assert.equal(denied.sql.prepare('SELECT COUNT(*) n FROM pending_actions').get().n, 0, `${label} must not queue a review outside the product workflow`)
     }
+  })
+
+  await check('actual POST requires product-image authority only when create_receive changes images', async () => {
+    const blockedImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
+    const denied = fixture()
+    const deniedApp = loadStockSession('routes/inventory.ts', blockedImage).default
+    const imageRequest = zeroCreateRequest('zero-image-denied', 'Image denied cream')
+    imageRequest.items[0].product.image_path = '/uploads/stock-image.png'
+    imageRequest.items[0].product.image_gallery = ['/uploads/stock-image.png']
+    const before = denied.sql.serialize()
+    const deniedResponse = await deniedApp.request('/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(imageRequest),
+    }, denied.env, { waitUntil() {} })
+    assert.equal(deniedResponse.status, 403, await deniedResponse.clone().text())
+    assert.deepEqual(denied.sql.serialize(), before, 'permission denial must precede every database write')
+
+    const allowed = fixture()
+    allowed.sql.prepare("INSERT INTO file_assets(original_name,stored_name,public_path,mime_type,media_type,byte_size) VALUES(?,?,?,?, 'image', 10)")
+      .run('stock-image.png', 'stock-image.png', '/uploads/stock-image.png', 'image/png')
+    const receipt = await commitStockSession(allowed.env, user, { ...imageRequest, client_request_id: 'zero-image-allowed' })
+    assert.deepEqual(allowed.sql.prepare('SELECT image_path,sort_order FROM product_images WHERE product_id=?').all(receipt.items[0].productId), [
+      { image_path: '/uploads/stock-image.png', sort_order: 0 },
+    ])
+    const history = JSON.parse(allowed.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(receipt.actionHistoryId).undo_payload)
+    assert.equal(history.requires_product_image, 1)
   })
 
   await check('product-only permission admits only zero session POST in standalone and mounted routes', async () => {

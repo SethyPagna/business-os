@@ -27,9 +27,12 @@ async function main() {
   {
     const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) }
     const noProductAdd = { ...user, permissions: JSON.stringify({ inventory: true, products: 'review' }) }
-    assert.equal(api.canReplayStockSessionPayload(noAdjust, { requires_product_add: 1, requires_inventory_adjust: 0 }), true)
+    const noProductImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
+    assert.equal(api.canReplayStockSessionPayload(noAdjust, { requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0 }), true)
     assert.equal(api.canReplayStockSessionPayload(noAdjust, { requires_product_add: 1 }), false, 'legacy payloads fail closed to inventory adjust')
-    assert.equal(api.canReplayStockSessionPayload(noProductAdd, { requires_product_add: 1, requires_inventory_adjust: 0 }), false)
+    assert.equal(api.canReplayStockSessionPayload(noProductAdd, { requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0 }), false)
+    assert.equal(api.canReplayStockSessionPayload(noProductImage, { requires_product_add: 1, requires_product_image: 1, requires_inventory_adjust: 0 }), false)
+    assert.equal(api.canReplayStockSessionPayload(noProductImage, { requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0 }), true)
 
     const f = fixture()
     const r = await api.commitStockSession(f.env, noAdjust, zeroCreateRequest('zero-replay-permissions'))
@@ -51,6 +54,25 @@ async function main() {
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
     assert.equal(f.sql.prepare('SELECT generation FROM stock_session_operations').get().generation, 2)
     console.log('PASS zero catalog reload undo/redo needs product-add only, is lost-ack idempotent and writes no movements')
+  }
+  {
+    const noProductImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
+    const f = fixture()
+    f.sql.prepare("INSERT INTO file_assets(original_name,stored_name,public_path,mime_type,media_type,byte_size) VALUES(?,?,?,?, 'image', 10)")
+      .run('replay-image.png', 'replay-image.png', '/uploads/replay-image.png', 'image/png')
+    const request = zeroCreateRequest('zero-image-replay', 'Replay image cream')
+    request.items[0].product.image_path = '/uploads/replay-image.png'
+    request.items[0].product.image_gallery = ['/uploads/replay-image.png']
+    const r = await api.commitStockSession(f.env, user, request)
+    const legacyPayload = payload(f, r)
+    delete legacyPayload.requires_product_image
+    const beforeDenied = state(f)
+    await assert.rejects(
+      api.replayStockSession(f.env, noProductImage, 'undo', r.actionHistoryId, 0, legacyPayload),
+      error => error.statusCode === 403,
+    )
+    assert.deepEqual(state(f), beforeDenied, 'authoritative replay must derive image mutation from the snapshot')
+    console.log('PASS legacy image-session replay rechecks current product-image authority')
   }
   {
     const f = fixture()
