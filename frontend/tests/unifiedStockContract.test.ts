@@ -15,8 +15,13 @@ import {
 // the client-side flow), so the surviving contract gets its own file.
 // 'supplier' (11th, OPTIONAL — migration 0062) attributes the batch a row's
 // stock was bought from; 'free_goods' (12th, OPTIONAL — N14-D) declares a
-// $0.00 cost as free rather than an invented zero. Ten-column files must
-// keep importing unchanged.
+// $0.00 cost as free rather than an invented zero. A ten-column file still
+// PARSES cleanly (both columns just resolve to nothing, asserted below), but
+// since the stock-in receipt gate (N14-D) landed, an add/create row from
+// such a file is REFUSED server-side unless it can top up a lot the catalog
+// already attributes to a supplier -- see test-stock-action-apply-pure.cjs's
+// 'job-gate' case, which proves a blank-supplier row is rejected rather than
+// silently importing (sibling:F13 verifier wave 9).
 assert.deepEqual(UNIFIED_STOCK_HEADERS, [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
   'selling_price', 'wholesale_price', 'cost_price', 'batch', 'supplier', 'free_goods',
@@ -26,8 +31,11 @@ assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'War
   name: 'Product Name', barcode: 'UPC', shop: 'Shop Qty', warehouse: 'Warehouse', date: 'Sale Date', action: 'Movement',
   selling_price: 'Price USD', wholesale_price: 'Special Price', cost_price: 'Unit Cost', batch: 'Lot Code', supplier: 'Vendor Name', free_goods: 'Free',
 })
-// A ten-column file (no supplier or free_goods header) still maps cleanly —
-// both just resolve to nothing.
+// A ten-column file (no supplier or free_goods header) still PARSES cleanly
+// — both columns just resolve to nothing here. It does NOT still import
+// unchanged: since N14-D, an add/create row parsed from a file like this is
+// refused server-side unless it tops up an already-attributed lot (proven by
+// test-stock-action-apply-pure.cjs's 'job-gate' case, not by this file).
 const tenColumnMap = mapUnifiedStockHeaders(['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'wholesale_price', 'cost_price', 'batch'])
 assert.equal(tenColumnMap.supplier, null)
 assert.equal(tenColumnMap.free_goods, null)
