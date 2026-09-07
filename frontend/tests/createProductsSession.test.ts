@@ -25,6 +25,7 @@ import {
   createProductsSessionRow,
   emptyCreateProductsHeader,
   isCreateProductsHeaderDirty,
+  isSameQueuedProduct,
   summarizeCreateProductsSession,
   type CreateProductsHeader,
   type CreateProductsSessionRow,
@@ -518,6 +519,40 @@ runTest('brand+supplier and branch+received date pair from 640px up', () => {
   const modalSizes = readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
   assert.match(modalSizes, /size === 'lg' \? 'max-w-3xl'/, 'the pairing argument above depends on this width')
   assert.match(modalSource, /size="lg"/)
+})
+
+// The 2026-09-06 leading-zero report on the CREATE path. The session
+// refuses to queue one article twice, and it compared barcodes as plain
+// text -- so '0748485110011' and '748485110011' both went through and
+// became two catalog rows for one article. Red before the fold.
+runTest('the queued-twin guard folds a leading-zero barcode', () => {
+  const queued = { name: 'Padded Twin Serum', barcode: '748485110011', unitCostUsd: 3.5 }
+  assert.equal(
+    isSameQueuedProduct(queued, { name: 'Padded Twin Serum', barcode: '0748485110011', unitCostUsd: 3.5 }),
+    true,
+    'a padding twin of a queued line is the SAME product and must be refused',
+  )
+  assert.equal(isSameQueuedProduct(queued, { name: 'padded twin serum ', barcode: '00748485110011', unitCostUsd: 3.5 }), true)
+})
+
+runTest('the queued-twin guard still lets a genuinely different line through', () => {
+  const queued = { name: 'Padded Twin Serum', barcode: '748485110011', unitCostUsd: 3.5 }
+  // One digit different is a different article.
+  assert.equal(isSameQueuedProduct(queued, { name: 'Padded Twin Serum', barcode: '748485110012', unitCostUsd: 3.5 }), false)
+  // A different cost is deliberately a different LINE -- the session
+  // records what each delivery actually cost.
+  assert.equal(isSameQueuedProduct(queued, { name: 'Padded Twin Serum', barcode: '0748485110011', unitCostUsd: 4 }), false)
+  // A different name is a different product even on the same code.
+  assert.equal(isSameQueuedProduct(queued, { name: 'Other Serum', barcode: '0748485110011', unitCostUsd: 3.5 }), false)
+  // '0' is a placeholder, not a barcode: two blank-coded lines still
+  // compare on name and cost alone, exactly as before.
+  assert.equal(isSameQueuedProduct({ name: 'A', barcode: '', unitCostUsd: 1 }, { name: 'A', barcode: '', unitCostUsd: 1 }), true)
+})
+
+runTest('both queued-twin call sites go through the shared fold', () => {
+  const uses = modalSource.match(/isSameQueuedProduct\(/g) || []
+  assert.equal(uses.length, 2, 'the add and the edit path must both use it')
+  assert.doesNotMatch(modalSource, /row\.barcode\.trim\(\) === barcode/, 'no hand-rolled barcode equality may remain')
 })
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }

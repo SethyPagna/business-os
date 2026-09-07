@@ -65,13 +65,20 @@ function loadReal(relPath) {
   return mod.exports
 }
 
-// datedStockCountResolve.ts's only real relative import is ./batchCode
-// (self-contained, no further relative imports of its own).
+// datedStockCountResolve.ts's relative imports: ./sqlBinding, ./batchCode and
+// ./productIdentity (which reaches ./productDetailRule for the barcode fold).
 const relMap = {
   './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
   './sqlBinding.ts': () => loadReal('lib/sqlBinding.ts'),
   './batchCode': () => loadReal('lib/batchCode.ts'),
   './batchCode.ts': () => loadReal('lib/batchCode.ts'),
+  // Added with the leading-zero fold: the barcode match now goes through
+  // the shared identity fold instead of plain lower() equality, so the
+  // module graph reaches productIdentity and, under it, productDetailRule.
+  './productIdentity': () => loadReal('lib/productIdentity.ts'),
+  './productIdentity.ts': () => loadReal('lib/productIdentity.ts'),
+  './productDetailRule': () => loadReal('lib/productDetailRule.ts'),
+  './productDetailRule.ts': () => loadReal('lib/productDetailRule.ts'),
 }
 const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
@@ -377,6 +384,40 @@ async function main() {
     assert.strictEqual(resolved[0].rowNumber, 1)
     assert.strictEqual(unresolved.length, 1)
     assert.strictEqual(unresolved[0].rowNumber, 2)
+  })
+
+  // The 2026-09-06 leading-zero report on the dated-stock-count import
+  // path. Red before the fold: the sheet's padded code matched no product
+  // at all and the row came back unresolved for a human to reconcile, even
+  // though the catalog holds exactly that article.
+  await testAsync('a padded sheet barcode resolves to the bare stored one', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Main')
+    seedProduct(rawDb, { id: 50, name: 'Padded Twin', barcode: '748485110011' })
+    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '0748485110011', productName: null })])
+    assert.deepStrictEqual(unresolved, [])
+    assert.strictEqual(resolved.length, 1)
+    assert.strictEqual(resolved[0].productId, 50)
+  })
+
+  await testAsync('a bare sheet barcode resolves to the zero-padded stored one', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Main')
+    seedProduct(rawDb, { id: 51, name: 'Stored Padded', barcode: '0885909950805' })
+    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '885909950805', productName: null })])
+    assert.deepStrictEqual(unresolved, [])
+    assert.strictEqual(resolved.length, 1)
+    assert.strictEqual(resolved[0].productId, 51)
+  })
+
+  await testAsync('the fold still never resolves a code that differs by more than padding', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Main')
+    seedProduct(rawDb, { id: 52, name: 'Different Article', barcode: '748485110012' })
+    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '0748485110011', productName: null })])
+    assert.deepStrictEqual(resolved, [])
+    assert.strictEqual(unresolved.length, 1)
+    assert.strictEqual(unresolved[0].reason, 'product_not_found')
   })
 
   console.log(`\n${passed} PASS, ${failed} FAIL`)

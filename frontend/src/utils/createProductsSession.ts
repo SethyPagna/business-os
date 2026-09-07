@@ -20,6 +20,8 @@
 // agrees and a "Multiple ..." label when they do not -- so a header that was
 // overridden on one item can never make the session summary lie.
 
+import { identityBarcodeKey } from './productDetailRule.ts'
+
 export type CreateProductsHeader = {
   /** Free-text brand, exactly like ProductForm's own brand field. */
   brand: string
@@ -192,4 +194,33 @@ export function summarizeCreateProductsSession(
     supplier: collapse(rows.map((row) => row.supplierName), header.supplierName, labels.multipleSuppliers, labels.none),
     branch: collapse(rows.map((row) => row.branchName), '', labels.multipleBranches, labels.none),
   }
+}
+
+/**
+ * "these two queued lines are the same product".
+ *
+ * The session refuses to queue one article twice, and it decided that with
+ * a plain `row.barcode.trim() === barcode` comparison. Two lines typed
+ * '0748485110011' and '748485110011' therefore both got through and became
+ * TWO catalog rows for one article -- the 2026-09-06 leading-zero report
+ * reaching the create path, where it forks the catalog rather than merely
+ * failing a search.
+ *
+ * The barcode is compared through identityBarcodeKey, the one fold both
+ * packages carry; name and cost keep the comparisons they already had (a
+ * cost difference is deliberately a DIFFERENT line -- the session records
+ * what each delivery actually cost).
+ */
+export function isSameQueuedProduct(
+  left: { name?: unknown; barcode?: unknown; unitCostUsd?: unknown },
+  right: { name?: unknown; barcode?: unknown; unitCostUsd?: unknown },
+): boolean {
+  const name = (value: unknown): string => String(value ?? '').trim().toLowerCase()
+  const cents = (value: unknown): number => {
+    const parsed = Number(value)
+    return Math.round((Number.isFinite(parsed) ? parsed : 0) * 10000)
+  }
+  return name(left.name) === name(right.name)
+    && identityBarcodeKey(left.barcode) === identityBarcodeKey(right.barcode)
+    && cents(left.unitCostUsd) === cents(right.unitCostUsd)
 }
