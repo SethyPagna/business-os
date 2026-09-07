@@ -43,7 +43,31 @@ async function main() {
     const existingSaleColumns = new Set(f.sql.prepare('PRAGMA table_info(sales)').all().map(column => column.name))
     if (!existingSaleColumns.has('change_is_actual')) f.sql.exec(`ALTER TABLE sales ADD COLUMN change_is_actual INTEGER NOT NULL DEFAULT 0 CHECK (change_is_actual IN (0,1))`)
     if (!existingSaleColumns.has('change_exchange_rate')) f.sql.exec('ALTER TABLE sales ADD COLUMN change_exchange_rate REAL')
+    if (!existingSaleColumns.has('creation_snapshot_json')) {
+      f.sql.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0134_sale_creation_snapshot.sql'), 'utf8'))
+    }
     bulk.seed(f, 3)
+    const immutableCreationSnapshot = JSON.stringify({
+      version: 1,
+      origin: 'pos',
+      recorded_at: '2026-09-07T10:00:00.000Z',
+      sale_at: null,
+      receipt_number: 'BACKUP-SNAPSHOT',
+      actor: { id: 1, username: 'synthetic-review' },
+      cashier: { id: 1, username: 'synthetic-review' },
+      sale_status: 'completed',
+      products: [{ product_id: 1, product: 'Original Product', sku: 'ORIGINAL', quantity: 1, unit_price_usd: 5, line_total_usd: 5 }],
+      total_usd: 5,
+      payment_method: 'Cash',
+      payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+      amount_paid_usd: 5,
+      amount_paid_khr: 0,
+      change_usd: 0,
+      change_khr: 0,
+      delivery: { is_delivery: false, driver_name: null, driver_phone: null, delivery_fee_usd: 0, delivery_actual_cost_usd: null },
+    })
+    f.sql.prepare('INSERT INTO sales(id,receipt_number,creation_snapshot_json) VALUES(999,?,?)')
+      .run('BACKUP-SNAPSHOT', immutableCreationSnapshot)
     f.sql.exec("INSERT INTO users(id,username,name,password) VALUES(1,'synthetic-review','Synthetic','unused')")
     f.sql.pragma('foreign_keys = ON')
     f.sql.exec(`
@@ -96,6 +120,11 @@ async function main() {
       f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get(),
       { change_is_actual: 1, change_exchange_rate: 3950 },
       'full backup preserves explicit native-change provenance exactly',
+    )
+    assert.equal(
+      f.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=999').get().creation_snapshot_json,
+      immutableCreationSnapshot,
+      'full backup preserves the immutable sale creation envelope byte-for-byte',
     )
     assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
     f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
