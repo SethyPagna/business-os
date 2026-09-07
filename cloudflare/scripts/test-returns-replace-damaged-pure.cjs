@@ -261,8 +261,12 @@ async function run() {
     // ...draw their lot up front with compensation on every later failure...
     assert.match(salesSource, /await consumeDamagedLot\(db, \{ lotId: Number\(item\.damaged_lot_id\)/)
     assert.match(salesSource, /await restoreConsumedDamagedLots\(\)\s+await db\.prepare\('DELETE FROM sales WHERE id = \?'\)/)
-    // ...record which lot on the sale line, and ledger the draw
-    assert.match(salesSource, /@batch_id, @batch_label, @batch_expiry_date, @damaged_lot_id/)
+    // ...record which damaged lot on the sale line. Sellable batch metadata
+    // comes from the validated current-line CTE rather than trusting the
+    // caller's batch label/expiry strings.
+    assert.match(salesSource, /WITH current_batch AS \([\s\S]*?WHERE pb\.id = @batch_id[\s\S]*?pb\.variant_product_id = @product_id[\s\S]*?current_line AS \(/)
+    assert.match(salesSource, /\(SELECT batch_id FROM current_line\),\s*\(SELECT lot_code FROM current_line\),\s*\(SELECT expiry_date FROM current_line\),\s*@damaged_lot_id/)
+    assert.doesNotMatch(salesSource, /@batch_id,\s*@batch_label,\s*@batch_expiry_date,\s*@damaged_lot_id/)
     assert.match(salesSource, /DAMAGE_OUT_MOVEMENT/)
     // status transitions run damaged lines on the SAME heldQuantity state
     // machine, outside the branch-stock plan
