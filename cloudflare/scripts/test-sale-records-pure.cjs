@@ -231,6 +231,38 @@ runTest('before/after is money for the delivery kinds and units for a line', () 
   assert.deepStrictEqual(cost.after, { amount_usd: 0.75, total_usd: 15.5 })
 })
 
+runTest('adding delivery is one truthful record with driver and complete USD/KHR snapshots', () => {
+  const before = {
+    is_delivery: false, delivery_contact_id: null, delivery_contact_name: null,
+    delivery_contact_phone: null, delivery_contact_address: null,
+    delivery_fee_usd: 0, delivery_fee_khr: 0, delivery_fee_paid_by: null,
+    delivery_actual_cost_usd: null, delivery_actual_cost_khr: null,
+    exchange_rate: 4000, total_usd: 10, total_khr: 40000,
+  }
+  const after = {
+    is_delivery: true, delivery_contact_id: 9, delivery_contact_name: 'Driver Dara',
+    delivery_contact_phone: '0123', delivery_contact_address: 'Zone A',
+    delivery_fee_usd: 2.5, delivery_fee_khr: 10000, delivery_fee_paid_by: 'customer',
+    delivery_actual_cost_usd: 4, delivery_actual_cost_khr: 16000,
+    exchange_rate: 4000, total_usd: 12.5, total_khr: 50000,
+  }
+  const record = ledgerRecord({
+    id: 14, kind: 'delivery_added', product_name: null,
+    quantity_before: null, quantity_after: null,
+    amount_before_usd: 0, amount_after_usd: 2.5,
+    total_before_usd: 10, total_after_usd: 12.5,
+    before_json: JSON.stringify(before), after_json: JSON.stringify(after),
+    units_moved: 0, stock_skipped: 0, via: 'amend', user_name: 'sokha',
+    created_at: '2026-09-06 11:40:00',
+  })
+  assert.strictEqual(record.kind, 'delivery_added')
+  assert.strictEqual(record.actor_username, 'sokha')
+  assert.strictEqual(record.at, '2026-09-06 11:40:00')
+  assert.strictEqual(record.subject, 'Driver Dara')
+  assert.deepStrictEqual(record.before, before)
+  assert.deepStrictEqual(record.after, after)
+})
+
 runTest('an undo keeps the kind of what it moved and says so through via', () => {
   const undone = ledgerRecord({ ...LEDGER[1], id: 14, via: 'undo', quantity_before: 2, quantity_after: 1 })
   assert.strictEqual(undone.kind, 'item_qty_changed', 'the reader still needs to know WHICH line moved')

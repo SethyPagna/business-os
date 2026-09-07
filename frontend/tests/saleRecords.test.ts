@@ -75,6 +75,13 @@ const RECORDS: SaleRecord[] = [
     summary: 'Bulk status to cancelled',
     before: { sale_status: 'completed' }, after: { sale_status: 'cancelled' },
   },
+  {
+    id: 'amendment:6', source: 'ledger', at: '2026-09-06 10:00:00', at_ms: 3.5,
+    actor_username: 'sokha', kind: 'delivery_added', via: 'amend', subject: 'Driver Dara',
+    summary: 'Delivery added',
+    before: { is_delivery: false, delivery_fee_usd: 0, delivery_fee_khr: 0, delivery_actual_cost_usd: null, delivery_actual_cost_khr: null, total_usd: 10, total_khr: 40000 },
+    after: { is_delivery: true, delivery_contact_name: 'Driver Dara', delivery_contact_phone: '0123', delivery_contact_address: 'Zone A', delivery_fee_usd: 2.5, delivery_fee_khr: 10000, delivery_actual_cost_usd: 4, delivery_actual_cost_khr: 16000, total_usd: 12.5, total_khr: 50000 },
+  },
 ]
 
 runTest('every kind the Worker can emit has a translated label in BOTH packs', () => {
@@ -124,6 +131,19 @@ runTest('a record expands to before -> after, with money known to be money', () 
   assert.equal(status?.format, 'status', 'a status must be localized, not printed as awaiting_payment')
 })
 
+runTest('delivery addition exposes USD and KHR snapshots with their native formatters', () => {
+  const rows = saleRecordFieldRows(RECORDS[4])
+  assert.equal(rows.find((row) => row.field === 'delivery_fee_usd')?.format, 'money')
+  assert.equal(rows.find((row) => row.field === 'delivery_fee_khr')?.format, 'money_khr')
+  assert.equal(rows.find((row) => row.field === 'delivery_actual_cost_khr')?.format, 'money_khr')
+  assert.equal(rows.find((row) => row.field === 'total_khr')?.format, 'money_khr')
+  assert.equal(rows.find((row) => row.field === 'delivery_contact_name')?.after, 'Driver Dara')
+  assert.equal(rows.find((row) => row.field === 'is_delivery')?.format, 'boolean')
+  const float = read('../src/components/sales/SaleRecordsFloat.tsx')
+  assert.match(float, /row\.format === 'money_khr'[\s\S]*?fmtKHR\(parsed\)/,
+    'KHR snapshots must use the native riel formatter, not the USD formatter')
+})
+
 runTest('a field present on only one side still gets a row', () => {
   const rows = saleRecordFieldRows({
     id: 'x', before: { sale_status: 'completed' }, after: { sale_status: 'cancelled', cancel_reason: 'wrong item' },
@@ -162,6 +182,7 @@ runTest('the filter offers only the kinds this sale actually has, in the declare
     { kind: 'sale_created', count: 1 },
     { kind: 'item_qty_changed', count: 2 },
     { kind: 'delivery_cost_changed', count: 1 },
+    { kind: 'delivery_added', count: 1 },
     { kind: 'cancelled', count: 1 },
   ])
 })

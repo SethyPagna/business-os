@@ -160,12 +160,15 @@ runTest('both editors refuse through the module and SAY SO instead of doing noth
   assert.match(modal, /from '\.\.\/\.\.\/utils\/deliveryAmounts\.ts'/, 'SaleDetailModal must import the shared rule')
   const stages: Array<[string, string]> = [
     ['delivery fee', modal.slice(modal.indexOf('const stageDeliveryFeeAmendment'), modal.indexOf('const stageActualDeliveryCostAmendment'))],
-    ['actual delivery cost', modal.slice(modal.indexOf('const stageActualDeliveryCostAmendment'), modal.indexOf('const settlementDirty'))],
+    ['actual delivery cost', modal.slice(modal.indexOf('const stageActualDeliveryCostAmendment'), modal.indexOf('const stageDeliveryAddition'))],
+    ['delivery addition', modal.slice(modal.indexOf('const stageDeliveryAddition'), modal.indexOf('const settlementDirty'))],
   ]
   for (const [name, stage] of stages) {
     assert.ok(stage.length > 100, `could not find the ${name} stage function`)
     assert.match(stage, /parseDeliveryAmountUsd\(/, `the ${name} editor must validate through the shared rule`)
-    assert.match(stage, /deliveryAmountChanged\(/, `the ${name} editor must use the shared "did anything change" rule`)
+    if (name !== 'delivery addition') {
+      assert.match(stage, /deliveryAmountChanged\(/, `the ${name} editor must use the shared "did anything change" rule`)
+    }
     assert.match(stage, /setAmendMutationError\(/, `the ${name} editor must say why it refused`)
     // The defect this replaced: a refusal that was a bare `return`.
     assert.doesNotMatch(
@@ -177,7 +180,7 @@ runTest('both editors refuse through the module and SAY SO instead of doing noth
   // And the message has somewhere to appear when no confirm dialog opens --
   // which is exactly the staging-refusal case.
   const inline = modal.match(/amendMutationError && !amendConfirm \?/g) || []
-  assert.equal(inline.length, 2, 'both delivery editors must render the refusal beside their own field')
+  assert.equal(inline.length, 3, 'all three delivery editors must render the refusal beside their own field')
 })
 
 runTest('both editors are OFFERED under the same test the route accepts them under', () => {

@@ -49,9 +49,22 @@ runTest('every SaleAmendmentRequest declaration knows the same amendment kinds',
   const entries = declarationSources.map(([where, source]) => [where, amendmentKinds(source, where)] as const)
   const [baseWhere, baseKinds] = entries[0]
   assert.ok(baseKinds.includes('delivery_actual_cost_changed'), 'the actual-delivery-cost amendment should be declared')
+  assert.ok(baseKinds.includes('delivery_added'), 'the counter-to-delivery amendment should be declared')
   for (const [where, kinds] of entries.slice(1)) {
     assert.deepEqual(kinds, baseKinds, `${where} should declare the same kinds as ${baseWhere}`)
   }
+})
+
+runTest('delivery addition carries the selected driver and uses the sales-scoped picker', () => {
+  const modal = sources['components/sales/SaleDetailModal.tsx']
+  const transport = sources['api/salesTransport.ts']
+  assert.match(transport, /delivery_contact_id\?: number/, 'the reviewed request must carry the selected driver id')
+  assert.match(transport, /getSaleDeliveryOptions[\s\S]*?\/api\/sales\/delivery-options/, 'the picker must use the sales-scoped read')
+  assert.match(modal, /kind: 'delivery_added'[\s\S]*?delivery_contact_id: deliveryContact\.id/, 'the one confirm submits the selected driver')
+  assert.match(modal, /onChange=\{\(event\) => \{ setDeliverySearch\(event\.target\.value\); setDeliveryContact\(null\) \}\}/,
+    'changing search must clear a now-hidden driver selection')
+  assert.match(modal, /!toNumber\(sale\.is_delivery\) && canAmendThisSale/,
+    'the add control must follow the authoritative delivery flag even if a legacy contact snapshot exists')
 })
 
 runTest('Sales imports and uses the canonical transport request type', () => {

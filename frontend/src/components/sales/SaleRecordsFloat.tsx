@@ -167,6 +167,7 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
       return Number.isFinite(parsed) ? fmtKHR(parsed) : String(value)
     }
     if (row.format === 'status') return getStatusLabel(value, t)
+    if (row.format === 'boolean') return value ? label('yes', 'Yes') : label('no', 'No')
     if (row.format === 'quantity') return String(value)
     const lines = formatSaleRecordValueLines(row.field, value, fmtUSD)
     if (lines.length === 0) return label('not_recorded', 'Not recorded')

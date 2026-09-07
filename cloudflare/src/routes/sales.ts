@@ -2809,6 +2809,17 @@ app.post('/:id/amendments', async (c) => {
   if (!AMENDMENT_REQUEST_KINDS.has(kind)) {
     return c.json({ error: `Unknown amendment "${kind}".` }, 400)
   }
+  if (kind === 'delivery_added') {
+    const allowed = new Set([
+      'kind', 'delivery_contact_id', 'delivery_fee_usd', 'delivery_actual_cost_usd',
+      'notes', 'client_request_id', 'expected_exchange_rate', 'expected_updated_at', 'expectedUpdatedAt',
+      'clientTime', 'deviceTz', 'deviceName',
+    ])
+    const unexpected = Object.keys(body).filter((key) => !allowed.has(key))
+    if (unexpected.length) {
+      return c.json({ error: `Unexpected delivery amendment field: ${unexpected[0]}.` }, 400)
+    }
+  }
 
   const amendmentRequestId = normalizeClientRequestId(body.client_request_id)
   if (!amendmentRequestId) return c.json({ error: 'client_request_id is required for a sale amendment.', code: 'client_request_id_required' }, 400)
@@ -2934,7 +2945,7 @@ app.post('/:id/amendments', async (c) => {
       return c.json({ error: 'Choose a delivery driver for this sale.' }, 400)
     }
     const contactRow = await db.prepare(`
-      SELECT id,name,phone,COALESCE(NULLIF(address,''),area) AS delivery_address
+      SELECT id,name,phone,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
       FROM delivery_contacts WHERE id=?
     `).get<{ id: number; name: string | null; phone: string | null; delivery_address: string | null }>([contactId])
     if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.' }, 409)
@@ -3016,7 +3027,7 @@ app.post('/:id/amendments', async (c) => {
       WHERE id=@id
         AND COALESCE(name,'')=COALESCE(@name,'')
         AND COALESCE(phone,'')=COALESCE(@phone,'')
-        AND COALESCE(NULLIF(address,''),area,'')=COALESCE(@address,'')
+        AND COALESCE(NULLIF(TRIM(address),''),area,'')=COALESCE(@address,'')
     )`, {
       id: contactRow.id,
       name: contactRow.name,
