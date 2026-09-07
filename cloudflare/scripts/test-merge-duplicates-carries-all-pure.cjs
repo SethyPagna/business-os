@@ -20,6 +20,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8')
+const snapshotSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'productMergeSnapshot.ts'), 'utf8')
 
 // The whole per-duplicate fold now lives in the shared helper
 // foldDuplicateProductInto (used by both POST /merge-duplicates and
@@ -97,7 +98,7 @@ check('the merge carries the highest selling and WHOLESALE prices onto the keepe
   assert.ok(/wholesale_price_usd = @wholesaleUsd/.test(mergeBlock), 'highest USD wholesale price must be written to the keeper')
   assert.ok(/wholesale_price_khr = @wholesaleKhr/.test(mergeBlock), 'and the KHR half of the same tier')
   assert.ok(!/special_price_(usd|khr) = @/.test(mergeBlock), 'the retired special_price_* pair must never be written by a merge again')
-  assert.ok(/wholesale_price_usd, wholesale_price_khr/.test(mergeBlock), 'both pricing SELECTs must read the wholesale columns, not the zeroed pair')
+  assert.ok(/wholesale_price_usd, wholesale_price_khr/.test(snapshotSrc), 'the batched pricing SELECTs must read the wholesale columns, not the zeroed pair')
   assert.ok(/keeperPricingBefore:/.test(routeSrc), 'the keeper price before-image must be captured so undo is exact')
 })
 
@@ -125,8 +126,10 @@ check('the merge carries the discarded row\'s RETURNS, not just its sales', () =
   ]) {
     assert.ok(new RegExp(`table: '${table}'`).test(list), `${table} must be relinked onto the survivor, never orphaned`)
   }
-  assert.ok(/for \(const \{ table, column \} of MERGE_REPARENT_TABLES\)/.test(mergeBlock),
-    'the fold must walk the ONE shared list, so a table added there is moved without a second edit here')
+  assert.ok(/readProductMergeCaseSnapshot\(db, canonicalId, dup\.id, MERGE_REPARENT_TABLES\)/.test(mergeBlock),
+    'the fold must pass the ONE shared reparent list into the batched snapshot helper')
+  assert.ok(/for \(const \{ table, column, ids \} of reparentedByTable\)/.test(mergeBlock),
+    'the fold must write every link captured by the shared reparent snapshot')
   assert.ok(/reparentedByTable,/.test(routeSrc), 'undo cannot put back a link the reversal never recorded')
 })
 
@@ -140,8 +143,8 @@ check('the merge carries the links that are NOT integer product FKs', () => {
   //     moment the fold deactivated it: the discount left the catalogue.
   //   * products.parent_id -- a product FK not named *product_id, on products
   //     itself. A child variant was left rooted on the deactivated parent.
-  assert.ok(/SELECT id, product_ids FROM promotion_rules/.test(mergeBlock),
-    'the fold must read the promotion scopes it might have to rewrite')
+  assert.ok(/SELECT id, product_ids FROM promotion_rules/.test(snapshotSrc),
+    'the batched snapshot must read the promotion scopes the fold might have to rewrite')
   assert.ok(/UPDATE promotion_rules SET product_ids = @ids/.test(mergeBlock),
     'a promotion rule scoped to the discarded row must follow it onto the survivor')
   assert.ok(/promotionRulesBefore\.push\(/.test(mergeBlock) && /promotionRulesBefore,/.test(routeSrc),

@@ -97,7 +97,14 @@ function dbAdapter(d1) {
         },
       }
     },
-    batch: (stmts) => d1.batch(stmts),
+    batch: (stmts) => {
+      const readOnly = stmts.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
+      if (!readOnly) return d1.batch(stmts)
+      return Promise.resolve(stmts.map(({ sql, params }) => ({
+        success: true,
+        results: d1.prepare(sql).all(params == null ? {} : params),
+      })))
+    },
   }
 }
 
@@ -113,6 +120,7 @@ function loadProductsRoute(d1) {
     './db': {}, './sqlBinding': realSqlBinding, './productDetailRule': realDetailRule,
   })
   const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), {})
+  const realProductMergeSnapshot = loadTs(path.join('lib', 'productMergeSnapshot.ts'), { './db': {} })
   const realUndoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
     './actorSnapshot': realActorSnapshot,
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
@@ -130,6 +138,7 @@ function loadProductsRoute(d1) {
     '../lib/productDetailRule': realDetailRule,
     '../lib/productIdentity': realProductIdentity,
     '../lib/productMerge': realProductMerge,
+    '../lib/productMergeSnapshot': realProductMergeSnapshot,
     '../lib/sqlBinding': realSqlBinding,
   })
   return { mod, adapter, auditCalls, MERGE_REPARENT_TABLES: realUndoAppliers.MERGE_REPARENT_TABLES }
