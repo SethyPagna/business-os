@@ -71,6 +71,8 @@ import {
 import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
+import { collectContactPhones, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
+import { canonicalizePhone } from './phone'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
@@ -2038,10 +2040,12 @@ export async function classifyProducts(
 }
 
 export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppliers' | 'delivery_contacts', rows: ParsedCsvRow[], policyJson?: string | null): Promise<ImportRowResult[]> {
+  const contactMode = table === 'delivery_contacts' ? 'area' : 'address'
   // Full rows (not just id/name/phone) so a matched row can be merged
   // field-by-field against what's actually stored, per getContactMergePolicy.
   const existing = await db.prepare(`SELECT * FROM "${table}"`).all<Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
-  const byPhone = new Map<string, Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
+  type ExistingContact = Record<string, unknown> & { id: number; name: string | null; phone: string | null }
+  const byPhone = new Map<string, ExistingContact[]>()
   const byName = new Map<string, Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
   // Customers only -- membership_number is the account's real identifier
   // (see the auto-generation block below), so a re-import that supplies
@@ -2049,13 +2053,20 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   // if the name/phone on file has since changed, same as re-importing an
   // existing product by barcode does regardless of a name edit.
   const byMembership = table === 'customers'
-    ? new Map<string, Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
+    ? new Map<string, ExistingContact[]>()
     : null
   for (const record of existing) {
-    if (str(record.phone)) byPhone.set(str(record.phone).replace(/\D/g, ''), record)
+    for (const phoneKey of collectContactPhones(record, contactMode)) {
+      const contacts = byPhone.get(phoneKey) || []
+      contacts.push(record)
+      byPhone.set(phoneKey, contacts)
+    }
     if (str(record.name)) byName.set(lower(record.name), record)
     if (byMembership && str((record as { membership_number?: unknown }).membership_number)) {
-      byMembership.set(lower(str((record as { membership_number?: unknown }).membership_number)), record)
+      const membershipKey = lower(str((record as { membership_number?: unknown }).membership_number))
+      const contacts = byMembership.get(membershipKey) || []
+      contacts.push(record)
+      byMembership.set(membershipKey, contacts)
     }
   }
   const policy = getContactMergePolicy(policyJson)
@@ -2110,6 +2121,13 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   // written -- so later duplicates get folded into that pending row's
   // `data` directly instead of pointing at an existingId).
   const pendingCreateByName = new Map<string, number>()
+  const pendingCreateByPhone = new Map<string, { index: number; rowNumber: number; name: string }>()
+  const pendingCreateByMembership = new Map<string, { index: number; rowNumber: number; name: string }>()
+  const rememberPendingPhones = (index: number, rowNumber: number, data: Record<string, unknown>) => {
+    for (const phoneKey of collectContactPhones(data, contactMode)) {
+      if (!pendingCreateByPhone.has(phoneKey)) pendingCreateByPhone.set(phoneKey, { index, rowNumber, name: str(data.name) })
+    }
+  }
 
   // Same idea as pendingCreateByName, but for rows that DO match an
   // existing DB record: two rows in this file that both resolve to the
@@ -2126,46 +2144,23 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   const results: ImportRowResult[] = []
   for (const row of rows) {
     const name = str(row.name)
-    const phone = str(row.phone)
+    const contactState = buildImportedContactState(row, contactMode)
+    const phone = formatPhoneP8(contactState.primary.phone || str(row.phone))
+    const address = formatContactOptionPhones(contactState.serialized || str(row.address) || null, contactMode) as string | null
+    const phoneKey = canonicalizePhone(phone)
     if (!name) {
       results.push({ rowNumber: row._rowNumber, action: 'error', identifier: phone || null, existingId: null, message: 'Missing required field: name', changes: {}, data: row })
       continue
     }
-    // Match priority for customers: membership_number (the account's real
-    // id -- a re-import that supplies it should always find that exact
-    // account, even if the name/phone on file has since changed) -> phone
-    // -> name. Phone WAS deliberately excluded from customer matching in
-    // an earlier revision on the theory that phone isn't unique per
-    // customer (shared households etc.) -- superseded: contactDuplicates.ts
-    // enforces phone as hard-unique across every contact table already (see
-    // findContactDuplicates/findDuplicateContactClusters), and manual
-    // add/edit already blocks on it. Excluding phone here just meant CSV
-    // import was the one path that could still slip a colliding phone
-    // number past that rule. Phone match is restored for customers, same
-    // priority position suppliers/delivery contacts already used.
+    // Membership identifies an existing customer. A phone may identify the
+    // same-name contact, but a phone-only/different-name collision is never
+    // auto-merged: manual add/edit hard-blocks that shape, so import refuses
+    // the row and leaves it visible for review too.
     const membershipRaw = table === 'customers' ? str(row.membership_number) : ''
-    const membershipMatch = table === 'customers' && byMembership && membershipRaw ? byMembership.get(lower(membershipRaw)) || null : null
-    // For suppliers/delivery contacts, phone IS a real match key (a shared
-    // phone reliably means "the same business/driver re-submitted"). For
-    // customers it deliberately is NOT a match key -- a shared phone number
-    // commonly belongs to two different real people (a household, a family
-    // plan), so matching on it here could silently merge two different
-    // customers into one record. See customerPhoneMatch below for the
-    // narrower thing customers DO get from phone: a review flag, not a
-    // silent merge.
-    const phoneMatch = table !== 'customers' && phone ? byPhone.get(phone.replace(/\D/g, '')) || null : null
-    // Phone is still a hard-unique identifier for the app as a whole -- see
-    // lib/contactDuplicates.ts's findContactDuplicates/
-    // findDuplicateContactClusters, which block on a colliding phone for
-    // the manual add/edit path and surface it in the Duplicates review
-    // panel. CSV import used to have no equivalent check at all for
-    // customers -- a phone already on file could import onto (or as) a
-    // second customer with zero warning, the one path that could slip a
-    // colliding number past that rule. Fixed here as a REVIEW FLAG only
-    // (never auto-merges/auto-blocks, unlike phoneMatch above) so the
-    // household-sharing case above still isn't broken by it -- just made
-    // visible when it happens.
-    const customerPhoneMatch = table === 'customers' && phone ? byPhone.get(phone.replace(/\D/g, '')) || null : null
+    const membershipMatches = table === 'customers' && byMembership && membershipRaw ? byMembership.get(lower(membershipRaw)) || [] : []
+    const membershipMatch = membershipMatches.length === 1 ? membershipMatches[0] : null
+    const phoneMatches = phoneKey ? byPhone.get(phoneKey) || [] : []
+    const phoneMatch = phoneMatches.find((candidate) => normalizeContactName(candidate.name) === normalizeContactName(name)) || null
     const rawNameMatch = !membershipMatch && !phoneMatch ? byName.get(lower(name)) || null : null
     // A name match is this app's best guess, not a real identifier the way
     // phone (suppliers/delivery contacts) or membership_number (customers)
@@ -2176,6 +2171,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     const forceCreate = decisions[String(row._rowNumber)]?.action === 'force_create'
     const nameMatch = forceCreate ? null : rawNameMatch
     const match = membershipMatch || phoneMatch || nameMatch
+    const phoneConflictMatch = phoneMatches.find((candidate) => Number(candidate.id) !== Number(match?.id ?? NaN)) || null
     // membership_number is the strongest identifier for a customer (see
     // the match-priority comment above), so an explicit number on the row
     // always wins the match itself -- there's no way for this row to
@@ -2191,28 +2187,16 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     // surfaced so a reviewer can catch the "this really is someone else's
     // number" case before it merges in silently.
     const membershipNameMismatch = !!(membershipMatch && name && str(membershipMatch.name) && lower(name) !== lower(str(membershipMatch.name)))
-    // True whenever this row's phone belongs to a customer OTHER than the
-    // one this row itself resolved to (whichever match, if any, `match`
-    // below ends up being -- including no match at all, i.e. a plain
-    // 'create'). Covers both defense-in-depth cases in one flag: a
-    // membership_number match whose phone actually belongs to someone else
-    // (likely a typo'd/copy-pasted number), and a brand-new/name-matched
-    // row whose phone was already on file under a different customer.
-    const customerPhoneConflict = !!(
-      table === 'customers' && customerPhoneMatch && Number(customerPhoneMatch.id) !== Number(membershipMatch?.id ?? rawNameMatch?.id ?? NaN)
-    )
     // Contact Options (up to 3 extra name/phone/email/address-or-area
     // entries per contact -- see contactOptions.ts) come from either the
     // legacy indexed contact_label_1../contact_address_1.. CSV columns or a
     // single contact_options JSON cell matching serializeContactOptions()'s
     // own output. Falls back to the plain phone/email/address(/area)
     // columns when a row has neither, so existing CSVs import unchanged.
-    const contactMode = table === 'delivery_contacts' ? 'area' : 'address'
-    const contactState = buildImportedContactState(row, contactMode)
     const data: Record<string, unknown> = {
       name,
-      phone: contactState.primary.phone || phone || null,
-      address: contactState.serialized || str(row.address) || null,
+      phone: phone || null,
+      address,
       notes: str(row.notes) || null,
     }
     // Historical join/creation date -- see the Created/created_date/
@@ -2240,6 +2224,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     })()
     if (table === 'customers') {
       data.email = contactState.primary.email || str(row.email) || null
+      data.phone_normalized = phoneKey
       data.membership_number = str(row.membership_number) || null
       data.gender = normalizeContactGender(row.gender)
       // New customer, no membership_number on the row -- assign one now
@@ -2258,6 +2243,34 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       data.area = contactState.primary.area || str(row.area) || null
       data.gender = normalizeContactGender(row.gender)
     }
+    if (membershipMatches.length > 1) {
+      const message = `Membership number "${membershipRaw}" resolves to ${membershipMatches.length} existing customers after trim/case normalization. This row was refused for review; no membership number was changed.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: membershipRaw || phone || name,
+        existingId: null,
+        message,
+        warnings: [{ kind: 'membership_mismatch', message }],
+        changes: {},
+        data,
+      })
+      continue
+    }
+    if (phoneConflictMatch) {
+      const message = `Phone "${phone}" already belongs to a different ${table === 'customers' ? 'customer' : table === 'suppliers' ? 'supplier' : 'delivery contact'}, "${phoneConflictMatch.name}" (id ${phoneConflictMatch.id}). This row was refused instead of merging or creating a duplicate.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: phone || name,
+        existingId: phoneConflictMatch.id,
+        message,
+        warnings: [{ kind: 'membership_phone_conflict', message }],
+        changes: {},
+        data,
+      })
+      continue
+    }
     if (match) {
       // A name-only match (no phone match) means this row and the
       // existing record agree on name but nothing else was used to find
@@ -2271,9 +2284,6 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
         : []
       if (membershipNameMismatch) {
         matchWarnings.push({ kind: 'membership_mismatch', message: `Membership number "${membershipRaw}" belongs to "${match.name}" on file, but this row's name is "${name}" -- double-check this is the same person before applying.` })
-      }
-      if (customerPhoneConflict) {
-        matchWarnings.push({ kind: 'membership_phone_conflict', message: `Phone "${phone}" already belongs to a different customer, "${customerPhoneMatch!.name}" (id ${customerPhoneMatch!.id}), not "${match.name}" (id ${match.id}) that this row matched -- double-check before applying, this row's phone will not be applied to the wrong account.` })
       }
       if (policy.conflictMode === 'skip') {
         results.push({
@@ -2295,16 +2305,10 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       }
       // name is required regardless of rule -- fall back to whichever side has it.
       if (!str(merged.name)) merged.name = data.name || match.name
-      // customerPhoneConflict means this row's phone provably belongs to a
-      // DIFFERENT existing customer than the one this row matched -- never
-      // write it onto `match` regardless of conflictMode/fieldRules, or
-      // import would either create a second customer sharing that phone (a
-      // hard-unique field) or silently steal the number from its real
-      // owner. The row's other fields still apply normally; only `phone`
-      // is pinned to whatever `match` already has, and the warning above
-      // tells the reviewer why.
-      if (customerPhoneConflict) merged.phone = match.phone ?? null
-      if (table === 'customers') merged.membership_number = match.membership_number ?? null
+      if (table === 'customers') {
+        merged.membership_number = match.membership_number ?? null
+        merged.phone_normalized = canonicalizePhone(merged.phone)
+      }
       // Deliberately NOT auto-assigned on the merge path (only on true
       // creation, just above) -- a matched existing customer keeps
       // whatever membership_number it already had, blank or not; this
@@ -2331,6 +2335,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
           pendingData[key] = resolveContactFieldValue(pendingData[key], data[key], policy.fieldRules[key], defaultRule)
         }
         if (!str(pendingData.name)) pendingData.name = data.name || match.name
+        if (table === 'customers') pendingData.phone_normalized = canonicalizePhone(pendingData.phone)
         pending.changes = diffFields(match as unknown as Record<string, unknown>, pendingData)
         const dupWarning: ImportRowWarning = { kind: 'duplicate_row_match', message: `Also matched "${match.name}" (id ${match.id}), already being updated earlier in this file (row ${pending.rowNumber}) -- merged into that row instead of applying separately.` }
         pending.warnings = [...(pending.warnings || []), dupWarning]
@@ -2365,7 +2370,44 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     // own 'force_create' override says these are genuinely two different
     // people who happen to share a name (same override as the DB-match
     // case above).
-    const pendingIndex = forceCreate ? null : pendingCreateByName.get(lower(name))
+    const membershipKey = table === 'customers' ? lower(str(data.membership_number)) : ''
+    const pendingMembership = membershipKey ? pendingCreateByMembership.get(membershipKey) : null
+    if (pendingMembership && normalizeContactName(pendingMembership.name) !== normalizeContactName(name)) {
+      const message = `Membership number "${data.membership_number}" already belongs to a different customer being created earlier in this file (row ${pendingMembership.rowNumber}, "${pendingMembership.name}"). This row was refused for review.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: membershipKey,
+        existingId: null,
+        message,
+        warnings: [{ kind: 'membership_mismatch', message }],
+        changes: {},
+        data,
+      })
+      continue
+    }
+    const pendingPhone = phoneKey ? pendingCreateByPhone.get(phoneKey) : null
+    if (pendingPhone && normalizeContactName(pendingPhone.name) !== normalizeContactName(name)) {
+      const message = `Phone "${phone}" already belongs to a different contact being created earlier in this file (row ${pendingPhone.rowNumber}, "${pendingPhone.name}"). This row was refused.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: phone || name,
+        existingId: null,
+        message,
+        warnings: [{ kind: 'membership_phone_conflict', message }],
+        changes: {},
+        data,
+      })
+      continue
+    }
+    // A reviewer's force_create decision only overrides a tentative name
+    // match. Phone and membership are stronger identities, so identical
+    // rows sharing either one still fold into their earlier pending create
+    // instead of queuing a write that manual add would refuse.
+    const pendingIndex = pendingMembership?.index
+      ?? pendingPhone?.index
+      ?? (forceCreate ? null : pendingCreateByName.get(lower(name)))
     if (pendingIndex != null) {
       const pending = results[pendingIndex]
       const pendingData = pending.data as Record<string, unknown>
@@ -2374,6 +2416,11 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       // the earlier row in the file wins on anything both rows set.
       for (const key of Object.keys(data)) {
         if (!str(pendingData[key]) && str((data as Record<string, unknown>)[key])) pendingData[key] = (data as Record<string, unknown>)[key]
+      }
+      if (table === 'customers') pendingData.phone_normalized = canonicalizePhone(pendingData.phone)
+      rememberPendingPhones(pendingIndex, pending.rowNumber, pendingData)
+      if (table === 'customers' && str(pendingData.membership_number)) {
+        pendingCreateByMembership.set(lower(str(pendingData.membership_number)), { index: pendingIndex, rowNumber: pending.rowNumber, name: str(pendingData.name) })
       }
       results.push({
         rowNumber: row._rowNumber,
@@ -2394,15 +2441,10 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     const forcedNote: ImportRowWarning[] = forceCreate && (rawNameMatch || pendingCreateByName.has(lower(name)))
       ? [{ kind: 'other', message: `Created as a separate contact from "${name}" on file/record, per reviewer override.` }]
       : []
-    // Brand-new customer whose phone is already on file under a different
-    // customer -- not blocked (could be a legitimate shared household
-    // number), but flagged so a reviewer notices instead of it silently
-    // creating what might really be a duplicate account.
-    const createPhoneConflictNote: ImportRowWarning[] = customerPhoneConflict
-      ? [{ kind: 'membership_phone_conflict', message: `Phone "${phone}" already belongs to an existing customer, "${customerPhoneMatch!.name}" (id ${customerPhoneMatch!.id}) -- this row is still being created as a new, separate customer. Double-check this isn't the same person before applying.` }]
-      : []
-    const createWarnings = [...forcedNote, ...createPhoneConflictNote]
+    const createWarnings = [...forcedNote]
     if (!forceCreate) pendingCreateByName.set(lower(name), results.length)
+    rememberPendingPhones(results.length, row._rowNumber, data)
+    if (table === 'customers' && membershipKey) pendingCreateByMembership.set(membershipKey, { index: results.length, rowNumber: row._rowNumber, name })
     results.push({
       rowNumber: row._rowNumber,
       action: 'create',
@@ -5994,7 +6036,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     } else if (job.type === 'customers' || job.type === 'suppliers' || job.type === 'delivery_contacts') {
       const table = job.type
       const columns = table === 'customers'
-        ? ['name', 'phone', 'address', 'notes', 'email', 'membership_number', 'gender']
+        ? ['name', 'phone', 'phone_normalized', 'address', 'notes', 'email', 'membership_number', 'gender']
         : table === 'suppliers'
           ? ['name', 'phone', 'address', 'notes', 'email', 'company', 'contact_person', 'gender']
           : ['name', 'phone', 'address', 'notes', 'area', 'gender']

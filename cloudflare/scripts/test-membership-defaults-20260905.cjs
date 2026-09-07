@@ -22,6 +22,9 @@ function load(file, dependencies = {}) {
   return m.exports
 }
 const membership = load('lib/membershipNumber.ts')
+const contactOptions = load('lib/contactOptions.ts')
+const phone = load('lib/phone.ts')
+const contactDuplicates = load('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone })
 const portal = load('routes/portal.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => next() },
@@ -48,8 +51,8 @@ const contacts = load('routes/contacts.ts', contactDependencies).default
 const contactsWrite = load('routes/contacts.ts', {
   ...contactDependencies,
   '../lib/conflictControl': load('lib/conflictControl.ts'),
-  '../lib/contactDuplicates': load('lib/contactDuplicates.ts', { './contactOptions': load('lib/contactOptions.ts') }),
-  '../lib/phone': load('lib/phone.ts'),
+  '../lib/contactDuplicates': contactDuplicates,
+  '../lib/phone': phone,
   '../lib/audit': { audit: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
@@ -57,8 +60,9 @@ const contactsWrite = load('routes/contacts.ts', {
 }).default
 const imports = load('lib/importEngine.ts', {
   './membershipNumber': membership,
-  './contactOptions': load('lib/contactOptions.ts'),
-  './phone': load('lib/phone.ts'),
+  './contactOptions': contactOptions,
+  './contactDuplicates': contactDuplicates,
+  './phone': phone,
   './batchCode': load('lib/batchCode.ts'),
   './searchMatch': load('lib/searchMatch.ts'),
 })
@@ -141,11 +145,13 @@ async function main() {
   const code = ts.transpileModule(applyBody, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   const statements = []
   new Function('job', 'actionable', 'statements', 'nowIso', code)(
-    { type: 'customers' }, [{ action: 'update', existingId: 1, data: { name: 'Member updated', phone: '12345678', address: null, notes: null, email: null, membership_number: 'REPLACE2', gender: null } }], statements, '2026-09-05 12:00:00',
+    { type: 'customers' }, [{ action: 'update', existingId: 1, data: { name: 'Member updated', phone: '012 345 678', phone_normalized: '012345678', address: null, notes: null, email: null, membership_number: 'REPLACE2', gender: null } }], statements, '2026-09-05 12:00:00',
   )
   for (const statement of statements) await db.prepare(statement.sql).run(statement.params)
-  const applied = await db.prepare('SELECT name,membership_number FROM customers WHERE id=1').get()
+  const applied = await db.prepare('SELECT name,phone,phone_normalized,membership_number FROM customers WHERE id=1').get()
   assert.equal(applied.name, 'Member updated')
+  assert.equal(applied.phone, '012 345 678')
+  assert.equal(applied.phone_normalized, '012345678', 'contact import apply keeps the canonical customer phone key fresh')
   assert.equal(applied.membership_number, ' legacy-Id ', 'apply cannot rewrite identity from a stale review')
 
   // --- undo/redo of a hard delete must not dead-end on a gap-fill race
