@@ -229,7 +229,7 @@ export default function GroupedReport(p: ReportViewProps) {
           }}
           maxHeight="70vh"
         />
-        <Fold open={!!open} onClose={() => setOpenKey(null)} anchorRef={anchorRef} title={open?.product_name || ''}>
+        <Fold className="reports-fold-panel" open={!!open} onClose={() => setOpenKey(null)} anchorRef={anchorRef} title={open?.product_name || ''}>
           <div className="p-2">
             {open ? (
               <ReceiptSheet
@@ -310,7 +310,7 @@ export default function GroupedReport(p: ReportViewProps) {
     { key: 'refund_usd', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd },
     { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: options.basis === 'revenue' },
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(basisValue(r, options.basis), totalBasis) },
-    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Credit'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
     { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
     { key: 'avg_order_usd', label: tr('avg_order', 'Avg order'), kind: 'money', value: (r) => r.avg_order_usd, defaultVisible: false },
     ...(showProfit
@@ -357,6 +357,7 @@ export default function GroupedReport(p: ReportViewProps) {
         maxHeight="70vh"
       />
       <Fold
+        className="reports-fold-panel"
         open={!!open}
         onClose={() => setOpenKey(null)}
         anchorRef={anchorRef}
@@ -378,7 +379,7 @@ export default function GroupedReport(p: ReportViewProps) {
                   .filter((grp) => statement.some((l) => l.group === grp))
                   .map((grp) => ({
                     key: grp,
-                    title: statementGroupLabel(grp, tr),
+                    title: grp === 'pending' ? undefined : statementGroupLabel(grp, tr),
                     highlight: isTheoreticalGroup(grp),
                     lines: statement.filter((l) => l.group === grp).map((l) => ({
                       key: l.key,

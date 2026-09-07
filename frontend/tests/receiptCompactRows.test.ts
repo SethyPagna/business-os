@@ -320,6 +320,17 @@ await runTest('the per-line qty column is untouched by the row removal', () => {
   assert.ok(noQty.includes('data-receipt-cell="qty"'), 'the flag empties the cell rather than dropping the track')
 })
 
+await runTest('item column headers stay literal English in every receipt language', () => {
+  for (const receipt_language of ['en', 'km', 'both']) {
+    const html = renderReceipt({ receipt_language })
+    const header = html.split('data-receipt-line="true"').find((chunk) => chunk.includes('data-receipt-cell="name"')) || ''
+    for (const label of ['Item', 'Qty', 'Price', 'Total']) {
+      assert.ok(header.includes(`>${label}</span>`), `${receipt_language}: missing literal ${label} header`)
+    }
+    assert.ok(!header.includes('ទំនិញ') && !header.includes('ចំនួន') && !header.includes('តម្លៃ'), `${receipt_language}: item headers must not be translated`)
+  }
+})
+
 await runTest('the retired row leaves no zombie behind', () => {
   assert.doesNotMatch(receiptSource, /totalQty/, 'no totalQty label, const or section may linger')
   assert.doesNotMatch(receiptSource, /total_qty/, 'and no field-order entry for it')

@@ -46,7 +46,7 @@ export interface ReportOptionsFoldProps {
 
 function Group({ title, hint, hintLabel, children }: { title: string; hint?: string; hintLabel?: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1">
+    <div className="report-segment space-y-1">
       <div className="flex items-center gap-1 text-[length:var(--ui-size-meta)] font-medium text-[var(--ui-ink-2)]">
         {title}
         {hint ? <InfoHint text={hint} label={hintLabel || title} /> : null}
@@ -79,6 +79,7 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
       open={open}
       onClose={onClose}
       anchorRef={anchorRef}
+      className="reports-fold-panel"
       title={tr('filters', 'Filters')}
       actions={
         <Button size="sm" variant="ghost" onClick={onReset} disabled={isDefault}>
@@ -116,7 +117,7 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
         <Group
           title={tr('profit', 'Profit')}
           hint={showProfit
-            ? tr('rpt_profit_hint', 'Profit = revenue − cost of goods sold + delivery fees charged − courier costs. Includes Not Paid sales. Operating expenses are deducted separately; this option selects which profit subtotal leads the summary.')
+            ? tr('rpt_profit_hint', 'Profit = revenue − cost of goods sold + delivery fees charged − courier costs. Includes Credit sales. Operating expenses are deducted separately; this option selects which profit subtotal leads the summary.')
             : tr('rpt_cost_hidden_hint', 'Cost and profit figures are visible to admins only.')}
         >
           {profitModes.map((m) => (

@@ -135,8 +135,147 @@
   min-width: 0;
   max-width: 100%;
   overflow-x: clip;
+  /* THE SIDE GUTTER, at every width. Owner, Sep 6: "ios pwa seems very left
+     edged, meaning no margins properly".
+
+     ROOT CAUSE. ReportsHub.tsx rendered
+     `embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'`, and SalesHubPage.tsx
+     -- the only mount point in the app -- always passes `embedded`. The
+     padded branch was dead code, so below 768px (where the first
+     `padding-inline` media query starts) the hub had NO horizontal padding
+     at all. The app shell's `<main>` pads by `env(safe-area-inset-left)`,
+     but that inset is 0px in portrait, which is exactly how a phone holds a
+     PWA -- so on an iPhone in standalone mode nothing stood between the
+     report and the rounded display edge. The fork is gone from the TSX; the
+     gutter lives here, where it can also carry the inset.
+
+     `max()`, not `+`: <main> already pads by the physical inset below md, so
+     adding it again would double it in landscape. This is a FLOOR -- 12px of
+     design gutter normally, the notch inset if that is ever larger (e.g. if
+     this surface is ever hosted outside that shell). The 0px fallbacks
+     matter: a bare `env()` is invalid on a browser without the feature and
+     would drop the whole declaration, reproducing the bug on desktop. */
+  padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));
+  padding-block: 8px;
 }
 
+/* ---------------------------------------------------------------------------
+   THE SIZE TOKENS THIS SURFACE OWNS, and the one multiplier Khmer moves.
+
+   Every size in the report is stated as `calc(<latin px> * var(--ui-km-boost))`
+   rather than a flat px. The reason is cascade mechanics, not style: the
+   desktop tier below re-declares `--ui-size-body` at the SAME specificity as
+   this rule, so a Khmer block that set a flat larger px here would simply be
+   overwritten at >=1024 and the boost would vanish on exactly the wide
+   screens the owner reads reports on. A multiplier survives, because the
+   Khmer rule at the bottom of this file (specificity 0-2-1) wins the
+   `--ui-km-boost` lookup on the element while each tier keeps owning its own
+   base size.
+
+   The h2/h3 tokens are declared here for the first time on this line. The
+   kit's SectionHeader/EmptyState/Fold ask for `--ui-size-h2` / `--ui-size-h3`,
+   which were declared NOWHERE -- an undeclared custom property makes
+   `font-size: var(--ui-size-h2)` invalid at computed-value time, so every
+   report section title was silently rendering at inherited body size. Scoped
+   to this surface (not `:root`) so no other kit caller changes size. */
+[data-reports-hub],
+.reports-fold-panel,
+[data-reports-fold] {
+  --ui-km-boost: 1;
+  --ui-size-body: calc(12px * var(--ui-km-boost, 1));
+  --ui-size-meta: calc(11px * var(--ui-km-boost, 1));
+  --ui-size-h2: calc(15px * var(--ui-km-boost, 1));
+  --ui-size-h3: calc(14px * var(--ui-km-boost, 1));
+  /* The receipt sheet's two smallest sizes have their OWN tokens, and are
+     deliberately absent from the >=1024 tier below.
+
+     They used to be hard-coded `text-[11px]` / `text-[10px]`, which Khmer
+     could not follow. Pointing them at `--ui-size-meta` fixed that and broke
+     something else: that token is 11px at the root but 13px from 1024px up, so
+     ENGLISH block meta went 11 -> 13px and the English line note went 10 ->
+     13px on every desktop width -- a change to Latin type in a lane whose
+     mandate was "make the KHMER text larger". Their own boost-aware tokens,
+     declared once, keep English at exactly 11/10px at every width (as at
+     6e3abfea) while Khmer reads 13.2/12px. */
+  --ui-size-receipt-meta: calc(11px * var(--ui-km-boost, 1));
+  --ui-size-note: calc(10px * var(--ui-km-boost, 1));
+  --ui-lh-heading: 1.3;
+  --ui-font-display: inherit;
+}
+
+/* ---------------------------------------------------------------------------
+   .report-segment -- THE segment shell (owner, Sep 6: "use borders for all
+   segments like up down, left and right, so see line borders").
+
+   One class, applied by ReportFrame (so every report view is a segment
+   exactly once), by the hub's desktop control row and shift block, by the
+   options fold's groups and by every receipt card. Deliberately NOT per-file
+   border utilities: the md+ layouts had already drifted into dropping the
+   frame (`md:border-0 md:bg-transparent` on the receipt sheet), which is the
+   drift a single class prevents.
+
+   The inset is a hairline: enough that the border never touches ink, never
+   enough to read as padding. Compactness is not being spent here -- the extra
+   room on a wide screen goes into the centred column's margins and into type
+   size, per the same message. */
+.report-segment {
+  min-width: 0;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface);
+  padding: 5px 7px;
+}
+
+/* A segment's two STATE tints have to be declared HERE, not as Tailwind
+   background utilities on the element.
+
+   `.report-segment` and `.bg-\[var\(--ui-warn-soft\)\]` have identical
+   specificity (0-1-0), so which one paints depends on stylesheet order -- and
+   this file ships in the lazily-imported ReportsHub CSS chunk, whose <link>
+   the browser appends AFTER the main stylesheet that carries the utilities
+   (verified in dist/: `.report-segment` is in ReportsHub-*.css, the two
+   `bg-[var(--ui-*-soft)]` utilities are in index-*.css). The segment
+   background would therefore paint over both tints. That is not cosmetic for
+   the warning one: the awaiting-payment block's tint is load-bearing
+   (S4R3-6) -- it is what stops a theoretical figure being read as a realised
+   one. An attribute selector (0-2-0) settles it by specificity instead of by
+   bundling order.
+
+   (`hover:` utilities are already 0-2-0 and keep working untouched.) */
+.report-segment[data-segment-selected='true'] {
+  background: var(--ui-accent-soft);
+}
+
+.report-segment[data-segment-highlight='true'] {
+  border-color: var(--ui-warn-line);
+  background: var(--ui-warn-soft);
+}
+
+/* The live-shift block is the one report segment whose BODY is a component
+   shared with three non-report callers (FeesPage, Sales, ShiftHistoryModal),
+   so ShiftSummary keeps drawing its own rounded gray-200 card and that card
+   cannot be removed at the source. Inside the report the card was a second
+   rectangle nested in the segment hairline, in the wrong ink and at four
+   times the inset -- and the same block drew NO frame at all while loading,
+   on a failed read, or when there is no open shift. The segment now supplies
+   the one frame in every state and this rule takes the private one out.
+
+   By SPECIFICITY (0-3-0), not by utility order: the Tailwind classes on that
+   element are 0-1-0 and their dark: variants 0-2-0, and Tailwind emits
+   .bg-transparent BEFORE .bg-white, .rounded-none before .rounded-xl and .p-0
+   before .p-3 -- so passing those utilities down would have lost three of the
+   four overrides to source order. Same argument as
+   .report-segment[data-segment-*] above.
+
+   Descendant matching cannot over-reach: .report-shift-plain is spelled on
+   exactly one ShiftSummary inside ShiftReport, and specificity is unchanged
+   at 0-3-0. */
+[data-reports-hub] .report-segment .report-shift-plain {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
 .reports-mobile-controls {
   position: sticky;
   top: 0;
@@ -228,25 +367,72 @@
 }
 
 /* Embedded reports need a gutter beside the sidebar at tablet widths too.
-   Keep phone density unchanged; wider desktops retain the larger gutter below. */
+   Keep phone density unchanged; wider desktops retain the larger gutter below.
+
+   EVERY tier repeats the `max(..., env(...))` floor, and that repetition is
+   load-bearing rather than defensive. `padding-inline` is a single property:
+   a tier that re-states it as a bare `clamp()` REPLACES the base rule's
+   floored value, so the safe-area inset would be paid below 768px and dropped
+   above it. And 768px is exactly where <main> stops paying it too
+   (App.tsx:1943 `pl-[env(safe-area-inset-left)] ... md:pl-0 md:pr-0`), while
+   the only orientation with a non-zero left/right inset -- landscape -- puts
+   every modern iPhone at >=812px. Bare clamps here reproduced the
+   "very left edged" report one media query higher up. */
 @media (min-width: 768px) {
   [data-reports-hub] {
-    padding-inline: clamp(12px, 2vw, 24px);
+    padding-inline: max(clamp(12px, 2vw, 24px), env(safe-area-inset-left, 0px)) max(clamp(12px, 2vw, 24px), env(safe-area-inset-right, 0px));
   }
 }
 
 /* Desktop-only, report-local readability. Do not enlarge global UI tokens
    or reduce the existing mobile/Khmer text and line-height floors. */
 @media (min-width: 1024px) {
-  [data-reports-hub] {
-    --ui-size-body: 14px;
-    --ui-size-meta: 13px;
+  /* SIZE tokens, shared with the PORTALLED fold.
+
+     A `Fold` renders into document.body, i.e. outside `[data-reports-hub]`, so
+     it inherits nothing from the hub and has to be named on its own. It was
+     named in the root token block and in the Khmer block but NOT here, so a
+     detail fold opened on a desktop report fell back to 12px/11px while the
+     report behind it read at 14px/13px -- the sibling drift, restated in the
+     cascade. Layout stays in the hub-only rule below on purpose: a floating
+     panel does not want a 74rem cap, auto margins or a 56px gutter. */
+  [data-reports-hub],
+  .reports-fold-panel,
+  [data-reports-fold] {
+    /* Boost-aware, never a flat px -- see the token block above: a flat px
+       here would silently cancel the Khmer boost from 1024px up. */
+    --ui-size-body: calc(14px * var(--ui-km-boost, 1));
+    --ui-size-meta: calc(13px * var(--ui-km-boost, 1));
+    --ui-size-h2: calc(17px * var(--ui-km-boost, 1));
+    --ui-size-h3: calc(15px * var(--ui-km-boost, 1));
     --ui-receipt-lh: 24px;
+  }
+
+  [data-reports-hub] {
     /* O9 names >=1024 too: the old clamp(20px, 3vw, 48px) gave 30.7px at
        1024, indistinguishable from the tablet gutter. 3.5vw with a 28px floor
        reads as a real margin from 1024 and hands over smoothly to the 1280
        tier (44.8px at 1279 -> 51.2px at 1280). */
-    padding-inline: clamp(28px, 3.5vw, 56px);
+    padding-inline: max(clamp(28px, 3.5vw, 56px), env(safe-area-inset-left, 0px)) max(clamp(28px, 3.5vw, 56px), env(safe-area-inset-right, 0px));
+    /* THE CENTRED DOCUMENT COLUMN (owner, Sep 6: "in small and large screens
+       move them more to the center...compact them").
+
+       This cap used to live in the 1536 tier at 96rem, so 1024-1535 ran the
+       full content width and 1920 still showed a 1536px slab. 74rem (1184px)
+       is a reading width: the widest report table (the compare-on income
+       statement, five columns) still fits inside it without reaching its own
+       horizontal scroller, and every tier from the first desktop breakpoint
+       up is now centred rather than only the widest one.
+
+       `width: 100%` is load-bearing and must stay: `[data-reports-hub]` is a
+       flex item of the page-scroll column, and per CSS Flexbox 9.6 a flex
+       item with an `auto` cross-axis margin is NOT stretched -- it shrinks to
+       fit-content, which made an earlier 96rem cap moot and floated the whole
+       hub at ~414px inside a 1700px column. The explicit width gives the auto
+       margins something to centre. */
+    width: 100%;
+    max-width: 74rem;
+    margin-inline: auto;
   }
   [data-reports-hub] .reports-overview-statement {
     max-width: 34rem;
@@ -262,30 +448,19 @@
    fix, so tablet and the existing desktop floor are unchanged. */
 @media (min-width: 1280px) {
   [data-reports-hub] {
-    padding-inline: clamp(40px, 4vw, 64px);
+    padding-inline: max(clamp(40px, 4vw, 64px), env(safe-area-inset-left, 0px)) max(clamp(40px, 4vw, 64px), env(safe-area-inset-right, 0px));
   }
 }
 
 @media (min-width: 1536px) {
   [data-reports-hub] {
-    /* A reading-width cap, not just more padding: past ~1536px + the 220px
-       sidebar the report body was running to 1600px wide with only 46-48px
-       either side. Capping and centering reads as real margin at 1920+.
-
-       REPAIR (verifier, Sep 6): `[data-reports-hub]` is a flex item of the
-       page-scroll `flex min-h-0 min-w-0 flex-1 flex-col` column in
-       ReportsHub.tsx. Per CSS Flexbox 9.6, a flex item with an `auto`
-       cross-axis margin (`margin-inline: auto` sets both inline margins to
-       auto on this block axis-column layout) is NOT stretched to the
-       container's cross size -- it shrinks to fit-content instead. That
-       made `max-width: 96rem` moot (fit-content never reaches it) and the
-       whole hub floated at ~414px wide inside a 1700px column. `width: 100%`
-       gives the item an explicit basis so the auto margins only center the
-       max-width cap, restoring the intended "centered reading column". */
-    width: 100%;
-    max-width: 96rem;
-    margin-inline: auto;
-    padding-inline: clamp(56px, 4vw, 80px);
+    /* The width cap and its auto margins moved UP to the 1024 tier (and down
+       from 96rem to 74rem) when the owner asked for the report "more to the
+       center" -- keeping them here as well would only restate what the 1024
+       tier already establishes. What still belongs at this tier is the
+       gutter: the last of the padding ladder, so the widest monitors keep a
+       visible inset between the centred column's border and its own edge. */
+    padding-inline: max(clamp(56px, 4vw, 80px), env(safe-area-inset-left, 0px)) max(clamp(56px, 4vw, 80px), env(safe-area-inset-right, 0px));
   }
 }
 
@@ -316,10 +491,30 @@
    because `body.lang-km .text-xs/.text-sm/.text-base` is global and every
    other lane is editing the surfaces it would reflow. */
 
-body.lang-km [data-reports-hub] {
-  /* A taller line box needs a taller row, or the row clips instead. */
-  --ui-row-h: 38px;
-  --ui-receipt-lh: 20px;
+/* KHMER SIZE (owner, Sep 6: "make the khmer text larger, as it is report, and
+   has so much space"). The app-wide compaction pass tuned Khmer for dense
+   operational screens; a report is read as a document and has room to spare,
+   so this surface -- and only this surface -- takes the type back up.
+
+   One multiplier, not a set of flat sizes: see the token block near the top
+   of this file for why (a flat size loses to the >=1024 tier's own
+   declaration). 1.2 lands the body at 14.4px on phone/tablet and 16.8px from
+   1024px up, against 12/14px for Latin, which is unchanged.
+
+   The row height and the receipt line box are DERIVED from the boosted size
+   rather than frozen. That is the Aug-31 clipping root cause restated: the
+   line box must not be shorter than the cluster's ink extent (~1.62em), and a
+   `.truncate`/fixed-height ancestor shears whatever falls outside it. A
+   hard-coded 20px line box chosen for 12px type would clip 14.4px type; a
+   38px row would clip a 27px line box at desktop. Tying both to
+   `--ui-size-body` means the floor moves with the type by construction. */
+body.lang-km [data-reports-hub],
+body.lang-km .reports-fold-panel,
+body.lang-km [data-reports-fold] {
+  --ui-km-boost: 1.2;
+  --ui-row-h: calc(36px * var(--ui-km-boost, 1));
+  --ui-receipt-lh: calc(var(--ui-size-body) * 1.62);
+  --ui-lh-heading: 1.62;
 }
 
 body.lang-km [data-reports-hub],
@@ -329,6 +524,9 @@ body.lang-km [data-reports-hub] button,
 body.lang-km [data-reports-hub] input,
 body.lang-km [data-reports-hub] select,
 body.lang-km [data-reports-hub] .truncate,
+body.lang-km .reports-fold-panel,
+body.lang-km .reports-fold-panel button,
+body.lang-km .reports-fold-panel .truncate,
 body.lang-km [data-reports-fold],
 body.lang-km [data-reports-fold] button,
 body.lang-km [data-reports-fold] th,
@@ -340,11 +538,13 @@ body.lang-km [data-reports-fold] td {
    block, so matching specificity + !important is required to lift them back
    over the clip threshold inside this surface only. */
 body.lang-km [data-reports-hub] .text-xs,
+body.lang-km .reports-fold-panel .text-xs,
 body.lang-km [data-reports-fold] .text-xs {
   line-height: 1.62 !important;
 }
 
 body.lang-km [data-reports-hub] .text-sm,
+body.lang-km .reports-fold-panel .text-sm,
 body.lang-km [data-reports-fold] .text-sm {
   line-height: 1.6 !important;
 }

@@ -41,8 +41,7 @@ import PeriodReport from './reports/PeriodReport.tsx'
 import ReportOptionsFold from './reports/ReportOptionsFold.tsx'
 import ReturnsReport from './reports/ReturnsReport.tsx'
 import SalesListReport from './reports/SalesListReport.tsx'
-import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
-import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
+import ShiftReport from './reports/ShiftReport.tsx'
 import {
   DEFAULT_REPORT_OPTIONS,
   REPORT_STORAGE_KEYS,
@@ -114,7 +113,9 @@ export function parsePaymentMethods(raw: unknown): string[] {
   }
 }
 
-export default function ReportsHub({ embedded = false }: { embedded?: boolean }) {
+// SalesHubPage still passes the compatibility `embedded` prop. Layout no
+// longer branches on it: the gutter is unconditional in reports-surface.css.
+export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier, user, settings } = useApp()
   const trh = useCallback((key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }, [t])
   const tStr = useCallback((key: string): string => { const v = t(key); return v == null ? key : v }, [t])
@@ -387,7 +388,8 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   const body = !viewProps || !view ? (
     <EmptyState icon={<BarChart3 className="h-5 w-5" />} title={trh('reports', 'Reports')} text={trh('rpt_no_access', 'No report is available for your permissions.')} />
   ) : view.id === 'overview' ? <OverviewReport {...viewProps} />
-    : view.id === 'periods' ? <PeriodReport {...viewProps} />
+    : view.id === 'shift' ? <ShiftReport {...viewProps} />
+      : view.id === 'periods' ? <PeriodReport {...viewProps} />
       : view.id === 'sales' ? <SalesListReport {...viewProps} />
         : view.id === 'returns' ? <ReturnsReport {...viewProps} />
           : view.id === 'expenses' ? <ExpensesReport {...viewProps} />
@@ -419,7 +421,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   )
 
   return (
-    <div className={embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'} data-reports-hub>
+    <div className="space-y-2" data-reports-hub>
       {compact ? (controlsFolded ? foldedControls : (
         <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
           {searchInput}
@@ -433,24 +435,13 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
           </div>
         </section>
       )) : (
-        <div className="reports-desktop-controls">
+        <div className="reports-desktop-controls report-segment">
           <ControlRow className="reports-desktop-primary" sticky search={searchSlot} range={rangePicker} filters={null} actions={collapsedTail} overflow={collapsedTail} />
           {presetControls}
         </div>
       )}
 
       {body}
-
-      {/* Shift blocks sit BELOW the report (reference: filters first, results
-          second, nothing above the filters). Same two components as before. */}
-      <CurrentShiftSummary showHistory={false} />
-      <section className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900" aria-label={trh('shift_history', 'Shift history')}>
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{trh('shift_history', 'Shift history')}</h2>
-          <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{trh('shift_history_all', 'Authorized shop history')}</p>
-        </div>
-        <ShiftHistoryPanel compact limit={50} />
-      </section>
 
       <ReportOptionsFold
         open={optionsOpen}
