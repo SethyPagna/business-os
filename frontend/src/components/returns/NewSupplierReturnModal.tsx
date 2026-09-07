@@ -14,7 +14,7 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ContactPicker from '../contacts/ContactPicker.tsx'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
-import { normalizeBarcodeKey, searchTermBarcodeKey, sortBySearchRelevance } from '../../utils/searchMatch.ts'
+import { filterAndRankSupplierReturnProducts } from './supplierReturnSearch.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
@@ -305,20 +305,11 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   // matched nothing at all, and the plain substring test could not see
   // through this catalogue's GTIN-14/EAN-13 leading-zero twins. The
   // barcode-key probe below is the same fold the server applies
-  // (normalizeBarcodeKey), and the sort is the shared client mirror of the
+  // validated barcode-key relation, and the sort is the shared client mirror of the
   // server ordering contract (utils/searchMatch.ts). A scan still only
   // narrows the list -- the operator picks the row.
   const filteredProducts = useMemo(() => {
-    const raw = search.trim()
-    const term = raw.toLowerCase()
-    if (!term) return products
-    const barcodeKey = searchTermBarcodeKey(raw)
-    const matches = products.filter((product) => {
-      if (barcodeKey && normalizeBarcodeKey(product.barcode) === barcodeKey) return true
-      const hay = `${product.name || ''} ${product.sku || ''} ${product.barcode || ''} ${product.category || ''} ${product.brand || ''}`.toLowerCase()
-      return hay.includes(term)
-    })
-    return sortBySearchRelevance(matches, raw)
+    return filterAndRankSupplierReturnProducts(products, search)
   }, [products, search])
 
   const selectedItems = useMemo<SupplierReturnItem[]>(() => {
