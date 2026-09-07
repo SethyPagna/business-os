@@ -183,6 +183,7 @@ const TYPED_DATE_SITES = [
   ['routes/promotions.ts', 'promotion starts_at / ends_at (Promotions page)'],
   ['lib/productBatches.ts', 'receiveBatchStock -- the shared receive kernel'],
   ['lib/stockSession.ts', 'the dates on a stock-in session'],
+  ['routes/fees.ts', 'fee_date on POST/PATCH /api/fees (Expenses form)'],
 ]
 for (const [rel, what] of TYPED_DATE_SITES) {
   const text = read(rel)

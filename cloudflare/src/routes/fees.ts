@@ -7,6 +7,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
+import { normalizeTypedDate } from '../lib/batchCode'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import type { Env } from '../index'
 
@@ -113,17 +114,28 @@ export function normalizeFeeLabel(value: unknown): string | null {
   return words.length > FEE_LABEL_MAX_CHARS ? words.slice(0, FEE_LABEL_MAX_CHARS).trim() : words
 }
 
-function normalizeDate(value: unknown): string {
+// fee_date is a business CALENDAR date a person TYPED into the Expenses
+// form (frontend/src/components/fees/FeeForm.tsx renders DateEntryInput,
+// which is day-first). It is therefore read with the shared typed-date
+// kernel, not with `new Date`: V8 reads a slash date MONTH-first, so
+// new Date('03/09/2026') is 9 March for the string that field calls
+// 3 September, and a genuinely day-first value past the 12th
+// ('25/12/2026') is Invalid Date -- which used to fall through to
+// businessToday() and file the expense on TODAY with no error at all.
+// An unreadable value is now REFUSED (null -> 400) instead. Only an
+// OMITTED date still means today.
+//
+// A full ISO timestamp names an INSTANT rather than a calendar date, so it
+// keeps mapping to the Cambodia business day that instant fell in; the
+// shape is anchored ISO, so no month/day ambiguity can reach it.
+function normalizeDate(value: unknown): string | null {
   const str = typeof value === 'string' ? value.trim() : ''
-  // fee_date is a business CALENDAR date. Preserve an explicit YYYY-MM-DD
-  // literally; do not round-trip it through UTC. If omitted/invalid, default
-  // to Cambodia's current business day rather than the UTC day.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str
-  if (str) {
+  if (!str) return businessToday()
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d/.test(str)) {
     const parsed = new Date(str)
-    if (!Number.isNaN(parsed.getTime())) return businessToday(parsed.getTime())
+    return Number.isNaN(parsed.getTime()) ? null : businessToday(parsed.getTime())
   }
-  return businessToday()
+  return normalizeTypedDate(str)
 }
 
 // GET /api/fees -- list, newest fee_date first, with optional filters.
@@ -394,6 +406,7 @@ app.post('/', async (c) => {
   const amountUsd = round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0))
   const amountKhr = round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0))
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
+  if (feeDate === null) return c.json({ error: 'Expense date must be a valid date (dd/mm/yyyy)' }, 400)
   const saleId = body.sale_id != null && body.sale_id !== '' ? Number(body.sale_id) : null
   const branchId = body.branch_id != null && body.branch_id !== '' ? Number(body.branch_id) : null
   let deliveryContactId: number | null
@@ -460,6 +473,7 @@ app.put('/:id', async (c) => {
   const amountUsd = body.amount_usd !== undefined || body.amountUsd !== undefined ? round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0)) : existing.amount_usd
   const amountKhr = body.amount_khr !== undefined || body.amountKhr !== undefined ? round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0)) : existing.amount_khr
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
+  if (feeDate === null) return c.json({ error: 'Expense date must be a valid date (dd/mm/yyyy)' }, 400)
   const saleId = body.sale_id !== undefined ? (body.sale_id === null || body.sale_id === '' ? null : Number(body.sale_id)) : existing.sale_id
   const branchId = body.branch_id !== undefined ? (body.branch_id === null || body.branch_id === '' ? null : Number(body.branch_id)) : existing.branch_id
   let deliveryContactId = existing.delivery_contact_id

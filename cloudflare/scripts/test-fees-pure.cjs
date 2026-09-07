@@ -19,6 +19,10 @@ const sourcePath = path.join(__dirname, '..', 'src', 'routes', 'fees.ts')
 // Fresh Windows worktrees are CRLF; the production TypeScript is identical.
 const source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n')
 const businessDateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8').replace(/\r\n/g, '\n')
+// fee_date is a TYPED date, so normalizeDate delegates to the shared
+// day-first kernel in lib/batchCode.ts. Pulled in the same regex-extraction
+// way, so what runs below is the real kernel and not a copy of it.
+const batchCodeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'batchCode.ts'), 'utf8').replace(/\r\n/g, '\n')
 
 function extractFunction(name) {
   const re = new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}\\n`)
@@ -33,6 +37,13 @@ function extractBusinessDateSupport() {
   const functionMatch = businessDateSource.match(/export function businessToday\([\s\S]*?\n\}/)
   if (!offsetMatch || !functionMatch) throw new Error('businessToday support not found in businessDateWindow.ts')
   return `${offsetMatch[0].replace('export ', '')}\n${functionMatch[0].replace('export ', '')}`
+}
+
+function extractFromBatchCode(name) {
+  const re = new RegExp(`(?:export )?function ${name}\\([\\s\\S]*?\\n\\}`)
+  const match = batchCodeSource.match(re)
+  if (!match) throw new Error(`${name} not found in batchCode.ts -- source may have changed`)
+  return match[0].replace('export ', '')
 }
 
 function extractConst(name) {
@@ -52,6 +63,9 @@ function extractNumericConst(name) {
 }
 
 const combinedSource = extractBusinessDateSupport() + '\n'
+  + extractFromBatchCode('isValidCalendarDate') + '\n'
+  + extractFromBatchCode('normalizeToIsoDate') + '\n'
+  + extractFromBatchCode('normalizeTypedDate') + '\n'
   + extractConst('FEE_TYPES') + '\n'
   + extractNumericConst('FEE_LABEL_MAX_WORDS') + '\n'
   + extractNumericConst('FEE_LABEL_MAX_CHARS') + '\n'
@@ -61,7 +75,7 @@ const combinedSource = extractBusinessDateSupport() + '\n'
   + extractFunction('normalizeText') + '\n'
   + extractFunction('normalizeFeeLabel') + '\n'
   + extractFunction('normalizeDate') + '\n'
-  + 'export { round2, toNumber, normalizeFeeType, normalizeText, normalizeFeeLabel, normalizeDate }\n'
+  + 'export { round2, toNumber, normalizeFeeType, normalizeText, normalizeFeeLabel, normalizeDate, businessToday }\n'
 
 const { outputText } = ts.transpileModule(combinedSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -69,7 +83,7 @@ const { outputText } = ts.transpileModule(combinedSource, {
 })
 const moduleObj = { exports: {} }
 new Function('exports', outputText)(moduleObj.exports)
-const { round2, toNumber, normalizeFeeType, normalizeText, normalizeFeeLabel, normalizeDate } = moduleObj.exports
+const { round2, toNumber, normalizeFeeType, normalizeText, normalizeFeeLabel, normalizeDate, businessToday } = moduleObj.exports
 
 let passed = 0
 function check(name, fn) {
@@ -109,13 +123,34 @@ check('normalizeText trims, empties to null, and caps length', () => {
   assert.strictEqual(normalizeText('abcdef', 3), 'abc')
 })
 
-check('normalizeDate preserves date-only values and falls back to Cambodia business today', () => {
+check('normalizeDate reads a typed expense date DAY-FIRST, and refuses instead of filing it on today', () => {
+  // The Expenses date is typed into a day-first DateEntryInput
+  // (frontend/src/components/fees/FeeForm.tsx). 03/09/2026 is the
+  // discriminating input: both fields are <= 12, so BOTH orders name a real
+  // date and only the answer separates them. What this function used to
+  // call -- new Date('03/09/2026') -- reads it MONTH-first, filing a
+  // 3 September expense on 9 March with nothing on screen to show it.
+  assert.strictEqual(normalizeDate('03/09/2026'), '2026-09-03')
+  // Past the 12th the old reading was not merely wrong, it was SILENT:
+  // new Date('25/12/2026') is Invalid Date, so control fell through to
+  // `return businessToday()` and the expense was filed on today instead.
+  assert.strictEqual(normalizeDate('25/12/2026'), '2026-12-25')
+  assert.notStrictEqual(
+    normalizeDate('25/12/2026'), businessToday(),
+    'a readable day-first date must never be swallowed by the today default',
+  )
+  // Exactly one order is accepted -- the other fails loudly rather than
+  // being guessed -- and an unreadable value is REFUSED (null -> 400).
+  assert.strictEqual(normalizeDate('12/25/2026'), null)
+  assert.strictEqual(normalizeDate('not-a-date'), null)
+  assert.strictEqual(normalizeDate(42), businessToday(), 'a non-string is treated as omitted, not as an unreadable date')
+  // Kept, unchanged: an ISO calendar date is preserved literally, an
+  // INSTANT still maps to the Cambodia business day it fell in, and an
+  // omitted date still means today's business day.
   assert.strictEqual(normalizeDate('2026-01-15'), '2026-01-15')
   assert.strictEqual(normalizeDate('2026-08-31T17:30:00Z'), '2026-09-01', 'UTC evening maps to the next Cambodia calendar day')
-  const fallback = normalizeDate('not-a-date')
-  assert.ok(!Number.isNaN(Date.parse(fallback)), 'fallback should be a valid ISO date')
-  const fallbackEmpty = normalizeDate('')
-  assert.ok(!Number.isNaN(Date.parse(fallbackEmpty)), 'empty input should fall back to a valid date')
+  assert.strictEqual(normalizeDate(''), businessToday(), 'an omitted date still means today')
+  assert.strictEqual(normalizeDate(undefined), businessToday())
 })
 
 check('normalizeFeeLabel trims, collapses whitespace, empties to null', () => {
