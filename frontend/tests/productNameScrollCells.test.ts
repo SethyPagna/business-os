@@ -234,6 +234,16 @@ const NAME_CELLS: Array<[string, string, string]> = [
   ['Bulk add-stock result row', 'components/products/forms/BulkAddStockModal.tsx', '{row.request.productName}'],
   ['Manage batches header subtitle', 'components/inventory/ManageBatchesModal.tsx', '{product.name}</div>'],
   ['Receive batch header subtitle', 'components/inventory/ReceiveBatchModal.tsx', '{product.name}</div>'],
+  // The Adjust-stock and Transfer dialogs on the Inventory page: identical
+  // class string, identical role and identical failure mode as the two batch
+  // modals directly above -- a `truncate` with no title=, on the ONE line that
+  // says which product the dialog is about. They survived the earlier passes
+  // because the enumerating grep's binding filter only knew {product.name},
+  // product_name and productName, and these bind {adjustModal.name} and
+  // {transferModal.name}. The completeness sweep in section 2c now reads the
+  // ELEMENT rather than the line, so a new spelling cannot hide again.
+  ['Adjust-stock header subtitle', 'components/inventory/InventoryStockModals.tsx', '{adjustModal.name} - Current:'],
+  ['Transfer-stock header subtitle', 'components/inventory/InventoryStockModals.tsx', '{transferModal.name} - '],
 ]
 
 runTest('every product-name cell carries the one shared class', () => {

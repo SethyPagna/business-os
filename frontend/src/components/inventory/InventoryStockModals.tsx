@@ -346,7 +346,11 @@ export default function InventoryStockModals({
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <div className="min-w-0">
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
-                <div className="truncate text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
+                {/* N36: the ONE line that says which product this dialog is
+                    about. It was a dead-end ellipsis with no title=, exactly like
+                    ManageBatchesModal / ReceiveBatchModal before this lane; it
+                    takes the same shared .scroll-x-clean (styles/main.css). */}
+                <div className="mt-0.5 scroll-x-clean text-xs text-gray-400">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <button type="button" onClick={requestCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
@@ -750,7 +754,11 @@ export default function InventoryStockModals({
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div className="min-w-0">
                 <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer')}</h2>
-                <div className="mt-0.5 truncate text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
+                {/* N36: the ONE line that says which product this dialog is
+                    about. It was a dead-end ellipsis with no title=, exactly like
+                    ManageBatchesModal / ReceiveBatchModal before this lane; it
+                    takes the same shared .scroll-x-clean (styles/main.css). */}
+                <div className="mt-0.5 scroll-x-clean text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <button type="button" onClick={requestCloseTransfer} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
