@@ -1,3 +1,5 @@
+> **Stability release LIVE September 7, 15:36 UTC:** 560bfbcb, Worker03aa25a5-d482-45e9-9459-727b92ccf06c at100%. F41 polling/retry, F44 Not Paid wording and F45 WebSocket reconnect/auth cleanup shipped. Live EN/KM Sales and matching assets verified. Contacts, deeper merge and historical data correction remain active.
+
 > **Contacts additions F42–F46 and mobile U13–U15 recorded:** supplier/customer duplicates, phone formatting, membership lineage, Not Paid / ប្រាក់ជំពាក់ wording override, WebSocket attribution and bulk conflict review. Functional work continues; current states are in the owner register.
 
 > **Third functional release LIVE September 7, 13:14:39 UTC:** 02eecbe3833b,

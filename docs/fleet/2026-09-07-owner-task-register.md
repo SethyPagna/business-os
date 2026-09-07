@@ -5,7 +5,7 @@ requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
 Last reconciled: 2026-09-07T14:33:21.332Z. Functional fixes precede UI polish.
-Current production: **02eecbe3833b**, Worker **c3a21a40-544b-4678-bacd-bc50441df8a1**, 100% at **2026-09-07 13:14:39 UTC**. Migration 0134 preserved all 15,106 existing Sales rows and prior schema objects. GitHub release branch pushed. F33/F36/F37/F38 now deployed. Live smoke and duplicate merge follow. Historical repair attempts committed no changes; all 4,333 targets matched their original snapshots and audits remained zero.
+Current production: **560bfbcb**, Worker **03aa25a5-d482-45e9-9459-727b92ccf06c**, 100% at **2026-09-07T15:36:03.629193Z**. F41/F44/F45 deployed from the separate stability branch. No migration. Live signed-in Sales loads matching bundle; English and Khmer Not Paid verified. Historical correction still unapplied; product merge still eight completed cases.
 
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
 **498efadb-f833-471d-a8b7-b4326950bd26**, deployed 2026-09-07 09:54:13 UTC.
@@ -74,12 +74,12 @@ Every shipped row must eventually record its actual deployment version.
 | F39 | Live bulk merging remains about eight seconds per case and fails on database overload. | Active diagnosis / identity, media, sales, accounting | Eight commits preceded an 87.3s request failure. Inspect serial D1 round trips and invocation limits; preserve atomic cases, undo and whole-cluster cost mean. |
 | F40 | Bulk merge error falsely says data not saved after partial commits. | Active / identity | Return/reconcile committed cases and undo IDs on failure; explicit resumable partial state, no blind retry. |
 
-| F41 | Idle import polling writes to D1 and immediate retries amplify database overload. | Integrated db158f6c; independent PASS, backend 280/280 / sales | Skip no-op reaper writes when no stale jobs exist; preserve guarded stale recovery. Fail overload once instead of immediately retrying it. |
+| F41 | Idle import polling writes to D1 and immediate retries amplify database overload. | Deployed 560bfbcb; independent PASS, backend 280/280 / sales | Skip no-op reaper writes when no stale jobs exist; preserve guarded stale recovery. Fail overload once instead of immediately retrying it. |
 
 | F42 | Contacts duplicates: supplier creation in stock sessions, raw versus spaced customer phone numbers, obsolete membership IDs; inspect existing fixes before correction. | Confirmed canonical-phone/import bugs; implementation active / accounting | Stock-in does not auto-create suppliers. Spaced/raw/+855 duplicate matching and import lookup-key freshness are inconsistent. Legacy membership IDs remain; no blind deletion or reassignment. |
 | F43 | Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree. | Frontend integrated 5801abb2; independent review and backend parity pending | Progressive spacing, prefixes, paste and caret covered in seven create/edit/quick-add fields. |
-| F44 | Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere. | Stability candidate 560bfbcb; deployment pending | Supersedes N39/F13 unpaid-state wording. Internal values/accounting unchanged; distinct Store Credit, supplier credit and overpayment concepts preserved. |
-| F45 | Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors. | Stability candidate 560bfbcb; independent PASS | Cooldown lacked wake-up and actual logout did not disconnect. Both corrected. content.js listener is extension noise; VM startTime ownership unproven. |
+| F44 | Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere. | Deployed 560bfbcb; live EN/KM verified | Supersedes N39/F13 unpaid-state wording. Internal values/accounting unchanged; distinct Store Credit, supplier credit and overpayment concepts preserved. |
+| F45 | Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors. | Deployed 560bfbcb; independent PASS | Cooldown lacked wake-up and actual logout did not disconnect. Both corrected. content.js listener is extension noise; VM startTime ownership unproven. |
 | F46 | Bulk conflict multi-select processes slowly one by one; present combined before/after review and efficient bounded execution. | Queued after F39/F40 / identity | Distinguish conflict-resolution workflow from duplicate merge; keep atomicity, scope, audits and accurate partial progress. |
 
 ## Public portal and legal requests
@@ -128,6 +128,6 @@ stand in for deployment, and missing historical evidence is never fabricated.
 
 ## Stability release candidate and repair transport
 
-- Public fix branch codex/release-stability-20260907 at 560bfbcbbc6730e9bba305bec6b70af752579ad9 contains only F41, F44 and F45, separate from F39/F40. GitHub pushed. Backend 280/280 passed; frontend 307/309 initially passed, two stale assertions corrected and focused rerun passed 3/3; both types, i18n, build and deploy dry-run passed. Deployment remains unconfirmed after asset-upload network failure; root retry is active.
+- Public fix branch codex/release-stability-20260907 at 560bfbcbbc6730e9bba305bec6b70af752579ad9 contains only F41, F44 and F45, separate from F39/F40. GitHub pushed. Backend 280/280 passed; frontend 307/309 initially passed, two stale assertions corrected and focused rerun passed 3/3; both types, i18n, build and deploy dry-run passed. Initial attempt failed after asset upload; retry succeeded, independently confirmed as Worker03aa25a5 at100% at15:36:03UTC.
 - F39/F40 independent review found post-commit finalizer errors, unknown first-request timeout handling, normal-budget confirmation regression, and whole-cluster workload-bound gaps. Corrections are integrated progressively; not yet certified or deployed. Complex multi-product clusters must be refused before any fold unless a reviewed whole-cluster plan fits the bound. Their eventual correction remains open.
 - Three grouped historical execution attempts through the remote development proxy failed. Each full REST postcheck reports 44 pending, 0 applied, 0 audits, 0 violations across all 4,333 target rows. Private atomic file-import transport is being prepared with the same reviewed manifest and audit/full-row guards; no historical repair is claimed complete.
