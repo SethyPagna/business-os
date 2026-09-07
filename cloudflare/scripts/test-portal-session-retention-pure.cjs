@@ -103,7 +103,11 @@ const cookieStub = {
 
 const rawDb = openDb(allMigrationSql())
 const db = wrap(rawDb)
-const session = loadReal('lib/portalSession.ts', { './db': { getDb: () => db }, 'hono/cookie': cookieStub })
+const session = loadReal('lib/portalSession.ts', {
+  './db': { getDb: () => db },
+  './portalAccounts': { PORTAL_CONSENT_VERSION: 'portal-legal-2026-09-07' },
+  'hono/cookie': cookieStub,
+})
 
 // waitUntil runs inline so the assertions see the writes the route would have
 // deferred.
@@ -115,7 +119,9 @@ let seedSeq = 0
 function seedAccount() {
   seedSeq += 1
   const r = rawDb.prepare(
-    'INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES (@m, @n, @p, @h)',
+    `INSERT INTO portal_accounts (
+      membership_id, name, phone, password_hash, consent_version, consent_at, consent_locale
+    ) VALUES (@m, @n, @p, @h, 'portal-legal-2026-09-07', CURRENT_TIMESTAMP, 'en')`,
   ).run({ m: `LC-9${String(seedSeq).padStart(4, '0')}`, n: 'Retention Test', p: `0709998${String(seedSeq).padStart(2, '0')}`, h: 'x' })
   return Number(r.meta?.last_row_id ?? 0)
 }
@@ -144,6 +150,28 @@ let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
 async function run() {
+  await check('an active session does not authenticate or slide after its consent version becomes stale', async () => {
+    const accountId = seedAccount()
+    const { token } = await session.createPortalSession(ctx.env, accountId)
+    const tokenHash = await hashOf(token)
+    jar.value = token
+    rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-older' WHERE id = ?").run([accountId])
+    rawDb.prepare('UPDATE portal_sessions SET last_seen_at = NULL WHERE token_hash = ?').run([tokenHash])
+    const beforeExpiry = sessionRow(tokenHash).expires_at
+
+    const stale = await session.getPortalAccountState(ctx)
+    assert.deepStrictEqual(stale, { status: 'reconsent_required', account: null })
+    assert.equal(pending.length, 0, 'a stale consent session must not queue last-seen or expiry writes')
+    assert.equal(sessionRow(tokenHash).last_seen_at, null)
+    assert.equal(sessionRow(tokenHash).expires_at, beforeExpiry)
+
+    rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-2026-09-07', consent_at = CURRENT_TIMESTAMP WHERE id = ?").run([accountId])
+    const current = await session.getPortalAccountState(ctx)
+    assert.equal(current.status, 'authenticated')
+    assert.equal(current.account.id, accountId)
+    await settle()
+  })
+
   await check('a new session expires within the cookie ceiling, not a decade out', async () => {
     const accountId = seedAccount()
     const { token, expiresAt } = await session.createPortalSession(ctx.env, accountId)

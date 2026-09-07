@@ -11,7 +11,7 @@ import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
-import { detectBufferKind } from '../lib/uploadSecurity'
+import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
 import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse } from '../lib/portalAi'
@@ -20,8 +20,8 @@ import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
-import { signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
-import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccount } from '../lib/portalSession'
+import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
+import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState } from '../lib/portalSession'
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
@@ -1021,8 +1021,14 @@ app.post('/ai/chat', async (c) => {
       recommendations: response.recommendations || [],
       requestPolicy: response.requestPolicy || {},
     })
-  } catch (error) {
-    return c.json({ error: (error as Error)?.message || 'Portal AI request failed' }, 400)
+  } catch (_) {
+    // Provider and endpoint failures may include vendor URLs, account state,
+    // quota details, or echoed upstream response text. Keep those in server
+    // error reporting; the anonymous response gets one stable message.
+    return c.json({
+      error: 'The assistant is temporarily unavailable. Please try again later.',
+      code: 'portal_ai_unavailable',
+    }, 502)
   }
 })
 
@@ -1241,22 +1247,17 @@ async function materializePortalScreenshots(env: Env, screenshots: string[]): Pr
     if (/^data:image\//i.test(entry)) {
       const decoded = dataUrlToBytes(entry)
       if (!decoded) continue
-      // This is the one upload path in the app that previously skipped
-      // magic-byte validation (see lib/uploadSecurity.ts) -- every other
-      // upload route (files.ts, products.ts, users.ts, importJobs.ts)
-      // already checks that the file's real bytes match its claimed type.
-      // It was ALSO the only unauthenticated upload path until N45 put a
-      // portal session in front of it; the byte check stays regardless,
-      // because a signed-in stranger is still a stranger.
-      // sanitizeScreenshots already restricted the claimed mime type to
-      // image/(png|jpeg|webp|gif) via DATA_IMAGE_RE -- this confirms the
-      // decoded bytes actually are that kind of file, not just labeled as
-      // one, before anything gets written to R2 and served back out
-      // publicly at /uploads/*.
-      if (detectBufferKind(decoded.bytes) !== 'image') continue
-      const storedName = buildUniqueStoredName(`portal-submission-${Date.now()}.jpg`)
+      // Validate the real format and remove EXIF/GPS, XMP, comments, and
+      // vendor metadata on the server. A custom client can bypass any canvas
+      // conversion in the browser, so only these minimized bytes may reach R2.
+      const sanitized = sanitizePortalImageMetadata(decoded.bytes)
+      if (!sanitized) continue
+      const extension = sanitized.contentType === 'image/jpeg'
+        ? 'jpg'
+        : sanitized.contentType.slice('image/'.length)
+      const storedName = buildUniqueStoredName(`portal-submission-${Date.now()}.${extension}`)
       const objectKey = `${PORTAL_SUBMISSION_PREFIX}${storedName}`
-      await env.ASSETS.put(objectKey, decoded.bytes, { httpMetadata: { contentType: decoded.mimeType } })
+      await env.ASSETS.put(objectKey, sanitized.bytes, { httpMetadata: { contentType: sanitized.contentType } })
       // Keep customer-submitted evidence in the configured private R2 bucket.
       // The shared image-normalization queue can fall back to Cloudinary, so
       // these consented screenshots deliberately do not enter that pipeline.
@@ -1396,23 +1397,30 @@ app.post('/auth/signout', async (c) => {
 })
 
 app.get('/auth/me', async (c) => {
-  const account = await getPortalAccount(c)
-  if (!account) return c.json({ account: null })
-  return c.json({ account: { membershipId: account.membership_id, name: account.name, email: account.email } })
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') {
+    return c.json({ account: null, error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  }
+  if (!state.account) return c.json({ account: null })
+  return c.json({ account: { membershipId: state.account.membership_id, name: state.account.name, email: state.account.email } })
 })
 
 // Server-persisted cart + wishlist ("permanent memory"). Strictly scoped by
 // the session's own account id from the cookie — never a client-supplied id
 // (no IDOR).
 app.get('/account/cart', async (c) => {
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
   if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const row = await getDb(c.env).prepare('SELECT cart_json FROM portal_accounts WHERE id = ? LIMIT 1').get<{ cart_json: string | null }>([account.id])
   return c.json({ items: safeJsonArray(row?.cart_json) })
 })
 
 app.put('/account/cart', async (c) => {
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
   if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const items = sanitizePortalBucketItems(body.items, PORTAL_CART_MAX_ITEMS, true)
@@ -1421,14 +1429,18 @@ app.put('/account/cart', async (c) => {
 })
 
 app.get('/account/wishlist', async (c) => {
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
   if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const row = await getDb(c.env).prepare('SELECT wishlist_json FROM portal_accounts WHERE id = ? LIMIT 1').get<{ wishlist_json: string | null }>([account.id])
   return c.json({ items: safeJsonArray(row?.wishlist_json) })
 })
 
 app.put('/account/wishlist', async (c) => {
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
   if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const items = sanitizePortalBucketItems(body.items, PORTAL_WISHLIST_MAX_ITEMS, false)
@@ -1521,7 +1533,15 @@ app.post('/submissions', async (c) => {
   const rejection = await admitRequestBody(c, PORTAL_SCREENSHOT_BODY_BYTES)
   if (rejection) return rejection
 
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') {
+    return c.json({
+      error: 'Please agree to the current policies by signing in again before sharing a screenshot.',
+      code: 'portal_consent_required',
+      consentVersion: PORTAL_CONSENT_VERSION,
+    }, 428)
+  }
+  const account = state.account
   if (!account) {
     return c.json({ error: 'Please sign in to your account before sharing a screenshot.', code: 'portal_unauthenticated' }, 401)
   }

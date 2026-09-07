@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { getDb } from './db'
+import { PORTAL_CONSENT_VERSION } from './portalAccounts'
 import type { Env } from '../index'
 
 // Customer (storefront) sessions. A deliberate, SEPARATE fork of lib/auth.ts's
@@ -57,6 +58,11 @@ export type PortalAccount = {
   contact_id: number | null
 }
 
+export type PortalAccountState =
+  | { status: 'authenticated'; account: PortalAccount }
+  | { status: 'reconsent_required'; account: null }
+  | { status: 'unauthenticated'; account: null }
+
 export async function createPortalSession(
   env: Env,
   accountId: number,
@@ -93,28 +99,36 @@ export function clearPortalCookie<E extends { Bindings: Env } = { Bindings: Env 
   deleteCookie(c, PORTAL_COOKIE_NAME, { path: '/' })
 }
 
-export async function getPortalAccount<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<PortalAccount | null> {
+export async function getPortalAccountState<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<PortalAccountState> {
   const token = getCookie(c, PORTAL_COOKIE_NAME)
-  if (!token) return null
+  if (!token) return { status: 'unauthenticated', account: null }
   const tokenHash = await hashToken(token)
   const nowIso = new Date().toISOString()
   const db = getDb(c.env)
   const row = await db.prepare(`
-    SELECT a.id, a.membership_id, a.name, a.phone, a.email, a.contact_id
+    SELECT a.id, a.membership_id, a.name, a.phone, a.email, a.contact_id,
+           a.consent_version, a.consent_at
     FROM portal_sessions s
     JOIN portal_accounts a ON a.id = s.account_id
     WHERE s.token_hash = @token_hash
       AND s.revoked_at IS NULL
       AND s.expires_at > @now
     LIMIT 1
-  `).get<PortalAccount>({ token_hash: tokenHash, now: nowIso })
-  if (!row) return null
+  `).get<PortalAccount & { consent_version: string | null; consent_at: string | null }>({ token_hash: tokenHash, now: nowIso })
+  if (!row) return { status: 'unauthenticated', account: null }
+  if (row.consent_version !== PORTAL_CONSENT_VERSION || !row.consent_at) {
+    return { status: 'reconsent_required', account: null }
+  }
 
   c.executionCtx.waitUntil(
     db.prepare('UPDATE portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?').run([tokenHash]),
   )
   c.executionCtx.waitUntil(slidePortalSession(c, tokenHash))
-  return row
+  return { status: 'authenticated', account: row }
+}
+
+export async function getPortalAccount<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<PortalAccount | null> {
+  return (await getPortalAccountState(c)).account
 }
 
 // Same inactivity-sliding contract as lib/auth.ts::slideSessionExpiry — keeps
@@ -172,8 +186,15 @@ export async function requirePortalAccount(
   c: Context<{ Bindings: Env; Variables: { portalAccount: PortalAccount } }>,
   next: () => Promise<void>,
 ) {
-  const account = await getPortalAccount(c)
-  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
-  c.set('portalAccount', account)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') {
+    return c.json({
+      error: 'Please agree to the current Terms & Conditions and Privacy Policy to continue with your account.',
+      code: 'portal_consent_required',
+      consentVersion: PORTAL_CONSENT_VERSION,
+    }, 428)
+  }
+  if (!state.account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  c.set('portalAccount', state.account)
   await next()
 }
