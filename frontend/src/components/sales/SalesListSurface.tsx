@@ -350,7 +350,7 @@ export default function SalesListSurface({
           {revenueCount} {t('sales')} | {fmtUSD(revenue)}
           {/* The credit rides BESIDE the revenue, positive and unsigned: it is
               part of the figure to its left, not something to take off it. */}
-          {creditUsd > 0 ? <> · {t('rpt_pending_credit') || 'Credit'} {fmtUSD(creditUsd)}</> : null}
+          {creditUsd > 0 ? <> · {t('rpt_pending_credit') || 'Not Paid'} {fmtUSD(creditUsd)}</> : null}
         </div>
       </div>
 

@@ -1005,7 +1005,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     // payment the caller did not supply are not credit, and calling them
     // credit would put a debt on a customer who owes nothing.
     ...(unsettled && paid <= 0
-      ? [`Credit: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`]
+      ? [`Not Paid: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`]
       : [
         `Net Total: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
         // No recorded tender means no Paid line. The status carries the

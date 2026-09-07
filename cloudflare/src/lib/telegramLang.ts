@@ -190,10 +190,10 @@ const LABELS = {
   // printed as a single fact rather than a five-part formula.
   refunds: { en: 'Refunds', km: 'ការសងប្រាក់' },
   difference: { en: 'Difference', km: 'ភាពខុសគ្នា' },
-  // The word the owner asked for, alone, and always a positive figure -- see
-  // formatShiftReport and formatDaySummary. Copied from en.json's
-  // `supplier_credit` entry.
-  credit: { en: 'Credit', km: 'ឥណទាន' },
+  // The sale's unpaid amount stays a positive memo -- see formatShiftReport
+  // and formatDaySummary. This label is deliberately separate from supplier
+  // and store credit, which are different financial concepts.
+  credit: { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' },
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS

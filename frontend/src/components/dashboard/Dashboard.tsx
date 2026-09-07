@@ -1395,7 +1395,7 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         // reader to subtract it a second time.
         { label: translateOr('rpt_net_sales', 'Net sales'), value: fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aKernelRefund) },
-        ...(aCredit > 0 ? [{ label: translateOr('rpt_pending_credit', 'Credit'), value: fmtUSD(aCredit) }] : []),
+        ...(aCredit > 0 ? [{ label: translateOr('rpt_pending_credit', 'Not Paid'), value: fmtUSD(aCredit) }] : []),
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },

@@ -8,7 +8,7 @@ import {
 
 const translate = (key: string) => ({
   status_completed: 'Done',
-  status_awaiting_payment: 'Credit — awaiting payment',
+  status_awaiting_payment: 'Not Paid',
   status_awaiting_delivery: 'Awaiting delivery',
   status_cancelled: 'Cancelled',
   status_partial_return: 'Partial return',
@@ -16,7 +16,7 @@ const translate = (key: string) => ({
 }[key] || key)
 
 assert.equal(normalizeDashboardSaleStatus('awaiting_payment'), 'awaiting_payment')
-assert.equal(getDashboardSaleStatusLabel('awaiting_payment', translate), 'Credit — awaiting payment')
+assert.equal(getDashboardSaleStatusLabel('awaiting_payment', translate), 'Not Paid')
 assert.match(getDashboardSaleStatusTone('awaiting_payment'), /yellow/, 'credit receipts use a pending tone')
 assert.equal(getDashboardSaleStatusLabel('awaiting_delivery'), 'Awaiting Delivery')
 assert.equal(getDashboardSaleStatusLabel('cancelled'), 'Cancelled')
