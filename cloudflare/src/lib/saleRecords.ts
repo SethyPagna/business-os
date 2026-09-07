@@ -23,6 +23,12 @@
 //                             write ONE audit row keyed by the operation id,
 //                             not by sale, so without this join a sale that was
 //                             cancelled in a bulk action shows no record of it.
+//                             The same join, against the operation-keyed
+//                             action_undo / action_redo rows, is the only trace
+//                             of a bulk operation being UNDONE -- membership
+//                             does not gain a row when the group is replayed,
+//                             so without it the cancel stands as the last word
+//                             on a sale the restore already brought back.
 //   returns           (0001)  a return REWRITES sales.sale_status to
 //                             'returned' / 'partial_return' and back
 //                             (routes/returns.ts:1658, :2558,
@@ -431,6 +437,20 @@ function bulkMemberEntry(receiptJson: unknown, saleId: number | string): Record<
   return null
 }
 
+/**
+ * One side of a bulk receipt's per-sale entry.
+ *
+ * A bulk STATUS operation stores before/after as the status STRINGS; a bulk
+ * FIELD update stores them as OBJECTS (the customer/payment snapshot). Both
+ * shapes have to come out as the same field-keyed record, and both the
+ * operation and its replay read them, so the normalization lives in one place.
+ */
+function bulkSide(value: unknown): Record<string, unknown> | null {
+  if (value === undefined) return null
+  if (typeof value === 'object' && value !== null) return value as Record<string, unknown>
+  return { sale_status: text(value) }
+}
+
 export function bulkRecord(row: SaleRecordBulkRow, saleId: number | string): SaleRecord {
   const request = parseDetails(row.request_json) || {}
   const entry = bulkMemberEntry(row.receipt_json, saleId) || {}
@@ -440,14 +460,8 @@ export function bulkRecord(row: SaleRecordBulkRow, saleId: number | string): Sal
     : null
   const targetStatus = text(request.target_status)
 
-  // A bulk STATUS operation stores before/after as the status strings; a bulk
-  // FIELD update stores them as objects (the customer/payment snapshot).
-  const before = entry.before === undefined ? null
-    : typeof entry.before === 'object' && entry.before !== null ? entry.before as Record<string, unknown>
-    : { sale_status: text(entry.before) }
-  const after = entry.after === undefined ? null
-    : typeof entry.after === 'object' && entry.after !== null ? entry.after as Record<string, unknown>
-    : { sale_status: text(entry.after) }
+  const before = bulkSide(entry.before)
+  const after = bulkSide(entry.after)
 
   const kind: SaleRecordKind = targetStatus
     ? (targetStatus === 'cancelled' ? 'cancelled' : 'status_changed')
@@ -468,6 +482,81 @@ export function bulkRecord(row: SaleRecordBulkRow, saleId: number | string): Sal
       : `Bulk update: ${action || 'sale fields'}`,
     before,
     after,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Source 4b: the UNDO or REDO of a bulk operation.
+//
+// The gap this closes is the bulk gap one level down, and it is worse than the
+// original: pressing Undo on a bulk cancel writes every member sale's status
+// back (saleBulkStatus.ts:257 memberStatements, replayed at :471; the field
+// version at saleBulkUpdate.ts:173-183, replayed at :511) and audits itself
+// with `action_undo` / `action_redo` under entity 'sale' keyed by the
+// OPERATION id (both files' auditStatement). So:
+//
+//   - audit_logs WHERE entity_id = '<sale id>' cannot see it (wrong key),
+//   - sale_bulk_members has one row per member no matter how many times the
+//     operation is replayed (the replay only rewrites revision/fingerprint),
+//   - and action_history's row carries the ORIGINAL operation's time and actor,
+//     not the replay's.
+//
+// Without this source the float shows exactly one record -- "Bulk status to
+// cancelled, completed -> cancelled" -- for a sale whose status column says
+// `completed`, with no actor, no time and no way to count the restore. A record
+// list that contradicts the row it describes is worse than one that is silent.
+//
+// The SWAP is the substance. An undo moves the sale from the operation's AFTER
+// back to its BEFORE, so the member entry is read in reverse; a redo re-applies
+// it and is read forward. Reporting the entry as stored -- which is what the
+// operation record itself correctly does -- would date the cancellation to the
+// moment it was reversed.
+// ---------------------------------------------------------------------------
+export interface SaleRecordBulkReplayRow {
+  /** audit_logs.id -- unique per replay, which is what makes the record id unique. */
+  id: number | string
+  action?: string | null
+  details?: unknown
+  user_name?: string | null
+  created_at?: string | null
+  operation_id: string
+  request_json?: unknown
+  receipt_json?: unknown
+}
+
+export function bulkReplayRecord(row: SaleRecordBulkReplayRow, saleId: number | string): SaleRecord {
+  const via = text(row.action) === 'action_redo' ? 'redo' : 'undo'
+  const request = parseDetails(row.request_json) || {}
+  const details = parseDetails(row.details) || {}
+  const entry = bulkMemberEntry(row.receipt_json, saleId) || {}
+  const at = text(row.created_at)
+  const applied = bulkSide(entry.before)
+  const reversed = bulkSide(entry.after)
+  const action = request.action && typeof request.action === 'object'
+    ? text((request.action as Record<string, unknown>).kind)
+    : text(details.action)
+  const targetStatus = text(request.target_status)
+
+  return {
+    id: `bulk-replay:${row.id}`,
+    source: 'bulk',
+    at,
+    at_ms: atMs(at),
+    // The replay's OWN actor, from its own audit row. action_history's
+    // created_by_name is whoever ran the operation, which is frequently not
+    // whoever undid it.
+    actor_username: text(row.user_name),
+    // Rule 2: `undone` is for a replay whose audit row is its only trace, and
+    // a bulk replay writes no ledger entry at all -- it rewrites the sale rows
+    // in place. `via` still says which direction it went.
+    kind: 'undone',
+    via,
+    subject: targetStatus || action,
+    summary: via === 'undo'
+      ? `Bulk ${targetStatus ? `status to ${targetStatus}` : `update: ${action || 'sale fields'}`} undone`
+      : `Bulk ${targetStatus ? `status to ${targetStatus}` : `update: ${action || 'sale fields'}`} redone`,
+    before: via === 'undo' ? reversed : applied,
+    after: via === 'undo' ? applied : reversed,
   }
 }
 
@@ -570,6 +659,7 @@ export function buildSaleRecords(input: {
   ledger?: SaleRecordLedgerRow[]
   audit?: SaleRecordAuditRow[]
   bulk?: SaleRecordBulkRow[]
+  bulkReplays?: SaleRecordBulkReplayRow[]
   returns?: SaleRecordReturnRow[]
 }): SaleRecord[] {
   const records: SaleRecord[] = [saleCreatedRecord(input.sale)]
@@ -579,6 +669,7 @@ export function buildSaleRecords(input: {
     if (record) records.push(record)
   }
   for (const row of input.bulk || []) records.push(bulkRecord(row, input.sale.id))
+  for (const row of input.bulkReplays || []) records.push(bulkReplayRecord(row, input.sale.id))
   for (const row of input.returns || []) {
     if (returnTouchesSale(row)) records.push(returnRecord(row, input.sale))
   }
@@ -589,7 +680,7 @@ export function buildSaleRecords(input: {
 // The list-row count.
 //
 // The Sales list shows "Records n" on every row, so this must never be a query
-// per sale. It is ONE statement over the whole page: four grouped counts
+// per sale. It is ONE statement over the whole page: five grouped counts
 // UNIONed and re-summed, plus the +1 every sale gets for its own creation.
 //
 // The audit half applies BOTH suppressions the detail read applies -- an
@@ -635,20 +726,30 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
         WHERE sale_id IN (${placeholders})
           AND COALESCE(return_scope, 'customer') = 'customer'
         GROUP BY sale_id
+      UNION ALL
+      SELECT m.sale_id AS sale_id, COUNT(*) AS n
+        FROM audit_logs a
+        JOIN sale_bulk_members m ON m.operation_id = a.entity_id
+        WHERE a.entity = 'sale'
+          AND a.action IN ('action_undo','action_redo')
+          AND m.sale_id IN (${placeholders})
+        GROUP BY m.sale_id
     )
     GROUP BY sale_id
   `
 }
 
 /** How many `IN (...)` lists buildSaleRecordsCountSql binds each id into. */
-export const SALE_RECORDS_COUNT_BINDS_PER_ID = 4
+export const SALE_RECORDS_COUNT_BINDS_PER_ID = 5
 
 /**
  * The bind list for buildSaleRecordsCountSql, in statement order: the ledger's
  * INTEGER ids, then the audit table's TEXT ids, then the bulk table's INTEGER
- * ids, then the returns table's INTEGER ids. See the note above for why the
- * second list is stringified.
+ * ids, then the returns table's INTEGER ids, then the bulk-replay leg's
+ * INTEGER ids. See the note above for why the second list is stringified -- and
+ * note that the FIFTH list is an INTEGER one even though it filters audit rows:
+ * it compares `sale_bulk_members.sale_id`, not `audit_logs.entity_id`.
  */
 export function saleRecordsCountBinds(ids: Array<number | string>): Array<number | string> {
-  return [...ids, ...ids.map((id) => String(id)), ...ids, ...ids]
+  return [...ids, ...ids.map((id) => String(id)), ...ids, ...ids, ...ids]
 }

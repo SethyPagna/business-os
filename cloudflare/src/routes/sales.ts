@@ -92,6 +92,7 @@ import {
   SALE_RECORDS_COUNT_BINDS_PER_ID,
   SALE_RECORDS_SELF_COUNT,
   type SaleRecordAuditRow,
+  type SaleRecordBulkReplayRow,
   type SaleRecordBulkRow,
   type SaleRecordLedgerRow,
   type SaleRecordSaleRow,
@@ -2516,13 +2517,14 @@ app.get('/:id/amendments', async (c) => {
 //
 // This is NOT GET /:id/amendments with a different name. That endpoint reads
 // one table and answers "how was this sale corrected". A sale is changed by
-// five writers that each record themselves somewhere else -- the amendment
-// ledger, audit_logs, the bulk-operation receipt, the returns that rewrite
-// sales.sale_status, and the act of ringing the sale up at all -- and a reader
-// who only sees the ledger is told nothing about the sale that was cancelled in
-// a bulk action or refunded this morning, which is precisely the change they
-// came to ask about. lib/saleRecords.ts holds the meaning and every
-// classification rule; this route holds only the five reads.
+// six writers that each record themselves somewhere else -- the amendment
+// ledger, audit_logs, the bulk-operation receipt, the UNDO of a bulk operation
+// (keyed by the operation, not the sale, and leaving no membership row of its
+// own), the returns that rewrite sales.sale_status, and the act of ringing the
+// sale up at all -- and a reader who only sees the ledger is told nothing about
+// the sale that was cancelled in a bulk action or refunded this morning, which
+// is precisely the change they came to ask about. lib/saleRecords.ts holds the
+// meaning and every classification rule; this route holds only the six reads.
 //
 // Read-gated exactly like /:id/amendments: whoever may view the sale may see
 // how it got that way. Hiding the trail from the people who reconcile the books
@@ -2575,6 +2577,23 @@ app.get('/:id/records', async (c) => {
     WHERE m.sale_id = ?
   `).all<SaleRecordBulkRow>([saleId])
 
+  // The bulk REPLAY gap. Undoing a bulk operation rewrites every member sale
+  // (saleBulkStatus.ts:471, saleBulkUpdate.ts:511) and audits itself as
+  // action_undo / action_redo under entity 'sale' -- keyed by the OPERATION id
+  // again, so the audit read above misses it; and membership gains no row, so
+  // the read above misses it too. Reached the only way it can be: through the
+  // membership row that says this sale is in the group. m.sale_id is an INTEGER
+  // column (unlike audit_logs.entity_id), so this one binds the number.
+  const bulkReplayRows = await db.prepare(`
+    SELECT a.id, a.action, a.details, a.user_name, a.created_at,
+      m.operation_id, o.request_json, o.receipt_json
+    FROM audit_logs a
+    JOIN sale_bulk_members m ON m.operation_id = a.entity_id
+    LEFT JOIN sale_bulk_operations o ON o.id = m.operation_id
+    WHERE a.entity = 'sale' AND m.sale_id = ? AND a.action IN ('action_undo','action_redo')
+    ORDER BY a.id ASC
+  `).all<SaleRecordBulkReplayRow>([saleId])
+
   // The returns gap: routes/returns.ts:1658, :2558 and lib/returnBulkAction.ts
   // :253 rewrite sales.sale_status while auditing entity 'return', so neither
   // of the reads above can see the change. `is_current` marks the newest live
@@ -2595,7 +2614,7 @@ app.get('/:id/records', async (c) => {
     ORDER BY r.id ASC
   `).all<SaleRecordReturnRow>([saleId])
 
-  const records = buildSaleRecords({ sale, ledger, audit: auditRows, bulk, returns: returnRows })
+  const records = buildSaleRecords({ sale, ledger, audit: auditRows, bulk, bulkReplays: bulkReplayRows, returns: returnRows })
   return c.json({ saleId, records, count: records.length })
 })
 

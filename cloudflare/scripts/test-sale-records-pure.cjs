@@ -19,6 +19,15 @@
 //   3. THE BULK GAP. A bulk status change writes ONE audit row keyed by the
 //      operation id, not by sale. Reading audit_logs alone reports NOTHING for
 //      a sale that was cancelled in a bulk action.
+//   3b. THE BULK REPLAY GAP, which is the same gap one level down and is worse
+//      than silence: the bulk UNDO (saleBulkStatus.ts:471, saleBulkUpdate.ts
+//      :511) writes every member sale's fields back and audits itself as
+//      action_undo under entity 'sale' keyed by the OPERATION id too. Reading
+//      only sale_bulk_members leaves the restore invisible AND leaves the
+//      original record standing as the last word, so a sale that was cancelled
+//      in bulk and then restored reads "Bulk status to cancelled, completed ->
+//      cancelled" while sales.sale_status says completed. A stale record is a
+//      worse answer than a missing one.
 //   4. BEFORE/AFTER per kind: quantities for a line, dollars for the two
 //      delivery kinds, status strings for a transition, ids for a customer
 //      swap, and the per-sale entry dug out of a bulk receipt's items array.
@@ -79,6 +88,7 @@ const {
   buildSaleRecords,
   buildSaleRecordsCountSql,
   bulkRecord,
+  bulkReplayRecord,
   ledgerRecord,
   orderSaleRecords,
   saleCreatedRecord,
@@ -166,6 +176,22 @@ const BULK = [{
   history_id: 90,
   created_at: '2026-09-06 17:45:00',
   created_by_name: 'admin',
+}]
+
+// The audit row the bulk UNDO leaves: entity 'sale', entity_id the OPERATION
+// id (saleBulkStatus.ts:260 auditStatement, called at :471 with
+// `action_${direction}`). It is the ONLY trace of the restore -- the replay
+// writes no ledger entry and no new member row -- and it is keyed by the
+// operation, so audit_logs WHERE entity_id = '77' cannot see it either.
+const BULK_REPLAY = [{
+  id: 540,
+  action: 'action_undo',
+  user_name: 'admin',
+  details: JSON.stringify({ kind: 'sale_status_bulk', count: 1 }),
+  created_at: '2026-09-06 18:10:00',
+  operation_id: 'op-abc',
+  request_json: BULK[0].request_json,
+  receipt_json: BULK[0].receipt_json,
 }]
 
 // ---------------------------------------------------------------------------
@@ -370,6 +396,33 @@ runTest("a bulk action finds THIS sale's own before/after inside the operation r
   assert.deepStrictEqual(other.before, { sale_status: 'completed' })
 })
 
+runTest('a bulk UNDO is its own record, and its before/after are the operation SWAPPED', () => {
+  // The discriminating fact: the operation moved the sale completed ->
+  // cancelled, so undoing it moves cancelled -> completed. An implementation
+  // that reports the member entry as stored -- the obvious one, since that is
+  // exactly what bulkRecord does -- gets both halves backwards, and the reader
+  // is told the sale was cancelled at 18:10 when 18:10 is when it came back.
+  const record = bulkReplayRecord(BULK_REPLAY[0], 77)
+  assert.strictEqual(record.source, 'bulk')
+  assert.strictEqual(record.kind, 'undone')
+  assert.strictEqual(record.via, 'undo')
+  assert.strictEqual(record.actor_username, 'admin', 'the restore has an actor and it is the audit row, not the operation')
+  assert.strictEqual(record.at, '2026-09-06 18:10:00', 'and its own time, not the operation time')
+  assert.strictEqual(record.before.sale_status, 'cancelled')
+  assert.strictEqual(record.after.sale_status, 'completed')
+  assert.notStrictEqual(record.id, `bulk:${BULK[0].operation_id}`, 'it must not collide with the operation record')
+
+  // A REDO re-applies, so it is NOT swapped.
+  const redo = bulkReplayRecord({ ...BULK_REPLAY[0], id: 541, action: 'action_redo' }, 77)
+  assert.strictEqual(redo.via, 'redo')
+  assert.strictEqual(redo.before.sale_status, 'completed')
+  assert.strictEqual(redo.after.sale_status, 'cancelled')
+
+  // Another member of the same operation reads its OWN before/after.
+  const other = bulkReplayRecord(BULK_REPLAY[0], 76)
+  assert.strictEqual(other.before.sale_status, 'cancelled')
+})
+
 runTest('a bulk FIELD update reports the object snapshot rather than a status string', () => {
   const record = bulkRecord({
     operation_id: 'op-cust',
@@ -526,6 +579,12 @@ function seedRecords(sqlite) {
     .run({ req: BULK[0].request_json, rec: BULK[0].receipt_json })
   sqlite.prepare("INSERT INTO sale_bulk_members (operation_id, sale_id, revision, movement_fingerprint) VALUES ('op-abc',77,1,'[]')").run()
   sqlite.prepare("INSERT INTO action_history (id, scope, entity, entity_id, label, created_by_name, created_at) VALUES (90,'global','sale','op-abc','2 sales -> cancelled','admin','2026-09-06 17:45:00')").run()
+  // ...and then somebody pressed Undo. Keyed by the OPERATION id, so neither
+  // the audit read (entity_id = '77') nor the membership read can see it.
+  for (const row of BULK_REPLAY) {
+    sqlite.prepare("INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (@id,@u,@a,'sale',@op,@d,@at)")
+      .run({ id: row.id, u: row.user_name, a: row.action, op: row.operation_id, d: row.details, at: row.created_at })
+  }
 }
 
 runTest('the list-row count equals the number of lines the float shows, for both a busy sale and an untouched one', () => {
@@ -534,7 +593,7 @@ runTest('the list-row count equals the number of lines the float shows, for both
   const ids = [77, 78]
   const placeholders = ids.map(() => '?').join(',')
   const sql = buildSaleRecordsCountSql(placeholders)
-  assert.strictEqual(SALE_RECORDS_COUNT_BINDS_PER_ID, 4, 'the chunker has to know how many lists each id is bound into')
+  assert.strictEqual(SALE_RECORDS_COUNT_BINDS_PER_ID, 5, 'the chunker has to know how many lists each id is bound into')
   const rows = sqlite.prepare(sql).all(...saleRecordsCountBinds(ids))
   const counts = new Map(rows.map((row) => [Number(row.sale_id), Number(row.n)]))
 
@@ -547,11 +606,22 @@ runTest('the list-row count equals the number of lines the float shows, for both
   // other -- and this is the assertion that makes them one number.
   const detail77 = buildSaleRecords({
     sale: SALE_RETURNED, ledger: [...LEDGER, UNDO_LEDGER, REDO_LEDGER], audit: [...AUDIT, UNDO_AUDIT, REDO_AUDIT],
-    bulk: BULK, returns: RETURNS,
+    bulk: BULK, bulkReplays: BULK_REPLAY, returns: RETURNS,
   })
   assert.strictEqual(count77, detail77.length, 'the row badge and the float must agree')
-  assert.strictEqual(count77, 10,
-    '5 ledger + 2 audit (the amend twin and both add-items twins suppressed) + 1 bulk + 1 customer return + the sale itself')
+  assert.strictEqual(count77, 11,
+    '5 ledger + 2 audit (the amend twin and both add-items twins suppressed) + 1 bulk + 1 bulk undo + 1 customer return + the sale itself')
+  // The discriminating pair for the bulk-replay leg: the operation and its
+  // undo are TWO records, and the second one is the restore. Without the sixth
+  // source both numbers are 10 and agree with each other while the float still
+  // says the sale is cancelled -- which is the defect, not its absence.
+  const bulkRecords = detail77.filter((r) => r.source === 'bulk')
+  assert.strictEqual(bulkRecords.length, 2, 'the bulk cancel and the bulk undo are both records')
+  assert.strictEqual(bulkRecords[1].kind, 'undone')
+  assert.strictEqual(bulkRecords[1].via, 'undo')
+  assert.strictEqual(bulkRecords[1].actor_username, 'admin')
+  assert.strictEqual(bulkRecords[1].after.sale_status, 'completed',
+    "the restore's AFTER is the member's before -- the sale came back")
   assert.strictEqual(count78, 3, "sale 78's own creation, the one audit row about it, and its return")
 
   // The discriminating half, three ways -- each is a suppression a plausible
@@ -563,9 +633,12 @@ runTest('the list-row count equals the number of lines the float shows, for both
   assert.strictEqual(naiveReturns, 2, 'two returns exist on sale 77')
   assert.strictEqual(detail77.filter((r) => r.source === 'return').length, 1, 'but the supplier one never moved the sale')
   assert.strictEqual(
-    detail77.filter((r) => r.via === 'undo' || r.via === 'redo').length, 2,
+    detail77.filter((r) => r.source === 'ledger' && (r.via === 'undo' || r.via === 'redo')).length, 2,
     'the add-items undo and its redo are their ledger rows, once each',
   )
+  // Three replays in total: those two, plus the bulk undo -- which is NOT a
+  // ledger row and is the one this source exists for.
+  assert.strictEqual(detail77.filter((r) => r.via === 'undo' || r.via === 'redo').length, 3)
   sqlite.close()
 })
 
@@ -594,11 +667,11 @@ runTest('the audit half of the count binds the sale id as TEXT, which is why the
   // matches NOTHING in audit_logs, so the badge silently drops every status
   // change and every customer swap.
   const sql = buildSaleRecordsCountSql('?')
-  const numberBound = sqlite.prepare(sql).all(77, 77, 77, 77)
+  const numberBound = sqlite.prepare(sql).all(77, 77, 77, 77, 77)
   const viaHelper = sqlite.prepare(sql).all(...saleRecordsCountBinds([77]))
   const sum = (rows) => rows.reduce((total, row) => total + Number(row.n), 0)
-  assert.strictEqual(sum(numberBound), 7, 'number-bound: the two audit records vanish')
-  assert.strictEqual(sum(viaHelper), 9, 'text-bound: 5 ledger + 2 audit + 1 bulk + 1 customer return')
+  assert.strictEqual(sum(numberBound), 8, 'number-bound: the two audit records vanish')
+  assert.strictEqual(sum(viaHelper), 10, 'text-bound: 5 ledger + 2 audit + 1 bulk + 1 bulk undo + 1 customer return')
   sqlite.close()
 })
 
@@ -668,6 +741,13 @@ runTest('the Worker route is actually wired to this module', () => {
   assert.match(buildSaleRecordsCountSql('?'), /COALESCE\(return_scope, 'customer'\) = 'customer'/)
   assert.match(buildSaleRecordsCountSql('?'), /json_extract\(details, '\$\.applier'\) = 'sale\.add_items'/,
     'the count SQL must drop the add-items undo twin the classifier drops')
+  // The sixth read: the bulk replay's audit row is keyed by the operation, so
+  // it only reaches this sale through sale_bulk_members.
+  assert.match(ROUTES, /JOIN sale_bulk_members m ON m\.operation_id = a\.entity_id/,
+    'the route must reach the bulk undo/redo audit rows through membership')
+  assert.match(ROUTES, /bulkReplays: bulkReplayRows/, 'and hand them to the union')
+  assert.match(buildSaleRecordsCountSql('?'), /JOIN sale_bulk_members m ON m\.operation_id = a\.entity_id/,
+    'and the count SQL must carry the same leg or the badge is short by every restore')
 })
 
 runTest('the records route is gated on READING a sale, not on amending one', () => {
