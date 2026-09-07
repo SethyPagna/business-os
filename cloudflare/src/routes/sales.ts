@@ -341,7 +341,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'Sale items required' }, 400)
   }
 
-  // Cashier-selectable at checkout (POS.tsx's "Awaiting Payment" / "Awaiting
+  // Cashier-selectable at checkout (POS.tsx's "Credit" / "Awaiting
   // Delivery" flows) -- previously ignored, so the sale was always recorded
   // (and stock always deducted) as 'completed' regardless of what the
   // cashier actually picked.
@@ -2659,7 +2659,10 @@ app.post('/:id/amendments', async (c) => {
     if (costUsd !== null && (!Number.isFinite(costUsd) || costUsd < 0)) {
       return c.json({ error: 'An actual delivery cost must be blank or zero or more.' }, 400)
     }
-    const costPlan = planDeliveryActualCostChange({ saleId, sale, newCostUsd: costUsd, exchangeRate })
+    // `stamp` is what makes the row and the response agree on updated_at --
+    // see planDeliveryActualCostChange. This path writes no money statement,
+    // so nothing downstream will correct the column for it.
+    const costPlan = planDeliveryActualCostChange({ saleId, sale, newCostUsd: costUsd, exchangeRate, stamp: mutationStamp })
     if (costPlan.costDeltaUsd === 0 && costPlan.costBeforeUsd === costPlan.costAfterUsd) {
       return c.json({ error: 'That is already the actual delivery cost on this sale.' }, 400)
     }
@@ -3682,9 +3685,13 @@ app.get('/', async (c) => {
 // a small/default view, silently wrong (and silently *smaller* than
 // reality, with no indication anything was cut off) once a filtered date
 // range or search matched more rows than the cap. This computes the same
-// "net_total_usd (fallback total_usd), excluding cancelled/awaiting_payment"
-// revenue definition Sales.tsx already uses per-row, but as a single SQL
+// revenue definition Sales.tsx uses per-row -- the kernel's `recognizedExpr`
+// net-sales basis, which excludes ONLY cancelled -- but as a single SQL
 // aggregate over every matching row, not just the page that was fetched.
+//
+// That sentence used to read "net_total_usd (fallback total_usd), excluding
+// cancelled/awaiting_payment", which had gone stale in both halves: the basis
+// is net sales (total_usd folds tax in), and credit sales are counted.
 app.get('/stats', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
@@ -3759,8 +3766,23 @@ app.get('/stats', async (c) => {
   // Revenue basis = NET SALES (subtotal net of both discounts), minus customer
   // refunds -- the canonical definition (user directive Sep 1 2026). Tax and
   // delivery fees are pass-through, NOT revenue, so total_usd (which folds tax
-  // in) is not the base here. Awaiting-payment (unpaid credit) uses the same net
-  // basis but is reported separately as pending, never folded into revenue.
+  // in) is not the base here.
+  //
+  // CREDIT (owner ruling, Sep 6 2026: "don't minus for credit amount add into
+  // revenue and profit, just note the credit amount is that much"). A credit
+  // sale -- sale_status 'awaiting_payment', goods gone, cash not yet in -- is
+  // INSIDE revenue_usd here, because recognizedExpr is `<> 'cancelled'` and
+  // admits it. pending_revenue_usd is the same cohort measured on the same net
+  // basis and reported ALONGSIDE, so the Sales header can print "Credit $n" as
+  // a positive annotation on the revenue it is already part of. It is never
+  // subtracted from revenue_usd and never added to it a second time; the one
+  // figure it stays out of is collected cash (collectedSaleExpr), which lives
+  // on /stats-strip and the Reports kernel, not here.
+  //
+  // This comment used to assert the opposite -- that the credit cohort stayed
+  // out of revenue -- which described the pre-Sep-6 rule and contradicted the
+  // SQL a few lines below. That is the reading that makes the next person
+  // "fix" the query back.
   //
   // This header used to spell that definition out a SECOND time and carry a
   // comment claiming it matched salesAnalytics.ts byte for byte. It stopped

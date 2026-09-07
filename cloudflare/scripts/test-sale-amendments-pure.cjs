@@ -659,10 +659,30 @@ console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt an
   const stored = sqlite.prepare('SELECT * FROM sales WHERE id = 77').get()
   assert.strictEqual(guardDeliveryActualCostAmendment(stored).ok, true)
   assert.strictEqual(guardDeliveryActualCostAmendment({ ...stored, is_delivery: 0 }).ok, false)
-  const plan = planDeliveryActualCostChange({ saleId: 77, sale: stored, newCostUsd: 2.5, exchangeRate: 4100 })
+  // routes/sales.ts mints ONE `mutationStamp = new Date().toISOString()` per
+  // request and uses it for two things: the value written into
+  // sales.updated_at, and the `updated_at` reported in the response. The
+  // client stores what it was told and sends it back as `expected_updated_at`
+  // on its next write to the sale, so the two must be the SAME STRING -- not
+  // merely the same instant.
+  //
+  // This path shipped writing SQLite's CURRENT_TIMESTAMP instead. That value
+  // ("2026-09-07 03:14:15") can never equal the stamp the client was handed
+  // ("2026-09-07T03:14:15.926Z"), so the next edit of any sale whose courier
+  // cost had been corrected would be refused as a write conflict that had not
+  // happened. The delivery-FEE path escapes this only by composition -- a
+  // later saleMoneyUpdateStatement in its batch overwrites the column with the
+  // stamp. This path writes no money statement, so it must take the stamp.
+  const mutationStamp = new Date().toISOString()
+  const plan = planDeliveryActualCostChange({ saleId: 77, sale: stored, newCostUsd: 2.5, exchangeRate: 4100, stamp: mutationStamp })
   assert.strictEqual(plan.costBeforeUsd, 2)
   assert.strictEqual(plan.costAfterUsd, 2.5)
   assert.strictEqual(plan.costDeltaUsd, 0.5)
+  assert.throws(
+    () => planDeliveryActualCostChange({ saleId: 77, sale: stored, newCostUsd: 2.5, exchangeRate: 4100, stamp: '' }),
+    /mutation stamp/,
+    'a blank stamp must fail loudly, not fall back to CURRENT_TIMESTAMP or null the column',
+  )
   apply([
     ...plan.statements,
     amendmentEntryStatement(ENTRY({
@@ -674,13 +694,36 @@ console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt an
   assert.strictEqual(num(sqlite, 'SELECT delivery_actual_cost_usd FROM sales WHERE id = 77'), 2.5)
   assert.strictEqual(num(sqlite, 'SELECT delivery_actual_cost_khr FROM sales WHERE id = 77'), 10250)
   assert.strictEqual(num(sqlite, 'SELECT total_usd FROM sales WHERE id = 77'), 7.5, 'actual courier cost never changes what the customer owes')
+  const writtenUpdatedAt = sqlite.prepare('SELECT updated_at FROM sales WHERE id = 77').get().updated_at
+  assert.strictEqual(writtenUpdatedAt, mutationStamp,
+    'sales.updated_at must hold the exact stamp the response reports, or the concurrency token the client stores is wrong from the moment it is issued')
+  assert.ok(!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(String(writtenUpdatedAt)),
+    'a SQLite CURRENT_TIMESTAMP value in this column can never equal the ISO stamp the response carries')
   const entry = sqlite.prepare("SELECT * FROM sale_amendments WHERE kind = 'delivery_actual_cost_changed'").get()
   assert.strictEqual(entry.amount_before_usd, 2)
   assert.strictEqual(entry.amount_after_usd, 2.5)
   assert.strictEqual(entry.amount_delta_usd, 0.5)
   assert.strictEqual(entry.total_before_usd, entry.total_after_usd)
+
+  // Clearing the cost back to "not recorded" is a real correction, not a noop,
+  // and it must carry its own stamp the same way.
+  const clearStamp = new Date(Date.parse(mutationStamp) + 1000).toISOString()
+  const cleared = planDeliveryActualCostChange({
+    saleId: 77,
+    sale: sqlite.prepare('SELECT * FROM sales WHERE id = 77').get(),
+    newCostUsd: null,
+    exchangeRate: 4100,
+    stamp: clearStamp,
+  })
+  assert.strictEqual(cleared.costBeforeUsd, 2.5)
+  assert.strictEqual(cleared.costAfterUsd, null)
+  apply(cleared.statements)
+  const afterClear = sqlite.prepare('SELECT delivery_actual_cost_usd, delivery_actual_cost_khr, updated_at FROM sales WHERE id = 77').get()
+  assert.strictEqual(afterClear.delivery_actual_cost_usd, null)
+  assert.strictEqual(afterClear.delivery_actual_cost_khr, null, 'clearing the cost must clear its KHR twin, never leave a riel figure with no dollar figure')
+  assert.strictEqual(afterClear.updated_at, clearStamp)
 }
-console.log('PASS 11b -- actual courier cost changes the reporting fields only and leaves a separate immutable before/after ledger row')
+console.log('PASS 11b -- actual courier cost changes the reporting fields only, stamps updated_at with the value the response reports, and leaves a separate immutable before/after ledger row')
 
 // ---- 13: an oversell aborts the whole batch --------------------------------
 {

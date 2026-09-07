@@ -11,6 +11,7 @@ const StockAdjustModal = lazy(() => import('./forms/StockAdjustModal'))
 // this section's Adjust menu too (user, Aug 31: "for fast stock in do that
 // for products pages and all sections").
 const FastStockInModal = lazy(() => import('../inventory/FastStockInModal'))
+import type { StockMode } from '../inventory/FastStockInModal'
 // The shared range step in front of an export -- defaults to this section's
 // own Start → End range (user, Aug 31: "do the date range for all the
 // exports").
@@ -152,8 +153,11 @@ type BranchOption = { id: number; name: string }
 // trigger UI is lifted, via these stable callbacks.
 export type StockChangeHeaderActions = {
   canAdjust: boolean
-  openAdjust: (type: 'add' | 'remove' | 'set') => void
-  openFastStockIn: () => void
+  // N27: Add / Remove / Adjust quantity all open the fast flow in that mode.
+  // The one-by-one StockAdjustModal is no longer a header entry point; it
+  // remains only for resuming a failed attempt (below) and the per-row list
+  // adjust.
+  openFastStockIn: (mode?: StockMode) => void
   runExport: () => void
 }
 
@@ -201,11 +205,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [rowBusy, setRowBusy] = useState(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
-  // Adjust menu (Add / Remove / Adjust quantity) -> opens the reused modal.
-  // The trigger button/menu now lives on the page header row (Products.tsx);
-  // this state drives which modal that menu opens.
+  // adjustType now opens StockAdjustModal ONLY to resume a failed attempt
+  // (resumeFailedAttempt below). The header's Adjust menu (Products.tsx)
+  // opens the fast flow in the chosen mode instead.
   const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
+  const [fastStockInMode, setFastStockInMode] = useState<StockMode>('add')
   const [exportRange, setExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
   // Unsaved failed adjustments (user, Sep 3: "also show the failed in the
   // stock change as well"). These never reached the server -- inventory_
@@ -226,12 +231,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     const activeElement = typeof document === 'undefined' ? null : document.activeElement
     if (activeElement instanceof HTMLElement) activeElement.blur()
   }, [])
-  const openStockAdjustment = useCallback((type: 'add' | 'remove' | 'set') => {
+  const openFastStockIn = useCallback((nextMode: StockMode = 'add') => {
     blurLedgerSearch()
-    setAdjustType(type)
-  }, [blurLedgerSearch])
-  const openFastStockIn = useCallback(() => {
-    blurLedgerSearch()
+    setFastStockInMode(nextMode)
     setFastStockInOpen(true)
   }, [blurLedgerSearch])
 
@@ -427,12 +429,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     if (!onRegisterActions) return
     onRegisterActions({
       canAdjust,
-      openAdjust: openStockAdjustment,
       openFastStockIn,
       runExport: openExport,
     })
     return () => onRegisterActions(null)
-  }, [onRegisterActions, canAdjust, openExport, openFastStockIn, openStockAdjustment])
+  }, [onRegisterActions, canAdjust, openExport, openFastStockIn])
 
   // Part 553: two view chips plus All -- the Adjustment chip is gone (its
   // rows fold into In).
@@ -922,7 +923,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 [tr(t, 'category', 'Category'), detail.category],
                 [tr(t, 'brand', 'Brand'), detail.brand],
                 [tr(t, 'tag', 'Tag'), detail.tag_label],
-                [tr(t, 'unit_cost', 'Unit cost'), detail.unit_cost_usd != null || detail.batch_unit_cost_usd != null ? fmtOptionalUsd(detail.unit_cost_usd ?? detail.batch_unit_cost_usd) : null],
+                [tr(t, 'cost_price', 'Cost price'), detail.unit_cost_usd != null || detail.batch_unit_cost_usd != null ? fmtOptionalUsd(detail.unit_cost_usd ?? detail.batch_unit_cost_usd) : null],
                 [tr(t, 'total_cost', 'Total cost'), detail.total_cost_usd != null || detail.batch_received_cost_usd != null ? fmtOptionalUsd(detail.total_cost_usd ?? detail.batch_received_cost_usd) : null],
                 [tr(t, 'expiry_date', 'Expiry'), detail.batch_expiry_date],
                 [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],
@@ -1059,6 +1060,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           <FastStockInModal
             branchOptions={branches.map((branch) => ({ value: String(branch.id), label: branch.name || String(branch.id) }))}
             defaultBranchId={branchId || null}
+            initialMode={fastStockInMode}
             tr={(key: string, fallback = key) => tr(t, key, fallback)}
             notify={(message: string, kind?: string) => app.notify(message, kind)}
             onClose={() => setFastStockInOpen(false)}

@@ -21,7 +21,18 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applyDateEntryMask, daysInMonth, isoToDisplayDate, normalizeDateEntry } from '../src/utils/dateEntry.ts'
+import {
+  applyDateEntryMask,
+  applyTimeEntryMask,
+  dateEntryDisplayValue,
+  daysInMonth,
+  isoToDisplayDate,
+  joinLocalDateTime,
+  localDateTimePairValue,
+  normalizeDateEntry,
+  normalizeTimeEntry,
+  splitLocalDateTime,
+} from '../src/utils/dateEntry.ts'
 
 let failed = 0
 
@@ -222,8 +233,198 @@ runTest('every masked prefix of the canonical run still normalises to the same d
   assert.equal(normalizeDateEntry(digits, TODAY).iso, '2026-03-09')
 })
 
+// ---------------------------------------------------------------------------
+// 6. The TIME half (Sep 6 2026).
+//
+// Shift amend/close were the app's last native <input type="datetime-local">.
+// The date part of that control was already covered by the ban above; the
+// time part had no shared kernel to move to at all, which is why one is added
+// here rather than the fields being re-typed by hand in the modal.
+//
+// 24-hour throughout. Every row is one thing a cashier can type on the same
+// numeric keypad they type the date on.
+// ---------------------------------------------------------------------------
+type TimeRow = { raw: string; value: string | null; minutes: number | null; why: string }
+
+const TIMES: TimeRow[] = [
+  { raw: '', value: null, minutes: null, why: 'empty clears rather than errors (caller decides)' },
+  { raw: '   ', value: null, minutes: null, why: 'whitespace only is empty' },
+  { raw: '9', value: '09:00', minutes: 540, why: 'a bare hour means the hour' },
+  { raw: '09', value: '09:00', minutes: 540, why: 'a padded bare hour is the same hour' },
+  { raw: '0', value: '00:00', minutes: 0, why: 'midnight is a real hour, not a falsy blank' },
+  { raw: '23', value: '23:00', minutes: 1380, why: 'the last hour of the day' },
+  { raw: '930', value: '09:30', minutes: 570, why: '3 digits read H MM -- the keypad-native run' },
+  { raw: '1430', value: '14:30', minutes: 870, why: '4 digits read HH MM, 24-hour' },
+  { raw: '0930', value: '09:30', minutes: 570, why: 'a padded 4-digit run is the same minute' },
+  { raw: '0130', value: '01:30', minutes: 90, why: '01:30 is half past one in the MORNING -- there is no 12-hour reading' },
+  { raw: '2359', value: '23:59', minutes: 1439, why: 'the last minute of the day' },
+  { raw: '0000', value: '00:00', minutes: 0, why: 'the first minute of the day' },
+  { raw: '9:30', value: '09:30', minutes: 570, why: 'an explicit colon is honoured literally' },
+  { raw: '9.30', value: '09:30', minutes: 570, why: 'dots are separators' },
+  { raw: '9h30', value: '09:30', minutes: 570, why: "'h' is a separator" },
+  { raw: '14 30', value: '14:30', minutes: 870, why: 'spaces are separators' },
+  { raw: '14:30:00', value: '14:30', minutes: 870, why: 'a seconds group is dropped, not rejected' },
+  { raw: '143000', value: '14:30', minutes: 870, why: '6 digits are HHMMSS -- the seconds are dropped' },
+  { raw: '24:00', value: null, minutes: null, why: 'hour 24 is not an hour -- midnight is 00:00 of the next day' },
+  { raw: '2400', value: null, minutes: null, why: 'the same rejection through the digit run' },
+  { raw: '25', value: null, minutes: null, why: 'hour 25 is not an hour' },
+  { raw: '960', value: null, minutes: null, why: 'minute 60 is not a minute' },
+  { raw: '1260', value: null, minutes: null, why: 'minute 60 is refused whatever the hour' },
+  { raw: '9:5:3:1', value: null, minutes: null, why: 'four groups are not a time' },
+  { raw: 'noon', value: null, minutes: null, why: 'letters are not a time' },
+  { raw: '2pm', value: null, minutes: null, why: 'am/pm is not accepted -- the app is 24-hour and a guess here moves a shift by 12 hours' },
+  { raw: '12345', value: null, minutes: null, why: '5 digits are not a time of day' },
+]
+
+for (const row of TIMES) {
+  runTest(`normalizeTimeEntry(${JSON.stringify(row.raw)}) -> ${row.value ?? 'null'} (${row.why})`, () => {
+    const result = normalizeTimeEntry(row.raw)
+    assert.equal(result.value, row.value)
+    assert.equal(result.minutes, row.minutes)
+  })
+}
+
+runTest('the hour and the minute are genuinely separated, not coincidentally equal', () => {
+  // Rows whose hour and minute are both <= 12 would pass under a swapped
+  // reading too. These would not: each names a field only one order can hold.
+  assert.equal(normalizeTimeEntry('1430').value, '14:30')
+  assert.equal(normalizeTimeEntry('3014').value, null)
+  assert.equal(normalizeTimeEntry('2359').value, '23:59')
+  assert.equal(normalizeTimeEntry('5923').value, null)
+})
+
+runTest('value and minutes always agree', () => {
+  for (const row of TIMES) {
+    const result = normalizeTimeEntry(row.raw)
+    if (result.value === null) { assert.equal(result.minutes, null); continue }
+    const [hour, minute] = result.value.split(':').map(Number)
+    assert.equal(result.minutes, hour * 60 + minute)
+  }
+})
+
+const TIME_MASK: Array<[string, string, string]> = [
+  ['', '', 'empty stays empty'],
+  ['1', '1', 'one digit cannot close an hour'],
+  ['09', '09:', 'a real 2-digit hour closes its group'],
+  ['23', '23:', 'hour 23 closes its group'],
+  ['24', '24', 'hour 24 never closes a group'],
+  ['93', '93', "the keypad run on the way to '930' is left alone -- 93 is not an hour"],
+  ['930', '930', 'the whole run stays as typed and normalises on commit'],
+  ['1430', '14:30', 'a real hour masks the rest live'],
+  ['14:30', '14:30', 'already-masked text is stable'],
+  ['abc14', '14:', 'non-digits are dropped'],
+  ['143000', '14:30', 'the run is capped at 4 digits'],
+]
+for (const [raw, expected, why] of TIME_MASK) {
+  runTest(`applyTimeEntryMask(${JSON.stringify(raw)}) -> ${JSON.stringify(expected)} (${why})`, () => {
+    assert.equal(applyTimeEntryMask(raw), expected)
+  })
+}
+
+runTest('the time mask does not re-add a colon while deleting', () => {
+  assert.equal(applyTimeEntryMask('09', { deleting: true }), '09')
+  assert.equal(applyTimeEntryMask('09:3', { deleting: true }), '09:3')
+})
+
+runTest('every masked prefix of a keypad time still normalises to the same minute', () => {
+  for (const digits of ['930', '1430', '0000', '2359']) {
+    assert.equal(normalizeTimeEntry(applyTimeEntryMask(digits)).value, normalizeTimeEntry(digits).value)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 7. The local date+time pair the shift fields store.
+// ---------------------------------------------------------------------------
+runTest('splitLocalDateTime splits only a complete local wall clock', () => {
+  assert.deepEqual(splitLocalDateTime('2026-09-05T14:30'), { date: '2026-09-05', time: '14:30' })
+  assert.deepEqual(splitLocalDateTime('2026-09-05T14:30:00'), { date: '2026-09-05', time: '14:30' })
+  assert.deepEqual(splitLocalDateTime('2026-09-05'), { date: '', time: '' })
+  assert.deepEqual(splitLocalDateTime(''), { date: '', time: '' })
+  assert.deepEqual(splitLocalDateTime(null), { date: '', time: '' })
+  assert.deepEqual(splitLocalDateTime('05/09/2026 14:30'), { date: '', time: '' })
+})
+
+runTest('joinLocalDateTime never invents a midnight for a missing time', () => {
+  // The discriminating row: a date with no time must come back EMPTY. An
+  // implementation that defaulted the time to '00:00' would look identical on
+  // every other row here and would silently stamp a shift close at midnight
+  // that the cashier never entered.
+  assert.equal(joinLocalDateTime('2026-09-05', ''), '')
+  assert.equal(joinLocalDateTime('2026-09-05', null), '')
+  assert.equal(joinLocalDateTime('', '14:30'), '')
+  assert.equal(joinLocalDateTime('2026-09-05', '14:30'), '2026-09-05T14:30')
+  // The typed forms reach the join through the same normalizer.
+  assert.equal(joinLocalDateTime('2026-09-05', '930'), '2026-09-05T09:30')
+  assert.equal(joinLocalDateTime('2026-09-05', '9'), '2026-09-05T09:00')
+  assert.equal(joinLocalDateTime('2026-09-05', '2400'), '')
+  assert.equal(joinLocalDateTime('05/09/2026', '14:30'), '')
+})
+
+runTest('split and join round-trip the exact string the shift transport parses', () => {
+  // shiftTransport.shiftLocalDateTimeToIso accepts exactly this shape.
+  const shape = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
+  for (const local of ['2026-09-05T14:30', '2026-01-01T00:00', '2026-12-31T23:59']) {
+    const parts = splitLocalDateTime(local)
+    const rejoined = joinLocalDateTime(parts.date, parts.time)
+    assert.equal(rejoined, local)
+    assert.ok(shape.test(rejoined))
+  }
+})
+
+runTest('an unreadable half withdraws the pair instead of leaving the last good one', () => {
+  // THE discriminating rows for the pair field. joinLocalDateTime alone only
+  // knows whether both halves are PRESENT, and a typed field keeps its last
+  // committed value while the operator's unreadable text sits on screen. So a
+  // cashier who fixes a wrong day by retyping it and stops halfway would,
+  // under a join-only rule, still have the OLD timestamp stored and the Save
+  // button live -- and the shift would close at a minute that is nowhere on
+  // the screen. Both rows below return the stale pair under a join-only
+  // implementation and '' under this one.
+  const good = { date: '2026-09-05', time: '14:30' }
+  assert.equal(localDateTimePairValue({ ...good, dateUnreadable: false, timeUnreadable: false }), '2026-09-05T14:30')
+  assert.equal(localDateTimePairValue({ ...good, dateUnreadable: true, timeUnreadable: false }), '')
+  assert.equal(localDateTimePairValue({ ...good, dateUnreadable: false, timeUnreadable: true }), '')
+  assert.equal(localDateTimePairValue({ ...good, dateUnreadable: true, timeUnreadable: true }), '')
+  // The missing-half rule from joinLocalDateTime still holds through it, so
+  // there is one place that decides what a publishable pair is.
+  assert.equal(localDateTimePairValue({ date: '2026-09-05', time: '', dateUnreadable: false, timeUnreadable: false }), '')
+  assert.equal(localDateTimePairValue({ date: '', time: '14:30', dateUnreadable: false, timeUnreadable: false }), '')
+  assert.equal(localDateTimePairValue({ date: '2026-09-05', time: '930', dateUnreadable: false, timeUnreadable: false }), '2026-09-05T09:30')
+  // Absent flags read as readable, so the pair rule is safe to call with the
+  // two halves alone.
+  assert.equal(localDateTimePairValue({ date: '2026-09-05', time: '14:30' }), '2026-09-05T14:30')
+})
+
+runTest('the display rule the field renders with is the one in the kernel', () => {
+  // DateEntryInput.toDisplay is one line calling this, so the text on screen
+  // and the text the commit re-reads cannot drift apart.
+  assert.equal(dateEntryDisplayValue('2026-03-09', TODAY), '09/03/2026')
+  assert.equal(dateEntryDisplayValue('', TODAY), '')
+  assert.equal(dateEntryDisplayValue(null, TODAY), '')
+  // A legacy slash-form value is tolerated on the way in...
+  assert.equal(dateEntryDisplayValue('09/03/2026', TODAY), '09/03/2026')
+  // ...and text that reads as no date at all is handed back untouched rather
+  // than guessed at, which is what lets the field show it and go red instead
+  // of quietly replacing it.
+  assert.equal(dateEntryDisplayValue('Q3 batch', TODAY), 'Q3 batch')
+})
+
+runTest('the time half never routes through Date parsing either', () => {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+  const raw = fs.readFileSync(path.join(moduleDir, '..', 'src', 'utils', 'dateEntry.ts'), 'utf8')
+  const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((line) => !/^\s*(\/\/|\*)/.test(line)).join('\n')
+  for (const exported of ['normalizeTimeEntry', 'applyTimeEntryMask', 'splitLocalDateTime', 'joinLocalDateTime', 'localDateTimePairValue']) {
+    assert.ok(code.includes(`export function ${exported}`), `dateEntry.ts must export ${exported}`)
+  }
+  // Re-asserted after the addition: the whole module is still Date-free apart
+  // from the year default, which is what makes a typed shift close immune to
+  // the device timezone.
+  assert.equal(/new Date\(\s*[^)\s]/.test(code), false, 'dateEntry.ts must never construct a Date from a value')
+  assert.equal(code.includes('getHours'), false, 'the time half must never read a clock')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 } else {
-  console.log('PASS dateEntry: every typed form resolves to one dd/mm/yyyy day')
+  console.log('PASS dateEntry: every typed form resolves to one dd/mm/yyyy day and one 24-hour HH:mm')
 }

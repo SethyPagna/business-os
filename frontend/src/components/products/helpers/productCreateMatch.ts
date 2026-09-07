@@ -24,6 +24,10 @@ export interface CreateMatchCandidate {
   id: number | string
   name?: string
   barcode?: string | null
+  // Not part of identity. Carried because the same rows are offered as Name
+  // suggestions (helpers/productNameSuggestions.ts), where the second line
+  // has to say WHICH "Serum" this is.
+  brand?: string | null
   selling_price_usd?: unknown
   // accepted and DELIBERATELY IGNORED: cost is not product identity
   cost_price_usd?: unknown
