@@ -119,6 +119,24 @@ await runTest('the actual courier cost is a distinct money history row', () => {
   assert.equal(row.deltaText, '+$0.50')
 })
 
+await runTest('adding delivery renders one truthful driver, fee and optional-cost history line', () => {
+  const row = toAmendmentDisplayRow(ROW({
+    kind: 'delivery_added',
+    product_id: null, product_name: null, sale_item_id: null,
+    quantity_before: null, quantity_after: null, quantity_delta: null,
+    amount_before_usd: 0, amount_after_usd: 2.5, amount_delta_usd: 2.5,
+    before_json: JSON.stringify({ delivery_contact_name: null, delivery_fee_usd: 0, delivery_actual_cost_usd: null }),
+    after_json: JSON.stringify({ delivery_contact_name: 'Driver Dara', delivery_fee_usd: 2.5, delivery_actual_cost_usd: 4 }),
+    units_moved: 0,
+  }), usd, 'Delivery', { feeLabel: 'Fee', actualCostLabel: 'Actual cost', notRecordedLabel: 'Not recorded' })
+  assert.equal(row.family, 'money')
+  assert.equal(row.subject, 'Delivery')
+  assert.equal(row.beforeText, '— · Fee: $0.00 · Actual cost: Not recorded')
+  assert.equal(row.afterText, 'Driver Dara · Fee: $2.50 · Actual cost: $4.00')
+  assert.equal(row.deltaText, '+Delivery')
+  assert.equal(row.stockNote, null)
+})
+
 await runTest('a removal is still fully described after the line it describes is gone', () => {
   // This is the case the ledger exists for: sale_items no longer holds this
   // row at all, so the receipt cannot print it and the detail view has only

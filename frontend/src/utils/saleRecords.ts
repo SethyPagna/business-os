@@ -93,7 +93,7 @@ export function saleRecordKind(raw: unknown): SaleRecordKind {
 }
 
 /** How one before/after field should be rendered. */
-export type SaleRecordFieldFormat = 'money' | 'money_khr' | 'quantity' | 'status' | 'text'
+export type SaleRecordFieldFormat = 'money' | 'money_khr' | 'quantity' | 'status' | 'boolean' | 'text'
 
 /**
  * Field name -> how to render it, and what to call it.
@@ -127,7 +127,7 @@ const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }
   products: { key: 'products', format: 'text' },
   direction: { key: 'action', format: 'text' },
   stock_skipped: { key: 'stock', format: 'text' },
-  is_delivery: { key: 'delivery', format: 'text' },
+  is_delivery: { key: 'delivery', format: 'boolean' },
   delivery_contact_id: { key: 'id', format: 'text' },
   delivery_contact_name: { key: 'driver', format: 'text' },
   delivery_contact_phone: { key: 'driver_phone', format: 'text' },
