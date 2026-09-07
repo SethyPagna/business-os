@@ -294,8 +294,22 @@ runTest('the portal stylesheet scopes focus, touch targets and reduced motion to
   assert.ok(motion, 'the reduced-motion block must exist')
 
   assert.deepEqual(rootsIn(focusList[1]), MARKERS.slice().sort(), 'the focus ring must reach all three portal roots')
-  assert.deepEqual(rootsIn(coarse[1]), rootsIn(focusList[1]), 'touch targets and the focus ring must name the same roots')
   assert.deepEqual(rootsIn(motion[1]), rootsIn(focusList[1]), 'reduced motion and the focus ring must name the same roots')
+  // The touch-target block is deliberately NARROWER, and only in this one
+  // direction: [data-portal-root] is also stamped on CatalogPage's !publicView
+  // return, i.e. around the ADMIN portal editor, so putting it in a rule that
+  // raises every button to 44px would rewrite that editor's density on a
+  // tablet -- a change to an admin surface this lane does not own. A focus
+  // ring and a reduced-motion switch carry no such cost, so they take the
+  // wider set. What must never happen is the reverse: a root that gets touch
+  // targets but no focus ring is a portal surface the ring forgot.
+  const coarseRoots = rootsIn(coarse[1])
+  assert.ok(coarseRoots.length > 0, 'the coarse block must still name portal roots')
+  for (const root of coarseRoots) {
+    assert.ok(rootsIn(focusList[1]).includes(root), `${root} gets touch targets but no focus ring`)
+    assert.ok(rootsIn(motion[1]).includes(root), `${root} gets touch targets but no reduced-motion guard`)
+  }
+  assert.ok(coarseRoots.includes('data-public-media-protection'), 'the live customer route is in the touch-target block')
 
   // And the marker the live route actually carries is really the one on it.
   const publicPage = read('PublicCatalogPage.tsx')
@@ -408,12 +422,22 @@ runTest('a product card can be opened from the keyboard', () => {
     'the product name is a real button that opens the sheet',
   )
   assert.match(products, /openProductDetail \? \(\s*\r?\n\s*<button/, 'and stays a plain name when there is no sheet to open')
-  // The photo opens the gallery -- a separate action, on an element that
-  // holds nothing interactive, so it may carry role="button" itself.
-  assert.match(products, /role=\{gallery\.length \? 'button' : undefined\}/, 'the photo is a control when there are photos')
-  assert.match(products, /tabIndex=\{gallery\.length \? 0 : undefined\}/, 'and it is reachable by Tab')
-  assert.match(products, /event\.key === 'Enter' \|\| event\.key === ' '/, 'Enter / Space open the gallery')
-  assert.match(products, /aria-label=\{gallery\.length \? `\$\{copy\('viewImages', 'View images'\)\}: \$\{product\.name\}`/, 'named by the product it shows')
+  // The photo opens the gallery -- a separate action. The first attempt put
+  // role="button" on the WRAPPER, which was wrong: that wrapper also holds
+  // the absolutely-positioned promotion badges and the StatusPill, so the
+  // badges and the stock status became content of a control whose aria-label
+  // overrides its contents -- announced as nothing at all. The opener has to
+  // be a sibling of those layers, not their parent.
+  assert.doesNotMatch(products, /role=\{gallery\.length \? 'button' : undefined\}/, 'the badge/status wrapper is not itself the control')
+  const opener = /<button\b[^>]*\bdata-gallery-open="true"[\s\S]*?\/>/.exec(products)
+  assert.ok(opener, 'the gallery opener is a standalone overlay button')
+  assert.doesNotMatch(opener[0], /<StatusPill/, 'the stock pill is not inside the control')
+  assert.doesNotMatch(opener[0], /highlightBadges\.map/, 'nor are the promotion badges')
+  assert.match(opener[0], /aria-label=\{`\$\{copy\('viewImages', 'View images'\)\}: \$\{product\.name\}`\}/, 'named by the product it shows')
+  assert.match(opener[0], /className="absolute inset-0 /, 'and it covers the whole photo')
+  // The badges and the status pill still render, just no longer swallowed.
+  assert.match(products, /highlightBadges\.map/, 'the badges are still painted')
+  assert.match(products, /<StatusPill copy=\{copy\} status=\{status\} \/>/, 'and so is the stock status')
 })
 
 runTest('storefront heading levels run in order under the one h1', () => {

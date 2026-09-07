@@ -782,28 +782,19 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 className={`group overflow-hidden bg-transparent transition duration-200 ${openProductDetail ? 'cursor-pointer' : ''}`}
                 onClick={() => openProductDetail?.(product)}
               >
-                {/* Opening the gallery was a click on a bare <div>: no tab stop,
-                    no name, no key handler, so the photos were unreachable
-                    without a mouse. It holds only the image and decorative
-                    badges, so it can safely BE the button. */}
-                <div
-                className={`relative aspect-square overflow-hidden rounded-2xl bg-slate-100 dark:bg-neutral-800 ${gallery.length ? 'cursor-zoom-in' : ''}`}
-                role={gallery.length ? 'button' : undefined}
-                tabIndex={gallery.length ? 0 : undefined}
-                aria-label={gallery.length ? `${copy('viewImages', 'View images')}: ${product.name}` : undefined}
-                onKeyDown={(event) => {
-                  if (!gallery.length) return
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    openProductGallery(product, 0)
-                  }
-                }}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  if (gallery.length) openProductGallery(product, 0)
-                }}
-              >
+                {/* Opening the gallery was a click on a bare <div>: no tab
+                    stop, no name, no key handler, so the photos were
+                    unreachable without a mouse. Making this WRAPPER the
+                    button fixed that and broke something quieter: the
+                    promotion badges and the stock pill are absolutely
+                    positioned inside it, so they became content of a control
+                    -- and a control with an aria-label has its contents
+                    overridden, which is how "20% off" and "Low stock" stopped
+                    being announced at all. The opener is now its own
+                    transparent overlay button, a SIBLING of the badge layers
+                    instead of their parent, so the badges stay ordinary text
+                    in the card and the control names only itself. */}
+                <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100 dark:bg-neutral-800">
                 {primaryImage ? (
                   <CatalogProductImage src={primaryImage} alt={[product.name, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                 ) : (
@@ -851,6 +842,22 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   <span className="absolute bottom-3 left-3 rounded-full bg-slate-900/70 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur">
                     {replaceVars(copy('imageCount', '{current}/{total}'), { current: 1, total: gallery.length })}
                   </span>
+                ) : null}
+                {/* Last child, so it sits above the badge layers for the
+                    pointer and covers the whole photo; transparent, so it
+                    changes nothing visually. Being a real <button> gives it
+                    the tab stop, Enter/Space and the focus ring for free. */}
+                {gallery.length ? (
+                  <button
+                    type="button"
+                    data-gallery-open="true"
+                    className="absolute inset-0 h-full w-full cursor-zoom-in bg-transparent"
+                    aria-label={`${copy('viewImages', 'View images')}: ${product.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openProductGallery(product, 0)
+                    }}
+                  />
                 ) : null}
               </div>
 

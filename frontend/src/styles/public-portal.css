@@ -269,20 +269,14 @@ body[data-public-portal='true'] video,
   [data-public-media-protection='true'] button,
   [data-public-media-protection='true'] input,
   [data-public-media-protection='true'] select,
-  [data-public-media-protection='true'] textarea,
-  [data-portal-root='true'] button,
-  [data-portal-root='true'] input,
-  [data-portal-root='true'] select,
-  [data-portal-root='true'] textarea {
+  [data-public-media-protection='true'] textarea {
     min-height: 44px;
   }
 
   body[data-public-portal='true'] a[aria-label],
   body[data-public-portal='true'] button[aria-label],
   [data-public-media-protection='true'] a[aria-label],
-  [data-public-media-protection='true'] button[aria-label],
-  [data-portal-root='true'] a[aria-label],
-  [data-portal-root='true'] button[aria-label] {
+  [data-public-media-protection='true'] button[aria-label] {
     min-width: 44px;
     min-height: 44px;
   }
@@ -309,9 +303,15 @@ body[data-public-portal='true'] video,
       data-public-media-protection. Scoping this rule to the first two roots
       alone left every drawer on the real shop (bucket, account, wishlist,
       contact) with no ring at all, which is exactly the surface the rule
-      exists for. All three blocks below (:focus-visible, pointer:coarse,
-      prefers-reduced-motion) therefore name the SAME three roots, and
-      tests/portalAccessibility.test.ts asserts that they stay in step.
+      exists for. :focus-visible and prefers-reduced-motion therefore name all
+      three roots, and the pointer:coarse block above names every root they do
+      EXCEPT [data-portal-root] -- that marker is also stamped around the admin
+      portal editor (CatalogPage's !publicView return), and raising every
+      button there to 44px would rewrite an admin surface's density on a
+      tablet. A ring and a motion switch cost nothing, so they take the wider
+      set. tests/portalAccessibility.test.ts pins that one-directional
+      relationship: a root may have a ring without touch targets, never touch
+      targets without a ring.
 
       What this rule can NEVER reach: anything shared/PortalMenu.tsx sends
       through createPortal() to document.body, because that subtree is not a
