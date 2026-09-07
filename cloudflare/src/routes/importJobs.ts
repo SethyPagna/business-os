@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, hasAnyPermission, isActionBlocked } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
@@ -16,6 +16,7 @@ import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from 
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { sanitizeMediaPath } from '../lib/media'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -88,6 +89,65 @@ async function requireImportPermission(c: any, job: Record<string, unknown> | un
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: `${overrideSection}:import` }, 403)
   }
   return null
+}
+
+function requireProductImageAction(c: any) {
+  if (getActionTier(c.get('user'), 'products', 'image') !== 'full') {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products:image' }, 403)
+  }
+  return null
+}
+
+async function productImportChangesImages(env: Env, job: Record<string, unknown>): Promise<boolean> {
+  if (String(job.type || '') !== 'products') return false
+  const db = getDb(env)
+  const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
+  const decisions = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object'
+    ? policy.decisionsByRowNumber
+    : {}
+  const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
+  const imageOverrides = policy.imageOverrides && typeof policy.imageOverrides === 'object'
+    ? policy.imageOverrides
+    : {}
+  // Assign/wire can be chosen after analyze. In that case the persisted
+  // analyze rows do not yet contain the path apply will resolve, so fail
+  // closed when authority was revoked before approval. A wire plan analyzed
+  // with imageMatch present continues to use the exact per-row comparison.
+  if (Object.keys(imageOverrides).length > 0 || (policy.wire_images === true && !summary.imageMatch)) return true
+  const rows = await db.staging.prepare(`
+    SELECT row_number, action, result_json
+    FROM import_job_rows
+    WHERE job_id = @id AND phase = 'analyze' AND action IN ('create', 'update')
+      AND trim(COALESCE(json_extract(result_json, '$.data.image_path'), '')) <> ''
+  `).all<{ row_number: number; action: string; result_json: string }>({ id: String(job.id || '') })
+
+  const updates: Array<{ id: number; imagePath: string }> = []
+  for (const row of rows) {
+    if (decisions[String(row.row_number)]?.action === 'skip') continue
+    const result = safeJsonParse<ImportRowResult | null>(row.result_json, null)
+    const nextImagePath = sanitizeMediaPath(result?.data?.image_path, '')
+    if (!nextImagePath) continue
+    const existingId = Number(result?.existingId)
+    if (row.action === 'create' || !Number.isInteger(existingId) || existingId <= 0) return true
+    updates.push({ id: existingId, imagePath: nextImagePath })
+  }
+  if (!updates.length) return false
+
+  const currentById = new Map<number, string>()
+  const ids = [...new Set(updates.map((entry) => entry.id))]
+  for (let offset = 0; offset < ids.length; offset += 90) {
+    const chunk = ids.slice(offset, offset + 90)
+    const placeholders = chunk.map(() => '?').join(',')
+    const currentRows = await db.prepare(`SELECT id, image_path FROM products WHERE id IN (${placeholders})`)
+      .all<{ id: number; image_path: string | null }>(chunk)
+    for (const current of currentRows) currentById.set(Number(current.id), sanitizeMediaPath(current.image_path, ''))
+  }
+  return updates.some((entry) => currentById.get(entry.id) !== entry.imagePath)
+}
+
+async function requireChangedProductImportImageAction(c: any, job: Record<string, unknown>) {
+  if (String(job.type || '') !== 'products' || getActionTier(c.get('user'), 'products', 'image') === 'full') return null
+  return (await productImportChangesImages(c.env, job)) ? requireProductImageAction(c) : null
 }
 
 function serializeJob(job: Record<string, unknown>) {
@@ -475,6 +535,8 @@ app.patch('/:id/images/assign', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const imageDenied = requireProductImageAction(c as any)
+  if (imageDenied) return imageDenied
 
   const body = await c.req.json().catch(() => ({}))
   const fileId = Number(body?.file_id)
@@ -512,6 +574,8 @@ app.patch('/:id/images/assign-existing', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const imageDenied = requireProductImageAction(c as any)
+  if (imageDenied) return imageDenied
 
   const body = await c.req.json().catch(() => ({}))
   const fileId = Number(body?.file_id)
@@ -986,6 +1050,8 @@ app.post('/:id/images/wire', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const imageDenied = requireProductImageAction(c as any)
+  if (imageDenied) return imageDenied
 
   // Refuse while a phase is mid-flight. Flipping this under a running job
   // would have some chunks wire images and earlier ones not, leaving a
@@ -1094,6 +1160,8 @@ app.post('/:id/approve', async (c) => {
   if (status !== 'awaiting_review') {
     return c.json({ success: false, error: `Import cannot be approved while its status is ${status || 'unknown'}.` }, 409)
   }
+  const imageDenied = await requireChangedProductImportImageAction(c as any, job)
+  if (imageDenied) return imageDenied
 
   const body = await c.req.json().catch(() => ({}))
   const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
@@ -1282,6 +1350,10 @@ app.post('/:id/retry', async (c) => {
     return c.json({ success: false, error: 'This import is waiting for review. Use Confirm to apply it, or cancel it to start over.' }, 409)
   }
   const mode = retryMode
+  if (mode === 'apply') {
+    const imageDenied = await requireChangedProductImportImageAction(c as any, job)
+    if (imageDenied) return imageDenied
+  }
   await db.prepare(`
     UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0,
       processed_rows = 0, failed_rows = 0, last_error = NULL, updated_at = CURRENT_TIMESTAMP
