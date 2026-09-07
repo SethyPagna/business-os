@@ -6,6 +6,7 @@ import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Modal from '../shared/Modal'
 import { costMoveRows } from './mergeConfirmationRule'
+import { createMergeDuplicatesPreviewRequestCoordinator } from './mergeDuplicatesPreviewRequest'
 
 type Translate = (key: string, fallback?: string) => string | undefined
 
@@ -71,7 +72,7 @@ interface MergeDuplicatesReviewModalProps {
   t?: Translate
   onClose: () => void
   onConfirm: () => void
-  onLoadPreview: () => Promise<PreviewResult>
+  onLoadPreview: (signal: AbortSignal) => Promise<PreviewResult>
   working: boolean
 }
 
@@ -95,23 +96,38 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const mountedRef = useRef(true)
   const firstLoadRef = useRef(true)
+  const previewRequestsRef = useRef<ReturnType<typeof createMergeDuplicatesPreviewRequestCoordinator> | null>(null)
+  if (!previewRequestsRef.current) previewRequestsRef.current = createMergeDuplicatesPreviewRequestCoordinator()
 
   useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+      previewRequestsRef.current?.cancel()
+    }
   }, [])
 
   const runPreview = () => {
+    const request = previewRequestsRef.current!.begin()
     setPreviewLoading(true)
     setPreviewError(null)
-    onLoadPreview()
+    onLoadPreview(request.signal)
       .then((result) => {
-        if (!mountedRef.current) return
+        if (!mountedRef.current || !request.isCurrent()) return
         setPreview(result)
         setAcknowledged(false)
       })
-      .catch((error) => { if (mountedRef.current) setPreviewError(error?.message || 'Failed to load preview') })
-      .finally(() => { if (mountedRef.current) setPreviewLoading(false) })
+      .catch((error) => {
+        if (mountedRef.current && request.isCurrent()) setPreviewError(error?.message || 'Failed to load preview')
+      })
+      .finally(() => {
+        if (mountedRef.current && request.finish()) setPreviewLoading(false)
+      })
+  }
+
+  const close = () => {
+    previewRequestsRef.current?.cancel()
+    onClose()
   }
 
   useEffect(() => {
@@ -129,7 +145,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const canMerge = !previewLoading && !previewError && mergeableDuplicateProductCount > 0
 
   return (
-    <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={onClose} size="lg" unsavedChanges="read-only">
+    <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={close} size="lg" unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
           <GitMerge className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
@@ -379,7 +395,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
               : T('merge_duplicates_confirm_count', 'Merge {products} product(s) now').replace('{products}', String(mergeableDuplicateProductCount))}
           </button>
           <button
-            onClick={onClose}
+            onClick={close}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300"
           >
             {working ? T('merge_duplicates_stop', 'Stop and keep completed cases') : T('cancel', 'Cancel')}

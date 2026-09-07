@@ -28,6 +28,7 @@ export type MergeDuplicateProductsChunkResult = {
 export type MergeDuplicateProductsOptions = { requestId?: string; signal?: AbortSignal }
 
 const MERGE_DUPLICATES_CHUNK_TIMEOUT_MS = 120_000
+export const MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS = 30_000
 
 function getDevicePayload(): ProductPayload {
   return { ...getClientDeviceInfo() }
@@ -160,8 +161,8 @@ export function mergeDuplicateProducts(options: MergeDuplicateProductsOptions = 
 // machinery the way mergeDuplicateProducts() above is: this never mutates
 // anything, so there's nothing to replay if it fails offline -- a plain
 // apiFetch that the modal can just retry is the right shape for a GET.
-export function previewMergeDuplicateProducts(): Promise<unknown> {
-  return apiFetch('GET', '/api/products/merge-duplicates/preview')
+export function previewMergeDuplicateProducts(options: { signal?: AbortSignal } = {}): Promise<unknown> {
+  return apiFetch('GET', '/api/products/merge-duplicates/preview', undefined, MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS, { signal: options.signal })
 }
 
 // Products → Duplicates review section ("possibly the same" residue --
