@@ -88,7 +88,7 @@ check('the merge deactivates the duplicate only after everything is carried over
 })
 
 check('the merge carries the highest selling and WHOLESALE prices onto the keeper', () => {
-  assert.ok(/resolveMergedPricing\(\[canonicalBefore \|\| \{\}, dupPricing \|\| \{\}\]\)/.test(mergeBlock), 'price resolution must compare both rows')
+  assert.ok(/economicsOverride \?\? resolveProductMergeEconomics\(\[canonicalBefore, dupPricing\]\)/.test(mergeBlock), 'price resolution must compare both rows through the merge economics kernel')
   assert.ok(/selling_price_usd = @sellingUsd/.test(mergeBlock), 'highest USD selling price must be written to the keeper')
   // The discounted tier lives in wholesale_price_* since migration 0111.
   // While this path still named special_price_* the merge resolved max(0, 0)
@@ -102,7 +102,7 @@ check('the merge carries the highest selling and WHOLESALE prices onto the keepe
 })
 
 check('the audit entry reports what was moved, including images', () => {
-  const auditBlock = routeSrc.slice(mergeEnd, mergeEnd + 2000)
+  const auditBlock = mergeBlock.slice(mergeBlock.indexOf('const auditDetails'))
   assert.ok(/batchesMoved:/.test(auditBlock))
   assert.ok(/imagesMoved:/.test(auditBlock), 'a merge that moved imagery must say so rather than doing it invisibly')
   assert.ok(/stockDisposition,/.test(auditBlock), 'the audit must say WHICH answer was given for the discarded row\'s stock')
@@ -161,7 +161,7 @@ check('the merge carries the links that are NOT integer product FKs', () => {
 check('a WRITE-OFF zeroes the lots in place and leaves a balancing ledger line', () => {
   assert.ok(/const writeOffStock = stockDisposition === 'write_off'/.test(mergeBlock))
   assert.ok(/quantity: -qty,/.test(mergeBlock), 'the write-off must post a NEGATIVE movement, not just delete stock')
-  assert.ok(/reason: writeOffReason\(dup, mergeContext\)/.test(mergeBlock), 'the ledger line must say why the stock left')
+  assert.ok(/reason: writeOffReason\(dup, `\$\{mergeContext\}/.test(mergeBlock), 'the ledger line must say why the stock left')
   assert.ok(/DELETE FROM branch_batch_stock WHERE batch_id = @id/.test(mergeBlock), 'the written-off lots must be emptied')
   assert.ok(/writtenOffBatches\.push\(/.test(mergeBlock), 'undo must be able to bring the written-off lots back')
   // The RECON lots in production stored TEXT in this INTEGER column; the
@@ -177,19 +177,12 @@ check('a WRITE-OFF zeroes the lots in place and leaves a balancing ledger line',
 })
 
 check('both merge endpoints route through the ONE shared fold helper -- they can never drift', () => {
-  const groupLoopAt = routeSrc.indexOf('for (const dup of group.duplicates)')
-  assert.ok(groupLoopAt > 0, 'whole-catalog merge loop not found')
-  // The bulk path destructures the fold's return ({ reversal, and since S4-32
-  // costOutliers }) to record one composite undo for the whole run -- and since
-  // N15 it may REFUSE a pair before folding it at all (an un-averageable cost
-  // pair; a stock-in session that can still be undone). So the loop BODY is
-  // searched for the fold call rather than the fold being pinned to the loop's
-  // first statement, and the refusal is required to come first.
-  const bulkLoop = routeSrc.slice(groupLoopAt, routeSrc.indexOf('mergedProductsCount += 1', groupLoopAt))
-  assert.ok(/const \{ reversal(?:, [A-Za-z]+)* \} = await foldDuplicateProductInto\(/.test(bulkLoop),
+  const bulkRouteAt = routeSrc.indexOf("app.post('/merge-duplicates'")
+  const bulkFoldAt = routeSrc.indexOf('const result = await foldDuplicateProductInto(', bulkRouteAt)
+  assert.ok(bulkFoldAt > bulkRouteAt,
     'POST /merge-duplicates must fold via the shared helper')
-  assert.ok(bulkLoop.indexOf('refusals.push(') > 0 && bulkLoop.indexOf('refusals.push(') < bulkLoop.indexOf('await foldDuplicateProductInto('),
-    'a refused pair must be skipped BEFORE the fold, never reported after the write')
+  assert.ok(routeSrc.indexOf('let groupBlocker', bulkRouteAt) < bulkFoldAt,
+    'known blockers must quarantine the complete group before the first fold')
   const pairRouteAt = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
   assert.ok(pairRouteAt > 0, 'the one-pair review merge route must exist')
   assert.ok(routeSrc.indexOf('foldDuplicateProductInto(', pairRouteAt) > pairRouteAt, 'POST /possible-duplicates/merge must fold via the shared helper')
@@ -202,7 +195,7 @@ check('the review merge refuses inactive or group rows and recomputes the keeper
   const pairBlock = routeSrc.slice(pairRouteAt, pairRouteAt + 8000)
   assert.ok(/Both products must be active/.test(pairBlock), 'merging an already-merged row must 409, not double-fold')
   assert.ok(/is_group \|\| dup\.is_group/.test(pairBlock), 'group rows must be refused')
-  assert.ok(/SET stock_quantity = \(SELECT COALESCE\(SUM\(quantity\), 0\) FROM branch_stock/.test(pairBlock), 'the keeper\'s denormalized stock cache must be recomputed after the fold')
+  assert.ok(/stock_quantity=\(SELECT COALESCE\(SUM\(quantity\),0\) FROM branch_stock/.test(mergeBlock), 'the shared fold must recompute the keeper\'s denormalized stock cache')
 })
 
 console.log(`\n${passed} check(s) passed.`)

@@ -387,7 +387,10 @@ async function run() {
     assert.match(productsSrc, /rfid_confirmed_qty FROM branch_stock WHERE product_id = @id/)
     assert.match(productsSrc, /const adjustmentMovementIds =/)
     assert.match(productsSrc, /registerMergeFold\(foldDuplicateProductInto\)/)
-    assert.match(productsSrc, /recordMergeUndoSnapshot\(c\.env, user, stats\.reversal\)/)
+    assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
+    assert.match(productsSrc, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal\)/)
+    assert.match(appliersSrc, /VALUES\('products','product',@entityId,@label,@undoLabel,@redoLabel,0,'recorded'/)
+    assert.match(appliersSrc, /UPDATE action_history SET reversible=1,status='undoable'/)
   })
 
   await check('undoAppliers.ts undo preserves keeper rfid (UPDATE qty, not delete+reinsert) and gates on merge_duplicates', async () => {
@@ -532,15 +535,14 @@ async function runBulk() {
     )
   })
 
-  // Source guard: the REAL bulk route must capture reversals and record them.
+  // Source guard: the real bulk route records every case with its own atomic
+  // snapshot and carries the immutable cluster plan across retries.
   const productsSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
-  await check('products.ts bulk route captures each fold reversal and records ONE composite undo', async () => {
-    // The destructure may pick up further fields from the fold's return (it
-    // also yields costOutliers since S4-32); what this pins is that `reversal`
-    // is captured at all, not the exact field list.
-    assert.match(productsSrc, /const \{ reversal(?:, [A-Za-z]+)* \} = await foldDuplicateProductInto\(/)
-    assert.match(productsSrc, /reversals\.push\(reversal\)/)
-    assert.match(productsSrc, /recordBulkMergeUndoSnapshot\(c\.env, user, reversals\)/)
+  await check('products.ts bulk route records each fold atomically and persists the retry plan', async () => {
+    assert.match(productsSrc, /const result = await foldDuplicateProductInto\(/)
+    assert.match(productsSrc, /bulkClusterPlan: clusterPlan/)
+    assert.match(productsSrc, /readAppliedBulkClusterPlan/)
+    assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
   })
 }
 

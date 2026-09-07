@@ -11,7 +11,8 @@
     "merge_duplicates_preview_staleness": "This preview reflects the catalog now. Each case is checked again while it is saved. Changed or blocked cases stay unmerged and can be resumed; large runs are saved in bounded batches.",
     "merge_duplicates_acknowledge": "I understand this one confirmation starts a bounded, resumable merge; quantities and linked records move to the kept products. Undo is available while linked records remain unchanged.",
     "merge_duplicates_preview_blocked_groups": "{count} group(s) are quarantined and will remain unchanged.",
-    "merge_duplicates_stop": "Stop and keep completed cases"
+    "merge_duplicates_stop": "Stop and keep completed cases",
+    "merge_duplicates_undo_unavailable": "Undo is unavailable for {count} completed merge case(s) because history verification did not finish."
   },
   "km": {
     "merge_duplicates_summary": "ស្កេនផលិតផលសកម្ម ហើយបញ្ចូលអត្តសញ្ញាណដែលមានឈ្មោះស្តង់ដារដូចគ្នា និងបាកូដស្មើគ្នាតាមច្បាប់លេខសូន្យនាំមុខ ទៅជាជួរតែមួយ។",
@@ -25,6 +26,7 @@
     "merge_duplicates_preview_staleness": "ការមើលជាមុននេះបង្ហាញកាតាឡុកបច្ចុប្បន្ន។ ករណីនីមួយៗត្រូវបានពិនិត្យម្តងទៀតនៅពេលរក្សាទុក។ ករណីដែលបានផ្លាស់ប្តូរ ឬត្រូវបានរារាំង នឹងមិនត្រូវបានបញ្ចូល ហើយអាចបន្តបាន។ ដំណើរការធំត្រូវបានរក្សាទុកជាបាច់មានកំណត់។",
     "merge_duplicates_acknowledge": "ខ្ញុំយល់ថា ការបញ្ជាក់ម្តងនេះចាប់ផ្តើមការបញ្ចូលដែលមានកំណត់ និងអាចបន្តបាន។ បរិមាណ និងកំណត់ត្រាដែលភ្ជាប់ត្រូវបានផ្លាស់ទៅផលិតផលដែលរក្សាទុក។ អាចមិនធ្វើវិញបាន ដរាបណាកំណត់ត្រាដែលភ្ជាប់មិនបានផ្លាស់ប្តូរ។",
     "merge_duplicates_preview_blocked_groups": "ក្រុម {count} ត្រូវបានដាក់ឱ្យនៅដាច់ដោយឡែក ហើយនឹងនៅដដែល។",
-    "merge_duplicates_stop": "បញ្ឈប់ ហើយរក្សាករណីដែលបានបញ្ចប់"
+    "merge_duplicates_stop": "បញ្ឈប់ ហើយរក្សាករណីដែលបានបញ្ចប់",
+    "merge_duplicates_undo_unavailable": "មិនអាចមិនធ្វើវិញបានសម្រាប់ករណីបញ្ចូលដែលបានបញ្ចប់ {count} ព្រោះការផ្ទៀងផ្ទាត់កំណត់ហេតុមិនបានបញ្ចប់។"
   }
 }
