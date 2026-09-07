@@ -8,7 +8,7 @@ import {
   parseReportDate, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import {
-  getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesGroupedTotals, getSalesTotals,
+  getSalesGroupedTotals, getSalesTotals,
   recognizedExpr, shiftWindowWhere, type SalesFilters,
 } from './salesAnalytics'
 // The drawer arithmetic is NOT defined here any more. lib/shiftReconciliation.ts
@@ -57,6 +57,13 @@ function money(usd: unknown, khr: unknown, separator = ' · '): string {
   if (khrValue) parts.push(`${Math.round(khrValue).toLocaleString()}៛`)
   return parts.length ? parts.join(separator) : '$0.00'
 }
+
+// The ONE section rule every report draws, and the whole of what replaced the
+// explanatory sentences the owner asked us to delete ("no explanation just
+// arrange all reports more concise with breakdowns clearly"). A bare rule
+// reads as a break at phone width; a section heading would cost a line per
+// block and a blank line reads as an accident rather than a divider.
+const RULE = '━'.repeat(18)
 
 // The alerts chat id setting doubles as the COMMAND ALLOW-LIST. A Telegram
 // chat id is digits with an optional leading '-', so a comma/space separated
@@ -141,9 +148,13 @@ export async function getTelegramStatus(env: Env): Promise<{ configured: boolean
 export async function sendTelegramTest(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
   if (problem) throw new Error(problem)
+  // One confirmation line, then the reference. The sentence that used to sit
+  // between them -- "Every notification category is on by default; turn any
+  // off in Settings" -- explained Settings to a reader who was standing in
+  // Settings, having just pressed the button there. It was the last
+  // explanatory sentence the bot sent.
   await postTelegram(config, [
     `✅ ${bi('Business OS alerts and commands are connected.', 'ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។')}`,
-    bi('Every notification category is on by default; turn any off in Settings.', 'គ្រប់ប្រភេទការជូនដំណឹងបើកតាមលំនាំដើម។ អ្នកអាចបិទណាមួយនៅ Settings។'),
     '',
     telegramCommandReference(),
   ].join('\n'))
@@ -161,10 +172,26 @@ const dayClause = (column: string): string => localDateRangeClause(column, '@dat
 type MoneyBucket = { count: number; usd: number; khr: number } | null | undefined
 type UnitBucket = { count: number; quantity: number } | null | undefined
 /** Kernel-derived, so it carries what the kernel knows and the old SUM did not:
- *  how many receipts were VOIDED, and how much was refunded. */
-type SalesBucket = { count: number; usd: number; khr: number; cancelled: number; refundUsd: number }
+ *  how many receipts were VOIDED, and how much was refunded. Profit, delivery
+ *  and credit ride along because the day summary now leads with the SAME five
+ *  totals the shift report leads with -- one header shape for every report
+ *  (the owner's "arrange all reports more concise with breakdowns clearly"),
+ *  and no second definition: they are `getSalesTotals` fields, unaltered.
+ *  There is no riel half: the kernel's revenue is USD (salesAnalytics.ts's
+ *  header), and the column the old code summed for a `khr` was a different
+ *  quantity, not a translation of this one. */
+type SalesBucket = {
+  count: number; usd: number; cancelled: number; refundUsd: number
+  profitUsd: number; deliveryFeeUsd: number; creditUsd: number
+  // The courier money actually paid out over the day, and how many sales
+  // recorded any (a missing cost is NULL, never 0 -- deliveryActualCostExpr,
+  // which is why the count exists). It rides along for ONE reason: the day
+  // header and the shift header print the same word "Expenses", so they have
+  // to add up the same two things. See expenseBlock() below.
+  deliveryCostUsd: number; deliveryCostRecorded: number
+}
 type DayStats = { date: string; sales: SalesBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
-type CashierRow = { cashier: string; count: number; usd: number; khr: number; cancelled: number }
+type CashierRow = { cashier: string; count: number; usd: number }
 
 /** One business day as kernel filters. The shift report next door already
  *  reads its money this way (shiftFigures); the day/cashier/sales reports
@@ -198,7 +225,20 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
   ])
   return {
     date,
-    sales: { count: totals.tx_count, usd: totals.revenue_usd, khr: 0, cancelled: totals.cancelled_tx_count, refundUsd: totals.refund_usd },
+    sales: {
+      count: totals.tx_count, usd: totals.revenue_usd,
+      cancelled: totals.cancelled_tx_count, refundUsd: totals.refund_usd,
+      profitUsd: totals.profit_usd, deliveryFeeUsd: totals.delivery_usd,
+      // Not Paid on the kernel's net basis -- inside revenue and profit
+      // above, printed on its own line as a POSITIVE "Credit" figure and
+      // never subtracted from anything (the owner: "just use credit ...
+      // instead of $-n ... just $n").
+      creditUsd: totals.pending_revenue_usd,
+      // Same call, same two fields the shift report reads -- so the two
+      // reports' "Expenses" is one sum with one source, not a lookalike.
+      deliveryCostUsd: totals.delivery_actual_cost_usd,
+      deliveryCostRecorded: totals.delivery_actual_cost_count,
+    },
     fees,
     stockIn,
     stockOut,
@@ -211,12 +251,14 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
 // (They did not: the old query counted voided receipts and gross totals.)
 async function cashierTotals(env: Env, date: string): Promise<CashierRow[]> {
   const rows = await getSalesGroupedTotals(env, dayFilters(date), 'cashier', 12)
+  // Receipts and money only. The per-cashier VOID count used to ride along on
+  // this row; the day block above already reports the day's cancelled count,
+  // and repeating it per cashier is exactly the kind of second figure the
+  // owner asked us to take out of the message.
   return rows.map((row) => ({
     cashier: row.label || 'Unknown',
     count: row.tx_count,
     usd: row.revenue_usd,
-    khr: 0,
-    cancelled: row.cancelled_tx_count,
   }))
 }
 
@@ -233,25 +275,113 @@ export function formatBusinessDay(isoDate: string): string {
 const reportTitle = (icon: string, en: string, km: string, date?: string): string =>
   `${icon} ${bi(en, km)}${date ? ` — ${formatBusinessDay(date)}` : ''}`
 
-const counted = (count: unknown, noun: 'receipt(s)' | 'record(s)' | 'movement(s)' | 'unit(s)' | 'product(s)'): string =>
+// The stock lines are the only place a bilingual counter still earns its
+// keep: "12 · 340" would not say which half is movements and which is units.
+// Everywhere else the label already names the noun, so the counter went.
+const counted = (count: unknown, noun: 'movement(s)' | 'unit(s)'): string =>
   localizeTelegramValue(`${Number(count) || 0} ${noun}`)
 
-function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: Partial<Record<TelegramEventType, boolean>>): string {
-  const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
-  if (categories?.sales !== false) {
-    lines.push(labeled('sales', `${counted(stats.sales?.count, 'receipt(s)')} · ${money(stats.sales?.usd, stats.sales?.khr)}`))
-    // Both are already inside the figure above (refunds subtracted, voids
-    // contributing nothing). They print so the reader can see WHY the number
-    // is what it is, and only when there is something to see.
-    if (stats.sales?.refundUsd) lines.push(labeled('refund', money(stats.sales.refundUsd, 0)))
-    if (stats.sales?.cancelled) lines.push(labeled('cancelled', counted(stats.sales.cancelled, 'receipt(s)')))
+/**
+ * "Expenses" -- the ONE definition, shared by the shift report and the day
+ * summary because they print the same word for it.
+ *
+ * They did not share it until Sep 7 2026: the day header added up the fees
+ * table alone while the shift header added the fees to the courier money
+ * actually paid out, so a single-shift day showed `/shift` "Expenses: $17.00"
+ * against `/report` "Expenses: $9.50" and nothing on either message said why.
+ *
+ * An UNRECORDED courier cost is NULL, never $0.00 (deliveryActualCostExpr in
+ * salesAnalytics.ts) -- `recorded` is the count of sales that carry one, and a
+ * zero there keeps delivery out of the total entirely rather than claiming
+ * delivery was free.
+ *
+ * The two component lines print only when the total really has two parts.
+ * With one part the total IS that part, and printing it twice under two names
+ * is the repeated figure the owner asked us to take out ("no explanation just
+ * arrange all reports more concise").
+ */
+function expenseBlock(input: { otherUsd: unknown; otherKhr: unknown; deliveryCostUsd: unknown; deliveryCostRecorded: unknown }): { header: string | null; components: string[] } {
+  const courierUsd = Number(input.deliveryCostRecorded) > 0 ? round2(Number(input.deliveryCostUsd) || 0) : 0
+  const otherUsd = round2(Number(input.otherUsd) || 0)
+  const otherKhr = Number(input.otherKhr) || 0
+  const totalUsd = round2(otherUsd + courierUsd)
+  const split = courierUsd > 0 && (otherUsd > 0 || otherKhr > 0)
+  return {
+    header: totalUsd || otherKhr ? labeled('expenses', money(totalUsd, otherKhr)) : null,
+    components: split ? [labeled('deliveryCost', usd(courierUsd)), labeled('expensesOther', money(otherUsd, otherKhr))] : [],
   }
-  if (categories?.fees !== false) lines.push(labeled('fees', `${counted(stats.fees?.count, 'record(s)')} · ${money(stats.fees?.usd, stats.fees?.khr)}`))
-  if (categories?.stock_in !== false) lines.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
-  if (categories?.stock_out !== false) lines.push(labeled('stockOut', `${counted(stats.stockOut?.count, 'movement(s)')} · ${counted(stats.stockOut?.quantity, 'unit(s)')}`))
+}
+
+/**
+ * The day summary -- `/report`, and the scheduled push.
+ *
+ * SAME SHAPE AS THE SHIFT REPORT, deliberately (owner, Sep 6 2026: "arrange
+ * all reports more concise with breakdowns clearly"): a header block of the
+ * key totals in one fixed order -- Sales, Profit, Expenses, Delivery fee,
+ * Credit -- then compact labelled sections, one figure per line, a zero-value
+ * line simply not printed, and not one explanatory sentence. Two people
+ * reading the evening `/report` and tonight's shift message see the same five
+ * words in the same order.
+ *
+ * Credit is a POSITIVE "Credit $n" line, never a negative and never
+ * subtracted from the totals above it: it is unpaid revenue that already
+ * counts in Sales and Profit.
+ *
+ * `categories` is the owner's per-category switch set, unchanged: a category
+ * that is off takes its own lines out and nothing else.
+ *
+ * Exported for scripts/test-telegram-shift-report-pure.cjs, which renders it
+ * with no database at all -- the same reason formatShiftReport is exported.
+ */
+export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: Partial<Record<TelegramEventType, boolean>>): string {
+  const showSales = categories?.sales !== false
+  const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
+
+  const header: string[] = []
+  // Sales and Profit print even at $0.00: a day that took nothing is a fact
+  // the owner wants stated, not a blank. Every other header line is dropped
+  // when it is zero.
+  if (showSales) header.push(labeled('sales', usd(stats.sales?.usd)), labeled('profit', usd(stats.sales?.profitUsd)))
+  // The SAME sum the shift header prints, through the same function: the fees
+  // of the day plus the courier money actually paid out. The `fees` switch
+  // still governs whether the line exists at all.
+  const expenses = expenseBlock({
+    otherUsd: categories?.fees === false ? 0 : stats.fees?.usd,
+    otherKhr: categories?.fees === false ? 0 : stats.fees?.khr,
+    deliveryCostUsd: showSales ? stats.sales?.deliveryCostUsd : 0,
+    deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
+  })
+  if (expenses.header) header.push(expenses.header)
+  if (showSales && stats.sales?.deliveryFeeUsd) header.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
+  if (showSales && stats.sales?.creditUsd) header.push(labeled('credit', usd(stats.sales.creditUsd)))
+  if (header.length) lines.push(RULE, ...header)
+
+  if (showSales) {
+    // The counts, on their own. They are the breakdown of the header's Sales
+    // (refunds subtracted, voids contributing nothing), never a second total.
+    const counts = [labeled('invoices', Number(stats.sales?.count) || 0)]
+    if (stats.sales?.cancelled) counts.push(labeled('cancelled', Number(stats.sales.cancelled) || 0))
+    lines.push(RULE, ...counts)
+  }
+
+  // Then the money breakdown, in the shift report's order: the expense split
+  // (only when there are two parts of it), then the ONE refunds figure.
+  const breakdown = [...expenses.components]
+  if (showSales && stats.sales?.refundUsd) breakdown.push(labeled('refunds', usd(stats.sales.refundUsd)))
+  if (breakdown.length) lines.push(RULE, ...breakdown)
+
+  const stock: string[] = []
+  if (categories?.stock_in !== false && (stats.stockIn?.count || stats.stockIn?.quantity)) stock.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
+  if (categories?.stock_out !== false && (stats.stockOut?.count || stats.stockOut?.quantity)) stock.push(labeled('stockOut', `${counted(stats.stockOut?.count, 'movement(s)')} · ${counted(stats.stockOut?.quantity, 'unit(s)')}`))
+  if (stock.length) lines.push(RULE, ...stock)
+
   if (cashiers.length) {
-    lines.push('', `${label('cashiers')}:`)
-    for (const row of cashiers) lines.push(`• ${cleanLine(row.cashier, 60)} — ${counted(row.count, 'receipt(s)')} · ${money(row.usd, row.khr)}${row.cancelled ? ` · ${label('cancelled')} ${row.cancelled}` : ''}`)
+    lines.push(RULE, `${label('cashiers')}:`)
+    // Name, receipts, money. The bilingual "receipt(s)" counter is dropped
+    // here and only here: the section is a list of cashiers, so the count
+    // needs no noun, and repeating a two-language word on every bullet is
+    // what made this block long.
+    for (const row of cashiers) lines.push(`• ${cleanLine(row.cashier, 60)} — ${Number(row.count) || 0} · ${usd(row.usd)}`)
   }
   return lines.join('\n')
 }
@@ -280,7 +410,9 @@ async function salesReport(env: Env, date: string): Promise<string> {
   const ids = sales.map((sale) => sale.id)
   const items = await db.prepare(`SELECT sale_id, product_name, quantity, applied_price_usd, applied_price_khr FROM sale_items WHERE sale_id IN (${ids.map(() => '?').join(',')}) ORDER BY id ASC`).all<{ sale_id: number; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number }>(ids)
   const bySale = new Map<number, typeof items>(); for (const item of items) bySale.set(item.sale_id, [...(bySale.get(item.sale_id) || []), item])
-  const lines = [title, labeled('total', `${counted(stats.sales?.count, 'receipt(s)')} · ${money(stats.sales?.usd, stats.sales?.khr)}`), '', `${label('latestReceipts')}:`]
+  // The same header shape as every other report: the money first, the count
+  // under it, one figure per line, then the list.
+  const lines = [title, RULE, labeled('sales', usd(stats.sales?.usd)), labeled('invoices', Number(stats.sales?.count) || 0), RULE, `${label('latestReceipts')}:`]
   for (const sale of sales) {
     lines.push(`• ${sale.receipt_number || `#${sale.id}`} · ${money(sale.total_usd, sale.total_khr)} · ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`)
     const saleItems = bySale.get(sale.id) || []
@@ -293,7 +425,10 @@ async function salesReport(env: Env, date: string): Promise<string> {
 async function feesReport(env: Env, date: string): Promise<string> {
   const db = getDb(env); const stats = await dayStats(env, date)
   const fees = await db.prepare('SELECT fee_type, label, amount_usd, amount_khr FROM fees WHERE fee_date = @date ORDER BY id DESC LIMIT 8').all<{ fee_type: string; label: string | null; amount_usd: number; amount_khr: number }>({ date })
-  const lines = [reportTitle('💸', 'Expenses', 'ចំណាយ', date), labeled('total', `${counted(stats.fees?.count, 'record(s)')} · ${money(stats.fees?.usd, stats.fees?.khr)}`)]
+  // Total, then the records themselves. The record COUNT is gone: the bullets
+  // under it are the records, so printing how many of them there are is the
+  // repeated figure the owner asked us to drop.
+  const lines = [reportTitle('💸', 'Expenses', 'ចំណាយ', date), RULE, labeled('expenses', money(stats.fees?.usd, stats.fees?.khr)), RULE]
   if (!fees.length) lines.push(bi('No expense recorded on this day.', 'គ្មានចំណាយបានកត់ត្រាក្នុងថ្ងៃនេះទេ។'))
   for (const fee of fees) lines.push(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}: ${money(fee.amount_usd, fee.amount_khr)}`)
   return lines.join('\n')
@@ -308,7 +443,10 @@ async function inventoryReport(env: Env): Promise<string> {
   const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql} OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)) ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<{ name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }>()
   const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
   if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
-  const lines = [title, labeled('products', rows.length)]
+  // The same shape as the other six reports (Sep 7 2026): the figure block
+  // between rules, then the list. It was the only report still running its
+  // count straight into its bullets with no break.
+  const lines = [title, RULE, labeled('products', rows.length), RULE]
   for (const row of rows) {
     const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
     lines.push(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)} — ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`)
@@ -324,52 +462,62 @@ async function inventorySummaryReport(env: Env): Promise<string> {
     COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END), 0) AS out_of_stock,
     COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0) AND COALESCE(stock_quantity, 0) <= ${lowThresholdSql} THEN 1 ELSE 0 END), 0) AS low_stock
     FROM products WHERE is_active = 1`).get<{ products: number; units: number; out_of_stock: number; low_stock: number }>()
-  return [
+  // Sep 7 2026: the header block, then the stock health as its own section --
+  // the shape the other six reports took on Sep 6, which this one and /stock
+  // were the two replies to miss.
+  //
+  // The two health figures used to share a line ("Low stock: N · Out of
+  // stock: N"), against the one-figure-per-line rule the redesign holds
+  // everywhere else, and a `▸ /stock — the product list` pointer closed the
+  // message: a line spent telling the reader to send another message, exactly
+  // what the shortened command reference dropped. Both are gone; a shop with
+  // nothing low simply has no second section, the same way every other report
+  // drops a zero line.
+  const lowStock = Number(row?.low_stock || 0)
+  const outOfStock = Number(row?.out_of_stock || 0)
+  const lines = [
     reportTitle('🏷️', 'Inventory', 'ស្តុក'),
+    RULE,
     labeled('activeProducts', Number(row?.products || 0).toLocaleString()),
     labeled('unitsOnHand', Number(row?.units || 0).toLocaleString()),
-    `${label('lowStock')}: ${Number(row?.low_stock || 0)} · ${label('outOfStock')}: ${Number(row?.out_of_stock || 0)}`,
-    `▸ /stock — ${bi('the product list', 'បញ្ជីផលិតផល')}`,
-  ].join('\n')
+  ]
+  const health: string[] = []
+  if (lowStock) health.push(labeled('lowStock', lowStock))
+  if (outOfStock) health.push(labeled('outOfStock', outOfStock))
+  if (health.length) lines.push(RULE, ...health)
+  return lines.join('\n')
 }
 
-// ---- Shift report (S4-7) ---------------------------------------------------
+// ---- Shift report (S4-7, redesigned Sep 6 2026) ----------------------------
 //
-// The owner's line set, in the owner's order: shop name, cashier, from/to,
-// invoice counts (total / cancelled / edited), revenue, item discount,
-// invoice discount, gross sale, other expense, registered cash, final
-// amount -- THEN unpaid credit (moved below the total on the owner's review
-// ruling; see the note at "Final amount" below) -- then the payment-method
-// and delivery-service breakdowns.
+// The owner's own review, verbatim: "for telegram message can be made more
+// clearly, summary, less text, no explanation just arrange all reports more
+// concise with breakdowns clearly. like i see shift report is so long, much
+// more simpler so easy to understand at a glance" -- and, on the same report,
+// "you didn't mention the registered cash dollar and khr in open vs end."
 //
-// WHAT A SHIFT IS SCOPED TO. Per-account policy means one employee, one
-// branch and one business day. Shop-wide policy means every employee in that
-// branch during the one shared shift window. A shift whose branch_id is NULL
-// (a single-branch till, the common shop here) is not narrowed by branch.
+// The line set is now SHORT and grouped, one figure per line, nothing
+// explained in a sentence, no zero line printed:
 //
-// WHY IT GOES THROUGH THE SALES KERNEL. Revenue has exactly one definition in
-// this system -- net sales, over non-cancelled receipts (including
-// awaiting_payment), minus customer refunds, tax and delivery
-// excluded. A shift report that summed `total_usd` itself would be a second,
-// quietly different revenue on a surface the owner reads every evening. So it
-// calls getSalesTotals/getPaymentMethodBreakdown/getDeliveryContactTotals
-// with the shift window as a filter and formats what comes back.
+//   1. identity: shop, cashier, [branch], shift code, from/to
+//   2. the header block of key totals: sales, profit, [expenses], [delivery
+//      fee], [credit] -- credit is ALWAYS a plain positive figure, never a
+//      subtraction, per the owner's separate ruling ("just use credit ...
+//      instead of $-n ... just $n").
+//   3. invoice counts: invoices, [cancelled], [edited]
+//   4. registered cash, open vs end, both currencies, as ONE small block --
+//      the owner's specific gap above. This is a factual readout, not a
+//      claim that it must reconcile to anything.
+//   5. expenses split into exactly two plain lines (delivery cost, other
+//      expenses -- no itemised fee list), at most one refunds line, and ONE
+//      informational difference line. The difference is counted cash minus
+//      the expected drawer (lib/shiftReconciliation.ts, the one shared
+//      definition with the close routes and the shift screen), but it is
+//      printed as a single fact, never as "shortage" or a must-match claim,
+//      and the five-part formula behind it is not spelled out any more.
 //
-// THE TWO FIGURES THAT ARE JUDGEMENT CALLS, named here rather than buried:
-//
-//   * "Deleted" is reported as CANCELLED. Nothing deletes a sale in this
-//     system (see telegramLang.ts's `cancelled` entry), so the count the
-//     owner asked for is the count of voided receipts, under the app's own
-//     word for them.
-//
-//   * "Final amount" is a recorded CASH estimate, separately in USD and KHR:
-//     registered float + cash tender - recorded expenses. Bank payments are
-//     not drawer cash. Expenses currently have no tender-method ledger and
-//     are assumed to come from the drawer, explicitly stated in the message.
-//     Missing payment data, ambiguous change, refunds and courier payments
-//     suppress the estimate/difference rather than inventing a cash shortage.
-//     Sale-time windows do not establish later-settlement cash flow. Not Paid
-//     stays below the estimate and is never deducted from it a second time.
+// Per-account vs shop-wide scope, and which sales the window covers, are
+// unchanged -- see lib/shiftReconciliation.ts and shiftFilters() below.
 //
 // Riel is never folded into dollars anywhere here -- the drawer holds both and
 // the shop counts them separately, the same convention migration 0116 and
@@ -398,53 +546,39 @@ export type ShiftReportFigures = {
   invoices: number
   cancelled: number
   edited: number
+  // Net sales, straight off getSalesTotals -- the SAME kernel the Reports hub
+  // and the day summary read, never a second revenue computed here.
   revenueUsd: number
-  itemDiscountUsd: number
-  invoiceDiscountUsd: number
-  // The two halves of the invoice discount. `invoiceDiscountUsd` is their sum
-  // (the kernel's `discount_usd`), printed above them: the owner asked for the
-  // breakdown of each aspect, and "we gave away $3" answers a different
-  // question from "we gave away $2 as a shop decision and $1 as a membership
-  // benefit".
-  storeDiscountUsd: number
-  membershipDiscountUsd: number
-  grossSaleUsd: number
-  taxUsd: number
-  // Customer refunds, on the kernel's net basis. NOT the same figure as
-  // creditUsd: credit is a sale that has not been paid for, a refund is money
-  // that was taken and given back. The shift report carried neither returns
-  // figure before this.
-  refundUsd: number
-  avgOrderUsd: number
-  // Cost of goods sold and profit, straight off getSalesTotals -- the SAME
-  // helper the Reports hub reads, never a second definition computed here.
-  costUsd: number
   profitUsd: number
-  // Delivery, in the three parts the Reports hub carries: what customers were
-  // charged, what the couriers were actually paid, and the difference.
+  // What customers were charged for delivery, and what couriers were
+  // actually paid out of it. The margin between them is not printed any
+  // more -- the header shows the fee, the breakdown shows the cost, and a
+  // reader who wants the difference can do that one subtraction.
   deliveryFeeUsd: number
   deliveryCostUsd: number
-  deliveryMarginUsd: number
   // How many of the window's deliveries recorded a courier cost at all. A
   // missing cost is NULL, never zero (see deliveryActualCostExpr), so a report
-  // that printed "cost $0.00 / margin $6.00" off an empty column would claim
-  // free delivery. Nothing prints unless this is above zero.
+  // that printed "cost $0.00" off an empty column would claim free delivery.
+  // The delivery-cost line prints only when this is above zero.
   deliveryCostRecorded: number
+  // Customer refunds, on the kernel's net basis. NOT the same figure as
+  // creditUsd: credit is a sale that has not been paid for, a refund is
+  // money that was taken and given back. Printed as the ONE refunds line --
+  // no per-return breakdown.
+  refundUsd: number
   creditUsd: number
   otherExpenseUsd: number
   otherExpenseKhr: number
-  collectedUsd: number
   // Native tender currencies, never USD-equivalent sales totals. Null/absent
   // means the source cannot establish a drawer balance, not zero cash.
   cash?: { usd: number; khr: number; needsReview: boolean }
   // The drawer reconciliation, from lib/shiftReconciliation.ts. Optional only
   // so a caller with figures but no database (the pure test) still renders:
   // when it is absent the SAME pure function derives one from the fields
-  // above, so there is still exactly one formula in the codebase.
+  // above, so there is still exactly one formula in the codebase. Consumed
+  // ONLY to derive the single Difference line below -- its five components
+  // are no longer printed.
   reconciliation?: ShiftReconciliation
-  expenseDetails?: { label: string; usd: number; khr: number }[]
-  paymentMethods: { method: string; count: number; collectedUsd: number }[]
-  deliveryServices: { name: string; deliveries: number; chargedUsd: number; costUsd: number; marginUsd: number; costRecorded: number }[]
 }
 
 /**
@@ -467,136 +601,75 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   if (shift.branch_name) lines.push(labeled('branch', cleanLine(shift.branch_name, 60)))
   lines.push(
     labeled('shift', cleanLine(shift.shift_code, 40)),
-    ...(cancelled ? [bi('cancelled', 'បានបោះបង់')] : []),
     labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
     // An open shift reports up to NOW and says so, rather than printing a
     // closing time that has not happened. A shift left running overnight is
     // the honest record -- migration 0116 refuses to close one on a timer --
-    // so the report has to be able to render one.
+    // so the report has to be able to render one. A cancelled shift's "To"
+    // line carries the cancellation tag; nothing else needs to repeat it.
     open
       ? `${label('to')}: ${formatBusinessDateTime(new Date(nowMs).toISOString(), nowMs)} — ${bi('still open', 'នៅបើកនៅឡើយ')}`
       : `${labeled('to', formatBusinessDateTime(endedAt, nowMs))}${cancelled ? ` — ${bi('cancelled', 'បានបោះបង់')}` : ''}`,
-    ...(cancelled ? [
-      ...(shift.closed_at ? [`${bi('Cancelled at', 'បោះបង់នៅ')}: ${formatBusinessDateTime(shift.cancelled_at, nowMs)}`] : []),
-      `${bi('Cancelled by', 'បោះបង់ដោយ')}: ${cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)}`,
-      `${bi('Reason', 'មូលហេតុ')}: ${cleanLine(shift.cancel_reason || 'Not recorded', 500)}`,
-    ] : []),
-    '',
-    // Bare numbers, not `counted(...)`: the label IS the noun here, so
-    // "Invoices / វិក្កយបត្រ: 12 receipt(s) / វិក្កយបត្រ" would print the same
-    // Khmer word twice on one line. The breakdown bullets further down keep
-    // the counted noun, because those lines carry no label.
-    '━━━━━━━━━━━━━━━━━━',
-    labeled('invoices', figures.invoices),
-    labeled('cancelled', figures.cancelled),
-    labeled('edited', figures.edited),
-    '',
-    labeled('revenue', usd(figures.revenueUsd)),
-    labeled('itemDiscount', usd(figures.itemDiscountUsd)),
-    labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)),
-    // Indented under the line they add up to, the same way Final amount prints
-    // its own components: these are the split of the invoice discount, not two
-    // more discounts on top of it.
-    `     ${labeled('storeDiscount', usd(figures.storeDiscountUsd))}`,
-    `     ${labeled('membershipDiscount', usd(figures.membershipDiscountUsd))}`,
-    labeled('grossSale', usd(figures.grossSaleUsd)),
-    labeled('tax', usd(figures.taxUsd)),
-    labeled('refund', usd(figures.refundUsd)),
-    labeled('avgOrderValue', usd(figures.avgOrderUsd)),
-    labeled('costOfGoods', usd(figures.costUsd)),
-    labeled('profit', usd(figures.profitUsd)),
-    labeled('deliveryFee', usd(figures.deliveryFeeUsd)),
   )
-
-  // What the couriers were actually paid, and what was left. Printed ONLY when
-  // at least one delivery in the window recorded a cost: the column is NULL
-  // when nothing was recorded, so an unconditional pair would print
-  // "cost $0.00 / margin $6.00" and read as free delivery. Measured Sep 4 2026,
-  // 12 of 15,044 sales carry a courier cost, so silence is the common case and
-  // it has to be honest silence.
-  if (figures.deliveryCostRecorded > 0) {
-    lines.push(
-      `     ${labeled('deliveryCost', usd(figures.deliveryCostUsd))}`,
-      `     ${labeled('deliveryMargin', usd(figures.deliveryMarginUsd))}`,
-    )
+  if (cancelled) {
+    if (shift.closed_at) lines.push(`${bi('Cancelled at', 'បោះបង់នៅ')}: ${formatBusinessDateTime(shift.cancelled_at, nowMs)}`)
+    lines.push(`${bi('Cancelled by', 'បោះបង់ដោយ')}: ${cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)}`)
+    lines.push(`${bi('Reason', 'មូលហេតុ')}: ${cleanLine(shift.cancel_reason || 'Not recorded', 500)}`)
   }
 
-  // What should be in the drawer, and the five moving parts under it, so the
-  // number can be checked against the lines above without arithmetic in the
-  // reader's head and a disagreement points at a component rather than at
-  // "the report is wrong". ONE definition, shared with the close routes and
-  // the shift screen: see lib/shiftReconciliation.ts.
+  // The header block: the five totals the owner named, each dropped when it
+  // is zero -- Sales and Profit are the two the shop always wants, so they
+  // print unconditionally even at $0.00 (a quiet shift is still a real one).
+  const expenses = expenseBlock({
+    otherUsd: figures.otherExpenseUsd, otherKhr: figures.otherExpenseKhr,
+    deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
+  })
+  lines.push(RULE, labeled('sales', usd(figures.revenueUsd)), labeled('profit', usd(figures.profitUsd)))
+  if (expenses.header) lines.push(expenses.header)
+  if (figures.deliveryFeeUsd) lines.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
+  // Always positive, always the word "credit" -- never "$-n", never
+  // subtracted from anything above it (see the owner's separate ruling).
+  if (figures.creditUsd) lines.push(labeled('credit', usd(figures.creditUsd)))
+
+  lines.push(RULE, labeled('invoices', figures.invoices))
+  if (figures.cancelled) lines.push(labeled('cancelled', figures.cancelled))
+  if (figures.edited) lines.push(labeled('edited', figures.edited))
+
+  // The owner's specific gap: registered cash, open vs end, both currencies,
+  // as one small block. A factual readout -- it is not compared to anything
+  // here, and an open shift (no count taken yet) shows only the open half.
+  lines.push(RULE, labeled('cashOpen', money(shift.opening_float_usd, shift.opening_float_khr)))
+  if (shift.closed_at) lines.push(labeled('cashEnd', money(shift.closing_counted_usd, shift.closing_counted_khr)))
+
+  // Expenses split into exactly two plain lines, at most one refunds line,
+  // and one informational difference line -- none of it an
+  // expected-must-match check. The reconciliation is still computed (ONE
+  // shared definition, lib/shiftReconciliation.ts) but only to answer the
+  // single question "does the count differ from what it should be", not to
+  // print its own five-part formula any more.
   const recon = figures.reconciliation ?? computeShiftReconciliation({
     opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
     cashSales: figures.cash ?? { usd: 0, khr: 0 },
-    refunds: { usd: 0, khr: 0 },
+    refunds: { usd: figures.refundUsd, khr: 0 },
     expenses: { usd: figures.otherExpenseUsd, khr: figures.otherExpenseKhr },
-    courier: { usd: 0, khr: 0 },
+    courier: { usd: figures.deliveryCostRecorded > 0 ? figures.deliveryCostUsd : 0, khr: 0 },
     counted: { usd: shift.closing_counted_usd, khr: shift.closing_counted_khr },
     reviewCodes: !figures.cash || figures.cash.needsReview ? ['tender_incomplete'] : [],
   })
   const cashKnown = !recon.needs_review
-  lines.push(
-    '━━━━━━━━━━━━━━━━━━',
-    labeled('registeredCash', money(recon.opening.usd, recon.opening.khr)),
-    labeled('recordedCashReceipts', cashKnown ? money(recon.cash_sales.usd, recon.cash_sales.khr) : '—'),
-    labeled('shiftRefunds', money(recon.refunds.usd, recon.refunds.khr)),
-    labeled('otherExpense', money(recon.expenses.usd, recon.expenses.khr)),
-    labeled('courierPaid', money(recon.courier.usd, recon.courier.khr)),
-    labeled('finalAmount', cashKnown ? money(recon.expected.usd, recon.expected.khr) : '—'),
-  )
-  if (cashKnown) {
-    lines.push(
-      `     ${usd(recon.opening.usd)} + ${usd(recon.cash_sales.usd)} − ${usd(recon.refunds.usd)} − ${usd(recon.expenses.usd)} − ${usd(recon.courier.usd)}`,
-      `     ${riel(recon.opening.khr)} + ${riel(recon.cash_sales.khr)} − ${riel(recon.refunds.khr)} − ${riel(recon.expenses.khr)} − ${riel(recon.courier.khr)}`,
-    )
-  }
-  lines.push(bi('Expected drawer cash; expenses, refunds and courier payouts assumed paid from the drawer.', 'សាច់ប្រាក់ត្រូវមានក្នុងថត ដោយចាត់ចំណាយ ការសងប្រាក់ និងថ្លៃអ្នកដឹកជញ្ជូនថាបានបង់ពីថត។'))
-  lines.push(bi('Sale-time window; later settlements are not a cash-flow ledger.', 'តាមពេលកត់ត្រាការលក់ មិនមែនបញ្ជីលំហូរសាច់ប្រាក់នៃការទូទាត់នៅពេលក្រោយទេ។'))
-  if (!cashKnown) lines.push(bi('Cash review needed: incomplete tender, change, or an unrecognised cash payment method.', 'ត្រូវពិនិត្យសាច់ប្រាក់៖ កំណត់ត្រាទូទាត់ ប្រាក់អាប់ ឬវិធីទូទាត់សាច់ប្រាក់ដែលមិនស្គាល់។'))
-
-  // Printed AFTER Expected, deliberately: the owner's ruling was that a line
-  // above a total reads as an input to it, and unpaid credit is not one (see
-  // the section comment above). Below the total it reads as what it is --
-  // money owed, not money that belongs in tonight's drawer count.
-  lines.push(labeled('unpaidCredit', usd(figures.creditUsd)))
-
+  const context: string[] = [...expenses.components]
+  if (figures.refundUsd) context.push(labeled('refunds', usd(figures.refundUsd)))
   // The closing count only exists once the employee has ended the shift by
-  // hand, so an open shift shows neither it nor a difference against it --
-  // printing "Difference: -$256.00" for a shift still in progress would read
-  // as a missing-cash alarm on every open till.
+  // hand, so an open shift shows no difference against a count that was
+  // never taken -- that would read as a missing-cash alarm on every open till.
   if (shift.closed_at) {
-    lines.push(labeled('cashCounted', money(recon.counted.usd, recon.counted.khr)))
     const signed = (n: number, format: (value: number) => string) => `${n < 0 ? '−' : n > 0 ? '+' : ''}${format(Math.abs(n))}`
-    lines.push(labeled('difference', cashKnown && recon.difference.usd != null && recon.difference.khr != null
+    context.push(labeled('difference', cashKnown && recon.difference.usd != null && recon.difference.khr != null
       ? `${signed(recon.difference.usd, usd)} · ${signed(recon.difference.khr, riel)}`
       : '—'))
   }
+  if (context.length) lines.push(RULE, ...context)
 
-  if (figures.expenseDetails?.length) {
-    lines.push('', '━━━━━━━━━━━━━━━━━━', `${label('fees')}:`)
-    for (const expense of figures.expenseDetails) lines.push(`• ${cleanLine(expense.label, 65)} — ${money(expense.usd, expense.khr)}`)
-  }
-
-  if (figures.paymentMethods.length) {
-    lines.push('', '━━━━━━━━━━━━━━━━━━', `${label('paymentMethod')}:`)
-    for (const row of figures.paymentMethods) {
-      lines.push(`• ${localizeTelegramValue(cleanLine(row.method, 40))} — ${counted(row.count, 'receipt(s)')} · ${usd(row.collectedUsd)}`)
-    }
-  }
-  if (figures.deliveryServices.length) {
-    lines.push('', '━━━━━━━━━━━━━━━━━━', `${label('deliveryService')}:`)
-    for (const row of figures.deliveryServices) {
-      // charged − cost = margin, spelled as arithmetic rather than as three
-      // more labels: the bullet carries no label of its own, and the sum is
-      // checkable at a glance. A courier with no recorded cost keeps the old
-      // one-figure line -- see the deliveryCostRecorded note above.
-      const margin = row.costRecorded > 0
-        ? ` − ${usd(row.costUsd)} = ${usd(row.marginUsd)}`
-        : ''
-      lines.push(`• ${localizeTelegramValue(cleanLine(row.name, 60))} — ${row.deliveries} · ${usd(row.chargedUsd)}${margin}`)
-    }
-  }
   return lines.join('\n')
 }
 
@@ -636,12 +709,15 @@ async function shiftInvoiceCounts(env: Env, shift: ShiftReportSession, nowMs: nu
 async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number): Promise<ShiftReportFigures> {
   const filters = shiftFilters(shift, nowMs)
   const overflowLabel = bi('Other expenses', 'ចំណាយផ្សេងទៀត')
-  const [totals, counts, expenses, paymentMethods, deliveries, reconciliation] = await Promise.all([
+  // Payment-method and delivery-contact breakdowns are no longer part of the
+  // shift report (see the redesign header comment above formatShiftReport),
+  // so those two queries are gone -- getPaymentMethodBreakdown and
+  // getDeliveryContactTotals remain in lib/salesAnalytics.ts for
+  // routes/reports.ts, just no longer called from here.
+  const [totals, counts, expenses, reconciliation] = await Promise.all([
     getSalesTotals(env, filters),
     shiftInvoiceCounts(env, shift, nowMs),
     shiftExpenses(env, shift, nowMs, { overflowLabel }),
-    getPaymentMethodBreakdown(env, filters),
-    getDeliveryContactTotals(env, filters),
     loadShiftReconciliation(env, shift, nowMs, { overflowLabel }),
   ])
   return {
@@ -650,59 +726,30 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     edited: counts.edited,
     // Canonical revenue, straight off the kernel -- never re-derived here.
     revenueUsd: totals.revenue_usd,
-    itemDiscountUsd: totals.item_discount_usd,
-    // The kernel's `discount_usd` is store + membership: both are taken off
-    // the whole invoice rather than off a line, which is what makes them the
-    // invoice discount. The two halves ride along beside the sum -- the
-    // kernel already separates them, so printing the split costs no query.
-    invoiceDiscountUsd: totals.discount_usd,
-    storeDiscountUsd: totals.store_discount_usd,
-    membershipDiscountUsd: totals.membership_discount_usd,
-    // Pre-discount value of what left the shelf. `gross_sales_usd` is the sum
-    // of subtotals, which are already net of the LINE discounts, so the item
-    // discount is added back to reach the price the goods were listed at.
-    grossSaleUsd: Math.round((totals.gross_sales_usd + totals.item_discount_usd) * 100) / 100,
-    taxUsd: totals.tax_usd,
+    // Cost and profit as the Reports hub defines them. No second definition
+    // lives here: if that one changes, this line changes with it, which is the
+    // only way the shift message and the day report can stay reconcilable.
+    profitUsd: totals.profit_usd,
+    deliveryFeeUsd: totals.delivery_usd,
+    deliveryCostUsd: totals.delivery_actual_cost_usd,
+    deliveryCostRecorded: totals.delivery_actual_cost_count,
     // Customer refunds over the window, on the same net basis as revenue (they
     // are already subtracted from it). Attribution follows the kernel: a refund
     // belongs to the SALE's window, so a return taken this shift against
     // yesterday's receipt is yesterday's figure -- otherwise the two surfaces
     // would disagree about the same money.
     refundUsd: totals.refund_usd,
-    avgOrderUsd: totals.avg_order_usd,
-    // Cost and profit as the Reports hub defines them. No second definition
-    // lives here: if that one changes, this line changes with it, which is the
-    // only way the shift message and the day report can stay reconcilable.
-    costUsd: totals.cost_usd,
-    profitUsd: totals.profit_usd,
-    deliveryFeeUsd: totals.delivery_usd,
-    deliveryCostUsd: totals.delivery_actual_cost_usd,
-    deliveryMarginUsd: totals.delivery_margin_usd,
-    deliveryCostRecorded: totals.delivery_actual_cost_count,
     // Not Paid, on the same net basis. Included in business revenue/profit,
-    // but never in collected cash.
+    // but never in collected cash. Always printed as a positive "Credit"
+    // figure -- see the owner's ruling in the header comment.
     creditUsd: totals.pending_revenue_usd,
     otherExpenseUsd: expenses.usd,
     otherExpenseKhr: expenses.khr,
-    collectedUsd: totals.collected_total_usd,
     // Refunds and courier payouts no longer suppress the estimate: they are
     // subtracted components of it now (lib/shiftReconciliation.ts), so a shop
     // that takes one return a day stops seeing a permanent dash.
     cash: { ...reconciliation.cash_sales, needsReview: reconciliation.needs_review },
     reconciliation,
-    expenseDetails: expenses.details,
-    paymentMethods: paymentMethods.map((row) => ({ method: row.payment_method, count: row.tx_count, collectedUsd: row.collected_usd })),
-    deliveryServices: deliveries.map((row) => ({
-      name: row.delivery_contact_name,
-      deliveries: row.deliveries,
-      chargedUsd: row.charged_fee_usd,
-      // Per courier, the same three parts as the totals above -- already on
-      // the kernel's row (margin_usd = charged − actual cost), so this is a
-      // rename, not a second calculation.
-      costUsd: row.actual_cost_usd,
-      marginUsd: row.margin_usd,
-      costRecorded: row.actual_cost_count,
-    })),
   }
 }
 
@@ -741,7 +788,7 @@ async function shiftReport(env: Env, date: string, nowMs: number): Promise<strin
   }
   const blocks: string[] = []
   for (const shift of shifts) blocks.push(await shiftReportFor(env, shift, nowMs))
-  return blocks.join(`\n${'━'.repeat(18)}\n`)
+  return blocks.join(`\n${RULE}\n`)
 }
 
 /**
@@ -909,8 +956,20 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   const shopAbsorbedDelivery = Boolean(sale.isDelivery) && deliveryFee > 0 && customerDelivery === 0
   const paid = (Number(sale.paidUsd) || 0) + (Number(sale.paidKhr) || 0)
   const change = (Number(sale.changeUsd) || 0) + (Number(sale.changeKhr) || 0)
+  const status = String(sale.status || '').replace(/_/g, ' ')
+  // lib/salesStatus.ts's one unsettled status, with the underscore already
+  // taken out above. This is the ONLY thing that makes a sale credit.
+  const unsettled = status === 'awaiting payment'
+  // The pre-discount, pre-tax figure the customer was quoted. When there is
+  // neither a discount nor a tax it IS the Net Total, and printing the same
+  // dollars twice under two labels is precisely what the owner asked us to
+  // stop doing -- so on the ordinary sale it does not print at all.
+  const grossTotalUsd = round2((Number(sale.subtotalUsd) || 0) + customerDelivery)
+  const totalRepeatsNet = grossTotalUsd === round2(Number(sale.totalUsd) || 0)
   return [
-    `Status: ${String(sale.status || '').replace(/_/g, ' ')}`,
+    // A completed sale is the norm this heading already announces ("Sale
+    // recorded"), so only an out-of-the-ordinary status is worth a line.
+    status && status !== 'completed' ? `Status: ${status}` : '',
     `Date: ${formatBusinessDateTime(sale.createdAt)}`,
     `INV: ${sale.receiptNumber}`,
     `Cashier: ${sale.cashier || 'Unknown'}`,
@@ -920,15 +979,33 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     ...items,
     sale.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${sale.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
     sale.isDelivery ? `Delivery service: ${usd(deliveryFee)}${shopAbsorbedDelivery ? ' (shop paid)' : ''}` : '',
-    `Total: ${usd(round2((Number(sale.subtotalUsd) || 0) + customerDelivery))}`,
+    totalRepeatsNet ? '' : `Total: ${usd(grossTotalUsd)}`,
     sale.discountUsd ? `Discount: −${usd(sale.discountUsd)}` : '',
     sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',
     // totalKhr is the converted equivalent of totalUsd, while paidUsd and
     // paidKhr are native tender amounts. Change from saleTotals is likewise
     // an equivalent pair unless a caller can explicitly establish that both
     // currencies were physically returned.
-    `Net Total: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
-    paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : 'Paid: unpaid',
+    //
+    // A sale the customer has NOT settled states the amount ONCE, under the
+    // word CREDIT -- the owner's ruling for this figure everywhere ("just use
+    // credit ... instead of $-n ... just $n"). It used to print the same
+    // dollars as a Net Total and then "Paid: unpaid" underneath: two lines,
+    // one number, and the word the reader was looking for on neither of them.
+    //
+    // The trigger is the sale's own STATUS, never "no tender was passed to
+    // this builder": a replacement hand-out and a completed sale whose
+    // payment the caller did not supply are not credit, and calling them
+    // credit would put a debt on a customer who owes nothing.
+    ...(unsettled && paid <= 0
+      ? [`Credit: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`]
+      : [
+        `Net Total: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
+        // No recorded tender means no Paid line. The status carries the
+        // "not paid" fact already, so a line saying it again is one more
+        // line for nothing.
+        paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
+      ]),
     change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : ' / ')}` : '',
     sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
   ]
@@ -944,7 +1021,10 @@ export function formatStockChangeTelegramLines(change: TelegramStockChange): str
   return [
     `Product: ${change.product}`,
     `Stock change: ${change.type === 'add' ? '+' : '−'}${quantity}`,
-    `Branch: ${change.branch || 'Unassigned'}`,
+    // A branch-less movement drops the line instead of printing the word
+    // "Unassigned" -- the same zero-value rule the reports follow, and the
+    // On hand line below already names whichever branches it can.
+    change.branch ? `Branch: ${change.branch}` : '',
     change.reason ? `Reason: ${change.reason}` : '',
     change.lot ? `Lot: ${change.lot}` : '',
     onHand.length ? `On hand: ${onHand.join(' · ')}` : '',
@@ -1000,11 +1080,20 @@ export function formatTransferTelegramLines(transfer: TelegramTransferSummary): 
   const total = transfer.items.reduce((sum, item) => sum + Math.abs(Number(item.quantity) || 0), 0)
   return [
     `Date: ${formatBusinessDateTime(transfer.createdAt)}`,
-    `From: ${from}`,
-    `To: ${to}`,
+    // A transfer whose branch names did not reach this builder prints no
+    // From/To line at all, rather than the placeholder words "Source" and
+    // "Destination" -- the same zero-value rule that took "Branch:
+    // Unassigned" out of the stock-change message. The two fallbacks are
+    // still used to LABEL the on-hand numbers in the bullets above, where a
+    // nameless quantity would be worse than a generic name.
+    transfer.fromBranch ? `From: ${from}` : '',
+    transfer.toBranch ? `To: ${to}` : '',
     ...items,
     transfer.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${transfer.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
-    `Total moved: ${total} unit(s) · ${transfer.items.length} product(s)`,
+    // ONE figure, like every other total this bot sends. The product count
+    // that used to ride along here counted the bullets directly above it, and
+    // a truncated list already states its own remainder on the line above.
+    `Total moved: ${total} unit(s)`,
     transfer.note ? `Note: ${transfer.note}` : '',
     transfer.by ? `By: ${transfer.by}` : '',
   ]
@@ -1036,7 +1125,10 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
     ...replacements,
     ret.kind === 'supplier'
       ? (ret.compensationUsd != null || ret.compensationKhr != null ? `Supplier pays: ${money(ret.compensationUsd, ret.compensationKhr)}` : '')
-      : (hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : 'Refund: none'),
+      // No refund money means no refund line. A settlement that moved no cash
+      // (a replacement, a write-off) already says so on its own Settlement
+      // line, so "Refund: none" was a line that stated nothing.
+      : (hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : ''),
     ret.kind === 'supplier' && ((ret.lossUsd || 0) > 0 || (ret.lossKhr || 0) > 0) ? `Loss: ${money(ret.lossUsd, ret.lossKhr)}` : '',
     ret.by ? `By: ${ret.by}` : '',
   ]

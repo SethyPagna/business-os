@@ -128,8 +128,11 @@ const LABELS = {
   feeLabel: { en: 'Label', km: 'ស្លាក' },
 
   // --- reports ---
+  // `Fees / ចំណាយ` was retired on Sep 6 2026: the day summary's money line is
+  // now `expenses` below, the same word the shift report and the app's own
+  // renamed Expenses section use. One rule, one label -- a second entry with
+  // the same Khmer would be two names for one figure.
   sales: { en: 'Sales', km: 'ការលក់', localizeValue: true },
-  fees: { en: 'Fees', km: 'ចំណាយ', localizeValue: true },
   stockIn: { en: 'Stock in', km: 'ស្តុកចូល', localizeValue: true },
   stockOut: { en: 'Stock out', km: 'ស្តុកចេញ', localizeValue: true },
   products: { en: 'Products', km: 'ផលិតផល' },
@@ -141,15 +144,17 @@ const LABELS = {
   latestReceipts: { en: 'Latest receipts', km: 'វិក្កយបត្រចុងក្រោយ' },
   yourChatId: { en: 'This chat id', km: 'លេខឆាតនេះ' },
 
-  // --- shift report (S4-7) ---
-  // The line set, and its ORDER, is the shop owner's own, as amended after
-  // review: shop name, cashier, from/to, invoice counts (total, cancelled,
-  // edited), revenue, item discount, invoice discount, gross sale, other
-  // expense, registered cash, final amount -- THEN unpaid credit, printed
-  // below the total rather than above it, because a line above a total reads
-  // as an input to it and credit is explicitly not one (see the arithmetic
-  // note on formatShiftReport). From/To/Cashier/Branch reuse the labels above
-  // rather than growing shift-specific twins.
+  // --- shift report (S4-7, redesigned Sep 6 2026 per the owner's "so long...
+  // much more simpler so easy to understand at a glance" ruling) -----------
+  // The line set is now the SHORT one: shop, cashier, from/to, a header block
+  // of key totals (sales, profit, expenses, delivery fee, credit), invoice
+  // counts, registered cash open vs end (the owner's explicit ask -- "you
+  // didn't mention the registered cash dollar and khr in open vs end"), then
+  // expenses split into delivery cost / other expenses, at most one refunds
+  // line and one informational difference line. No arithmetic is spelled out
+  // and no line explains itself in a sentence -- see formatShiftReport.
+  // From/To/Cashier/Branch reuse the labels below rather than growing
+  // shift-specific twins.
   shop: { en: 'Shop', km: 'ហាង' },
   shift: { en: 'Shift', km: 'វេន' },
   invoices: { en: 'Invoices', km: 'វិក្កយបត្រ' },
@@ -163,59 +168,32 @@ const LABELS = {
   // Sales with at least one `sale_amendments` row (migration 0115) written
   // inside the window -- the append-only ledger IS the definition of edited.
   edited: { en: 'Edited', km: 'បានកែ' },
-  revenue: { en: 'Revenue', km: 'ចំណូល' },
-  itemDiscount: { en: 'Item discount', km: 'បញ្ចុះតម្លៃលើមុខទំនិញ' },
-  invoiceDiscount: { en: 'Invoice discount', km: 'បញ្ចុះតម្លៃលើវិក្កយបត្រ' },
-  grossSale: { en: 'Gross sale', km: 'ការលក់សរុប' },
-  // The eight drawer-reconciliation rows, in the order the owner reads them:
-  // Opening, Cash sales, Refunds, Expenses, Courier, Expected, Counted,
-  // Difference. They are computed by lib/shiftReconciliation.ts -- ONE
-  // definition shared with the close routes and the shift screen -- and the
-  // labels are deliberately identical to the app's own
-  // (shift_recon_* / refunds / fees / courier / shift_difference in
-  // en.json), because a cashier compares this message against that screen.
-  registeredCash: { en: 'Opening', km: 'ដើមវេន' },
-  recordedCashReceipts: { en: 'Cash sales', km: 'ការលក់ជាសាច់ប្រាក់' },
-  shiftRefunds: { en: 'Refunds', km: 'ការសងប្រាក់' },
-  otherExpense: { en: 'Expenses', km: 'ចំណាយ' },
-  // What couriers were actually paid out of the drawer in the window.
-  courierPaid: { en: 'Courier', km: 'អ្នកដឹកជញ្ជូន' },
-  finalAmount: { en: 'Expected', km: 'ត្រូវមាន' },
-  cashCounted: { en: 'Counted', km: 'បានរាប់' },
-  difference: { en: 'Difference', km: 'ភាពខុសគ្នា' },
-  // Reuses the app's own term for pending revenue -- copied verbatim from
-  // en.json/km.json's `rpt_pending_credit` (the Sales reports' "Unpaid
-  // credit" column) rather than inventing new wording for the same figure.
-  // Printed BELOW Final amount (see formatShiftReport): the owner's ruling
-  // was that a line above a total reads as an input to it, and unpaid credit
-  // explicitly is not one.
-  unpaidCredit: { en: 'Unpaid credit', km: 'ឥណទានមិនទាន់បង់' },
-  paymentMethod: { en: 'Payment method', km: 'វិធីទូទាត់' },
-
-  // --- shift report, the fuller breakdown (owner, Sep 4 2026: "proper
-  // detailed summary breakdowns of each aspects") ---------------------------
-  //
-  // Measured against what the Reports hub already carries for the same admin
-  // audience, the shift message was missing the tax, the returns money, the
-  // average sale, the two halves of the invoice discount, and everything about
-  // what a delivery COST as opposed to what it charged. Every Khmer below is
-  // copied from km.json (test-telegram-bilingual-pure.cjs re-checks it):
-  // store/membership discount from the reports' own column headers, 'Avg order
-  // value' from `avg_order_value`, 'Profit' from `profit`, 'Delivery fee' from
-  // `delivery_fee`, 'Delivery margin' from the delivery-margin column. Tax and
-  // Refund needed no new entry -- they already exist above, for the receipt
-  // and the returns message, and reusing them is the point of one table.
-  storeDiscount: { en: 'Store discount', km: 'បញ្ចុះតម្លៃហាង' },
-  membershipDiscount: { en: 'Membership discount', km: 'បញ្ចុះតម្លៃសមាជិក' },
-  avgOrderValue: { en: 'Avg order value', km: 'ទឹកប្រាក់មធ្យម/វិក្កយបត្រ' },
-  // 'Cost of goods' has no pack entry; the compound is built on the pack's
-  // canonical ថ្លៃដើម for cost (the retail glossary's rival, តម្លៃដើម, is
-  // what the rival-spelling check refuses).
-  costOfGoods: { en: 'Cost of goods', km: 'ថ្លៃដើមទំនិញ' },
+  // `sales` is reused from the reports section above -- the shift header's
+  // "Sales" line is the same word and the same figure shape as /report's.
   profit: { en: 'Profit', km: 'ចំណេញ' },
+  // The one combined "Expenses" total in the header block; the delivery-cost
+  // and other-expenses lines beneath it (below) are its two components, never
+  // a second total.
+  expenses: { en: 'Expenses', km: 'ចំណាយ' },
+  expensesOther: { en: 'Other expenses', km: 'ចំណាយផ្សេងទៀត' },
   deliveryFee: { en: 'Delivery fee', km: 'ថ្លៃដឹក' },
   deliveryCost: { en: 'Delivery cost', km: 'ថ្លៃដើមដឹកជញ្ជូន' },
-  deliveryMargin: { en: 'Delivery margin', km: 'ចំណេញដឹកជញ្ជូន' },
+  // Copied from km.json's shift_opening_cash / shift_counted_cash -- the same
+  // words the shift screen itself uses for these two figures, so a cashier
+  // reading the phone message and the shift screen sees the same terms for
+  // "open" and "end".
+  cashOpen: { en: 'Opening cash', km: 'សាច់ប្រាក់ដើមវេន' },
+  cashEnd: { en: 'Counted cash', km: 'សាច់ប្រាក់បានរាប់' },
+  // ONE refunds line (no per-return breakdown) and ONE informational
+  // difference line -- never "shortage", never a must-match claim. Computed
+  // by lib/shiftReconciliation.ts, the one shared drawer definition, but
+  // printed as a single fact rather than a five-part formula.
+  refunds: { en: 'Refunds', km: 'ការសងប្រាក់' },
+  difference: { en: 'Difference', km: 'ភាពខុសគ្នា' },
+  // The word the owner asked for, alone, and always a positive figure -- see
+  // formatShiftReport and formatDaySummary. Copied from en.json's
+  // `supplier_credit` entry.
+  credit: { en: 'Credit', km: 'ឥណទាន' },
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS
@@ -343,82 +321,84 @@ export function localizeTelegramHeading(heading: string): string {
 
 const RULE = '━━━━━━━━━━━━━━━━━━'
 
-type CommandDoc = { command: string; icon: string; en: string; km: string; example: string; dated?: true }
+type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true }
 
-/** The shipped command set, in the order the reference lists them. */
+/**
+ * The shipped command set, in the order the reference lists them.
+ *
+ * SHORTENED Sep 6 2026 with the reports themselves (owner: "less text, no
+ * explanation"). Each entry is now a USAGE line and its Khmer twin -- the
+ * `[date]` marker on a dated command, plus the one date line in the footer,
+ * say everything the per-command `▸ /report 09/01/2026` example used to, in
+ * a seventh of the lines. The example field is gone rather than left unused.
+ */
 export const TELEGRAM_COMMANDS: readonly CommandDoc[] = [
   {
     command: '/report', icon: '📊',
-    en: 'Sales, expenses, stock + total per cashier',
-    km: 'ការលក់ ចំណាយ ស្តុក និងសរុបតាមអ្នកគិតប្រាក់',
-    example: '/report 09/01/2026', dated: true,
+    en: 'Day totals, per cashier',
+    km: 'សរុបប្រចាំថ្ងៃ តាមអ្នកគិតប្រាក់',
+    dated: true,
   },
   {
     command: '/sales', icon: '🛍️',
-    en: 'Receipts with items, prices, cashier',
-    km: 'វិក្កយបត្រ ជាមួយមុខទំនិញ តម្លៃ អ្នកគិតប្រាក់',
-    example: '/sales yesterday', dated: true,
+    en: 'Receipts with items',
+    km: 'វិក្កយបត្រ និងមុខទំនិញ',
+    dated: true,
   },
   {
     command: '/shift', icon: '🧑‍💼',
-    en: 'Each employee shift: takings and cash',
-    km: 'វេនបុគ្គលិកនីមួយៗ៖ ចំណូល និងសាច់ប្រាក់',
-    example: '/shift today', dated: true,
+    en: 'Each shift: takings, cash',
+    km: 'វេននីមួយៗ៖ ចំណូល សាច់ប្រាក់',
+    dated: true,
   },
   {
     command: '/fees', icon: '💸',
-    en: 'Expenses recorded on a day',
-    km: 'ចំណាយដែលបានកត់ត្រាក្នុងមួយថ្ងៃ',
-    example: '/fees 2026-09-01', dated: true,
+    en: 'Expenses of the day',
+    km: 'ចំណាយប្រចាំថ្ងៃ',
+    dated: true,
   },
   {
     command: '/stock', icon: '📦',
-    en: 'Products at or below their low-stock alert',
-    km: 'ផលិតផលដែលស្តុកទាប ឬអស់ស្តុក',
-    example: '/stock',
+    en: 'Low and out of stock',
+    km: 'ស្តុកទាប និងអស់ស្តុក',
   },
   {
     command: '/inventory', icon: '🏷️',
-    en: 'Active products, units on hand, health',
-    km: 'ផលិតផលសកម្ម ឯកតាក្នុងស្តុក សុខភាពស្តុក',
-    example: '/inventory',
+    en: 'Products, units, health',
+    km: 'ផលិតផល ឯកតា សុខភាពស្តុក',
   },
   {
     command: '/help', icon: '❓',
     en: 'This list',
     km: 'បញ្ជីនេះ',
-    example: '/help',
   },
 ]
 
 /**
  * The designed, bilingual command reference. Pure, so
  * scripts/test-telegram-bilingual-pure.cjs pins it without a bot token.
+ *
+ * Two lines per command -- the usage line carries the English, the Khmer sits
+ * under it -- and ONE rule for the whole block instead of one per command. A
+ * `/`-joined sentence pair is wider than a phone-width Telegram bubble and
+ * wraps into a mush, which is why the two languages still get a line each.
  */
 export function telegramCommandReference(): string {
   const lines = [
     '🤖 Business OS — Reports',
     '     របាយការណ៍ Business OS',
-    '',
-    // Full sentences get a line each: a `/`-joined sentence pair is wider than
-    // a phone-width Telegram bubble and wraps into a mush. Field LABELS are
-    // short enough to share a line, and do.
-    'Type one of these in this chat.',
-    'សរសេរពាក្យបញ្ជាណាមួយក្នុងឆាតនេះ។',
+    RULE,
   ]
   for (const doc of TELEGRAM_COMMANDS) {
     lines.push(
-      RULE,
-      `${doc.icon} ${doc.command}${doc.dated ? '  [date]' : ''}`,
-      `     ${doc.en}`,
+      `${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — ${doc.en}`,
       `     ${doc.km}`,
-      `     ▸ ${doc.example}`,
     )
   }
   lines.push(
     RULE,
-    `🗓 ${bi('Date', 'កាលបរិច្ឆេទ')}: dd/mm/yyyy · yyyy-mm-dd`,
-    `     today · yesterday · ${bi('blank = today', 'ទទេ = ថ្ងៃនេះ')}`,
+    '🗓 dd/mm/yyyy · today · yesterday',
+    `     ${bi('blank = today', 'ទទេ = ថ្ងៃនេះ')}`,
     '🔒 Only this shop chat receives data.',
     '     មានតែឆាតហាងនេះទេ ដែលទទួលទិន្នន័យ។',
   )
@@ -487,10 +467,14 @@ export function parseReportDate(argument: string | undefined, today: string): Pa
       `⚠️ ${bi(`I could not read the date "${raw.slice(0, 30)}".`, `មិនអាចអានកាលបរិច្ឆេទ "${raw.slice(0, 30)}" បានទេ។`)}`,
       '',
       bi('Use one of these — the DAY comes first:', 'សូមប្រើទម្រង់ណាមួយ៖ ថ្ងៃមកមុន'),
-      `  ▸ dd/mm/yyyy   — ${bi('e.g.', 'ឧ.')} 01/09/2026 = ${bi('1 September', '1 កញ្ញា')}`,
-      `  ▸ yyyy-mm-dd   — ${bi('e.g.', 'ឧ.')} 2026-09-01`,
-      `  ▸ today ${BILINGUAL_SEPARATOR.trim()} yesterday`,
-      `  ▸ ${bi('nothing at all = today', 'មិនដាក់អ្វីសោះ = ថ្ងៃនេះ')}`,
+      // `•`, not `▸`: the arrow is this bot's POINTER glyph -- "now send that
+      // other command" -- and the Sep 2026 redesign took every pointer line
+      // out of every message. These four are a list of accepted forms, so
+      // they are bulleted like any other list the bot sends.
+      `  • dd/mm/yyyy   — ${bi('e.g.', 'ឧ.')} 01/09/2026 = ${bi('1 September', '1 កញ្ញា')}`,
+      `  • yyyy-mm-dd   — ${bi('e.g.', 'ឧ.')} 2026-09-01`,
+      `  • today ${BILINGUAL_SEPARATOR.trim()} yesterday`,
+      `  • ${bi('nothing at all = today', 'មិនដាក់អ្វីសោះ = ថ្ងៃនេះ')}`,
     ].join('\n'),
   }
 }

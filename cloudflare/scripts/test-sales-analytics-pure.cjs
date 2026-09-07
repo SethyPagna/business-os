@@ -49,7 +49,7 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
     membership_discount_usd: 2,
     tax_usd: 4,
     delivery_usd: 6,        // customer-paid delivery (already excludes store-paid, per the SQL CASE)
-    store_delivery_usd: 3,  // store-absorbed delivery -- a cost, not revenue
+    store_delivery_usd: 3,  // fee waived by the store -- a memo, not revenue or a second cost
   }
   const totals = lib.deriveTotals(level, /* costUsd */ 20, /* returnedCostUsd */ 0, { itemDiscountUsd: 0 })
   assert.equal(totals.discount_usd, 7, 'discount_usd = store + membership')
@@ -67,6 +67,24 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
   assert.equal(totals.store_delivery_usd, 3, 'the waived fee is still REPORTED -- it just is not a cost')
   assert.notEqual(totals.profit_usd, 70, 'the waived fee must not be subtracted a second time')
   assert.equal(totals.avg_order_usd, Math.round((93 / 3) * 100) / 100, 'avg_order = revenue / tx_count')
+}
+
+// The store-waived fee is a memo, not a second courier payout. With $2 charged
+// to the customer and $4 actually paid to the courier, delivery contributes
+// -$2. A separate $2 store-paid memo must not turn that into -$4.
+{
+  const totals = lib.deriveTotals({
+    tx_count: 1,
+    gross_sales_usd: 20,
+    recognized_net_usd: 20,
+    recognized_delivery_usd: 2,
+    recognized_delivery_cost_usd: 4,
+    store_delivery_usd: 2,
+    recognized_store_delivery_usd: 2,
+  }, 5, 0, { itemDiscountUsd: 0 })
+  assert.equal(totals.delivery_net_usd, -2, 'delivery contribution = customer charge (2) - actual courier cost (4)')
+  assert.equal(totals.profit_usd, 13, 'profit uses the -2 delivery contribution exactly once')
+  assert.equal(totals.store_delivery_usd, 2, 'store-paid delivery remains visible as a memo')
 }
 
 // ---- deriveTotals: the fan-out bug this replaces can't reproduce here ----

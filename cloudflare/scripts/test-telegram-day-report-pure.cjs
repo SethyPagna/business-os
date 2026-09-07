@@ -154,12 +154,22 @@ const report = await telegram.telegramCommandReply({}, '/report 10/08/2026')
 check('the day report renders', report.includes('10/08/2026') && report.length > 40)
 check(`the Sales line carries the KERNEL revenue, not the old gross ($115.00 present, $643.00 absent)`,
   report.includes('$115.00') && !report.includes('$643.00'))
+// REDESIGNED Sep 6 2026: one figure per line, so the count is its own line
+// under its own label instead of riding on the money line behind a bilingual
+// "receipt(s) / វិក្កយបត្រ" counter.
 check('and the kernel receipt count, not the count that included the void',
-  /2 receipt/.test(report) && !/3 receipt/.test(report))
+  /^Invoices \/ [^\n]*: 2$/m.test(report) && !/: 3$/m.test(report))
 check('the refund that produced the difference is printed, so the number explains itself',
-  report.includes('$15.00'))
+  /^Refunds \/ [^\n]*: \$15\.00$/m.test(report))
 check('the voided receipt is REPORTED as voided rather than silently counted or silently dropped',
-  /Cancelled/.test(report) && /1 receipt/.test(report))
+  /^Cancelled \/ [^\n]*: 1$/m.test(report))
+// The whole point of the redesign, stated as a measurement rather than a
+// claim: the pre-redesign message spread the same day over prose-tagged
+// lines. This one is a header block, a count block, stock and cashiers.
+check(`the day summary fits one phone screen (${report.split('\n').length} lines)`,
+  report.split('\n').length <= 20)
+check('and it leads with the five totals every report now leads with',
+  /^Sales \/ [^\n]*: \$115\.00$/m.test(report) && /^Profit \/ /m.test(report))
 check('the tax and the delivery fee are not inside the sales figure',
   !report.includes('$103.00') && !report.includes('$128.00'))
 

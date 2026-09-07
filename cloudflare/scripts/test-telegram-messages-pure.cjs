@@ -163,14 +163,15 @@ const cancelledShift = {
   closed_at: null, closing_counted_usd: null, closing_counted_khr: null,
   cancelled_at: '2026-09-04T02:30:00.000Z', cancelled_by_user_name: 'Manager', cancel_reason: 'Duplicate opening',
 }
+// The figure set the redesigned report actually consumes (Sep 6 2026). The
+// discount/tax/average/cost/margin fields and the payment-method and
+// delivery-service breakdown arrays are gone from ShiftReportFigures, not
+// merely unprinted -- shiftFigures no longer queries for them.
 const cancelledFigures = {
-  invoices: 3, cancelled: 1, edited: 0, revenueUsd: 25, itemDiscountUsd: 0,
-  invoiceDiscountUsd: 0, storeDiscountUsd: 0, membershipDiscountUsd: 0,
-  grossSaleUsd: 25, taxUsd: 0, refundUsd: 0, avgOrderUsd: 8.33, costUsd: 10,
-  profitUsd: 15, deliveryFeeUsd: 0, deliveryCostUsd: 0, deliveryMarginUsd: 0,
-  deliveryCostRecorded: 0, creditUsd: 0, otherExpenseUsd: 0, otherExpenseKhr: 0,
-  collectedUsd: 25, cash: { usd: 25, khr: 0, needsReview: false },
-  paymentMethods: [], deliveryServices: [],
+  invoices: 3, cancelled: 1, edited: 0, revenueUsd: 25, profitUsd: 15,
+  deliveryFeeUsd: 0, deliveryCostUsd: 0, deliveryCostRecorded: 0,
+  refundUsd: 0, creditUsd: 0, otherExpenseUsd: 0, otherExpenseKhr: 0,
+  cash: { usd: 25, khr: 0, needsReview: false },
 }
 const cancelledReport = telegram.formatShiftReport('Shop', cancelledShift, cancelledFigures, Date.parse('2026-09-04T12:00:00.000Z'))
 assert.ok(cancelledReport.includes('cancelled / បានបោះបង់'), cancelledReport)
@@ -196,7 +197,9 @@ const closedCancelledReport = telegram.formatShiftReport('Shop', closedThenCance
 assert.equal(telegram.shiftFilters(closedThenCancelled, Date.parse('2026-09-05T12:00:00.000Z')).createdTo, closedThenCancelled.closed_at)
 assert.ok(closedCancelledReport.includes('To / ទៅ: 04/09/2026 17:02'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Cancelled at / បោះបង់នៅ: 05/09/2026 09:30'), closedCancelledReport)
-assert.ok(closedCancelledReport.includes('Counted / បានរាប់: $75.00 · 100,000៛'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('Counted cash / សាច់ប្រាក់បានរាប់: $75.00 · 100,000៛'), closedCancelledReport)
+// ... beside the OPENING count, which is the half the owner said was missing.
+assert.ok(closedCancelledReport.includes('Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Invoices / វិក្កយបត្រ: 3'), closedCancelledReport)
 const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 assert.match(telegramSource, /WHERE business_date = @date\s+ORDER BY/, 'dated /shift history must retain cancelled shifts')
@@ -209,8 +212,12 @@ const credit = telegram.formatSaleTelegramLines({
 }).filter(Boolean)
 assert.equal(credit[0], 'Status: awaiting payment')
 assert.ok(credit.includes('Delivery service: $1.00 (shop paid)'))
-assert.ok(credit.includes('Total: $2.00'), credit.join('\n'))
-assert.ok(credit.includes('Paid: unpaid'))
+// REDESIGNED Sep 6 2026. An unsettled sale states the amount ONCE, under the
+// owner's word for it -- not as a Total, a Net Total and a "Paid: unpaid"
+// spelling out the same $2.00 three times over.
+assert.ok(credit.includes('Credit: $2.00'), credit.join('\n'))
+assert.ok(!credit.some((line) => /^(Total|Net Total|Paid):/.test(line)), credit.join('\n'))
+assert.ok(!credit.join('\n').includes('unpaid'), 'the word "unpaid" is gone; the line says Credit')
 assert.ok(!credit.some((line) => /^(Customer|Tel|Discount|Change|Delivery driver):/.test(line)))
 
 // The payer as it is ACTUALLY stored. `delivery_fee_paid_by` defaults to
@@ -226,16 +233,25 @@ const absorbed = telegram.formatSaleTelegramLines({
   subtotalUsd: 20, discountUsd: 0, totalUsd: 20, totalKhr: 82000, paidUsd: 20,
 }).filter(Boolean)
 assert.ok(absorbed.includes('Delivery service: $2.00 (shop paid)'), absorbed.join('\n'))
-assert.ok(absorbed.includes('Total: $20.00'), absorbed.join('\n'))
 assert.ok(absorbed.includes('Net Total: $20.00 / 82,000៛'), absorbed.join('\n'))
+// REDESIGNED Sep 6 2026: with no discount and no tax the pre-discount Total
+// IS the Net Total, so it does not print. It printing here would mean either
+// the repeated figure the owner asked us to drop or -- the older defect --
+// the shop-absorbed $2.00 billed into it.
+assert.ok(!absorbed.some((line) => line.startsWith('Total: ')), absorbed.join('\n'))
 
 // The message FOOTS: Total - Discount + Tax must equal Net Total, which is
 // the stored total_usd. A shop-absorbed fee added to Total would break this
 // by exactly the fee -- which is the defect above, stated as arithmetic.
+// Since Sep 6 2026 a Total equal to the Net Total is not printed at all, so
+// an absent Total line MEANS "equal to Net Total" -- which is what the
+// fallback below encodes. The check stays discriminating either way: bill the
+// shop-absorbed fee into Total and the line reappears, two dollars too big.
 const footing = (sale) => {
   const lines = telegram.formatSaleTelegramLines(sale).filter(Boolean)
   const money = (prefix) => { const hit = lines.find((l) => l.startsWith(prefix)); return hit ? Number(hit.replace(prefix, '').split(' ')[0].replace(/[$,\u00a0]/g, '').replace('\u2212', '-')) : 0 }
-  return Math.round((money('Total: ') - money('Discount: \u2212') + money('Tax: ') - money('Net Total: ')) * 100) / 100
+  const total = lines.some((l) => l.startsWith('Total: ')) ? money('Total: ') : money('Net Total: ')
+  return Math.round((total - money('Discount: \u2212') + money('Tax: ') - money('Net Total: ')) * 100) / 100
 }
 assert.equal(footing({
   status: 'completed', receiptNumber: 'R4', items: [{ name: 'A', quantity: 2, unitPriceUsd: 21, basePriceUsd: 28, lineTotalUsd: 42 }, { name: 'B', quantity: 1, unitPriceUsd: 10, lineTotalUsd: 10 }],
@@ -277,20 +293,40 @@ assert.deepEqual(telegram.formatTransferTelegramLines({
   'To: Shop',
   '• Rice 5kg 10 (lot 09032026) — Warehouse 90 · Shop 25 · all branches 115',
   '• Coca Cola 330ml 24 → Coca-Cola 330ml — Warehouse 0 · Shop 48',
-  'Total moved: 34 unit(s) · 2 product(s)',
+  // ONE figure. The product count that used to ride on this line ("· 2
+  // product(s)") counted the bullets directly above it -- the same repeated
+  // figure the Sep 2026 redesign took out of the expense report, where the
+  // records under the total ARE the count.
+  'Total moved: 34 unit(s)',
   'Note: Restock front shelf',
   'By: Za',
 ])
+// Every labelled line of an event message states exactly one figure, the rule
+// the reports follow. (Bullets are a list, the Date is a timestamp, and a
+// money pair like "$5.00 + 2,000៛" is one amount in the two currencies the
+// drawer holds.)
+for (const line of telegram.formatTransferTelegramLines({
+  createdAt: '2026-09-03 03:04:05', fromBranch: 'Warehouse', toBranch: 'Shop',
+  items: [{ product: 'Rice 5kg', quantity: 10 }],
+}).filter(Boolean)) {
+  if (line.startsWith('•') || line.startsWith('+') || !line.includes(': ') || line.startsWith('Date: ')) continue
+  const figures = line.slice(line.indexOf(': ') + 2).replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []
+  assert.ok(figures.length <= 1, `the transfer message puts ${figures.length} figures on one line: "${line}"`)
+}
 // unknown on-hand (read-back failed) and missing branch names never produce a
-// dangling "On hand:" fragment; the cap states the remainder
+// dangling "On hand:" fragment; the cap states the remainder.
+// A transfer whose branches are unknown prints NO From/To line rather than the
+// placeholder words "Source" and "Destination" -- the same zero-value rule
+// that took "Branch: Unassigned" out of the stock-change message.
 const bulk = telegram.formatTransferTelegramLines({
   items: Array.from({ length: 23 }, (_, i) => ({ product: `Item ${i + 1}`, quantity: 2 })),
 }).filter(Boolean)
-assert.equal(bulk[1], 'From: Source')
-assert.equal(bulk[3], '• Item 1 2')
+assert.ok(!bulk.some((line) => /^(From|To): /.test(line)), bulk.join('\n'))
+assert.equal(bulk[1], '• Item 1 2')
 assert.equal(bulk.filter((line) => line.startsWith('• ')).length, 20)
 assert.ok(bulk.includes('+ 3 more item(s)'))
-assert.ok(bulk.includes('Total moved: 46 unit(s) · 23 product(s)'))
+assert.ok(bulk.includes('Total moved: 46 unit(s)'))
+assert.ok(!bulk.some((line) => line.includes('product(s)')), bulk.join('\n'))
 
 // --- customer return: receipt-style, refund per line, resulting on-hand ---
 assert.deepEqual(telegram.formatReturnTelegramLines({
@@ -315,9 +351,11 @@ assert.deepEqual(telegram.formatReturnTelegramLines({
   'Refund: $10.25',
   'By: Za',
 ])
-// a replacement-only return has no money: say so instead of "$0.00"
+// A replacement-only return has no money. It used to say "Refund: none";
+// since Sep 6 2026 a line with nothing in it is not sent at all -- the same
+// zero-value rule the reports follow.
 const swap = telegram.formatReturnTelegramLines({ kind: 'customer', returnNumber: 'RET-1', items: [{ product: 'A', quantity: 1 }], refundUsd: 0, refundKhr: 0 }).filter(Boolean)
-assert.ok(swap.includes('Refund: none'), swap.join('\n'))
+assert.ok(!swap.some((line) => line.startsWith('Refund:')), swap.join('\n'))
 assert.ok(!swap.some((line) => /^(INV|Customer|Branch|Reason|Type|Settlement|Loss|By):/.test(line)))
 
 // --- supplier return: stock out + settlement money, loss only when there is one ---

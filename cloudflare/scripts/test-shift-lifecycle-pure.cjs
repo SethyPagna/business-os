@@ -46,6 +46,35 @@ function database() {
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
   db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY,name TEXT NOT NULL,is_active INTEGER DEFAULT 1);
+    CREATE TABLE sales (
+      id INTEGER PRIMARY KEY, created_at TEXT, cashier_id INTEGER, branch_id INTEGER,
+      sale_status TEXT, payment_method TEXT, payment_details TEXT,
+      amount_paid_usd REAL, amount_paid_khr REAL, change_usd REAL, change_khr REAL,
+      change_is_actual INTEGER, change_exchange_rate REAL, total_usd REAL, exchange_rate REAL,
+      subtotal_usd REAL, discount_usd REAL, membership_discount_usd REAL, tax_usd REAL,
+      delivery_fee_usd REAL, delivery_fee_paid_by TEXT, delivery_actual_cost_usd REAL,
+      delivery_actual_cost_khr REAL, is_delivery INTEGER, source_return_id INTEGER,
+      customer_id INTEGER, delivery_contact_id INTEGER, delivery_contact_name TEXT
+    );
+    CREATE TABLE sale_items (
+      id INTEGER PRIMARY KEY, sale_id INTEGER, quantity REAL, cost_price_usd REAL,
+      product_discount_usd REAL, manual_discount_usd REAL
+    );
+    CREATE TABLE returns (
+      id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, cashier_id INTEGER, branch_id INTEGER,
+      status TEXT, return_scope TEXT, total_refund_usd REAL, total_refund_khr REAL
+    );
+    CREATE TABLE return_items (
+      id INTEGER PRIMARY KEY, return_id INTEGER, quantity REAL, cost_price_usd REAL,
+      return_to_stock INTEGER, stock_action TEXT
+    );
+    CREATE TABLE fees (
+      id INTEGER PRIMARY KEY, created_at TEXT, created_by INTEGER, branch_id INTEGER,
+      fee_date TEXT, fee_type TEXT, label TEXT, amount_usd REAL, amount_khr REAL,
+      sale_id INTEGER, delivery_contact_id INTEGER, notes TEXT
+    );
+    CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT);
+    CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);
     CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,
       entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,old_value TEXT,new_value TEXT,
       device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`)
@@ -69,12 +98,32 @@ async function main() {
   const sqlite = database()
   let user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.stringify({ pos: true }) }
   const sent = []; const waited = []
+  const dbModule = { getDb: () => d1(sqlite) }
+  const businessDateWindow = loadReal('lib/businessDateWindow.ts')
+  const financialPrecision = loadReal('lib/financialPrecision.ts')
+  const saleTotals = loadReal('lib/saleTotals.ts')
+  const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', {
+    './financialPrecision': financialPrecision,
+    './saleTotals': saleTotals,
+  })
+  const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
+  const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+    './db': dbModule,
+    './businessDateWindow': businessDateWindow,
+  })
+  const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
+    './db': dbModule,
+    './nativeSaleChange': nativeSaleChange,
+    './salesAnalytics': salesAnalytics,
+    './paymentMethodRegistry': paymentMethodRegistry,
+  })
   const permissions = loadReal('lib/permissions.ts')
   const route = loadReal('routes/shifts.ts', {
-    '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
-    '../lib/db': { getDb: () => d1(sqlite) },
+    '../lib/businessDateWindow': businessDateWindow,
+    '../lib/db': dbModule,
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
     '../lib/permissions': permissions,
+    '../lib/shiftReconciliation': shiftReconciliation,
     '../lib/audit': { audit: async () => { throw new Error('lifecycle audit must be in the D1 batch') } },
     '../lib/telegram': { sendTelegramShiftReport: async (_env, shiftId) => { sent.push(shiftId); return true } },
   })
@@ -87,6 +136,9 @@ async function main() {
   const opened = await call('POST', '/open', { branch_id: 1, opening_float_usd: 10, opening_float_khr: 10000 })
   assert.equal(opened.status, 201)
   const rootShift = (await opened.json()).shift
+  const openingReconciliation = await shiftReconciliation.loadShiftReconciliation({}, rootShift)
+  assert.deepEqual(openingReconciliation.opening, { usd: 10, khr: 10000 },
+    'the lifecycle harness executes the real reconciliation helper')
   assert.equal(rootShift.parent_shift_id, null)
   assert.deepEqual(rootShift.capabilities, { can_edit: true, can_close: true, can_reopen: false, can_cancel: false })
   assert.deepEqual(sent, [rootShift.id], 'winning root open schedules one open-state report')
@@ -102,6 +154,12 @@ async function main() {
   assert.deepEqual([rootCloseA.status, rootCloseB.status].sort(), [200, 409], 'concurrent exact close has one winner')
   const rootClose = rootCloseA.status === 200 ? rootCloseA : rootCloseB
   const closedRoot = (await rootClose.json()).shift
+  assert.deepEqual(closedRoot.reconciliation.opening, { usd: 10, khr: 10000 },
+    'the lifecycle route loads the real reconciliation helper and returns its opening registration')
+  assert.deepEqual(closedRoot.reconciliation.counted, { usd: 12, khr: 12000 },
+    'the real helper returns the persisted closing registration')
+  assert.deepEqual(closedRoot.reconciliation.expected, { usd: 10, khr: 10000 },
+    'an empty trading window keeps the expected drawer at the opening registration')
   assert.equal(closedRoot.capabilities.can_reopen, true)
   assert.equal(sent.filter((id) => id === rootShift.id).length, 2,
     'root has one opening and one winning close notification')

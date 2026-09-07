@@ -237,7 +237,7 @@ check('the WAIVED delivery fee is reported but never charged to profit (the old 
 check(`kernel refund_usd is apportioned onto the net basis (${EXPECT.refunds}), not the charged one (${EXPECT.refundsChargedBasis})`,
   kernel.refund_usd === EXPECT.refunds && kernel.refund_usd !== EXPECT.refundsChargedBasis)
 check(`kernel collected_total_usd = revenue + tax + customer delivery (${EXPECT.collected})`, kernel.collected_total_usd === EXPECT.collected)
-check('kernel gross_sales_usd still reports the raw pre-discount subtotal line (unchanged display field)', kernel.gross_sales_usd === 100 + 50 + 40 + 200 + 80) // all non-cancelled subtotals = 470
+check('kernel gross_sales_usd keeps the stored subtotal contract (already net of line discounts; unchanged display field)', kernel.gross_sales_usd === 100 + 50 + 40 + 200 + 80) // all non-cancelled stored subtotals = 470
 check('awaiting-payment contributes positively to revenue while remaining Not Paid', kernel.revenue_usd === EXPECT.revenue && kernel.pending_revenue_usd === EXPECT.pending)
 
 // ---- 5. Per-period trend must SUM to the headline (shared deriveTotals) ------
