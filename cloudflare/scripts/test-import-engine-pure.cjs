@@ -1395,6 +1395,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results[0].existingId, 12)
     assert.strictEqual(results[0].data.phone, '012 345 678')
     assert.strictEqual(results[0].data.phone_normalized, '012345678', 'a touched customer refreshes its canonical phone key')
+    assert.strictEqual(results[0].expectedUpdatedAt, null, 'contact updates carry the exact updated_at snapshot (including legacy null) to the apply guard')
   }
 
   // 4e) Secondary Contact Option phones participate in canonical identity.
@@ -1642,6 +1643,9 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const applyBody = source.slice(applyStart, applyEnd)
   assert.match(applyBody, /\['name', 'phone', 'phone_normalized', 'address'/, 'customer import apply writes phone_normalized beside phone')
   assert.match(applyBody, /columns\.filter\(\(c\) => c !== 'membership_number'\)/, 'updates preserve membership identity while still refreshing phone_normalized')
+  assert.match(applyBody, /contactDuplicateWriteGuardStatement\(table/, 'every contact create/update gets a canonical phone guard at apply time')
+  assert.match(applyBody, /updated_at IS @expectedUpdatedAt/, 'contact updates verify the freshly classified row snapshot in the atomic write group')
+  assert.match(applyBody, /guardedGroups\.push\(group\)/, 'contact guard and write remain one group instead of entering the split plain-statement path')
 }
 
 // -- classifySales: order grouping by receipt_number, sale_status
