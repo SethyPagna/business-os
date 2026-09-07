@@ -14,6 +14,7 @@ import {
   undismissDuplicateCluster,
   collectContactPhones,
   formatPhoneP8,
+  formatContactOptionPhones,
   type ContactDuplicateMatch,
   type ContactDuplicateTable,
 } from '../lib/contactDuplicates'
@@ -983,6 +984,7 @@ function registerContactRoutes(config: ContactConfig) {
     // match the 10,352 migrated numbers. Matching below stays digit-based,
     // so this changes nothing about duplicate detection or linkage.
     if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
+    if (Object.prototype.hasOwnProperty.call(payload, 'address')) payload.address = formatContactOptionPhones(payload.address, config.optionMode)
     // Keep the canonical phone key in sync so the storefront signup can detect
     // this contact as an existing customer (lib/phone.ts is the authority;
     // 0087 backfilled the historical rows). Customers only — suppliers/delivery
@@ -1141,6 +1143,7 @@ function registerContactRoutes(config: ContactConfig) {
     // P7-c: same P8 display shape on edit as on create -- an update that
     // touches the phone must not undo the convention.
     if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
+    if (Object.prototype.hasOwnProperty.call(payload, 'address')) payload.address = formatContactOptionPhones(payload.address, config.optionMode)
     // Keep the canonical phone key in sync on edit too (see create above).
     if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'phone')) {
       payload.phone_normalized = canonicalizePhone(payload.phone)
@@ -2155,10 +2158,13 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
     if (!target) return c.json({ error: 'Target customer not found.' }, 404)
     targetId = target.id
   } else {
+    const storedPhone = formatPhoneP8(phone)
+    const duplicateBlock = await checkContactDuplicateBlock(c.env, CUSTOMERS, { name: name || storedPhone, phone: storedPhone, address: null }, false)
+    if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
     const inserted = await withMintedMembershipNumber(db, (membership) => db.prepare(`
       INSERT INTO customers (name, phone, phone_normalized, membership_number, created_at, updated_at)
       VALUES (@name, @phone, @phoneNormalized, @membership, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `).run({ name: name || phone, phone: phone || null, phoneNormalized: canonicalizePhone(phone), membership }))
+    `).run({ name: name || storedPhone, phone: storedPhone || null, phoneNormalized: canonicalizePhone(storedPhone), membership }))
     targetId = Number((inserted as { lastInsertRowid?: number | bigint }).lastInsertRowid ?? (inserted as { meta?: { last_row_id?: number } })?.meta?.last_row_id)
     created = true
   }

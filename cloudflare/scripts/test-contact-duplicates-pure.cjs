@@ -41,10 +41,12 @@ function transpileTs(tsPath) {
   return mod.exports
 }
 const contactOptionsExports = transpileTs(path.join(path.dirname(sourcePath), 'contactOptions.ts'))
+const phoneExports = transpileTs(path.join(path.dirname(sourcePath), 'phone.ts'))
 
 const moduleObj = { exports: {} }
 function fakeRequire(specifier) {
   if (specifier === './contactOptions' || specifier === './contactOptions.ts') return contactOptionsExports
+  if (specifier === './phone' || specifier === './phone.ts') return phoneExports
   return require(specifier)
 }
 const wrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)
@@ -56,6 +58,7 @@ const {
   dismissDuplicateCluster,
   normalizeContactName,
   normalizePhone,
+  formatContactOptionPhones,
 } = moduleObj.exports
 
 let failed = 0
@@ -93,6 +96,20 @@ async function main() {
   assert.strictEqual(normalizeContactName('  Sok   Dara '), 'sok dara')
   assert.strictEqual(normalizePhone('(012) 345-678'), '012345678')
   assert.strictEqual(normalizePhone('   '), null)
+})
+
+  await runTest('normalizePhone: local and Cambodia country-code forms share one identity', async () => {
+  assert.strictEqual(normalizePhone('012 345 678'), '012345678')
+  assert.strictEqual(normalizePhone('+855 12 345 678'), '012345678')
+  assert.strictEqual(normalizePhone('85512345678'), '012345678')
+})
+
+  await runTest('formatContactOptionPhones formats structured phones without touching plain addresses', async () => {
+  const stored = JSON.stringify([{ label: 'Default', name: 'Dara', phone: '+855 12 345 678', address: 'Street 1' }])
+  const formatted = formatContactOptionPhones(stored)
+  assert.strictEqual(contactOptionsExports.parseStoredContactOptions(formatted)[0].phone, '012 345 678')
+  assert.strictEqual(formatContactOptionPhones('Street 1'), 'Street 1')
+  assert.strictEqual(formatContactOptionPhones('[broken'), '[broken')
 })
 
 // -- findDuplicateContactClusters / dismissDuplicateCluster: fake db ------

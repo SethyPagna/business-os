@@ -1,5 +1,6 @@
 import type { D1Compat } from './db'
-import { parseStoredContactOptions, type ContactOptionMode } from './contactOptions'
+import { parseStoredContactOptions, serializeContactOptions, type ContactOptionMode } from './contactOptions'
+import { canonicalizePhone } from './phone'
 
 // Duplicate detection for customers/suppliers/delivery_contacts, backing
 // the rule these three tables now share: name, phone, and (customers
@@ -61,15 +62,12 @@ export function normalizeContactName(value: unknown): string {
   return String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-// Phones are compared on digits (+ leading +) only, so "012 345 678",
-// "012-345-678", and "(012) 345 678" all normalize to the same key -- the
-// same formatting tolerance classifyContacts() already relies on for CSV-
-// import phone matching (see importEngine.ts).
+// Phone identity uses the account system's canonical key. Besides ignoring
+// display separators, this folds Cambodia's 855 country code to the local
+// 0-leading form, so +855 12 345 678 and 012 345 678 cannot become two
+// contacts merely because they were entered through different surfaces.
 export function normalizePhone(value: unknown): string | null {
-  const raw = String(value ?? '').trim()
-  if (!raw) return null
-  const digits = raw.replace(/[^\d+]/g, '')
-  return digits || null
+  return canonicalizePhone(value)
 }
 
 // P7-c: the P8 DISPLAY convention for manually entered phones -- the same
@@ -94,6 +92,26 @@ export function formatPhoneP8(value: unknown): string {
   const national = /^855\d{8,9}$/.test(digits) ? `0${digits.slice(3)}` : digits
   if (!/^0\d{8,9}$/.test(national)) return raw
   return `${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`
+}
+
+// Contact Options live as JSON in the address column. Format only a real JSON
+// array: legacy/plain addresses and malformed historical values must survive
+// byte-for-byte. This keeps every phone written by the manual/import paths in
+// the same display shape as the top-level phone without rewriting old rows.
+export function formatContactOptionPhones(value: unknown, mode: ContactOptionMode = 'address'): unknown {
+  const raw = String(value ?? '').trim()
+  if (!raw || !raw.startsWith('[')) return value
+  try {
+    if (!Array.isArray(JSON.parse(raw))) return value
+  } catch (_) {
+    return value
+  }
+  const options = parseStoredContactOptions(raw, mode)
+  if (!options.length) return value
+  return serializeContactOptions(options.map((option) => ({
+    ...option,
+    phone: option.phone == null ? null : formatPhoneP8(option.phone),
+  })), mode)
 }
 
 // Every phone number a contact record actually carries: its primary
@@ -170,11 +188,24 @@ export async function findContactDuplicates(
     params.nameKey = nameKey
     conditions.push(`lower(trim(name)) = @nameKey`)
   }
+  // Use the same canonical rule as normalizePhone for accepted phone shapes in the primary
+  // column and each structured Contact Option. customers.phone_normalized is
+  // indexed and checked first, while the expression also catches historical
+  // supplier/delivery rows and imported customer rows whose key is stale.
+  const digitsSql = (column: string) => `replace(replace(replace(replace(replace(replace(replace(COALESCE(${column}, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', ''), '+', ''), '/', '')`
+  const canonicalSql = (column: string) => {
+    const digits = digitsSql(column)
+    return `(CASE WHEN substr(${digits}, 1, 3) = '855' AND length(${digits}) IN (11, 12) THEN '0' || substr(${digits}, 4) ELSE ${digits} END)`
+  }
   phones.forEach((phone, index) => {
     params[`phone${index}`] = phone
-    conditions.push(`phone = @phone${index}`)
-    params[`addr${index}`] = `%${phone}%`
-    conditions.push(`address LIKE @addr${index}`)
+    if (table === 'customers') conditions.push(`phone_normalized = @phone${index}`)
+    conditions.push(`${canonicalSql('phone')} = @phone${index}`)
+    conditions.push(`EXISTS (
+      SELECT 1
+      FROM json_each(CASE WHEN json_valid(address) THEN CASE WHEN json_type(address) = 'array' THEN address ELSE '[]' END ELSE '[]' END) AS option
+      WHERE ${canonicalSql("json_extract(option.value, '$.phone')")} = @phone${index}
+    )`)
   })
   if (!conditions.length) return []
 
