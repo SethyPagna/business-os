@@ -22,7 +22,16 @@ const searchMatch = compile('searchMatch.ts')
 const stockReceiptGate = compile('stockReceiptGate.ts')
 const branchRoles = compile('branchRoles.ts')
 const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branchRoles })
-const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch, './stockReceiptGate': stockReceiptGate, './branchRoleGuards': branchRoleGuards })
+const actorSnapshot = compile('actorSnapshot.ts')
+const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
+const subject = compile('stockActionCommit.ts', {
+  './db': {},
+  './batchCode': batchCode,
+  './searchMatch': searchMatch,
+  './stockReceiptGate': stockReceiptGate,
+  './branchRoleGuards': branchRoleGuards,
+  './saleCreationSnapshot': saleCreationSnapshot,
+})
 
 function setup() {
   const sqlite = new Database(':memory:')

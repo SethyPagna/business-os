@@ -11,7 +11,7 @@ const actual = new Set(['actorSnapshot','movementBranchName',
   'db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
   'productBatches','batchCode','salesStatus','conflictControl','searchMatch','financialPrecision',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
-  'nativeSaleChange','deliveryAmounts','saleRecords',
+  'nativeSaleChange','deliveryAmounts','saleRecords','saleCreationSnapshot',
   'receiptNumber','clientTimestamp',
   // N21: routes/sales.ts resolves the display address through this kernel on
   // every write. A stub makes contactDisplayAddress undefined and the route
