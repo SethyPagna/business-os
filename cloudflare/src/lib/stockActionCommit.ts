@@ -47,6 +47,19 @@ export interface UnifiedStockAddInput {
   sellingPriceUsd?: number | null
   wholesalePriceUsd?: number | null
   costPriceUsd?: number | null
+  /**
+   * The sheet's OWN cost_price cell, with no catalog fallback. The gate must
+   * be asked about what the operator actually typed on this row, never a
+   * value costPriceUsd inherited from an existing product's catalog cost --
+   * that inheritance feeds the product-price columns, not the receipt gate.
+   * Import callers (importEngine.ts) always pass this explicitly, including
+   * an explicit `null` when the sheet's cost column was blank. A caller that
+   * builds one receipt cost with no sheet/catalog distinction (a direct
+   * unit-level caller with no import sheet behind it) may omit the field
+   * entirely, in which case the gate falls back to costPriceUsd itself,
+   * unchanged from before this field existed.
+   */
+  sheetCostPriceUsd?: number | null
   /** Supplier this batch was bought from (migration 0062). Stored on batch
    *  creation; an existing batch's blank supplier is backfilled, but a
    *  supplier already recorded on the lot is never overwritten. */
@@ -247,10 +260,17 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // applyStockActionsJob records the message on the row and the operator sees
   // it in the finished report.
   const freeGoods = input.freeGoods === true
+  // The GATE must see what the sheet's own cost_price cell said, never a
+  // value costPriceUsd inherited from an existing product's catalog cost --
+  // that inheritance exists to keep the product-price columns filled, not to
+  // manufacture a receipt cost the operator never typed (sibling:F13
+  // verifier round 2). A caller with no sheet/catalog distinction (no
+  // sheetCostPriceUsd key at all) keeps today's behavior unchanged.
+  const sheetCostPriceUsd = 'sheetCostPriceUsd' in input ? input.sheetCostPriceUsd : input.costPriceUsd
   const refusal = unifiedStockReceiptRefusal({
     supplierName,
     lotSupplierName: pre?.lot_supplier_name ?? null,
-    unitCostUsd: input.costPriceUsd,
+    unitCostUsd: sheetCostPriceUsd,
     freeGoods,
   })
   if (refusal) throw new Error(refusal)

@@ -4366,7 +4366,11 @@ async function dispatchStockActionSingle(
   // cost to describe and the gate must not touch it.
   const receivesStock = plan.branchActions.some((a) => a.direction === 'add' && a.quantity > 0)
   if (plan.kind === 'create' && receivesStock) {
-    const refusal = unifiedStockReceiptRefusal({ supplierName, unitCostUsd: resolved.costPriceUsd, freeGoods: resolved.freeGoods })
+    // sheetCostPriceUsd, not costPriceUsd: a create has no catalog row to
+    // inherit a cost from anyway, but the gate must ask the same question
+    // applyUnifiedStockAdd asks below -- what the sheet's own cell said, not
+    // what a fallback happened to backfill (sibling:F13 verifier round 2).
+    const refusal = unifiedStockReceiptRefusal({ supplierName, unitCostUsd: resolved.sheetCostPriceUsd, freeGoods: resolved.freeGoods })
     if (refusal) throw new Error(refusal)
   }
   let productId = resolved.productId ?? 0
@@ -4402,6 +4406,7 @@ async function dispatchStockActionSingle(
       sellingPriceUsd: resolved.sellingPriceUsd,
       wholesalePriceUsd: resolved.wholesalePriceUsd,
       costPriceUsd: resolved.costPriceUsd,
+      sheetCostPriceUsd: resolved.sheetCostPriceUsd,
       supplierName,
       supplierId,
       freeGoods: resolved.freeGoods,

@@ -509,17 +509,26 @@ async function test(name, fn) {
     assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-reconcile-gate'`).get().status, 'completed_with_errors')
   })
 
-  // 12) The concurrency race: two add rows sharing one lot (same product +
-  // batchIdentity's date/label key) must not race applyUnifiedStockAdd's
-  // read of the lot's current supplier. Before the fix, importEngine.ts's
-  // dispatch loop pushed BOTH rows onto pendingAdds and awaited them with
-  // Promise.all, so the order their INSERTs actually land in D1 -- not the
-  // order they appear in the sheet -- decided whether the pair's supplier
-  // row or its blank row 'wins' the lot's first attribution, and a re-run of
-  // the identical file could come back with a different {applied, failed}.
-  // Run twice on FRESH databases and assert the two outcomes are identical:
-  // a scheduling-dependent answer is exactly what this pins against.
-  await test('two add rows sharing one lot never race: the outcome is scheduling-independent', async () => {
+  // 12) Two add rows sharing one lot (same product + batchIdentity's
+  // date/label key): a blank-supplier row must inherit the lot's first
+  // attribution rather than being refused. Before the fix at commit
+  // 2d27a570 -- which introduced applyUnifiedStockAdd's lot_supplier_name
+  // read without yet serializing same-lot dispatch -- this file's job-race
+  // case failed with { applied: 1, failed: 1 }: the second row's read of
+  // the lot could land in either order relative to the first row's INSERT,
+  // and one of those two orders refuses it. Correction to an earlier draft
+  // of this comment: base 6e3abfea passes this exact case trivially, not
+  // because it handles the race correctly, but because stockActionCommit.ts
+  // had no receipt gate at all yet (sibling:F13's whole point) -- nothing
+  // there could refuse either row regardless of read order. And because
+  // this harness's D1 stub is synchronous better-sqlite3, applyUnifiedStockAdd's
+  // read and write can never actually interleave here regardless of dispatch
+  // order, so no scheduling-dependence is observable in THIS harness at
+  // all. What this case actually pins is the narrower, harness-provable
+  // half of the fix: pendingLotKeys makes a second same-lot row wait for
+  // the first, so it inherits the first row's supplier instead of being
+  // refused by it.
+  await test('a second blank-supplier row of the same lot inherits the first row\'s supplier instead of being refused', async () => {
     const buildRows = () => [
       // Row 2 supplies the lot; row 3 (same product+date+batch => same lot)
       // does not. Sequentially this always tops up an already-attributed lot
@@ -539,6 +548,33 @@ async function test(name, fn) {
     const second = await runOnce()
     assert.deepStrictEqual(first, second, 'the same file must not import differently run to run')
     assert.deepStrictEqual(first, { applied: 2, failed: 0 }, 'both rows of one lot land: the blank row inherits the lot supplier, never a race')
+  })
+
+  // 13) An existing product's catalog cost must never fill a blank cost_price
+  // cell for the RECEIPT GATE. stockActionImport.ts's costPriceUsd inherits
+  // matched.product.cost_price_usd so the product-price columns stay filled
+  // on a bare add, but before sheetCostPriceUsd existed that same inherited
+  // value fed the gate too -- so a sheet with a supplier column and NO
+  // cost_price column at all resolved a $5 catalog cost into an ACCEPTED
+  // receipt cost the operator never typed. Discriminating: this case passes
+  // wrongly (applied:1) against the pre-fix code, because cost.value ??
+  // matched.product?.cost_price_usd ?? null hands the gate the catalog's 5.
+  await test('an existing product\'s catalog cost never fills a blank cost_price cell for the receipt gate', async () => {
+    const { sqlite, db } = makeDb()
+    seedProduct(sqlite, { id: 95, name: 'Catalog Serum', barcode: 'CS95', cost: 5 })
+    seedJob(sqlite, 'job-catalog-cost', [
+      // No cost_price key at all: the sheet states a supplier but never
+      // types a cost for this row.
+      { _rowNumber: 2, name: 'Catalog Serum', barcode: 'CS95', shop: '4', warehouse: '', date: '08/27/2026', action: 'add', supplier: 'Bong Long', batch: 'CATALOG-LOT' },
+    ], { stock_action_mode: 'direct' })
+    const { out } = await runJobToCompletion(db, 'job-catalog-cost', JSON.stringify({ stock_action_mode: 'direct' }))
+    assert.deepStrictEqual(out, { applied: 0, failed: 1 })
+    const refused = JSON.parse(sqlite.prepare(`SELECT result_json FROM import_job_rows WHERE job_id='job-catalog-cost' AND row_number=2`).get().result_json)
+    assert.match(refused.message, /must carry its unit cost/, 'refused for cost, not supplier -- the supplier column IS filled')
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=95 AND branch_id=1`).get().quantity, 0, 'branch_stock unchanged')
+    assert.strictEqual(sqlite.prepare(`SELECT stock_quantity FROM products WHERE id=95`).get().stock_quantity, 0, 'products.stock_quantity unchanged')
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=95`).get().n, 0, 'no lot minted from the catalog cost')
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements WHERE product_id=95`).get().n, 0)
   })
 
   if (failures > 0) { console.error(`\n${failures} test(s) failed`); process.exit(1) }
