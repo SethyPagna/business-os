@@ -446,7 +446,7 @@ app.post('/', async (c) => {
   // validate stock as a plain read first, exactly like the original
   // backend/src/routes/sales.ts's assertSaleStockAvailable does, *before*
   // building the atomic write batch below. Skipped entirely when this sale's
-  // status won't deduct stock yet (e.g. 'awaiting_payment') -- matches
+  // status does not deduct stock -- matches
   // PATCH /:id/status's own wasStockDeducted/willStockBeDeducted gate below.
   //
   // Batched by branch (one query per distinct branch_id in this sale, not
@@ -479,25 +479,63 @@ app.post('/', async (c) => {
     }
   }
 
-  // Batch stock check -- additional to the branch_stock check above, for
-  // any line the cashier picked a specific batch for (see
-  // lib/productBatches.ts for why this is a separate table, not folded
-  // into the branch_stock check). A batch line still counts against the
-  // branch_stock total above too, since branch_stock stays authoritative.
-  const batchCheckItems = stockCheckItems.filter((item) => item.batch_id)
-  if (batchCheckItems.length) {
-    const batchIds = [...new Set(batchCheckItems.map((item) => item.batch_id as number))]
-    const batchStockRows = await selectInChunks(batchIds, 0, (chunk) => db
-      .prepare(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ batch_id: number; branch_id: number; quantity: number }>(chunk))
-    const batchStockMap = new Map(batchStockRows.map((row) => [`${row.batch_id}:${row.branch_id}`, row.quantity]))
-    for (const item of batchCheckItems) {
-      const available = batchStockMap.get(`${item.batch_id}:${item.branch_id}`) || 0
-      if (item.quantity > available) {
-        const name = productMap.get(item.product_id)?.name || `product #${item.product_id}`
-        return c.json({ error: `Insufficient stock for ${name}: requested ${item.quantity}, available ${available}` }, 409)
+  // Resolve every explicit batch against the authoritative PRODUCT + Shop
+  // BRANCH + active-lot identity before retaining any caller-supplied batch
+  // metadata. The previous check only keyed branch_batch_stock by
+  // batch_id+branch_id, so a caller could attach another product's lot to a
+  // line and persist a plausible-looking label/expiry snapshot. This is the
+  // same resolver used by POST /:id/items, including cumulative availability
+  // across repeated lines that name the same lot.
+  //
+  // Read all ordinary lines once. The same mutable map is reserved by
+  // explicit picks below, then consumed by FIFO for unpicked lines, so an
+  // explicit and automatic line cannot both plan the same units.
+  const lotsByProductBranch = await readFifoLotAvailabilityForCart(
+    db,
+    normalized
+      .filter((item) => !item.damaged_lot_id && item.branch_id)
+      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number })),
+  )
+  const explicitBatchResolution = resolveExplicitSaleLineBatches(
+    normalized.map((item) => {
+      const product = productMap.get(item.product_id)
+      return {
+        productId: item.product_id,
+        productName: product?.name || `product #${item.product_id}`,
+        quantity: item.quantity,
+        branchId: item.branch_id,
+        unitPriceUsd: Number(item.applied_price_usd ?? product?.selling_price_usd ?? 0),
+        costPriceUsd: Number(product?.cost_price_usd || 0),
+        costPriceKhr: Number(product?.cost_price_khr || 0),
+        batchId: item.damaged_lot_id ? null : item.batch_id,
+        batchLabel: item.damaged_lot_id ? null : item.batch_label,
+        batchExpiryDate: item.damaged_lot_id ? null : item.batch_expiry_date,
       }
+    }),
+    lotsByProductBranch,
+  )
+  if (!explicitBatchResolution.ok) {
+    return c.json({ error: explicitBatchResolution.error }, 409)
+  }
+  for (const [itemIndex, resolved] of explicitBatchResolution.lines.entries()) {
+    const item = normalized[itemIndex]
+    if (item.damaged_lot_id || !item.branch_id) continue
+    if (!resolved.batchId) {
+      // A label/expiry without a real picked id is not lot identity. FIFO
+      // below may replace these with a server-owned single-lot snapshot;
+      // a multi/untracked line must stay blank rather than persisting client
+      // text that looks attributable when it is not.
+      item.batch_id = undefined
+      item.batch_label = undefined
+      item.batch_expiry_date = undefined
+      continue
     }
+    item.batch_id = resolved.batchId || undefined
+    item.batch_label = resolved.batchLabel || undefined
+    item.batch_expiry_date = resolved.batchExpiryDate || undefined
+    const lot = (lotsByProductBranch.get(`${item.product_id}:${item.branch_id}`) || [])
+      .find((entry) => entry.batchId === Number(resolved.batchId))
+    if (lot) lot.available -= item.quantity
   }
 
   // 11.9: damaged-source availability (plain read, same validate-then-write
@@ -534,22 +572,18 @@ app.post('/', async (c) => {
   // batch_id NULL and records per-lot allocation rows instead. Units beyond
   // what the lot ledger tracks (legacy stock) stay unlotted -- the sale
   // still proceeds on branch_stock, exactly as before this pass existed.
-  // Runs for non-deducting statuses too (awaiting_payment): the attribution
-  // is recorded now (released_quantity = quantity, nothing physically out),
-  // so the later deducting transition draws the same lots.
+  // Runs for non-deducting statuses too: the attribution is recorded now
+  // (released_quantity = quantity, nothing physically out), so a later
+  // deducting transition draws the same lots.
   const autoAllocationsByItemIndex = new Map<number, FifoLotTake[]>()
   {
     // One batched read of every unlotted line's FIFO availability instead of
     // a round-trip per line -- the grouped Map is still mutated in place
     // below so a second line of the same product can't double-take a lot.
-    const fifoPairs = normalized
-      .filter((item) => !item.batch_id && !item.damaged_lot_id && item.branch_id)
-      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number }))
-    const lotsByKey = await readFifoLotAvailabilityForCart(db, fifoPairs)
     for (const [itemIndex, item] of normalized.entries()) {
       if (item.batch_id || item.damaged_lot_id || !item.branch_id) continue
       const key = `${item.product_id}:${item.branch_id}`
-      const lots = lotsByKey.get(key) || []
+      const lots = lotsByProductBranch.get(key) || []
       const { takes } = allocateAcrossLots(lots, item.quantity)
       if (!takes.length) continue
       // Consume the shared availability so a second line of the same
@@ -963,16 +997,8 @@ app.post('/', async (c) => {
   // never sees a "sale" with no items. ----
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
-    // Index into `statements` of each item's own sale_items INSERT, in the
-    // same order as `priced` -- D1's batch() returns one result per
-    // statement (with meta.last_row_id for inserts), so this is how we find
-    // out each sale_item's real id *after* the atomic batch below commits,
-    // without being able to branch mid-batch (see lib/db.ts's batch() docs).
-    // Only needed for lines with a batch_id -- see the allocation-recording
-    // step after the batch commits.
-    const saleItemStatementIndexByItemIndex: number[] = []
+    const allocationReleasedAt = shouldDeductStock ? null : new Date().toISOString()
     for (const [itemIndex, item] of priced.entries()) {
-      saleItemStatementIndexByItemIndex[itemIndex] = statements.length
       statements.push({
         sql: `INSERT INTO sale_items (
                 sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
@@ -1021,6 +1047,41 @@ app.post('/', async (c) => {
           damaged_lot_id: item.damaged_lot_id || null,
         },
       })
+      // Persist exact lot lineage immediately after this line and before the
+      // next sale_item INSERT. D1 executes this statement list sequentially
+      // in one transaction, so the latest item for this new sale is the row
+      // directly above. A NOT NULL/constraint failure here now aborts the
+      // same batch as item, stock, and movement writes; returns/cancels can
+      // never lose their lot source while checkout still succeeds.
+      const allocationTakes = item.batch_id && item.branch_id
+        ? [{
+            batchId: item.batch_id,
+            lotCode: item.batch_label || null,
+            expiryDate: item.batch_expiry_date || null,
+            quantity: item.quantity,
+          } as FifoLotTake]
+        : autoAllocationsByItemIndex.get(itemIndex) || []
+      if (item.branch_id && !item.damaged_lot_id) {
+        for (const take of allocationTakes) {
+          statements.push({
+            sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
+                  VALUES (
+                    (SELECT id FROM sale_items WHERE sale_id = @sale_id ORDER BY id DESC LIMIT 1),
+                    @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, @released_quantity, @released_at
+                  )`,
+            params: {
+              sale_id: saleId,
+              batch_id: take.batchId,
+              branch_id: item.branch_id,
+              quantity: take.quantity,
+              lot_code: take.lotCode || null,
+              expiry_date: take.expiryDate || null,
+              released_quantity: shouldDeductStock ? 0 : take.quantity,
+              released_at: allocationReleasedAt,
+            },
+          })
+        }
+      }
       // A damaged-source line's stock ALREADY moved (the lot draw above);
       // only its ledger entry rides this batch. Regular branch/batch
       // deductions never apply to it.
@@ -1106,57 +1167,7 @@ app.post('/', async (c) => {
         })
       }
     }
-    const batchResults = await db.batch(statements)
-
-    // Record which batch each sale line actually drew from, now that we
-    // know each sale_item's real id (from the batch's own results, matched
-    // back up via saleItemStatementIndexByItemIndex). Deliberately a
-    // second, non-atomic pass: stock is already correctly decremented by
-    // the atomic batch above (that only ever needed batch_id/branch_id,
-    // known up front) -- this is bookkeeping for reporting/returns, not
-    // stock-accuracy-critical, so a failure here is logged and swallowed
-    // rather than rolling back an otherwise-successful sale.
-    // Z0: one row per lot a line drew from -- single-lot lines (explicit
-    // pick OR an auto-allocation one lot fully covered) and multi-lot
-    // auto-allocated lines alike. released_quantity starts at 0 for a
-    // deducting sale (units are OUT with the sale) and at the full take for
-    // a non-deducting one (awaiting_payment -- nothing physically left, the
-    // later deducting transition consumes released_quantity back down).
-    const allocationItems = priced
-      .map((item, itemIndex) => ({
-        item,
-        itemIndex,
-        takes: item.batch_id && item.branch_id
-          ? [{ batchId: item.batch_id, lotCode: item.batch_label || null, expiryDate: item.batch_expiry_date || null, quantity: item.quantity } as FifoLotTake]
-          : autoAllocationsByItemIndex.get(itemIndex) || [],
-      }))
-      .filter(({ item, takes }) => takes.length && item.branch_id && !item.damaged_lot_id)
-    if (allocationItems.length) {
-      try {
-        const allocationStatements = allocationItems.flatMap(({ item, itemIndex, takes }) => {
-          const statementIndex = saleItemStatementIndexByItemIndex[itemIndex]
-          const saleItemId = Number(batchResults[statementIndex]?.meta?.last_row_id || 0)
-          if (!(saleItemId > 0)) return []
-          return takes.map((take) => ({
-            sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
-                  VALUES (@sale_item_id, @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, @released_quantity, @released_at)`,
-            params: {
-              sale_item_id: saleItemId,
-              batch_id: take.batchId,
-              branch_id: item.branch_id,
-              quantity: take.quantity,
-              lot_code: take.lotCode || null,
-              expiry_date: take.expiryDate || null,
-              released_quantity: shouldDeductStock ? 0 : take.quantity,
-              released_at: shouldDeductStock ? null : new Date().toISOString(),
-            },
-          }))
-        })
-        if (allocationStatements.length) await db.batch(allocationStatements)
-      } catch (allocationError) {
-        console.error('[sales] failed to record sale_item_batch_allocations (stock already deducted correctly)', allocationError)
-      }
-    }
+    await db.batch(statements)
   } catch (error) {
     // The atomic batch rolled back, so nothing here was applied; delete the
     // orphaned header written in step 4 so the caller never sees an itemless
