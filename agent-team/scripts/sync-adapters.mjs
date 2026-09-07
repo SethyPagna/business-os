@@ -4,8 +4,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const normalizeLineEndings = (value) => value.replace(/\r\n/g, "\n");
 const manifest = JSON.parse(readFileSync(join(root, "agent-team/agents.json"), "utf8"));
-const base = readFileSync(join(root, "agent-team/prompts/_base.md"), "utf8").trim();
+const base = normalizeLineEndings(readFileSync(join(root, "agent-team/prompts/_base.md"), "utf8")).trim();
 const check = process.argv.includes("--check");
 const changed = [];
 const expected = new Set();
@@ -19,7 +20,8 @@ function emit(relativePath, content) {
   const path = join(root, relativePath);
   let current = null;
   try { current = readFileSync(path, "utf8"); } catch {}
-  if (current === content) return;
+  content = normalizeLineEndings(content);
+  if (current !== null && normalizeLineEndings(current) === content) return;
   changed.push(relativePath);
   if (check) return;
   mkdirSync(dirname(path), { recursive: true });
@@ -43,7 +45,7 @@ function removeOrphanedGeneratedFiles(directory, suffix) {
 }
 
 for (const agent of manifest.agents) {
-  const role = readFileSync(join(root, "agent-team", agent.prompt), "utf8").trim();
+  const role = normalizeLineEndings(readFileSync(join(root, "agent-team", agent.prompt), "utf8")).trim();
   const prompt = `${base}\n\n## Role-specific instructions\n\n${role}`;
   const teamWarning = agent.teamEligible === false
     ? "\n\nDo not use this role as a Claude agent-team teammate. Use it as a normal subagent or isolated session so its permission and worktree controls apply."
