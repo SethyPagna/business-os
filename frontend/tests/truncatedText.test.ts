@@ -35,6 +35,7 @@ import {
   nextFloatState,
   placeFloat,
 } from '../src/components/shared/textAffordances.ts'
+import { LONG_PRESS_THRESHOLD_MS } from '../src/utils/longPress.ts'
 import { buildClickableRow, installAffordanceDom, wait, type StubElement } from './affordanceDomStub.ts'
 
 const read = (path: string): string => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
@@ -349,6 +350,52 @@ dom.fire('mouseover', { target: tapCell })
 dom.fire('touchstart', { target: outside, touches: [{ clientX: 5, clientY: 5 }] })
 await wait(HOVER_OPEN_DELAY_MS + 80)
 assert.equal(host.hidden, true, 'a touch elsewhere disarms a dwell the pointer left pending')
+
+/* ---------------------------------------------------------------- *
+ * 5c. The touch reveal -- the gap this lane opens with.
+ *
+ * `.dense-cell-truncate` cells reveal their full value through the native
+ * `title`, which is a hover tooltip: nothing at all on a phone, where the
+ * ellipsis is a dead end. Hover fixed that for a mouse only; the four
+ * dense surfaces still had NO way to see a clipped value on touch.
+ *
+ * The controller already owns the one gesture a touch screen has spare --
+ * press-and-hold -- it was just fenced to copy in two places: the press
+ * was armed only for `kind === 'copy'`, and `onLongPress` hardcoded that
+ * kind when it fired. Opening the same panel for a clipped cell needs no
+ * edit to any of those four lanes' files.
+ *
+ * It takes the HOLD, never the tap: the tap still opens the record (5b),
+ * exactly the trade already accepted for copy on touch.
+ * ---------------------------------------------------------------- */
+
+const holdCell = dom.el('span', { class: 'dense-cell-truncate', title: 'Return #20260904-141233, damaged carton, 3 units' }, { scrollWidth: 280, clientWidth: 90 })
+const holdRow = buildClickableRow(dom, holdCell)
+const holdStart = dom.fire('touchstart', { target: holdCell, touches: [{ clientX: 40, clientY: 120 }] })
+assert.equal(holdStart.stopped, true, 'the hold on a clipped cell is the reveal\u2019s, so the row does not also start one')
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, false, 'press-and-hold reveals a clipped dense cell on touch')
+assert.equal(
+  String(host.childNodes[0]?.textContent || ''),
+  'Return #20260904-141233, damaged carton, 3 units',
+  'and it shows the value the native title used to, in full',
+)
+const holdEnd = dom.fire('touchend', { target: holdCell })
+assert.equal(holdEnd.stopped, true, 'the release that ends a fired hold does not also open the record')
+dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true)
+
+// Control: a dense cell in the same row whose text FITS is a plain cell.
+// It carries no title, nothing is hidden, and a hold there must reach the
+// row's own detector (select mode) untouched.
+const fitsCell = dom.el('span', { class: 'dense-cell-truncate' }, { scrollWidth: 80, clientWidth: 90 })
+const fitsWrap = dom.el('td')
+fitsWrap.append(fitsCell)
+holdRow.append(fitsWrap)
+const fitsStart = dom.fire('touchstart', { target: fitsCell, touches: [{ clientX: 40, clientY: 120 }] })
+assert.equal(fitsStart.stopped, false, 'control: an un-clipped cell keeps the row every touch it had')
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, true, 'control: and holding it reveals nothing, because nothing is hidden')
 
 dom.restore()
 

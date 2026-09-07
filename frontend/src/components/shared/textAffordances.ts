@@ -34,10 +34,14 @@
 // The one thing delegation must NOT do is quietly change those surfaces'
 // behaviour while it is reaching into them. On all four dense tables the
 // truncated cells sit inside a row that opens the record when clicked, so
-// the reveal defers there (see `claimsClick`) and appears on hover only: a
-// tooltip is a poor trade for a detail view that shows the same value plus
-// the rest of the record. It takes the click only where nothing underneath
-// wanted it.
+// the reveal defers there (see `claimsClick`): a tooltip is a poor trade for
+// a detail view that shows the same value plus the rest of the record. It
+// takes the CLICK only where nothing underneath wanted it.
+//
+// That leaves the reveal reachable by hover on a pointer device and by
+// press-and-hold on touch -- the one gesture those rows do not already use
+// -- which is the half of gap (2) a hover fixes nothing about. Both are
+// additive: the tap still opens the record.
 import { createLongPressHandlers, createLongPressState } from '../../utils/longPress.ts'
 
 export const COPY_ATTR = 'data-copy-value'
@@ -223,6 +227,9 @@ let copiedTimer: ReturnType<typeof setTimeout> | null = null
 let hoverTimer: ReturnType<typeof setTimeout> | null = null
 const pressState = createLongPressState()
 let pressElement: HTMLElement | null = null
+// Which affordance armed the live press -- a copy field, or a clipped cell
+// whose only reveal on a touch screen is the hold.
+let pressKind: AffordanceKind = 'copy'
 
 const textFor = (element: HTMLElement, kind: AffordanceKind): string => (
   kind === 'copy'
@@ -393,7 +400,10 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   // press that has wandered off its trigger.
   const press = createLongPressHandlers(pressState, {
     onLongPress: () => {
-      if (pressElement) apply({ type: 'gesture', element: pressElement, kind: 'copy' })
+      // Whatever armed the press is what the hold opens. Hardcoding 'copy'
+      // here was one of the two fences that kept press-and-hold away from a
+      // clipped dense cell, where it is the only reveal a phone has.
+      if (pressElement) apply({ type: 'gesture', element: pressElement, kind: pressKind })
     },
   })
   type MouseArg = Parameters<typeof press.onMouseDown>[0]
@@ -496,6 +506,7 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     if (found?.kind === 'copy' && pressWillOpenFloat(found)) {
       event.stopPropagation()
       pressElement = found.element
+      pressKind = found.kind
       press.onMouseDown(event as unknown as MouseArg)
       return
     }
@@ -518,15 +529,31 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     // the synthetic one a previous tap left behind.
     cancelHover()
     const found = targetFrom(event.target)
-    // Touch is the one place the copy field takes the hold even inside a
-    // surface that owns its own: press-and-hold is the ONLY way to copy on a
-    // phone, and one hold cannot both copy a value and enter the Products
-    // row's select mode. It takes the hold, not the tap -- see `touchend`.
-    // A NON-copy target inside that row is left completely alone, so the
-    // row's own long-press still works everywhere else on it.
-    if (found?.kind === 'copy') {
+    // Touch is the one place an affordance takes the hold even inside a
+    // surface that owns its own, and for both kinds it is the same argument:
+    // press-and-hold is the ONLY gesture a phone has spare, and one hold
+    // cannot both answer the affordance and enter the Products row's select
+    // mode. It takes the hold, not the tap -- see `touchend`.
+    //
+    //   - copy: press-and-hold is the only way to copy on a phone at all.
+    //   - reveal: a clipped `.dense-cell-truncate` cell publishes its full
+    //     value through a `title`, i.e. a HOVER tooltip, i.e. nothing on a
+    //     touch screen. Stock Changes, Stock-in Sessions, Returns and Fees
+    //     gain the reveal here with no edit to any of those files -- and
+    //     strictly additively, because the tap they already answered still
+    //     reaches the row.
+    //
+    // `eligible` is exactly that pair of rules already: a copy field always
+    // qualifies, a reveal only while its text is actually cut off. A cell
+    // whose text FITS keeps the row every touch it had, and so does any
+    // other target inside it.
+    if (found && eligible(found)) {
       event.stopPropagation()
+      // The press does not re-open a panel it is about to cover, but it must
+      // not leave a DIFFERENT one floating over the record either.
+      if (state && state.element !== found.element) apply({ type: 'dismiss' })
       pressElement = found.element
+      pressKind = found.kind
       press.onTouchStart(event as unknown as TouchArg)
       return
     }
