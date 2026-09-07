@@ -551,25 +551,24 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                     {choice === 'merge' && (row.contactMatchTargetInvalid || matchCandidates.length > 1) ? (
                       <label className="mb-3 block text-xs font-medium text-gray-700 dark:text-gray-200">
                         {tr('contacts_import_conflict_choose_target', 'Choose the existing contact to merge into')}
-                        <select
-                          value={selectedTargets[row.rowNumber] || ''}
-                          onChange={(event) => {
-                            const value = Number(event.target.value)
+                        <AppSelect
+                          value={selectedTargets[row.rowNumber] ? String(selectedTargets[row.rowNumber]) : ''}
+                          onChange={(nextValue) => {
+                            const value = Number(nextValue)
                             setSelectedTargets((current) => Number.isSafeInteger(value) && value > 0
                               ? { ...current, [row.rowNumber]: value }
                               : Object.fromEntries(Object.entries(current).filter(([key]) => Number(key) !== row.rowNumber)))
                           }}
-                          className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-                        >
-                          <option value="">{tr('contacts_import_conflict_choose_target_placeholder', 'Select an existing contact...')}</option>
-                          {matchCandidates.map((candidate) => (
-                            <option key={candidate.id} value={candidate.id}>
-                              {candidate.name || tr('unknown', 'Unknown')} (ID {candidate.id})
-                              {candidate.phone ? ` — ${candidate.phone}` : ''}
-                              {candidate.membership_number ? ` — ${candidate.membership_number}` : ''}
-                            </option>
-                          ))}
-                        </select>
+                          ariaLabel={tr('contacts_import_conflict_choose_target', 'Choose the existing contact to merge into')}
+                          options={[
+                            { value: '', label: tr('contacts_import_conflict_choose_target_placeholder', 'Select an existing contact...') },
+                            ...matchCandidates.map((candidate) => ({
+                              value: String(candidate.id),
+                              label: `${candidate.name || tr('unknown', 'Unknown')} (ID ${candidate.id})${candidate.phone ? ` — ${candidate.phone}` : ''}${candidate.membership_number ? ` — ${candidate.membership_number}` : ''}`,
+                            })),
+                          ]}
+                          buttonClassName="mt-1 w-full px-2.5 py-2 text-xs"
+                        />
                       </label>
                     ) : null}
 
