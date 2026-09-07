@@ -33,6 +33,7 @@ import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { buildContactMergePlan, contactMergeHasDistinctMemberships } from '../lib/contactMerge'
 
 // Customers, suppliers, and delivery contacts, ported from
 // backend/src/routes/contacts.ts. This never had a real route on Cloudflare
@@ -843,6 +844,28 @@ function registerContactRoutes(config: ContactConfig) {
     ])
     if (!keeper) return c.json({ error: `Contact to keep (id ${keepId}) not found` }, 404)
     if (!merged) return c.json({ error: `Contact to merge (id ${mergeId}) not found` }, 404)
+
+    // A merge endpoint is not a general hard-delete primitive. Re-prove that
+    // these two current rows still share the duplicate identity the review UI
+    // showed, then pin both complete editable snapshots in the atomic guard.
+    const duplicateMatches = await findContactDuplicates(db, config.table, {
+      id: keepId,
+      name: String(keeper.name || ''),
+      phones: collectContactPhones(keeper, config.optionMode),
+    }, config.optionMode)
+    if (!duplicateMatches.some((match) => Number(match.id) === mergeId)) {
+      return c.json({
+        error: 'These contacts no longer share a duplicate name or phone. Refresh the review before merging.',
+        code: 'contact_merge_identity_required',
+      }, 409)
+    }
+
+    if (config.table === 'customers' && contactMergeHasDistinctMemberships(keeper, merged)) {
+      return c.json({
+        error: 'Both customers have different membership IDs. Preserve their membership lineage before merging.',
+        code: 'membership_lineage_required',
+      }, 409)
+    }
     if (config.table === 'customers') {
       const portalAccounts = await db.prepare(
         `SELECT id, contact_id FROM portal_accounts WHERE contact_id IN (@keepId, @mergeId) ORDER BY id`,
@@ -856,136 +879,95 @@ function registerContactRoutes(config: ContactConfig) {
       }
     }
 
-    // Backfill: only columns this table actually allows editing (same
-    // allowlist POST/PUT use), and only where the keeper is genuinely
-    // blank -- never overwrites a value the keeper already has.
-    const backfill: Record<string, unknown> = {}
-    for (const column of config.columns) {
-      const keeperValue = keeper[column]
-      const mergedValue = merged[column]
-      const keeperBlank = keeperValue === null || keeperValue === undefined || keeperValue === ''
-      const mergedHasValue = mergedValue !== null && mergedValue !== undefined && mergedValue !== ''
-      if (keeperBlank && mergedHasValue) backfill[column] = mergedValue
-    }
-    if (Object.keys(backfill).length) {
-      const setSql = Object.keys(backfill).map((col) => `${col} = @${col}`).join(', ')
-      await db.prepare(`UPDATE ${config.table} SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ ...backfill, id: keepId })
+    const [hasCustomerReceivables, hasSupplierInvoices] = await Promise.all([
+      config.table === 'customers' ? hasTable(db, 'customer_receivables') : Promise.resolve(false),
+      config.table === 'suppliers' ? hasTable(db, 'supplier_invoices') : Promise.resolve(false),
+    ])
+    let auditDevice: { deviceName: string | null; deviceTz: string | null } = { deviceName: null, deviceTz: null }
+    if (user?.id) {
+      try {
+        const device = await db.prepare(`
+          SELECT device_name, device_tz FROM user_sessions
+          WHERE user_id = @userId AND revoked_at IS NULL
+          ORDER BY last_seen_at DESC, id DESC LIMIT 1
+        `).get<{ device_name: string | null; device_tz: string | null }>({ userId: user.id })
+        auditDevice = { deviceName: device?.device_name ?? null, deviceTz: device?.device_tz ?? null }
+      } catch (_) {
+        // Matches audit(): device attribution is best effort and never blocks
+        // the business write. The authenticated username remains authoritative.
+      }
     }
 
-    // Table-specific FK repoints -- every place elsewhere in the schema
-    // that references this contact by id (confirmed against
-    // migrations/0001_init.sql: sales/returns/customer_share_submissions
-    // for customers, returns for suppliers, sales for delivery_contacts).
-    // products.supplier is a free-text name (not an id) for suppliers --
-    // repointed by value, using the merged supplier's own name captured
-    // above before its row is deleted.
-    if (config.table === 'customers') {
-      const mergedNameLower = String(merged.name || '').trim().toLowerCase()
-      await db.batch([
-        // The id is authoritative, but these operational rows also expose a
-        // mutable display snapshot in lists, details, reports and exports.
-        // Repointing only the FK left the survivor linked to the loser name.
-        { sql: `UPDATE sales SET customer_id = @keepId, customer_name = @keeperName, customer_phone = @keeperPhone, customer_address = @keeperAddress WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name, keeperPhone: keeper.phone ?? null, keeperAddress: contactDisplayAddress(keeper.address) || null } },
-        { sql: `UPDATE returns SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-        { sql: `UPDATE customer_share_submissions SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-        // Was missing until an earlier session -- loyalty_point_adjustments
-        // has no FK/CASCADE (confirmed against migrations/0028), so without
-        // this repoint, merging a customer who had ever been manually
-        // awarded points silently orphaned those adjustment rows the
-        // moment `mergeId`'s row was deleted below: computeCustomerPointsMap
-        // only ever queries adjustments for ids still in the customers
-        // table, so the merged-away customer's manually-awarded points
-        // would vanish from the survivor's balance instead of carrying
-        // over, with no error and no record of what was lost.
-        { sql: `UPDATE loyalty_point_adjustments SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
-        // Storefront account link (portal_accounts.contact_id, migration
-        // 0087). It has no FK/CASCADE, so a merge that deletes `mergeId`
-        // below would leave that customer's storefront account pointing at a
-        // now-deleted contacts row: the membership badge would drop off the
-        // survivor's customer row (the list joins portal_accounts on
-        // contact_id) and staff portal-reset could never find the account.
-        // Repoint it to the keeper.
-        { sql: `UPDATE portal_accounts SET contact_id = @keepId, updated_at = CURRENT_TIMESTAMP WHERE contact_id = @mergeId`, params: { keepId, mergeId } },
-      ])
-      // Customer AR ledger (migration 0094): id-attributed invoices follow
-      // the keeper, and the display name is carried over too so the
-      // name-grouped AR report (which buckets by customer_name, not id --
-      // see /customers/reports/ar-invoices) shows the merged-away customer's
-      // receivables under the survivor rather than under an orphaned name.
-      // The importer stores customer_id only when it could match a contact
-      // (import-aug31-legacy-reports.mjs: `r.customer?.id || NULL`), so the
-      // NULL-id rows named exactly like the merged contact are moved by name
-      // as well -- otherwise they would strand under a name with no contact.
-      if (await hasTable(db, 'customer_receivables')) {
-        const arStatements: Array<{ sql: string; params: Record<string, unknown> }> = [
-          { sql: `UPDATE customer_receivables SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-        ]
-        if (mergedNameLower) {
-          arStatements.push({ sql: `UPDATE customer_receivables SET customer_name = @keeperName WHERE customer_id IS NULL AND lower(trim(customer_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
-        }
-        await db.batch(arStatements)
-      }
-    } else if (config.table === 'suppliers') {
-      const mergedName = String(merged.name || '')
-      const mergedNameLower = mergedName.trim().toLowerCase()
-      const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
-        { sql: `UPDATE returns SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-        // Purchase lots (product_batches, migration 0062): id-attributed lots
-        // follow the keeper. The supplier batch/cost drilldown reads by
-        // supplier_id (contacts.ts supplier-lots query: `pb.supplier_id = @id
-        // OR (supplier_id IS NULL AND supplier_name = @name)`), so an
-        // un-repointed lot would drop off the survivor's supplier detail.
-        // The name is carried too so the id: and name: aggregation keys stay
-        // consistent (products.ts supplier-cost grouping).
-        { sql: `UPDATE product_batches SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-      ]
-      if (mergedName) {
-        statements.push({ sql: `UPDATE products SET supplier = @keeperName, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(COALESCE(supplier, ''))) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
-        // Name-only lots (supplier typed free-text, supplier_id NULL) move by
-        // name exactly the way products.supplier does above and the way
-        // renameCascade.ts already carries a supplier rename -- otherwise a
-        // merge would consolidate the id-linked lots but strand the free-text
-        // ones under the merged-away name.
-        statements.push({ sql: `UPDATE product_batches SET supplier_name = @keeperName WHERE supplier_id IS NULL AND lower(trim(supplier_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
-      }
-      await db.batch(statements)
-      // Supplier AP ledger (migration 0088): same shape as the customer AR
-      // ledger above -- id-attributed invoices follow the keeper (name
-      // carried), and the NULL-id rows the import could not attribute move by
-      // name, so the name-grouped AP report (/suppliers .../ap-invoices)
-      // consolidates onto the survivor.
-      if (mergedName && await hasTable(db, 'supplier_invoices')) {
-        await db.batch([
-          { sql: `UPDATE supplier_invoices SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-          { sql: `UPDATE supplier_invoices SET supplier_name = @keeperName WHERE supplier_id IS NULL AND lower(trim(supplier_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } },
+    const operationId = crypto.randomUUID()
+    const plan = buildContactMergePlan({
+      table: config.table,
+      entity: config.entity,
+      editableColumns: config.columns,
+      keeper,
+      merged,
+      hasCustomerReceivables,
+      hasSupplierInvoices,
+      audit: {
+        operationId,
+        userId: user?.id ?? null,
+        userName: actorSnapshot(user),
+        deviceName: auditDevice.deviceName,
+        deviceTz: auditDevice.deviceTz,
+      },
+    })
+
+    let committedKeeper: Record<string, unknown> = plan.finalKeeper
+    try {
+      await db.batch(plan.statements)
+    } catch (error) {
+      // A transient response can arrive after D1 committed the batch. The audit
+      // marker is in that same transaction, so it is durable proof that this
+      // exact request completed; reconcile before returning any failure.
+      try {
+        const [afterKeeper, afterMerged, receipt] = await Promise.all([
+          db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }),
+          db.prepare(`SELECT id FROM ${config.table} WHERE id = @id`).get<{ id: number }>({ id: mergeId }),
+          db.prepare(`SELECT id FROM audit_logs
+            WHERE action = 'merge' AND entity = @entity AND entity_id = @entityId
+              AND json_valid(details) AND json_extract(details, '$.operationId') = @operationId
+            ORDER BY id DESC LIMIT 1`).get<{ id: number }>({ entity: config.entity, entityId: String(keepId), operationId }),
         ])
-      } else if (await hasTable(db, 'supplier_invoices')) {
-        await db.prepare(`UPDATE supplier_invoices SET supplier_id = @keepId WHERE supplier_id = @mergeId`).run({ keepId, mergeId })
+        if (afterKeeper && !afterMerged && receipt) {
+          committedKeeper = afterKeeper
+        } else if (/malformed JSON|contact_merge_guard/i.test(String(error))) {
+          return c.json({
+            error: 'One of these contacts changed while the merge was being saved. Refresh the review and try again.',
+            code: 'contact_merge_conflict',
+          }, 409)
+        } else {
+          throw error
+        }
+      } catch (reconcileError) {
+        if (reconcileError === error) throw error
+        return c.json({
+          error: 'The merge status could not be confirmed. Refresh before trying again.',
+          code: 'contact_merge_status_unknown',
+          operationId,
+        }, 503)
       }
-    } else if (config.table === 'delivery_contacts') {
-      await db.batch([
-        { sql: `UPDATE sales SET delivery_contact_id = @keepId, delivery_contact_name = @keeperName WHERE delivery_contact_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-      ])
     }
 
-    await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id: mergeId })
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'merge', config.entity, keepId, { mergedId: mergeId, mergedName: merged.name, backfilled: Object.keys(backfill) })
     const mergeVersions: string[] = [config.table]
-    // A merge changes more than the contact picker: linked operational rows
-    // feed other versioned read caches. Advance those dependency namespaces
-    // at the mutation boundary so a live-refresh cannot fetch an old Cache
-    // API response under the previous version.
-    if (config.table === 'customers') {
-      mergeVersions.push('sales', 'returns')
-    } else if (config.table === 'suppliers') {
-      mergeVersions.push('products', 'returns')
-    } else if (config.table === 'delivery_contacts') {
-      mergeVersions.push('sales')
+    if (config.table === 'customers') mergeVersions.push('sales', 'returns')
+    else if (config.table === 'suppliers') mergeVersions.push('products', 'returns')
+    else mergeVersions.push('sales', 'fees')
+
+    // The merge and audit are already committed. Cache, broadcast, and the
+    // convenience refresh may fail independently but must never tell the user
+    // their data was not saved.
+    await Promise.allSettled([...new Set(mergeVersions)].map((namespace) => bumpVersion(c.env, namespace)))
+    c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedId: mergeId }).catch(() => {}))
+    try {
+      committedKeeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }) || committedKeeper
+    } catch (_) {
+      // Return the computed final keeper when a post-commit refresh is down.
     }
-    await Promise.all([...new Set(mergeVersions)].map((namespace) => bumpVersion(c.env, namespace)))
-    c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedId: mergeId }))
-    const refreshed = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId })
-    return c.json({ contact: refreshed })
+    return c.json({ contact: committedKeeper, operationId })
   })
 
   app.post(config.path, async (c) => {
