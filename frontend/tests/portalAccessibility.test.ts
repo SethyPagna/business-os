@@ -35,6 +35,7 @@ const frontend = path.join(here, '..')
 const catalogDir = path.join(frontend, 'src', 'components', 'catalog')
 const read = (file: string): string => fs.readFileSync(path.join(catalogDir, file), 'utf8')
 const readFrontend = (...parts: string[]): string => fs.readFileSync(path.join(frontend, ...parts), 'utf8')
+const readShared = (file: string): string => fs.readFileSync(path.join(frontend, 'src', 'components', 'shared', file), 'utf8')
 
 /** Every file that renders on the public storefront route. */
 const PUBLIC_STOREFRONT_FILES = [
@@ -537,6 +538,20 @@ runTest('the skip link is the FIRST tab stop, not just present somewhere', () =>
   )
 })
 
+runTest('the image lightbox the storefront can now open by keyboard behaves like a dialog', () => {
+  // This lane turned the product photo into a real <button>, which created a
+  // KEYBOARD path into a modal that had none of the four dialog behaviours:
+  // no role, no accessible name, focus never moved in, focus never came back.
+  // Before the lane the same overlay was a mouse-only <div>, so the lane owns
+  // the consequence even though the modal is shared with the admin app.
+  const lightbox = readShared('ImageGalleryLightbox.tsx')
+  assert.match(lightbox, /role="dialog"/, 'the lightbox must declare itself a dialog')
+  assert.match(lightbox, /aria-modal="true"/, 'and that the page behind it is inert')
+  assert.match(lightbox, /aria-label=\{title \|\|/, 'and carry an accessible name')
+  assert.match(lightbox, /closeButtonRef\.current\?\.focus\(\)/, 'focus must move into the dialog on open')
+  assert.match(lightbox, /previouslyFocusedRef\.current\?\.focus\?\.\(\)/, 'and return to the opener on close')
+  assert.match(lightbox, /ref=\{closeButtonRef\}/, 'the close button is the focus target')
+})
 runTest('pinch zoom is not disabled', () => {
   // WCAG 1.4.4: the app shipped `maximum-scale=1, user-scalable=no`, which
   // stops a low-vision visitor enlarging the storefront at all.

@@ -96,6 +96,8 @@ export default function ImageGalleryLightbox({
   const panStartRef = useRef<{ pointer: PanPointer; zoom: ZoomState } | null>(null)
   const pinchStartRef = useRef<{ distance: number; scale: number; midpoint: PanPointer; zoom: ZoomState } | null>(null)
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null)
 
   function formatLabel(template: string, values: LabelValues) {
     return String(template || '').replace(/\{(\w+)\}/g, (_match, key) => String(values?.[key] ?? ''))
@@ -273,6 +275,23 @@ export default function ImageGalleryLightbox({
     pinchStartRef.current = null
   }, [safeIndex, open])
 
+  // This is a modal: it covers the page, it swallows Escape, and nothing
+  // behind it should be reachable. It announced none of that -- no role, no
+  // name, and focus stayed wherever the opener left it, so a keyboard or
+  // screen-reader visitor who opened the gallery was silently stranded on a
+  // control that had just been covered over. Same shape as the product sheet
+  // (ProductDetailFlyout): remember what was focused, move focus in, put it
+  // back on close.
+  useEffect(() => {
+    if (!open || !total || typeof document === 'undefined') return undefined
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null
+    const raf = requestAnimationFrame(() => closeButtonRef.current?.focus())
+    return () => {
+      cancelAnimationFrame(raf)
+      previouslyFocusedRef.current?.focus?.()
+    }
+  }, [open, total])
+
   useEffect(() => {
     if (!open || !total) return undefined
     function onKeyDown(event: KeyboardEvent) {
@@ -292,7 +311,7 @@ export default function ImageGalleryLightbox({
   const isZoomed = zoom.scale > MIN_SCALE
 
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-2 backdrop-blur-md sm:p-4" onClick={() => onClose?.()}>
+    <div role="dialog" aria-modal="true" aria-label={title || formatLabel(copy.imageCount, { current: safeIndex + 1, total })} className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-2 backdrop-blur-md sm:p-4" onClick={() => onClose?.()}>
       {/* w-full/h-full up to a capped max on larger screens -- on a narrow
           phone this fills the safe viewport edge-to-edge (minus the outer
           p-2) rather than reserving a fixed vw fraction that could still
@@ -318,6 +337,7 @@ export default function ImageGalleryLightbox({
             <ZoomIn className="h-5 w-5" />
           </button>
           <button
+            ref={closeButtonRef}
             type="button"
             className="rounded-full border border-white/20 bg-slate-950/45 p-2 text-white shadow-sm transition hover:bg-slate-950/65"
             onClick={() => onClose?.()}
