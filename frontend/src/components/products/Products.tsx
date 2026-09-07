@@ -59,6 +59,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { createLongPressHandlers, createLongPressState, consumeLongPressClick } from '../../utils/longPress.ts'
 import type { LongPressState } from '../../utils/longPress.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
+import { mergeDuplicateChunkRequiresManualResume } from './mergeDuplicatesRun.ts'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.ts'
 import {
   beginTrackedRequest,
@@ -345,6 +346,8 @@ type MergeDuplicateRequestOptions = { requestId?: string; signal?: AbortSignal }
 
 type MergeDuplicateProductsResult = ProductApiResponse & {
   complete?: boolean
+  interrupted?: boolean
+  interruptionCode?: 'merge_budget_reached' | 'merge_infrastructure_interrupted' | null
   stalled?: boolean
   madeProgress?: boolean
   mergedGroups?: number
@@ -1942,6 +1945,23 @@ function ProductsFullEditor() {
         for (const refusal of Array.isArray(result?.refusals) ? result.refusals : []) {
           const key = String(refusal?.caseKey || `${refusal?.mergedId || 'unknown'}:${refusal?.code || refusal?.error || 'refused'}`)
           refusalsByCase.set(key, refusal)
+        }
+        if (mergeDuplicateChunkRequiresManualResume(result)) {
+          const savedSummary = (t('merge_duplicates_partial_saved') || 'Saved {products} duplicate product(s) in {groups} completed group(s).')
+            .replace('{products}', String(mergedProducts))
+            .replace('{groups}', String(mergedGroups))
+          const resumeMessage = result.interruptionCode === 'merge_infrastructure_interrupted'
+            ? (t('merge_duplicates_partial_busy') || 'The database became busy after completed groups were saved. Review the refreshed preview and choose Merge again to continue.')
+            : (t('merge_duplicates_partial_resume') || 'Processing stopped safely before another group started. Review the refreshed preview and choose Merge again to continue.')
+          const undoWarning = undoPendingCount > 0
+            ? (t('merge_duplicates_undo_unavailable') || 'Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.')
+              .replace('{count}', String(undoPendingCount))
+            : ''
+          notify([savedSummary, resumeMessage, undoWarning].filter(Boolean).join(' '),
+            result.interruptionCode === 'merge_infrastructure_interrupted' ? 'error' : 'info')
+          await load(true)
+          setMergeDuplicatesReviewOpen(false)
+          return
         }
         if (result?.complete) {
           completed = true
