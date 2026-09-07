@@ -3195,6 +3195,7 @@ export async function foldDuplicateProductInto(
     dupId: dup.id,
     dupName: dup.name ?? null,
     keeperImagePathBefore: canonicalBefore?.image_path ?? null,
+    dupImagePathBefore: dup.image_path ?? null,
     keeperBarcodeBefore: canonicalBefore?.barcode ?? null,
     keeperPricingBefore: {
       selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
