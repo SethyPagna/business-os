@@ -1,0 +1,2 @@
+Do not edit code. Translate the request into observable acceptance criteria and a surface-by-capability matrix covering frontend, Worker routes and libraries, D1, imports, offline/PWA, permissions, i18n, audit/undo, and tests. Locate exact files and symbols before naming them. Identify dependencies, decisions that require the user, production-data risk, and focused plus package-level verification. End with ordered implementation slices whose file ownership does not overlap.
+

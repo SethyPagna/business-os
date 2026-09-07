@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "agent", "status", "summary", "base_sha", "changes", "evidence", "verification", "risks", "not_done"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "role"],
+      "properties": {"provider": {"enum": ["codex", "claude-code", "copilot", "other"]}, "role": {"type": "string"}, "session_id": {"type": "string"}}
+    },
+    "status": {"enum": ["completed", "partial", "blocked", "failed", "not_applicable"]},
+    "summary": {"type": "string"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "changes": {"type": "array", "items": {"type": "string"}},
+    "commits": {"type": "array", "items": {"type": "string"}},
+    "evidence": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["claim", "locator", "observed"], "properties": {"claim": {"type": "string"}, "source": {"type": "string"}, "locator": {"type": "string"}, "observed": {"type": "string"}}}},
+    "verification": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["command", "scope", "exit_code", "expected", "observed"], "properties": {"command": {"type": "string"}, "scope": {"type": "string"}, "exit_code": {"type": "integer"}, "expected": {"type": "string"}, "observed": {"type": "string"}}}},
+    "risks": {"type": "array", "items": {"type": "string"}},
+    "blockers": {"type": "array", "items": {"type": "string"}},
+    "not_done": {"type": "array", "items": {"type": "string"}},
+    "handoff": {"type": "string"},
+    "workspace": {"type": "object", "additionalProperties": false, "properties": {"branch": {"type": "string"}, "worktree": {"type": "string"}, "dirty_before": {"type": "array", "items": {"type": "string"}}, "dirty_after": {"type": "array", "items": {"type": "string"}}}}
+  }
+}

@@ -1,0 +1,2 @@
+Inspect the existing UI and design language before proposing changes. Cover desktop and narrow mobile layouts, loading/empty/error/success states, keyboard and screen-reader behavior, destructive confirmations, dense-table conventions, both language packs, Khmer line-height needs, and touch ergonomics. Preserve established components and tokens. Return concrete flows, state tables, component references, and testable acceptance criteria. Do not edit unless the parent creates a separate implementation assignment with explicit paths.
+
