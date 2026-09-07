@@ -59,26 +59,26 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 1260,
+    line: 1357,
     reason:
-      'Filter-metadata effect. Re-runs INDIRECTLY: filterMetaScope (a useMemo over all '
-      + 'six filters, :1237) changes -> the effect at :1245 resets filterMetaLoadedRef and '
-      + 'filterMetaReady -> load()\'s loading cycle re-triggers :1251 -> this effect runs '
-      + 'again with a fresh closure. Verified 2026-09-03; RE-VERIFIED 2026-09-06 at the '
-      + 'integrated product-row/text-affordance line -- the sites above were read again and the chain is unchanged. '
-      + 'No path found where a filter changes without load() running. FRAGILE: it depends '
-      + 'on `loading` cycling, so if that chain is ever refactored this entry must be '
-      + 're-verified, not trusted.',
+      'Deferred filter-metadata fallback. filterMetaScope includes all six filters at :1334; '
+      + 'its effect at :1342 invalidates the outstanding fallback and clears readiness, while '
+      + 'the main load callback at :1001 is keyed by the effective server filter scope and '
+      + 'consumes filter metadata returned with that product response. Adding the raw filters '
+      + 'to this fallback effect would launch a redundant request in the same commit before '
+      + 'the readiness reset lands. RE-VERIFIED 2026-09-07 after the session-restore insertion: '
+      + 'the filter scope, invalidation order and main-load dependency chain are unchanged. '
+      + 'FRAGILE: re-verify if metadata stops arriving with the main product response.',
   },
   {
     file: 'components/products/Products.tsx',
     names: ['stockFilter'],
-    line: 2313,
+    line: 2398,
     reason:
       'False-positive class 3. `stockFilter:` here is an OBJECT KEY -- the value read is '
       + 'effectiveStockState, which IS in the deps. Nothing to fix. Re-verified and '
-      + 'repinned 2026-09-06 (the `filtered` useMemo); the old pin had drifted to the '
-      + 'edge of DRIFT, one inserted line from reporting itself stale.',
+      + 'repinned 2026-09-07 (the `filtered` useMemo) after session-restore code moved the '
+      + 'source position; effectiveStockState remains in the dependency array.',
   },
 ]
 
