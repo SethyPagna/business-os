@@ -118,7 +118,14 @@ function loadPreviewRoute(adapter) {
     '../lib/productDetailRule': detailRule,
     '../lib/productMerge': productMerge,
     '../lib/sqlBinding': sqlBinding,
-    '../lib/undoAppliers': { registerMergeFold: () => {}, MERGE_REPARENT_TABLES: [] },
+    '../lib/undoAppliers': {
+      registerMergeFold: () => {},
+      MERGE_REPARENT_TABLES: [
+        ['sale_items', 'product_id'], ['return_items', 'product_id'], ['return_replacement_items', 'product_id'],
+        ['inventory_movements', 'product_id'], ['damaged_stock_lots', 'product_id'], ['stock_transfers', 'product_id'],
+        ['rfid_tags', 'product_id'], ['rfid_events', 'product_id'], ['rfid_session_items', 'product_id'], ['promotions', 'link_product_id'],
+      ].map(([table, column]) => ({ table, column })),
+    },
   }).default
   const route = app.routes.find((entry) => entry.method === 'GET' && entry.path === '/merge-duplicates/preview')
   assert.ok(route, 'real products route must register duplicate preview')
@@ -245,17 +252,23 @@ async function invokePreview(handler, user) {
   assert.equal(invalidCost.costRefusals[0].field, 'cost_price_usd')
   assert.equal(invalidCost.costRefusals[0].code, 'negative')
 
-  // 4,027 unique member ids fit in 41 100-bind reads. One additional UNION
-  // statement maps every potentially linked member of a multi-row cluster,
+  // 4,027 unique member ids fit in 41 100-bind reads. Fifteen additional
+  // simple SELECTs map every potentially linked member of a multi-row cluster,
   // plus one duplicate detector query and one branch-name query. This bound is deliberately
   // independent of group count; the old per-group route executes 6,002.
-  assert.ok(adapter.metrics.queries <= 44, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
+  assert.ok(adapter.metrics.queries <= 58, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
   assert.equal(adapter.metrics.batchRoundTrips, 1, 'preview hydration and the linked-member map must share one D1 round trip')
-  assert.equal(adapter.metrics.maxBatchStatements, 42)
+  assert.equal(adapter.metrics.maxBatchStatements, 56)
   assert.ok(adapter.metrics.maxBoundParams <= 100, `preview bound ${adapter.metrics.maxBoundParams} params in one statement`)
   assert.ok(
     adapter.metrics.sql.some((sql) => /FROM products p LEFT JOIN branch_stock/i.test(sql)),
     'preview hydration must retain the real product/branch stock relationship',
+  )
+  const routeSource = fs.readFileSync(path.join(SRC, 'routes', 'products.ts'), 'utf8')
+  assert.doesNotMatch(
+    routeSource.slice(routeSource.indexOf('function multiClusterComplexLinkStatements'), routeSource.indexOf('async function readMultiClusterComplexProductIds')),
+    /\bUNION\b/i,
+    'the linked-member map must not exceed D1 compound SELECT term limits',
   )
   console.log(JSON.stringify({
     status: 'PASS',

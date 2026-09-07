@@ -3328,26 +3328,24 @@ function multiClusterComplexLinkStatements(
     .flatMap((group) => [group.canonical.id, ...group.duplicates.map((duplicate) => duplicate.id)]))]
   return chunkForBinding(ids).map((chunk) => {
     const { sql, params } = buildInClause('complexProduct', chunk)
-    const linkedSelects = MERGE_REPARENT_TABLES.map(({ table, column }) =>
-      `SELECT ${column} AS product_id FROM ${table} WHERE ${column} IN (${sql})`)
-    return {
-      sql: `
-        SELECT DISTINCT product_id FROM (
-          SELECT product_id FROM branch_stock WHERE product_id IN (${sql})
-          UNION ALL SELECT product_id FROM product_images WHERE product_id IN (${sql})
-          UNION ALL SELECT variant_product_id AS product_id FROM product_batches WHERE variant_product_id IN (${sql})
-          ${linkedSelects.map((select) => `UNION ALL ${select}`).join('\n')}
-          UNION ALL SELECT parent_id AS product_id FROM products WHERE parent_id IN (${sql})
-          UNION ALL
-          SELECT CAST(j.value AS INTEGER) AS product_id
-          FROM promotion_rules pr,
-               json_each(CASE WHEN json_valid(pr.product_ids) THEN pr.product_ids ELSE '[]' END) j
-          WHERE CAST(j.value AS INTEGER) IN (${sql})
-        )
-      `,
-      params,
-    }
-  })
+    return [
+      { sql: `SELECT DISTINCT product_id FROM branch_stock WHERE product_id IN (${sql})`, params },
+      { sql: `SELECT DISTINCT product_id FROM product_images WHERE product_id IN (${sql})`, params },
+      { sql: `SELECT DISTINCT variant_product_id AS product_id FROM product_batches WHERE variant_product_id IN (${sql})`, params },
+      ...MERGE_REPARENT_TABLES.map(({ table, column }) => ({
+        sql: `SELECT DISTINCT ${column} AS product_id FROM ${table} WHERE ${column} IN (${sql})`,
+        params,
+      })),
+      { sql: `SELECT DISTINCT parent_id AS product_id FROM products WHERE parent_id IN (${sql})`, params },
+      {
+        sql: `SELECT DISTINCT CAST(j.value AS INTEGER) AS product_id
+              FROM promotion_rules pr,
+                   json_each(CASE WHEN json_valid(pr.product_ids) THEN pr.product_ids ELSE '[]' END) j
+              WHERE CAST(j.value AS INTEGER) IN (${sql})`,
+        params,
+      },
+    ]
+  }).flat()
 }
 
 async function readMultiClusterComplexProductIds(
