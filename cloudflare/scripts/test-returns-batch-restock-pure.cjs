@@ -94,11 +94,13 @@ let activeUser = FAKE_USER
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshotKernel })
 const branchRolesKernel = loadReal('lib/branchRoles.ts')
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
   '../lib/branchRoles': branchRolesKernel,
   '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/saleCreationSnapshot': saleCreationSnapshotKernel,
   // N21: the display-address kernel, REAL. A stub resolves every address to
   // undefined and would make the assertion below agree with itself.
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
@@ -374,11 +376,26 @@ async function main() {
     assert.strictEqual(header.total_refund_usd, 20, 'the return refunds its own lines, whatever the replacement costs')
     assert.strictEqual(header.replacement_sale_id, json.replacementSaleId)
     assert.strictEqual(json.replacementReceiptNumber, '20260830-120000')
-    const replacementSale = rawDb.prepare('SELECT receipt_number, source_return_id, payment_method, total_usd, amount_paid_usd FROM sales WHERE id = ?').get([json.replacementSaleId])
+    const replacementSale = rawDb.prepare('SELECT receipt_number, source_return_id, payment_method, total_usd, amount_paid_usd, creation_snapshot_json FROM sales WHERE id = ?').get([json.replacementSaleId])
     assert.strictEqual(replacementSale.source_return_id, json.id)
     assert.strictEqual(replacementSale.payment_method, 'Cash')
     assert.strictEqual(replacementSale.total_usd, 20)
     assert.strictEqual(replacementSale.amount_paid_usd, 20)
+    const creation = JSON.parse(replacementSale.creation_snapshot_json)
+    assert.equal(creation.version, 1)
+    assert.equal(creation.origin, 'return_replacement')
+    assert.deepEqual(creation.actor, { id: 1, username: 'tester' })
+    assert.deepEqual(creation.products, [{
+      product_id: 2,
+      product: 'Different Serum',
+      sku: null,
+      quantity: 2,
+      unit_price_usd: 10,
+      line_total_usd: 20,
+    }])
+    assert.equal(creation.payment_method, 'Cash')
+    assert.equal(creation.total_usd, 20)
+    assert.equal(creation.delivery.is_delivery, false)
     const replacementSaleItem = rawDb.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').get([json.replacementSaleId])
     assert.strictEqual(replacementSaleItem.product_id, 2)
     assert.strictEqual(replacementSaleItem.quantity, 2)
@@ -740,6 +757,8 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM return_items').get().n, 0)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM return_replacement_items').get().n, 0)
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type IN ('return', 'replacement_out')").get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM sales').get().n, 1, 'failed replacement snapshot is deleted with its compensated sale')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM sales WHERE creation_snapshot_json IS NOT NULL').get().n, 0)
   })
 
   await check('a replacement the LOTS cannot cover is refused 409 before any write -- aggregate and lots never diverge', async () => {

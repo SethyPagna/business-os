@@ -4633,6 +4633,7 @@ async function dispatchStockActionSaleGroup(
   jobId: string,
   saleGroupKey: string,
   groupRows: StockActionImportResult[],
+  actor: SessionUser,
 ): Promise<'applied' | 'skipped'> {
   const first = groupRows[0].data as unknown as UnifiedStockResolvedRow
   const lines: UnifiedStockSaleLine[] = []
@@ -4657,7 +4658,7 @@ async function dispatchStockActionSaleGroup(
     }
   }
   if (!lines.length) return 'skipped'
-  await applyUnifiedStockSale(db, { jobId, saleGroupKey, date: first.date, lines })
+  await applyUnifiedStockSale(db, { jobId, saleGroupKey, date: first.date, lines, actor, recordedAt: new Date().toISOString() })
   return 'applied'
 }
 
@@ -4688,6 +4689,7 @@ export async function applyStockActionsJob(
   policyJson: string | null,
   sw: ReturnType<typeof makeStopwatch>,
   queueLatencyMs: number | undefined,
+  actor: SessionUser,
 ): Promise<{ applied: number; failed: number }> {
   const startedAtMs = Date.now()
   // Same materialize-first contract as the generic apply path: this
@@ -4714,12 +4716,12 @@ export async function applyStockActionsJob(
     if (totalRows > STOCK_ACTION_MAX_ROWS) {
       throw new Error(`This stock import has ${totalRows} rows; reconcile mode checks every row against one live-stock snapshot, so split it into files of at most ${STOCK_ACTION_MAX_ROWS} rows before importing.`)
     }
-    return await applyStockActionsSinglePass(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs)
+    return await applyStockActionsSinglePass(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, actor)
   }
   if (totalRows > STOCK_ACTION_DIRECT_MAX_ROWS) {
     throw new Error(`This stock import has ${totalRows} rows; the ceiling is ${STOCK_ACTION_DIRECT_MAX_ROWS} rows per file — split it before importing.`)
   }
-  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows)
+  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor)
 }
 
 // The original single-pass engine, now reconcile-only. Classifies the whole
@@ -4733,6 +4735,7 @@ async function applyStockActionsSinglePass(
   sw: ReturnType<typeof makeStopwatch>,
   queueLatencyMs: number | undefined,
   startedAtMs: number,
+  actor: SessionUser,
 ): Promise<{ applied: number; failed: number }> {
   const decisions = getDecisionMap(policyJson)
   const rows = await readAllMaterializedRows(db, jobId, decisions)
@@ -4797,7 +4800,7 @@ async function applyStockActionsSinglePass(
       continue
     }
     try {
-      const outcome = await dispatchStockActionSaleGroup(db, jobId, saleGroupKey, groupRows)
+      const outcome = await dispatchStockActionSaleGroup(db, jobId, saleGroupKey, groupRows, actor)
       if (outcome === 'skipped') for (const r of groupRows) r.action = 'skip'
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sale group failed'
@@ -4857,6 +4860,7 @@ async function applyStockActionsContinuation(
   queueLatencyMs: number | undefined,
   startedAtMs: number,
   totalRows: number,
+  actor: SessionUser,
 ): Promise<{ applied: number; failed: number }> {
   const decisions = getDecisionMap(policyJson)
   const { cursor, state } = await getChunkState(db, jobId)
@@ -5047,7 +5051,7 @@ async function applyStockActionsContinuation(
           continue
         }
         try {
-          const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, groupResults)
+          const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, groupResults, actor)
           if (outcome === 'skipped') markGroup((row) => { row.action = 'skip' })
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Sale group failed'
@@ -5286,7 +5290,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // would mutate sales tables with the wrong row shape. Returns here with
     // its own {applied, failed}; the lease is released in the shared finally.
     if (job.type === 'stock_actions') {
-      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs)
+      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs, authority.actor)
     }
 
     const stillMaterializing = await ensureSourceRowsMaterialized(env, db, jobId, 'apply')
@@ -6104,6 +6108,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             rowNumber: r.rowNumber,
             data: r.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
             nowIso,
+            actor: authority.actor,
             accrueLoyalty,
           })
         }))

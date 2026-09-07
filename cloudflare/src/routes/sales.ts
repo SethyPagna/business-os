@@ -123,6 +123,7 @@ import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { formatSaleTelegramLines, sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import { contactDisplayAddress } from '../lib/contactOptions'
+import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 
@@ -794,6 +795,41 @@ app.post('/', async (c) => {
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
   const branchRow = body.branch_id ? await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]) : null
+  let creationSnapshotJson: string
+  try {
+    creationSnapshotJson = buildSaleCreationSnapshot({
+      origin: clientCreatedAt ? 'offline_replay' : 'pos',
+      recordedAt: new Date().toISOString(),
+      saleAt: clientCreatedAt,
+      receiptNumber,
+      actor: user,
+      cashierId: actorId(user) ?? (body.cashier_id || null),
+      cashierName: actorSnapshot(user),
+      saleStatus,
+      items: priced.map((item) => ({
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unitPriceUsd: item.unitPriceUsd,
+        lineTotalUsd: item.lineTotalUsd,
+      })),
+      totalUsd,
+      paymentMethod,
+      paymentDetails: effectivePaymentDetails,
+      amountPaidUsd,
+      amountPaidKhr,
+      changeUsd: nativeChange.changeUsd,
+      changeKhr: nativeChange.changeKhr,
+      isDelivery,
+      deliveryContactName: deliveryContact?.name,
+      deliveryContactPhone: deliveryContact?.phone,
+      deliveryFeeUsd,
+      deliveryActualCostUsd,
+    })
+  } catch (error) {
+    if (error instanceof SaleCreationSnapshotError) return c.json({ error: error.message }, 400)
+    throw error
+  }
   const saleInsert = await db
     .prepare(`
       INSERT INTO sales (
@@ -806,7 +842,7 @@ app.post('/', async (c) => {
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
         delivery_actual_cost_usd, delivery_actual_cost_khr,
-        loyalty_accrual, sale_status, search_normalized, created_at, updated_at
+        loyalty_accrual, sale_status, search_normalized, creation_snapshot_json, created_at, updated_at
       ) VALUES (@receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
@@ -816,7 +852,7 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, @search_normalized, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+        @loyalty_accrual, @sale_status, @search_normalized, @creation_snapshot_json, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
     `)
     .run({
       receipt_number: receiptNumber,
@@ -855,6 +891,7 @@ app.post('/', async (c) => {
           .filter(Boolean)
           .join(' '),
       ),
+      creation_snapshot_json: creationSnapshotJson,
       payment_method: paymentMethod,
       payment_details: JSON.stringify(effectivePaymentDetails),
       payment_currency: body.payment_currency || 'USD',
@@ -2644,7 +2681,7 @@ app.get('/:id/records', async (c) => {
     SELECT id, receipt_number, sale_status, status_before_return, status_before_cancel,
       cashier_name, total_usd,
       payment_method, payment_details, amount_paid_usd, amount_paid_khr,
-      change_usd, change_khr, created_at, updated_at
+      change_usd, change_khr, creation_snapshot_json, created_at, updated_at
     FROM sales WHERE id = ?
   `).get<SaleRecordSaleRow>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)

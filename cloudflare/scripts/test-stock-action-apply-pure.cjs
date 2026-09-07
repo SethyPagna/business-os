@@ -47,6 +47,7 @@ const REAL = new Set([
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
   'branchRoles', 'branchRoleGuards',
+  'actorSnapshot', 'saleCreationSnapshot',
 ])
 
 // Functional stubs for the D1/Env/queue/cache/broadcast modules that can't
@@ -131,7 +132,7 @@ function makeDb() {
     CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,
       cashier_name TEXT, branch_id INTEGER, branch_name TEXT, payment_method TEXT, payment_currency TEXT,
       subtotal_usd REAL, total_usd REAL, amount_paid_usd REAL, sale_status TEXT, notes TEXT, items TEXT,
-      created_at TEXT, updated_at TEXT);
+      creation_snapshot_json TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE sale_items (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER, product_id INTEGER,
       product_name TEXT, quantity REAL, unit TEXT, applied_price_usd REAL, cost_price_usd REAL, total_usd REAL,
       branch_id INTEGER, price_mode TEXT, base_price_usd REAL, batch_id INTEGER, batch_label TEXT, batch_expiry_date TEXT);
@@ -197,6 +198,7 @@ function seedJob(sqlite, jobId, rows, policy) {
 
 const env = { IMPORT_QUEUE: { send: async () => {} } }
 const sw = { lap() {}, marks: {} }
+const APPLY_ACTOR = { id: 61, username: 'stock-job-runner', name: 'Ignored Full Name' }
 
 // DIRECT mode is a continuation engine (M4): each invocation does one window
 // of classify or dispatch and self-enqueues the next. This pump simulates
@@ -206,11 +208,11 @@ async function runJobToCompletion(db, jobId, policy, { maxInvocations = 1000 } =
   const queue = []
   const pumpEnv = { IMPORT_QUEUE: { send: async (message) => { queue.push(message) } } }
   let invocations = 1
-  let out = await applyStockActionsJob(pumpEnv, db, jobId, policy, sw, undefined)
+  let out = await applyStockActionsJob(pumpEnv, db, jobId, policy, sw, undefined, APPLY_ACTOR)
   while (queue.length) {
     if (++invocations > maxInvocations) throw new Error('continuation did not terminate')
     queue.shift()
-    out = await applyStockActionsJob(pumpEnv, db, jobId, policy, sw, undefined)
+    out = await applyStockActionsJob(pumpEnv, db, jobId, policy, sw, undefined, APPLY_ACTOR)
   }
   return { out, invocations }
 }
@@ -273,6 +275,10 @@ async function test(name, fn) {
     // units come from LATE -> EARLY 0, LATE 3. Total sold across the group = 5.
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_batch_stock WHERE batch_id=201`).get().quantity, 0)
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_batch_stock WHERE batch_id=202`).get().quantity, 3)
+    const creation = JSON.parse(sqlite.prepare('SELECT creation_snapshot_json FROM sales').get().creation_snapshot_json)
+    assert.equal(creation.origin, 'stock_action_import')
+    assert.deepEqual(creation.actor, { id: 61, username: 'stock-job-runner' })
+    assert.equal(creation.total_usd, 75)
 
     // Whole-job retry (a redelivery / crash-resume) must not double anything.
     const { out: retry } = await runJobToCompletion(db, 'job-sale', policy)
@@ -358,12 +364,12 @@ async function test(name, fn) {
     // classify invocation + FIRST dispatch window only (which may already
     // cover every unit when the sheet fits inside one window -- the
     // redelivery claims below hold either way)...
-    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined)
-    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined)
+    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined, APPLY_ACTOR)
+    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined, APPLY_ACTOR)
     // ...then simulate the crashed window's message being REDELIVERED twice
     // before the run continues to completion.
     const { out } = await runJobToCompletion(db, 'job-resume', policy)
-    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined)
+    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined, APPLY_ACTOR)
     assert.deepStrictEqual(out, { applied: 75, failed: 0 })
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=51 AND branch_id=1`).get().quantity, 75, 'resume + redelivery never double-add')
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 75)
@@ -376,7 +382,7 @@ async function test(name, fn) {
     const rows = Array.from({ length: overRows }, (_, index) => ({ _rowNumber: index + 2, name: `Raw ${index}` }))
     seedJob(sqlite, 'job-rows-bound', rows, { stock_action_mode: 'reconcile' })
     await assert.rejects(
-      () => applyStockActionsJob(env, db, 'job-rows-bound', JSON.stringify({ stock_action_mode: 'reconcile' }), sw, undefined),
+      () => applyStockActionsJob(env, db, 'job-rows-bound', JSON.stringify({ stock_action_mode: 'reconcile' }), sw, undefined, APPLY_ACTOR),
       new RegExp(`${overRows} rows[\\s\\S]*at most ${STOCK_ACTION_MAX_ROWS} rows`),
     )
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM import_job_rows`).get().n, 0)
@@ -392,7 +398,7 @@ async function test(name, fn) {
     }))
     seedJob(sqlite, 'job-units-bound', rows, { stock_action_mode: 'reconcile' })
     await assert.rejects(
-      () => applyStockActionsJob(env, db, 'job-units-bound', JSON.stringify({ stock_action_mode: 'reconcile' }), sw, undefined),
+      () => applyStockActionsJob(env, db, 'job-units-bound', JSON.stringify({ stock_action_mode: 'reconcile' }), sw, undefined, APPLY_ACTOR),
       new RegExp(`actions[\\s\\S]*at most ${STOCK_ACTION_MAX_UNITS} actions`),
     )
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
@@ -408,7 +414,7 @@ async function test(name, fn) {
     const bulk = sqlite.transaction(() => { for (let i = 0; i < 25001; i++) insert.run(i, i + 2) })
     bulk()
     await assert.rejects(
-      () => applyStockActionsJob(env, db, 'job-direct-bound', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined),
+      () => applyStockActionsJob(env, db, 'job-direct-bound', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined, APPLY_ACTOR),
       /25001 rows.*25000 rows/,
     )
   })

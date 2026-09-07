@@ -3,6 +3,8 @@ import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
 import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
+import type { ActorLike } from './actorSnapshot'
+import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 
 /**
  * The FOURTH receipt wire (N14-D).
@@ -94,6 +96,8 @@ export interface UnifiedStockSaleInput {
   saleGroupKey: string
   date: string
   lines: UnifiedStockSaleLine[]
+  actor: ActorLike
+  recordedAt: string
 }
 
 const MAX_SALE_LINES = 8
@@ -606,24 +610,53 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     row: line.rowNumber, product_id: line.productId, product_name: line.productName,
     branch_id: line.branchId, quantity: line.quantity, price_usd: line.sellingPriceUsd,
   })))
+  const receiptNumber = `IMP-${soldAt.replace(/-/g, '')}-${groupHash.slice(0, 8).toUpperCase()}`
+  const branchId = uniqueBranches.length === 1 ? uniqueBranches[0] : null
+  const branchName = uniqueBranches.length === 1 ? lines[0].branchName : 'Multiple branches'
+  const creationSnapshotJson = buildSaleCreationSnapshot({
+    origin: 'stock_action_import',
+    recordedAt: input.recordedAt,
+    saleAt: soldAt,
+    receiptNumber,
+    actor: input.actor,
+    cashierName: 'Unified stock import',
+    saleStatus: 'completed',
+    items: lines.map((line) => ({
+      product_id: line.productId,
+      product_name: line.productName,
+      quantity: line.quantity,
+      applied_price_usd: line.sellingPriceUsd,
+      total_usd: Math.round(line.quantity * line.sellingPriceUsd * 100) / 100,
+    })),
+    totalUsd: subtotalUsd,
+    paymentMethod: 'Cash',
+    paymentDetails: [{ method: 'Cash', amount_usd: subtotalUsd, amount_khr: 0 }],
+    amountPaidUsd: subtotalUsd,
+    amountPaidKhr: 0,
+    changeUsd: 0,
+    changeKhr: 0,
+    isDelivery: false,
+    deliveryFeeUsd: 0,
+  })
   statements.push({
     sql: `INSERT INTO sales (
             receipt_number, client_request_id, cashier_name, branch_id, branch_name,
             payment_method, payment_currency, subtotal_usd, total_usd, amount_paid_usd,
-            sale_status, notes, items, created_at, updated_at
+            sale_status, notes, items, creation_snapshot_json, created_at, updated_at
           )
           SELECT @receiptNumber, @clientRequestId, 'Unified stock import', @branchId, @branchName,
             'Cash', 'USD', @subtotalUsd, @subtotalUsd, @subtotalUsd,
-            'completed', @notes, @items, @soldAt, CURRENT_TIMESTAMP
+            'completed', @notes, @items, @creationSnapshotJson, @soldAt, CURRENT_TIMESTAMP
           WHERE ${guard}`,
     params: {
       ...common,
-      receiptNumber: `IMP-${soldAt.replace(/-/g, '')}-${groupHash.slice(0, 8).toUpperCase()}`,
-      branchId: uniqueBranches.length === 1 ? uniqueBranches[0] : null,
-      branchName: uniqueBranches.length === 1 ? lines[0].branchName : 'Multiple branches',
+      receiptNumber,
+      branchId,
+      branchName,
       subtotalUsd,
       notes: `Unified stock import ${jobId}, group ${saleGroupKey}`,
       items: itemSnapshot,
+      creationSnapshotJson,
       soldAt,
     },
   })

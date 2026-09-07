@@ -70,7 +70,12 @@ const saleAmendments = compile('saleAmendments.ts', {
   './financialPrecision': financialPrecision,
   './saleLineAddition': saleLineAddition,
 })
-const subject = compile('saleRecords.ts', { './saleAmendments': saleAmendments })
+const actorSnapshot = compile('actorSnapshot.ts')
+const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
+const subject = compile('saleRecords.ts', {
+  './saleAmendments': saleAmendments,
+  './saleCreationSnapshot': saleCreationSnapshot,
+})
 
 const {
   SALE_RECORD_KINDS,
@@ -359,6 +364,77 @@ runTest('legacy mutable creation fields are unknown when no durable before snaps
   assert.strictEqual(record.after.total_usd, 12.5, 'total remains known without an amendment')
   assert.strictEqual(record.after.products, null,
     'current sale-item names can be rewritten by product rename/merge sync and must not be called the creation basket')
+})
+
+runTest('a future immutable creation snapshot wins over every mutable current sale field', () => {
+  const immutable = saleCreationSnapshot.buildSaleCreationSnapshot({
+    origin: 'sales_import',
+    recordedAt: '2026-09-07T12:00:00.000Z',
+    saleAt: '2026-08-28T07:30:00.000Z',
+    receiptNumber: '20260828-143000',
+    actor: { id: 9, username: 'importer-now' },
+    cashierId: 3,
+    cashierName: 'source-cashier',
+    saleStatus: 'awaiting_payment',
+    items: [{ product_id: 4, product_name: 'Original Serum', sku: 'OLD-4', quantity: 2, applied_price_usd: 5, total_usd: 10 }],
+    totalUsd: 12,
+    paymentMethod: 'Split',
+    paymentDetails: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }, { method: 'ABA', amount_usd: 7, amount_khr: 0 }],
+    amountPaidUsd: 12,
+    amountPaidKhr: 0,
+    changeUsd: 0,
+    changeKhr: 0,
+    isDelivery: true,
+    deliveryContactName: 'Original Driver',
+    deliveryContactPhone: '012-ORIGINAL',
+    deliveryFeeUsd: 2,
+    deliveryActualCostUsd: 1.25,
+  })
+  const current = {
+    ...SALE,
+    receipt_number: 'MUTATED-RECEIPT',
+    cashier_name: 'renamed-cashier',
+    sale_status: 'completed',
+    total_usd: 999,
+    payment_method: 'Changed',
+    payment_details: '[]',
+    amount_paid_usd: 999,
+    items: [{ product_name: 'Renamed Product', quantity: 99, applied_price_usd: 99, total_usd: 9801 }],
+    creation_snapshot_json: immutable,
+  }
+  const created = buildSaleRecords({ sale: current, ledger: LEDGER, audit: AUDIT })
+    .find((record) => record.id === 'sale:77')
+  assert.ok(created)
+  assert.equal(created.at, '2026-09-07T12:00:00.000Z', 'record time is when the acting account created the row')
+  assert.equal(created.actor_username, 'importer-now', 'record actor is the applying account, not the source cashier')
+  assert.equal(created.subject, '20260828-143000')
+  assert.equal(created.via, 'sales_import')
+  assert.deepEqual(created.after, {
+    receipt_number: '20260828-143000',
+    sale_status: 'awaiting_payment',
+    products: [{ product: 'Original Serum', sku: 'OLD-4', quantity: 2, unit_price_usd: 5, line_total_usd: 10 }],
+    total_usd: 12,
+    payment_method: 'Split',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }, { method: 'ABA', amount_usd: 7, amount_khr: 0 }],
+    amount_paid_usd: 12,
+    amount_paid_khr: 0,
+    change_usd: 0,
+    change_khr: 0,
+    is_delivery: true,
+    delivery_contact_name: 'Original Driver',
+    delivery_contact_phone: '012-ORIGINAL',
+    delivery_fee_usd: 2,
+    delivery_actual_cost_usd: 1.25,
+  })
+})
+
+runTest('missing, malformed and unknown-version snapshots retain the honest legacy path', () => {
+  for (const raw of [null, '{bad', JSON.stringify({ version: 999, products: [] })]) {
+    const record = buildSaleRecords({ sale: { ...SALE, creation_snapshot_json: raw } })[0]
+    assert.equal(record.after.products, null)
+    assert.equal(record.after.payment_method, null)
+    assert.equal(record.actor_username, 'sokha')
+  }
 })
 
 runTest('a payment correction is one rich record, not a status-only duplicate', () => {

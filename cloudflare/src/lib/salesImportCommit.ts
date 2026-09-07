@@ -3,6 +3,8 @@ import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './re
 import { RETURN_STATUSES } from './salesStatus'
 import { branchCanSell } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
+import type { ActorLike } from './actorSnapshot'
+import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 
 // 100, not 50, since Part 388: the real Aug-28 sales history holds three
 // genuine receipts of 86/58/55 lines (big wholesale orders) that the old
@@ -30,7 +32,7 @@ export async function applyHistoricalSaleImport(
   // review screen (default OFF -- migrated history should not inflate
   // balances, which are summed from sales). Set true only when the operator
   // explicitly opts a sales import into earning points.
-  input: { jobId: string; rowNumber: number; data: SaleImportData; nowIso: string; accrueLoyalty?: boolean },
+  input: { jobId: string; rowNumber: number; data: SaleImportData; nowIso: string; actor: ActorLike; accrueLoyalty?: boolean },
 ): Promise<HistoricalSaleCommitResult> {
   const jobId = String(input.jobId || '').trim()
   const rowNumber = Number(input.rowNumber)
@@ -90,6 +92,29 @@ export async function applyHistoricalSaleImport(
     Number.isNaN(mintMoment.getTime()) ? new Date(input.nowIso) : mintMoment,
   )
   const legacyReceiptNumber = ownReceipt ? null : suppliedReceipt || null
+  const creationSnapshotJson = buildSaleCreationSnapshot({
+    origin: 'sales_import',
+    recordedAt: input.nowIso,
+    saleAt: createdAt,
+    receiptNumber,
+    actor: input.actor,
+    cashierId: d.cashier_id,
+    cashierName: d.cashier_name,
+    saleStatus: d.sale_status,
+    items: normalizedItems,
+    totalUsd: d.total_usd,
+    paymentMethod: d.payment_method,
+    paymentDetails: d.payment_details,
+    amountPaidUsd: d.amount_paid_usd,
+    amountPaidKhr: d.amount_paid_khr,
+    changeUsd: d.change_usd,
+    changeKhr: d.change_khr,
+    isDelivery: d.is_delivery,
+    deliveryContactName: d.delivery_contact_name,
+    deliveryContactPhone: d.delivery_contact_phone,
+    deliveryFeeUsd: d.delivery_fee_usd,
+    deliveryActualCostUsd: d.delivery_actual_cost_usd,
+  })
 
   const common = { job_id: jobId, group_key: groupKey, row_number: rowNumber, client_request_id: clientRequestId }
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
@@ -108,7 +133,7 @@ export async function applyHistoricalSaleImport(
             delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
             delivery_actual_cost_usd, delivery_actual_cost_khr,
             loyalty_accrual, sale_status, items, created_at, client_request_id,
-            legacy_receipt_number
+            legacy_receipt_number, creation_snapshot_json
           )
           SELECT
             @receipt_number, @cashier_id, @cashier_name, @branch_id, @branch_name,
@@ -121,7 +146,7 @@ export async function applyHistoricalSaleImport(
             @delivery_contact_address, @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
             @delivery_actual_cost_usd, @delivery_actual_cost_khr,
             @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id,
-            @legacy_receipt_number
+            @legacy_receipt_number, @creation_snapshot_json
           WHERE ${pendingGuard}`,
     // Imported sales default to NOT earning loyalty points -- the balance is
     // computed by summing sales, so migrated old-system receipts would
@@ -138,6 +163,7 @@ export async function applyHistoricalSaleImport(
       loyalty_accrual: input.accrueLoyalty ? 1 : 0,
       items_json: JSON.stringify(normalizedItems),
       created_at: createdAt,
+      creation_snapshot_json: creationSnapshotJson,
     },
   }]
 

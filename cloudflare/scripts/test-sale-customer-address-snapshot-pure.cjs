@@ -39,7 +39,7 @@ const actual = new Set([
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
   'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
-  'contactOptions',
+  'contactOptions', 'saleCreationSnapshot',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
@@ -163,6 +163,19 @@ async function run() {
     'St 271, Phnom Penh',
     'the server must not store the options JSON a stale client sent',
   )
+  const directCreation = JSON.parse(g.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(created.body.id).creation_snapshot_json)
+  assert.equal(directCreation.version, 1)
+  assert.equal(directCreation.origin, 'pos')
+  assert.deepEqual(directCreation.actor, { id: 1, username: 'admin' })
+  assert.deepEqual(directCreation.products, [{
+    product_id: 1,
+    product: 'Serum',
+    sku: null,
+    quantity: 1,
+    unit_price_usd: 5,
+    line_total_usd: 5,
+  }])
+  assert.deepEqual(directCreation.payment_details, [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }])
 
   // A plainly typed address is untouched -- the normalization must not eat
   // ordinary input, including a numeric house number that parses as JSON.
@@ -184,6 +197,48 @@ async function run() {
     )
   }
   console.log('PASS a sale created by a stale client stores the display address')
+
+  // Offline replay is the same writer, but records the client sale moment and
+  // a distinct origin. A retry returns the one already-created row and cannot
+  // regenerate or alter the immutable envelope.
+  const offline = fixture()
+  const offlinePayload = {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD',
+    amount_paid_usd: 5,
+    amount_paid_khr: 0,
+    exchange_rate: 4200,
+    client_request_id: 'offline-create-1',
+    created_at: '2026-09-07T09:30:00.000Z',
+  }
+  const first = await offline.call('/', offlinePayload, 'POST')
+  assert.equal(first.status, 200, JSON.stringify(first))
+  const beforeRetry = offline.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(first.body.id).creation_snapshot_json
+  const replay = await offline.call('/', offlinePayload, 'POST')
+  assert.equal(replay.status, 200, JSON.stringify(replay))
+  assert.equal(replay.body.id, first.body.id)
+  assert.equal(offline.sql.prepare('SELECT COUNT(*) n FROM sales WHERE client_request_id=?').get('offline-create-1').n, 1)
+  assert.equal(offline.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(first.body.id).creation_snapshot_json, beforeRetry)
+  const offlineCreation = JSON.parse(beforeRetry)
+  assert.equal(offlineCreation.origin, 'offline_replay')
+  assert.equal(offlineCreation.sale_at, '2026-09-07 09:30:00')
+  console.log('PASS offline replay keeps one immutable queue-time creation snapshot')
+
+  const failed = fixture()
+  failed.sql.exec("CREATE TRIGGER reject_sale_line BEFORE INSERT ON sale_items BEGIN SELECT RAISE(ABORT, 'forced sale-line failure'); END;")
+  const rejected = await failed.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'snapshot-compensation-1',
+  }, 'POST')
+  assert.ok(rejected.status >= 400, JSON.stringify(rejected))
+  assert.equal(failed.sql.prepare('SELECT COUNT(*) n FROM sales WHERE client_request_id=?').get('snapshot-compensation-1').n, 0)
+  assert.equal(failed.sql.prepare('SELECT COUNT(*) n FROM sales WHERE creation_snapshot_json IS NOT NULL').get().n, 0)
+  console.log('PASS failed direct sale deletes its staged creation snapshot with the sale header')
 }
 
 run().then(() => console.log('test-sale-customer-address-snapshot-pure OK')).catch((error) => {
