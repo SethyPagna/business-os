@@ -232,6 +232,8 @@ interface ProductFormProps {
   // cannot restore or clear one another's work. Existing products continue to
   // use their stable entity id regardless of caller.
   draftScope?: string
+  /** Session-local warning only; catalog identity stays governed by classifyCreateMatches. */
+  sessionDuplicateCheck?: (candidate: { name?: unknown; barcode?: unknown }) => boolean
   // Session shells keep their parent mounted while this form floats above it.
   // The shared Modal's nested layer prevents the newer surface from falling
   // behind the parent; ordinary standalone create/edit callers omit it.
@@ -492,6 +494,7 @@ export default function ProductForm({
   onMinimize,
   createDefaults,
   draftScope,
+  sessionDuplicateCheck,
   modalLayer = 'default',
   showReceivedDate = false,
   t,
@@ -907,6 +910,7 @@ export default function ProductForm({
   // choices where they actually differ. Same-name rows always wrap together
   // under the virtual group title; there is no stored parent/child link.
   const [createMatches, setCreateMatches] = useState<CreateMatchCandidate[]>([])
+  const [createMatchLookupState, setCreateMatchLookupState] = useState<'idle' | 'loading' | 'resolved' | 'failed'>('idle')
   const [createVerdictOpen, setCreateVerdictOpen] = useState(false)
   const createVerdictResolveRef = useRef<((choice: 'back' | 'group' | 'new') => void) | null>(null)
   const createMatchSeqRef = useRef(0)
@@ -920,16 +924,19 @@ export default function ProductForm({
     }, createMatches),
     [form.name, form.barcode, form.selling_price_usd, createMatches],
   )
+  const createSessionDuplicate = isCreateMode && Boolean(sessionDuplicateCheck?.({ name: form.name, barcode: form.barcode }))
   useEffect(() => {
     if (!isCreateMode) return
+    const seq = ++createMatchSeqRef.current
     const name = String(form.name || '').trim()
     const barcode = String(form.barcode || '').trim()
     // The min-length and debounce live in helpers/productNameSuggestions.ts
     // because the Name field's suggestion list is fed by THIS lookup: one
     // gate, so the dropdown and the identity hint can never disagree about
     // when the catalog has been asked.
-    if (!shouldSearchProductMatches(name, barcode)) { setCreateMatches([]); return }
-    const seq = ++createMatchSeqRef.current
+    if (!shouldSearchProductMatches(name, barcode)) { setCreateMatches([]); setCreateMatchLookupState('idle'); return }
+    setCreateMatches([])
+    setCreateMatchLookupState('loading')
     const timer = window.setTimeout(async () => {
       try {
         const queries = productMatchQueries(name, barcode)
@@ -946,7 +953,10 @@ export default function ProductForm({
           seen.add(key)
           return true
         }))
-      } catch { /* live match is advisory -- a failed search never blocks typing */ }
+        setCreateMatchLookupState('resolved')
+      } catch {
+        if (seq === createMatchSeqRef.current) setCreateMatchLookupState('failed')
+      }
     }, PRODUCT_MATCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1145,6 +1155,10 @@ export default function ProductForm({
         'This barcode looks like scientific notation (an Excel export artifact). Edit it or clear it — it cannot be saved as-is.',
         'បាកូដនេះមើលទៅដូចជាទម្រង់វិទ្យាសាស្ត្រ (កំហុសពីការនាំចេញ Excel)។ កែ ឬលុបវាចេញ — មិនអាចរក្សាទុកបែបនេះបានទេ។',
       ))
+      return
+    }
+    if (createSessionDuplicate) {
+      alert(tr('create_products_session_duplicate', 'Duplicate: You added this item already.', 'ស្ទួន៖ អ្នកបានបន្ថែមទំនិញនេះរួចហើយ។'))
       return
     }
     // F1: the page-by-page confirm -- a matching name/barcode stops the
@@ -1558,7 +1572,11 @@ export default function ProductForm({
               {/* F1: while a NEW product is typed, say out loud what the
                   identity rule will do with this name/barcode -- before the
                   save button is anywhere near being pressed. */}
-              {isCreateMode && createVerdict.kind ? (
+              {createSessionDuplicate ? (
+                <p className="mt-1 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+                  {tr('create_products_session_duplicate', 'Duplicate: You added this item already.', 'ស្ទួន៖ អ្នកបានបន្ថែមទំនិញនេះរួចហើយ។')}
+                </p>
+              ) : isCreateMode && createVerdict.kind ? (
                 <p className={`mt-1 rounded-lg border px-2.5 py-1.5 text-xs ${createVerdict.kind === 'exact_twin'
                   ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
                   : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'}`}>
@@ -1568,6 +1586,10 @@ export default function ProductForm({
                       ? tr('create_match_name_hint', 'This name already exists ({n} rows) — saving adds this as a new row of that group.', 'ឈ្មោះនេះមានរួចហើយ ({n} ជួរ) — ការរក្សាទុកនឹងបន្ថែមជាជួរថ្មីនៃក្រុមនោះ។').replace('{n}', String(createVerdict.groupRows.length))
                       : tr('create_match_barcode_hint', 'This barcode is already on "{name}".', 'បាកូដនេះមាននៅលើ "{name}" រួចហើយ។').replace('{name}', createVerdict.canonicalName)}
                   {createVerdict.priceMatches ? ` · ${tr('create_match_price_hint', 'same price too', 'តម្លៃដូចគ្នាដែរ')}` : ''}
+                </p>
+              ) : isCreateMode && createMatchLookupState === 'resolved' ? (
+                <p className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                  {tr('available', 'Available', 'អាចប្រើបាន')}
                 </p>
               ) : null}
               {/* Group membership is automatic and name-based. There is no

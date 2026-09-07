@@ -20,7 +20,7 @@
 // agrees and a "Multiple ..." label when they do not -- so a header that was
 // overridden on one item can never make the session summary lie.
 
-import { identityBarcodeKey } from './productDetailRule.ts'
+import { identityBarcodeKey, normalizeProductGroupName } from './productDetailRule.ts'
 
 export type CreateProductsHeader = {
   /** Free-text brand, exactly like ProductForm's own brand field. */
@@ -223,4 +223,40 @@ export function isSameQueuedProduct(
   return name(left.name) === name(right.name)
     && identityBarcodeKey(left.barcode) === identityBarcodeKey(right.barcode)
     && cents(left.unitCostUsd) === cents(right.unitCostUsd)
+}
+
+export type SessionProductDuplicateReason = 'name' | 'barcode'
+
+/**
+ * A session-entry safety rule, deliberately separate from catalog identity.
+ * The operator should not add a second line for the same barcode OR retype the
+ * same normalized name in one open session; they should edit the first line's
+ * quantity instead. Empty names/barcodes never match, and barcode comparison
+ * uses the bounded leading-zero fold shared with scanners and the backend.
+ */
+export function sessionProductDuplicateReason(
+  left: { name?: unknown; barcode?: unknown },
+  right: { name?: unknown; barcode?: unknown },
+): SessionProductDuplicateReason | null {
+  const leftName = normalizeProductGroupName(left.name)
+  const rightName = normalizeProductGroupName(right.name)
+  if (leftName && leftName === rightName) return 'name'
+  const leftBarcode = String(left.barcode ?? '').trim()
+  const rightBarcode = String(right.barcode ?? '').trim()
+  if (!leftBarcode || !rightBarcode || /^0+$/.test(leftBarcode) || /^0+$/.test(rightBarcode)) return null
+  return identityBarcodeKey(leftBarcode) === identityBarcodeKey(rightBarcode) ? 'barcode' : null
+}
+
+export function findSessionProductDuplicate<T extends { key?: unknown; lineId?: unknown; name?: unknown; barcode?: unknown }>(
+  rows: readonly T[],
+  candidate: { name?: unknown; barcode?: unknown },
+  excludeKey?: unknown,
+): { row: T; reason: SessionProductDuplicateReason } | null {
+  for (const row of rows) {
+    const rowKey = row.key ?? row.lineId
+    if (excludeKey != null && String(rowKey) === String(excludeKey)) continue
+    const reason = sessionProductDuplicateReason(row, candidate)
+    if (reason) return { row, reason }
+  }
+  return null
 }
