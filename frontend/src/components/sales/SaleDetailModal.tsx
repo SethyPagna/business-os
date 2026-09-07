@@ -46,6 +46,7 @@ import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
 import SaleSettlementEditor, { MAX_SETTLEMENT_ROWS } from './SaleSettlementEditor.tsx'
 import {
+  advanceSettlementReviewVersion,
   buildSettlementPayload,
   configuredSettlementMethods,
   createSettlementRequestId,
@@ -1144,6 +1145,13 @@ export default function SaleDetailModal({
       } else if (settlementError) {
         setPayError(settlementError)
       } else if (result !== false) {
+        // The status route returns the exact committed sale timestamp. Carry
+        // it into the next review before this surface closes: if the refreshed
+        // row keeps the detail mounted, Record payment must guard against the
+        // status write that just succeeded, not the version from before it.
+        // Failed settlements never enter this branch, so their typed tender
+        // rows and reviewed version remain available for a deliberate retry.
+        setSettlementSession((current) => advanceSettlementReviewVersion(current, result))
         onClose()
       }
     } finally {

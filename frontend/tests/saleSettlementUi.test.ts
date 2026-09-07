@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  advanceSettlementReviewVersion,
   buildSettlementPayload,
   configuredSettlementMethods,
   initialSettlementRows,
@@ -40,6 +41,21 @@ assert.equal(
   extractNumericConst(editorSource, 'MAX_SETTLEMENT_ROWS'),
   extractNumericConst(paymentSettlementSource, 'MAX_SETTLEMENT_TENDER_ROWS'),
   'the editor review cap and the server enforcement cap must be the same number',
+)
+
+const preStatusReview = {
+  expectedUpdatedAt: 'sale-before-status',
+  rows: [{ id: 'typed', method: 'ABA Bank', usd: '300', khr: '' }],
+}
+const postStatusReview = advanceSettlementReviewVersion(preStatusReview, {
+  statusUpdatedAt: 'sale-after-credit',
+})
+assert.equal(postStatusReview.expectedUpdatedAt, 'sale-after-credit', 'the next payment review uses the status write version')
+assert.strictEqual(postStatusReview.rows, preStatusReview.rows, 'refreshing the version does not replace entered tender rows')
+assert.strictEqual(
+  advanceSettlementReviewVersion(postStatusReview, { settlementError: 'This sale changed on another device' }),
+  postStatusReview,
+  'a real conflict keeps the reviewed version and entered tender state intact',
 )
 
 assert.deepEqual(
@@ -157,6 +173,8 @@ assert.match(modalSource, /exchangeRateChanged[\s\S]*?sale_settlement_rate_chang
 assert.match(modalSource, /showNotes=\{!needsPaymentEntry\}/, 'settlement hides the unsupported notes control while normal status reviews retain it')
 assert.match(workflowSource, /showNotes \? <div>[\s\S]*?sale-status-notes/, 'the workflow conditionally renders its existing notes draft')
 assert.match(modalSource, /settlementError[\s\S]*?setPayError\(settlementError\)/, 'a failed settlement remains visible inside its review')
+assert.match(salesSource, /mutationResult\?\.updated_at[\s\S]*?\{ statusUpdatedAt \}/, 'a successful status write returns its authoritative sale version to the open detail')
+assert.match(modalSource, /setSettlementSession\(\(current\) => advanceSettlementReviewVersion\(current, result\)\)/, 'the next same-modal payment review advances to the committed status version')
 assert.match(modalSource, /settlementSession\.exchangeRate/, 'the editor and coverage preview use the frozen settings rate')
 assert.match(modalSource, /useCloseGuard\(\{ dirty: settlementDirty \}/, 'edited tender rows are protected by the standard close guard')
 assert.match(modalSource, /setStatusReviewRequestId\(\(requestId\) => requestId \+ 1\)/, 'Record payment explicitly opens the status review step')
