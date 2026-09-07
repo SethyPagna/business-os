@@ -399,6 +399,51 @@ await runTest('Wholesale price: reads wholesale_price_*, lands the legacy vip_pr
   assert.equal(Number(byName('Wholesale Blank')!.wholesale_price_usd), 0, 'a blank wholesale price is 0, NOT the selling price (12) -- defaulting to selling was destroying real prices on re-save')
 })
 
+await runTest('a padded sheet barcode merges into the bare stored barcode', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Padded Serum', barcode: '0748485110011', stock_quantity: '4' },
+  ], [
+    { id: 9, name: 'Padded Serum', barcode: '748485110011', stock_quantity: 1 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 9)
+  assert.equal(analysis.summary.newCount, 0)
+})
+
+await runTest('a padded barcode owned by another product stays a visible barcode conflict', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Other Serum', barcode: '0748485110011', stock_quantity: '4' },
+  ], [
+    { id: 9, name: 'Padded Serum', barcode: '748485110011', stock_quantity: 1 },
+  ])
+
+  assert.equal(analysis.conflicts.length, 1)
+  assert.equal(analysis.conflicts[0].conflictFields.includes('barcode'), true)
+})
+
+await runTest('same-file padding twins share one detail signature', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Twin Serum', barcode: '0748485110011', stock_quantity: '2' },
+    { name: 'Twin Serum', barcode: '748485110011', stock_quantity: '3' },
+  ], [])
+
+  assert.equal(analysis.rows[0]._detail_signature, analysis.rows[1]._detail_signature)
+  assert.notEqual(analysis.rows[1]._planned_action, 'create_variant')
+})
+
+await runTest('valid UPC-E does not collide with a seven-digit internal code', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Internal Code Serum', barcode: '01234565', stock_quantity: '2' },
+  ], [
+    { id: 9, name: 'Internal Code Serum', barcode: '1234565', stock_quantity: 1 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
+  assert.equal(analysis.rows[0]._target_product_id, null)
+  assert.equal(analysis.conflicts[0].conflictFields.includes('barcode'), false)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
