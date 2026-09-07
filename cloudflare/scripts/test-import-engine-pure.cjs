@@ -57,6 +57,32 @@ const contactOptionsModuleObj = { exports: {} }
 const contactOptionsWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', contactOptionsOutputText)
 contactOptionsWrapper(contactOptionsModuleObj.exports, require, contactOptionsModuleObj, contactOptionsSourcePath, path.dirname(contactOptionsSourcePath))
 
+// Phone identity and contact-option phone formatting are real import
+// dependencies of classifyContacts. Load both real helpers so import tests
+// exercise the same +855 fold and structured-option parsing as the route.
+const phoneSourcePath = path.join(__dirname, '..', 'src', 'lib', 'phone.ts')
+const { outputText: phoneOutputText } = ts.transpileModule(fs.readFileSync(phoneSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'phone.ts',
+})
+const phoneModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', phoneOutputText)(
+  phoneModuleObj.exports, require, phoneModuleObj, phoneSourcePath, path.dirname(phoneSourcePath),
+)
+const contactDuplicatesSourcePath = path.join(__dirname, '..', 'src', 'lib', 'contactDuplicates.ts')
+const { outputText: contactDuplicatesOutputText } = ts.transpileModule(fs.readFileSync(contactDuplicatesSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'contactDuplicates.ts',
+})
+const contactDuplicatesModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', contactDuplicatesOutputText)(
+  contactDuplicatesModuleObj.exports,
+  (request) => request === './contactOptions' ? contactOptionsModuleObj.exports : request === './phone' ? phoneModuleObj.exports : require(request),
+  contactDuplicatesModuleObj,
+  contactDuplicatesSourcePath,
+  path.dirname(contactDuplicatesSourcePath),
+)
+
 // salesStatus.ts is pure (no D1/Env dependency, per its own file comment)
 // and classifySales (tested below) genuinely calls normalizeSaleStatus and
 // reads RETURN_STATUSES/VALID_SALE_STATUSES at runtime -- same reasoning as
@@ -240,6 +266,12 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request === './contactOptions') {
     return contactOptionsModuleObj.exports // real module -- classifyContacts actually calls into it
+  }
+  if (request === './contactDuplicates') {
+    return contactDuplicatesModuleObj.exports // real module -- canonical phone matching/option formatting
+  }
+  if (request === './phone') {
+    return phoneModuleObj.exports // real module -- customers.phone_normalized authority
   }
   if (request === './membershipNumber') {
     return membershipNumberModuleObj.exports // real module -- the one LC- membership minter classifyContacts uses
@@ -1234,10 +1266,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 
 // -- classifyContacts: customer membership-number auto-assignment
 // (creation-only), same-name-can't-coexist with a 'force_create' reviewer
-// override (both against the existing DB and within one file), and the
-// membership_number -> name match priority (phone deliberately dropped as
-// a customer match key -- phone/address can be shared by multiple
-// different customers, unlike name and membership_number). Real transpiled
+// override (both against the existing DB and within one file), canonical
+// phone conflict refusal, and membership_number -> phone+name match priority. Real transpiled
 // classifyContacts against a small in-memory fake D1 (its DB touch is two
 // `db.prepare(sql).all()` reads up front -- the existing table, and (for
 // customers) portal_accounts.membership_id, unioned into the allocator's
@@ -1318,29 +1348,23 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.ok(results[0].warnings?.some((w) => w.kind === 'name_match'), 'a name-only match is flagged with a name_match warning')
   }
 
-  // 4b) Phone is no longer a customer match key -- a matching phone with a
-  // DIFFERENT name must NOT merge (phone/address can be legitimately
-  // shared by more than one customer; only name and membership_number
-  // identify a customer for matching purposes now).
+  // 4b) A canonical phone match with a DIFFERENT name is the same hard
+  // conflict manual create/edit enforces. It must neither merge nor create.
   {
-    const db = makeFakeDb([{ id: 9, name: 'Household Account', phone: '099888777', membership_number: 'LCMN-HOUSE001' }])
-    const results = await classifyContacts(db, 'customers', [row({ name: 'A Different Person', phone: '099888777' }, 1)], null)
-    assert.strictEqual(results[0].action, 'create', 'a shared phone number alone must not merge two different-named customers into one')
-    assert.notStrictEqual(results[0].existingId, 9)
-    // Not silent, though -- a genuinely new customer whose phone is
-    // already on file under someone else gets flagged for review even
-    // though it isn't auto-merged/blocked.
+    const db = makeFakeDb([{ id: 9, name: 'Existing Account', phone: '099 888 777', membership_number: 'LCMN-HOUSE001' }])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'A Different Person', phone: '+855 99 888 777' }, 1)], null)
+    assert.strictEqual(results[0].action, 'error', 'a canonical phone conflict must not merge or create a different-named customer')
+    assert.strictEqual(results[0].existingId, 9)
     assert.ok(
       results[0].warnings?.some((w) => w.kind === 'membership_phone_conflict'),
-      'a new customer whose phone already belongs to a different existing customer must be flagged for review, not imported silently',
+      'the refused canonical conflict remains visible in contact review',
     )
   }
 
   // 4c) membership_number match whose phone belongs to a DIFFERENT
   // existing customer than the one matched (typo'd/copy-pasted number) --
-  // must still match/update via membership_number (the stronger
-  // identifier), but flag the conflict and never let this row's phone
-  // overwrite the matched customer's real phone.
+  // must refuse the whole row like manual edit, rather than partially
+  // updating one account from a row whose phone belongs to another.
   {
     const db = makeFakeDb([
       { id: 10, name: 'Correct Owner', phone: '011222333', membership_number: 'LCMN-REAL001' },
@@ -1352,13 +1376,49 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       [row({ name: 'Correct Owner', phone: '099888777', membership_number: 'LCMN-REAL001' }, 1)],
       null,
     )
-    assert.strictEqual(results[0].action, 'update', 'membership_number still wins the match over the phone conflict')
-    assert.strictEqual(results[0].existingId, 10)
+    assert.strictEqual(results[0].action, 'error', 'a membership/phone split-identity row must be refused')
+    assert.strictEqual(results[0].existingId, 11)
     assert.ok(
       results[0].warnings?.some((w) => w.kind === 'membership_phone_conflict'),
       'a membership match whose phone belongs to a different existing customer must be flagged',
     )
-    assert.strictEqual(results[0].data.phone, '011222333', 'the conflicting imported phone must never overwrite the matched customer\'s real phone')
+    assert.strictEqual(results[0].data.phone, '099 888 777', 'the refused row is still normalized for an accurate review preview')
+  }
+
+  // 4d) The same canonical phone and same normalized name is the same
+  // contact. It may update, and any touched customer gets a fresh canonical
+  // key even if the stored row predates phone_normalized.
+  {
+    const db = makeFakeDb([{ id: 12, name: 'Sok Dara', phone: '012 345 678', phone_normalized: null, membership_number: 'LC-00012' }])
+    const results = await classifyContacts(db, 'customers', [row({ name: '  sok   dara ', phone: '+855 12 345 678' }, 1)], null)
+    assert.strictEqual(results[0].action, 'update')
+    assert.strictEqual(results[0].existingId, 12)
+    assert.strictEqual(results[0].data.phone, '012 345 678')
+    assert.strictEqual(results[0].data.phone_normalized, '012345678', 'a touched customer refreshes its canonical phone key')
+  }
+
+  // 4e) Secondary Contact Option phones participate in canonical identity.
+  {
+    const db = makeFakeDb([{ id: 13, name: 'Option Owner', phone: null, address: JSON.stringify([{ label: 'Other', phone: '+855 77 888 999' }]), membership_number: 'LC-00013' }])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Different Person', phone: '077888999' }, 1)], null)
+    assert.strictEqual(results[0].action, 'error')
+    assert.strictEqual(results[0].existingId, 13)
+  }
+
+  // 4f) Multiple rows folded into one pending update cannot let the
+  // internal canonical key drift from the final phone, even when the
+  // reviewer configures a rule for the visible phone field only.
+  {
+    const db = makeFakeDb([{ id: 17, name: 'Folded Update', phone: null, phone_normalized: 'stale', membership_number: 'LC-00017' }])
+    const policy = JSON.stringify({ conflictMode: 'overwrite', fieldRules: { phone: 'use_imported', phone_normalized: 'keep_existing' } })
+    const results = await classifyContacts(db, 'customers', [
+      row({ name: 'Folded Update', phone: '012345678' }, 1),
+      row({ name: 'Folded Update', phone: '+855 70 111 222' }, 2),
+    ], policy)
+    assert.strictEqual(results[0].action, 'update')
+    assert.strictEqual(results[1].action, 'skip')
+    assert.strictEqual(results[0].data.phone, '070 111 222')
+    assert.strictEqual(results[0].data.phone_normalized, '070111222', 'the pending update key follows its final phone')
   }
 
   // 5) Two brand-new rows in the SAME file share a name -- must fold into
@@ -1390,6 +1450,46 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.notStrictEqual(results[0].data.phone, results[1].data.phone, 'the two rows stay genuinely separate, not merged')
   }
 
+  // 5c) Two differently named contacts in one file cannot queue creates
+  // for the same canonical phone, even when one uses +855 and one local.
+  {
+    const db = makeFakeDb([])
+    const results = await classifyContacts(db, 'suppliers', [
+      row({ name: 'Supplier One', phone: '+855 12 345 678' }, 1),
+      row({ name: 'Supplier Two', phone: '012345678' }, 2),
+    ], null)
+    assert.strictEqual(results[0].action, 'create')
+    assert.strictEqual(results[0].data.phone, '012 345 678')
+    assert.strictEqual(results[1].action, 'error', 'the second same-file canonical phone is refused')
+    assert.ok(results[1].warnings?.some((w) => w.kind === 'membership_phone_conflict'))
+  }
+
+  // 5d) Existing supplier phone matching is canonical and name-safe: same
+  // name updates, different name refuses rather than silently auto-merging.
+  {
+    const existing = [{ id: 21, name: 'Acme Supply', phone: '+855 70 111 222' }]
+    const same = await classifyContacts(makeFakeDb(existing), 'suppliers', [row({ name: ' acme  supply ', phone: '070111222' }, 1)], null)
+    assert.strictEqual(same[0].action, 'update')
+    assert.strictEqual(same[0].existingId, 21)
+    const different = await classifyContacts(makeFakeDb(existing), 'suppliers', [row({ name: 'Other Supply', phone: '070 111 222' }, 1)], null)
+    assert.strictEqual(different[0].action, 'error')
+    assert.strictEqual(different[0].existingId, 21)
+  }
+
+  // 5e) The review override is intentionally name-only. It cannot create a
+  // second contact with a stronger phone or membership identity already
+  // queued earlier in this same file.
+  {
+    const db = makeFakeDb([])
+    const results = await classifyContacts(db, 'customers', [
+      row({ name: 'Repeated Member', phone: '012345678', membership_number: 'legacy-55' }, 1),
+      row({ name: ' repeated  member ', phone: '+855 12 345 678', membership_number: ' LEGACY-55 ' }, 2),
+    ], withDecisions({ '2': { action: 'force_create' } }))
+    assert.strictEqual(results[0].action, 'create')
+    assert.strictEqual(results[1].action, 'skip', 'force_create cannot bypass the pending canonical phone/membership identity')
+    assert.match(results[1].message, /row 1/)
+  }
+
   // 6) Re-importing with a membership_number that matches an existing
   // customer finds that account even though the name on file changed --
   // membership_number is the account's real identifier, and outranks a
@@ -1410,6 +1510,47 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifyContacts(db, 'customers', [row({ name: 'New Name', membership_number: 'LCMN-ACCT0010' }, 1)], withDecisions({ '1': { action: 'force_create' } }))
     assert.strictEqual(results[0].action, 'update', 'force_create cannot bypass a membership_number match -- that identifies one specific real account')
     assert.strictEqual(results[0].existingId, 10)
+  }
+
+  // 6c) Legacy/non-house membership values compare trim/case-normalized for
+  // collision review, while the stored identity bytes remain unchanged.
+  {
+    const db = makeFakeDb([{ id: 14, name: 'Original Member', membership_number: ' legacy-id ' }])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Different Name', membership_number: 'LEGACY-ID' }, 1)], null)
+    assert.strictEqual(results[0].action, 'update')
+    assert.strictEqual(results[0].existingId, 14)
+    assert.strictEqual(results[0].data.membership_number, ' legacy-id ', 'the existing legacy membership value is preserved byte-for-byte')
+    assert.ok(results[0].warnings?.some((w) => w.kind === 'membership_mismatch'), 'the normalized membership collision is flagged for review')
+  }
+
+  // 6d) If historical rows already contain a trim/case-normalized
+  // membership collision, import must not guess which customer owns it.
+  // The identity stays untouched and the row remains in review.
+  {
+    const db = makeFakeDb([
+      { id: 15, name: 'Member One', membership_number: ' legacy-duplicate ' },
+      { id: 16, name: 'Member Two', membership_number: 'LEGACY-DUPLICATE' },
+    ])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Imported Member', membership_number: 'Legacy-Duplicate' }, 1)], null)
+    assert.strictEqual(results[0].action, 'error')
+    assert.strictEqual(results[0].existingId, null)
+    assert.ok(results[0].warnings?.some((w) => w.kind === 'membership_mismatch'))
+    assert.match(results[0].message, /resolves to 2 existing customers/)
+  }
+
+  // 6e) Two different people in one file cannot queue the same normalized
+  // membership identity. This is review-only: neither value is rewritten.
+  {
+    const db = makeFakeDb([])
+    const results = await classifyContacts(db, 'customers', [
+      row({ name: 'First Person', membership_number: ' old-77 ' }, 1),
+      row({ name: 'Second Person', membership_number: 'OLD-77' }, 2),
+    ], null)
+    assert.strictEqual(results[0].action, 'create')
+    assert.strictEqual(results[0].data.membership_number, 'old-77')
+    assert.strictEqual(results[1].action, 'error')
+    assert.strictEqual(results[1].data.membership_number, 'OLD-77')
+    assert.ok(results[1].warnings?.some((w) => w.kind === 'membership_mismatch'))
   }
 
   // 7) DB name match with a 'force_create' override -- reviewer says the
@@ -1459,7 +1600,18 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results[0].data.created_at, '2015-01-01T00:00:00.000Z', 'a matched customer keeps its real original created_at -- the imported created_date never overwrites it')
   }
 
-  console.log('PASS classifyContacts: creation-only membership_number backfill, membership_number/name match priority (phone dropped for customers), force_create reviewer override for name matches, and gender/created_date column parsing')
+  console.log('PASS classifyContacts: creation-only membership preservation, canonical phone identity/refusal/options/formatting, name-safe matching, force_create name override, and gender/created_date parsing')
+}
+
+// The apply writer must materialize the canonical customer key classified
+// above. No trigger fills phone_normalized, so omitting it here would make a
+// correctly classified import stale as soon as it reached D1.
+{
+  const applyStart = source.indexOf("} else if (job.type === 'customers' || job.type === 'suppliers' || job.type === 'delivery_contacts') {")
+  const applyEnd = source.indexOf("} else if (job.type === 'inventory')", applyStart)
+  const applyBody = source.slice(applyStart, applyEnd)
+  assert.match(applyBody, /\['name', 'phone', 'phone_normalized', 'address'/, 'customer import apply writes phone_normalized beside phone')
+  assert.match(applyBody, /columns\.filter\(\(c\) => c !== 'membership_number'\)/, 'updates preserve membership identity while still refreshing phone_normalized')
 }
 
 // -- classifySales: order grouping by receipt_number, sale_status
