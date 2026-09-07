@@ -553,6 +553,14 @@ export default function ProductDetailSheet({
   const batchReadyToSell = sheetState.batchReadyToSell
   const pickAllowed = sheetState.pickAllowed
   const pickBlockedReason = sheetState.pickBlockedReason
+  // The SAME derived reason renderPickButton prints, hoisted because the POS
+  // -- the host that supplies no onPick and therefore never renders that
+  // button -- adds to the cart through the six price buttons below instead.
+  // They used to ask only about stock and lots, so a product sitting solely
+  // at the warehouse showed a greyed, refused warehouse pill above a LIVE
+  // "Selling $x" button that booked the line at that very branch. One rule,
+  // one derivation: productSheetState decides, nothing here re-decides.
+  const saleBlockedAtBranch = pickBlockedReason === 'warehouse_branch'
   // The ONE stock number this sheet shows, from productSheetState.ts:
   // on-hand comes from branch_stock (the ledger that answers "how many are
   // at this branch"), and the lot ledger only narrows it once a specific
@@ -919,8 +927,10 @@ export default function ProductDetailSheet({
                   ) : null}
                   <div className="flex flex-wrap gap-1.5">
                     {onPick ? renderPickButton(effectiveVariant) : null}
-                    {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
-                      {batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
+                    {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={saleBlockedAtBranch || !effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
+                      {saleBlockedAtBranch
+                        ? warehouseBlockedMessage
+                        : batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
                     </button>}
                     {/* The variant's VIP add-to-cart button is deleted by the
                         2026-09-04 ruling; the Wholesale button beside it now
@@ -928,14 +938,14 @@ export default function ProductDetailSheet({
                     {!onPick && (asNumber(effectiveVariant.wholesale_price_usd) > 0 || asNumber(effectiveVariant.wholesale_price_khr) > 0) ? (
                       <button
                         className="btn-secondary flex-1 text-xs border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
-                        disabled={!effectiveVariantInStock || !batchReadyToSell}
+                        disabled={saleBlockedAtBranch || !effectiveVariantInStock || !batchReadyToSell}
                         onClick={() => closeAfterAdd(effectiveVariant, 'wholesale')}
                       >
                         {`${t('wholesale_price') || 'Wholesale'} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
                       </button>
                     ) : null}
                     {!onPick && effectiveVariantPromotion.active ? (
-                      <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
+                      <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={saleBlockedAtBranch || !effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
                         {effectiveVariantPromoBadge.kind === 'quantity_hint'
                           ? ((effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${effectiveVariantPromoBadge.min_quantity}+`)
                           : `${(effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || effectiveVariant.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(effectiveVariantPromotion.applied_price_usd)}`}
@@ -1015,11 +1025,13 @@ export default function ProductDetailSheet({
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {onPick ? renderPickButton(product) : null}
-              {onPick ? null : <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+              {onPick ? null : <button className="btn-primary flex-1" disabled={saleBlockedAtBranch || displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
+                {saleBlockedAtBranch
+                  ? warehouseBlockedMessage
+                  : displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
               </button>}
               {!onPick && promotion.active ? (
-                <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
+                <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={saleBlockedAtBranch || displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
                   {promoBadge.kind === 'quantity_hint'
                     ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
                     : `${(promoBadge.show_title && promoBadge.title) || product.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(promotion.applied_price_usd)}`}
@@ -1030,7 +1042,7 @@ export default function ProductDetailSheet({
               {!onPick && (asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0) ? (
                 <button
                   className="btn-secondary flex-1 border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
-                  disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
+                  disabled={saleBlockedAtBranch || displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
                   onClick={() => closeAfterAdd(product, 'wholesale')}
                 >
                   {`${t('wholesale_price') || 'Wholesale'} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}

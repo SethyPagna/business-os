@@ -2363,12 +2363,18 @@ export default function POS() {
     // The override branch is trusted here on purpose, and it is only safe
     // because the sheet that supplies it refuses first: productSheetState
     // blocks the pick with `warehouse_branch` whenever the branch it
-    // resolved cannot sell, so no Add button on the sheet can hand this
-    // function a warehouse id. That refusal is what makes the sentence
-    // above true -- the sheet shows the warehouse pill greyed WITH its
-    // quantity, never in the chosen/blue state, and prints the rule on the
-    // dead button. Until then the pill answered the tap but the Add button
-    // beside it did not, which is the half this comment used to promise.
+    // resolved cannot sell, and EVERY control on the sheet that can reach
+    // this function reads that one flag -- renderPickButton on the hosts
+    // that pass onPick, and here on the POS, which passes none, the six
+    // price buttons through `saleBlockedAtBranch`. The sheet shows the
+    // warehouse pill greyed WITH its quantity, never in the chosen/blue
+    // state, and prints the rule on the dead button beside it.
+    //
+    // That last half is new. While the flag stopped at the pick button the
+    // POS never rendered, only the pill answered the tap: the "Selling $x"
+    // button beside it stayed live and booked the line at the very branch
+    // the pill had just refused, and this comment promised a refusal that
+    // no POS control performed.
     const saleBranch = overrideBranchId != null && Number.isFinite(overrideBranchId)
       ? { branchId: overrideBranchId, blocked: false }
       : resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })

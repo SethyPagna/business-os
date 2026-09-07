@@ -305,6 +305,98 @@ await runTest('a product held ONLY at the warehouse refuses the pick, not just t
   assert.equal(grouped.pickBlockedReason, 'warehouse_branch')
 })
 
+// The POS is the one host that supplies NO `onPick`, so it never renders
+// renderPickButton at all -- the gate above is invisible there. Its six
+// add-to-cart buttons (three on the grouped/variant footer, three on the flat
+// footer) are the only way a cart line is born on the owner's primary sale
+// surface, and they asked about stock and lots only. A product sitting solely
+// at the warehouse therefore had a LIVE "Selling $x" button under a greyed,
+// refused warehouse pill: the pill answered the tap and the button beside it
+// booked the sale anyway, at the warehouse branch the sheet had resolved.
+//
+// The fix reads the SAME derived reason the pick button reads -- no second
+// warehouse rule -- so this pin is coupled to that derivation below: break
+// either half and this test is red.
+await runTest('the six POS add-to-cart buttons refuse a branch that cannot sell', () => {
+  const sheet = src('components', 'pos', 'ProductDetailSheet.tsx')
+  // One derived flag, hoisted beside the other two gates, not re-decided per
+  // button and not re-derived from branch names.
+  assert.match(
+    sheet,
+    /const saleBlockedAtBranch = pickBlockedReason === 'warehouse_branch'/,
+    "the add buttons must read productSheetState's reason, not a second warehouse rule",
+  )
+  // Six buttons, six gates. Three variant-footer twins (selling / wholesale /
+  // promotion) and three flat-footer twins.
+  assert.equal(
+    (sheet.match(/disabled=\{[^}]*saleBlockedAtBranch/g) || []).length,
+    6,
+    'all six add-to-cart buttons must carry the blocked-branch flag',
+  )
+  // Discriminating: these are the exact pre-fix expressions. While either
+  // survives, a warehouse-only product still has a live Add button.
+  assert.doesNotMatch(
+    sheet,
+    /disabled=\{!effectiveVariantInStock \|\| !batchReadyToSell\}/,
+    'the variant-footer buttons still ask only about stock and lots',
+  )
+  assert.doesNotMatch(
+    sheet,
+    /disabled=\{displayedStock <= asNumber\(product\.out_of_stock_threshold\) \|\| !batchReadyToSell\}/,
+    'the flat-footer buttons still ask only about stock and lots',
+  )
+  // ...and the dead button says WHY, in the pack sentence, exactly as
+  // renderPickButton does. Two primary labels, one per footer.
+  assert.equal(
+    (sheet.match(/saleBlockedAtBranch\s*\r?\n?\s*\? warehouseBlockedMessage/g) || []).length,
+    2,
+    'both primary add labels must print the warehouse sentence when the branch cannot sell',
+  )
+
+  // Coupled to the derivation the flag is spelled from, so the source pin
+  // cannot outlive the rule it stands for: this is the shape those six
+  // buttons were live on.
+  const warehouseOnly = deriveProductSheetState({
+    product: {
+      id: 91,
+      name: 'Awaiting transfer',
+      unit: 'pcs',
+      branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 12 }],
+      stock_quantity: 12,
+    },
+    variants: [],
+    groupProduct: false,
+    intent: 'sell',
+  })
+  assert.equal(warehouseOnly.pickBlockedReason, 'warehouse_branch')
+  assert.equal(warehouseOnly.displayedStock, 12, 'stock is NOT the reason -- 12 units are on hand')
+  assert.equal(warehouseOnly.batchReadyToSell, true, 'nor is the lot gate -- it is not batch-tracked')
+  // Which is the whole point: both halves of the old expression say "allow",
+  // and only the branch rule says no.
+
+  // POS.tsx trusts the branch id the sheet hands back verbatim (addToCart
+  // builds { branchId: overrideBranchId, blocked: false } and skips
+  // resolveSaleBranch entirely). Its comment is the STATED justification for
+  // that, so it has to name the mechanism above rather than promise it: the
+  // round that shipped the pick gate wrote "no Add button on the sheet can
+  // hand this function a warehouse id" while the six buttons ignored the
+  // rule. Coupled deliberately -- strip the flag off the buttons and the
+  // count assertion above goes red in this same test.
+  const pos = src('components', 'pos', 'POS.tsx')
+  const justification = pos.split('const saleBranch =')[0].split('The override branch is trusted')[1] ?? ''
+  assert.ok(justification, 'the override-trust comment must still sit above the branch resolution')
+  assert.match(
+    justification,
+    /saleBlockedAtBranch/,
+    'the comment must name the flag the POS add buttons actually read',
+  )
+  assert.match(
+    justification,
+    /renderPickButton/,
+    '...and the other control, so both paths to addToCart are accounted for',
+  )
+})
+
 // The two source-shape halves of the same rule: a refused branch must not be
 // able to look chosen, and the dead button must say WHY in the owner's words.
 await runTest('a blocked branch pill cannot take the active style, and the dead pick names the rule', () => {
