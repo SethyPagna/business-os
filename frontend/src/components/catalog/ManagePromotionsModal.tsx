@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { isSafeLinkUrl } from '../../utils/safeLinkUrl.ts'
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical.js'
 import ImageIcon from 'lucide-react/dist/esm/icons/image.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -193,6 +194,10 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     if (!form.title.trim()) return 'Title is required'
     if (form.link_type === 'product' && !form.link_product_id) return 'Choose a product to link to'
     if (form.link_type === 'url' && !form.link_url.trim()) return 'Enter a link URL'
+    // Same allowlist the Worker enforces (cloudflare/src/lib/safeLinkUrl.ts):
+    // http(s) or a site-relative path. Checked here so the author is told
+    // what is wrong with their link instead of getting a bare 400 back.
+    if (form.link_type === 'url' && !isSafeLinkUrl(form.link_url)) return 'Enter a link URL that starts with http:// or https://'
     if (form.starts_at && form.ends_at && form.starts_at > form.ends_at) return 'End date must be after start date'
     return null
   }

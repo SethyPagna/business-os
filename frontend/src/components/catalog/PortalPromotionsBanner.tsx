@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { safeLinkUrl } from '../../utils/safeLinkUrl.ts'
 import { getPortalPromotions } from '../../api/portalPublicTransport.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 
@@ -141,11 +142,18 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
       return
     }
     if (promo.link_type === 'url' && promo.link_url) {
-      const isExternal = /^https?:\/\//i.test(promo.link_url)
-      if (isExternal) {
-        window.open(promo.link_url, '_blank', 'noopener,noreferrer')
+      // The Worker refuses to STORE anything but http(s) and site-relative
+      // paths (lib/safeLinkUrl.ts). Rows written before that guard existed
+      // are still in the table, and window.location.assign follows a
+      // javascript: URL happily, so the same rule is applied again here on
+      // the way out. A refused link does nothing rather than navigating
+      // somewhere unexpected (N45).
+      const target = safeLinkUrl(promo.link_url)
+      if (!target) return
+      if (/^https?:\/\//i.test(target)) {
+        window.open(target, '_blank', 'noopener,noreferrer')
       } else {
-        window.location.assign(promo.link_url)
+        window.location.assign(target)
       }
     }
   }

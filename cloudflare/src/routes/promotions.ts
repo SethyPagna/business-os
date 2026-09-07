@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
 import { audit } from '../lib/audit'
 import { hasPermission, getPermissionTier, getActionTier } from '../lib/permissions'
 import { bumpVersion } from '../lib/cache'
@@ -237,7 +238,12 @@ function normalizePromotionInput(body: PromotionInput = {}) {
     image_path: normalizeText(body.image_path, 500) || null,
     link_type: linkType,
     link_product_id: linkType === 'product' ? (Number(body.link_product_id) || null) : null,
-    link_url: linkType === 'url' ? (normalizeText(body.link_url, 500) || null) : null,
+    // N45: an allowlist, not a trim. The storefront banner navigates to
+    // this value, so a javascript: or data: URL stored here would run in
+    // every visitor's browser. normalizeSafeLinkUrl returns null for
+    // anything that is not http(s) or a site-relative path, and the
+    // handlers below turn that null into a 400 rather than a silent drop.
+    link_url: linkType === 'url' ? normalizeSafeLinkUrl(body.link_url) : null,
     badge_text: normalizeText(body.badge_text, 40) || null,
     badge_color: normalizeColor(body.badge_color),
     is_active: body.is_active === false || body.is_active === 0 ? 0 : 1,
@@ -260,7 +266,7 @@ app.post('/', requireKey('products'), async (c) => {
   const input = normalizePromotionInput(body)
   if (!input.title) return c.json({ error: 'Title required' }, 400)
   if (input.link_type === 'product' && !input.link_product_id) return c.json({ error: 'Choose a product to link to' }, 400)
-  if (input.link_type === 'url' && !input.link_url) return c.json({ error: 'Enter a link URL' }, 400)
+  if (input.link_type === 'url' && !input.link_url) return c.json({ error: 'Enter a link URL that starts with http:// or https://' }, 400)
 
   const db = getDb(c.env)
   if (input.link_type === 'product') {
@@ -294,7 +300,7 @@ app.put('/:id', requireKey('products'), async (c) => {
   const input = normalizePromotionInput(body)
   if (!input.title) return c.json({ error: 'Title required' }, 400)
   if (input.link_type === 'product' && !input.link_product_id) return c.json({ error: 'Choose a product to link to' }, 400)
-  if (input.link_type === 'url' && !input.link_url) return c.json({ error: 'Enter a link URL' }, 400)
+  if (input.link_type === 'url' && !input.link_url) return c.json({ error: 'Enter a link URL that starts with http:// or https://' }, 400)
   if (input.link_type === 'product') {
     const productExists = await db.prepare('SELECT id FROM products WHERE id = ?').get([input.link_product_id])
     if (!productExists) return c.json({ error: 'Linked product not found' }, 400)
