@@ -203,7 +203,7 @@ const EN: Record<string, string> = {
   portal_legal_cookies_third_h: 'Third parties',
   portal_legal_cookies_third_b: 'Choosing an external translation language loads Google Translate, which receives the page text and writes a googtrans cookie for this site; loading the store map loads Google Maps. Both are Google services and may set their own cookies once loaded. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
   portal_legal_cookies_clear_h: 'How to remove it',
-  portal_legal_cookies_clear_b: 'Sign out to end the session cookie, and clear site data for this address in your browser settings to remove everything else. Clearing it removes your saved list, wishlist, language and theme on this device.',
+  portal_legal_cookies_clear_b: 'Sign out to end the session cookie. Use the unload control beside the map to forget the saved map choice. Clear site data for this address in your browser settings to remove everything else; this removes your saved list, wishlist, language and theme on this device.',
 
   // --- storage table -------------------------------------------------------
   portal_legal_col_name: 'Name',
@@ -238,6 +238,7 @@ const EN: Record<string, string> = {
   portal_legal_map_consent_b: 'The map is loaded from Google Maps, which can set its own cookies. Load it only if you want to.',
   portal_legal_map_consent_load: 'Load the map',
   portal_legal_map_consent_link: 'Open in Google Maps instead',
+  portal_legal_map_consent_revoke: 'Unload map and forget this choice',
 
   // --- admin editor block --------------------------------------------------
   portal_legal_editor_block: 'Legal & business details',
@@ -320,7 +321,7 @@ const KM: Record<string, string> = {
   portal_legal_cookies_third_h: 'ភាគីទីបី',
   portal_legal_cookies_third_b: 'ការជ្រើសភាសាបកប្រែខាងក្រៅផ្ទុក Google Translate ដែលទទួលអត្ថបទទំព័រ និងសរសេរខូឃី googtrans សម្រាប់គេហទំព័រនេះ ហើយការផ្ទុកផែនទីហាងផ្ទុក Google Maps។ ទាំងពីរជាសេវា Google ហើយអាចកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
   portal_legal_cookies_clear_h: 'របៀបលុបវា',
-  portal_legal_cookies_clear_b: 'ចាកចេញពីគណនីដើម្បីបញ្ចប់ខូឃីវគ្គ ហើយសម្អាតទិន្នន័យគេហទំព័រនេះក្នុងការកំណត់កម្មវិធីរុករក ដើម្បីលុបអ្វីៗផ្សេងទៀត។ ការសម្អាតនឹងលុបបញ្ជី បញ្ជីចង់បាន ភាសា និងរូបរាងរបស់អ្នកលើឧបករណ៍នេះ។',
+  portal_legal_cookies_clear_b: 'ចាកចេញពីគណនីដើម្បីបញ្ចប់ខូឃីវគ្គ។ ប្រើប៊ូតុងបិទនៅក្បែរផែនទី ដើម្បីលុបជម្រើសផែនទីដែលបានរក្សាទុក។ សម្អាតទិន្នន័យគេហទំព័រនេះក្នុងការកំណត់កម្មវិធីរុករក ដើម្បីលុបអ្វីៗផ្សេងទៀត រួមទាំងបញ្ជី បញ្ជីចង់បាន ភាសា និងរូបរាងរបស់អ្នកលើឧបករណ៍នេះ។',
 
   portal_legal_col_name: 'ឈ្មោះ',
   portal_legal_col_kind: 'ប្រភេទ',
@@ -353,6 +354,7 @@ const KM: Record<string, string> = {
   portal_legal_map_consent_b: 'ផែនទីផ្ទុកពី Google Maps ដែលអាចកំណត់ខូឃីផ្ទាល់ខ្លួន។ សូមផ្ទុកតែបើអ្នកចង់។',
   portal_legal_map_consent_load: 'ផ្ទុកផែនទី',
   portal_legal_map_consent_link: 'បើកក្នុង Google Maps ជំនួសវិញ',
+  portal_legal_map_consent_revoke: 'បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍',
 
   portal_legal_editor_block: 'ព័ត៌មានច្បាប់និងអាជីវកម្ម',
   portal_legal_editor_hint: 'បង្ហាញក្នុងជើងទំព័រហាង និងបំពេញក្នុងទំព័រឯកជនភាព លក្ខខណ្ឌ និងខូឃី។ ទុកទទេដើម្បីលាក់បន្ទាត់នោះ។',

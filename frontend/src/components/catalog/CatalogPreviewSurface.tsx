@@ -599,19 +599,19 @@ export default function CatalogPreviewSurface({
             {displayConfig.publicationReady === false ? (
               <div role="status" className="mx-1 mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100">
                 <div className="font-semibold">
-                  {copy('portalPublicationReadinessTitle', 'Seller details need verification', 'ព័ត៌មានអ្នកលក់ត្រូវការការផ្ទៀងផ្ទាត់')}
+                  {copy('portalPublicationReadinessTitle', 'Some online features are unavailable', 'មុខងារអនឡាញមួយចំនួនមិនអាចប្រើបាន')}
                 </div>
                 <p className="mt-1">
                   {copy(
                     'portalPublicationReadinessBody',
-                    'This catalogue remains available for browsing, but publication readiness is not confirmed until the registered seller name, registration number, address, phone, and email are verified.',
-                    'កាតាឡុកនេះនៅតែអាចមើលបាន ប៉ុន្តែមិនទាន់បញ្ជាក់ភាពរួចរាល់សម្រាប់ការផ្សព្វផ្សាយទេ រហូតដល់ឈ្មោះអ្នកលក់ដែលបានចុះបញ្ជី លេខចុះបញ្ជី អាសយដ្ឋាន លេខទូរស័ព្ទ និងអ៊ីមែល ត្រូវបានផ្ទៀងផ្ទាត់។',
+                    'Browse the catalogue or contact the store while we complete our seller details.',
+                    'សូមមើលកាតាឡុក ឬទាក់ទងហាង ខណៈយើងកំពុងបំពេញព័ត៌មានអ្នកលក់។',
                   )}
                 </p>
               </div>
             ) : null}
 
-            <main id="portal-main-content">
+            <main id="portal-main-content" tabIndex={-1}>
               {promotionsSection}
               {catalogSection}
               {secondaryTabSection}
