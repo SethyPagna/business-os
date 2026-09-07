@@ -109,6 +109,31 @@ const salesStatusModuleObj = { exports: {} }
 const salesStatusWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', salesStatusOutputText)
 salesStatusWrapper(salesStatusModuleObj.exports, require, salesStatusModuleObj, salesStatusSourcePath, path.dirname(salesStatusSourcePath))
 
+// Sales imports share the live-sale branch-role authority. Load the real
+// pure helpers so the classifier tests exercise the canonical Shop rule.
+const branchRolesSourcePath = path.join(__dirname, '..', 'src', 'lib', 'branchRoles.ts')
+const { outputText: branchRolesOutputText } = ts.transpileModule(fs.readFileSync(branchRolesSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'branchRoles.ts',
+})
+const branchRolesModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', branchRolesOutputText)(
+  branchRolesModuleObj.exports, require, branchRolesModuleObj, branchRolesSourcePath, path.dirname(branchRolesSourcePath),
+)
+const branchRoleGuardsSourcePath = path.join(__dirname, '..', 'src', 'lib', 'branchRoleGuards.ts')
+const { outputText: branchRoleGuardsOutputText } = ts.transpileModule(fs.readFileSync(branchRoleGuardsSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'branchRoleGuards.ts',
+})
+const branchRoleGuardsModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', branchRoleGuardsOutputText)(
+  branchRoleGuardsModuleObj.exports,
+  (request) => request === './branchRoles' ? branchRolesModuleObj.exports : require(request),
+  branchRoleGuardsModuleObj,
+  branchRoleGuardsSourcePath,
+  path.dirname(branchRoleGuardsSourcePath),
+)
+
 // batchCode.ts is pure (no D1/Env dependency) -- productBatches.ts's
 // receiveBatchStock now derives lot_code/batch_key through it (dateToBatchCode/
 // normalizeToIsoDate), so it needs to be the real transpiled module wherever
@@ -279,6 +304,8 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './salesStatus') {
     return salesStatusModuleObj.exports // real module -- classifySales actually calls into it
   }
+  if (request === './branchRoles') return branchRolesModuleObj.exports
+  if (request === './branchRoleGuards') return branchRoleGuardsModuleObj.exports
   if (request === './productBatches') {
     return productBatchesModuleObj.exports // real module -- sales-import apply path actually calls into it
   }
@@ -1663,7 +1690,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     { id: 1, sku: 'SKU-1', barcode: 'BAR-1', name: 'Widget', selling_price_usd: 10, selling_price_khr: 41000, cost_price_usd: 6, cost_price_khr: 24600 },
     { id: 2, sku: 'SKU-2', barcode: 'BAR-2', name: 'Gadget', selling_price_usd: 20, selling_price_khr: 82000, cost_price_usd: 12, cost_price_khr: 49200 },
   ]
-  const defaultBranches = [{ id: 5, name: 'Main Branch' }]
+  const defaultBranches = [{ id: 5, name: 'Shop', is_active: 1 }]
   const defaultBatches = [{ id: 9, variant_product_id: 1, lot_code: 'LOT-A', expiry_date: '2027-01-01' }]
 
   const makeFakeDb = (overrides = {}) => {
@@ -1796,37 +1823,57 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   }
 
   // 8) batch_label matching an existing active lot for that exact product
-  // resolves batch_id + carries its expiry_date; a label that matches no
-  // batch (or matches a DIFFERENT product's lot) leaves batch_id null
-  // rather than erroring -- an unmatched lot is not a blocking problem, it
-  // just means the restock (if any) lands at the branch level only.
+  // resolves batch_id + preserves its supplied label and expiry. Unknown
+  // or wrong-product labels refuse the receipt rather than becoming NULL.
   {
     const db = makeFakeDb()
     const matched = await classifySales(db, [row({ receipt_number: 'R-8', sku: 'SKU-1', quantity: 1, batch_label: 'LOT-A', sale_status: 'returned' }, 1)], null)
     assert.strictEqual(matched[0].data.items[0].batch_id, 9)
+    assert.strictEqual(matched[0].data.items[0].batch_label, 'LOT-A')
     assert.strictEqual(matched[0].data.items[0].batch_expiry_date, '2027-01-01')
 
     const unmatched = await classifySales(db, [row({ receipt_number: 'R-8b', sku: 'SKU-1', quantity: 1, batch_label: 'LOT-ZZZ', sale_status: 'returned' }, 1)], null)
-    assert.strictEqual(unmatched[0].data.items[0].batch_id, null, 'unmatched lot code does not error, just imports with no batch link')
+    assert.strictEqual(unmatched[0].action, 'error', 'an explicit unknown lot refuses the receipt')
+    assert.match(unmatched[0].message, /LOT-ZZZ/)
 
     const wrongProduct = await classifySales(db, [row({ receipt_number: 'R-8c', sku: 'SKU-2', quantity: 1, batch_label: 'LOT-A', sale_status: 'returned' }, 1)], null)
-    assert.strictEqual(wrongProduct[0].data.items[0].batch_id, null, "LOT-A belongs to product 1's batch, not product 2's -- must not cross-match")
+    assert.strictEqual(wrongProduct[0].action, 'error', "LOT-A belongs to product 1's batch, so product 2's receipt must be refused")
+
+    const blank = await classifySales(db, [row({ receipt_number: 'R-8d', sku: 'SKU-1', quantity: 1, sale_status: 'returned' }, 1)], null)
+    assert.strictEqual(blank[0].action, 'create', 'a genuinely blank lot remains an allowed unallocated historical line')
+    assert.strictEqual(blank[0].data.items[0].batch_id, null)
   }
 
-  // 9) a named branch that matches an existing branch resolves branch_id
-  // immediately (mirroring classifyProducts/classifyInventory); a branch
-  // name with no match yet sets branch_name_pending instead of erroring,
-  // to be created at apply time by the shared resolveAndCreateBranches --
-  // same three-case rule those two already use.
+  // 9) only the active canonical Shop can carry a historical sale. Unknown,
+  // Warehouse, and inactive Shop names refuse before apply has any opportunity
+  // to create/backfill a branch or mutate stock. A legacy blank branch safely
+  // defaults only when exactly one active Shop exists.
   {
     const db = makeFakeDb()
-    const known = await classifySales(db, [row({ receipt_number: 'R-9', sku: 'SKU-1', quantity: 1, branch: 'Main Branch' }, 1)], null)
+    const known = await classifySales(db, [row({ receipt_number: 'R-9', sku: 'SKU-1', quantity: 1, branch: 'Shop' }, 1)], null)
     assert.strictEqual(known[0].data.branch_id, 5)
     assert.strictEqual(known[0].data.branch_name_pending, undefined)
 
     const unknown = await classifySales(db, [row({ receipt_number: 'R-9b', sku: 'SKU-1', quantity: 1, branch: 'New Branch' }, 1)], null)
-    assert.strictEqual(unknown[0].data.branch_id, null)
-    assert.strictEqual(unknown[0].data.branch_name_pending, 'New Branch')
+    assert.strictEqual(unknown[0].action, 'error')
+    assert.match(unknown[0].message, /New Branch/)
+    assert.strictEqual(unknown[0].data.branch_name_pending, undefined)
+
+    const warehouseDb = makeFakeDb({ branches: [{ id: 5, name: 'Shop', is_active: 1 }, { id: 6, name: 'Warehouse', is_active: 1 }] })
+    const warehouse = await classifySales(warehouseDb, [row({ receipt_number: 'R-9c', sku: 'SKU-1', quantity: 1, branch: 'Warehouse' }, 1)], null)
+    assert.strictEqual(warehouse[0].action, 'error')
+
+    const inactiveDb = makeFakeDb({ branches: [{ id: 5, name: 'Shop', is_active: 0 }] })
+    const inactive = await classifySales(inactiveDb, [row({ receipt_number: 'R-9d', sku: 'SKU-1', quantity: 1, branch: 'Shop' }, 1)], null)
+    assert.strictEqual(inactive[0].action, 'error')
+
+    const blankBranch = await classifySales(db, [row({ receipt_number: 'R-9e', sku: 'SKU-1', quantity: 1 }, 1)], null)
+    assert.strictEqual(blankBranch[0].action, 'create')
+    assert.strictEqual(blankBranch[0].data.branch_id, 5)
+
+    const noShopDb = makeFakeDb({ branches: [{ id: 6, name: 'Warehouse', is_active: 1 }] })
+    const noShop = await classifySales(noShopDb, [row({ receipt_number: 'R-9f', sku: 'SKU-1', quantity: 1 }, 1)], null)
+    assert.strictEqual(noShop[0].action, 'error')
   }
 
   // 10) order_reference is still accepted as a fallback grouping key for a
