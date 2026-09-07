@@ -234,6 +234,47 @@ for (const pathName of ['indexed', 'compat']) {
   })
 }
 
+// --- the bound-parameter budget the UPC pair must live inside ----------
+//
+// D1 refuses any statement carrying more than 100 bound parameters
+// (measured live, not assumed: scripts/test-d1-bound-params-repro.cjs:28
+// installs that ceiling as `D1_MAX_BOUND_PARAMS = 100` and the production
+// failure it pins was `D1_ERROR: too many SQL variables at offset 415` on
+// GET /api/products). The barcode clause is only ONE disjunct of the
+// product search WHERE; the same statement also binds the branch filter,
+// the status filters, the pagination window and, on /api/products, a
+// per-page id list. So the barcode fold has to leave most of that ceiling
+// for everyone else.
+//
+// A namespaced UPC-pair key is the widest case by far, because BOTH halves
+// of the pair generate padded spellings: an 8-digit UPC-E and the 12-digit
+// UPC-A it expands to. Left uncapped at barcodeEqualityCandidates' default
+// maxLength of 18, one UPC-E scan spent 31 parameters on the clause alone
+// and 36 across the whole builder. GTIN-14 is the widest padding this
+// catalog is documented to carry (see the comment on
+// barcodeEqualityCandidates in lib/searchMatch.ts), and anything padded
+// wider is still caught by the ltrim() catch-all, so the literal probe is
+// capped there.
+check('budget: a UPC-pair scan stays far inside D1\'s bound-parameter ceiling', () => {
+  for (const code of ['01234565', '012345000065', '0123456789012']) {
+    for (const useSearchIndex of [true, false]) {
+      const params = {}
+      buildProductSearchQuery(code, params, { useSearchIndex })
+      const count = Object.keys(params).length
+      // The hard fence: D1 rejects the statement past 100 bound parameters
+      // (scripts/test-d1-bound-params-repro.cjs:28), and the barcode clause
+      // is one disjunct among many in that same statement.
+      assert.ok(count <= 40,
+        `scan ${code} (useSearchIndex:${useSearchIndex}) bound ${count} parameters; D1's ceiling is 100 total (scripts/test-d1-bound-params-repro.cjs:28) and the barcode clause may not eat 40 of them`)
+      // The regression bound that actually bites: on 77ac1a98, before the
+      // GTIN-14 cap, '01234565' bound 36 here. Anything back over 28 means
+      // the pair's padded spellings went uncapped again.
+      assert.ok(count <= 28,
+        `scan ${code} (useSearchIndex:${useSearchIndex}) bound ${count} parameters; the UPC-pair spellings are meant to stop at GTIN-14, and 36 is what the uncapped default cost (D1's ceiling: scripts/test-d1-bound-params-repro.cjs:28)`)
+    }
+  }
+})
+
 // Ranking is only meaningful on the indexed path's tier, which both paths
 // now compute; assert it where the substring rival actually co-occurs.
 check('indexed: the exact-barcode row leads a mere substring hit', () => {

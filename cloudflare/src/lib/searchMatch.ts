@@ -1485,6 +1485,25 @@ export interface BarcodeKeyPlan {
   paddingLiterals: string[]
 }
 
+// The widest stored spelling the literal index probe is generated for.
+//
+// D1 refuses a statement carrying more than 100 bound parameters -- measured
+// live, not assumed (scripts/test-d1-bound-params-repro.cjs pins that ceiling
+// and the production `too many SQL variables` failure it came from) -- and
+// the barcode clause is only one disjunct of a WHERE that also binds the
+// branch filter, the status filters and the pagination window.
+//
+// A namespaced UPC pair is by far the widest case, because BOTH halves emit
+// padded spellings: the 8-digit UPC-E and the 12-digit UPC-A it expands to.
+// At barcodeEqualityCandidates' default maxLength of 18 that cost 31 bound
+// values on the clause and 36 across the whole product-search builder for a
+// single UPC-E scan. GTIN-14 is the only padding this catalog is documented
+// to carry (see barcodeEqualityCandidates below), and a value stored padded
+// wider than that still matches through the ltrim() catch-all rather than
+// through this literal probe, so the probe stops at 14: 19 on the clause,
+// 24 on the builder.
+export const MAX_STORED_GTIN_WIDTH = 14
+
 export function barcodeKeyPlan(keys: readonly string[]): BarcodeKeyPlan {
   const normKeys: string[] = []
   const equivalentLiterals: string[] = []
@@ -1494,14 +1513,14 @@ export function barcodeKeyPlan(keys: readonly string[]): BarcodeKeyPlan {
       // pads a value up, so '01234565' yields '001234565' and wider but never
       // the bare '1234565' another product may legitimately own -- which is
       // the whole reason the pair is namespaced rather than zero-stripped.
-      for (const form of barcodeEqualityCandidates(key.slice(key.indexOf(':') + 1))) {
+      for (const form of barcodeEqualityCandidates(key.slice(key.indexOf(':') + 1), MAX_STORED_GTIN_WIDTH)) {
         if (!equivalentLiterals.includes(form)) equivalentLiterals.push(form)
       }
     } else if (key && !normKeys.includes(key)) normKeys.push(key)
   }
   const paddingLiterals: string[] = []
   for (const key of normKeys) {
-    for (const form of barcodeEqualityCandidates(key)) {
+    for (const form of barcodeEqualityCandidates(key, MAX_STORED_GTIN_WIDTH)) {
       if (!paddingLiterals.includes(form)) paddingLiterals.push(form)
     }
   }
@@ -1625,8 +1644,12 @@ export function buildExactBarcodeMatchClause(
 }
 
 // The stored literal forms one normalized barcode key can take. GTIN-14 is the
-// only padding this catalog is known to carry (~3000 rows), but padding to 18
-// costs five extra bound values on a 13-digit scan and removes the guesswork.
+// only padding this catalog is known to carry (~3000 rows). barcodeKeyPlan --
+// the only production caller -- passes MAX_STORED_GTIN_WIDTH rather than this
+// default, because a UPC pair generates padded spellings for BOTH halves and
+// the extra widths cost bound parameters against D1's 100-parameter ceiling
+// while adding nothing the ltrim() catch-all does not already match. The
+// wider default stays for callers that ask for it explicitly.
 export function barcodeEqualityCandidates(key: string, maxLength = 18): string[] {
   if (!key) return []
   const forms = [key]

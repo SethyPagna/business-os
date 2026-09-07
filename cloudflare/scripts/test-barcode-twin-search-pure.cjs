@@ -56,6 +56,7 @@ const {
   barcodeKeysMatch,
   searchTermBarcodeKey,
   MIN_REAL_BARCODE_LENGTH,
+  MAX_STORED_GTIN_WIDTH,
   PRODUCT_SEARCH_COLUMNS,
   PRODUCTS_FTS_BM25_SQL,
 } = loadTs('src/lib/searchMatch.ts')
@@ -311,7 +312,12 @@ check('the equality probe is emitted before the normalized comparison, and is sa
   const ltrimIndex = clause.indexOf('ltrim(')
   assert.ok(probeIndex >= 0, 'a raw-column equality probe must be present -- ltrim() alone cannot use idx_products_barcode_pg')
   assert.ok(ltrimIndex > probeIndex, 'the normalized catch-all comes after the indexable probe')
-  const candidates = barcodeEqualityCandidates(SCANNED)
+  // The literal probe is generated up to MAX_STORED_GTIN_WIDTH, not to
+  // barcodeEqualityCandidates' wider default: a UPC pair pads BOTH halves and
+  // the extra widths cost bound values against D1's 100-parameter ceiling
+  // while matching nothing the ltrim() catch-all misses. Read the cap from the
+  // module so this pin tracks the rule instead of restating it.
+  const candidates = barcodeEqualityCandidates(SCANNED, MAX_STORED_GTIN_WIDTH)
   assert.equal(candidates[0], SCANNED, 'the bare code is a candidate')
   assert.ok(candidates.includes(TWIN), 'so is the GTIN-14 zero-padded form')
   for (const candidate of candidates) {
