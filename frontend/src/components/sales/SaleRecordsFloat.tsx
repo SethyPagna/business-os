@@ -34,7 +34,7 @@ import Modal from '../shared/Modal.tsx'
 import FilterMenu from '../shared/FilterMenu.tsx'
 import { getSaleRecords } from '../../api/salesTransport.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
-import { getStatusLabel } from './StatusBadge.tsx'
+import { getStatusLabel, isSaleStatus } from './StatusBadge.tsx'
 import {
   SALE_RECORD_KIND_KEYS,
   filterSaleRecords,
@@ -109,6 +109,37 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecor
       : record.via === 'redo' ? label('redo', 'Redo')
       : null
   )
+
+  // What the change was ABOUT. This column is MIXED by design, and printing it
+  // raw is correct only for the free-text case:
+  //
+  //   a product name  "Coca-Cola 330ml"  print exactly as typed. Sending it
+  //                                      through a pack would turn every
+  //                                      product into a missing-key fallback.
+  //   'delivery'      a Worker constant  saleRecords.ts's DELIVERY_SUBJECT,
+  //                                      written for both money kinds. The pack
+  //                                      has owned the word all along, so a
+  //                                      Khmer reader was being shown
+  //                                      "ប្តូរថ្លៃដឹកជញ្ជូន delivery".
+  //   a bulk action   'customer'         saleBulkUpdate.ts's action kinds, the
+  //                   'payment_method'   subject of a bulk replay's record.
+  //                   'delivery_contact' Each is already a pack key under
+  //                                      exactly that identifier.
+  //   a sale status   'cancelled'        what a bulk STATUS replay is about. It
+  //                                      goes through getStatusLabel -- the
+  //                                      same function the status rows in the
+  //                                      before/after table already use --
+  //                                      rather than a second mapping that
+  //                                      could disagree with them.
+  const subjectLabel = (record: SaleRecord): string | null => {
+    if (!record.subject) return null
+    return record.subject === 'delivery' ? label('delivery', 'Delivery')
+      : record.subject === 'customer' ? label('customer', 'Customer')
+      : record.subject === 'payment_method' ? label('payment_method', 'Payment method')
+      : record.subject === 'delivery_contact' ? label('delivery_contact', 'Delivery contact')
+      : isSaleStatus(record.subject) ? getStatusLabel(record.subject, t)
+      : record.subject
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -214,7 +245,7 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecor
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="text-[13px] font-medium text-gray-800 dark:text-gray-100">{kindLabel(String(record.kind || ''))}</span>
-                        {record.subject ? <span className="truncate text-xs text-gray-500">{record.subject}</span> : null}
+                        {subjectLabel(record) ? <span className="truncate text-xs text-gray-500">{subjectLabel(record)}</span> : null}
                       </span>
                       {/* The history convention: acting USERNAME, then the
                           dd/mm/yyyy HH:mm stamp. */}

@@ -259,6 +259,44 @@ runTest('the "how" badge is translated, not the Worker enum printed raw', () => 
   assert.doesNotMatch(float, /label\('amend'/, "the common case must not badge every row")
 })
 
+runTest('the subject beside the kind is a WORD, not whichever Worker enum landed there', () => {
+  // `subject` is a MIXED column and that is the trap: for a line amendment it
+  // is a product NAME (free text, must print exactly as typed), but for the two
+  // delivery kinds the Worker writes the constant 'delivery'
+  // (lib/saleRecords.ts DELIVERY_SUBJECT) and for a bulk replay it writes a
+  // sale STATUS. Printing the column raw is right one time in three; a Khmer
+  // reader saw "ប្តូរថ្លៃដឹកជញ្ជូន delivery" -- the same defect as the `via`
+  // badge above, on the same surface, one line apart.
+  const float = read('../src/components/sales/SaleRecordsFloat.tsx')
+  assert.doesNotMatch(float, /\{record\.subject\}<\/span>/, 'the Worker subject enum must not reach the DOM raw')
+  assert.match(float, /record\.subject === 'delivery' \? label\('delivery'/, 'the delivery constant reads from the pack')
+  assert.match(float, /\{subjectLabel\(record\)/, 'and the row renders the resolved label')
+  // A status subject resolves through the SAME function every other status on
+  // this surface goes through, so 'partial_return' is never printed raw either.
+  assert.match(float, /isSaleStatus\(record\.subject\)/, 'a status subject is a status, not a string')
+  assert.match(float, /getStatusLabel\(record\.subject, t\)/)
+  // A product name is free text and must survive untouched: mapping it through
+  // a pack would turn "Coca-Cola 330ml" into a missing-key fallback.
+  assert.match(float, /:\s*record\.subject\r?\n/, 'anything else prints exactly as the Worker stored it')
+
+  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
+  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
+  // Every Worker subject enum the union can emit, and each one's pack key. The
+  // bulk-update action kinds (saleBulkUpdate.ts) are the subject of a bulk
+  // replay's record, and each is already a pack key under its own identifier.
+  for (const key of ['delivery', 'customer', 'payment_method', 'delivery_contact']) {
+    assert.match(float, new RegExp(`record\\.subject === '${key}' \\? label\\('${key}'`), `${key} must read from the pack`)
+    assert.ok(en[key], `en.json is missing ${key}`)
+    assert.ok(km[key], `km.json is missing ${key}`)
+    assert.notEqual(km[key], en[key], `the ${key} label is not actually translated`)
+    assert.notEqual(km[key], key, `km.json's ${key} is the identifier, not a translation`)
+  }
+  const bulkUpdate = read('../../cloudflare/src/lib/saleBulkUpdate.ts')
+  for (const kind of ['customer', 'payment_method', 'delivery_contact']) {
+    assert.ok(bulkUpdate.includes(`'${kind}'`), `saleBulkUpdate.ts must still spell the action kind ${kind}`)
+  }
+})
+
 runTest('the float is wired into the Sales page and fetches the union endpoint', () => {
   const sales = read('../src/components/sales/Sales.tsx')
   assert.match(sales, /import\('\.\/SaleRecordsFloat'\)/, 'the float must be code-split like the other sale modals')
