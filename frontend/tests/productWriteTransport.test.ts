@@ -31,5 +31,6 @@ assert.match(budgetBlock, /mergeDuplicateChunkCanContinueAutomatically\(result\)
 assert.match(budgetBlock, /callCeiling = Math\.max\(callCeiling, calls \+ result\.maxAdditionalRequests\)/)
 assert.match(budgetBlock, /continue/)
 assert.doesNotMatch(budgetBlock, /setMergeDuplicatesReviewOpen\(false\)/, 'a normal safe yield keeps the original confirmation active')
+assert.match(products, /if \(result\?\.blockedOnly\)[\s\S]*?completed = true[\s\S]*?break/, 'deliberate refusals reach the summary without another futile request')
 
 console.log('PASS product merge auto-continues normal budget yields and stops on infrastructure interruption')
