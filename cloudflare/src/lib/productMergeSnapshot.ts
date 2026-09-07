@@ -59,7 +59,7 @@ export class ProductMergeReadBatchLimitError extends Error {
   readonly code = 'merge_read_batch_statement_limit'
 
   constructor(readonly statementCount: number, readonly maxStatements: number) {
-    super(`Product merge dependent read batch requires ${statementCount} statements; limit is ${maxStatements}.`)
+    super(`merge_read_batch_statement_limit: dependent read batch requires ${statementCount} statements; limit is ${maxStatements}.`)
     this.name = 'ProductMergeReadBatchLimitError'
   }
 }
