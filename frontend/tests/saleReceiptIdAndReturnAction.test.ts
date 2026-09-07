@@ -138,6 +138,13 @@ const mobileCard = salesList.slice(mobileCardStart)
 assert.match(mobileCard, /whitespace-normal break-all font-mono text-sm font-semibold[^"]*text-blue-600/, 'the phone sales card must wrap the receipt id')
 assert.doesNotMatch(mobileCard, /truncate font-mono text-sm font-semibold text-blue-600/, 'the phone sales card must not ellipsise the receipt id')
 
+// The desktop row itself and its receipt number already open the detail. Keep
+// the actions cell for Print only instead of repeating that action with an eye.
+assert.doesNotMatch(salesList, /icons\/eye\.js|<Eye\b/, 'sale rows must not render a redundant eye action beside Print')
+assert.match(salesList, /onClick: \(\) => setDetailSale\(sale\)/, 'a plain desktop row click must still open sale detail')
+assert.match(salesList, /onClick=\{\(event\) => \{ event\.stopPropagation\(\); setDetailSale\(sale\) \}\}/, 'the receipt number must still open sale detail directly')
+assert.equal((salesList.match(/<Printer className="h-3\.5 w-3\.5" \/>/g) || []).length, 1, 'the desktop actions cell keeps one Print icon')
+
 // The printable receipt view and its print template.
 assert.match(receipt, /value=\{rNum\} bold breakAll/, 'the printed receipt number must break rather than overflow its column')
 assert.match(receipt, /breakAll \? 'break-all' : 'break-words'/, 'Row must honour breakAll for identifiers')

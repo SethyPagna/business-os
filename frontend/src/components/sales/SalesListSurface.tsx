@@ -1,7 +1,6 @@
 import { Fragment, type RefObject } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import StatusBadge from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
@@ -331,7 +330,6 @@ export default function SalesListSurface({
                               {cols.isVisible('items') ? <td className="hidden px-3 py-1.5 text-center text-gray-500 md:table-cell">{items.length}</td> : null}
                               <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
                                 <div className="flex flex-nowrap items-center justify-end gap-0.5">
-                                  <button type="button" onClick={() => setDetailSale(sale)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('view') || 'View'} title={t('view') || 'View'}><Eye className="h-3.5 w-3.5" /></button>
                                   <button type="button" onClick={() => setSelectedSale(sale)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('print') || 'Print'} title={t('print') || 'Print'}><Printer className="h-3.5 w-3.5" /></button>
                                 </div>
                               </td>
