@@ -182,15 +182,18 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   assert.match(receiptSource, /បង្កាន់ដៃ/)
   assert.doesNotMatch(receiptSource, /áž/)
   // FOUR columns since Sep 4 2026 (item / qty / price / total), three when a
-  // shop switches the price column off, and ONE const so the header row and
-  // the item rows can never disagree about the track count.
-  assert.match(receiptSource, /const itemGridCols = showUnitPriceCol/)
-  assert.match(receiptSource, /grid-cols-\[minmax\(0,1fr\)_2\.2rem_minmax\(3\.9rem,auto\)_minmax\(3\.4rem,auto\)\]/)
-  assert.match(receiptSource, /grid-cols-\[minmax\(0,1fr\)_2\.2rem_minmax\(4\.6rem,auto\)\]/)
+  // shop switches the price column off, and ONE track so the header row and
+  // the item rows can never disagree about the count. Since N33 (owner, Sep 6
+  // 2026, "make them compact... especially name") that track is
+  // receiptItemGridTemplate() in utils/receiptItemColumns -- shared with
+  // printReceipt.ts's paper re-layout, which used to keep a drifted copy.
+  // receiptCompactRows.test.ts renders the component and states the geometry.
+  assert.match(receiptSource, /const itemGridStyle: CSSProperties = \{/)
+  assert.match(receiptSource, /gridTemplateColumns: receiptItemGridTemplate\(showUnitPriceCol\)/)
   assert.equal(
-    (receiptSource.match(/\$\{itemGridCols\}/g) || []).length,
+    (receiptSource.match(/style=\{itemGridStyle\}/g) || []).length,
     2,
-    'the header row and the item rows must both read the shared track const'
+    'the header row and the item rows must both read the shared track'
   )
   assert.match(receiptSource, /data-receipt-cell="line-total"/)
   assert.doesNotMatch(receiptSource, /getStatusLabel/)
@@ -240,12 +243,21 @@ await runTest('receipt discounts stay beside the charged price and printable gri
   assert.match(previewSource, /businessDateTimeId\(previewNow\)/)
   assert.match(previewSource, /created_at: previewNow\.toISOString\(\)/)
   assert.doesNotMatch(previewSource, /receipt_number: '20260831-143000'/)
-  assert.match(printSource, /line\.style\.gridTemplateColumns = 'minmax\(0,1fr\) 2\.5rem minmax\(4\.25rem,auto\)'/)
+  // N33 (owner, Sep 6 2026): the exporter no longer carries its own literal
+  // track list. It had drifted from what the component renders (3.6rem/3.2rem
+  // here against 3.9rem/3.4rem there, 4.25rem against 4.6rem on the label
+  // rows), so a column change reached the screen and never reached paper. Both
+  // sides now read utils/receiptItemColumns; receiptCompactRows.test.ts pins
+  // the resulting geometry.
+  assert.match(printSource, /line\.style\.gridTemplateColumns = receiptItemGridTemplate\(false\)/)
+  assert.match(printSource, /line\.style\.gridTemplateColumns = RECEIPT_ROW_GRID_TEMPLATE/)
+  assert.doesNotMatch(printSource, /gridTemplateColumns = 'minmax\(0,1fr\)/,
+    'no literal track may come back into the exporter -- that is the copy that drifted')
   // On paper the tracks are recomputed from the printable box, so the count
   // has to follow the cells. Three tracks under a four-cell row would wrap the
   // line total onto a row of its own -- invisible on screen, wrong on paper.
   assert.match(printSource, /const hasLineTotal = Boolean\(line\.querySelector\(.\[data-receipt-cell="line-total"\].\)\)/)
-  assert.match(printSource, /gridTemplateColumns = 'minmax\(0,1fr\) 2\.2rem minmax\(3\.6rem,auto\) minmax\(3\.2rem,auto\)'/)
+  assert.match(printSource, /line\.style\.gridTemplateColumns = receiptItemGridTemplate\(true\)/)
   // ...and the canvas fallback (iOS / tainted-foreignObject) draws four fields
   // rather than folding price and total into one right-aligned slot.
   assert.match(printSource, /const hasTotalColumn = parts\.length >= 4/)
