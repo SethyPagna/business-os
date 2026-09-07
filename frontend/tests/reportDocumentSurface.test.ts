@@ -370,13 +370,36 @@ for (const soup of ['border-gray-200', 'dark:border-zinc-700']) {
 // inner card was unreachable from the call site in the first place.
 assert.match(currentShift, /summaryClassName\?: string/, 'CurrentShiftSummary takes the inner-card class explicitly')
 assert.match(currentShift, /<ShiftSummary shift=\{state\.shift\} className=\{summaryClassName\} \/>/, 'and forwards it -- a prop that stops at the wrapper cannot strip the card')
+// ...and it forwards it from INSIDE a wrapper of its own. That wrapper is the
+// whole reason `summaryClassName` had to exist (`className` is spent on it) and
+// it is also what makes `.report-shift-plain` a GRANDCHILD of the segment:
+//
+//   <section class="report-segment">              ReportsHub.tsx:458
+//     <div class="space-y-2 ">                     CurrentShiftSummary.tsx:65 -- always rendered
+//       <section class="... report-shift-plain">   ShiftSummary.tsx:42
+//
+// so a CHILD combinator between the segment and the stripped card matches
+// nothing, and the gray-200 card goes on painting inside the --ui-line
+// hairline. The DOM level and the selector are asserted together on purpose:
+// greping the rule and greping the prop as two independent strings is exactly
+// what let a rule that can never match ship as a fix.
+assert.match(
+  currentShift,
+  /<div className=\{`space-y-2 \$\{className\}`\}>/,
+  'CurrentShiftSummary always interposes a wrapper div between the segment and the card',
+)
 // The shared component is untouched: three non-report callers still want the card.
 assert.match(shiftSummary, /className=\{`min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900 \$\{className\}`\}/, 'ShiftSummary keeps its own frame for FeesPage / Sales / ShiftHistoryModal')
 // Stripping it is done by SPECIFICITY (0-3-0), not by utility order. The
 // Tailwind utilities on that element are 0-1-0 and their dark: variants 0-2-0,
 // and which of two equal-specificity rules paints depends on chunk order --
 // the same argument .report-segment[data-segment-*] already makes above.
-const shiftPlain = ruleBody(css, '[data-reports-hub] .report-segment > .report-shift-plain')
+const shiftPlain = ruleBody(css, '[data-reports-hub] .report-segment .report-shift-plain')
+assert.doesNotMatch(
+  css,
+  /\.report-segment\s*>\s*\.report-shift-plain/,
+  'the stripped card is a grandchild of the segment: CurrentShiftSummary interposes its own wrapper div, so a child combinator here is dead',
+)
 assert.match(shiftPlain, /border:\s*0;/, 'the inner card gives up its border to the segment')
 assert.match(shiftPlain, /background:\s*transparent;/, 'and its white fill, or the segment shows a sheet on a sheet')
 assert.match(shiftPlain, /padding:\s*0;/, 'and its 12px inset -- compactness is not spent here')

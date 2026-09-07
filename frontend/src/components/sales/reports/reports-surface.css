@@ -264,8 +264,15 @@
    .bg-transparent BEFORE .bg-white, .rounded-none before .rounded-xl and .p-0
    before .p-3 -- so passing those utilities down would have lost three of the
    four overrides to source order. Same argument as
-   .report-segment[data-segment-*] above. */
-[data-reports-hub] .report-segment > .report-shift-plain {
+   .report-segment[data-segment-*] above.
+
+   DESCENDANT, not child: the class lands on ShiftSummary's <section>, and
+   CurrentShiftSummary always wraps that in a `space-y-2` <div> of its own --
+   the very wrapper that made `summaryClassName` necessary. A `>` here matches
+   nothing and the private card paints on. Descendant matching cannot
+   over-reach: .report-shift-plain is spelled on exactly one element in the app
+   (ReportsHub.tsx) and specificity is unchanged at 0-3-0. */
+[data-reports-hub] .report-segment .report-shift-plain {
   border: 0;
   border-radius: 0;
   background: transparent;
