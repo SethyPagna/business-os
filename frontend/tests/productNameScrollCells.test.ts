@@ -209,6 +209,16 @@ const NAME_CELLS: Array<[string, string, string]> = [
   ['Transfer picker option', 'components/branches/TransferModal.tsx', '{product.name}</div>'],
   ['Transfer picker group title', 'components/branches/TransferModal.tsx', "· {(t('transfer_group_variant_count')"],
   ['Transfer picker selected product', 'components/branches/TransferModal.tsx', '{selectedProduct.name}</span>'],
+  // Transfer HISTORY on the Branches page -- the mobile card and the desktop
+  // table cell for the same value. Both wrapped, so a long product name grew
+  // the row instead of scrolling in it, which is the exact defect N36 names.
+  // Neither carries `dense-cell-truncate`, so the Stock Change tooltip rule in
+  // tests/historyRowModel.test.ts does not key on them and the "dense ledger"
+  // exclusion below does not reach them either. The desktop one keeps its own
+  // `max-w-[16rem]` cap -- the shared base sits in the components layer, so
+  // that Tailwind utility still wins and the name scrolls inside the cap.
+  ['Branches transfer history card', 'components/branches/Branches.tsx', '{transfer.product_name}</div>'],
+  ['Branches transfer history row', 'components/branches/Branches.tsx', '{transfer.product_name}</span></td>'],
 ]
 
 runTest('every product-name cell carries the one shared class', () => {

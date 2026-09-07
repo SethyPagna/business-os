@@ -1680,7 +1680,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                         {tr('transfer', 'Transfer')}
                       </span>
                     </div>
-                    <div className="whitespace-normal break-words text-sm font-semibold text-gray-900 dark:text-white">{transfer.product_name}</div>
+                    <div className="scroll-x-clean text-sm font-semibold text-gray-900 dark:text-white">{transfer.product_name}</div>
                     <div className="mt-0.5 text-[11px] text-gray-400">{formatTransferDate(transfer.created_at)}</div>
                   </div>
                   <div className="text-right">
@@ -1729,7 +1729,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                       <div className="text-[9px] font-bold uppercase tracking-wide text-violet-500 dark:text-violet-400">{tr('transfer', 'Transfer')}</div>
                     </td>
                     <td className="whitespace-nowrap px-2.5 py-1.5 text-[11px] text-gray-400">{formatTransferDate(transfer.created_at)}</td>
-                    <td className="max-w-[16rem] whitespace-normal break-words px-2.5 py-1.5 font-medium text-gray-800 dark:text-gray-200">{transfer.product_name}</td>
+                    <td className="max-w-[16rem] px-2.5 py-1.5 font-medium text-gray-800 dark:text-gray-200"><span className="scroll-x-clean">{transfer.product_name}</span></td>
                     <td className="px-2.5 py-1.5">
                       <div className="flex min-w-0 items-center gap-1">
                         <span className="max-w-[8rem] truncate rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{historyField(transfer.from_name)}</span>
