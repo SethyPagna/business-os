@@ -5,6 +5,7 @@ import { canRestoreMinimizedWork } from '../src/utils/minimizedWork.ts'
 
 const modal = fs.readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+const stockChanges = fs.readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
 
 assert.match(modal, /import \{[^}]*flushPendingWorkDraft[^}]*\} from '\.\.\/\.\.\/utils\/workDrafts\.ts'/)
 
@@ -23,14 +24,16 @@ assert.ok(minimizeBody.indexOf("onMinimize(tr('fast_stockin_title'") < minimizeB
 
 assert.match(inventory, /draftKey: scopedWorkDraftKey\('fast_stockin'\)/)
 assert.match(inventory, /requiredPermission: \{ permissionKey: 'inventory', actionKey: 'adjust' \}/)
-assert.match(inventory, /!can\('inventory', 'adjust'\)/)
-assert.match(inventory, /canRestoreMinimizedWork\(entry, can\)/)
-assert.match(inventory, /reparkDeniedRestore\(entry\)/)
+assert.match(inventory, /\.\.\.FAST_STOCK_IN_RESTORE_HOST/)
+assert.match(stockChanges, /!canAdjust \|\| !canRestoreMinimizedWork\(entry, app\.can\)/)
+assert.match(stockChanges, /reparkDeniedRestore\(entry\)/)
+assert.match(stockChanges, /FastStockInRestoreCommit onCommit=\{commitFastStockInRestore\}/)
 
 const entry = {
   key: 'fast-stockin',
   kind: 'fast_stockin' as const,
-  pageId: 'branches',
+  pageId: 'products',
+  anchor: 'hub:products:stock_changes',
   label: 'Fast stock-in',
   requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
   minimizedAt: 1,
