@@ -84,6 +84,19 @@ const subject = compile('saleAmendments.ts', {
   './financialPrecision': financialPrecision,
   './saleLineAddition': saleLineAddition,
 })
+const saleBulkStatus = compile('saleBulkStatus.ts', {
+  './db': {},
+  '../index': {},
+  './auth': {},
+  './permissions': { getActionTier: () => 'full', isAdminControlUser: () => true },
+  './sqlBinding': { D1_MAX_BOUND_PARAMS: 100 },
+  './salesStatus': salesStatus,
+  './saleTransitions': saleTransitions,
+  './cache': {},
+  '../durable-objects/broadcastHub': {},
+  './actorSnapshot': {},
+  './branchRoles': {},
+})
 
 const {
   AMENDMENT_KINDS,
@@ -111,6 +124,7 @@ const {
   resolveAmendedTaxUsd,
   saleTaxUpdateStatement,
 } = subject
+const { saleRevisionGuard } = saleBulkStatus
 
 // ---------------------------------------------------------------------------
 // A schema with production's real constraints AND migration 0115's real
@@ -155,6 +169,7 @@ function setup() {
       created_at TEXT, updated_at TEXT);
     CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE sale_bulk_guards (id INTEGER PRIMARY KEY, guard_value INTEGER NOT NULL CHECK(guard_value = 1));
   `)
   sqlite.exec(MIGRATION_0115)
   sqlite.exec(MIGRATION_0129)
@@ -724,6 +739,71 @@ console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt an
   assert.strictEqual(afterClear.updated_at, clearStamp)
 }
 console.log('PASS 11b -- actual courier cost changes the reporting fields only, stamps updated_at with the value the response reports, and leaves a separate immutable before/after ledger row')
+
+// ---- 11c: a fee response is the next courier-cost request's version -------
+{
+  const { sqlite, apply } = setup()
+  seedShelf(sqlite)
+  const sale = seedSale(sqlite)
+  const initialRevision = num(sqlite, 'SELECT COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id = 77), 0)')
+  assert.strictEqual(initialRevision, 0)
+
+  const feeStamp = '2026-09-07T06:20:00.123Z'
+  const feePlan = planDeliveryFeeChange({ saleId: 77, sale, newFeeUsd: 2.5, exchangeRate: 4100 })
+  apply([
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    saleRevisionGuard(77, initialRevision),
+    ...feePlan.statements,
+    // The route's saleMoneyUpdateStatement is the final fee write and stores
+    // the exact updated_at value returned to the browser.
+    { sql: 'UPDATE sales SET total_usd = @total, updated_at = @stamp WHERE id = @sale', params: { sale: 77, total: 8.5, stamp: feeStamp } },
+    amendmentEntryStatement(ENTRY({
+      kind: 'delivery_fee_changed',
+      amountBeforeUsd: 1.5, amountAfterUsd: 2.5,
+      totalBeforeUsd: 7.5, totalAfterUsd: 8.5,
+    })),
+  ])
+
+  const afterFee = sqlite.prepare(`SELECT s.*,COALESCE(r.revision,0) AS write_revision
+    FROM sales s LEFT JOIN sale_write_revisions r ON r.sale_id=s.id WHERE s.id=77`).get()
+  assert.strictEqual(afterFee.updated_at, feeStamp, 'the fee response token is the value persisted on the sale')
+  assert.strictEqual(afterFee.write_revision, 1, 'the fee ledger append advances the authoritative revision')
+
+  const costStamp = '2026-09-07T06:20:01.456Z'
+  const costPlan = planDeliveryActualCostChange({ saleId: 77, sale: afterFee, newCostUsd: 1.25, exchangeRate: 4100, stamp: costStamp })
+  assert.throws(() => apply([
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    saleRevisionGuard(77, initialRevision),
+    ...costPlan.statements,
+    amendmentEntryStatement(ENTRY({
+      kind: 'delivery_actual_cost_changed', amountBeforeUsd: null, amountAfterUsd: 1.25,
+      totalBeforeUsd: 8.5, totalAfterUsd: 8.5,
+    })),
+  ]), /CHECK constraint/i, 'the stale pre-fee revision is still rejected atomically')
+  assert.strictEqual(sqlite.prepare('SELECT delivery_actual_cost_usd FROM sales WHERE id=77').get().delivery_actual_cost_usd, null)
+
+  apply([
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    saleRevisionGuard(77, afterFee.write_revision),
+    ...costPlan.statements,
+    amendmentEntryStatement(ENTRY({
+      kind: 'delivery_actual_cost_changed', amountBeforeUsd: null, amountAfterUsd: 1.25,
+      totalBeforeUsd: 8.5, totalAfterUsd: 8.5,
+    })),
+  ])
+  const afterCost = sqlite.prepare(`SELECT s.delivery_fee_usd,s.delivery_actual_cost_usd,s.total_usd,s.updated_at,
+    COALESCE(r.revision,0) AS write_revision FROM sales s LEFT JOIN sale_write_revisions r ON r.sale_id=s.id WHERE s.id=77`).get()
+  assert.deepStrictEqual(afterCost, {
+    delivery_fee_usd: 2.5,
+    delivery_actual_cost_usd: 1.25,
+    total_usd: 8.5,
+    updated_at: costStamp,
+    write_revision: 2,
+  })
+  assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM sale_amendments WHERE sale_id=77'), 2,
+    'the successful sequence retains separate fee and courier-cost records')
+}
+console.log('PASS 11c -- fee then courier cost accepts the current revision/token, rejects the stale revision, and keeps both records')
 
 // ---- 13: an oversell aborts the whole batch --------------------------------
 {
