@@ -493,6 +493,24 @@ async function run() {
     )
   })
 
+  await check('post-commit history lookup failure returns a stable pending reconciliation receipt', async () => {
+    const operationId = 'committed-merge-overload'
+    const result = await undo.finalizeAtomicMergeHistory({}, operationId, reversal, {
+      prepare: () => ({
+        get: async () => { throw new Error('D1_ERROR: D1 DB is overloaded. Requests queued for too long.') },
+      }),
+      batch: async () => { throw new Error('finalization batch must not run after lookup failure') },
+    })
+    assert.deepEqual(result, {
+      operationId,
+      committed: true,
+      snapshotId: null,
+      actionHistoryId: null,
+      historyResolved: false,
+      fingerprintReady: false,
+    })
+  })
+
   // ---- Source guards: the REAL fold in products.ts must emit the same shape ----
   const productsSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
   const appliersSrc = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
