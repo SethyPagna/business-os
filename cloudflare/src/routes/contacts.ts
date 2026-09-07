@@ -9,6 +9,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { loadSettingsMap, buildPortalConfig, summarizePoints, type SubmissionRow } from './portal'
 import {
   findContactDuplicates,
+  findContactDuplicateState,
   findDuplicateContactClusters,
   dismissDuplicateCluster,
   undismissDuplicateCluster,
@@ -23,6 +24,7 @@ import {
   type ContactDuplicateTable,
   type ContactDuplicateReview,
   type ContactDuplicateCreateSeparateDecision,
+  type ContactDuplicateCandidateSnapshot,
 } from '../lib/contactDuplicates'
 import { contactDisplayAddress, type ContactOptionMode } from '../lib/contactOptions'
 import { canonicalizePhone } from '../lib/phone'
@@ -330,12 +332,13 @@ async function checkContactDuplicateBlock(
   decision: ContactDuplicateCreateSeparateDecision | null
   matches: ContactDuplicateMatch[]
   review: ContactDuplicateReview
+  snapshots: ContactDuplicateCandidateSnapshot[]
   phones: string[]
 }> {
   const db = getDb(env)
   const phones = collectContactPhones({ phone: subject.phone, address: subject.address }, config.optionMode)
-  const matches = await findContactDuplicates(db, config.table, { id: subject.id, name: subject.name, phones }, config.optionMode)
-  const review = buildContactDuplicateReview(matches)
+  const duplicateState = await findContactDuplicateState(db, config.table, { id: subject.id, name: subject.name, phones }, config.optionMode)
+  const { matches, review, snapshots } = duplicateState
   const decision = parseContactDuplicateCreateSeparateDecision(decisionInput)
   if (decisionInput != null && !decision) {
     return {
@@ -343,22 +346,24 @@ async function checkContactDuplicateBlock(
       decision: null,
       matches,
       review,
+      snapshots,
       phones,
     }
   }
   const phoneConflict = matches.find((m) => m.severity === 'phone_conflict')
-  if (phoneConflict) return { block: duplicateErrorResponse(config.entity, phoneConflict, matches, review), decision: null, matches, review, phones }
+  if (phoneConflict) return { block: duplicateErrorResponse(config.entity, phoneConflict, matches, review), decision: null, matches, review, snapshots, phones }
   const exactMatch = matches.find((m) => m.severity === 'exact_match')
-  if (exactMatch && !decision) return { block: duplicateErrorResponse(config.entity, exactMatch, matches, review), decision: null, matches, review, phones }
+  if (exactMatch && !decision) return { block: duplicateErrorResponse(config.entity, exactMatch, matches, review), decision: null, matches, review, snapshots, phones }
   if (decision && !contactDuplicateDecisionMatches(review, decision)) {
     const top = exactMatch || matches[0]
-    if (top) return { block: duplicateErrorResponse(config.entity, top, matches, review, 'contact_duplicate_candidates_changed'), decision: null, matches, review, phones }
+    if (top) return { block: duplicateErrorResponse(config.entity, top, matches, review, 'contact_duplicate_candidates_changed'), decision: null, matches, review, snapshots, phones }
     const duplicate = { matches, duplicateReview: review, allowedActions: [] }
     return {
       block: { status: 409, body: { error: 'The possible duplicate records changed. Review again before saving.', code: 'contact_duplicate_candidates_changed', duplicate, matches, duplicateReview: review, allowedActions: [] } },
       decision: null,
       matches,
       review,
+      snapshots,
       phones,
     }
   }
@@ -367,6 +372,7 @@ async function checkContactDuplicateBlock(
     decision,
     matches,
     review,
+    snapshots,
     phones,
   }
 }
@@ -377,8 +383,7 @@ async function duplicateBlockAfterGuardFailure(
   subject: { id?: number | string | null; name: string; phones: string[] },
   decision: ContactDuplicateCreateSeparateDecision | null,
 ): Promise<{ body: Record<string, unknown>; status: number } | null> {
-  const matches = await findContactDuplicates(getDb(env), config.table, subject, config.optionMode)
-  const review = buildContactDuplicateReview(matches)
+  const { matches, review } = await findContactDuplicateState(getDb(env), config.table, subject, config.optionMode)
   if (decision && !contactDuplicateDecisionMatches(review, decision)) {
     const top = matches[0]
     return top
@@ -829,8 +834,8 @@ function registerContactRoutes(config: ContactConfig) {
     const excludeId = query.excludeId || null
     if (!name && !rawPhones.length) return c.json({ matches: [], duplicateReview: buildContactDuplicateReview([]), allowedActions: [] })
     const phones = [...new Set(rawPhones.flatMap((phone) => collectContactPhones({ phone }, config.optionMode)))]
-    const matches = await findContactDuplicates(db, config.table, { id: excludeId, name, phones }, config.optionMode)
-    return c.json({ matches, duplicateReview: buildContactDuplicateReview(matches), allowedActions: duplicateAllowedActions(matches) })
+    const { matches, review } = await findContactDuplicateState(db, config.table, { id: excludeId, name, phones }, config.optionMode)
+    return c.json({ matches, duplicateReview: review, allowedActions: duplicateAllowedActions(matches) })
   })
 
   // Whole-table sweep for the admin "Possible Duplicates" review panel --
@@ -1081,7 +1086,7 @@ function registerContactRoutes(config: ContactConfig) {
 
     const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.duplicateDecision)
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
-    const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { name, phones: duplicateDecision.phones }, duplicateDecision.decision)
+    const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
     // Customers only. A number staff typed in wins (after a reuse check);
     // a blank one is minted from the house LC- sequence. The mint is deferred
@@ -1279,7 +1284,7 @@ function registerContactRoutes(config: ContactConfig) {
     const effectiveAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
     const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.duplicateDecision)
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
-    const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision)
+    const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
     // Customers only, same deferred-mint shape as the POST route above: a
     // number staff typed in wins (after a reuse check); a blank one on a
