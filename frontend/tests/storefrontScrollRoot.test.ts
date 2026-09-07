@@ -65,6 +65,7 @@ const sources = new Map(STOREFRONT_FILES.map((file) => [file, read(file)] as con
 const previewSurface = code('../src/components/catalog/CatalogPreviewSurface.tsx')
 const productsSection = code('../src/components/catalog/CatalogProductsSection.tsx')
 const publicPage = sources.get('../src/components/catalog/PublicCatalogPage.tsx')!
+const mainCss = code('../src/styles/main.css')
 const pullToRefreshHook = read('../src/components/shared/usePullToRefresh.ts')
 const pullToRefreshUtil = read('../src/utils/pullToRefresh.ts')
 
@@ -101,12 +102,12 @@ runTest('every storefront flyout is an overlay, so a CLOSED flyout leaves nothin
   }
 })
 
-runTest('the public shell is not a two-axis scroll container by accident', () => {
+runTest('the document is the sole public vertical scroll owner', () => {
   const shellStart = previewSurface.indexOf('data-portal-root="true"')
   const shellEnd = previewSurface.indexOf('max-w-[1680px]')
   assert.ok(shellStart > 0 && shellEnd > shellStart, 'the public shell wrapper must still be findable')
   const shell = previewSurface.slice(shellStart, shellEnd)
-  assert.match(shell, /overflowY: 'auto'/, 'iOS momentum scrolling on the shell is deliberate and stays')
+  assert.doesNotMatch(shell, /overflowY: 'auto'/, 'an auto-height shell must not capture vertical scrolling from the document')
   assert.doesNotMatch(
     shell,
     /overflow-visible/,
@@ -122,6 +123,10 @@ runTest('the public shell is not a two-axis scroll container by accident', () =>
   assert.doesNotMatch(shell, /(?<![\w-])h-screen\b/, 'a fixed-height shell cannot grow with the catalog and pins the page')
   assert.match(shell, /min-h-screen/, 'the shell must still fill at least the viewport')
   assert.doesNotMatch(shell, /overflow-hidden/, 'a hidden shell clips the whole storefront below the fold')
+  assert.match(mainCss, /html\[data-public-portal='true'\]\s*\{[\s\S]*?overflow-y:\s*auto\s*!important;[\s\S]*?touch-action:\s*pan-y pinch-zoom;/,
+    'the document root owns vertical scrolling and touch panning')
+  assert.match(mainCss, /body\[data-public-portal='true'\]\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?touch-action:\s*pan-y pinch-zoom;/,
+    'the body grows with content instead of becoming a nested scrollport')
 })
 
 runTest('nothing scrollable sits over the product list except the filters dialog', () => {
