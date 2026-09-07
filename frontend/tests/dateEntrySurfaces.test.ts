@@ -59,6 +59,48 @@ for (const surface of SURFACES) {
   })
 }
 
+// The one surface whose column the app did NOT own -- and which turned out
+// not to be a surface at all.
+//
+// Every entry in SURFACES above writes a validated ISO date, so the typed
+// field is a pure entry change there. A custom-table `date` column was not:
+// TEXT with no format check in the Worker or in the row write, so a cell
+// could already hold '20260309', '2026-03-09 00:00:00' or 'Q3 batch'.
+// DateEntryInput commits on BLUR, so adopting it there would have rewritten
+// the cell on a tab THROUGH the row, with no keystroke -- and '03/09/2026'
+// would have come back as 2026-09-03, a DIFFERENT DAY, because the typed
+// reader is day-first and whoever wrote the cell may not have been.
+//
+// The component was deleted instead (df29dda1): it had zero importers, no
+// route, no permission key and its Worker router was never mounted, so the
+// native picker the widened pattern below finally revealed was in code no
+// one could open. deadFeatureRetirement.test.ts is the lock that keeps it
+// gone. The rule the episode leaves behind, for the next adoption: a field
+// that normalises on blur may only take a column whose values it hands back
+// unchanged -- on free text, adopting it IS a write.
+
+// Surfaces that type a date AND a 24-hour time. Until Sep 6 2026 these three
+// shift fields were the app's last native <input type="datetime-local">: the
+// amend opened-at/closed-at and the historical close time a cashier cannot
+// skip. The native control is wrong here for both halves at once -- it
+// rejects the keypad run staff type, and it renders the DATE part in the
+// device locale, so a phone set to en-US swaps day and month on a drawer
+// close that is then written to the shift ledger as fact.
+const DATE_TIME_SURFACES: Array<{ file: string; what: string }> = [
+  { file: 'components/shifts/ShiftHistoryModal.tsx', what: 'shift amend opened-at and closed-at, and the required historical close date+time' },
+]
+
+for (const surface of DATE_TIME_SURFACES) {
+  runTest(`${surface.file} enters date+time through DateTimeEntryInput (${surface.what})`, () => {
+    const source = read(surface.file)
+    assert.ok(
+      /import \{[^}]*\bDateTimeEntryInput\b[^}]*\} from '[^']*DateEntryInput(\.tsx)?'/.test(source),
+      `${surface.file} must import the shared DateTimeEntryInput`,
+    )
+    assert.ok(source.includes('<DateTimeEntryInput'), `${surface.file} must render <DateTimeEntryInput`)
+  })
+}
+
 // The allow-list is EMPTY on purpose. Every date field in the admin app is
 // typed by staff on a numeric keypad, and <input type="date"> is exactly what
 // makes '9032026' impossible: it hands entry to the browser's own segmented
@@ -70,7 +112,47 @@ for (const surface of SURFACES) {
 // without failing.) There is no surface where the
 // native control buys something the shared field does not. If one ever turns
 // up, add it here WITH the reason -- do not weaken the sweep.
+//
+// Sep 6 2026: the sweep now covers EVERY native temporal control, not just
+// type="date". It was written against that one string, and three
+// <input type="datetime-local"> fields sat in ShiftHistoryModal.tsx
+// underneath it the whole time -- the sweep reported green because the
+// string it looked for was never the one that was there. That is a hole in
+// the instrument rather than a missing rule: 'datetime-local' rejects
+// '9032026' for exactly the same reason 'date' does, and 'time' renders
+// 12-hour AM/PM under the pinned en-US locale (the reason
+// DateTimeRangePicker dropped it too).
+//
+// Sep 7 2026: and it now reads the JSX EXPRESSION form as well. A quoted
+// literal directly after `type=` was still the only shape the pattern could
+// see, so a picker chosen at RENDER time -- the custom-table row editor's
+// `type={... column.type === 'date' ? 'date' : 'text'}` -- was invisible to
+// the one check whose whole job is to notice. Same hole, one level down: the
+// rule was right, the instrument only looked at one spelling of it. A banned
+// literal anywhere inside `type={...}` on the line now counts. A bare
+// identifier (`type={dateKind}`) still does not: what it resolves to is not
+// on the line, and flagging it would be guesswork rather than evidence.
+const NATIVE_TEMPORAL_TYPES = ['date', 'datetime-local', 'time', 'month', 'week']
+
+/** Matches `type="date"` AND a banned literal inside `type={...}`. */
+function nativeTemporalPattern(): RegExp {
+  const types = NATIVE_TEMPORAL_TYPES.join('|')
+  return new RegExp(`type=(?:(["'])(?:${types})\\1|\\{[^}]*(["'])(?:${types})\\2[^}]*\\})`)
+}
+
 const NATIVE_DATE_ALLOW_LIST: string[] = []
+
+/**
+ * Blanks every block comment (a JSX `{/* … *\/}` included) so prose ABOUT a
+ * banned control cannot be read as a use of it, while every surviving line
+ * keeps its original number for the offender report. DateTimeRangePicker.tsx
+ * explains why it dropped <input type="time"> on a continuation line that
+ * starts with neither // nor *, and that explanation is the opposite of a
+ * violation.
+ */
+function withoutBlockComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '))
+}
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -81,19 +163,53 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
-runTest('no source file renders a native <input type="date">', () => {
+runTest(`no source file renders a native <input type="${NATIVE_TEMPORAL_TYPES.join('|')}">`, () => {
+  const native = nativeTemporalPattern()
   const offenders: string[] = []
   for (const file of walk(SRC)) {
     const relative = path.relative(SRC, file).split(path.sep).join('/')
     if (NATIVE_DATE_ALLOW_LIST.includes(relative)) continue
-    const source = fs.readFileSync(file, 'utf8')
+    const source = withoutBlockComments(fs.readFileSync(file, 'utf8'))
     source.split('\n').forEach((line, index) => {
       // Comments explaining why the native control was dropped are fine.
       if (/^\s*(\/\/|\*)/.test(line)) return
-      if (/type=(["'])date\1/.test(line)) offenders.push(`${relative}:${index + 1}`)
+      if (native.test(line)) offenders.push(`${relative}:${index + 1}`)
     })
   }
-  assert.deepEqual(offenders, [], `native date inputs found -- route them through DateEntryInput:\n  ${offenders.join('\n  ')}`)
+  assert.deepEqual(offenders, [], `native temporal inputs found -- route them through DateEntryInput / DateTimeEntryInput:\n  ${offenders.join('\n  ')}`)
+})
+
+runTest('the widened sweep can still see a native control (positive control)', () => {
+  // A sweep that reports every case the same way is indistinguishable from a
+  // broken instrument -- which is exactly how the datetime-local fields
+  // survived it. So the pattern is exercised here on known-offending text,
+  // in the same file as the sweep it guards.
+  //
+  // The ternary row is the one that mattered: it is the exact shape of the
+  // live offender the pattern used to walk straight past, so it sits in the
+  // OFFENDING list rather than in a comment about it. `type={dateKind}` stays
+  // innocent to keep the widening honest -- catching every `type={...}` would
+  // pass this control while flagging every select and text input in the app.
+  const native = nativeTemporalPattern()
+  for (const offending of [
+    '<input type="date" />',
+    "<input type='datetime-local' />",
+    '<input className="input" type="datetime-local" required />',
+    '<input type="time" />',
+    "<input type={column.type === 'date' ? 'date' : 'text'} />",
+    '<input type={kind === "month" ? "month" : "text"} />',
+  ]) {
+    assert.ok(native.test(offending), `the sweep must catch ${offending}`)
+  }
+  for (const innocent of ['<input type="text" />', '<input type="number" />', '<input type="datetime" />', 'type={dateKind}', "<input type={numeric ? 'number' : 'text'} />"]) {
+    assert.ok(!native.test(innocent), `the sweep must not flag ${innocent}`)
+  }
+  // And the comment blanking keeps its line numbering, so an offender report
+  // still points at the right line.
+  const blanked = withoutBlockComments('const a = 1\n{/* NOT <input type="time"> */}\n<input type="date" />')
+  assert.equal(blanked.split('\n').length, 3, 'blanking a block comment must not lose lines')
+  assert.ok(!native.test(blanked.split('\n')[1]), 'prose inside a block comment must not read as a use')
+  assert.ok(native.test(blanked.split('\n')[2]), 'real code after a block comment must still be caught')
 })
 
 runTest('no surface keeps a free-typed date field outside the shared component', () => {
@@ -130,6 +246,59 @@ runTest('DateEntryInput carries the entry contract the direction asked for', () 
   assert.ok(source.includes('moveToNextField'), 'a committed Enter must move focus to the next field')
   assert.ok(source.includes('InfoHint'), 'an unreadable entry must raise an InfoHint')
   assert.ok(!/onChange\(''\)[^\n]*invalid/.test(source), 'an unreadable entry must never clear the field')
+})
+
+runTest('the time and date+time fields reuse the same typed-entry machinery', () => {
+  const source = read('components/shared/DateEntryInput.tsx')
+  // One masking/caret/Enter implementation, three fields -- not a second
+  // hand-rolled copy of the mechanics for the time half.
+  assert.ok(source.includes('function MaskedEntryField'), 'the shared mechanics must live in one component')
+  assert.equal((source.match(/setSelectionRange/g) || []).length, 1, 'the caret must be parked in exactly one place')
+  assert.equal((source.match(/const moveToNextField = /g) || []).length, 1, 'the Enter-advance must be declared exactly once')
+  assert.equal((source.match(/moveToNextField\(\)/g) || []).length, 1, 'the Enter-advance must be called from the one shared keydown handler')
+  assert.ok(source.includes('export function TimeEntryInput'), 'the 24-hour time field must be exported from the shared module')
+  assert.ok(source.includes('export function DateTimeEntryInput'), 'the date+time pair must be exported from the shared module')
+  assert.ok(source.includes('applyTimeEntryMask'), 'the time mask must come from the shared helper')
+  assert.ok(source.includes('normalizeTimeEntry'), 'the time commit must go through the shared normalizer')
+  assert.ok(source.includes('localDateTimePairValue') && source.includes('splitLocalDateTime'), 'the pair must be split/joined by the shared kernel')
+  // The half-filled rule: a date with no time publishes '' rather than a
+  // guessed midnight, and both halves stay on screen.
+  assert.ok(/const combined = localDateTimePairValue\(/.test(source), 'the pair must be published through the one pair rule')
+  assert.ok(!/T00:00/.test(source), 'no field may default a missing time to midnight')
+})
+
+runTest('an unreadable half withdraws the shift timestamp instead of banking the last good one', () => {
+  const source = read('components/shared/DateEntryInput.tsx')
+  // A typed field keeps its last COMMITTED value while the operator's
+  // unreadable text sits on screen -- that is DateEntryInput's contract and
+  // it is right for a filter box. On the shift close it is not: the pair
+  // would still hold the previous timestamp, closeReason would stay null,
+  // and Save would write a drawer close at a minute printed nowhere on the
+  // screen. So the pair listens to BOTH halves' invalid state and withdraws.
+  // Two wirings, not the four `onInvalidChange={...}` in the file -- the other
+  // two are DateEntryInput's and TimeEntryInput's pass-through to their own
+  // caller, which is the range picker's box painting and not this rule.
+  assert.equal(
+    (source.match(/onInvalidChange=\{\(unreadable\) => apply\(\{/g) || []).length, 2,
+    'both halves of the pair must report their unreadable state to it',
+  )
+  assert.ok(
+    /dateUnreadable/.test(source) && /timeUnreadable/.test(source),
+    'the pair must track each half\'s unreadable state by name',
+  )
+  // ...and it must NOT do it by clearing the half, which would wipe the very
+  // text the operator has to see to fix.
+  assert.ok(
+    !/onInvalidChange=\{[^}]*set(Date|Time)\(''\)/.test(source),
+    'withdrawing the pair must never clear what the operator typed',
+  )
+  // The blocker the withdrawal hands the work to already exists on both
+  // shift forms; assert it here so the two halves cannot drift apart.
+  const modal = read('components/shifts/ShiftHistoryModal.tsx')
+  assert.ok(
+    /const closeReason = !close\.closedAt \?/.test(modal) && /!edit\.openedAt \?/.test(modal),
+    'both shift forms must print a reason when their timestamp is withdrawn',
+  )
 })
 
 runTest('the shared field is 13px on desktop and >=16px under 768px', () => {
@@ -210,7 +379,7 @@ runTest('both language packs carry every date-entry string', () => {
   }
   const en = flatten(JSON.parse(fs.readFileSync(path.join(SRC, 'lang', 'en.json'), 'utf8')))
   const km = flatten(JSON.parse(fs.readFileSync(path.join(SRC, 'lang', 'km.json'), 'utf8')))
-  for (const key of ['date_entry_invalid', 'date_entry_help', 'date_entry_hint_label', 'date_entry_ambiguous']) {
+  for (const key of ['date_entry_invalid', 'date_entry_help', 'date_entry_hint_label', 'date_entry_ambiguous', 'time_entry_invalid', 'time_entry_help', 'time_entry_hint_label']) {
     assert.ok(en[key], `en.json must define ${key}`)
     assert.ok(km[key], `km.json must define ${key}`)
     assert.ok(/[ក-៿]/.test(km[key]), `km.json's ${key} must actually be Khmer, not the English string copied over`)
@@ -220,5 +389,5 @@ runTest('both language packs carry every date-entry string', () => {
 if (failed > 0) {
   process.exitCode = 1
 } else {
-  console.log(`PASS dateEntrySurfaces: ${SURFACES.length} surfaces type dates through one field, 0 native pickers left`)
+  console.log(`PASS dateEntrySurfaces: ${SURFACES.length} date surfaces + ${DATE_TIME_SURFACES.length} date+time surface type through one field, 0 native pickers left`)
 }

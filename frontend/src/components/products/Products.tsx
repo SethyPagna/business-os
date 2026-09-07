@@ -140,6 +140,9 @@ import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../a
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
+// The section chips below are the same chrome HubSectionNav renders, styled
+// from the same stylesheet (see the row's `bos-nav-chrome` class).
+import '../navigation/nav-chrome.css'
 
 const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategoriesModal'), 'products-manage-categories-modal')
 // Part 241: the restricted image-only view, split out so the wrapper
@@ -3838,7 +3841,7 @@ function ProductsFullEditor() {
             never offer different sections. */}
         {layeredSectionNav || productSectionTabs.length <= 1 ? null : (
           <div className="w-full min-w-0 max-w-full sm:w-auto sm:flex-1" role="group" aria-label={tr('product_sections', 'Product sections')}>
-            <div className="hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800 md:inline-flex">
+            <div className="bos-nav-chrome hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl p-1 md:inline-flex">
               {productSectionTabs.map((section) => {
                 const isActive = activeProductSection === section.id
                 return (
@@ -3847,7 +3850,7 @@ function ProductsFullEditor() {
                     type="button"
                     onClick={() => setActiveProductSection(section.id as typeof activeProductSection)}
                     aria-pressed={isActive}
-                    className={`hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center break-words rounded-lg px-2.5 py-2 text-center text-sm font-medium leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0 ${isActive ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
+                    className="hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center break-words rounded-lg px-2.5 py-2 text-center text-[13px] font-semibold leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0"
                   >
                     {tr(section.key, section.label)}
                   </button>
@@ -3934,11 +3937,11 @@ function ProductsFullEditor() {
                     </button>
                   )}
                   items={[
-                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openAdjust('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
-                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openAdjust('remove') },
-                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openAdjust('set') },
-                    'divider',
-                    { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => ledgerActions?.openFastStockIn(), color: 'blue' },
+                    // N27: one way to change stock -- the fast flow, opened in
+                    // the chosen mode (add / remove / set).
+                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openFastStockIn('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
+                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openFastStockIn('remove') },
+                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openFastStockIn('set') },
                   ] as PortalMenuItem[]}
                 />
               ) : null

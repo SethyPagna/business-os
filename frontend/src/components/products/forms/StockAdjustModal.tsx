@@ -16,7 +16,7 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
-import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import {
   applyRowOutcome,
   browserStockStorage,
@@ -456,7 +456,10 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     if (!product) { notify('Select a product first', 'error'); return }
     if (adjustSaving) return
     const qty = parseFloat(String(adjustForm.quantity))
-    if (!qty || qty <= 0) { notify('Invalid quantity', 'error'); return }
+    // Same rule, same helper, as Inventory.handleAdjust and FastStockInModal:
+    // a set may target 0 (an emptied branch), an add or a remove may not move 0.
+    const quantityError = stockAdjustQuantityError(adjustForm.type, adjustForm.quantity)
+    if (quantityError) { notify(tr(quantityError, STOCK_ADJUST_QUANTITY_FALLBACKS[quantityError]), 'error'); return }
     if (!String(adjustForm.reason || '').trim()) {
       notify(tr('adjust_reason_required', 'A reason is required for this stock adjustment.'), 'error')
       return
