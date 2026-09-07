@@ -155,7 +155,9 @@ export default function InventoryProductsSurface({
   // two surfaces agree cell for cell. That agreement is about the four cells,
   // not about the branch arithmetic behind them: the ledger's own header is
   // where the branch slices are shown to add back up to the unfiltered row,
-  // and where the over-refund cases that no scoping rule reaches are named.
+  // and where the two exceptions are named -- a sale line written with
+  // branch_id NULL, which no branch scope can see, and the over-refund regime
+  // no scoping rule reaches. Both are pinned by fixtures, not by prose.
   //
   // A negative reaching this line therefore means one thing: the product was
   // genuinely sold below cost. That is real and stays visible (yellow). Do NOT

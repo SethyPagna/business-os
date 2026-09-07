@@ -88,6 +88,16 @@
 //      quantity > 0, so this is a shape the live API can write.
 //              ledger 21cf77ae, branch 1 + branch 2: 1 -> 0 = unfiltered
 //
+// GROUP 3, the documented EXCEPTION, pinned so the comments cannot drift into
+// claiming a partition the ledger does not have:
+//
+//   N  a sale line written with sale_items.branch_id NULL (routes/sales.ts
+//      writes `Number(item.branch_id || body.branch_id) || null`). No branch
+//      scope can see it -- `si.branch_id = @branchId` is never true of NULL --
+//      so branch 1 + branch 2 = 0 against an unfiltered 2 units / $20. That is
+//      true at base and at head alike; it is asserted here AS the exception,
+//      not as the partition.
+//
 // Plus the two positive controls, without which a "nothing is negative any
 // more" sweep would be indistinguishable from a broken instrument:
 //
@@ -199,8 +209,9 @@ function setupDatabase() {
       (10,'J: the return line names no branch, the return does','j',1,0,0,0,0,0),
       (11,'K: one sale, two branches worth very different money','k',1,0,0,0,0,0),
       (12,'L: a return naming a branch that sold none of it','l',1,0,0,0,0,0),
-      (13,'M: fractional branch lines, all of it returned','m',1,0,0,0,0,0);
-    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0),(9,1,0),(9,2,0),(10,1,0),(10,2,0),(11,1,0),(11,2,0),(12,1,0),(12,2,0),(13,1,0),(13,2,0);
+      (13,'M: fractional branch lines, all of it returned','m',1,0,0,0,0,0),
+      (14,'N: a sale line with no branch at all','n',1,0,0,0,0,0);
+    INSERT INTO branch_stock VALUES (1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0),(7,1,0),(8,1,0),(8,2,0),(9,1,0),(9,2,0),(10,1,0),(10,2,0),(11,1,0),(11,2,0),(12,1,0),(12,2,0),(13,1,0),(13,2,0),(14,1,0);
 
     -- A: the sale is in AUGUST, the return is inside the September window.
     INSERT INTO sales VALUES (100,1,'completed','2026-08-01 03:00:00',100,400000,0,0,0,0);
@@ -307,13 +318,20 @@ function setupDatabase() {
     INSERT INTO returns VALUES (211,112,NULL,'completed','customer','2026-09-05 04:00:00');
     INSERT INTO return_items VALUES (211,211,13,NULL,3,30,120000,4,16000,1,'restock');
 
+    -- N: the sale LINE carries no branch. routes/sales.ts writes it as
+    -- Number(item.branch_id || body.branch_id) || null, so this is a shape the
+    -- live API produces, and si.branch_id = @branchId is never true of NULL --
+    -- no branch scope can see the line. This is the documented EXCEPTION to
+    -- the partition, asserted below as such.
+    INSERT INTO sales VALUES (113,1,'completed','2026-09-05 03:00:00',20,80000,0,0,0,0);
+    INSERT INTO sale_items VALUES (118,113,14,NULL,2,20,80000,4,16000);
   `)
   return d1
 }
 
 const round2 = (value) => Math.round(value * 100) / 100
 
-const ALL_PRODUCTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+const ALL_PRODUCTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 
 async function main() {
   const db = dbAdapter(setupDatabase())
@@ -446,7 +464,9 @@ async function main() {
   // The branch-scoped shape must actually discriminate. Only the branch-split
   // sales have a branch-2 line, so that scope must return exactly them -- and
   // branch 3, where nothing was sold, must come back empty. Either half alone
-  // would pass on a builder that quietly ignored @branchId.
+  // would pass on a builder that quietly ignored @branchId. Case N is absent
+  // by the same token: its ONE sale line carries branch_id NULL, which no
+  // branch scope can match.
   const branchScopedSql = productSalesLedger.buildProductSalesLedgerSql({ branchScoped: true })
   const branchTwo = db.prepare(`SELECT * FROM (${branchScopedSql}) fin ORDER BY fin.product_id`).all({ branchId: 2 })
   assert.deepEqual(branchTwo.map((row) => Number(row.product_id)), [8, 9, 10, 11, 12, 13],
@@ -481,19 +501,40 @@ async function main() {
   // for every column -- splitting a refund by the UNIT share overpays a cheap
   // branch line and the cap eats the excess, which is case K.
   //
-  // The invariant holds for every sale whose reversals fit inside the branch
-  // lines they name, which is every sale in this fixture and every return the
-  // app writes against a sale it recognised. It is deliberately NOT asserted
-  // as unconditional: two return groups naming different branches that between
-  // them push more onto one line than that line recognised clamp on each side
-  // separately. See the ledger header -- an invariant that is false in a
-  // shipped comment is worse than no comment.
+  // The invariant holds for every sale whose lines carry a branch and whose
+  // reversals fit inside the branch lines they name -- which is every sale in
+  // this fixture except case N, and every return the app writes against a sale
+  // it recognised. It is deliberately NOT asserted as unconditional; the two
+  // exceptions are named in the ledger header and both are pinned here rather
+  // than left to a comment:
+  //   * a sale LINE with branch_id NULL, which no branch scope can see (case N,
+  //     asserted just below as the exception);
+  //   * an over-refund: two return groups naming different branches that
+  //     between them push more onto one line than that line recognised clamp on
+  //     each side separately.
+  // An invariant that is false in a shipped comment is worse than no comment.
   const unfilteredSql = productSalesLedger.buildProductSalesLedgerSql({})
   const unfiltered = new Map(db.prepare(`SELECT * FROM (${unfilteredSql}) fin`).all({})
     .map((row) => [Number(row.product_id), row]))
   const branchOneById = new Map(db.prepare(`SELECT * FROM (${branchScopedSql}) fin`).all({ branchId: 1 })
     .map((row) => [Number(row.product_id), row]))
   const columnOf = (row, column) => (row ? Number(row[column]) || 0 : 0)
+
+  // Case N, asserted AS the exception. The sale line carries no branch, so no
+  // branch scope recognises it at all: the branch rows sum to 0 against an
+  // unfiltered 2 units / $20. True at base 6e3abfea and at head alike -- what
+  // changed is that the claim in the shipped comments now matches it.
+  assert.deepEqual(
+    [columnOf(unfiltered.get(14), 'qty_sold'), columnOf(unfiltered.get(14), 'revenue_usd')],
+    [2, 20],
+    'N: the unfiltered ledger recognises the branchless sale line in full')
+  for (const column of ['qty_sold', 'revenue_usd', 'cogs_usd']) {
+    assert.equal(
+      columnOf(branchOneById.get(14), column) + columnOf(branchTwoById.get(14), column),
+      0,
+      `N: a sale line with branch_id NULL is invisible to EVERY branch scope, so the branch rows cannot partition its ${column} -- the documented exception, not the rule`,
+    )
+  }
 
   for (const productId of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
     for (const column of ['qty_sold', 'revenue_usd', 'revenue_khr', 'cogs_usd', 'cogs_khr']) {

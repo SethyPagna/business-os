@@ -269,10 +269,14 @@ export async function attachInventoryProductMetrics(
       // against its own denominator, units by the unit share and money by the
       // share of the VALUE a branch recognised -- so the branch rows add back
       // up to the unfiltered figure instead of each reversing the whole,
-      // wherever a reversal fits inside the sale it names (the ledger header
-      // states the two over-refund cases where both sides clamp separately).
+      // wherever a reversal fits inside the sale it names. Two exceptions are
+      // named and pinned in the ledger header, NOT claimed away here: a sale
+      // line written with branch_id NULL, which no branch scope can see at
+      // all, and the over-refund regime where both sides clamp separately.
       // Units are allocated by largest remainder on top of that, because this
-      // route's qty_sold is rendered by the list with no formatting at all.
+      // route's qty_sold is rendered by the list with no formatting at all;
+      // the leftover is poured by each line's remaining ROOM, so a fractional
+      // sale line cannot leave a unit unallocated.
       // The per-(sale, product) caps stay behind all of it as a residual guard
       // for what no scoping rule can fix -- a return line taking back more
       // than the sale recognised for the product at all. A negative

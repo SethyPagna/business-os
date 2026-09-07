@@ -118,4 +118,17 @@ assert.match(workerLedger, /MIN\(part\.filled, part\.leftover\) - MIN\(part\.fil
 assert.match(workerLedger, /MIN\(sold\.qty_sold, COALESCE\(ret\.qty_returned, 0\)\)/,
   'the UNIT reversal carries the same residual cap as the money, for the one case apportionment cannot reach: a return line taking back more than the sale recognised for the product at all')
 
+// The "branch rows add back up to the unfiltered row" claim is CONDITIONAL,
+// and it is repeated in three places. Its conditions have to travel with it:
+// a sale LINE written with branch_id NULL (routes/sales.ts writes
+// `Number(item.branch_id || body.branch_id) || null`) is invisible to EVERY
+// branch scope, so those rows sum to 0 against a real unfiltered figure.
+// scripts/test-product-profit-floor-pure.cjs pins the arithmetic as case N;
+// these three pin the sentence, because a comment that overclaims is the next
+// reader's premise.
+for (const [name, source] of [['the ledger', workerLedger], ['the Worker route', workerRoute], ['this list', surface]] as const) {
+  assert.match(source, /branch_id NULL/,
+    `${name} names the NULL-branch sale line as an exception to the partition, rather than claiming a partition it does not have`)
+}
+
 console.log('profit floor parity (list vs pane, one Dashboard formula) tests passed')

@@ -86,13 +86,25 @@
 // return group sum to 1, so for every column the branch rows add back up to
 // the unfiltered row whenever the sale has a single return group, or every
 // group's reversal fits inside the branch line it names -- which is every
-// return the app writes against a sale it recognised. Past that lies the
-// over-refund regime the residual caps below exist for: a reversal larger than
-// the whole sale recognised clamps every branch row AND the unfiltered row to
-// 0, so they still agree; two groups naming different branches that between
-// them push more onto one line than that line recognised clamp separately and
-// can differ by the excess. No scoping rule makes that arithmetic, and an
-// unconditional invariant written here would simply be false.
+// return the app writes against a sale it recognised. TWO named exceptions
+// remain, and both are pinned by fixtures in
+// scripts/test-product-profit-floor-pure.cjs rather than left to this comment:
+//
+//   * A SALE LINE WITH NO BRANCH. routes/sales.ts writes sale_items.branch_id
+//     as `Number(item.branch_id || body.branch_id) || null`, and
+//     `si.branch_id = @branchId` is never true of NULL, so a line left with
+//     branch_id NULL is invisible to EVERY branch scope: 2 units and $20 on
+//     the unfiltered row against 0 + 0 across the branches. That predates
+//     this file (base 6e3abfea behaves identically) and no apportionment can
+//     reach it -- the line names no branch to apportion to. Case N.
+//   * THE OVER-REFUND REGIME the residual caps below exist for. A reversal
+//     larger than the whole sale recognised clamps every branch row AND the
+//     unfiltered row to 0, so they still agree; two groups naming different
+//     branches that between them push more onto one line than that line
+//     recognised clamp separately and can differ by the excess.
+//
+// No scoping rule makes either arithmetic, and an unconditional invariant
+// written here would simply be false.
 //
 // NON-NEGATIVITY, by construction rather than by clamp. Per (sale, product):
 //   * net value is floored at 0 -- a line whose apportioned discounts exceed
