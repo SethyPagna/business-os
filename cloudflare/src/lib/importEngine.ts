@@ -88,6 +88,8 @@ import { applyUnifiedStockAdd, applyUnifiedStockSale, batchIdentity, ensureUnifi
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
+import { branchCanSell } from './branchRoles'
+import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import {
   normalizeImageMatchKey,
   MAX_IMAGES_PER_PRODUCT,
@@ -2791,9 +2793,10 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     return compatible.length === 1 ? compatible[0] : null
   }
 
-  const branches = await db.prepare(`SELECT id, name FROM branches`).all<{ id: number; name: string }>()
-  const branchByName = new Map<string, number>()
-  for (const branch of branches) branchByName.set(lower(branch.name), branch.id)
+  const branches = await db.prepare(`SELECT id, name, is_active FROM branches`).all<{ id: number; name: string; is_active?: number | null }>()
+  const branchByName = new Map<string, (typeof branches)[number]>()
+  for (const branch of branches) branchByName.set(lower(branch.name), branch)
+  const activeShopBranches = branches.filter((branch) => Number(branch.is_active ?? 1) === 1 && branchCanSell(branch.name))
 
   // Track F parity: routes/sales.ts POST / (manual checkout) resolves and
   // stores a real customer_id whenever the cashier picked a customer at
@@ -2876,9 +2879,9 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   // sales-history file would be backwards: batches are receiving records
   // (lib/productBatches.ts's receiveBatchStock), and a sale/return can only
   // ever reference stock that was actually received under a real lot at
-  // some point. An unmatched label just means this line's restock (if any)
-  // lands at the plain branch level instead of a specific batch -- same as
-  // any row with no batch_label at all -- not an error.
+  // some point. An explicitly supplied label must resolve for that exact
+  // product. A blank label remains an ordinary unallocated historical line,
+  // but a wrong label is refused instead of being silently rewritten to NULL.
   const batches = await db
     .prepare(`SELECT id, variant_product_id, lot_code, expiry_date FROM product_batches WHERE is_active = 1`)
     .all<{ id: number; variant_product_id: number; lot_code: string | null; expiry_date: string | null }>()
@@ -2936,7 +2939,33 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     }
 
     const branchName = str(first.branch || first.branch_name)
-    const matchedBranchId = branchName ? branchByName.get(lower(branchName)) ?? null : null
+    // A legacy file may omit the branch column entirely. It can safely use
+    // the one active canonical Shop; any explicit value is authoritative and
+    // must match that same Shop rather than being guessed or auto-created.
+    const matchedBranch = branchName
+      ? branchByName.get(lower(branchName)) ?? null
+      : activeShopBranches.length === 1 ? activeShopBranches[0] : null
+    const matchedBranchId = matchedBranch?.id ?? null
+    // Historical receipts are still real sales: every line must belong to
+    // the active canonical Shop, exactly like POS/manual sale writes. Refuse
+    // blank, unknown, inactive, Warehouse, and other branch names while this
+    // function is still read-only. Previously an unknown name became
+    // branch_name_pending, so runImportApply created and backfilled a branch
+    // before applyHistoricalSaleImport later rejected the receipt.
+    if (!matchedBranch || Number(matchedBranch.is_active ?? 1) !== 1 || !branchCanSell(matchedBranch.name)) {
+      results.push({
+        rowNumber: first._rowNumber,
+        action: 'error',
+        identifier,
+        existingId: null,
+        message: branchName
+          ? `${WAREHOUSE_NOT_SELLABLE_ERROR} Imported branch "${branchName}" is not the active Shop.`
+          : `${WAREHOUSE_NOT_SELLABLE_ERROR} The imported receipt has no branch.`,
+        changes: {},
+        data: first,
+      })
+      continue
+    }
 
     // Phone first (more precise/unique -- and cheap to get right, unlike a
     // shared name), name only as a fallback; an ambiguous name (>1 customer
@@ -3057,6 +3086,10 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
 
       const batchLabel = str(row.batch_label || row.lot_code)
       const batchMatch = batchLabel ? batchByProductAndLot.get(`${product.id}\u0001${lower(batchLabel)}`) : null
+      if (batchLabel && !batchMatch) {
+        error = `Batch/lot "${batchLabel}" was not found for product "${product.name || sku || barcode}". The receipt was refused so the requested batch identity is not discarded.`
+        break
+      }
 
       items.push({
         product_id: product.id, product_name: product.name, sku: product.sku,
@@ -3088,7 +3121,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
         // per-line status override, for the same reason.
         branch_id: matchedBranchId,
         batch_id: batchMatch?.id ?? null,
-        batch_label: batchMatch ? batchLabel : null,
+        batch_label: batchLabel || null,
         batch_expiry_date: batchMatch?.expiry_date ?? null,
       })
     }
@@ -3204,13 +3237,6 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       created_at: createdAt,
       items,
     }
-    // Same three-case branch-resolution rule classifyProducts/classifyInventory
-    // use -- a named branch that doesn't exist yet gets created at apply time
-    // (branch_id null + branch_name_pending set) rather than the order
-    // silently landing with no branch, and resolveAndCreateBranches below is
-    // reused as-is for sales too (see runImportApply's sales dispatch).
-    if (branchName && matchedBranchId == null) data.branch_name_pending = branchName
-
     results.push({ rowNumber: first._rowNumber, action: 'create', identifier, existingId: null, message, changes: {}, data })
   }
   return results
