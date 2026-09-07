@@ -494,6 +494,31 @@ assert.match(desktopTokens, /--ui-size-body:\s*calc\(14px \* var\(--ui-km-boost,
 assert.match(desktopTokens, /--ui-size-meta:\s*calc\(13px \* var\(--ui-km-boost, 1\)\);/)
 assert.doesNotMatch(desktopTokens, /--ui-size-body:\s*\d+px;/, 'no flat px size may reach the desktop tier; it would cancel the Khmer boost')
 
+// 4c. WHERE THE BOOST IS OBSERVABLE -- the probe target, pinned.
+//
+// VERIFIER DEFECT (measurement). The lane's browser plan measured the Khmer
+// boost as `getComputedStyle(document.querySelector('[data-reports-hub]'))
+// .fontSize`. That reads the HUB ELEMENT, and this surface never sets
+// `font-size` on it: the boost travels as `--ui-size-body`, which only the
+// CONSUMERS of the token spend. So the probe returned the inherited <body>
+// size in both languages -- the same number in en and km -- and a total loss
+// of the boost would still have read as "expected".
+//
+// Two halves, pinned together so the plan's probe target cannot drift out
+// from under the next reader: (a) the hub element is NOT a font-size source,
+// and (b) the two elements the plan measures instead really do read the token.
+for (const rule of cssRules) {
+  for (const part of selectorList(rule.selector)) {
+    if (!part.endsWith('[data-reports-hub]')) continue
+    assert.ok(
+      !declaredProps(rule.body).includes('font-size'),
+      `"${part}" must not set font-size: this surface sizes text through --ui-size-body on its consumers, so a font-size on the hub would be a second, competing source of truth -- measure a consumer, not the hub`,
+    )
+  }
+}
+assert.match(denseTable, /text-\[length:var\(--ui-size-body\)\]/, 'DenseTable spends --ui-size-body -- `[data-reports-hub] table` is the probe target for every table view')
+assert.match(sheetCode, /text-\[length:var\(--ui-size-body,12px\)\]/, 'and the receipt wrapper spends it too -- the probe target for receipt style')
+
 const km = ruleBody(css, 'body.lang-km [data-reports-hub],\nbody.lang-km [data-reports-fold]')
 const boost = km.match(/--ui-km-boost:\s*([\d.]+);/)
 assert.ok(boost, 'the Khmer block raises the boost')
