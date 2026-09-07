@@ -25,7 +25,6 @@ import {
   createProductsSessionRow,
   emptyCreateProductsHeader,
   isCreateProductsHeaderDirty,
-  openingStockRequest,
   summarizeCreateProductsSession,
   type CreateProductsHeader,
   type CreateProductsSessionRow,
@@ -128,50 +127,11 @@ runTest('quantities are floored non-negative -- junk never becomes stock', () =>
 })
 
 // ---------------------------------------------------------------------------
-// 4. the opening stock rides the SAME kernel, under one session id
+// 4. the opening stock rides the SAME writer as every other stock-in session
+//    (POST /api/inventory/sessions -- pinned below in the wire tests). The
+//    per-line receiveBatchStock helper that used to live here was removed as
+//    zombie code on 2026-09-06: nothing in src had called it since S4-15.
 // ---------------------------------------------------------------------------
-
-runTest('opening stock is one receiveBatchStock call carrying the session id', () => {
-  const request = openingStockRequest(row(), header, 1725400000000, '2026-09-04')
-  assert.deepEqual(request, {
-    productId: 1, branchId: 2, quantity: 3,
-    receivedDate: '2026-09-04', expiryDate: null,
-    supplierId: 7, supplierName: 'Sok Trading',
-    unitCostUsd: 2.5, sessionId: 1725400000000,
-  })
-})
-
-runTest('a zero-quantity item posts no receipt at all', () => {
-  assert.equal(openingStockRequest(row({ quantity: 0 }), header, 1, '2026-09-04'), null)
-  assert.equal(openingStockRequest(row({ branchId: '' }), header, 1, '2026-09-04'), null)
-  assert.equal(openingStockRequest(row({ productId: 0 }), header, 1, '2026-09-04'), null)
-})
-
-runTest('a name-only supplier stays name-only -- it is never auto-created', () => {
-  const nameOnly: CreateProductsHeader = { brand: '', supplierId: null, supplierName: 'Walk-in wholesaler', branchId: '2' }
-  const request = openingStockRequest(row({ supplierName: 'Walk-in wholesaler' }), nameOnly, 5, '2026-09-04')
-  assert.equal(request?.supplierId, null)
-  assert.equal(request?.supplierName, 'Walk-in wholesaler')
-  // No supplier at all sends null rather than an empty string.
-  assert.equal(
-    openingStockRequest(row({ supplierName: '' }), emptyCreateProductsHeader('2'), 5, '2026-09-04')?.supplierName,
-    null,
-  )
-})
-
-runTest('an item that overrode the supplier never rides the header contact id', () => {
-  // The header linked a supplier CONTACT (id 7). One item was typed against
-  // a different name -- re-labelling contact 7 with it would corrupt a real
-  // supplier's lot history, so that lot goes out name-only instead.
-  const overridden = openingStockRequest(row({ supplierName: 'Other Co' }), header, 5, '2026-09-04')
-  assert.equal(overridden?.supplierId, null)
-  assert.equal(overridden?.supplierName, 'Other Co')
-  // The ordinary path -- the row still carries the header's supplier -- keeps
-  // the contact link, case and padding notwithstanding.
-  const kept = openingStockRequest(row({ supplierName: '  sok trading ' }), header, 5, '2026-09-04')
-  assert.equal(kept?.supplierId, 7)
-  assert.equal(kept?.supplierName, 'sok trading')
-})
 
 // ---------------------------------------------------------------------------
 // 5. the session record's own columns
@@ -220,6 +180,13 @@ runTest('money rounds to cents rather than accumulating float dust', () => {
 // ---------------------------------------------------------------------------
 
 const modalSource = readFileSync(new URL('../src/components/products/CreateProductsSessionModal.tsx', import.meta.url), 'utf8')
+const utilsSource = readFileSync(new URL('../src/utils/createProductsSession.ts', import.meta.url), 'utf8')
+
+runTest('the per-line receipt helper is gone -- one writer, no parallel path', () => {
+  assert.doesNotMatch(utilsSource, /openingStockRequest/)
+  assert.doesNotMatch(modalSource, /openingStockRequest|receiveBatchStock/)
+})
+
 const productsSource = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const productFormSource = readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
 const fastStockInSource = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
@@ -400,12 +367,17 @@ runTest('full-access zero-stock New queues in the atomic session while Review ke
   assert.doesNotMatch(modalSource, /Bounded NON-ATOMIC exception/)
 })
 
-runTest('catalog-only session lines omit receipt and AP fields and accept nullable receipt ids', () => {
+runTest('catalog-only session lines omit receipt and AP fields, keep the supplier, and accept nullable receipt ids', () => {
   const zeroWire = modalSource.slice(modalSource.indexOf("if (line.kind === 'create_receive' && Number(line.quantity) === 0)"), modalSource.indexOf('const common ='))
   assert.match(zeroWire, /quantity: 0/)
   assert.match(zeroWire, /received_date: line\.receivedDate/)
   assert.match(zeroWire, /product: line\.product \|\| \{\}/)
-  assert.doesNotMatch(zeroWire, /batch_id|supplier_id|supplier_name|expiry_date|notes|unit_cost_usd|payment_status|credit_due_date/)
+  assert.doesNotMatch(zeroWire, /batch_id|expiry_date|notes|unit_cost_usd|payment_status|credit_due_date/)
+  // N29: the supplier is attribution, not a receipt field -- it rides the zero
+  // line so Stock-in Sessions can show who an all-zero create session came
+  // from, under the same lock rule a received line uses.
+  assert.match(zeroWire, /supplier_id: line\.supplierLocked \|\| line\.supplierId == null \? null : Number\(line\.supplierId\)/)
+  assert.match(zeroWire, /supplier_name: line\.supplierLocked \? null : \(line\.supplierName \|\| null\)/)
   assert.match(inventoryWriteTransportSource, /batchId: number \| null/)
   assert.match(inventoryWriteTransportSource, /movementId: number \| null/)
 })

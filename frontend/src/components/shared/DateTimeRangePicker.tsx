@@ -107,8 +107,10 @@ function displayDate(iso: string): string {
 // batch and stock-adjust dates. Same 1970-2999 window as before.
 
 // The 24-hour time reader moved to utils/dateEntry.ts as normalizeTimeEntry,
-// so this row and the shift date+time fields read "930" the same way. Same
-// behaviour: '' clears, null means unreadable so the caller snaps back.
+// so this row and the shift date+time fields read "930" the same way. It
+// returns { value, minutes }, and reports empty text and unreadable text the
+// same way (value === null), so the empty case is separated here on the raw
+// text: a blank box clears the bound, anything else unreadable snaps back.
 
 function todayIso(): string {
   return statsPresetRange('today').startDate
@@ -230,7 +232,8 @@ export default function DateTimeRangePicker({
   }
 
   const commitTime = (which: 'start' | 'end', raw: string) => {
-    const norm = normalizeTimeEntry(raw)
+    const text = String(raw ?? '').trim()
+    const norm = text ? normalizeTimeEntry(text).value : ''
     if (norm === null) {
       // Unparseable -- snap the field back to the stored value.
       if (which === 'start') setStartTimeText(value.startTime)

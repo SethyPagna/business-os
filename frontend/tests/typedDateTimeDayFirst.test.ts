@@ -94,27 +94,30 @@ await runTest('the shared time reader is 24-hour and takes keypad runs', () => {
   // Same loose forms DateTimeRangePicker's row has always accepted -- this is
   // that function, moved rather than reimplemented, so the range row and the
   // shift fields cannot drift into two different clocks.
-  assert.equal(normalizeTimeEntry('14:30'), '14:30')
-  assert.equal(normalizeTimeEntry('1430'), '14:30')
-  assert.equal(normalizeTimeEntry('930'), '09:30')
-  assert.equal(normalizeTimeEntry('9'), '09:00')
-  assert.equal(normalizeTimeEntry('9:5'), '09:05')
-  assert.equal(normalizeTimeEntry('23:59'), '23:59')
-  assert.equal(normalizeTimeEntry('00:00'), '00:00')
-  // Empty clears; unreadable returns null so the caller can snap back rather
-  // than store garbage.
-  assert.equal(normalizeTimeEntry(''), '')
-  assert.equal(normalizeTimeEntry('24:00'), null)
-  assert.equal(normalizeTimeEntry('12:60'), null)
-  assert.equal(normalizeTimeEntry('2:30pm'), null)
+  assert.equal(normalizeTimeEntry('14:30').value, '14:30')
+  assert.equal(normalizeTimeEntry('1430').value, '14:30')
+  assert.equal(normalizeTimeEntry('930').value, '09:30')
+  assert.equal(normalizeTimeEntry('9').value, '09:00')
+  assert.equal(normalizeTimeEntry('9:5').value, '09:05')
+  assert.equal(normalizeTimeEntry('23:59').value, '23:59')
+  assert.equal(normalizeTimeEntry('00:00').value, '00:00')
+  // Empty and unreadable both come back with a null value, so a caller that
+  // must tell a real clear from garbage separates them on the raw text (see
+  // DateTimeRangePicker.commitTime); what matters here is that neither one
+  // ever produces a guessed clock.
+  assert.equal(normalizeTimeEntry('').value, null)
+  assert.equal(normalizeTimeEntry('24:00').value, null)
+  assert.equal(normalizeTimeEntry('12:60').value, null)
+  assert.equal(normalizeTimeEntry('2:30pm').value, null)
 })
 
 await runTest('14:30 is never rendered back as a 12-hour time', () => {
   // The defect a native field carries: en-US renders 14:30 as "02:30 PM", and
   // an operator reading that beside a 24-hour sales row has no way to tell the
   // two apart at 02:30. The kernel has no am/pm branch at all.
-  assert.equal(normalizeTimeEntry('14:30'), '14:30')
-  assert.notEqual(normalizeTimeEntry('14:30'), '02:30')
+  assert.equal(normalizeTimeEntry('14:30').value, '14:30')
+  assert.notEqual(normalizeTimeEntry('14:30').value, '02:30')
+  assert.equal(normalizeTimeEntry('14:30').minutes, 14 * 60 + 30)
 })
 
 // ---------------------------------------------------------------------------
@@ -193,17 +196,37 @@ await runTest('the composed field hands its translator to the date half', () => 
   // verify:i18n cannot see this: the keys exist in both packs and the literals
   // are legitimate fallbacks for the callers that pass no `t` at all. Only the
   // wiring is wrong, so only a wiring assertion catches it.
-  const HAS_T = /<DateEntryInput[^>]*\st=\{t\}/
+  // The matcher reads the WHOLE tag, lazily to its `/>`, and asks whether the
+  // translator is anywhere inside it. An earlier version ran `[^>]*` between
+  // the tag name and `t={t}` and silently reported every multi-prop field as a
+  // violation: `onChange={(iso) => ...}` contains a '>', so the class stopped
+  // at the arrow long before reaching the prop it was looking for.
+  const TAG = /<DateEntryInput(?![A-Za-z])[\s\S]*?\/>/
+  const hasTranslator = (source: string): boolean => {
+    const tag = TAG.exec(source)
+    return tag ? /\st=\{t\}/.test(tag[0]) : false
+  }
   // Positive control first: an assertion that cannot report a negative is not
   // an assertion. The first string is the exact shape the bug had.
-  assert.doesNotMatch(
-    '<DateEntryInput id={id} value={date} onChange={(iso) => setDate(iso)} />', HAS_T,
+  assert.equal(
+    hasTranslator('<DateEntryInput id={id} value={date} onChange={(iso) => setDate(iso)} />'), false,
     'the matcher must fail on a tag written WITHOUT the translator',
   )
-  assert.match('<DateEntryInput t={t} id={id} value={date} />', HAS_T, 'the matcher must pass a tag that has it')
+  assert.equal(hasTranslator('<DateEntryInput t={t} id={id} value={date} />'), true, 'the matcher must pass a tag that has it')
+  // ...including when the translator sits after a prop holding an arrow, which
+  // is how every real call site is written.
+  assert.equal(
+    hasTranslator('<DateEntryInput id={id} onChange={(iso) => apply(iso)}\n  t={t}\n/>'), true,
+    'a \'>\' inside an arrow prop must not hide a translator that follows it',
+  )
 
-  const composed = fs.readFileSync(path.join(srcDir, 'components', 'shared', 'DateTimeEntryInput.tsx'), 'utf8')
-  assert.match(composed, HAS_T, 'DateTimeEntryInput must pass its `t` down to the DateEntryInput it composes')
+  // DateTimeEntryInput ships inside DateEntryInput.tsx -- the shift-datetime
+  // lane put the date field and the composed date+time field in one file. The
+  // assertion follows the code, not the path the component used to live at.
+  const composed = fs.readFileSync(path.join(srcDir, 'components', 'shared', 'DateEntryInput.tsx'), 'utf8')
+  assert.ok(/export function DateTimeEntryInput/.test(composed), 'the composed date+time field lives in DateEntryInput.tsx')
+  const inner = composed.slice(composed.indexOf('export function DateTimeEntryInput'))
+  assert.equal(hasTranslator(inner), true, 'DateTimeEntryInput must pass its `t` down to the DateEntryInput it composes')
 })
 
 await runTest('no typed date field is rendered without a translator', () => {
@@ -215,7 +238,11 @@ await runTest('no typed date field is rendered without a translator', () => {
   const offenders: string[] = []
   let seen = 0
   for (const file of walk(srcDir)) {
-    const source = fs.readFileSync(file, 'utf8')
+    // Comments are blanked first, line numbers intact. These files argue about
+    // the fields at length and quote their own markup while doing it -- a
+    // {/* ... <DateEntryInput> ... */} block in CreateProductsSessionModal was
+    // reported as a call site with no translator, which is prose, not a defect.
+    const source = stripComments(fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n'))
     const rel = path.relative(srcDir, file).replace(/\\/g, '/')
     for (const pattern of TAGS) {
       const re = new RegExp(pattern.source, 'g')
@@ -228,10 +255,26 @@ await runTest('no typed date field is rendered without a translator', () => {
       }
     }
   }
-  // Guards the sweep itself: a walk that found nothing would report clean.
+  // Guards the sweep itself, twice over: a walk that found nothing -- or a
+  // comment-blanker that swallowed real code with the prose -- would report
+  // clean. The control proves the blanked source still holds live tags.
   assert.ok(seen >= 30, `expected the app's typed date fields to be found, saw ${seen}`)
+  assert.deepEqual(
+    strippedTagCount('{/* a <DateEntryInput /> we only talk about */}\n<DateEntryInput t={t} />'), 1,
+    'the sweep must count the live tag and not the one inside a comment',
+  )
   assert.deepEqual(offenders, [], 'every typed date field must be given a translator (`t={...}`)')
 })
+
+function strippedTagCount(source: string): number {
+  const clean = stripComments(source.replace(/\r\n/g, '\n'))
+  let count = 0
+  for (const pattern of [/<DateEntryInput(?![A-Za-z])[\s\S]*?\/>/, /<DateTimeEntryInput(?![A-Za-z])[\s\S]*?\/>/]) {
+    const re = new RegExp(pattern.source, 'g')
+    while (re.exec(clean)) count += 1
+  }
+  return count
+}
 
 await runTest('the time reader has exactly one implementation', () => {
   // DateTimeRangePicker owned a private copy. Two copies of a clock is how the

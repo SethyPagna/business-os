@@ -225,3 +225,43 @@ export function saleListRevenueUsd(rows: readonly SaleRevenueRow[]): number {
   }
   return round2(total)
 }
+
+/**
+ * `awaitingExpr`: a sale the customer has taken away and not yet paid for.
+ *
+ * ONE WORD (owner, Sep 6 2026): this cohort is called **credit** everywhere a
+ * user can read it -- not "unpaid", "not paid", "pending" or "awaiting
+ * payment", which were four names for this one predicate.
+ */
+export function isCreditSale(sale: SaleRevenueRow): boolean {
+  return saleStatus(sale) === 'awaiting_payment'
+}
+
+/**
+ * The credit annotation beside the footer's revenue: `SUM over credit rows of
+ * netSaleExpr`, the client mirror of the kernel's `pending_revenue_usd`
+ * (cloudflare/src/lib/salesAnalytics.ts).
+ *
+ * Two properties it must keep, both of them owner rules:
+ *
+ *  * POSITIVE, ALWAYS. netSaleExpr floors each row at 0, so the sum cannot go
+ *    negative and the surface has nothing to clamp. "instead of $-n... just
+ *    $n" is enforced here rather than at every place that formats it.
+ *  * A SUBSET, NOT A COMPLEMENT. These same rows are already inside
+ *    `saleListRevenueUsd` (isRevenueCountedSale excludes only cancelled).
+ *    Nothing may add this to a revenue or subtract it from one; it says how
+ *    much of the revenue already shown is still owed.
+ *
+ * No refund term, matching the kernel: `pending_revenue_usd` is netSaleExpr
+ * alone, so the header's credit and the kernel's credit stay byte-identical.
+ * cloudflare/scripts/test-credit-in-revenue-pure.cjs asserts that equality
+ * against a real SQLite fixture.
+ */
+export function saleListCreditUsd(rows: readonly SaleRevenueRow[]): number {
+  let total = 0
+  for (const sale of rows || []) {
+    if (!isCreditSale(sale)) continue
+    total += saleNetSalesUsd(sale)
+  }
+  return round2(total)
+}

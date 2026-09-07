@@ -263,68 +263,192 @@ export function applyDateEntryMask(raw: string, options?: { deleting?: boolean; 
   return `${day}/${month}/${digits.slice(4)}`
 }
 
+// ---------------------------------------------------------------------------
+// The TIME half of the same kernel.
+//
+// A shift is amended and closed at a date AND a wall-clock minute, and until
+// Sep 6 2026 those three fields were the app's last native
+// <input type="datetime-local"> -- the very control DateEntryInput.tsx exists
+// to replace. The native control rejects the keypad run this project's staff
+// actually type ('9032026'), and it renders the date part in the DEVICE
+// locale, so a phone set to en-US silently swaps day and month on a
+// historical shift close that a cashier cannot skip.
+//
+// So the time is typed as bare digits too, on the same terms as the date:
+// '930' is 09:30, '1430' is 14:30, '9' is 09:00. 24-hour throughout -- the
+// app's stated convention, and the one reading that has no am/pm to lose.
+//
+// Timezone safety is inherited: nothing here constructs a Date either. The
+// pair is joined as the plain local string 'YYYY-MM-DDTHH:mm', which is the
+// exact shape shiftTransport.shiftLocalDateTimeToIso already consumes and
+// stamps with the shop's +07:00 offset, so the one place that decides what a
+// typed wall clock MEANS is still that function and not this one.
+// ---------------------------------------------------------------------------
+
+export interface TimeEntryResult {
+  /** Display and storage form, 'HH:mm' (24-hour). null when empty or unreadable. */
+  value: string | null
+  /** Minutes since midnight, 0-1439. null when empty or unreadable. */
+  minutes: number | null
+}
+
+const EMPTY_TIME: TimeEntryResult = { value: null, minutes: null }
+
+function timeCandidate(hour: number, minute: number): TimeEntryResult {
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return EMPTY_TIME
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return EMPTY_TIME
+  return { value: `${pad2(hour)}:${pad2(minute)}`, minutes: hour * 60 + minute }
+}
+
 /**
- * Loosely typed 24-hour time -> 'HH:MM'.
+ * Turn typed text into 'HH:mm' + minutes-since-midnight.
  *
- * Accepts what staff actually type on a keypad -- '14:30', '1430', '930',
- * '9', '9:5' -- and returns '' for empty (a real clear) or null when the text
- * cannot be read, so the caller can snap the field back to its stored value
- * rather than store garbage.
+ * Accepted (24-hour, never am/pm):
+ *   '9' / '09' -> 09:00        a bare hour means the hour
+ *   '930' -> 09:30             3 digits are H MM
+ *   '1430' / '0930' -> HH MM
+ *   '9:30', '9.30', '9h30', '14 30'  -- one separator alphabet, like the date
+ *   '14:30:00' / '143000'      a seconds group is dropped, not rejected
  *
- * There is no am/pm branch and there never should be. This lived privately
- * inside DateTimeRangePicker, which dropped `<input type="time">` because the
- * native field renders 12-hour AM/PM under the pinned en-US locale; the shift
- * fields need exactly the same reading, and a second copy of a clock is how
- * two rows of the same screen end up disagreeing about what '930' means.
+ * Rejected (returns nulls, so the caller shows an error rather than storing
+ * a guess): hour 24+, minute 60+, letters, and any digit run that is not one
+ * of the lengths above. There is deliberately NO 12-hour reading: '0130'
+ * means half past one in the morning, and a parser that also accepted
+ * '1:30pm' would make the same four keystrokes mean two different minutes.
  */
-export function normalizeTimeEntry(raw: string): string | null {
+export function normalizeTimeEntry(raw: string): TimeEntryResult {
   const text = String(raw ?? '').trim()
-  if (!text) return ''
-  let hour: number
-  let minute: number
-  const colon = /^(\d{1,2}):(\d{1,2})$/.exec(text)
-  if (colon) {
-    hour = Number(colon[1])
-    minute = Number(colon[2])
-  } else if (/^\d{3,4}$/.test(text)) {
-    const padded = text.padStart(4, '0')
-    hour = Number(padded.slice(0, 2))
-    minute = Number(padded.slice(2))
-  } else if (/^\d{1,2}$/.test(text)) {
-    hour = Number(text)
-    minute = 0
-  } else {
-    return null
+  if (!text) return EMPTY_TIME
+  // Same separator alphabet as the date half, plus 'h' for '9h30'.
+  const unified = text.replace(/[:.\-\s_hH]+/g, ':').replace(/^:+|:+$/g, '')
+  if (!unified || !/^[0-9:]+$/.test(unified)) return EMPTY_TIME
+
+  if (unified.includes(':')) {
+    // The operator (or the as-you-type mask) put the separator in, so honour
+    // the grouping literally rather than re-cutting the digits.
+    const parts = unified.split(':')
+    if (parts.length === 3 && /^\d{1,2}$/.test(parts[2])) parts.pop()
+    if (parts.length !== 2) return EMPTY_TIME
+    const [hour, minute] = parts
+    if (!/^\d{1,2}$/.test(hour) || !/^\d{1,2}$/.test(minute)) return EMPTY_TIME
+    return timeCandidate(Number(hour), Number(minute))
   }
-  if (hour > 23 || minute > 59) return null
-  return `${pad2(hour)}:${pad2(minute)}`
+
+  switch (unified.length) {
+    case 1:
+    case 2:
+      return timeCandidate(Number(unified), 0)
+    case 3:
+      return timeCandidate(Number(unified.slice(0, 1)), Number(unified.slice(1, 3)))
+    case 4:
+    case 6:
+      // 6 digits are HHMMSS; the seconds are dropped for the same reason the
+      // date half drops a trailing time -- pasted exports carry them.
+      return timeCandidate(Number(unified.slice(0, 2)), Number(unified.slice(2, 4)))
+    default:
+      return EMPTY_TIME
+  }
 }
 
 /**
- * Split the stored local-datetime shape 'YYYY-MM-DDTHH:mm' into the two halves
- * DateTimeEntryInput edits. Seconds are tolerated on the way in (some server
- * rows carry them) and dropped, because the field shows HH:mm.
+ * As-you-type mask for the time half.
  *
- * String surgery only -- never `new Date(value)`, which would re-interpret the
- * string in the device's zone and can move the day west of UTC.
+ * It inserts the colon only where it cannot be wrong: after a 2-digit group
+ * that is a real HOUR (00-23). A run whose first two digits are not an hour
+ * ('93' on the way to '930') is left exactly as typed and normalised on
+ * Enter/blur instead -- the same contract applyDateEntryMask keeps, so a
+ * keypad run never fights the typist.
+ *
+ * `deleting` suppresses the trailing colon so backspacing over one is not
+ * instantly undone.
  */
-export function splitLocalDateTime(value: string | null | undefined): { date: string; time: string } {
-  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::\d{2})?/.exec(String(value ?? '').trim())
-  if (!match) return { date: '', time: '' }
-  return { date: match[1], time: `${match[2]}:${match[3]}` }
+export function applyTimeEntryMask(raw: string, options?: { deleting?: boolean }): string {
+  const digits = String(raw ?? '').replace(/\D/g, '').slice(0, 4)
+  if (!digits) return ''
+  const hour = digits.slice(0, 2)
+  const hourComplete = hour.length === 2 && Number(hour) <= 23
+  if (!hourComplete) return digits
+  if (digits.length <= 2) return options?.deleting ? hour : `${hour}:`
+  return `${hour}:${digits.slice(2)}`
+}
+
+/** The local wall-clock pair the shift transport consumes: 'YYYY-MM-DDTHH:mm'. */
+const LOCAL_DATE_TIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/
+
+/**
+ * Split a stored 'YYYY-MM-DDTHH:mm' into its two typed halves. Anything else
+ * -- including a half-entered value -- splits to two empty strings, so a
+ * caller never renders a fragment it cannot round-trip.
+ */
+export function splitLocalDateTime(local: string | null | undefined): { date: string; time: string } {
+  const match = LOCAL_DATE_TIME.exec(String(local ?? '').trim())
+  return match ? { date: match[1], time: match[2] } : { date: '', time: '' }
 }
 
 /**
- * The inverse: an ISO date and an 'HH:MM' back into 'YYYY-MM-DDTHH:mm'.
+ * Join an ISO date and a typed time back into 'YYYY-MM-DDTHH:mm'.
  *
- * Returns '' unless BOTH halves are present. Defaulting a missing time to
- * midnight would write a shift boundary the operator never chose -- silently,
- * and into a row that decides a day's cash reconciliation. Empty keeps the
- * existing loud refusal (api/shiftTransport.ts's shiftLocalDateTimeToIso).
+ * Returns '' unless BOTH halves are real. A date with no time must never
+ * default to midnight: on the shift close form that would silently invent a
+ * closing minute the cashier never entered, which is the one thing
+ * shift_close_time_hint promises the app does not do.
  */
-export function joinLocalDateTime(date: string | null | undefined, time: string | null | undefined): string {
-  const iso = String(date ?? '').trim()
-  const clock = String(time ?? '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || !/^\d{2}:\d{2}$/.test(clock)) return ''
-  return `${iso}T${clock}`
+export function joinLocalDateTime(isoDate: string | null | undefined, time: string | null | undefined): string {
+  const date = String(isoDate ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return ''
+  const parsed = normalizeTimeEntry(String(time ?? ''))
+  return parsed.value ? `${date}T${parsed.value}` : ''
+}
+
+/** The two halves of a typed pair, plus whether either is showing text it could not read. */
+export interface LocalDateTimePair {
+  date: string
+  time: string
+  /** True while the date half holds text that did not normalise. */
+  dateUnreadable?: boolean
+  /** True while the time half holds text that did not normalise. */
+  timeUnreadable?: boolean
+}
+
+/**
+ * What a date+time pair may publish upward: 'YYYY-MM-DDTHH:mm', or ''.
+ *
+ * joinLocalDateTime alone answers "are both halves PRESENT". That is not the
+ * whole question for a typed field, because a typed field deliberately keeps
+ * its last committed value while the operator's unreadable text sits on
+ * screen (DateEntryInput never clears what was typed). On a filter box that
+ * is right. On the shift close it is not: a cashier retyping a wrong day and
+ * stopping halfway would leave the OLD timestamp stored, the Save button
+ * live, and the drawer would close at a minute printed nowhere on the
+ * screen -- which is the same class of silent wrong timestamp the native
+ * datetime-local control was removed for.
+ *
+ * So an unreadable half WITHDRAWS the pair. The half keeps its text (the
+ * operator has to see it to fix it) and the owning form's blocker row says
+ * what is missing.
+ */
+export function localDateTimePairValue(pair: LocalDateTimePair): string {
+  if (pair.dateUnreadable || pair.timeUnreadable) return ''
+  return joinLocalDateTime(pair.date, pair.time)
+}
+
+/**
+ * The display text DateEntryInput shows for a stored value.
+ *
+ * The field's contract is ISO 'YYYY-MM-DD' in and ISO out; a legacy
+ * slash-form string is tolerated on the way in by running it through the
+ * same reader Enter uses. Anything neither shape is handed back untouched --
+ * the field then shows it as the unreadable text it is rather than guessing.
+ *
+ * It lives here rather than inside the component because the display rule
+ * and the commit rule are one rule, and a second copy of it inside the
+ * component is how the two drift apart.
+ */
+export function dateEntryDisplayValue(value: string | null | undefined, today?: Date): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const iso = isoToDisplayDate(raw)
+  if (iso) return iso
+  const parsed = normalizeDateEntry(raw, today)
+  return parsed.value || raw
 }

@@ -21,8 +21,6 @@
 -- kind or its history.  Revert application code if necessary; the new rows
 -- remain readable and the canonical sales columns remain authoritative.
 
-BEGIN;
-
 DROP TRIGGER IF EXISTS sale_amendments_append_only_update;
 DROP TRIGGER IF EXISTS sale_amendments_append_only_delete;
 DROP TRIGGER IF EXISTS sale_revision_sale_amendments_insert;
@@ -122,5 +120,3 @@ BEGIN
   INSERT INTO sale_write_revisions(sale_id, revision) SELECT OLD.sale_id, 1 WHERE OLD.sale_id IS NOT NULL
   ON CONFLICT(sale_id) DO UPDATE SET revision = revision + 1;
 END;
-
-COMMIT;
