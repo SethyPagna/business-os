@@ -5902,7 +5902,7 @@
   "portal_legal_kind_local": "Local storage",
   "portal_legal_kind_both": "Local and session storage",
   "portal_legal_store_session_p": "Keeps you signed in. Set only when you sign in, cannot be read by scripts, and is limited to this site.",
-  "portal_legal_store_session_l": "Until you sign out or it expires",
+  "portal_legal_store_session_l": "About 13 months, pushed back each time you visit. Signing out deletes it.",
   "portal_legal_store_googtrans_p": "Remembers the external translation language. Written only if you choose one of those languages.",
   "portal_legal_store_googtrans_l": "Until you return to the original language",
   "portal_legal_store_bucket_p": "Your list of products, so it survives a page reload.",

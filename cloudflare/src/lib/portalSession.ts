@@ -13,13 +13,27 @@ import type { Env } from '../index'
 // origin (leangbeauty.com) is never sent to admin.leangbeauty.com.
 
 const PORTAL_COOKIE_NAME = 'bos_portal'
-// Storefront accounts exist to REMEMBER a customer (their cart + wishlist),
-// so the session is long-lived by design ("permanent memory"). 10 years is
-// indistinguishable from "always"; the cookie itself is capped below.
-const PORTAL_SESSION_MS = 10 * 365 * 24 * 60 * 60 * 1000
 // RFC 6265bis cookie Expires ceiling (Hono throws past ~400 days) — same cap
 // lib/auth.ts uses.
 const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
+// Storefront accounts exist to REMEMBER a customer (their cart + wishlist),
+// so the session is long-lived by design ("permanent memory"). That memory
+// comes from SLIDING an active session forward, not from one enormous TTL:
+// the row expires exactly when the cookie the browser holds does, and every
+// visit past the halfway mark pushes both out again.
+//
+// It used to be ten years, which broke this twice over (N45). The row sat in
+// portal_sessions with the visitor's last_ip and user-agent for a decade,
+// unreachable by the retention sweep, which deletes a row once its expires_at
+// is in the past -- so "expired sessions are deleted automatically" in the
+// privacy policy was not true of the ones that mattered. And because
+// slidePortalSession() computes the next expiry as min(now + ttl, now +
+// MAX_COOKIE_AGE_MS), a ten-year ttl made every candidate expiry EARLIER
+// than the stored one, so the slide returned without doing anything and the
+// cookie was never re-issued: a customer who visited daily was still signed
+// out at 399 days. Matching the two ceilings fixes the retention hole and
+// turns the sliding back on.
+const PORTAL_SESSION_MS = MAX_COOKIE_AGE_MS
 const SLIDE_AFTER_FRACTION = 0.5
 
 async function hashToken(token: string): Promise<string> {
@@ -144,14 +158,17 @@ export async function revokePortalSession<E extends { Bindings: Env } = { Bindin
   const token = getCookie(c, PORTAL_COOKIE_NAME)
   if (!token) return
   const tokenHash = await hashToken(token)
-  await getDb(c.env).prepare('UPDATE portal_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?').run([tokenHash])
+  // Signing out drops the device details with the session. They were kept to
+  // show a live session in a device list; a revoked session has nothing to
+  // show, and the row lingers until the retention sweep next runs.
+  await getDb(c.env).prepare('UPDATE portal_sessions SET revoked_at = CURRENT_TIMESTAMP, last_ip = NULL, user_agent = NULL WHERE token_hash = ?').run([tokenHash])
 }
 
 // Kill every live session for an account — used after a password reset so a
 // stolen/forgotten password can't keep a session alive elsewhere.
 export async function revokePortalSessionsForAccount(env: Env, accountId: number): Promise<void> {
   await getDb(env).prepare(
-    'UPDATE portal_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE account_id = @account_id AND revoked_at IS NULL',
+    'UPDATE portal_sessions SET revoked_at = CURRENT_TIMESTAMP, last_ip = NULL, user_agent = NULL WHERE account_id = @account_id AND revoked_at IS NULL',
   ).run({ account_id: accountId })
 }
 
