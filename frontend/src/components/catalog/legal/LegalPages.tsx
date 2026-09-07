@@ -368,7 +368,9 @@ function LegalReader({
     closeRef.current?.focus()
     const dialog = dialogRef.current
     const previousOverflow = document.body.style.overflow
+    const previousDocumentOverflow = document.documentElement.style.overflow
     document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
 
     // The reader is rendered beside the catalogue landmarks, rather than
     // inside them. Marking those landmarks inert keeps pointer and keyboard
@@ -408,6 +410,7 @@ function LegalReader({
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
+      document.documentElement.style.overflow = previousDocumentOverflow
       background.forEach((element, index) => {
         if (!previouslyInert[index]) element.removeAttribute('inert')
       })
