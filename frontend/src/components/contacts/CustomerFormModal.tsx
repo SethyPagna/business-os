@@ -12,6 +12,7 @@ import type { ContactOption } from './contactOptionUtils'
 import { CUSTOMER_MEMBERSHIP_PLACEHOLDER } from './customerMembershipNumber'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
+import { createSeparateContactDecision, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 
@@ -41,7 +42,8 @@ interface CustomerFormState extends CustomerRecord {
 
 interface CustomerFormModalProps {
   customer?: CustomerRecord | null
-  onSave: (payload: CustomerFormState & { address: string | null; confirmDuplicate?: boolean }) => void | Promise<void>
+  onSave: (payload: CustomerFormState & { address: string | null; duplicateDecision?: ContactDuplicateDecision }) => unknown | Promise<unknown>
+  onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   t?: TranslateFn
 }
@@ -109,7 +111,7 @@ function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEdi
   )
 }
 
-export default function CustomerFormModal({ customer, onSave, onClose, t }: CustomerFormModalProps) {
+export default function CustomerFormModal({ customer, onSave, onUseExisting, onClose, t }: CustomerFormModalProps) {
   const initial = customer
     ? {
       ...customer,
@@ -133,17 +135,26 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
   // Part 563: the review dialog is open (handleSubmit validated + opened it;
   // commitCustomer calls onSave on confirm).
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const duplicateMatches = useContactDuplicateFlag('customers', form.name, form.phone, customer?.id)
+  const [serverDuplicateCheck, setServerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const [pendingDuplicateCheck, setPendingDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const duplicateCheck = useContactDuplicateFlag('customers', form.name, [form.phone, ...options.map((option) => option.phone)], customer?.id)
+  const activeDuplicateCheck = serverDuplicateCheck || duplicateCheck
+  const duplicateMatches = activeDuplicateCheck.matches
   const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
+  const pendingExactMatch = pendingDuplicateCheck?.matches.find((match) => match.severity === 'exact_match')
   const membershipNumberReadOnly = !customer || Boolean(String(customer.membership_number || '').trim())
 
-  const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => setForm((current) => ({ ...current, [key]: value }))
-  const addOption = () => setOptions((current) => {
-    if (current.length >= CONTACT_OPTION_LIMIT) return current
-    return [...current, createContactOption()]
-  })
-  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
-  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item)))
+  const clearServerDuplicateCheck = () => setServerDuplicateCheck(null)
+  const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => {
+    clearServerDuplicateCheck()
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+  const addOption = () => {
+    clearServerDuplicateCheck()
+    setOptions((current) => current.length >= CONTACT_OPTION_LIMIT ? current : [...current, createContactOption()])
+  }
+  const removeOption = (index: number) => { clearServerDuplicateCheck(); setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index)) }
+  const updateOption = (index: number, nextOption: ContactOption) => { clearServerDuplicateCheck(); setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item))) }
   // Part 563: validate, then open the review dialog. commitCustomer calls
   // onSave once confirmed. The old exact-duplicate window.confirm() is folded
   // INTO the review dialog (danger note when an exact match exists) so there is
@@ -169,6 +180,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       return
     }
     setLocalError('')
+    setPendingDuplicateCheck(exactMatch ? activeDuplicateCheck : null)
     setConfirmOpen(true)
   }
 
@@ -190,13 +202,19 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
     const membershipNumber = String(form.membership_number || '').trim()
     setSaving(true)
     try {
-      await Promise.resolve(onSave({
+      const duplicateDecision = pendingDuplicateCheck ? createSeparateContactDecision(pendingDuplicateCheck) : null
+      const result = await Promise.resolve(onSave({
         ...form,
         name,
         membership_number: membershipNumber.toUpperCase(),
         address: serializeContactOptions(options),
-        confirmDuplicate: !!exactMatch,
+        ...(duplicateDecision ? { duplicateDecision } : {}),
       }))
+      const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
+      if (nextCheck) {
+        setServerDuplicateCheck(nextCheck)
+        setLocalError(tr(t, 'contact_duplicate_review_changed', 'Review the current possible duplicate records before saving.'))
+      }
     } finally {
       setSaving(false)
     }
@@ -250,7 +268,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
           ) : null}
         </div>
 
-        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="customer" />
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="customer" onUseExisting={onUseExisting} t={t} />
 
         <div>
           <label htmlFor="customer-form-gender" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'gender', 'Gender')}</label>
@@ -323,9 +341,9 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
           title={customer ? tr(t, 'edit_customer', 'Edit Customer') : tr(t, 'add_customer', 'Add Customer')}
           message={String(form.name || '').trim()}
           items={buildCustomerReviewItems()}
-          note={exactMatch ? `"${exactMatch.name}" ${tr(t, 'customer_exact_duplicate_confirm', 'already has this exact name and phone number. Create a separate customer record anyway?')}` : undefined}
-          danger={!!exactMatch}
-          confirmLabel={customer ? tr(t, 'save', 'Save') : tr(t, 'add_customer', 'Add Customer')}
+          note={pendingExactMatch ? tr(t, 'contact_duplicate_possible_message', 'A contact already has this name and phone number. Use the existing record or create a separate one.') : undefined}
+          danger={!!pendingExactMatch}
+          confirmLabel={pendingExactMatch ? tr(t, 'contact_duplicate_create_separately', 'Create separately') : customer ? tr(t, 'save', 'Save') : tr(t, 'add_customer', 'Add Customer')}
           cancelLabel={tr(t, 'cancel', 'Cancel')}
           working={saving}
           workingLabel={tr(t, 'saving', 'Saving...')}
