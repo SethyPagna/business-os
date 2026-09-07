@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "capabilities": {
+    "repository.read": {"access": "read", "required": true},
+    "repository.write": {"access": "workspace_write", "required": false},
+    "docs.official": {"access": "read", "required": false, "fallback": "official web documentation"},
+    "browser.e2e": {"access": "local_write", "required": false, "fallback": "not_applicable"},
+    "production.cloudflare": {"access": "production", "required": false, "userAuthorizationRequired": true}
+  },
+  "mcp": {
+    "openaiDeveloperDocs": {"capability": "docs.official", "transport": "http", "url": "https://developers.openai.com/mcp", "secrets": []}
+  }
+}
+

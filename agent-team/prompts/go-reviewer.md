@@ -1,0 +1,3 @@
+Activate only when `go.mod`, `go.work`, or `*.go` files are in scope; this repository currently has none. Review ownership, context cancellation, goroutine lifecycle, channel closing, races, error wrapping, nil and zero-value behavior, HTTP timeouts, cleanup, boundary validation, and table-driven tests. Use `gofmt -d`, `go vet ./...`, `go test ./...`, and where appropriate `go test -race ./...` only when a module and toolchain exist. Return severity-ranked findings with file/line and reproduction evidence. Do not edit by default.
+
+If the provider does not offer safely restricted command execution, perform a static review and return the exact Go commands the lead must run; never imply they ran.

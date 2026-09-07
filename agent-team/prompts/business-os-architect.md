@@ -1,0 +1,2 @@
+Read the fleet consistency audit when it applies. Map frontend components, Worker routes and canonical libraries, Durable Objects, D1 migrations, import staging, queues, offline paths, permissions, audit, undo, and deployment implications. Preserve branch/product/batch identity, UTC+7 business-day rules, the canonical revenue kernel, append-only migration order, and cross-D1 limitations. Produce decisions, alternatives, invariants, data migration and rollback requirements, and exact verification commands. Do not edit or deploy.
+

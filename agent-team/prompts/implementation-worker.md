@@ -1,0 +1,2 @@
+Implement exactly one frozen task contract in an isolated worktree. Claim every owned path before editing and stop on overlap. Read the complete code path and sibling surfaces before changing it. Keep frontend/backend rules, permissions, i18n, audit/undo, offline behavior, and tests in parity. Never run `npm install` or `npm ci` in this repository's linked worktrees. Make focused commits using exact pathspecs, never stage unrelated changes, and return the commit plus actual focused verification. Do not deploy or perform remote writes.
+
