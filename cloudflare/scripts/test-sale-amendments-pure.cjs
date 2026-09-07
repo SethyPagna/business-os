@@ -114,6 +114,8 @@ const {
   planDeliveryFeeChange,
   guardDeliveryActualCostAmendment,
   planDeliveryActualCostChange,
+  guardDeliveryAddition,
+  planDeliveryAddition,
   recomputeSaleMoneyAfterAmendment,
   amendedSaleKeepsReceiptNumber,
   amendmentEntryStatement,
@@ -136,6 +138,10 @@ const MIGRATION_0115 = fs.readFileSync(
 )
 const MIGRATION_0129 = fs.readFileSync(
   path.join(__dirname, '..', 'migrations', '0129_sale_actual_delivery_cost_amendment.sql'),
+  'utf8',
+)
+const MIGRATION_0133 = fs.readFileSync(
+  path.join(__dirname, '..', 'migrations', '0133_sale_delivery_added_amendment.sql'),
   'utf8',
 )
 
@@ -166,6 +172,7 @@ function setup() {
       total_usd REAL, total_khr REAL, amount_paid_usd REAL DEFAULT 0, amount_paid_khr REAL DEFAULT 0,
       change_usd REAL DEFAULT 0, change_khr REAL DEFAULT 0, stock_skipped INTEGER DEFAULT 0,
       delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL,
+      delivery_contact_id INTEGER, delivery_contact_name TEXT, delivery_contact_phone TEXT, delivery_contact_address TEXT,
       created_at TEXT, updated_at TEXT);
     CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
@@ -173,6 +180,7 @@ function setup() {
   `)
   sqlite.exec(MIGRATION_0115)
   sqlite.exec(MIGRATION_0129)
+  sqlite.exec(MIGRATION_0133)
   const apply = (statements) => {
     const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))
     return run()
@@ -805,6 +813,82 @@ console.log('PASS 11b -- actual courier cost changes the reporting fields only, 
 }
 console.log('PASS 11c -- fee then courier cost accepts the current revision/token, rejects the stale revision, and keeps both records')
 
+// ---- 11d: one atomic conversion from counter sale to delivery -------------
+{
+  const { sqlite, apply } = setup()
+  const sale = seedSale(sqlite, {
+    is_delivery: 0,
+    delivery_fee_usd: 0,
+    delivery_actual_cost_usd: null,
+    total_usd: 6,
+    amount_paid_usd: 6,
+  })
+  assert.strictEqual(guardDeliveryAddition(sale).ok, true)
+  assert.strictEqual(guardDeliveryAddition({ ...sale, is_delivery: 1 }).ok, false)
+  const stamp = '2026-09-07T09:00:00.123Z'
+  const plan = planDeliveryAddition({
+    saleId: 77,
+    sale,
+    contact: { id: 9, name: 'Driver Dara', phone: '0123', address: 'Zone A' },
+    feeUsd: 2.5,
+    actualCostUsd: 4,
+    exchangeRate: 4000,
+    stamp,
+  })
+  const money = recomputeSaleMoneyAfterAmendment({
+    sale,
+    subtotalUsd: 6,
+    deliveryFeeUsdOverride: 2.5,
+    isDeliveryOverride: true,
+    deliveryFeePaidByOverride: 'customer',
+    exchangeRateOverride: 4000,
+  })
+  assert.strictEqual(money.totalUsd, 8.5, 'the customer fee enters the total exactly once')
+  assert.strictEqual(money.totalKhr, 34000)
+  assert.throws(() => planDeliveryAddition({ ...plan, saleId: 77, sale, contact: { id: 9, name: null, phone: null, address: null }, feeUsd: -1, actualCostUsd: null, exchangeRate: 4000, stamp }), /non-negative/)
+  assert.throws(() => planDeliveryAddition({ saleId: 77, sale, contact: { id: 9, name: null, phone: null, address: null }, feeUsd: 0, actualCostUsd: Number.NaN, exchangeRate: 4000, stamp }), /non-negative/)
+  apply([
+    ...plan.statements,
+    {
+      sql: 'UPDATE sales SET total_usd=@total,total_khr=@total_khr,updated_at=@stamp WHERE id=@id',
+      params: { id: 77, total: money.totalUsd, total_khr: money.totalKhr, stamp },
+    },
+    amendmentEntryStatement({
+      saleId: 77,
+      kind: 'delivery_added',
+      totalBeforeUsd: 6,
+      totalAfterUsd: money.totalUsd,
+      before: { ...plan.before, total_usd: 6, total_khr: null },
+      after: { ...plan.after, total_usd: money.totalUsd, total_khr: money.totalKhr },
+      userId: 2,
+      userName: 'cashier',
+    }),
+  ])
+  assert.deepStrictEqual(sqlite.prepare(`SELECT is_delivery,delivery_contact_id,delivery_contact_name,
+    delivery_contact_phone,delivery_contact_address,delivery_fee_usd,delivery_fee_khr,
+    delivery_fee_paid_by,delivery_actual_cost_usd,delivery_actual_cost_khr,total_usd,total_khr
+    FROM sales WHERE id=77`).get(), {
+    is_delivery: 1,
+    delivery_contact_id: 9,
+    delivery_contact_name: 'Driver Dara',
+    delivery_contact_phone: '0123',
+    delivery_contact_address: 'Zone A',
+    delivery_fee_usd: 2.5,
+    delivery_fee_khr: 10000,
+    delivery_fee_paid_by: 'customer',
+    delivery_actual_cost_usd: 4,
+    delivery_actual_cost_khr: 16000,
+    total_usd: 8.5,
+    total_khr: 34000,
+  })
+  const rows = sqlite.prepare('SELECT * FROM sale_amendments WHERE sale_id=77').all()
+  assert.strictEqual(rows.length, 1, 'one user action must be one immutable ledger row')
+  assert.strictEqual(rows[0].kind, 'delivery_added')
+  assert.strictEqual(JSON.parse(rows[0].after_json).delivery_contact_name, 'Driver Dara')
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n, 0)
+}
+console.log('PASS 11d -- a counter sale gains driver, customer fee and actual cost atomically with one record and no stock movement')
+
 // ---- 13: an oversell aborts the whole batch --------------------------------
 {
   const { sqlite, apply } = setup()
@@ -826,7 +910,7 @@ console.log('PASS 13 -- an oversell aborts the batch, nothing half-applies, no l
 // ---- 14: summarizeAmendments -----------------------------------------------
 {
   assert.deepStrictEqual([...AMENDMENT_KINDS], [
-    'line_added', 'line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'delivery_fee_changed', 'delivery_actual_cost_changed',
+    'line_added', 'line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'delivery_fee_changed', 'delivery_actual_cost_changed', 'delivery_added',
   ])
   assert.strictEqual(reversingKind('line_added'), 'line_removed')
   assert.strictEqual(reversingKind('line_removed'), 'line_added')

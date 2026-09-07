@@ -2149,6 +2149,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             }}
             t={t}
             fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
           />
         </Suspense>
       ) : null}

@@ -4,6 +4,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { searchProducts } from '../../api/methods.ts'
+import { getSaleDeliveryOptions } from '../../api/salesTransport.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
@@ -165,13 +166,33 @@ type AddProductCandidate = SaleAddCandidate
 // api/salesTransport.ts's SaleAmendmentRequest -- one shape, so the button and
 // the request cannot drift.
 interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed'
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
   sale_item_id?: number
   quantity?: number
   delivery_fee_usd?: number
   delivery_actual_cost_usd?: number | string | null
+  delivery_contact_id?: number
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
+}
+
+type DeliveryContactOption = {
+  id: number
+  name?: string | null
+  phone?: string | null
+  area?: string | null
+  address?: string | null
+}
+
+function deliveryContactRows(payload: unknown): DeliveryContactOption[] {
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === 'object' && Array.isArray((payload as { items?: unknown }).items)
+      ? (payload as { items: unknown[] }).items
+      : []
+  return rows.filter((row): row is DeliveryContactOption => (
+    !!row && typeof row === 'object' && Number.isSafeInteger(Number((row as { id?: unknown }).id))
+  )).map((row) => ({ ...row, id: Number(row.id) }))
 }
 
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
@@ -475,6 +496,12 @@ export default function SaleDetailModal({
   const [feeText, setFeeText] = useState('')
   const [actualCostEditing, setActualCostEditing] = useState(false)
   const [actualCostText, setActualCostText] = useState('')
+  const [deliveryAdding, setDeliveryAdding] = useState(false)
+  const [deliverySearch, setDeliverySearch] = useState('')
+  const [deliveryOptions, setDeliveryOptions] = useState<DeliveryContactOption[]>([])
+  const [deliveryContact, setDeliveryContact] = useState<DeliveryContactOption | null>(null)
+  const [deliveryContactsLoading, setDeliveryContactsLoading] = useState(false)
+  const [deliveryContactsError, setDeliveryContactsError] = useState('')
   // Replace: the line being replaced, while the existing product search picks
   // its replacement. Reuses the add-items search rather than growing a second
   // picker with its own bugs.
@@ -498,11 +525,37 @@ export default function SaleDetailModal({
     setAmendMutationError('')
     setActualCostEditing(false)
     setActualCostText('')
+    setDeliveryAdding(false)
+    setDeliverySearch('')
+    setDeliveryOptions([])
+    setDeliveryContact(null)
+    setDeliveryContactsError('')
     setPayError('')
     // Settings changes while this sale is open deliberately do not alter the
     // reviewed rate/method snapshot. A different sale starts a new review.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saleId])
+
+  useEffect(() => {
+    if (!deliveryAdding) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      setDeliveryContactsLoading(true)
+      setDeliveryContactsError('')
+      getSaleDeliveryOptions(deliverySearch.trim())
+        .then((payload) => {
+          if (!cancelled) setDeliveryOptions(deliveryContactRows(payload))
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setDeliveryOptions([])
+            setDeliveryContactsError((error as Error)?.message || translateOr('load_error', 'Could not load delivery drivers.'))
+          }
+        })
+        .finally(() => { if (!cancelled) setDeliveryContactsLoading(false) })
+    }, 200)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [deliveryAdding, deliverySearch])
   useEffect(() => {
     if (!onLoadAmendments || saleId === undefined || saleId === null) return
     let cancelled = false
@@ -595,7 +648,11 @@ export default function SaleDetailModal({
   // stock write in this app has. `submitAmendment` is the ONE place a request
   // is actually sent, so there is one error path and one reload.
   const amendmentRows: AmendmentDisplayRow[] = useMemo(
-    () => toAmendmentDisplayRows(amendments, (value) => fmtUSD(value), t('delivery') || 'Delivery'),
+    () => toAmendmentDisplayRows(amendments, (value) => fmtUSD(value), t('delivery') || 'Delivery', {
+      feeLabel: translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន'),
+      actualCostLabel: translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ'),
+      notRecordedLabel: translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា'),
+    }),
     [amendments, fmtUSD, t],
   )
   const amendmentGroups = useMemo(() => pairReplacements(amendmentRows), [amendmentRows])
@@ -637,6 +694,9 @@ export default function SaleDetailModal({
         setReplaceLineId(null)
         setFeeEditing(false)
         setActualCostEditing(false)
+        setDeliveryAdding(false)
+        setDeliveryContact(null)
+        setDeliverySearch('')
         setAmendQtyText('')
         setAmendConfirm(null)
         setAmendReloadToken((token) => token + 1)
@@ -774,6 +834,36 @@ export default function SaleDetailModal({
       request: { kind: 'delivery_actual_cost_changed', delivery_actual_cost_usd: next },
       title: translateOr('amend_actual_cost_title', 'Correct the actual delivery cost?', 'កែថ្លៃដឹកជញ្ជូនពិតប្រាកដ?'),
       summary: `${currentCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(currentCostUsd)} → ${next === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(next)}`,
+    })
+  }
+
+  const stageDeliveryAddition = (): void => {
+    if (!deliveryContact) {
+      setAmendMutationError(translateOr('delivery_driver_required', 'Choose a delivery driver for this sale.', 'សូមជ្រើសរើសអ្នកដឹកជញ្ជូនសម្រាប់ការលក់នេះ។'))
+      return
+    }
+    const fee = parseDeliveryAmountUsd(feeText)
+    if (!fee.ok) {
+      setAmendMutationError(t(DELIVERY_AMOUNT_ERROR_KEYS[fee.code]) || DELIVERY_AMOUNT_ERROR_KEYS[fee.code])
+      return
+    }
+    const cost = parseDeliveryAmountUsd(actualCostText)
+    if (!cost.ok && cost.code !== 'blank') {
+      setAmendMutationError(t(DELIVERY_AMOUNT_ERROR_KEYS[cost.code]) || DELIVERY_AMOUNT_ERROR_KEYS[cost.code])
+      return
+    }
+    const actualCost = cost.ok ? cost.usd : null
+    amendRequestIdRef.current = createSettlementRequestId()
+    setAmendMutationError('')
+    setAmendConfirm({
+      request: {
+        kind: 'delivery_added',
+        delivery_contact_id: deliveryContact.id,
+        delivery_fee_usd: fee.usd,
+        delivery_actual_cost_usd: actualCost,
+      },
+      title: translateOr('add_delivery_title', 'Add delivery to this sale?', 'បន្ថែមការដឹកជញ្ជូនទៅការលក់នេះ?'),
+      summary: `${deliveryContact.name || `#${deliveryContact.id}`} · ${translateOr('delivery_fee', 'Delivery fee')}: ${fmtUSD(fee.usd)} · ${translateOr('delivery_actual_cost', 'Actual delivery cost')}: ${actualCost === null ? translateOr('not_recorded', 'Not recorded') : fmtUSD(actualCost)}`,
     })
   }
 
@@ -1192,6 +1282,74 @@ export default function SaleDetailModal({
                     zero and the row did not render. */}
                 <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} />
                 <DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} />
+                {!toNumber(sale.is_delivery) && canAmendThisSale ? (
+                  <div className="py-1.5">
+                    <button
+                      type="button"
+                      className="rounded border border-blue-200 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:border-blue-800 dark:text-blue-300"
+                      onClick={() => {
+                        setAmendMutationError('')
+                        setDeliveryAdding((open) => {
+                          if (!open) {
+                            setFeeText('0')
+                            setActualCostText('')
+                            setDeliverySearch('')
+                          }
+                          return !open
+                        })
+                      }}
+                    >
+                      {deliveryAdding ? (t('cancel') || 'Cancel') : translateOr('add_delivery', 'Add delivery', 'បន្ថែមការដឹកជញ្ជូន')}
+                    </button>
+                    {deliveryAdding ? (
+                      <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50/50 p-2.5 dark:border-blue-900 dark:bg-blue-950/20">
+                        <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="sale-add-delivery-driver-search">
+                          {translateOr('choose_delivery_driver', 'Choose a driver', 'ជ្រើសរើសអ្នកដឹកជញ្ជូន')}
+                        </label>
+                        <input
+                          id="sale-add-delivery-driver-search"
+                          type="search"
+                          value={deliverySearch}
+                          onChange={(event) => { setDeliverySearch(event.target.value); setDeliveryContact(null) }}
+                          placeholder={translateOr('search_delivery_contacts', 'Search delivery contacts', 'ស្វែងរកអ្នកដឹកជញ្ជូន')}
+                          className="input w-full text-sm"
+                        />
+                        {deliveryContactsLoading ? <div className="text-[11px] text-gray-400">{t('loading') || 'Loading…'}</div> : null}
+                        {deliveryContactsError ? <div role="alert" className="text-[11px] font-medium text-red-600 dark:text-red-400">{deliveryContactsError}</div> : null}
+                        {!deliveryContactsLoading && !deliveryContactsError ? (
+                          <div className="max-h-36 space-y-1 overflow-y-auto">
+                            {deliveryOptions.map((option) => (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => { setDeliveryContact(option); setAmendMutationError('') }}
+                                className={`flex w-full items-start justify-between gap-2 rounded border px-2 py-1.5 text-left text-xs ${deliveryContact?.id === option.id ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}
+                              >
+                                <span className="font-medium text-gray-800 dark:text-gray-100">{option.name || `#${option.id}`}</span>
+                                <span className="text-gray-400">{option.phone || option.address || option.area || ''}</span>
+                              </button>
+                            ))}
+                            {deliveryOptions.length === 0 ? <div className="text-[11px] text-gray-400">{t('no_data')}</div> : null}
+                          </div>
+                        ) : null}
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="sale-add-delivery-fee">
+                            {translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}
+                            <input id="sale-add-delivery-fee" type="number" min="0" step="0.01" inputMode="decimal" value={feeText} onChange={(event) => setFeeText(event.target.value)} className="input mt-1 w-full text-sm tabular-nums" />
+                          </label>
+                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="sale-add-delivery-cost">
+                            {translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ')}
+                            <input id="sale-add-delivery-cost" type="number" min="0" step="0.01" inputMode="decimal" value={actualCostText} onChange={(event) => setActualCostText(event.target.value)} placeholder={translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា')} className="input mt-1 w-full text-sm tabular-nums" />
+                          </label>
+                        </div>
+                        <button type="button" disabled={amendSaving} onClick={stageDeliveryAddition} className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                          {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
+                        </button>
+                        {amendMutationError && !amendConfirm ? <div role="alert" className="text-[11px] font-medium text-red-600 dark:text-red-400">{amendMutationError}</div> : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {/* N41 (owner, Sep 6 2026): "i see the delivery fees it should
                     show options to change delivery actual cost and the delivery
                     fees. both." So the courier cost is shown and is editable --

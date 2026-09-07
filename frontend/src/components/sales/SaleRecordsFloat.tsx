@@ -54,6 +54,7 @@ interface SaleRecordsFloatProps {
   onClose: () => void
   t: TranslateFn
   fmtUSD: (value: number | string) => string
+  fmtKHR: (value: number | string) => string
 }
 
 const KIND_FALLBACKS: Record<string, string> = {
@@ -65,6 +66,7 @@ const KIND_FALLBACKS: Record<string, string> = {
   record_kind_item_price_changed: 'Price changed',
   record_kind_delivery_fee_changed: 'Delivery fee changed',
   record_kind_delivery_cost_changed: 'Delivery cost changed',
+  record_kind_delivery_added: 'Delivery added',
   record_kind_discount_changed: 'Discount changed',
   record_kind_customer_changed: 'Customer changed',
   record_kind_payment_settled: 'Payment settled',
@@ -93,9 +95,18 @@ const FIELD_FALLBACKS: Record<string, string> = {
   products: 'Products',
   action: 'Action',
   stock: 'Stock',
+  delivery: 'Delivery',
+  id: 'ID',
+  driver: 'Driver',
+  driver_phone: 'Driver phone',
+  address: 'Address',
+  delivery_fee: 'Delivery fee',
+  paid_by: 'Paid by',
+  delivery_actual_cost: 'Actual delivery cost',
+  exchange_rate: 'Exchange rate',
 }
 
-export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecordsFloatProps) {
+export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: SaleRecordsFloatProps) {
   const [records, setRecords] = useState<SaleRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -150,6 +161,10 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecor
     if (row.format === 'money') {
       const parsed = Number(value)
       return Number.isFinite(parsed) ? fmtUSD(parsed) : String(value)
+    }
+    if (row.format === 'money_khr') {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? fmtKHR(parsed) : String(value)
     }
     if (row.format === 'status') return getStatusLabel(value, t)
     if (row.format === 'quantity') return String(value)
