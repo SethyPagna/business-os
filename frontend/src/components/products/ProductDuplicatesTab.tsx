@@ -12,7 +12,6 @@ import { getPossiblySameProducts, dismissProductDuplicateCluster, getProductIden
 import IdentityHistoryPanel from './IdentityHistoryPanel.tsx'
 import type { IdentityHistory } from './helpers/identityHistory.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { identityBarcodeKey, normalizeLeadingZeroBarcodeForCleanup, resolveMergedCostDetail } from '../../utils/productDetailRule.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { useIdentityLinkOver } from './useIdentityLinkOver.tsx'

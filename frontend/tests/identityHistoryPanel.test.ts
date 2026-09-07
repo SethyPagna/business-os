@@ -115,6 +115,17 @@ check('the Conflicts resolve float renders the shared panel', () => {
     !/identity_history_merged_from/.test(tab),
     'the float must render THROUGH the shared panel -- a second copy of these lines drifts the moment either gains a row type',
   )
+  // The zombie the extraction left behind: the tab imported fmtDateTime24 for
+  // the timestamps it used to render itself, and kept the import after the
+  // shared panel took that rendering over. The panel is now the ONLY renderer
+  // of a timestamp on this surface, so a live fmtDateTime24 reference here is
+  // either dead code or a second formatter about to drift from the shared one
+  // -- and the date convention (dd/mm/yyyy + 24h) is exactly the kind of rule
+  // that ends up with two implementations this way.
+  assert.ok(
+    !/fmtDateTime24/.test(tab),
+    'Conflicts must not carry a timestamp formatter it does not use -- the shared panel renders every timestamp on this surface',
+  )
 })
 
 check('DISCRIMINATING: the product form shows it too, in edit mode', () => {
