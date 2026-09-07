@@ -9,6 +9,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import { branchCanSell } from '../lib/branchRoles'
+import { normalizeTypedDate } from '../lib/batchCode'
 import type { Env } from '../index'
 
 // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
@@ -154,11 +155,12 @@ export function normalizeFeeLabel(value: unknown): string | null {
 
 function normalizeDate(value: unknown): string {
   const str = typeof value === 'string' ? value.trim() : ''
-  // fee_date is a business CALENDAR date. Preserve an explicit YYYY-MM-DD
-  // literally; do not round-trip it through UTC. If omitted/invalid, default
-  // to Cambodia's current business day rather than the UTC day.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str
-  if (str) {
+  // fee_date is a business CALENDAR date. Values typed in the app follow its
+  // day-first convention, while an ISO timestamp from an older integration
+  // still needs Cambodia's calendar-day conversion.
+  const typed = normalizeTypedDate(str)
+  if (typed && !/^\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:/.test(str)) return typed
+  if (/^\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:/.test(str)) {
     const parsed = new Date(str)
     if (!Number.isNaN(parsed.getTime())) return businessToday(parsed.getTime())
   }

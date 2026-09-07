@@ -19,6 +19,7 @@ const sourcePath = path.join(__dirname, '..', 'src', 'routes', 'fees.ts')
 // Fresh Windows worktrees are CRLF; the production TypeScript is identical.
 const source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n')
 const businessDateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8').replace(/\r\n/g, '\n')
+const batchCodeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'batchCode.ts'), 'utf8').replace(/\r\n/g, '\n')
 
 function extractFunction(name) {
   const re = new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}\\n`)
@@ -67,8 +68,16 @@ const { outputText } = ts.transpileModule(combinedSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   fileName: 'fees-pure.ts',
 })
+const { outputText: batchCodeOutput } = ts.transpileModule(batchCodeSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'batchCode.ts',
+})
+const batchCodeModule = { exports: {} }
+new Function('exports', 'require', 'module', batchCodeOutput)(batchCodeModule.exports, require, batchCodeModule)
+const normalizeTypedDate = batchCodeModule.exports.normalizeTypedDate
+  || ((value) => batchCodeModule.exports.normalizeToIsoDate(value, 'day-first'))
 const moduleObj = { exports: {} }
-new Function('exports', outputText)(moduleObj.exports)
+new Function('exports', 'normalizeTypedDate', outputText)(moduleObj.exports, normalizeTypedDate)
 const { round2, toNumber, normalizeFeeType, normalizeText, normalizeFeeLabel, normalizeDate } = moduleObj.exports
 
 let passed = 0
@@ -109,8 +118,10 @@ check('normalizeText trims, empties to null, and caps length', () => {
   assert.strictEqual(normalizeText('abcdef', 3), 'abc')
 })
 
-check('normalizeDate preserves date-only values and falls back to Cambodia business today', () => {
+check('normalizeDate preserves ISO and day-first typed dates, and falls back to Cambodia business today', () => {
   assert.strictEqual(normalizeDate('2026-01-15'), '2026-01-15')
+  assert.strictEqual(normalizeDate('03/09/2026'), '2026-09-03')
+  assert.notStrictEqual(normalizeDate('12/25/2026'), '2026-12-25', 'month-first input must not be guessed')
   assert.strictEqual(normalizeDate('2026-08-31T17:30:00Z'), '2026-09-01', 'UTC evening maps to the next Cambodia calendar day')
   const fallback = normalizeDate('not-a-date')
   assert.ok(!Number.isNaN(Date.parse(fallback)), 'fallback should be a valid ISO date')
@@ -135,6 +146,11 @@ check('normalizeFeeLabel caps at 6 words / 60 chars (sentences cannot be saved)'
   // Khmer has no spaces, so only the char cap bounds it -- and short Khmer
   // labels round-trip untouched.
   assert.strictEqual(normalizeFeeLabel('ទឹកភ្លើង'), 'ទឹកភ្លើង')
+})
+
+check('fees route delegates app-entered dates to the shared typed-date kernel', () => {
+  assert.match(source, /import \{ normalizeTypedDate \} from '\.\.\/lib\/batchCode'/)
+  assert.match(source, /const typed = normalizeTypedDate\(str\)/)
 })
 
 check('manual expenses require an active exact Shop and linked expenses derive the branch from a real sale', () => {
