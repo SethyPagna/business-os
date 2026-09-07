@@ -42,7 +42,7 @@ import {
   buildIssueStateClauses,
 } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { omitUnchangedProductImageFields, productImageFieldsChanged, resolveProductImageFields, ProductImageAssetError } from '../lib/productImagePermission'
+import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields, ProductImageAssetError } from '../lib/productImagePermission'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -1789,23 +1789,25 @@ app.put('/:id', async (c) => {
       supplied: imageLimitError.supplied,
     }, 409)
   }
-  try {
-    await resolveProductImageFields(getDb(c.env), body)
-  } catch (error) {
-    if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
-    throw error
-  }
-
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
   if (submittedImageFields) {
     const currentImageState = await loadProductImageState(c.env, id)
     if (!currentImageState) return c.json({ error: 'Product not found' }, 404)
-    const changesImages = productImageFieldsChanged(body, currentImageState)
+    const changesImages = await productImageFieldsChangedResolved(getDb(c.env), body, currentImageState)
     if (imagePermissionDenied(user, changesImages, isImageOnlyEdit)) {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
-    if (!changesImages) omitUnchangedProductImageFields(body)
+    if (!changesImages) {
+      omitUnchangedProductImageFields(body)
+    } else {
+      try {
+        await resolveProductImageFields(getDb(c.env), body)
+      } catch (error) {
+        if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
+        throw error
+      }
+    }
   }
 
   // Same identity rule as create: an EDIT must not rename/re-barcode a row

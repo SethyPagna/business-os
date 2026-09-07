@@ -36,7 +36,8 @@ function loadTs(relativePath, stubs = {}) {
 }
 
 const media = loadTs('lib/media.ts')
-const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media })
+const sqlBinding = loadTs('lib/sqlBinding.ts')
+const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 const permissions = loadTs('lib/permissions.ts')
 
 function role(grants) {
@@ -78,7 +79,7 @@ function loadReviewApply(state, updateChanges = 1) {
         },
         async all(params = []) {
           if (/SELECT public_path FROM file_assets/i.test(sql)) {
-            return [...state.assetPaths].filter((public_path) => params.includes(public_path)).map((public_path) => ({ public_path }))
+            return [...state.assetPaths].filter((public_path) => Object.values(params).includes(public_path)).map((public_path) => ({ public_path }))
           }
           if (/FROM product_images/i.test(sql)) return state.currentGallery.map((image_path) => ({ image_path }))
           return []
@@ -151,6 +152,20 @@ async function main() {
     assert.equal(state.synced.length, 0)
     assert.equal(state.audits, 1)
     console.log('PASS unchanged queued images are stripped and the non-image edit still applies')
+  }
+
+  {
+    const state = freshState(role({ products: 'review', 'products:image': false }))
+    state.current.image_path = '/uploads/orphan.png'
+    state.currentGallery = ['/uploads/orphan.png']
+    state.assetPaths.clear()
+    const { applyApprovedPendingAction } = loadReviewApply(state)
+    await applyApprovedPendingAction({}, pending('update', {
+      description: 'approved', image_path: '/uploads/orphan.png', image_gallery: ['/uploads/orphan.png'],
+    }), reviewer)
+    assert.deepEqual(state.updated, [{ description: 'approved' }])
+    assert.equal(state.synced.length, 0)
+    console.log('PASS unchanged queued orphan images do not block the approved non-image edit')
   }
 
   {
