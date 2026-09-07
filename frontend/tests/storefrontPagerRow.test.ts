@@ -394,6 +394,132 @@ runTest('pressing Next announces the page it landed on', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 6b. ONE name per landmark, ONE announcement per move
+//
+// The landmark fix above put the same `<nav aria-label={pageLabel}>` on BOTH
+// storefront mounts -- above the grid and below it -- so a screen reader's
+// landmark list showed two entries called "Page" / "ទំព័រ" with nothing to
+// tell them apart, and `pageLabel` is also the page <input>'s own aria-label,
+// so one string named three different things inside one region. And both
+// mounts carried a live region, so a single Next fired two announcements.
+//
+// Discriminating: at 4fe515f5 the nav's label expression IS `pageLabel`, both
+// mounts pass no name at all, and the live region is unconditional.
+// ---------------------------------------------------------------------------
+
+// Every <CatalogPaginationControls .../> mount in a source string, with the
+// comments stripped -- a mount whose comment explains why it does NOT opt into
+// the announcement must not read as one that does.
+function pagerMounts(source: string): string[] {
+  const found: string[] = []
+  let at = source.indexOf('<CatalogPaginationControls')
+  while (at >= 0) {
+    const end = source.indexOf('/>', at)
+    if (end < 0) break
+    found.push(source.slice(at, end + 2).replace(/^\s*\/\/.*$/gm, ''))
+    at = source.indexOf('<CatalogPaginationControls', end)
+  }
+  return found
+}
+
+// The reader under test: the accessible names the storefront's pager mounts
+// ask for. An empty string means the mount asked for no name of its own and
+// so inherits whatever the component defaults to -- which is how two
+// identically-named landmarks happen.
+function pagerNames(source: string): string[] {
+  return pagerMounts(source).map((mount) => {
+    const match = /pagerName=\{([\s\S]*?)\}\n/.exec(mount)
+    return match ? match[1].trim() : ''
+  })
+}
+
+function mountsAnnouncing(source: string): number {
+  return pagerMounts(source).filter((mount) => /announcePage/.test(mount)).length
+}
+
+// The state this round fixes, written out as a fixture, so a reader that
+// cannot see the defect is caught here rather than by the next verifier.
+const DUPLICATE_NAME_FIXTURE = `
+      {showPager ? (
+        <CatalogPaginationControls
+          className="mb-4"
+          pagerName={copy('page', 'Page')}
+          announcePage
+          onPageChange={updatePage}
+        />
+      ) : null}
+      {showPager ? (
+        <CatalogPaginationControls
+          className="mt-4"
+          pagerName={copy('page', 'Page')}
+          announcePage
+          onPageChange={updatePage}
+        />
+      ) : null}
+`
+
+runTest('the name reader can tell two identical landmarks from two distinct ones (positive control)', () => {
+  const names = pagerNames(DUPLICATE_NAME_FIXTURE)
+  assert.equal(names.length, 2, 'the fixture has two mounts')
+  assert.equal(new Set(names).size, 1, 'and the reader must report them as sharing one name -- otherwise it proves nothing below')
+  assert.equal(mountsAnnouncing(DUPLICATE_NAME_FIXTURE), 2, 'and must see both fixture mounts announcing')
+})
+
+runTest('the two pager landmarks are not called the same thing', () => {
+  const names = pagerNames(catalogProducts)
+  assert.equal(names.length, 2, 'the storefront mounts the pager above and below the grid')
+  assert.ok(names.every((name) => name.length > 0), 'each mount must ask for its own accessible name')
+  assert.equal(new Set(names).size, 2, 'two landmarks with one name are two landmarks a reader cannot choose between')
+})
+
+runTest('the landmark is not named with the same string as the page field', () => {
+  const branch = centeredBranch()
+  const body = branch.slice(branch.indexOf('return ('))
+  const navAt = body.indexOf('<nav')
+  const navTag = body.slice(navAt, body.indexOf('<', navAt + 1))
+  const label = /aria-label=\{([^}]*)\}/.exec(navTag)
+  assert.ok(label, 'the landmark must still be named')
+  assert.notEqual(
+    label ? label[1].trim() : '',
+    'pageLabel',
+    "`pageLabel` is the page <input>'s own aria-label; naming the landmark with it makes one string mean three things in one region",
+  )
+  // The input keeps that string -- this is about the landmark, not a rename.
+  assert.match(body, /aria-label=\{pageLabel\}/, 'the page field itself still says "Page"')
+})
+
+runTest('exactly one mount announces a page change', () => {
+  const branch = centeredBranch()
+  const live = branch.match(/aria-live=/g) || []
+  assert.equal(live.length, 1, 'the component declares one live region')
+  const at = branch.indexOf('aria-live')
+  const tagStart = branch.lastIndexOf('<', at)
+  const before = branch.slice(Math.max(0, tagStart - 120), tagStart)
+  assert.match(
+    before,
+    /\?|&&/,
+    'the live region must be rendered under a condition -- unconditional, both mounts announce the same move twice',
+  )
+  assert.equal(
+    mountsAnnouncing(catalogProducts),
+    1,
+    'only one storefront mount opts in; the bottom pager scrolls the shopper away from itself anyway',
+  )
+})
+
+runTest('the names the mounts ask for exist in every portal language pack', () => {
+  const packs = read('../src/components/catalog/portalLanguagePacks.ts')
+  const nextEntries = packs.match(/^\s*next: /gm) || []
+  const topEntries = packs.match(/^\s*pagerTop: /gm) || []
+  const bottomEntries = packs.match(/^\s*pagerBottom: /gm) || []
+  assert.ok(nextEntries.length >= 17, 'sanity: the packs still carry the pager vocabulary')
+  assert.equal(topEntries.length, nextEntries.length, 'a name in 2 of 18 packs is English in the other 16')
+  assert.equal(bottomEntries.length, nextEntries.length, 'same for the bottom pager')
+  assert.match(packs, /pagerTop: 'ទំព័រ \(ខាងលើ\)'/, 'real Khmer, matching the packs own ខាងលើ / ខាងក្រោម vocabulary')
+  assert.match(packs, /pagerBottom: 'ទំព័រ \(ខាងក្រោម\)'/)
+})
+
+// ---------------------------------------------------------------------------
 // 7. Behaviour that must NOT change
 // ---------------------------------------------------------------------------
 

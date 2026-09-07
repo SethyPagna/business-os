@@ -737,6 +737,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           pageSize={effectivePageSize}
           totalItems={totalProducts}
           label={copy('products', 'products')}
+          // Two mounts of one control, so two names: a landmark list with two
+          // entries both called "Page" tells a reader nothing about which one
+          // it is jumping to. `pagerTop`/`pagerBottom` are in all 18 portal
+          // packs. The announcement belongs to this one -- paging from the
+          // bottom pager scrolls the shopper up and away from it.
+          pagerName={copy('pagerTop', 'Pages (top)')}
+          announcePage
           t={(key) => ({
             page: copy('page', 'Page'),
             of: copy('of', 'of'),
@@ -962,6 +969,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           pageSize={effectivePageSize}
           totalItems={totalProducts}
           label={copy('products', 'products')}
+          // The other half of that pair. No `announcePage`: one move, one
+          // announcement, and the mount that stays on screen after the move
+          // is the top one.
+          pagerName={copy('pagerBottom', 'Pages (bottom)')}
           t={(key) => ({
             page: copy('page', 'Page'),
             of: copy('of', 'of'),

@@ -32,6 +32,12 @@ type CatalogPaginationControlsProps = {
   label?: string
   t?: Translate
   className?: string
+  // Which of the storefront's two pager mounts this is. The grid carries the
+  // same control above and below itself, so each needs a name of its own --
+  // otherwise the landmark list holds two identical entries -- and only one
+  // of them may carry the live region, or one Next is announced twice.
+  pagerName?: string
+  announcePage?: boolean
 }
 
 function clampCatalogPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
@@ -56,6 +62,8 @@ export default function CatalogPaginationControls({
   label = 'products',
   t,
   className = '',
+  pagerName = '',
+  announcePage = false,
 }: CatalogPaginationControlsProps) {
   return (
     <PaginationControls
@@ -77,6 +85,8 @@ export default function CatalogPaginationControls({
       // the prop would be a seam whose only use is re-growing the defect. The
       // chooser is a Filters field -- see CatalogProductsSection.
       layout="centered"
+      pagerName={pagerName}
+      announcePage={announcePage}
       className={className}
     />
   )

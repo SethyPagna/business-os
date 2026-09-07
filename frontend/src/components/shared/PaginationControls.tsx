@@ -61,6 +61,23 @@ export interface PaginationControlsProps {
   // and centres the whole thing. 'default' stays the default, so every admin
   // consumer of this control renders exactly as before.
   layout?: 'default' | 'centered'
+  // The accessible name of the centred layout's landmark, and whether this
+  // mount is the one that announces a page change.
+  //
+  // Both exist because the storefront mounts the SAME pager twice, above and
+  // below the product grid. Naming both from `page` put two landmarks called
+  // "Page" in the reader's landmark list with nothing to choose between --
+  // and `page` is also the page field's own aria-label three elements down,
+  // so one string named three different things inside one region. Leaving the
+  // live region unconditional fired two announcements for one move.
+  //
+  // So the name comes from the caller (each mount says which of the two it
+  // is, in the shopper's language) and the announcement is opt-in -- the top
+  // mount takes it, since paging scrolls the shopper away from the bottom one
+  // anyway. Both default to the previous single-mount behaviour, so no admin
+  // caller of this control changes.
+  pagerName?: string
+  announcePage?: boolean
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
@@ -92,6 +109,8 @@ export default function PaginationControls({
   editablePageSizeInput = true,
   rangeAsPageSize = false,
   layout = 'default',
+  pagerName = '',
+  announcePage = false,
 }: PaginationControlsProps) {
   // One shared kernel (utils/pagerState.ts) answers all of it: the clamped
   // page, the page count, the item range, whether each arrow is dead, and
@@ -240,20 +259,26 @@ export default function PaginationControls({
     // in no landmark list, so the one control a screen-reader user most needs
     // to jump to was the one they had to hunt for.
     //
-    // The name is composed from `page`, which every one of the 17 portal
-    // language packs already translates (portalLanguagePacks.ts), rather than
-    // from a `pagination` key added for this row alone: the storefront's
-    // `copy()` resolves through those packs, so a new key would be English in
-    // 15 languages and would duplicate a string that already exists.
+    // ITS OWN name, though -- not `page`. The first cut of this landmark used
+    // `pageLabel`, and the storefront mounts this pager TWICE (above the grid
+    // and below it), so the reader's landmark list showed two entries called
+    // "Page" / "ទំព័រ" with no way to tell which one it was about to jump to;
+    // `pageLabel` is also the page field's aria-label a few elements down, so
+    // that one string was naming three different things inside one region.
+    // The caller names each mount instead ("Pages (top)" / "Pages (bottom)",
+    // translated in every portal pack as pagerTop / pagerBottom), and falls
+    // back to `pageLabel` only for a lone mount, where there is nothing to be
+    // confused with.
     //
     // And it SAYS where it went. Pressing Next swapped the grid silently: the
     // focus stays on Next, whose accessible name does not change, so nothing
     // was announced at all. The polite live region carries the page and the
-    // total. Both mounts (above and below the grid) carry one, because either
-    // one can be the pager being operated; a reader on a page with both will
-    // hear the move once per region.
+    // total -- from ONE mount, opted in by the caller. Two live regions on
+    // one screen announce a single move twice, which is the noise the
+    // announcement was added to avoid.
+    const navLabel = pagerName || pageLabel
     return (
-      <nav className={`flex w-full justify-center ${className}`} aria-label={pageLabel}>
+      <nav className={`flex w-full justify-center ${className}`} aria-label={navLabel}>
         <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
           <button
             type="button"
@@ -297,7 +322,9 @@ export default function PaginationControls({
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
         </div>
-        <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
+        {announcePage ? (
+          <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
+        ) : null}
       </nav>
     )
   }
