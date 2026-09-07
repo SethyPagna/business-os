@@ -74,6 +74,8 @@ Every shipped row must eventually record its actual deployment version.
 | F39 | Live bulk merging remains about eight seconds per case and fails on database overload. | Active diagnosis / identity, media, sales, accounting | Eight commits preceded an 87.3s request failure. Inspect serial D1 round trips and invocation limits; preserve atomic cases, undo and whole-cluster cost mean. |
 | F40 | Bulk merge error falsely says data not saved after partial commits. | Active / identity | Return/reconcile committed cases and undo IDs on failure; explicit resumable partial state, no blind retry. |
 
+| F41 | Idle import polling writes to D1 and immediate retries amplify database overload. | Active / sales | Skip no-op reaper writes when no stale jobs exist; preserve guarded stale recovery. Fail overload once instead of immediately retrying it. |
+
 ## Public portal and legal requests
 
 | ID | Request | State / owner | Evidence or next action |
