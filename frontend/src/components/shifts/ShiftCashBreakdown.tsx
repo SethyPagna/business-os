@@ -1,5 +1,6 @@
 import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import { shiftCountedPairText } from '../../utils/shiftReportModel.ts'
 import type { ShiftReconciliation } from '../../api/shiftTransport.ts'
 
 // The eight drawer rows, in the owner's reading order:
@@ -38,6 +39,11 @@ export default function ShiftCashBreakdown({ reconciliation, className = '' }: P
   const pair = (usd: number | null, khr: number | null) => usd == null || khr == null
     ? '—'
     : `${fmtUSD(usd)} · ${fmtKHR(khr)}`
+  // The COUNTED row is the one pair that can be half-present: a cashier may
+  // count the dollars and leave the riel blank, and that half is a fact they
+  // recorded. shiftCountedPairText is the shared rule -- the summary header
+  // and the report block print the same drawer the same way.
+  const countedPair = (usd: number | null, khr: number | null) => shiftCountedPairText(usd, khr, fmtUSD, fmtKHR)
   // A shortage and a surplus must be distinguishable at a glance, so the sign
   // is explicit on both currencies rather than implied by a minus that a
   // formatter may drop.
@@ -73,22 +79,24 @@ export default function ShiftCashBreakdown({ reconciliation, className = '' }: P
         <div className="flex min-w-0 items-baseline justify-between gap-3 py-1">
           <dt className="shrink-0 text-gray-500 dark:text-gray-400">{t('shift_recon_counted')}</dt>
           <dd className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">
-            {pair(reconciliation.counted.usd, reconciliation.counted.khr)}
+            {countedPair(reconciliation.counted.usd, reconciliation.counted.khr)}
           </dd>
         </div>
+        {/* INFORMATIONAL, not a verdict. Owner ruling (Sep 6 2026): the
+            counted drawer is "just a more detailed breakdown ... without
+            making it a necessity to match the expected". A red/amber/green
+            traffic light said the opposite -- it graded the cashier pass/fail
+            on a number that gates nothing -- so the difference now carries the
+            same neutral weight as every other row and the hint says it is for
+            the record. The SIGN stays explicit: a shortage and a surplus are
+            different facts and must not read alike. */}
         <div className="flex min-w-0 items-baseline justify-between gap-3 py-1">
-          <dt className="shrink-0 font-semibold text-gray-700 dark:text-gray-200">{t('shift_difference')}</dt>
-          <dd className={`min-w-0 break-words text-right font-semibold ${
-            reconciliation.difference.usd == null || reconciliation.difference.khr == null
-              ? 'text-gray-800 dark:text-gray-100'
-              : reconciliation.difference.usd < 0 || reconciliation.difference.khr < 0
-                ? 'text-red-600 dark:text-red-400'
-                : reconciliation.difference.usd > 0 || reconciliation.difference.khr > 0
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-green-700 dark:text-green-400'
-          }`}
-          >
-            {reconciliation.difference.usd == null || reconciliation.difference.khr == null
+          <dt className="flex shrink-0 items-center gap-1 font-semibold text-gray-700 dark:text-gray-200">
+            {t('shift_difference')}
+            <InfoHint text={t('shift_difference_informational')} label={t('shift_difference')} />
+          </dt>
+          <dd className="min-w-0 break-words text-right font-semibold text-gray-800 dark:text-gray-100">
+            {reconciliation.difference.usd == null && reconciliation.difference.khr == null
               ? '—'
               : `${signed(reconciliation.difference.usd, fmtUSD)} · ${signed(reconciliation.difference.khr, fmtKHR)}`}
           </dd>

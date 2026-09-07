@@ -133,8 +133,14 @@ ok(/shiftCountOrZero\(floatUsd\)/.test(gate) && /openingFloatUsd == null \|\| op
 ok(!/disabled=\{busy \|\| parseShiftCount\(floatUsd\) == null \|\| parseShiftCount\(floatKhr\) == null\}/.test(registerBlock)
   && /<ShiftSubmitRow[\s\S]{0,200}reason=\{startBlocker \? t\(shiftCountBlockerKey\(startBlocker\)\) : null\}/.test(registerBlock),
   'the Start Shift control is never disabled without the reason printed beside it')
-ok(/shiftCountOrZero\(countedUsd\)/.test(endBody) && /closingCountedUsd == null \|\| closingCountedKhr == null \|\| endBlocker/.test(endBody),
-  'current-day close records a blank count as 0 and still rejects invalid, infinite, and negative ones')
+// The CLOSE half moved on (a2 shift2 / N37, owner: the closing count is "only
+// a breakdown for admins in reports"): an untouched pair is "not counted" and
+// closes anyway, a half-typed pair is still 0 in the other currency, and an
+// invalid entry is still refused out loud beside the button.
+// tests/shiftCloseAlwaysWorks.test.ts executes that rule; this pins that the
+// POS close step goes through it.
+ok(/shiftClosingCounts\(countedUsd, countedKhr\)/.test(endBody) && /if \(busy \|\| endBlocker\) return/.test(endBody),
+  'current-day close submits through the shared closing-count rule and still refuses an invalid count')
 ok(!/Number\((?:float|counted)[^)]+\) \|\| 0/.test(gate),
   'POS shift forms never coerce an INVALID count to zero -- only a blank one becomes 0, through the shared helper')
 
