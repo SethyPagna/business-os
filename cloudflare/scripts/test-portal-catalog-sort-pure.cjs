@@ -105,6 +105,11 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
   '../lib/portalSession': { createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
+  // N45: an abuse counter's key is made one-way before it is stored, so
+  // the portal routes reach for this on the way to checkRateLimit. Stubbed to
+  // a fixed key here -- the digest itself is pinned by
+  // test-portal-abuse-key-pure.cjs; this file only needs the counter reached.
+  '../lib/portalAbuseKey': { portalAbuseKey: async (_env, scope, value) => (String(value ?? '').trim() ? `stub:${scope}` : '') },
   '../lib/portalAuthLockout': { getPortalLockoutState: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), recordPortalFailure: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), clearPortalLockout: async () => {} },
   '../lib/phone': { canonicalizePhone: (v) => String(v || '').replace(/\D/g, '') || null },
   '../lib/fileAssets': { buildUniqueStoredName: (name) => name },

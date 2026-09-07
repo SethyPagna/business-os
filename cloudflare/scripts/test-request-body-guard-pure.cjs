@@ -144,6 +144,12 @@ async function main() {
     '../lib/portalSession': { getPortalAccount: async () => null, createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {} },
     '../lib/r2': { serveObject: async () => new Response(null, { status: 404 }) },
     '../lib/rateLimit': { getClientIp: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
+    // N45: an abuse counter's key is made one-way before it is stored, so the
+    // portal routes call this on the way to checkRateLimit. This file has no
+    // opinion about the digest -- only that the counter is still reached --
+    // so a fixed key stands in for it. The digest itself is pinned by
+    // test-portal-abuse-key-pure.cjs.
+    '../lib/portalAbuseKey': { portalAbuseKey: async (_env, scope, value) => (String(value ?? '').trim() ? `stub:${scope}` : '') },
     '../lib/db': { getDb: () => ({ prepare: (sql) => {
       assert.match(sql, /^SELECT key, value FROM settings$/)
       calls.settings++
