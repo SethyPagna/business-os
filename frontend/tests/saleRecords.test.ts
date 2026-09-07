@@ -207,6 +207,58 @@ runTest('the float is the SHARED float, read-only, with one close affordance', (
   assert.match(float, /record\.actor_username/, 'the acting USERNAME leads every row')
 })
 
+runTest("a return's record renders its refund as money, not as a raw field name", () => {
+  // The returns source (lib/saleRecords.ts, source 5) emits a field no other
+  // source does. A field with no rule falls through to plain text UNDER ITS OWN
+  // RAW NAME, so the row would read "refund_usd  -  3" in both languages.
+  const record: SaleRecord = {
+    id: 'return:5', source: 'return', at: '2026-09-06 14:00:00', at_ms: 9,
+    actor_username: 'dara', kind: 'status_changed', via: null, subject: 'R-0005',
+    summary: 'Partial return',
+    before: { sale_status: 'completed' },
+    after: { sale_status: 'partial_return', refund_usd: 3 },
+  }
+  const rows = saleRecordFieldRows(record)
+  const refund = rows.find((row) => row.field === 'refund_usd')
+  assert.ok(refund, 'the refund must expand')
+  assert.equal(refund?.format, 'money', 'a refund rendered as a bare number reads as a quantity')
+  assert.ok(refund?.labelKey, 'and it must have a label key rather than printing refund_usd')
+  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
+  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
+  assert.ok(en[refund!.labelKey!], 'en.json is missing the refund label')
+  assert.ok(km[refund!.labelKey!], 'km.json is missing the refund label')
+  assert.notEqual(km[refund!.labelKey!], en[refund!.labelKey!], 'the refund label is not actually translated')
+  // The status pair still reads as a status, so the row is a transition and
+  // not two opaque strings.
+  const status = rows.find((row) => row.field === 'sale_status')
+  assert.equal(status?.format, 'status')
+  assert.equal(status?.changed, true)
+})
+
+runTest('the "how" badge is translated, not the Worker enum printed raw', () => {
+  // `via` is a Worker enum -- 'amend' | 'undo' | 'redo' -- and the float is the
+  // one surface whose whole job is explaining what happened, so printing it raw
+  // put the English words "undo" and "redo" into the Khmer pack. Both words are
+  // already in both packs.
+  const float = read('../src/components/sales/SaleRecordsFloat.tsx')
+  assert.doesNotMatch(float, /\{record\.via\}<\/span>/, 'the raw enum must not reach the DOM')
+  assert.match(float, /record\.via === 'undo' \? label\('undo', 'Undo'\)/, 'undo reads from the pack')
+  assert.match(float, /record\.via === 'redo' \? label\('redo', 'Redo'\)/, 'redo reads from the pack')
+  assert.match(float, /\{viaLabel\(record\) \?/, 'and the badge renders the looked-up label')
+  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
+  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
+  for (const key of ['undo', 'redo']) {
+    assert.ok(en[key], `en.json is missing ${key}`)
+    assert.ok(km[key], `km.json is missing ${key}`)
+    assert.notEqual(km[key], en[key], `${key} is not actually translated`)
+    // The tell the raw render leaves behind: the Khmer pack showing the
+    // English identifier is exactly the failure this pins.
+    assert.notEqual(km[key], key, `km.json's ${key} is the identifier, not a translation`)
+  }
+  // 'amend' deliberately has NO badge: it is how nearly every record was made.
+  assert.doesNotMatch(float, /label\('amend'/, "the common case must not badge every row")
+})
+
 runTest('the float is wired into the Sales page and fetches the union endpoint', () => {
   const sales = read('../src/components/sales/Sales.tsx')
   assert.match(sales, /import\('\.\/SaleRecordsFloat'\)/, 'the float must be code-split like the other sale modals')

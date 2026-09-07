@@ -77,6 +77,7 @@ const FIELD_FALLBACKS: Record<string, string> = {
   total: 'Sale total',
   quantity: 'Quantity',
   status: 'Status',
+  refund: 'Refund',
   receipt_number: 'Receipt',
   customer: 'Customer',
   membership_number: 'Membership',
@@ -98,6 +99,16 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecor
     const value = t(key)
     return value && value !== key ? value : fallback
   }
+
+  // The via badge. Only the two replay directions are named here on purpose:
+  // 'amend' is how nearly every record was made and a badge on nearly every row
+  // is noise, and an unknown value from a newer Worker prints nothing rather
+  // than an English identifier.
+  const viaLabel = (record: SaleRecord): string | null => (
+    record.via === 'undo' ? label('undo', 'Undo')
+      : record.via === 'redo' ? label('redo', 'Redo')
+      : null
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -210,7 +221,12 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecor
                       <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-400">
                         <span>{record.actor_username || (t('system') || 'System')}</span>
                         <span>{fmtDateTime24(record.at)}</span>
-                        {record.via && record.via !== 'amend' ? <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{record.via}</span> : null}
+                        {/* HOW it was done. `via` is a Worker enum -- amend /
+                            undo / redo -- not a display string: printing it raw
+                            put the English word "undo" into the Khmer pack, on
+                            the one surface whose whole job is explaining what
+                            happened. The pack already owns both words. */}
+                        {viaLabel(record) ? <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{viaLabel(record)}</span> : null}
                       </span>
                     </span>
                   </button>
