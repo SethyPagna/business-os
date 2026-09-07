@@ -247,6 +247,16 @@ const CREATION_SNAPSHOT_FIELDS = [
   'change_khr',
 ] as const
 
+const LEGACY_AMBIGUOUS_CREATION_FIELDS = [
+  'sale_status',
+  'payment_method',
+  'payment_details',
+  'amount_paid_usd',
+  'amount_paid_khr',
+  'change_usd',
+  'change_khr',
+] as const
+
 type CreationSnapshotField = (typeof CREATION_SNAPSHOT_FIELDS)[number]
 
 type KnownBefore = { at: number; value: unknown }
@@ -274,7 +284,10 @@ function rememberEarlierBefore(
  * The sales row is mutable. Rendering it verbatim in the creation record made
  * a later settlement look as if the sale had originally been completed and
  * paid by that tender. The first durable before-value for each field is the
- * original value; fields with no writer remain safe to read from the row.
+ * original value. Legacy rows may have outlived the audit entry that recorded
+ * a status or payment change, so mutable fields without surviving evidence are
+ * explicitly unknown rather than inferred from today's row. The total remains
+ * safe when there is no permanent amendment ledger entry.
  * Product lines are safe only while no line amendment exists. Once a line was
  * added/removed/changed, the ledger does not retain enough price detail to
  * recreate the original array, so `products: null` says unknown instead of
@@ -347,6 +360,9 @@ export function reconstructSaleCreation(input: {
   }
 
   const reconstructed: SaleRecordSaleRow = { ...input.sale }
+  for (const field of LEGACY_AMBIGUOUS_CREATION_FIELDS) {
+    reconstructed[field] = null
+  }
   for (const field of CREATION_SNAPSHOT_FIELDS) {
     if (known[field]) reconstructed[field] = known[field]!.value
   }
