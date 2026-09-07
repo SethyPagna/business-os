@@ -177,7 +177,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             <li>
               {T(
                 'merge_duplicates_quantity_kept',
-                'The oldest row in each duplicate group (lowest id) is kept as the "canonical" product; every other row in the group is merged into it.',
+                'The kept product is chosen in a fixed order. For leading-zero barcode duplicates, the row with the fewest extra leading zeros is preferred. Next, the row with the highest current stock is preferred; remaining ties keep the lowest ID. Every other row in the group is merged into it.',
               )}
             </li>
             <li>
