@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "task_id": "takeover-identity-20260907",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "/root/identity_impl"
+  },
+  "status": "completed",
+  "summary": "Implemented exact product identity, resumable bulk merge correctness, guarded scanner/search parity, fail-closed undo activation, lifecycle cleanup, truthful review copy, and current merge gate coverage without production writes.",
+  "base_sha": "ea9f0d1b7d67891be519fbe74c91a8bdf4102593",
+  "head_sha": "cfd9e63cafcac6d611ce4ac595c3d4d51d49e5ef",
+  "changes": [
+    "cloudflare/src/routes/products.ts: enforces exact identity and numeric validity, preserves immutable whole-cluster economics across partial failure/retry, bounds requests to 25 cases, reparents the product graph, records each case atomically, and quarantines stale or oversized clusters.",
+    "cloudflare/src/lib/productMerge.ts and frontend/src/utils/productMerge.ts: compute one DISTINCT positive-cost mean across the whole cluster, round upward once to four decimals, retain maximum retail/wholesale prices, and expose immutable retry-plan validation.",
+    "cloudflare/src/lib/undoAppliers.ts: stores mutation/history/audit together and keeps action history non-reversible until fingerprint storage and action activation succeed in one guarded batch.",
+    "cloudflare/src/lib/productIdentity.ts and frontend product grouping: normalize leading-zero-equivalent exact identities and choose a clean canonical displayed barcode.",
+    "cloudflare/src/lib/searchMatch.ts, cloudflare/src/lib/productSearchQuery.ts, and frontend/src/utils/searchMatch.ts: add checked UPC-E/UPC-A equivalence while preventing seven-digit internal-code collisions through fuzzy, FTS, trigram, and fallback search.",
+    "BarcodeScannerModal.tsx and ScanSearchButton.tsx: close successful scans once, reject stale callbacks, release tracks, require user camera action, and stop denied-permission retry loops.",
+    "MergeDuplicatesReviewModal.tsx, ProductDuplicatesTab.tsx, and productWriteTransport.ts: provide bounded/resumable merge contracts, cancellation, truthful blocked-group/undo language, horizontal product-name access, and a stable request transport.",
+    "Focused and legacy product merge/scanner tests now exercise real helpers and database effects; identity_i18n.json supplies exact English/Khmer strings for separately owned language maps."
+  ],
+  "commits": [
+    "93e4653a4898e42097e63eda796d1adbdc6fa43a fix(products): make duplicate merges atomic and resumable",
+    "c0e12bd1ccec8dab254da4c95cdffe7e0e856f8b fix(products): preserve merge plans across retries",
+    "cfd9e63cafcac6d611ce4ac595c3d4d51d49e5ef test(products): align merge gates with cluster contract"
+  ],
+  "evidence": [
+    {
+      "claim": "A 4/5/6 cluster keeps the whole-cluster result 5 after a committed first case and later retry.",
+      "source": "cloudflare/scripts/test-product-merge-kernel-pure.cjs",
+      "locator": "immutable ProductMergeClusterPlan retry assertions",
+      "observed": "Fresh pairwise retry is explicitly shown as 5.5 while resolving the stored original plan remains 5; changed remaining members fail plan validation."
+    },
+    {
+      "claim": "Injected route-level failure, changed-member quarantine, and pending-fingerprint behavior were independently exercised against c0e12bd1.",
+      "source": "accounting_impl verification message",
+      "locator": "route adversarial harness for c0e12bd1",
+      "observed": "Second-fold failure then retry ended USD/KHR 5/5000; changed remaining member returned merge_cluster_plan_conflict; fingerprint activation failure left reversible=0, status=recorded, fingerprintPending=1."
+    },
+    {
+      "claim": "The local bulk benchmark scans 1600 candidate pairs and mutates only one bounded 25-case request.",
+      "source": "cloudflare/scripts/test-product-merge-bulk-benchmark.cjs",
+      "locator": "benchmark JSON output",
+      "observed": "candidates=1600, chunk=25, scanMs=38.1, runMs=172.9, reads=751, batches=50, statementsInBatches=350."
+    },
+    {
+      "claim": "Checked UPC pairing does not collide with a seven-digit internal code.",
+      "source": "cloudflare/scripts/test-barcode-search-zero-parity-pure.cjs and frontend/tests/barcodeLeadingZeroScan.test.ts",
+      "locator": "UPC-E 01234565 / UPC-A 012345000065 fixtures",
+      "observed": "Both helpers and indexed/fallback product queries match the checked pair and exclude 1234565."
+    },
+    {
+      "claim": "Every requested legacy merge gate now exercises current real modules or database effects.",
+      "source": "cloudflare/scripts/test-merge-*.cjs and test-product-merge-undo-pure.cjs",
+      "locator": "five-test focused gate",
+      "observed": "All five scripts exited 0 after loader fixtures and obsolete source assertions were aligned without weakening identity or numeric validation."
+    }
+  ],
+  "verification": [
+    {
+      "command": "npm run typecheck",
+      "scope": "cloudflare package after merge-plan, undo, route, and search changes",
+      "exit_code": 0,
+      "expected": "TypeScript succeeds with no emit.",
+      "observed": "tsc --noEmit completed successfully."
+    },
+    {
+      "command": "node scripts/test-product-merge-kernel-pure.cjs && node scripts/test-product-merge-atomic-pure.cjs && node scripts/test-product-identity-guard-pure.cjs && node scripts/test-barcode-search-zero-parity-pure.cjs",
+      "scope": "backend merge economics, retry plan, atomic history, identity, and scanner search",
+      "exit_code": 0,
+      "expected": "All focused backend assertions pass.",
+      "observed": "All four scripts reported all checks passed."
+    },
+    {
+      "command": "node scripts/test-product-merge-bulk-benchmark.cjs",
+      "scope": "local SQLite benchmark with 1600 candidate pairs and one bounded 25-case mutation chunk",
+      "exit_code": 0,
+      "expected": "Scans 1600 candidates and processes no more than 25 cases in the measured request.",
+      "observed": "1600 candidates, chunk 25, measured scan 38.1 ms and run 172.9 ms; test passed."
+    },
+    {
+      "command": "npm run typecheck && npx tsx tests/productMergeKernel.test.ts && npx tsx tests/productMergeBulkRun.test.ts && npx tsx tests/barcodeLeadingZeroScan.test.ts && npx tsx tests/barcodeScannerState.test.ts",
+      "scope": "frontend types and focused merge/scanner contracts",
+      "exit_code": 0,
+      "expected": "Types and focused tests pass.",
+      "observed": "Typecheck and all four tests completed successfully."
+    },
+    {
+      "command": "npx tsx tests/leadingZeroIdentity.test.ts && npx tsx tests/mergeRulesParity.test.ts",
+      "scope": "frontend/Worker identity and merge-rule parity",
+      "exit_code": 0,
+      "expected": "Leading-zero identity and cross-package merge rules agree.",
+      "observed": "9 leading-zero checks and 13 merge-rule checks passed."
+    },
+    {
+      "command": "npm run build",
+      "scope": "frontend production build",
+      "exit_code": 0,
+      "expected": "Vite production build succeeds.",
+      "observed": "1075 modules transformed; build completed in 32.09 s. Generated public runtime files were restored to their clean pre-build state."
+    },
+    {
+      "command": "npm run verify:i18n",
+      "scope": "frontend translation gate before the separately owned language map is applied",
+      "exit_code": 1,
+      "expected": "Reports only keys intentionally handed off through identity_i18n.json.",
+      "observed": "Reported merge_duplicates_preview_blocked_groups and merge_duplicates_stop missing from en.json/km.json; the artifact also includes merge_duplicates_undo_unavailable required by the integrated Products.tsx warning."
+    },
+    {
+      "command": "node scripts/test-merge-cost-similarity-guard-pure.cjs; node scripts/test-merge-duplicates-carries-all-pure.cjs; node scripts/test-merge-duplicates-stock-choice-pure.cjs; node scripts/test-merge-identity-fk-pure.cjs; node scripts/test-product-merge-undo-pure.cjs",
+      "scope": "requested legacy merge gate after harness alignment",
+      "exit_code": 0,
+      "expected": "All five scripts preserve runtime coverage and pass current contracts.",
+      "observed": "19, 14, all stock-choice, 24 identity/FK, and 16 undo checks passed."
+    }
+  ],
+  "risks": [
+    "A fingerprint activation failure leaves the merge committed and audited but intentionally non-reversible; Products.tsx must surface undoPendingCount, which the lineage owner implemented outside this branch.",
+    "The benchmark in this branch measures candidate discovery plus one bounded 25-case request. The independent route harness measured the full 1600-case continuation separately."
+  ],
+  "blockers": [],
+  "not_done": [
+    "Products.tsx continuation and undoPendingCount warning are owned and implemented by /root/lineage, not edited in this branch.",
+    "frontend/src/lang/en.json and km.json are owned by root; apply outputs/takeover-20260907/identity_i18n.json, then rerun verify:i18n.",
+    "Supplier-return, dated stock-count, and create-products-session scanner callers are owned by /root/media_stock_impl and consume the committed barcode helper contract.",
+    "No production merge, deployment, remote migration, or remote D1 write was performed."
+  ],
+  "handoff": "Cherry-pick 93e4653a, c0e12bd1, and cfd9e63c in order. Apply identity_i18n.json to the root-owned language files, retain the lineage Products.tsx continuation/undo warning, integrate the media scanner callers, then run the combined frontend/cloudflare gates."
+}
