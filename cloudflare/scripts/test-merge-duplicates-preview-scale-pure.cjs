@@ -212,8 +212,9 @@ function seedCatalog() {
     raw.prepare('UPDATE products SET is_active=0 WHERE id=?').run(fixtureGroups[0][1])
     raw.prepare(`INSERT INTO undo_snapshots(kind,status,payload_json)
       VALUES('product.merge','applied',?)`).run(JSON.stringify({ bulkClusterPlan }))
+    const originalPlanSnapshotId = raw.prepare('SELECT MAX(id) AS id FROM undo_snapshots').get().id
     raw.exec('COMMIT')
-    return { d1, fixtureGroups, productCount: nextId - 1 }
+    return { d1, fixtureGroups, productCount: nextId - 1, bulkClusterPlan, originalPlanSnapshotId }
   } catch (error) {
     raw.exec('ROLLBACK')
     throw error
@@ -228,9 +229,42 @@ async function invokePreview(handler, user) {
   })
 }
 
+function verifyPlanLookupMigrationPreservesRows() {
+  const migrations = loadAll()
+  assert.match(migrations.at(-1), /idx_undo_product_merge_plan_keeper/, '0135 must remain the final migration in this fixture')
+  const before0135 = openDb(migrations.slice(0, -1))
+  const raw = before0135.db
+  raw.prepare(`INSERT INTO undo_snapshots(id,kind,status,payload_json)
+    VALUES(501,'product.merge','applied',?), (502,'product.merge','applied','{malformed')`)
+    .run(JSON.stringify({ bulkClusterPlan: { version: 1, keeperId: 10, identityKey: 'x', memberIds: [10], members: [] } }))
+  raw.prepare(`INSERT INTO action_history(id,scope,entity,entity_id,label,status)
+    VALUES(601,'products','product','10','preserved','undoable')`).run()
+  const snapshotsBefore = raw.prepare('SELECT id,kind,status,payload_json FROM undo_snapshots ORDER BY id').all()
+  const historyBefore = raw.prepare('SELECT id,scope,entity,entity_id,label,status FROM action_history ORDER BY id').all()
+  raw.exec(migrations.at(-1))
+  assert.deepEqual(raw.prepare('SELECT id,kind,status,payload_json FROM undo_snapshots ORDER BY id').all(), snapshotsBefore,
+    '0135 preserves valid and malformed opaque snapshot bytes')
+  assert.deepEqual(raw.prepare('SELECT id,scope,entity,entity_id,label,status FROM action_history ORDER BY id').all(), historyBefore,
+    '0135 preserves action-history rows')
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='index' AND name LIKE 'idx_undo_product_merge_%'").get().n, 2)
+}
+
 ;(async () => {
-  const { d1, fixtureGroups, productCount } = seedCatalog()
+  verifyPlanLookupMigrationPreservesRows()
+  const { d1, fixtureGroups, productCount, bulkClusterPlan, originalPlanSnapshotId } = seedCatalog()
   assert.equal(productCount, 4_027)
+  const indexNames = d1.db.prepare(`SELECT name FROM sqlite_master WHERE type='index'
+    AND name IN ('idx_undo_product_merge_plan_keeper','idx_undo_product_merge_invalid_json') ORDER BY name`).all().map((row) => row.name)
+  assert.deepEqual(indexNames, ['idx_undo_product_merge_invalid_json', 'idx_undo_product_merge_plan_keeper'])
+  const keeperLookupPlan = d1.db.prepare(`EXPLAIN QUERY PLAN
+    SELECT id FROM undo_snapshots INDEXED BY idx_undo_product_merge_plan_keeper
+    WHERE kind='product.merge' AND status='applied' AND json_valid(payload_json)=1
+      AND CASE WHEN json_valid(payload_json)
+        THEN CAST(json_extract(payload_json,'$.bulkClusterPlan.keeperId') AS INTEGER)
+        ELSE NULL END IN (?, ?)
+    LIMIT 9`).all(fixtureGroups[0][0], 999999)
+  assert.ok(keeperLookupPlan.some((row) => /SEARCH undo_snapshots USING INDEX idx_undo_product_merge_plan_keeper/i.test(row.detail)),
+    `keeper lookup did not use its expression index: ${JSON.stringify(keeperLookupPlan)}`)
   const adapter = countingAdapter(d1)
   const handler = loadPreviewRoute(adapter)
 
@@ -287,12 +321,14 @@ async function invokePreview(handler, user) {
 
   // 4,026 active member ids fit in 41 100-bind reads. Sixteen additional
   // simple SELECTs map every potentially linked member of a multi-row cluster,
-  // one JSON-bound snapshot-plan read preserves any partial cluster economics,
+  // twenty indexed plan lookups cover the 2,000 keepers in 100-bind chunks;
+  // one indexed malformed-history guard makes invalid JSON fail closed,
   // plus one duplicate detector query and one branch-name query. This bound is deliberately
   // independent of group count; the old per-group route executes 6,002.
-  assert.ok(adapter.metrics.queries <= 60, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
+  assert.ok(adapter.metrics.queries <= 80, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
+  const initialPreviewQueries = adapter.metrics.queries
   assert.equal(adapter.metrics.batchRoundTrips, 1, 'preview hydration and the linked-member map must share one D1 round trip')
-  assert.equal(adapter.metrics.maxBatchStatements, 58)
+  assert.equal(adapter.metrics.maxBatchStatements, 78)
   assert.ok(adapter.metrics.maxBoundParams <= 100, `preview bound ${adapter.metrics.maxBoundParams} params in one statement`)
   assert.ok(
     adapter.metrics.sql.some((sql) => /FROM products p LEFT JOIN branch_stock/i.test(sql)),
@@ -306,11 +342,76 @@ async function invokePreview(handler, user) {
   )
   assert.match(routeSource, /MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS = 600/)
   assert.match(routeSource, /assumedComplexIds: allIds\.slice\(MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS\)/)
+
+  const previewAgain = () => invokePreview(handler, FULL_USER)
+  const planGroup = (preview) => preview.body.groups.find((group) => group.canonicalId === fixtureGroups[0][0])
+  const insertSnapshot = (payload) => d1.db.prepare(`INSERT INTO undo_snapshots(kind,status,payload_json)
+    VALUES('product.merge','applied',?)`).run(payload)
+
+  // Unrelated valid plan history is skipped by the indexed keeper locator and
+  // cannot consume this active group's bounded candidate budget.
+  for (let id = 900_000; id < 900_020; id += 1) {
+    const unrelated = {
+      ...bulkClusterPlan,
+      keeperId: id,
+      memberIds: [id, id + 100_000],
+      members: bulkClusterPlan.members.slice(0, 2).map((member, index) => ({ ...member, id: index ? id + 100_000 : id })),
+    }
+    insertSnapshot(JSON.stringify({ bulkClusterPlan: unrelated }))
+  }
+  let guarded = await previewAgain()
+  assert.equal(planGroup(guarded).mergeable, true, 'unrelated keeper plans do not block a valid partial cluster')
+
+  // A changed remaining source is never previewed using a recomputed 5.5.
+  // The original timestamp is restored after the assertion for later cases.
+  const remainingMember = bulkClusterPlan.members.find((member) => member.id === fixtureGroups[0][2])
+  d1.db.prepare("UPDATE products SET updated_at='2099-01-01 00:00:00' WHERE id=?").run(fixtureGroups[0][2])
+  guarded = await previewAgain()
+  assert.equal(planGroup(guarded).mergeable, false)
+  assert.equal(planGroup(guarded).mergeBlockers[0].code, 'merge_cluster_plan_conflict')
+  assert.deepEqual(planGroup(guarded).costAfter, planGroup(guarded).costBefore, 'stale plans show no invented recomputed result')
+  d1.db.prepare('UPDATE products SET updated_at=? WHERE id=?').run(remainingMember.updated_at, fixtureGroups[0][2])
+
+  // A single oversized candidate is truncated in SQL and blocks the preview;
+  // its full reversal payload is never returned to the Worker.
+  insertSnapshot(JSON.stringify({ bulkClusterPlan: { ...bulkClusterPlan, padding: 'x'.repeat(5_000) } }))
+  guarded = await previewAgain()
+  assert.equal(planGroup(guarded).mergeable, false)
+  assert.equal(planGroup(guarded).mergeBlockers[0].code, 'merge_plan_history_unavailable')
+  assert.deepEqual(planGroup(guarded).costAfter, planGroup(guarded).costBefore, 'oversized plan history shows no recomputed mean')
+  d1.db.prepare('DELETE FROM undo_snapshots WHERE id>?').run(originalPlanSnapshotId + 20)
+
+  // A structurally invalid but keeper-addressable plan cannot be ignored and
+  // replaced with the wrong current-row mean.
+  insertSnapshot(JSON.stringify({ bulkClusterPlan: { version: 99, keeperId: fixtureGroups[0][0], identityKey: bulkClusterPlan.identityKey } }))
+  guarded = await previewAgain()
+  assert.equal(planGroup(guarded).mergeable, false)
+  assert.equal(planGroup(guarded).mergeBlockers[0].code, 'merge_plan_history_unavailable')
+  assert.deepEqual(planGroup(guarded).costAfter, planGroup(guarded).costBefore, 'malformed applicable plan shows no recomputed mean')
+  d1.db.prepare('DELETE FROM undo_snapshots WHERE id>?').run(originalPlanSnapshotId + 20)
+
+  // Malformed opaque merge history has no trustworthy keeper locator, so the
+  // dedicated partial index makes it an explicit global fail-closed condition.
+  insertSnapshot('{malformed')
+  guarded = await previewAgain()
+  assert.equal(planGroup(guarded).mergeable, false)
+  assert.equal(planGroup(guarded).mergeBlockers[0].code, 'merge_plan_history_unavailable')
+  assert.deepEqual(planGroup(guarded).costAfter, planGroup(guarded).costBefore, 'invalid JSON history shows no recomputed mean')
+  d1.db.prepare('DELETE FROM undo_snapshots WHERE id>?').run(originalPlanSnapshotId + 20)
+
+  // More than eight current-keeper candidates in one 100-keeper lookup chunk
+  // returns only the sentinel ninth row, then blocks without an unbounded scan
+  // or a fallback recomputation.
+  for (let copy = 0; copy < 9; copy += 1) insertSnapshot(JSON.stringify({ bulkClusterPlan }))
+  guarded = await previewAgain()
+  assert.equal(planGroup(guarded).mergeable, false)
+  assert.equal(planGroup(guarded).mergeBlockers[0].code, 'merge_plan_history_unavailable')
+  assert.deepEqual(planGroup(guarded).costAfter, planGroup(guarded).costBefore, 'saturated history shows no recomputed mean')
   console.log(JSON.stringify({
     status: 'PASS',
     groups: response.body.groupCount,
     duplicates: response.body.duplicateProductCount,
-    queries: adapter.metrics.queries,
+    queries: initialPreviewQueries,
     maxBoundParams: adapter.metrics.maxBoundParams,
     elapsedMs,
   }))
