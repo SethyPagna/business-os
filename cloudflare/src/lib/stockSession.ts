@@ -97,6 +97,21 @@ export type StockSessionReceipt = {
   }>
 }
 
+export type SessionProductDuplicateReason = 'name' | 'barcode'
+
+export function sessionProductDuplicateReason(
+  left: { name?: unknown; barcode?: unknown },
+  right: { name?: unknown; barcode?: unknown },
+): SessionProductDuplicateReason | null {
+  const leftName = normalizeProductGroupName(left.name)
+  const rightName = normalizeProductGroupName(right.name)
+  if (leftName && leftName === rightName) return 'name'
+  const leftBarcode = String(left.barcode ?? '').trim()
+  const rightBarcode = String(right.barcode ?? '').trim()
+  if (!leftBarcode || !rightBarcode || /^0+$/.test(leftBarcode) || /^0+$/.test(rightBarcode)) return null
+  return identityBarcodeKey(leftBarcode) === identityBarcodeKey(rightBarcode) ? 'barcode' : null
+}
+
 export class StockSessionError extends Error {
   constructor(
     message: string,
@@ -483,6 +498,27 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       const batch = explicitBatchMap.get(line.batch_id)
       if (!batch || Number(batch.variant_product_id) !== line.product_id) fail(`Batch ${line.batch_id} does not belong to product ${line.product_id}.`, 409, 'batch_mismatch')
     }
+  }
+
+  // A stock session is a single editable receipt. Repeating a product by
+  // normalized name OR folded barcode is almost always an accidental second
+  // Add; quantity belongs on the first line. This guard is intentionally
+  // session-local and does not redefine catalog identity or merge variants.
+  const seenSessionProducts: Array<{ lineId: string; name?: unknown; barcode?: unknown }> = []
+  for (const line of request.items) {
+    const source = line.kind === 'receive'
+      ? receiveProducts.get(line.product_id as number)
+      : line.product
+    const candidate = { lineId: line.line_id, name: source?.name, barcode: source?.barcode }
+    const duplicate = seenSessionProducts.find((seen) => sessionProductDuplicateReason(seen, candidate))
+    if (duplicate) {
+      fail('Duplicate: You added this item already.', 409, 'duplicate_session_item', {
+        line_id: line.line_id,
+        duplicate_line_id: duplicate.lineId,
+        match: sessionProductDuplicateReason(duplicate, candidate),
+      })
+    }
+    seenSessionProducts.push(candidate)
   }
 
   const dateBatchLines = request.items.filter((line) => line.kind === 'receive' && line.batch_id == null)
