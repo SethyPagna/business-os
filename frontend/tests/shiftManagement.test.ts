@@ -187,9 +187,8 @@ ok(/status\?\: unknown[\s\S]{0,160}=== 409/.test(modal) && /detailsError[\s\S]{0
 ok(/shift\.cancelled_at/.test(summary) && /shift_cancel_preserved_hint/.test(summary), 'cancelled detail is labelled closed out and keeps recorded facts visible')
 
 ok(/branchId=\{branchId\}/.test(currentSummary) && !/setShowHistory|aria-expanded/.test(currentSummary), 'transaction pages launch floating history with their operational branch and never expand inline')
-for (const [surface, source] of [['Sales', sales], ['Expenses', fees]] as const) {
-  ok(/<CurrentShiftSummary\b/.test(source), `${surface} retains the shared shift launcher surface`)
-}
+ok(/<ShiftHistoryModal\b/.test(sales) && /label=\{translateOr\('shift', 'Shift'\)\}/.test(sales), 'Sales retains the compact shared Shift launcher in its stats actions')
+ok(/<CurrentShiftSummary\b/.test(fees), 'Expenses retains the shared current-shift launcher surface')
 ok(/<ShiftHistoryPanel branchId=\{primaryBranchFilterId\} compact label=\{t\('shift_code'\)\}/.test(pos), 'POS has a persistent branch-scoped Shift button')
 ok(/layer="nested"/.test(profile), 'Profile opens the shared shift popup above its parent modal')
 ok(/userId=\{currentUserId\}/.test(profile) && !/canManage=\{hasPermission/.test(profile), 'Profile shows the signed-in user while actions still come only from server capabilities')

@@ -123,20 +123,23 @@ ok(/t\('shift_starts_at'\)/.test(registerBlock) && /fmtDateTime24\(now\)/.test(r
   'the registration prompt shows the moment the shift will be opened at')
 ok(/function useWallClock\(/.test(gate) && /window\.setInterval/.test(gate),
   'the not-yet-stamped moment is a live clock, not a value frozen when the panel opened')
-// Owner, 2026-09-06: "i had to enter the usd as well as khmer riel to enter."
-// A blank count is 0 and is sent as 0; an INVALID (negative, NaN, infinite)
-// count is still refused -- and refused out loud, beside the button, not
-// through a silently disabled control. tests/shiftGateUx.test.ts executes the
-// shared rule; this pins that both POS steps go through it.
+// Opening blanks deliberately register as 0. Closing blanks are independently
+// unknown/null so a cashier can close without inventing a measured zero; an
+// INVALID (negative, NaN, infinite) count is still refused out loud beside the
+// button. The shared helpers are executed in shiftGateUx/shiftClosingCounts;
+// this pins that both POS steps go through the corresponding helper.
 ok(/shiftCountOrZero\(floatUsd\)/.test(gate) && /openingFloatUsd == null \|\| openingFloatKhr == null \|\| startBlocker/.test(gate),
   'a new day records a blank opening count as 0 and still rejects invalid, infinite, and negative ones')
 ok(!/disabled=\{busy \|\| parseShiftCount\(floatUsd\) == null \|\| parseShiftCount\(floatKhr\) == null\}/.test(registerBlock)
   && /<ShiftSubmitRow[\s\S]{0,200}reason=\{startBlocker \? t\(shiftCountBlockerKey\(startBlocker\)\) : null\}/.test(registerBlock),
   'the Start Shift control is never disabled without the reason printed beside it')
-ok(/closingCounts\(countedUsd, countedKhr\)/.test(endBody) && /if \(endBlocker\) return/.test(endBody),
+ok(/const counts = shiftClosingCounts\(countedUsd, countedKhr\)/.test(endBody)
+  && /closingCountedUsd: counts\.usd/.test(endBody)
+  && /closingCountedKhr: counts\.khr/.test(endBody)
+  && /if \(endBlocker\) return/.test(endBody),
   'current-day close permits an unknown count and still rejects invalid, infinite, and negative ones')
 ok(!/Number\((?:float|counted)[^)]+\) \|\| 0/.test(gate),
-  'POS shift forms never coerce an INVALID count to zero -- only a blank one becomes 0, through the shared helper')
+  'POS shift forms never coerce an invalid count to zero; opening blanks and closing blanks keep their distinct shared-helper meanings')
 
 // ---- 4. No offline mirror for a physical cash count ------------------------
 for (const method of ['openShift', 'closeShift', 'amendShift', 'closeShiftById', 'reopenShift', 'cancelShift']) {
