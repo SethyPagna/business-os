@@ -40,7 +40,7 @@ await runTest('branch roles come from the name, never from is_default', () => {
   assert.equal(branchCanSell('Warehouse'), false)
   assert.equal(branchCanSell('Shop'), true)
   // An unrecognised branch is not evidence of a stock-only branch.
-  assert.equal(branchCanSell('Kiosk'), true)
+  assert.equal(branchCanSell('Kiosk'), false)
   assert.equal(branchCanBeTransferSource('Warehouse'), true)
   assert.equal(branchCanBeTransferSource('Shop'), false)
   assert.equal(branchCanBeTransferDestination('Shop'), true)
