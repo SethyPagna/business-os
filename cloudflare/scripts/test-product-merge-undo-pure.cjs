@@ -496,19 +496,23 @@ async function run() {
   // ---- Source guards: the REAL fold in products.ts must emit the same shape ----
   const productsSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
   const appliersSrc = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
+  const snapshotSrc = fs.readFileSync(path.join(LIB_DIR, 'productMergeSnapshot.ts'), 'utf8')
 
   await check('products.ts fold re-parents sale_items + inventory_movements and captures their ids', async () => {
-    // The per-table repoint is now driven by MERGE_REPARENT_TABLES (the one
-    // list undoAppliers.ts and the fold share) instead of two hand-written
-    // UPDATEs, so assert the generic statement AND that both original tables
-    // are still on the list -- dropping either would otherwise pass silently.
+    // The batched snapshot must still be driven by MERGE_REPARENT_TABLES (the
+    // one list undoAppliers.ts and the fold share), and the route may only
+    // replay the exact ids returned by that snapshot.
     assert.match(productsSrc, /UPDATE \$\{table\} SET \$\{column\} = @canonicalId WHERE \$\{column\} = @dupId/)
-    assert.match(productsSrc, /for \(const \{ table, column \} of MERGE_REPARENT_TABLES\)/)
+    assert.match(productsSrc, /readProductMergeCaseSnapshot\(db, canonicalId, dup\.id, MERGE_REPARENT_TABLES\)/)
+    assert.match(productsSrc, /const reparentedByTable = snapshot\.reparentedByTable/)
+    assert.match(productsSrc, /for \(const \{ table, column, ids \} of reparentedByTable\)/)
+    assert.match(snapshotSrc, /\.\.\.reparentTables\.map\(\(\{ table, column \}, index\) =>/)
+    assert.match(snapshotSrc, /sql: `SELECT id FROM \$\{table\} WHERE \$\{column\} = @id`/)
     assert.match(appliersSrc, /\{ table: 'sale_items', column: 'product_id' \}/)
     assert.match(appliersSrc, /\{ table: 'inventory_movements', column: 'product_id' \}/)
     assert.match(productsSrc, /const reparentedSaleItemIds = byTable\('sale_items'\)/)
     assert.match(productsSrc, /const reparentedMovementIds = byTable\('inventory_movements'\)/)
-    assert.match(productsSrc, /rfid_confirmed_qty FROM branch_stock WHERE product_id = @id/)
+    assert.match(snapshotSrc, /rfid_confirmed_qty FROM branch_stock WHERE product_id = @id/)
     assert.match(productsSrc, /const adjustmentMovementIds =/)
     assert.match(productsSrc, /registerMergeFold\(foldDuplicateProductInto\)/)
     assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
