@@ -186,4 +186,19 @@ assert.match(stockActionImportModal, /STOCK_RECEIPT_GATE_KEYS/,
 assert.match(stockActionImportModal, /noSupplierColumn/,
   'the stock-action import review must warn pre-upload when the sheet has no supplier column, the same way it warns about a missing cost column')
 
+// ROOT CAUSE (sibling:F13 verifier wave 9, item 3): two independently
+// maintained header-alias tables -- the client's HEADER_ALIASES and the
+// Worker's own reader -- let a spelling accepted on one side be refused on
+// the other (supplier/cost_price were each patched one column at a time).
+// The Worker must now expose ONE table (COLUMN_ALIASES) so a future column
+// added only on the client side is a source-shape defect this test can
+// catch, not a silent gap.
+const stockActionImportSrc = fs.readFileSync(path.join(root, 'src', 'lib', 'stockActionImport.ts'), 'utf8')
+assert.match(stockActionImportSrc, /export const COLUMN_ALIASES/,
+  'stockActionImport.ts must expose one canonical alias table, not scattered ad-hoc ?? fallbacks per column')
+for (const field of ['supplier', 'cost_price', 'wholesale_price', 'free_goods']) {
+  assert.match(stockActionImportSrc, new RegExp(`${field}:\\s*\\[`),
+    `COLUMN_ALIASES must list aliases for '${field}'`)
+}
+
 console.log(`PASS stock-in receipt gate: ${table.cases.length} shared cases, supplier+cost required, $0 only as declared free goods, corrections exempt, and all FOUR receipt wires enforced`)

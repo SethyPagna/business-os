@@ -93,6 +93,61 @@ function key(value: unknown): string {
   return text(value).toLowerCase().replace(/\s+/g, ' ')
 }
 
+// ONE alias table for every unified-stock column, copied verbatim (spelling
+// for spelling) from the client's HEADER_ALIASES (unifiedStockImport.ts).
+// Before this table there were TWO independently-maintained lists and only
+// the client's was ever consulted for most columns: a sheet the client
+// blessed as clean (e.g. a "Vendor Name" or "Unit Cost" header) came back
+// refused on every row because the Worker read only the one literal key
+// (`supplier`, `cost_price`) it was written against (sibling:F13 verifier
+// wave 9). Adding the missing spellings one column at a time (as free_goods
+// was) only proves the NEXT column is still exposed to the same bug.
+//
+// The two sides normalize a header differently -- the client's
+// normalizeUnifiedStockHeader strips every non-alphanumeric character
+// ("Cost Price (USD)" -> "costpriceusd"), while normalizeCsvKey (importCsv.ts)
+// only turns whitespace into underscores ("Cost Price (USD)" ->
+// "cost_price_(usd)"). readAliased below closes that gap by applying the
+// SAME non-alphanumeric strip to the raw row's own keys before comparing,
+// so this table can hold the identical spelling list the client checks
+// against, rather than a hand-translated (and inevitably incomplete)
+// underscored twin of it.
+export const COLUMN_ALIASES: Record<string, readonly string[]> = {
+  name: ['name', 'product', 'productname', 'item', 'itemname'],
+  barcode: ['barcode', 'upc', 'ean'],
+  shop: ['shop', 'shopquantity', 'shopqty', 'store', 'storequantity', 'storeqty'],
+  warehouse: ['warehouse', 'warehousequantity', 'warehouseqty'],
+  date: ['date', 'transactiondate', 'stockdate', 'receiveddate', 'saledate'],
+  action: ['action', 'stockaction', 'movement', 'movementtype', 'salegroup'],
+  selling_price: ['sellingprice', 'sellingpriceusd', 'price', 'priceusd'],
+  wholesale_price: ['wholesaleprice', 'wholesalepriceusd', 'vipprice', 'vippriceusd', 'specialprice', 'specialpriceusd'],
+  cost_price: ['costprice', 'costpriceusd', 'cost', 'unitcost'],
+  batch: ['batch', 'batchlabel', 'batchcode', 'lot', 'lotcode'],
+  supplier: ['supplier', 'suppliername', 'vendor', 'vendorname'],
+  free_goods: ['freegoods', 'free', 'isfree', 'freeitem'],
+}
+
+function normalizeAliasKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/** Reads one column's cell off a raw import row, accepting any header
+ *  spelling COLUMN_ALIASES lists for that column (plus the canonical column
+ *  name itself), matched the same way the client's mapUnifiedStockHeaders
+ *  matches a header -- every non-alphanumeric character stripped, so
+ *  "Vendor Name" and "VendorName" both reach 'vendorname'. A present-but-
+ *  blank aliased column is treated as absent, so an earlier blank canonical
+ *  column never shadows a later filled alias column. */
+function readAliased(raw: Record<string, unknown>, field: keyof typeof COLUMN_ALIASES): unknown {
+  const wanted = new Set([normalizeAliasKey(field), ...COLUMN_ALIASES[field].map(normalizeAliasKey)])
+  for (const rawKey of Object.keys(raw)) {
+    if (!wanted.has(normalizeAliasKey(rawKey))) continue
+    const value = raw[rawKey]
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value
+  }
+  return undefined
+}
+
 /** The sheet's free_goods cell, read the way a spreadsheet checkbox column
  *  is actually typed -- '1'/'true'/'yes'/'y', case-insensitive; anything
  *  else (blank included) is "not declared free". */
@@ -196,29 +251,28 @@ export function resolveUnifiedStockImportRows(
 
   rawRows.forEach((raw, index) => {
     const rowNumber = Number(raw._rowNumber) > 0 ? Number(raw._rowNumber) : index + 2
-    const name = text(raw.name)
-    const barcode = text(raw.barcode)
-    const date = normalizeToIsoDate(text(raw.date)) || ''
-    const action = text(raw.action)
-    const shop = optionalNumber(raw.shop, 'shop quantity')
-    const warehouse = optionalNumber(raw.warehouse, 'warehouse quantity')
-    const selling = optionalMoney(raw.selling_price, 'selling price')
+    const name = text(readAliased(raw, 'name'))
+    const barcode = text(readAliased(raw, 'barcode'))
+    const date = normalizeToIsoDate(text(readAliased(raw, 'date'))) || ''
+    const action = text(readAliased(raw, 'action'))
+    const shop = optionalNumber(readAliased(raw, 'shop'), 'shop quantity')
+    const warehouse = optionalNumber(readAliased(raw, 'warehouse'), 'warehouse quantity')
+    const selling = optionalMoney(readAliased(raw, 'selling_price'), 'selling price')
     // Wholesale price -- the sheet column renamed from vip_price by migration
-    // 0111. The legacy vip_price / special_price spellings still resolve here:
-    // per the owner's ruling that column always carried wholesale numbers, so
-    // an old sheet headed "VIP price" IS a wholesale sheet and reading it as
-    // absent would silently drop the operator's real prices on every re-import
-    // of a file exported before the rename. An explicit wholesale_price wins,
-    // being the one header that unambiguously names the tier it means. Mirrors
-    // unifiedStockImport.ts's HEADER_ALIASES on the frontend side.
-    const wholesale = optionalMoney(raw.wholesale_price ?? raw.vip_price ?? raw.special_price, 'Wholesale price')
-    const cost = optionalMoney(raw.cost_price, 'cost price')
+    // 0111. The legacy vip_price / special_price spellings (and their _usd
+    // twins) still resolve here via COLUMN_ALIASES: per the owner's ruling
+    // that column always carried wholesale numbers, so an old sheet headed
+    // "VIP price" IS a wholesale sheet and reading it as absent would
+    // silently drop the operator's real prices on every re-import of a file
+    // exported before the rename.
+    const wholesale = optionalMoney(readAliased(raw, 'wholesale_price'), 'Wholesale price')
+    const cost = optionalMoney(readAliased(raw, 'cost_price'), 'cost price')
     const errors = [shop.error, warehouse.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
     if (!name && !barcode) errors.push('Name or barcode is required.')
     if (!date) errors.push('Date must be mm/dd/yyyy or yyyy-mm-dd.')
     if (shop.value == null && warehouse.value == null) errors.push('Enter a shop or warehouse quantity.')
 
-    const batchLabel = text(raw.batch)
+    const batchLabel = text(readAliased(raw, 'batch'))
     const effectiveBatchLabel = batchLabel || (date ? String(dateToBatchCode(date)) : '')
     const matched = matchProduct(name, barcode, effectiveBatchLabel, products)
     const productName = matched.product?.name || name
@@ -266,14 +320,13 @@ export function resolveUnifiedStockImportRows(
       costPriceUsd: cost.value ?? matched.product?.cost_price_usd ?? null,
       sheetCostPriceUsd: cost.value,
       batchLabel: batchLabel || null,
-      supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
-      // Same spellings the client's own header-alias map accepts for this
-      // column (unifiedStockImport.ts's free_goods aliases) -- otherwise a
-      // sheet headed "Free" / "FreeGoods" / "Is Free" / "Free Item" passes
-      // the client mirror clean and is refused free_goods_required by the
-      // server for a box the operator already ticked (sibling:F13 verifier
-      // wave 9).
-      freeGoods: parseFreeGoodsFlag(raw.free_goods ?? raw.freegoods ?? raw.free ?? raw.is_free ?? raw.free_item),
+      supplier: text(readAliased(raw, 'supplier')).replace(/\s{2,}/g, ' ').slice(0, 120),
+      // Every spelling COLUMN_ALIASES.free_goods lists (the client's own
+      // header-alias map for this column) -- otherwise a sheet headed
+      // "Free" / "FreeGoods" / "Is Free" / "Free Item" passes the client
+      // mirror clean and is refused free_goods_required by the server for a
+      // box the operator already ticked (sibling:F13 verifier wave 9).
+      freeGoods: parseFreeGoodsFlag(readAliased(raw, 'free_goods')),
       branchRefs,
       plan: null,
       conflicts,
