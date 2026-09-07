@@ -6,6 +6,8 @@
   "identity_history_kept_separate": "Kept separate from #{ids}",
   "identity_history_reversed": "undone",
   "identity_keep_separate_action": "Keep them separate",
+  "identity_group_rename_message": "Renaming the whole group carries {count} other product(s) onto this name, and one of them already matches \"{name}\".",
+  "identity_group_rename_note": "Link-over is not offered here: the match is on another product in this group, not on the one you are saving, so merging would fold the wrong pair. Keep them separate to write the rename and list the pair in Conflicts, or go back and merge that pair there first.",
   "identity_keep_separate_only_note": "There is no saved row yet to link over. Open the existing product instead, or keep them separate — the pair is then listed in Conflicts, where you can still merge them either way.",
   "identity_link_over_action": "Link records over",
   "identity_link_over_message": "This matches \"{name}\". Link this product’s records over to it?",

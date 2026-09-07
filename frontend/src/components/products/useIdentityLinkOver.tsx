@@ -39,6 +39,14 @@ type PendingAsk = {
   matches: IdentityMatch[]
   canLinkOver: boolean
   canKeepSeparate: boolean
+  /**
+   * The siblings a GROUP rename carries whose next identity collides. Non-empty
+   * means the match is on ANOTHER row in the group, not on the row being saved,
+   * so the wording has to say that and link-over is not on offer. Without it
+   * the dialog fell through to the create-door note ("There is no saved row yet
+   * to link over"), which is plainly untrue on a rename.
+   */
+  collidingSiblingIds?: number[]
   resolve: (choice: IdentityLinkOverChoice) => void
 }
 
@@ -75,16 +83,25 @@ export function useIdentityLinkOver(t: TranslateFn) {
       t={t}
       layer="nested"
       title={T('identity_link_over_title', 'This matches another product')}
-      message={pending.matches.length === 1
-        ? T('identity_link_over_message', 'This matches "{name}". Link this product’s records over to it?')
+      message={(pending.collidingSiblingIds?.length ?? 0) > 0
+        ? T('identity_group_rename_message', 'Renaming the whole group carries {count} other product(s) onto this name, and one of them already matches "{name}".')
+          .replace('{count}', String(pending.collidingSiblingIds?.length ?? 0))
           .replace('{name}', labelOf(pending.matches[0]))
-        : T('identity_link_over_message_many', 'This matches {count} existing products. Link this product’s records over to the first?')
-          .replace('{count}', String(pending.matches.length))}
+        : pending.matches.length === 1
+          ? T('identity_link_over_message', 'This matches "{name}". Link this product’s records over to it?')
+            .replace('{name}', labelOf(pending.matches[0]))
+          : T('identity_link_over_message_many', 'This matches {count} existing products. Link this product’s records over to the first?')
+            .replace('{count}', String(pending.matches.length))}
       items={pending.matches.map((match) => ({
         label: `#${match.id}`,
         value: `${labelOf(match)}${match.barcode ? ` · ${match.barcode}` : ''}`,
       }))}
-      note={pending.canLinkOver
+      note={(pending.collidingSiblingIds?.length ?? 0) > 0
+        ? T(
+          'identity_group_rename_note',
+          'Link-over is not offered here: the match is on another product in this group, not on the one you are saving, so merging would fold the wrong pair. Keep them separate to write the rename and list the pair in Conflicts, or go back and merge that pair there first.',
+        )
+        : pending.canLinkOver
         ? T(
           'identity_link_over_note',
           'Linking over moves every record — sales, returns, stock movements, batches, branch stock and discount scopes — onto the matched product. Keeping them separate writes your change and lists the pair in Conflicts, where you can still merge them either way.',

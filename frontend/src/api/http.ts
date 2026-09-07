@@ -317,6 +317,14 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // what reaches the caller is what the server actually said.
   error.matches = parsed?.matches || null
   error.resolutions = parsed?.resolutions || null
+  // ...and, for a GROUP rename, WHICH pair the refusal is about. The rows in
+  // `matches` are what a SIBLING being carried to the new name would land on,
+  // not what the row being saved would, so a client that only sees `matches`
+  // and `resolutions` reads a link-over offer and merges the wrong pair. These
+  // two fields are the only thing that distinguishes the case; dropped here,
+  // the distinction cannot be made anywhere downstream.
+  error.renameScope = parsed?.renameScope || null
+  error.collidingSiblingIds = parsed?.collidingSiblingIds || null
   // Carry the per-branch/per-lot breakdown a 400 stock_choice_required returns,
   // so the caller can open the merge/remove dialog with the real numbers
   // instead of a bare error toast -- see routes/products.ts's merge guard.

@@ -114,6 +114,14 @@ check('createApiError carries matches and resolutions onto the thrown Error', ()
     body, /error\.resolutions\s*=/,
     'without this the client can never learn that keep-separate is on offer, and the second answer is unreachable',
   )
+  assert.match(
+    body, /error\.renameScope\s*=/,
+    'without this a group-rename refusal is indistinguishable from a single-row one, and the client offers a merge of the wrong pair',
+  )
+  assert.match(
+    body, /error\.collidingSiblingIds\s*=/,
+    'without this the prompt cannot say WHICH sibling the rename collides on',
+  )
 })
 
 // --- 3. THE REFUSAL, unpacked --------------------------------------------
@@ -162,6 +170,42 @@ check('the structured refusal is read whole -- every match, and the door\'s answ
   assert.ok(create)
   assert.equal(create!.canLinkOver, false, 'create must not offer to link over a row that does not exist yet')
   assert.equal(create!.canKeepSeparate, true)
+})
+
+check('a GROUP-rename refusal offers keep-separate but never link-over', () => {
+  // The fourth door. A group rename carries every sibling to the destination
+  // name, so the row that collides is a SIBLING, not the row being saved --
+  // the Worker says so explicitly, with renameScope 'group' and the
+  // collidingSiblingIds it names. The generic edit-door handling would offer
+  // "link over" and merge THIS product into matches[0]: the wrong pair,
+  // folding two rows that never collided and leaving the pair that did.
+  // Keep-separate is still a real answer (the Worker extends it to the
+  // siblings), and so is going back and merging that sibling from Conflicts.
+  const groupRename = identityCollisionFrom({
+    code: 'duplicate_product',
+    error: '"Bar" already exists with this barcode',
+    duplicate: { id: 22, name: 'Bar', barcode: '2' },
+    matches: [{ id: 22, name: 'Bar', barcode: '2' }],
+    candidateIds: [22],
+    collidingSiblingIds: [21],
+    renameScope: 'group',
+    resolutions: ['link_over', 'keep_separate'],
+  })
+  assert.ok(groupRename)
+  assert.equal(groupRename!.canLinkOver, false,
+    'the colliding row is a sibling, so merging THIS row into it would fold the wrong pair')
+  assert.equal(groupRename!.canKeepSeparate, true, 'keep-separate covers the siblings, so it stays on offer')
+  assert.deepEqual(groupRename!.collidingSiblingIds, [21], 'the prompt can say WHICH sibling collides')
+  // DISCRIMINATING against the same body without the scope: that one is an
+  // ordinary edit collision on the row itself, and link-over is correct there.
+  const ordinary = identityCollisionFrom({
+    code: 'duplicate_product',
+    duplicate: { id: 22, name: 'Bar', barcode: '2' },
+    matches: [{ id: 22, name: 'Bar', barcode: '2' }],
+    resolutions: ['link_over', 'keep_separate'],
+  })
+  assert.equal(ordinary!.canLinkOver, true, 'a single-row edit collision still offers the merge')
+  assert.deepEqual(ordinary!.collidingSiblingIds, [], 'and names no sibling, because none is carried')
 })
 
 check('an older Worker (no resolutions, only `duplicate`) degrades to link-over only', () => {
@@ -386,6 +430,32 @@ check('the variant door -- the third create door -- answers through the same hel
     variant, /choice !== 'keep_separate' \|\| !collision\.canKeepSeparate/,
     'nothing is retried without an explicit answer -- a re-send on any other outcome would write over an identity nobody approved',
   )
+})
+
+check('the group-rename refusal reaches the dialog, which says what it is', () => {
+  const form = fs.readFileSync(
+    path.join(repoRoot, 'frontend', 'src', 'components', 'products', 'forms', 'ProductForm.tsx'), 'utf8',
+  )
+  assert.match(
+    form, /collidingSiblingIds: collision\.collidingSiblingIds/,
+    'the edit door must hand the sibling ids to the prompt, or the dialog cannot tell a rename collision from a create one',
+  )
+  const hook = fs.readFileSync(
+    path.join(repoRoot, 'frontend', 'src', 'components', 'products', 'useIdentityLinkOver.tsx'), 'utf8',
+  )
+  // Without its own wording the dialog fell through to the create-door note --
+  // "There is no saved row yet to link over" -- in front of an operator who is
+  // renaming a saved group. A sentence that is simply false is worse than a
+  // bare refusal, because it sends him looking for a row that is right there.
+  assert.match(hook, /identity_group_rename_message/, 'the rename case has its own message')
+  assert.match(hook, /identity_group_rename_note/, 'and its own note, instead of the create door\'s')
+  const en = JSON.parse(fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'lang', 'en.json'), 'utf8')) as Record<string, string>
+  const km = JSON.parse(fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'lang', 'km.json'), 'utf8')) as Record<string, string>
+  for (const key of ['identity_group_rename_message', 'identity_group_rename_note']) {
+    assert.ok(en[key], `${key} must exist in the English pack`)
+    assert.ok(km[key], `${key} must exist in the Khmer pack`)
+    assert.notEqual(km[key], en[key], `${key} must be really translated, not the English string copied`)
+  }
 })
 
 console.log(`PASS identityLinkOver (${passed} checks)`)

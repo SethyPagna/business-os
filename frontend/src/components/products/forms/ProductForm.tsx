@@ -1358,6 +1358,12 @@ export default function ProductForm({
           matches: collision.matches,
           canLinkOver: collision.canLinkOver,
           canKeepSeparate: collision.canKeepSeparate,
+          // A GROUP rename collides through a SIBLING it carries, not through
+          // this row. The dialog needs that fact or it falls back to the
+          // create-door note ("there is no saved row yet to link over"), which
+          // is not true of a rename -- and link-over stays off, because it
+          // would fold this row into one it never collided with.
+          collidingSiblingIds: collision.collidingSiblingIds,
         })
         if (choice === 'link_over' && collision.canLinkOver && product?.id) {
           try {

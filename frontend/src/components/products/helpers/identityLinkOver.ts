@@ -62,11 +62,20 @@ export type IdentityCollision = {
    * Whether THIS door can offer to link the records over. False on create --
    * there is no saved row yet whose records could move anywhere, which is why
    * the Worker sends 'open_existing' there instead. A client that offered a
-   * merge on create would be offering to fold a row that does not exist.
+   * merge on create would be offering to fold a row that does not exist. Also
+   * false on a GROUP rename, for the opposite reason: the row that collides is
+   * a sibling being carried, not the row being saved, so "link over" would
+   * merge the wrong pair.
    */
   canLinkOver: boolean
   /** Whether the operator may write anyway and settle the pair in Conflicts. */
   canKeepSeparate: boolean
+  /**
+   * On a group rename, the siblings whose next identity collides -- the rows
+   * the refusal is actually ABOUT. Empty for every single-row refusal, where
+   * the colliding row is the one being saved.
+   */
+  collidingSiblingIds: number[]
 }
 
 function toMatch(row: unknown): IdentityMatch | null {
@@ -98,6 +107,8 @@ export function identityCollisionFrom(error: unknown): IdentityCollision | null 
     matches?: unknown
     duplicate?: unknown
     resolutions?: unknown
+    renameScope?: unknown
+    collidingSiblingIds?: unknown
   } | null
   if (String(err?.code || '') !== 'duplicate_product') return null
 
@@ -112,11 +123,23 @@ export function identityCollisionFrom(error: unknown): IdentityCollision | null 
   // a Worker that would reject the decision field would put a button in front
   // of the operator that cannot work.
   const resolutions = Array.isArray(err?.resolutions) ? err.resolutions.map((value) => String(value)) : null
+  // A GROUP rename carries every sibling in the name group to the destination
+  // name, so the row named in `matches` is what a SIBLING would land on -- not
+  // what the row being saved would. The Worker's resolution list is about the
+  // door, not about which pair collided, so taking `link_over` from it here
+  // would merge this product into a row it never collided with, leaving the
+  // pair that actually did. Keep-separate is unaffected: the Worker extends it
+  // to the siblings, which is why it is still the answer this door can give.
+  const groupRename = String(err?.renameScope || '') === 'group'
+  const collidingSiblingIds = Array.isArray(err?.collidingSiblingIds)
+    ? err.collidingSiblingIds.map(Number).filter(Number.isInteger)
+    : []
   return {
     matches,
     message: String(err?.error || ''),
-    canLinkOver: resolutions ? resolutions.includes('link_over') : true,
+    canLinkOver: groupRename ? false : (resolutions ? resolutions.includes('link_over') : true),
     canKeepSeparate: resolutions ? resolutions.includes(IDENTITY_KEEP_SEPARATE) : false,
+    collidingSiblingIds,
   }
 }
 
