@@ -24,7 +24,7 @@ assert.match(productFormSource, /clearAfterSuccessfulProductSave/, 'draft cleari
 assert.match(productFormSource, /const legacyDraft = !draft && legacyDraftKey/, 'legacy fallback must run only when the new scoped draft is absent')
 assert.match(productFormSource, /restoredLegacyDraftKeyRef\.current = legacyDraft\?\.data \? legacyDraftKey : null/, 'legacy clearing must be armed only by an actual fallback restore')
 assert.match(productFormSource, /useEffect\(\(\) => \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?\}, \[draftKey\]\)/, 'unmount/key change must flush only this form pending draft')
-assert.match(productFormSource, /const preserveAndMinimize = isCreateMode && onMinimize \? \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?onMinimize\(/, 'standalone prompt minimize must synchronously finish its own draft before parking')
+assert.match(productFormSource, /const preserveAndMinimize = onMinimize \? \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?productId: product\?\.id \?\? null/, 'create and edit minimize must flush and identify the exact entity draft before parking')
 assert.match(productFormSource, /<Modal[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'ProductForm must expose its proven preservation capability to the shared close prompt')
 assert.match(productFormSource, /<ConfirmDialogLayerContext\.Provider value=\{modalLayer\}>/, 'nested ProductForm must propagate its layer to indirect confirmation dialogs')
 assert.match(productFormSource, /<Modal[\s\S]*?layer=\{modalLayer\}/, 'ProductForm must retain its requested layer while a child is open')

@@ -216,10 +216,10 @@ interface ProductFormProps {
   // prop is present AND `product` is set, so a fresh "Add product" form
   // never shows it.
   onDelete?: () => void
-  // F3 slice 2: when supplied (create mode only), the modal shows a −
-  // minimize control that parks the in-progress add-product flow as a
-  // top-bar chip via the shared minimizedWork registry. Omitted for edit.
-  onMinimize?: (label: string) => void
+  // When supplied, the modal shows a − minimize control and passes the host
+  // the exact actor-scoped draft/entity identity it just flushed. The host
+  // owns declarative parking, permission metadata and current-row restore.
+  onMinimize?: (label: string, detail?: { draftKey: string; productId: EntityId | null }) => void
   // S4-12: values a CREATE starts pre-filled with, layered over this form's
   // own blank defaults (so the defaults below stay the single source of
   // truth for every field the caller does not seed). Used by the
@@ -1342,13 +1342,19 @@ export default function ProductForm({
     () => (isCreateMode && !nameLocked ? buildProductNameSuggestions(createMatches, { excludeId: product?.id }) : []),
     [isCreateMode, nameLocked, createMatches, product?.id],
   )
-  const preserveAndMinimize = isCreateMode && onMinimize ? () => {
+  const preserveAndMinimize = onMinimize ? () => {
     // The shared unsaved prompt may offer Minimize only through an explicit
     // preservation capability. Finish this form's pending debounce before the
     // parent parks/closes it; an already-fired debounce is already durable.
     flushPendingWorkDraft(draftKey)
-    const typedName = String(form.name || '').trim()
-    onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
+    const typedName = String(form.name || product?.name || '').trim()
+    const actionLabel = isEditMode
+      ? tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')
+      : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')
+    onMinimize(`${actionLabel}${typedName ? ` — ${typedName}` : ''}`, {
+      draftKey,
+      productId: product?.id ?? null,
+    })
   } : undefined
   const childSurfaceOpen = Boolean(
     filePickerOpen || scannerField || renameRequest || mergeStockChoiceDialog || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
