@@ -296,6 +296,18 @@ async function complexLaterMemberBlocksWholeThreeRowCluster() {
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
 }
 
+async function laterPrimaryImageBlocksWholeThreeRowCluster() {
+  const d1 = seedGroups([2])
+  d1.db.prepare("UPDATE products SET image_path='/uploads/later.webp' WHERE id=3").run()
+  const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.mergedProducts, 0, 'a later primary image blocks the whole cluster before its simple first member')
+  assert.equal(result.body.refusals.length, 2)
+  assert.ok(result.body.refusals.every((refusal) => refusal.code === 'cluster_requires_manifest'))
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM products WHERE is_active=0').get().n, 0)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+}
+
 ;(async () => {
   await overloadAfterEight()
   await budgetStopsBetweenWholeGroups()
@@ -304,5 +316,6 @@ async function complexLaterMemberBlocksWholeThreeRowCluster() {
   await oversizedWritePlanRefusesBeforeMutation()
   await oversizedDependentReadRefusesBeforeMutation()
   await complexLaterMemberBlocksWholeThreeRowCluster()
+  await laterPrimaryImageBlocksWholeThreeRowCluster()
   console.log('PASS merge route reports committed partial work and stops only between complete clusters')
 })().catch((error) => { console.error(error); process.exitCode = 1 })
