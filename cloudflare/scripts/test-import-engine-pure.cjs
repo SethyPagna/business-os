@@ -1880,6 +1880,18 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(drifted[0].action, 'error', 'a selected id that left the live candidate set is refused')
     assert.strictEqual(drifted[0].contactMatchTargetInvalid, true)
     assert.match(drifted[0].message, /no longer a current match/)
+
+    for (const invalidTarget of [true, [31], '31']) {
+      const invalid = await classifyContactsForAmbiguity(
+        makeContactDb(legacyDuplicates),
+        'customers',
+        [row({ name: 'Shared Legacy Name' }, 1)],
+        contactDecisions({ '1': { action: 'apply', target_existing_id: invalidTarget } }),
+      )
+      assert.strictEqual(invalid[0].action, 'error', `non-number target ${JSON.stringify(invalidTarget)} must not select a contact`)
+      assert.strictEqual(invalid[0].existingId, null)
+      assert.strictEqual(invalid[0].contactMatchTargetInvalid, true)
+    }
   }
 
   // 9) only the active canonical Shop can carry a historical sale. Unknown,

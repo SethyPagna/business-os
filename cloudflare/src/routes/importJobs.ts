@@ -503,8 +503,8 @@ app.patch('/:id/decisions', async (c) => {
         return c.json({ success: false, error: `Invalid contact import action for row ${rowNumber}.` }, 400)
       }
       if (decision.target_existing_id != null) {
-        const targetId = Number(decision.target_existing_id)
-        if (decision.action !== 'apply' || !Number.isSafeInteger(targetId) || targetId <= 0) {
+        const targetId = decision.target_existing_id
+        if (decision.action !== 'apply' || typeof targetId !== 'number' || !Number.isSafeInteger(targetId) || targetId <= 0) {
           return c.json({ success: false, error: `Invalid contact merge target for row ${rowNumber}.` }, 400)
         }
       }

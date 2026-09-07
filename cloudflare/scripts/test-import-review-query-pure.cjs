@@ -69,9 +69,28 @@ assert.deepStrictEqual(sorted.map((row) => row.row_number), [3, 4, 2], 'alphabet
 insert.run('job-contact', 2, 'update', 'Sokha', JSON.stringify({ warnings: [{ kind: 'name_match', message: 'review' }] }))
 insert.run('job-contact', 3, 'update', 'Dara', JSON.stringify({ warnings: [{ kind: 'membership_phone_conflict', message: 'review' }] }))
 insert.run('job-contact', 4, 'update', 'Clean', JSON.stringify({ warnings: [] }))
-const unresolvedWhere = buildUnresolvedContactReviewWhere('job-contact', JSON.stringify({ 2: { action: 'apply' } }))
-const unresolved = sqlite.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`).get(unresolvedWhere.params)
-assert.strictEqual(unresolved.n, 1, 'only contact-conflict rows without a durable row decision block approval')
+for (const rowNumber of [5, 6, 7, 8, 9, 10, 11]) {
+  insert.run('job-contact', rowNumber, 'error', `Ambiguous ${rowNumber}`, JSON.stringify({
+    warnings: [{ kind: 'name_match', message: 'choose exact target' }],
+    contactMatchTargetInvalid: true,
+  }))
+}
+const unresolvedWhere = buildUnresolvedContactReviewWhere('job-contact', JSON.stringify({
+  2: { action: 'apply' },
+  5: { action: 'apply' },
+  6: { action: 'apply', target_existing_id: 31 },
+  7: { action: 'skip' },
+  8: { action: 'force_create', field_overrides: { name: 'Distinct Name' } },
+  9: { action: 'apply', target_existing_id: true },
+  10: { action: 'apply', target_existing_id: [31] },
+  11: { action: 'apply', target_existing_id: '31' },
+}))
+const unresolved = sqlite.prepare(`SELECT row_number FROM import_job_rows WHERE ${unresolvedWhere.sql} ORDER BY row_number`).all(unresolvedWhere.params)
+assert.deepStrictEqual(
+  unresolved.map((row) => row.row_number),
+  [3, 5, 9, 10, 11],
+  'ambiguous apply requires a numeric target; skip/force-create and a valid targeted apply resolve the row',
+)
 
 insert.run('job-product', 2, 'create', 'Shared barcode', JSON.stringify({ warnings: [{ kind: 'barcode_collision', message: 'review' }] }))
 insert.run('job-product', 3, 'create', 'Shared sku', JSON.stringify({ warnings: [{ kind: 'sku_collision', message: 'review' }] }))
