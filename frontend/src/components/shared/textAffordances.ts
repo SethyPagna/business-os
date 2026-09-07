@@ -409,11 +409,18 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   // A click the float does NOT claim is left completely alone -- not
   // stopped, not defaulted -- so the row underneath behaves exactly as it
   // did before this lane existed.
+  //
+  // Every exit from here disarms a pending dwell first. A tap fires a
+  // SYNTHETIC mouseover before its click, and on the dense rows the click is
+  // declined -- so the 450ms timer that mouseover armed used to survive the
+  // whole gesture and open the panel a third of a second later, on the z-1200
+  // layer above the record the tap had just opened, pointing at a cell that
+  // view now covers. Declining the click means declining the reveal.
   document.addEventListener('click', (event) => {
     if (insideFloat(event.target)) return
     const found = targetFrom(event.target)
-    if (!found || !eligible(found)) return
-    if (!claimsClick(found.kind, insideClickableSurface(found.element))) return
+    if (!found || !eligible(found)) { cancelHover(); return }
+    if (!claimsClick(found.kind, insideClickableSurface(found.element))) { cancelHover(); return }
     event.stopPropagation()
     apply({ type: 'click', element: found.element, kind: found.kind })
   }, true)
@@ -460,6 +467,10 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
 
   document.addEventListener('mousedown', (event) => {
     if (insideFloat(event.target)) return
+    // A pointer that has come down is no longer dwelling, whatever happens to
+    // the press next. Only `apply()` used to disarm the dwell, and the paths
+    // below that hand the press back to the surface never call it.
+    cancelHover()
     const found = targetFrom(event.target)
     // ONE ownership rule, at every entry point -- the press included.
     //
@@ -503,6 +514,9 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
 
   document.addEventListener('touchstart', (event) => {
     if (insideFloat(event.target)) return
+    // Same as `mousedown`: a finger on the glass ends any dwell, including
+    // the synthetic one a previous tap left behind.
+    cancelHover()
     const found = targetFrom(event.target)
     // Touch is the one place the copy field takes the hold even inside a
     // surface that owns its own: press-and-hold is the ONLY way to copy on a

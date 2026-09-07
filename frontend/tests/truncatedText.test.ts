@@ -283,6 +283,73 @@ const again = await hoverThenLeave(denseCell)
 assert.equal(again.opened, true, 're-hovering the same cell opens it again')
 assert.equal(again.closed, true, 'and it closes again')
 
+/* ---------------------------------------------------------------- *
+ * 5b. A pending hover must not outlive the tap that declined it.
+ *
+ * `cancelHover()` was reachable only through `apply()`, and the three
+ * paths a tap on a dense row actually takes never call it: `mousedown`
+ * returns without applying anything when the surface owns the press, the
+ * `click` handler returns early the moment `claimsClick` says the row
+ * keeps its click, and `touchstart` does the same. So the synthetic
+ * mouseover every tap fires armed a 450ms timer that nothing disarmed,
+ * and the panel opened a third of a second later ON TOP of the record the
+ * tap had just opened -- pointing at a cell that view now covers.
+ *
+ * Hover itself must survive: an actual dwell still opens the panel, which
+ * is the control this section leads with.
+ * ---------------------------------------------------------------- */
+
+const tapCell = dom.el('span', { class: 'dense-cell-truncate', title: 'Shop -> Warehouse, wrong size returned' }, { scrollWidth: 260, clientWidth: 80 })
+buildClickableRow(dom, tapCell)
+
+// Control: a real dwell, with no tap, still reveals.
+dom.fire('mouseover', { target: tapCell })
+await wait(HOVER_OPEN_DELAY_MS + 80)
+assert.equal(host.hidden, false, 'control: hovering a clipped dense cell still opens the panel')
+dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true)
+
+// The real order a finger produces on a touch screen: touchstart,
+// touchend, then the synthetic mouseover/mousedown/mouseup/click pair the
+// browser replays before the row's own handler runs.
+dom.fire('touchstart', { target: tapCell, touches: [{ clientX: 30, clientY: 90 }] })
+dom.fire('touchend', { target: tapCell })
+dom.fire('mouseover', { target: tapCell })
+dom.fire('mousedown', { target: tapCell, clientX: 30, clientY: 90 })
+dom.fire('mouseup', { target: tapCell })
+const tapClick = dom.fire('click', { target: tapCell })
+assert.equal(tapClick.stopped, false, 'the row keeps the click that opens its record')
+await wait(HOVER_OPEN_DELAY_MS + 80)
+assert.equal(host.hidden, true, 'and no panel arrives afterwards, over the record that tap opened')
+
+// A click with no press in front of it -- a keyboard activation, or any
+// programmatic .click() -- has to disarm the dwell too, because the click
+// handler is then the only path that sees the gesture at all.
+dom.fire('mouseover', { target: tapCell })
+const bareClick = dom.fire('click', { target: tapCell })
+assert.equal(bareClick.stopped, false, 'still the row\u2019s click')
+await wait(HOVER_OPEN_DELAY_MS + 80)
+assert.equal(host.hidden, true, 'a declined click disarms the hover it declined')
+
+// ...and each of the three entry points has to disarm it ON ITS OWN, or the
+// gesture that skips the others carries the timer through.
+//
+// A press that turns into a drag never produces a click at all (text
+// selection, a flick on a trackpad), so `mousedown` is the only path that
+// sees it.
+dom.fire('mouseover', { target: tapCell })
+dom.fire('mousedown', { target: tapCell, clientX: 30, clientY: 90 })
+await wait(HOVER_OPEN_DELAY_MS + 80)
+assert.equal(host.hidden, true, 'a press disarms the dwell even when no click follows it')
+
+// And on a hybrid machine the pointer can be resting on a cell -- dwell
+// armed -- while the finger lands somewhere else entirely. No mouseout, no
+// click on the hovered cell: `touchstart` is the only path that sees THAT.
+dom.fire('mouseover', { target: tapCell })
+dom.fire('touchstart', { target: outside, touches: [{ clientX: 5, clientY: 5 }] })
+await wait(HOVER_OPEN_DELAY_MS + 80)
+assert.equal(host.hidden, true, 'a touch elsewhere disarms a dwell the pointer left pending')
+
 dom.restore()
 
 console.log('PASS one delegated reveal serves every truncated cell, without taking a click the surface owns')
