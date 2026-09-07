@@ -20,7 +20,7 @@ import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
-import { formatPhoneInputElement, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
+import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
@@ -306,6 +306,7 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
               setOptions((current) => current.map((option, itemIndex) => (itemIndex === 0 ? { ...option, phone } : option)))
             }}
             onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === 0 ? { ...option, phone } : option))))}
+            onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === 0 ? { ...option, phone } : option))))}
           />
         </div>
         <div>
@@ -337,7 +338,7 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
                   </div>
                   <div>
                     <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">{t('phone') || 'Phone'}</label>
-                    <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" autoComplete="tel" inputMode="tel" placeholder={t('phone_number') || 'Phone number'} value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: formatPhoneInputElement(event.currentTarget) })} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => updateOption(index, { ...option, phone }))} />
+                    <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" autoComplete="tel" inputMode="tel" placeholder={t('phone_number') || 'Phone number'} value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: formatPhoneInputElement(event.currentTarget) })} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => updateOption(index, { ...option, phone }))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => updateOption(index, { ...option, phone }))} />
                   </div>
                 </div>
                 <div>
