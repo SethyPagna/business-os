@@ -1000,7 +1000,30 @@ app.post('/', async (c) => {
     const allocationReleasedAt = shouldDeductStock ? null : new Date().toISOString()
     for (const [itemIndex, item] of priced.entries()) {
       statements.push({
-        sql: `INSERT INTO sale_items (
+        sql: `WITH current_batch AS (
+                SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date
+                FROM product_batches pb
+                JOIN branch_batch_stock bbs
+                  ON bbs.batch_id = pb.id
+                 AND bbs.branch_id = @branch_id
+                 AND bbs.quantity >= @quantity
+                WHERE pb.id = @batch_id
+                  AND pb.variant_product_id = @product_id
+                  AND pb.is_active = 1
+                LIMIT 1
+              ), current_line AS (
+                SELECT b.id AS branch_id,
+                       cb.batch_id, cb.lot_code, cb.expiry_date
+                FROM branches b
+                JOIN products p ON p.id = @product_id
+                LEFT JOIN current_batch cb ON 1 = 1
+                WHERE b.id = @branch_id
+                  AND COALESCE(b.is_active, 1) = 1
+                  AND lower(trim(b.name)) = 'shop'
+                  AND (@batch_id IS NULL OR cb.batch_id IS NOT NULL)
+                LIMIT 1
+              )
+              INSERT INTO sale_items (
                 sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
                 cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
                 price_mode, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr,
@@ -1008,11 +1031,15 @@ app.post('/', async (c) => {
                 batch_id, batch_label, batch_expiry_date, damaged_lot_id
               )
               VALUES (
-                @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
+                CASE WHEN EXISTS (SELECT 1 FROM current_line) THEN @sale_id ELSE NULL END,
+                @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
                 @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
                 @price_mode, @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr,
                 @base_price_usd, @base_price_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr,
-                @batch_id, @batch_label, @batch_expiry_date, @damaged_lot_id
+                (SELECT batch_id FROM current_line),
+                (SELECT lot_code FROM current_line),
+                (SELECT expiry_date FROM current_line),
+                @damaged_lot_id
               )`,
         params: {
           sale_id: saleId,
@@ -1042,8 +1069,6 @@ app.post('/', async (c) => {
           manual_discount_usd: Number(item.manual_discount_usd) || 0,
           manual_discount_khr: Number(item.manual_discount_khr) || 0,
           batch_id: item.batch_id || null,
-          batch_label: item.batch_label || null,
-          batch_expiry_date: item.batch_expiry_date || null,
           damaged_lot_id: item.damaged_lot_id || null,
         },
       })
@@ -1064,18 +1089,39 @@ app.post('/', async (c) => {
       if (item.branch_id && !item.damaged_lot_id) {
         for (const take of allocationTakes) {
           statements.push({
-            sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
+            sql: `WITH current_batch AS (
+                    SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date
+                    FROM product_batches pb
+                    JOIN branch_batch_stock bbs
+                      ON bbs.batch_id = pb.id
+                     AND bbs.branch_id = @branch_id
+                     AND bbs.quantity >= @quantity
+                    JOIN branches b
+                      ON b.id = bbs.branch_id
+                     AND COALESCE(b.is_active, 1) = 1
+                     AND lower(trim(b.name)) = 'shop'
+                    WHERE pb.id = @batch_id
+                      AND pb.variant_product_id = @product_id
+                      AND pb.is_active = 1
+                    LIMIT 1
+                  )
+                  INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
                   VALUES (
-                    (SELECT id FROM sale_items WHERE sale_id = @sale_id ORDER BY id DESC LIMIT 1),
-                    @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, @released_quantity, @released_at
+                    CASE WHEN EXISTS (SELECT 1 FROM current_batch)
+                      THEN (SELECT id FROM sale_items WHERE sale_id = @sale_id ORDER BY id DESC LIMIT 1)
+                      ELSE NULL END,
+                    (SELECT batch_id FROM current_batch),
+                    @branch_id, @quantity,
+                    (SELECT lot_code FROM current_batch),
+                    (SELECT expiry_date FROM current_batch),
+                    @released_quantity, @released_at
                   )`,
             params: {
               sale_id: saleId,
+              product_id: item.product_id,
               batch_id: take.batchId,
               branch_id: item.branch_id,
               quantity: take.quantity,
-              lot_code: take.lotCode || null,
-              expiry_date: take.expiryDate || null,
               released_quantity: shouldDeductStock ? 0 : take.quantity,
               released_at: allocationReleasedAt,
             },
@@ -1175,6 +1221,12 @@ app.post('/', async (c) => {
     await restoreConsumedDamagedLots()
     await db.prepare('DELETE FROM sales WHERE id = ?').run([saleId])
     const message = (error as Error).message || ''
+    if (/NOT NULL constraint failed:\s*(?:sale_items\.sale_id|sale_item_batch_allocations\.sale_item_id)/i.test(message)) {
+      return c.json({
+        error: 'The Shop or batch changed while this sale was being recorded. Refresh the sale and pick the current batch before trying again.',
+        code: 'sale_identity_conflict',
+      }, 409)
+    }
     // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
     // stock between this request's availability read and its write -- report
     // it as the same 409 an up-front shortage gets, not an opaque 500, so the

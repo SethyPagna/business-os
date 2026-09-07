@@ -80,7 +80,7 @@ function all(db, sql, params = {}) { return db.prepare(sql).all(params) }
 // getDb wrapper promotes changes/last_row_id to the D1Compat result fields
 // routes consume, so mirror that thin boundary here while keeping the real
 // SQL engine and transactional batch underneath.
-function routeDb(db) {
+function routeDb(db, hooks = {}) {
   const api = {
     prepare(sql) {
       const statement = db.prepare(sql)
@@ -97,14 +97,17 @@ function routeDb(db) {
         },
       }
     },
-    batch: (statements) => db.batch(statements),
+    batch: async (statements) => {
+      if (hooks.beforeBatch) await hooks.beforeBatch({ rawDb: db, statements })
+      return db.batch(statements)
+    },
     exec: (sql) => db.exec(sql),
   }
   api.staging = api
   return api
 }
 
-async function postSale(db, items, suffix, overrides = {}) {
+async function postSale(db, items, suffix, overrides = {}, hooks = {}) {
   const body = {
     branch_id: 1,
     items,
@@ -119,7 +122,7 @@ async function postSale(db, items, suffix, overrides = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, { DB: routeDb(db) }, executionCtx)
+  }, { DB: routeDb(db, hooks) }, executionCtx)
   const text = await response.text()
   return { status: response.status, body: text ? JSON.parse(text) : null }
 }
@@ -177,6 +180,68 @@ function counts(db) {
     assert.deepEqual(counts(db), before)
   }
   console.log('PASS 1 -- explicit batches are product + Shop branch identities')
+
+  // The read above is advisory; the write batch itself must still refuse if
+  // an administrator changes the selling branch before the statements run.
+  {
+    const db = fixture()
+    const before = counts(db)
+    const result = await postSale(
+      db,
+      [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }],
+      'branch-race',
+      {},
+      { beforeBatch: ({ rawDb }) => run(rawDb, "UPDATE branches SET name='Warehouse' WHERE id=1") },
+    )
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'sale_identity_conflict')
+    assert.deepEqual(counts(db), before)
+  }
+  console.log('PASS 1b -- Shop identity is rechecked inside the write batch')
+
+  // A product merge/reassignment can move a batch after the route read it.
+  // The write-time product+branch+batch predicate must fail the whole sale.
+  {
+    const db = fixture()
+    const before = counts(db)
+    const result = await postSale(
+      db,
+      [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }],
+      'batch-owner-race',
+      {},
+      { beforeBatch: ({ rawDb }) => run(rawDb, 'UPDATE product_batches SET variant_product_id=11 WHERE id=500') },
+    )
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'sale_identity_conflict')
+    assert.deepEqual(counts(db), before)
+  }
+  console.log('PASS 1c -- lot product ownership is rechecked inside the write batch')
+
+  // Metadata is a current database snapshot, not a stale preflight binding.
+  // A safe rename/expiry correction before commit follows the lot identity.
+  {
+    const db = fixture()
+    const result = await postSale(
+      db,
+      [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }],
+      'batch-metadata-race',
+      {},
+      {
+        beforeBatch: ({ rawDb }) => run(rawDb, `UPDATE product_batches
+          SET lot_code='SERUM-CURRENT', expiry_date='2030-12-31' WHERE id=500`),
+      },
+    )
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.deepEqual({ ...get(db, 'SELECT batch_label,batch_expiry_date FROM sale_items') }, {
+      batch_label: 'SERUM-CURRENT',
+      batch_expiry_date: '2030-12-31',
+    })
+    assert.deepEqual({ ...get(db, 'SELECT lot_code,expiry_date FROM sale_item_batch_allocations') }, {
+      lot_code: 'SERUM-CURRENT',
+      expiry_date: '2030-12-31',
+    })
+  }
+  console.log('PASS 1d -- lot metadata is selected again inside the write batch')
 
   // A valid explicit pick persists the database's own label and expiry, not
   // the caller's text, and records allocation before checkout succeeds.
