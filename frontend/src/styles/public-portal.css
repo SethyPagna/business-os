@@ -269,14 +269,20 @@ body[data-public-portal='true'] video,
   [data-public-media-protection='true'] button,
   [data-public-media-protection='true'] input,
   [data-public-media-protection='true'] select,
-  [data-public-media-protection='true'] textarea {
+  [data-public-media-protection='true'] textarea,
+  [data-portal-root='true'] button,
+  [data-portal-root='true'] input,
+  [data-portal-root='true'] select,
+  [data-portal-root='true'] textarea {
     min-height: 44px;
   }
 
   body[data-public-portal='true'] a[aria-label],
   body[data-public-portal='true'] button[aria-label],
   [data-public-media-protection='true'] a[aria-label],
-  [data-public-media-protection='true'] button[aria-label] {
+  [data-public-media-protection='true'] button[aria-label],
+  [data-portal-root='true'] a[aria-label],
+  [data-portal-root='true'] button[aria-label] {
     min-width: 44px;
     min-height: 44px;
   }
@@ -294,8 +300,28 @@ body[data-public-portal='true'] video,
       click does not light it up. sky-700 (#0369a1) is 5.93:1 on the light
       ground and amber-300 (#fcd34d) is 11.4:1 on the dark one, both well past
       the 3:1 WCAG 1.4.11 floor for a UI component.
+
+      The ROOT SET matters more than the rule. There are three markers and the
+      live storefront only ever carries the third: CatalogPage (the admin
+      preview route) stamps body[data-public-portal] and wraps its surfaces in
+      [data-portal-root], while PublicCatalogPage -- the customer route -- has
+      neither and instead marks its own outermost <div> with
+      data-public-media-protection. Scoping this rule to the first two roots
+      alone left every drawer on the real shop (bucket, account, wishlist,
+      contact) with no ring at all, which is exactly the surface the rule
+      exists for. All three blocks below (:focus-visible, pointer:coarse,
+      prefers-reduced-motion) therefore name the SAME three roots, and
+      tests/portalAccessibility.test.ts asserts that they stay in step.
+
+      What this rule can NEVER reach: anything shared/PortalMenu.tsx sends
+      through createPortal() to document.body, because that subtree is not a
+      descendant of any of the three roots. Those inputs carry their own
+      focus-visible:outline-* utilities instead (PortalFilterCombobox,
+      CatalogPreviewSurface's language search), and the CatalogAccountSection
+      inputs carry theirs too so the form does not depend on this rule.
    --------------------------------------------------------------------------- */
 body[data-public-portal='true'] :focus-visible,
+[data-public-media-protection='true'] :focus-visible,
 [data-portal-root='true'] :focus-visible {
   outline: 3px solid #0369a1;
   outline-offset: 2px;
@@ -303,7 +329,9 @@ body[data-public-portal='true'] :focus-visible,
 }
 
 [data-portal-root='true'].dark :focus-visible,
-.dark [data-portal-root='true'] :focus-visible {
+.dark [data-portal-root='true'] :focus-visible,
+[data-public-media-protection='true'].dark :focus-visible,
+.dark [data-public-media-protection='true'] :focus-visible {
   outline-color: #fcd34d;
 }
 
@@ -338,6 +366,7 @@ body[data-public-portal='true'] :focus-visible,
       (PortalPromoStrip), so this covers the CSS half only. */
 @media (prefers-reduced-motion: reduce) {
   body[data-public-portal='true'] *,
+  [data-public-media-protection='true'] *,
   [data-portal-root='true'] * {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
@@ -348,7 +377,9 @@ body[data-public-portal='true'] :focus-visible,
   body[data-public-portal='true'] .group:hover .group-hover\:scale-105,
   body[data-public-portal='true'] .group:hover .group-hover\:scale-\[1\.03\],
   [data-portal-root='true'] .group:hover .group-hover\:scale-105,
-  [data-portal-root='true'] .group:hover .group-hover\:scale-\[1\.03\] {
+  [data-portal-root='true'] .group:hover .group-hover\:scale-\[1\.03\],
+  [data-public-media-protection='true'] .group:hover .group-hover\:scale-105,
+  [data-public-media-protection='true'] .group:hover .group-hover\:scale-\[1\.03\] {
     transform: none !important;
   }
 }

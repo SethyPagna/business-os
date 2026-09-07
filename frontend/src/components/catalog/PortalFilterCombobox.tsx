@@ -314,7 +314,14 @@ export default function PortalFilterCombobox({
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => handleSearchKeyDown(event, closeMenu, clearAll)}
               placeholder={searchPlaceholder}
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-7 pr-2 text-xs text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-500/50 dark:focus:ring-amber-500/15"
+              // This popup is createPortal()ed to document.body by
+              // shared/PortalMenu, so it is NOT a descendant of any portal
+              // root and public-portal.css's :focus-visible ring can never
+              // reach it. focus:ring-blue-100 is #dbeafe on white = 1.16:1,
+              // i.e. no visible indicator at all on the one field a keyboard
+              // shopper lands in first. The outline utilities below are the
+              // same 3px sky-700 / amber-300 ring the stylesheet paints.
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-7 pr-2 text-xs text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-500/50 dark:focus:ring-amber-500/15 dark:focus-visible:outline-[#fcd34d]"
             />
           </div>
           <div ref={listRef} className="max-h-56 overflow-y-auto p-1.5" id={listboxId} role="listbox" aria-multiselectable="true" aria-label={label}>

@@ -222,7 +222,7 @@ export const PORTAL_CONTRAST_PAIRS: PortalContrastPair[] = [
   { name: 'signup reminder (amber-800 on amber-50)', foreground: '#92400e', background: '#fffbeb', kind: 'text', where: 'CatalogAccountSection membership reminder' },
   { name: 'destructive icon button (rose-600)', foreground: '#e11d48', background: PORTAL_LIGHT_SURFACE, kind: 'ui', where: 'remove-from-list / remove-from-wishlist' },
   { name: 'inactive promo dot (slate-500)', foreground: '#64748b', background: PORTAL_LIGHT_SURFACE, kind: 'ui', where: 'PortalPromoStrip dot row' },
-  { name: 'focus ring against the light ground', foreground: '#0369a1', background: PORTAL_LIGHT_SURFACE, kind: 'ui', where: 'public-portal.css :focus-visible outline' },
+  { name: 'focus ring against the light ground', foreground: '#0369a1', background: PORTAL_LIGHT_SURFACE, kind: 'ui', where: 'public-portal.css :focus-visible outline + the focus-visible:outline-[] classes on the createPortal()ed popups and the account form' },
 
   // --- dark theme, on the flat #0b0b0c ground --------------------------------
   { name: 'dark heading text (neutral-100)', foreground: '#f5f5f5', background: PORTAL_DARK_SURFACE, kind: 'text', where: 'catalogUi SectionShell title, product name' },
@@ -236,7 +236,7 @@ export const PORTAL_CONTRAST_PAIRS: PortalContrastPair[] = [
   { name: 'dark stock badge: out of stock (rose-300 on the neutral-900 pill)', foreground: '#fda4af', background: '#171717', kind: 'text', where: 'catalogUi StatusPill' },
   { name: 'dark destructive icon button (rose-400)', foreground: '#fb7185', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'remove-from-list / remove-from-wishlist' },
   { name: 'dark inactive promo dot (neutral-400)', foreground: '#a3a3a3', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'PortalPromoStrip dot row' },
-  { name: 'dark focus ring against the dark ground', foreground: '#fcd34d', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'public-portal.css :focus-visible outline' },
+  { name: 'dark focus ring against the dark ground', foreground: '#fcd34d', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'public-portal.css :focus-visible outline + the focus-visible:outline-[] classes on the createPortal()ed popups and the account form' },
 ]
 
 /**

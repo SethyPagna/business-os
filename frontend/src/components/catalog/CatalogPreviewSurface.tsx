@@ -451,7 +451,15 @@ export default function CatalogPreviewSurface({
                                     value={translateSearch}
                                     onChange={(event) => setTranslateSearch(event.target.value)}
                                     placeholder={copy('searchLanguages', 'Search languages')}
-                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-400 dark:focus:bg-neutral-900"
+                                    aria-label={copy('searchLanguages', 'Search languages')}
+                                    // Same createPortal() problem as the
+                                    // filter menu's search field: this popup
+                                    // is mounted on document.body, outside
+                                    // every portal root, so the stylesheet's
+                                    // :focus-visible ring cannot reach it and
+                                    // focus:border-blue-400 alone is a 1px
+                                    // tint. It paints the ring itself.
+                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-400 dark:focus:bg-neutral-900 dark:focus-visible:outline-[#fcd34d]"
                                     // Real user requirement, not decorative:
                                     // a flat 28-option list with no way to
                                     // filter was the actual complaint behind

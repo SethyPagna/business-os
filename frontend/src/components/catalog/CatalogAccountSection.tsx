@@ -257,7 +257,16 @@ export default function CatalogAccountSection({
   )
 }
 
-const inputClass = 'w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white'
+// `outline-none` with `focus:border-emerald-400` as its only replacement is
+// not a focus indicator: emerald-400 on the slate-50 field is 1.75:1, well
+// under the 3:1 WCAG 1.4.11 floor, and a keyboard shopper filling this form
+// cannot see where they are. The portal stylesheet's :focus-visible ring
+// cannot rescue it either -- the account drawer renders as a SIBLING of
+// <CatalogPreviewSurface> inside PublicCatalogPage, so it depends on the
+// live-route root being in that rule's selector list, which is a coupling the
+// storefront's only real form should not have. It paints its own ring, with
+// the same 3px sky-700 / amber-300 as the stylesheet.
+const inputClass = 'w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-white/10 dark:bg-white/5 dark:text-white dark:focus-visible:outline-[#fcd34d]'
 const submitClass = 'inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:opacity-60'
 
 // A wrapping <label> names its input, but it cannot name anything else: the

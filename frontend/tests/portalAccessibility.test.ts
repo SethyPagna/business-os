@@ -15,6 +15,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PORTAL_CONTRAST_PAIRS } from '../src/components/catalog/portalContrast.ts'
 
 let failed = 0
 
@@ -208,10 +209,42 @@ runTest('the password field has a labelled show / hide control', () => {
   assert.match(account, /type=\{visible \? 'text' : 'password'\}/, 'and actually toggles the field')
 })
 
+/**
+ * The set of inks this project has actually MEASURED at >= 3:1 against a
+ * storefront ground (WCAG 1.4.11 for a UI component). A focus indicator is
+ * only a focus indicator if it is painted in one of them.
+ */
+const MEASURED_UI_INKS = new Set(
+  PORTAL_CONTRAST_PAIRS.filter((pair) => pair.kind === 'ui').map((pair) => pair.foreground.toLowerCase()),
+)
+
+/**
+ * Does this class string replace the outline it just removed?
+ *
+ * The previous version of this sweep accepted a bare `focus:ring-*` or
+ * `focus:border-*` as the replacement, and that escape hatch is precisely what
+ * let the storefront's only real form through: CatalogAccountSection's fields
+ * carried `outline-none focus:border-emerald-400`, which is 1.75:1, and the
+ * filter menu's search field carried `focus:ring-blue-100`, which is 1.16:1 on
+ * white. A tint that the eye cannot separate from the resting state is not an
+ * indicator. So: an actual outline utility, or a ring in a colour that appears
+ * in PORTAL_CONTRAST_PAIRS at kind 'ui' -- nothing else counts.
+ */
+function paintsAMeasuredFocusIndicator(line: string): boolean {
+  const inks = [...line.matchAll(/focus-visible:(?:outline|ring)-\[(#[0-9a-fA-F]{6})\]/g)].map((m) => m[1].toLowerCase())
+  if (!inks.length) return false
+  if (!inks.every((ink) => MEASURED_UI_INKS.has(ink))) return false
+  // A colour on its own is not a ring: the style has to be turned on too.
+  return /focus-visible:outline\b/.test(line) || /focus-visible:ring-\d/.test(line)
+}
+
 runTest('no storefront control kills its focus outline without replacing it', () => {
-  // `outline-none` is fine ONLY when the same element paints a ring/border of
-  // its own or the portal stylesheet's :focus-visible rule covers it. The
-  // stylesheet rule is what makes this true for all of them.
+  // `outline-none` is fine ONLY when the same element paints a MEASURED ring
+  // of its own, or when it sits inside a root the portal stylesheet's
+  // :focus-visible rule actually reaches. Both halves matter: the stylesheet
+  // rule shipped scoped to two roots the live customer route does not carry,
+  // so "the stylesheet covers everything" was false for every drawer on the
+  // real shop -- see the root-parity test above.
   const css = readFrontend('src', 'styles', 'public-portal.css')
   assert.match(css, /:focus-visible \{\s*\r?\n\s*outline: 3px solid/, 'the portal paints one focus ring for everything inside it')
   const failures: string[] = []
@@ -220,7 +253,9 @@ runTest('no storefront control kills its focus outline without replacing it', ()
     const lines = source.split(/\r?\n/)
     lines.forEach((line, index) => {
       if (!/\boutline-none\b/.test(line)) return
-      if (/focus:ring|focus:border|focus-within:ring|focus-visible:/.test(line)) return
+      // A comment that NAMES the utility is not the utility.
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return
+      if (paintsAMeasuredFocusIndicator(line)) return
       // Two legitimate shapes the same-line check cannot see:
       //  - the indicator is painted by the WRAPPER (a bordered field shell
       //    with focus-within:ring around a transparent input), which is the
@@ -234,6 +269,59 @@ runTest('no storefront control kills its focus outline without replacing it', ()
     })
   }
   assert.deepEqual(failures, [])
+})
+
+runTest('the portal stylesheet scopes focus, touch targets and reduced motion to the SAME roots', () => {
+  // The rule that nearly sank this lane: there are THREE portal root markers
+  // and the live customer route carries only one of them. CatalogPage (the
+  // admin preview) stamps body[data-public-portal] and wraps its surfaces in
+  // [data-portal-root]; PublicCatalogPage -- the actual shop -- marks its own
+  // outermost <div> with data-public-media-protection and neither of the other
+  // two. A :focus-visible rule scoped to the first two roots therefore painted
+  // nothing on the real storefront's drawers, while the pointer:coarse block
+  // right above it already listed the live root and worked. Any block that
+  // claims to cover "the portal" must name the same set, or it silently covers
+  // a different site than the block beside it.
+  const css = readFrontend('src', 'styles', 'public-portal.css')
+  const MARKERS = ['data-public-media-protection', 'data-portal-root', 'data-public-portal']
+  const rootsIn = (text: string): string[] => MARKERS.filter((marker) => text.includes(marker)).sort()
+
+  const focusList = /\n((?:[^\n{]*:focus-visible,\s*\n)*[^\n{]*:focus-visible) \{\s*\r?\n\s*outline: 3px solid/.exec(css)
+  assert.ok(focusList, 'the :focus-visible ring rule must exist')
+  const coarse = /@media \(pointer: coarse\) \{([\s\S]*?)\n\}/.exec(css)
+  assert.ok(coarse, 'the coarse-pointer block must exist')
+  const motion = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)
+  assert.ok(motion, 'the reduced-motion block must exist')
+
+  assert.deepEqual(rootsIn(focusList[1]), MARKERS.slice().sort(), 'the focus ring must reach all three portal roots')
+  assert.deepEqual(rootsIn(coarse[1]), rootsIn(focusList[1]), 'touch targets and the focus ring must name the same roots')
+  assert.deepEqual(rootsIn(motion[1]), rootsIn(focusList[1]), 'reduced motion and the focus ring must name the same roots')
+
+  // And the marker the live route actually carries is really the one on it.
+  const publicPage = read('PublicCatalogPage.tsx')
+  assert.match(publicPage, /data-public-media-protection="true"/, 'the customer route root carries the live marker')
+  assert.doesNotMatch(publicPage, /data-portal-root="true"/, 'and not the preview-only one -- so the CSS cannot rely on it')
+})
+
+runTest('the storefront controls no portal-scoped CSS can reach carry their own ring', () => {
+  // shared/PortalMenu.tsx createPortal()s its popup to document.body, so the
+  // filter menu's search field and the language-menu search field sit OUTSIDE
+  // every portal root: no descendant selector in public-portal.css can ever
+  // match them. Their base-tree indicator was focus:ring-blue-100 (#dbeafe on
+  // white = 1.16:1). They need the ring in their own class string.
+  for (const file of ['PortalFilterCombobox.tsx', 'CatalogPreviewSurface.tsx']) {
+    const source = read(file)
+    assert.match(source, /focus-visible:outline-\[#0369a1\]/, `${file}: the popup search field paints its own focus outline`)
+    assert.match(source, /dark:focus-visible:outline-\[#fcd34d\]/, `${file}: and the dark-mode counterpart`)
+  }
+  // The account drawer renders as a sibling of <CatalogPreviewSurface> and is
+  // the storefront's only real form, so it does not get to depend on a
+  // stylesheet rule either.
+  const account = read('CatalogAccountSection.tsx')
+  const inputClass = /const inputClass = '([^']+)'/.exec(account)
+  assert.ok(inputClass, 'inputClass must still be a single class string')
+  assert.match(inputClass[1], /focus-visible:outline-\[#0369a1\]/, 'every account field paints its own focus outline')
+  assert.match(inputClass[1], /focus-visible:outline-\[3px\]/, 'three solid pixels, matching the stylesheet ring')
 })
 
 runTest('the product search field has a name, not just a placeholder', () => {
