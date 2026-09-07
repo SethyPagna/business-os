@@ -39,7 +39,14 @@
 //       stored as its UPC-A;
 //     * 'pickers that re-filter locally pass barcode as its OWN field' --
 //       TransferModal and NewSupplierReturnModal joined their fields into
-//       one haystack at base;
+//       one haystack at base. The check is now a CLOSED SWEEP over every
+//       call site of the shared matcher rather than a two-file spot check:
+//       it enumerates POS.tsx, productFilterHelpers.ts, CatalogPage.tsx,
+//       TransferModal.tsx (array shape -- these inherit the fold through
+//       buildHaystackIndex's per-field flatMap) and Inventory.tsx,
+//       Returns.tsx, DeliveryTab.tsx (joined shape -- lawful only because
+//       none of those haystacks carries a barcode field), and fails if a
+//       new picker calls the matcher without declaring which it is;
 //     * the two cross-kernel source guards, which name rules base has not
 //       got.
 //
@@ -245,18 +252,150 @@ check('no numeric coercion anywhere on the decode -> search box path', () => {
   }
 })
 
-check('pickers that re-filter locally pass barcode as its OWN field', () => {
-  // A pre-joined "name sku barcode" string is not a barcode any more: the
-  // fold cannot see a discrete code inside a sentence, so these call sites
-  // must hand the fields over separately.
-  for (const file of [
-    '../src/components/branches/TransferModal.tsx',
-    '../src/components/catalog/CatalogPage.tsx',
-  ]) {
-    const src = read(file)
-    const joinedHaystack = /fuzzyTextMatches\(\s*\[[^\]]*\]\s*\.join\(/.test(src)
-    assert.ok(!joinedHaystack, `${file} joins its haystack before fuzzyTextMatches`)
+// EVERY call site of the shared client matcher, enumerated. The fold lives
+// at utils/searchMatch.ts:306 (termMatchesBarcode, tried at the head of
+// termMatchesHaystack) and reaches a record only through
+// buildHaystackIndex's per-field pass (utils/searchMatch.ts:261): the index
+// flatMaps an ARRAY of fields and derives barcodeSearchKeys from each field
+// on its own. A caller that pre-joins its fields into one string hands the
+// index a sentence, and no per-field fold can find a discrete code inside a
+// sentence -- so a pre-joined haystack that carries a barcode silently loses
+// the fold and drops rows the server just matched.
+//
+// Two lawful shapes, and this sweep pins which one each call site is:
+//   * ARRAY -- passes its fields as an array, so it inherits the fold;
+//   * JOINED -- pre-joins, which is only lawful because the haystack it
+//     builds carries NO barcode field at all (movements, returns and
+//     delivery contacts do not hold one), so there is no fold to lose.
+// The enumeration is closed: a picker file that starts calling the matcher
+// and is not listed here fails the sweep rather than silently choosing a
+// shape.
+const LOCAL_REFILTER_CALL_SITES: Array<{
+  file: string
+  shape: 'array' | 'joined'
+  // JOINED sites only: the local/imported builders whose text IS the
+  // haystack, read whole and required to hold no barcode field.
+  builders?: Array<{ file: string, name: string }>
+}> = [
+  { file: '../src/components/branches/TransferModal.tsx', shape: 'array' },
+  { file: '../src/components/catalog/CatalogPage.tsx', shape: 'array' },
+  { file: '../src/components/pos/POS.tsx', shape: 'array' },
+  { file: '../src/components/products/helpers/productFilterHelpers.ts', shape: 'array' },
+  {
+    file: '../src/components/contacts/DeliveryTab.tsx',
+    shape: 'joined',
+    builders: [],
+  },
+  {
+    file: '../src/components/inventory/Inventory.tsx',
+    shape: 'joined',
+    builders: [
+      { file: '../src/components/inventory/Inventory.tsx', name: 'movHay' },
+      { file: '../src/components/inventory/movementGroups.ts', name: 'movementGroupHaystack' },
+    ],
+  },
+  {
+    file: '../src/components/returns/Returns.tsx',
+    shape: 'joined',
+    builders: [{ file: '../src/components/returns/Returns.tsx', name: 'buildReturnHaystack' }],
+  },
+]
+
+const MATCHER_CALL = /\b(?:fuzzyTextMatches|matchesSearchTermGroups)\s*\(/g
+
+// Comments in this codebase name the matcher constantly ("Routed through
+// fuzzyTextMatches (searchMatch.ts)"), so the sweep reads code only. `//`
+// preceded by `:` is left alone so a URL inside a string is not treated as
+// the start of a comment.
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+}
+
+// The first argument of a call, read by balanced parentheses so a nested
+// call or array literal is taken whole rather than to the first comma.
+function firstCallArgument(src: string, callEnd: number): string {
+  const open = src.lastIndexOf('(', callEnd)
+  const whole = balanced(src, open, '(', ')').slice(1, -1)
+  let depth = 0
+  for (let i = 0; i < whole.length; i += 1) {
+    const c = whole[i]
+    if (c === '(' || c === '[' || c === '{') depth += 1
+    else if (c === ')' || c === ']' || c === '}') depth -= 1
+    else if (c === ',' && depth === 0) return whole.slice(0, i)
   }
+  return whole
+}
+
+// Several call sites bind the haystack a line above the call
+// (`const haystack = [...]`, `const hay = [...]`). Resolve a bare identifier
+// to that binding so the shape check reads the real expression; anything
+// that is not a local const (a function parameter, for instance) resolves to
+// '' and is covered by its declared builders instead.
+function resolveHaystackExpression(src: string, arg: string): string {
+  const name = arg.trim()
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return arg
+  const decl = new RegExp(`\\bconst\\s+${name}\\s*(?::[^=\\n]+)?=\\s*`).exec(src)
+  if (!decl) return ''
+  const start = decl.index + decl[0].length
+  if (src[start] === '[') return balanced(src, start, '[', ']')
+  return src.slice(start, src.indexOf('\n', start))
+}
+
+check('pickers that re-filter locally pass barcode as its OWN field', () => {
+  // 1. The enumeration is closed: sweep src for matcher calls and require
+  //    every file that makes one to be listed above.
+  const srcRoot = new URL('../src/', import.meta.url)
+  const listed = new Set(LOCAL_REFILTER_CALL_SITES.map((site) => site.file))
+  const unlisted: string[] = []
+  for (const abs of walkSourceFiles(srcRoot)) {
+    const rel = `../src/${abs.slice(fileURLToPath(srcRoot).length).split(/[\\/]/).join('/')}`
+    if (/\/utils\/searchMatch\.ts$/.test(rel)) continue // the kernel itself
+    if (!MATCHER_CALL.test(stripComments(readFileSync(abs, 'utf8')))) { MATCHER_CALL.lastIndex = 0; continue }
+    MATCHER_CALL.lastIndex = 0
+    if (!listed.has(rel)) unlisted.push(rel)
+  }
+  assert.deepEqual(unlisted, [],
+    'a picker calls the shared matcher without declaring whether it passes barcode as its own field')
+
+  // 2. Every ARRAY site really passes an array, and never a joined one.
+  //    Every JOINED site really joins nothing that holds a barcode.
+  for (const site of LOCAL_REFILTER_CALL_SITES) {
+    const src = stripComments(read(site.file))
+    MATCHER_CALL.lastIndex = 0
+    let hit: RegExpExecArray | null
+    let calls = 0
+    while ((hit = MATCHER_CALL.exec(src))) {
+      const arg = resolveHaystackExpression(src, firstCallArgument(src, hit.index + hit[0].length - 1))
+      calls += 1
+      if (site.shape === 'array') {
+        assert.ok(arg.trimStart().startsWith('['),
+          `${site.file}: the matcher's haystack is not an array literal (${arg.trim().slice(0, 60)})`)
+        assert.ok(!/\.join\s*\(/.test(arg),
+          `${site.file} joins its haystack before the matcher -- the per-field barcode fold cannot see a code inside a sentence`)
+        assert.ok(/barcode/.test(arg),
+          `${site.file}: the product haystack no longer carries barcode as its own field`)
+      } else {
+        assert.ok(!/barcode/.test(arg),
+          `${site.file}: a pre-joined haystack now carries a barcode -- pass the fields as an array instead, or the fold is lost`)
+      }
+    }
+    assert.ok(calls > 0, `${site.file} no longer calls the shared matcher; drop it from the enumeration`)
+    for (const builder of site.builders || []) {
+      const body = localFunctionBody(read(builder.file), builder.name)
+      assert.ok(body, `${builder.file}: ${builder.name} not found`)
+      assert.ok(!/barcode/.test(body),
+        `${builder.file}: ${builder.name} joins a barcode into its haystack -- the fold cannot see it there`)
+    }
+  }
+
+  // 3. The one picker that folds explicitly instead of through the index.
+  //    NewSupplierReturnModal keeps a joined `.includes()` haystack for the
+  //    word path but calls barcodeKeysMatch on the barcode FIELD first, so
+  //    the fold is present; if that call goes, the joined haystack is all
+  //    that is left and a UPC-E scan comes back empty.
+  const supplierReturn = read('../src/components/returns/NewSupplierReturnModal.tsx')
+  assert.ok(/barcodeKeysMatch\s*\(\s*raw\s*,\s*product\.barcode\s*\)/.test(supplierReturn),
+    'NewSupplierReturnModal no longer folds the barcode field before its joined haystack')
 })
 
 check('the shared kernel is the ONLY place the UPC-E rule is implemented', () => {
