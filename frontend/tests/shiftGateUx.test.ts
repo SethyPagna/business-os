@@ -8,11 +8,10 @@
 // nothing on screen said so. A drawer that holds only dollars, or only riel,
 // is a normal drawer. So:
 //
-//   1. A blank count field means 0 and is SENT as 0 (the Worker's
-//      requiredMoney already accepts 0 -- that rule is not touched).
-//   2. The primary action is enabled once EITHER field has a value. When it
-//      cannot proceed (both blank, an invalid number) the reason is printed
-//      next to the button, never hidden inside a disabled state.
+//   1. A blank count field means unknown and is SENT as null. An explicit 0
+//      remains a measured zero.
+//   2. The primary action is enabled with either or both fields blank. Invalid
+//      non-blank input is explained next to the button.
 //   3. Both packs carry the "0" placeholder hint and the two reasons.
 //   4. Every sibling with the same two-currency count pattern (the Shifts
 //      popup's amend / close / reopen forms) uses the same shared fields.
@@ -24,7 +23,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { openShift, shiftCountOrZero, shiftCountPairBlocker } from '../src/api/shiftTransport.ts'
+import { openShift, shiftCountPairBlocker, shiftOpeningCounts } from '../src/api/shiftTransport.ts'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -48,33 +47,27 @@ const ok = (cond: unknown, label: string) => {
   console.log(`  ok - ${label}`)
 }
 
-// ---- 1. Blank means 0; invalid is still rejected ---------------------------
-// Executed, not pattern-matched: the old parseShiftCount('') is null, the new
-// rule is 0. On '' the two implementations disagree, so this is red on the
-// pre-fix tree by construction.
-assert.equal(shiftCountOrZero(''), 0)
-assert.equal(shiftCountOrZero('   '), 0)
-assert.equal(shiftCountOrZero('0'), 0)
-assert.equal(shiftCountOrZero('12.50'), 12.5)
-assert.equal(shiftCountOrZero('4000'), 4000)
-assert.equal(shiftCountOrZero('-1'), null)
-assert.equal(shiftCountOrZero('abc'), null)
-assert.equal(shiftCountOrZero('Infinity'), null)
-checks += 8
-console.log('  ok - a blank count is 0; negative, NaN and infinite counts are still rejected')
+// ---- 1. Blank is unknown; explicit zero remains measured ------------------
+assert.deepEqual(shiftOpeningCounts('', ''), { usd: null, khr: null })
+assert.deepEqual(shiftOpeningCounts('   ', '0'), { usd: null, khr: 0 })
+assert.deepEqual(shiftOpeningCounts('12.50', '4000'), { usd: 12.5, khr: 4000 })
+assert.deepEqual(shiftOpeningCounts('-1', 'abc'), { usd: null, khr: null })
+checks += 4
+console.log('  ok - blank and explicit zero remain distinct; invalid values are rejected')
 
 // ---- 2. The blocker names the reason, and there is none once EITHER field has a value
 assert.equal(shiftCountPairBlocker('', ''), 'both_blank')
 assert.equal(shiftCountPairBlocker('  ', ''), 'both_blank')
-assert.equal(shiftCountPairBlocker('5', ''), null, 'USD alone is enough')
-assert.equal(shiftCountPairBlocker('', '20000'), null, 'KHR alone is enough')
-assert.equal(shiftCountPairBlocker('0', ''), null, 'an explicit 0 is a value')
+assert.equal(shiftCountPairBlocker('', '', { blankMeansUncounted: true }), null)
+assert.equal(shiftCountPairBlocker('5', '', { blankMeansUncounted: true }), null, 'USD alone is enough')
+assert.equal(shiftCountPairBlocker('', '20000', { blankMeansUncounted: true }), null, 'KHR alone is enough')
+assert.equal(shiftCountPairBlocker('0', '', { blankMeansUncounted: true }), null, 'an explicit 0 is a value')
 assert.equal(shiftCountPairBlocker('5', '20000'), null)
-assert.equal(shiftCountPairBlocker('-1', ''), 'invalid')
-assert.equal(shiftCountPairBlocker('5', 'abc'), 'invalid')
-assert.equal(shiftCountPairBlocker('', '-100'), 'invalid')
+assert.equal(shiftCountPairBlocker('-1', '', { blankMeansUncounted: true }), 'invalid')
+assert.equal(shiftCountPairBlocker('5', 'abc', { blankMeansUncounted: true }), 'invalid')
+assert.equal(shiftCountPairBlocker('', '-100', { blankMeansUncounted: true }), 'invalid')
 checks += 9
-console.log('  ok - the pair blocker is null once either field holds a valid count, and names both_blank / invalid otherwise')
+console.log('  ok - optional registration allows blanks, while required pairs still name both_blank / invalid')
 
 // ---- 3. No primary action is disabled on "both counts non-null" -------------
 const bothNullDisabled = /disabled=\{[^}\n]*parseShiftCount\([^)]*\) == null[^}\n]*\|\|[^}\n]*parseShiftCount\([^)]*\) == null/
@@ -84,22 +77,21 @@ ok(!/parseShiftCount\(/.test(gate), 'ShiftGate no longer treats a blank count as
 ok(/shiftClosingCounts\(edit\.closingUsd, edit\.closingKhr\)/.test(modal),
   'ShiftHistoryModal uses the shared independent parser for closing counts')
 
-// ---- 4. Opening blanks map to 0; two closing blanks remain unknown ----------
+// ---- 4. Opening and closing blanks remain independently unknown ------------
 const registerBody = gate.slice(gate.indexOf('const submitOpen'), gate.indexOf('const needsRegistration'))
-ok(/shiftCountOrZero\(floatUsd\)/.test(registerBody) && /shiftCountOrZero\(floatKhr\)/.test(registerBody),
-  'the register step submits each blank float as 0')
+ok(/shiftOpeningCounts\(floatUsd, floatKhr\)/.test(registerBody),
+  'the register step uses the shared nullable opening parser')
 const closeBody = gate.slice(gate.indexOf('const submitClose'), gate.indexOf('const dismiss'))
 ok(/const counts = shiftClosingCounts\(countedUsd, countedKhr\)/.test(closeBody),
   'the POS close step preserves two blanks as an unknown report count')
-for (const draft of ['edit.openingUsd', 'edit.openingKhr', 'reopen.openingUsd', 'reopen.openingKhr']) {
-  ok(modal.includes(`shiftCountOrZero(${draft})`), `the Shifts popup submits a blank ${draft} as 0`)
-}
+ok(modal.includes('shiftOpeningCounts(edit.openingUsd, edit.openingKhr)'), 'the Shifts popup preserves nullable opening counts when amending')
+ok(modal.includes('shiftOpeningCounts(reopen.openingUsd, reopen.openingKhr)'), 'the Shifts popup preserves nullable opening counts when reopening')
 ok(modal.includes('shiftClosingCounts(edit.closingUsd, edit.closingKhr)'), 'the Shifts popup applies the shared close-count rule when amending')
 ok(modal.includes('shiftClosingCounts(close.closingUsd, close.closingKhr)'), 'the Shifts popup applies the shared close-count rule when closing')
 ok(!/Number\((?:float|counted|edit|close|reopen)[^)]+\) \|\| 0/.test(gate + modal),
-  'no surface coerces an INVALID count to 0 -- only a blank one becomes 0, through the shared helper')
+  'no surface coerces a blank or invalid count to 0')
 
-// Executed: an opening blank still travels through the transport as 0.
+// Executed: an opening blank travels through the transport as null.
 const originalFetch = globalThis.fetch
 const originalServerUrl = getSyncServerUrl()
 const posted: Array<{ url: string; body: Record<string, unknown> }> = []
@@ -114,11 +106,12 @@ try {
   __resetApiHealthForTests()
   __resetApiWriteDedupeForTests()
   setSyncServerUrl('https://sync.example.test')
-  await openShift({ branchId: 2, branchName: 'shop', openingFloatUsd: shiftCountOrZero('50') as number, openingFloatKhr: shiftCountOrZero('') as number })
+  const opening = shiftOpeningCounts('50', '')
+  await openShift({ branchId: 2, branchName: 'shop', openingFloatUsd: opening.usd, openingFloatKhr: opening.khr })
   assert.equal(posted[posted.length - 1].body.opening_float_usd, 50)
-  assert.equal(posted[posted.length - 1].body.opening_float_khr, 0)
+  assert.equal(posted[posted.length - 1].body.opening_float_khr, null)
   checks += 2
-  console.log('  ok - opening posts the blank side as 0 and the typed side untouched')
+  console.log('  ok - opening posts the blank side as null and the typed side untouched')
 } finally {
   globalThis.fetch = originalFetch
   setSyncServerUrl(originalServerUrl)
@@ -130,7 +123,7 @@ try {
 ok(/export default function ShiftCountPair\(/.test(fields) || /export function ShiftCountPair\(/.test(fields),
   'the two-currency count pair is one shared component')
 ok((fields.match(/placeholder="0"/g) || []).length >= 2, 'both count inputs show 0 as the placeholder')
-ok(/t\('shift_blank_count_hint'\)/.test(fields), 'the shared pair carries the one-line blank-is-0 hint')
+ok(/t\('shift_blank_count_hint'\)/.test(fields), 'the shared pair carries the one-line blank/zero hint')
 ok((gate.match(/hint=\{t\('shift_registered_cash_hint'\)\}/g) || []).length >= 1
   && (modal.match(/hint=\{t\('shift_registered_cash_hint'\)\}/g) || []).length >= 2,
   'close forms explain that registered counts are report-only')

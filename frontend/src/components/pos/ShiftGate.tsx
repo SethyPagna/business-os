@@ -2,13 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { closeShift, fetchCurrentShift, openShift, shiftClosingCounts, shiftCountOrZero, shiftCountPairBlocker, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { closeShift, fetchCurrentShift, openShift, shiftClosingCounts, shiftCountPairBlocker, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 import { shiftCountedPairText } from '../shifts/shiftReportModel.ts'
 
 function closingCountInvalid(value: string): boolean {
-  return value.trim() !== '' && shiftCountOrZero(value) == null
+  return value.trim() !== '' && shiftClosingCounts(value, null).usd == null
 }
 
 /**
@@ -269,22 +269,21 @@ export default function ShiftGate({ children, branchId = null, branchName = null
   const [floatKhr, setFloatKhr] = useState('')
   const [note, setNote] = useState('')
 
-  // Null once either field holds a valid count; otherwise the reason that is
-  // printed beside the Start button. Blank fields are 0 at submit.
-  const startBlocker = shiftCountPairBlocker(floatUsd, floatKhr)
+  // Registration is optional per currency. Blank means uncounted/unknown;
+  // explicit 0 is a measured zero. Invalid non-blank values still block.
+  const startBlocker = shiftCountPairBlocker(floatUsd, floatKhr, { blankMeansUncounted: true })
 
   const submitOpen = async () => {
     if (busy) return
-    const openingFloatUsd = shiftCountOrZero(floatUsd)
-    const openingFloatKhr = shiftCountOrZero(floatKhr)
-    if (openingFloatUsd == null || openingFloatKhr == null || startBlocker) return
+    const opening = shiftOpeningCounts(floatUsd, floatKhr)
+    if (startBlocker) return
     setBusy(true)
     try {
       const next = await openShift({
         branchId,
         branchName,
-        openingFloatUsd,
-        openingFloatKhr,
+        openingFloatUsd: opening.usd,
+        openingFloatKhr: opening.khr,
         openingNote: note.trim() || null,
       })
       // Publish, not setState: this is what makes End Shift appear the moment
@@ -334,9 +333,8 @@ export default function ShiftGate({ children, branchId = null, branchName = null
             ]}
             />
 
-            {/* Both currencies are counted and stored separately, never
-                converted -- the drawer holds each and the shop counts each.
-                A blank one is 0, and the pair says so. */}
+            {/* Both currencies are stored separately and never converted.
+                A blank stays unknown; an explicit 0 is a counted zero. */}
             <ShiftCountPair
               dense autoFocus disabled={busy}
               label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')}
@@ -438,7 +436,6 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
     setNote('')
   }
 
-  const money = (usd: unknown, khr: unknown) => `${fmtUSD(usd)} · ${fmtKHR(khr)}`
   // What the cashier has typed so far, preserving two blanks as unknown -- shown beside the
   // server's EXPECTED figure so the two are compared before the close is
   // written. The difference itself is NOT computed here: that is the server's
@@ -489,7 +486,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 // about to be stamped; after it, the moment that was.
                 { label: closed ? t('shift_closed_at') : t('shift_ends_at'), value: fmtDateTime24(closed?.closed_at || now) },
                 { label: closed ? t('shift_duration') : t('shift_open_for'), value: formatShiftDuration(shift.opened_at, parseServerTimestampMs(closed?.closed_at) || now, t) },
-                { label: t('shift_opened_with'), value: money(shift.opening_float_usd, shift.opening_float_khr) },
+                { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },
                 // The after half of the before/after: what was counted into
                 // the drawer against what it opened with, on the same cell
                 // shape so the two are read as one comparison.
@@ -520,7 +517,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 {shift?.reconciliation && (
                   <ShiftFactStrip accent facts={[
                     { label: t('shift_drawer_total_typed'), value: typedDrawer },
-                    { label: t('shift_recon_expected'), value: money(shift.reconciliation.expected.usd, shift.reconciliation.expected.khr) },
+                    { label: t('shift_recon_expected'), value: shiftCountedPairText(shift.reconciliation.expected.usd, shift.reconciliation.expected.khr, fmtUSD, fmtKHR) },
                   ]}
                   />
                 )}

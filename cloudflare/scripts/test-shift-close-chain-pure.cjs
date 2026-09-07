@@ -78,6 +78,7 @@ sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0089_system_flags.sql
 sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
 sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
 sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
+sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
 
 // The money tables the reconciliation reads. Column shapes copied from the
 // production schema the kernel queries, not invented for this test.

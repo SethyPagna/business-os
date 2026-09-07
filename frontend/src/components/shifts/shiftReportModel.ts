@@ -3,7 +3,7 @@ import type { Shift } from '../../api/shiftTransport.ts'
 export type ShiftCountPairValue = { usd: number | null; khr: number | null }
 
 export type ShiftFiguresShape = {
-  opening: { usd: number; khr: number }
+  opening: ShiftCountPairValue
   closing: ShiftCountPairValue
   sales_usd: number
   cogs_usd: number

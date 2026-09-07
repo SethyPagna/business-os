@@ -51,7 +51,7 @@ export default function ShiftCashBreakdown({ reconciliation, className = '' }: P
     value == null ? '—' : `${value > 0 ? '+' : ''}${format(value)}`
 
   const rows: { key: string; label: string; value: string }[] = [
-    { key: 'shift_recon_opening', label: t('shift_recon_opening'), value: pair(reconciliation.opening.usd, reconciliation.opening.khr) },
+    { key: 'shift_recon_opening', label: t('shift_recon_opening'), value: countedPair(reconciliation.opening.usd, reconciliation.opening.khr) },
     { key: 'shift_recon_cash_sales', label: t('shift_recon_cash_sales'), value: pair(reconciliation.cash_sales.usd, reconciliation.cash_sales.khr) },
     { key: 'refunds', label: t('refunds'), value: `− ${pair(reconciliation.refunds.usd, reconciliation.refunds.khr)}` },
     { key: 'fees', label: t('fees'), value: `− ${pair(reconciliation.expenses.usd, reconciliation.expenses.khr)}` },
@@ -73,7 +73,7 @@ export default function ShiftCashBreakdown({ reconciliation, className = '' }: P
             <InfoHint text={t('shift_difference_hint')} label={t('shift_recon_expected')} />
           </dt>
           <dd className="min-w-0 break-words text-right font-semibold text-gray-900 dark:text-white">
-            {pair(reconciliation.expected.usd, reconciliation.expected.khr)}
+            {countedPair(reconciliation.expected.usd, reconciliation.expected.khr)}
           </dd>
         </div>
         <div className="flex min-w-0 items-baseline justify-between gap-3 py-1">

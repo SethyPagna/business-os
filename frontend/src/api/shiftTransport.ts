@@ -30,12 +30,12 @@ import { apiFetch, route } from './http.ts'
 export type ShiftMoney = { usd: number; khr: number }
 export type ShiftCountedMoney = { usd: number | null; khr: number | null }
 export type ShiftReconciliation = {
-  opening: ShiftMoney
+  opening: ShiftCountedMoney
   cash_sales: ShiftMoney
   refunds: ShiftMoney
   expenses: ShiftMoney
   courier: ShiftMoney
-  expected: ShiftMoney
+  expected: ShiftCountedMoney
   counted: ShiftCountedMoney
   difference: ShiftCountedMoney
   /** A component could not be established; the figures are shown with a warning. */
@@ -54,8 +54,8 @@ export type Shift = {
   branch_name: string | null
   business_date: string
   opened_at: string
-  opening_float_usd: number
-  opening_float_khr: number
+  opening_float_usd: number | null
+  opening_float_khr: number | null
   opening_note: string | null
   closed_at: string | null
   closing_counted_usd: number | null
@@ -102,7 +102,7 @@ export type Shift = {
  * remaining fee, so the two always sum to the drawer's expense outflow.
  */
 export type ShiftFigures = {
-  opening: ShiftMoney
+  opening: ShiftCountedMoney
   closing: ShiftCountedMoney
   sales_usd: number
   cogs_usd: number
@@ -176,25 +176,6 @@ export function parseShiftCount(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
-/**
- * The count a required OPEN/REOPEN form field holds, where blank means 0.
- *
- * Owner, 2026-09-06: the Start-shift button sat disabled because only one
- * currency had been typed -- "i had to enter the usd as well as khmer riel".
- * A drawer that holds only dollars, or only riel, is a normal drawer, so a
- * field left blank is recorded as 0 and the field says so (placeholder "0" +
- * shift_blank_count_hint). Only a blank becomes 0: a negative, NaN or
- * infinite entry is still rejected, exactly as parseShiftCount rejects it.
- *
- * Closing counts use shiftClosingCounts instead because a blank close field
- * means that currency was not measured. The Worker's required opening-money
- * contract accepts 0, so opening and reopening retain this rule.
- */
-export function shiftCountOrZero(value: unknown): number | null {
-  if (typeof value === 'string' && value.trim() === '') return 0
-  return parseShiftCount(value)
-}
-
 export type ShiftCountBlocker = 'both_blank' | 'invalid'
 
 /**
@@ -202,12 +183,9 @@ export type ShiftCountBlocker = 'both_blank' | 'invalid'
  * Rendered NEXT TO the button (ShiftSubmitRow), never swallowed by a bare
  * `disabled`. The action is allowed once EITHER field holds a valid count.
  *
- * `blankMeansUncounted` is the CLOSE rule (owner, Sep 6 2026: the counted
- * drawer "is not calculated in the internal system, it is calculated only for
- * shift report"). Ending a shift may leave both fields empty -- the shift is
- * then recorded as closed with no count, which every surface already prints as
- * "—" -- so on those forms an empty pair is not a blocker at all. Registering
- * an opening float keeps the old rule: that number IS the registration.
+ * `blankMeansUncounted` is the report-only registration rule. A blank field is
+ * unknown/null; an explicit 0 is a measured zero. Opening, reopening and close
+ * all use this option, while an invalid non-blank entry still blocks.
  * An invalid entry (negative, NaN) still blocks everywhere.
  */
 export function shiftCountPairBlocker(
@@ -218,7 +196,8 @@ export function shiftCountPairBlocker(
   const usdBlank = typeof usd === 'string' && usd.trim() === ''
   const khrBlank = typeof khr === 'string' && khr.trim() === ''
   if (usdBlank && khrBlank) return options.blankMeansUncounted ? null : 'both_blank'
-  if (shiftCountOrZero(usd) == null || shiftCountOrZero(khr) == null) return 'invalid'
+  if ((!usdBlank && parseShiftCount(usd) == null) || (!khrBlank && parseShiftCount(khr) == null)) return 'invalid'
+  if (!options.blankMeansUncounted && (usdBlank || khrBlank)) return 'invalid'
   return null
 }
 
@@ -235,6 +214,9 @@ export function shiftCountPairBlocker(
 export function shiftClosingCounts(usd: unknown, khr: unknown): { usd: number | null; khr: number | null } {
   return { usd: parseShiftCount(usd), khr: parseShiftCount(khr) }
 }
+
+/** Opening registration uses the same per-currency blank/null contract. */
+export const shiftOpeningCounts = shiftClosingCounts
 
 function requiredShiftCount(value: unknown, label: string): number {
   const parsed = parseShiftCount(value)
@@ -288,14 +270,14 @@ export async function fetchCurrentShift(branchId?: number | null): Promise<Shift
 export type OpenShiftInput = {
   branchId?: number | null
   branchName?: string | null
-  openingFloatUsd: number
-  openingFloatKhr: number
+  openingFloatUsd: number | null
+  openingFloatKhr: number | null
   openingNote?: string | null
 }
 
 export async function openShift(input: OpenShiftInput): Promise<ShiftState> {
-  const openingFloatUsd = requiredShiftCount(input.openingFloatUsd, 'Opening USD count')
-  const openingFloatKhr = requiredShiftCount(input.openingFloatKhr, 'Opening KHR count')
+  const openingFloatUsd = optionalShiftCount(input.openingFloatUsd, 'Opening USD count')
+  const openingFloatKhr = optionalShiftCount(input.openingFloatKhr, 'Opening KHR count')
   // isWrite = true: no local race, no cached answer. The server's UNIQUE index
   // is the arbiter of "once a day", so this call must actually reach it.
   const state = await route<ShiftState>(
@@ -381,8 +363,8 @@ export type AmendShiftInput = {
   expectedRevision: number
   reason: string
   openedAt: string
-  openingFloatUsd: number
-  openingFloatKhr: number
+  openingFloatUsd: number | null
+  openingFloatKhr: number | null
   openingNote?: string | null
   closedAt?: string | null
   closingCountedUsd?: number | null
@@ -391,8 +373,8 @@ export type AmendShiftInput = {
 }
 
 export async function amendShift(id: number, input: AmendShiftInput): Promise<{ shift: Shift }> {
-  const openingFloatUsd = requiredShiftCount(input.openingFloatUsd, 'Opening USD count')
-  const openingFloatKhr = requiredShiftCount(input.openingFloatKhr, 'Opening KHR count')
+  const openingFloatUsd = optionalShiftCount(input.openingFloatUsd, 'Opening USD count')
+  const openingFloatKhr = optionalShiftCount(input.openingFloatKhr, 'Opening KHR count')
   // Optional even on a closed shift: a shift ended without a count keeps that
   // fact through an amendment instead of gaining a fabricated 0.
   const closingCountedUsd = input.closedAt == null
@@ -460,8 +442,8 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
 export type ReopenShiftInput = {
   expectedRevision: number
   reason: string
-  openingFloatUsd: number
-  openingFloatKhr: number
+  openingFloatUsd: number | null
+  openingFloatKhr: number | null
   openingNote?: string | null
 }
 
@@ -471,8 +453,8 @@ export type ReopenShiftResult = {
 }
 
 export async function reopenShift(id: number, input: ReopenShiftInput): Promise<ReopenShiftResult> {
-  const openingFloatUsd = requiredShiftCount(input.openingFloatUsd, 'Opening USD count')
-  const openingFloatKhr = requiredShiftCount(input.openingFloatKhr, 'Opening KHR count')
+  const openingFloatUsd = optionalShiftCount(input.openingFloatUsd, 'Opening USD count')
+  const openingFloatKhr = optionalShiftCount(input.openingFloatKhr, 'Opening KHR count')
   const result = await route<ReopenShiftResult>(
     `shifts:reopen:${id}`,
     () => apiFetch('POST', `/api/shifts/${id}/reopen`, {

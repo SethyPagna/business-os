@@ -272,6 +272,14 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   assert.equal(cents.expected.usd, 0.3)
   assert.equal(cents.difference.usd, 0)
   assert.equal(cents.difference.khr, null)
+  const unknownOpening = recon.computeShiftReconciliation({
+    opening: { usd: null, khr: 0 }, cashSales: { usd: 5, khr: 1000 },
+    refunds: null, expenses: null, courier: null, counted: { usd: 5, khr: 1000 },
+  })
+  assert.deepEqual(unknownOpening.opening, { usd: null, khr: 0 })
+  assert.deepEqual(unknownOpening.expected, { usd: null, khr: 1000 },
+    'an unknown opening count cannot silently become a measured zero in expected cash')
+  assert.deepEqual(unknownOpening.difference, { usd: null, khr: 0 })
   // A missing component is zero, never NaN: an unreadable figure must not
   // erase the whole expectation.
   const messy = recon.computeShiftReconciliation({

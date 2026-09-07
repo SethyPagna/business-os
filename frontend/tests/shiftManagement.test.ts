@@ -105,7 +105,7 @@ const closedRow = fixture(2, '2026-09-05', '2026-09-05T03:00:00.000Z', '2026-09-
 // is a $3.25 SURPLUS, where the reconciled drawer is $28 SHORT. Both cannot
 // be put in front of a cashier, so the client-side subtraction was deleted
 // rather than repointed -- nothing here recomputes what the server settled.
-const openingFloatFormula = Number((closedRow.closing_counted_usd! - closedRow.opening_float_usd).toFixed(2))
+const openingFloatFormula = Number((closedRow.closing_counted_usd! - closedRow.opening_float_usd!).toFixed(2))
 assert.equal(openingFloatFormula, 3.25)
 assert.notEqual(openingFloatFormula, reconciled.difference.usd)
 assert.deepEqual(reconciled.difference, { usd: -28, khr: 55_000 })
@@ -165,9 +165,12 @@ for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) 
 }
 ok(!/hasPermission|canManage/.test(modal), 'the shift popup never derives actions from Settings permission')
 ok(/expectedRevision: shift\.revision/.test(modal) && /expectedRevision: edit\.expectedRevision/.test(modal), 'the amend draft captures and submits the row revision without a pre-submit refresh')
-// 2026-09-06: blank is 0 through the shared shiftCountOrZero rule (executed
-// in tests/shiftGateUx.test.ts); an INVALID count is still never coerced.
-ok(/shiftCountOrZero\(edit\.openingUsd\)/.test(modal) && /shiftClosingCounts\(close\.closingUsd, close\.closingKhr\)/.test(modal) && !/Number\((?:edit|close|reopen)\.[^)]+\) \|\| 0/.test(modal), 'opening counts remain numeric while each blank closing currency remains unknown and invalid input is never coerced')
+// Opening and closing registrations share the per-currency blank/null rule;
+// invalid input is still never coerced.
+ok(/shiftOpeningCounts\(edit\.openingUsd, edit\.openingKhr\)/.test(modal)
+  && /shiftClosingCounts\(close\.closingUsd, close\.closingKhr\)/.test(modal)
+  && !/Number\((?:edit|close|reopen)\.[^)]+\) \|\| 0/.test(modal),
+  'opening and closing blanks remain unknown while invalid input is never coerced')
 // Sep 6 2026: the three shift timestamps moved off <input type="datetime-local">
 // onto the shared typed field (see tests/dateEntrySurfaces.test.ts). The native
 // control's `required` attribute went with it and is not missed -- nothing here

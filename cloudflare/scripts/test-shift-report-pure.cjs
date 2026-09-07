@@ -312,8 +312,8 @@ const rielReport = telegram.formatShiftReport('Shop', {
   otherExpenseUsd: 0, otherExpenseKhr: 150000,
 }, NOW)
 const rielLines = rielReport.split('\n')
-assert.ok(rielLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': 283,700៛'))
-assert.ok(rielLines.find((line) => line.startsWith(`Counted cash${SEP}`)).endsWith(': 133,700៛'))
+assert.ok(rielLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': $0.00 · 283,700៛'))
+assert.ok(rielLines.find((line) => line.startsWith(`Counted cash${SEP}`)).endsWith(': $0.00 · 133,700៛'))
 assert.ok(rielLines.find((line) => line.startsWith(`Expenses${SEP}`)).endsWith(': 150,000៛'))
 assert.ok(rielLines.find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
 // The per-expense list is gone: the header total and the "Other expenses"

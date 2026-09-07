@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { closeShift, shiftClosingCounts, shiftCountPairBlocker } from '../src/api/shiftTransport.ts'
+import { closeShift, openShift, shiftClosingCounts, shiftCountPairBlocker, shiftOpeningCounts } from '../src/api/shiftTransport.ts'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -18,6 +18,8 @@ equal(shiftClosingCounts('12.50', ''), { usd: 12.5, khr: null }, 'a blank KHR fi
 equal(shiftClosingCounts('  ', '120000'), { usd: null, khr: 120_000 }, 'whitespace USD stays unmeasured')
 equal(shiftClosingCounts(null, undefined), { usd: null, khr: null }, 'absent currencies stay unmeasured')
 equal(shiftClosingCounts('0', 0), { usd: 0, khr: 0 }, 'explicit zeros remain measured zeros')
+equal(shiftOpeningCounts('', '0'), { usd: null, khr: 0 }, 'opening blank stays unknown while explicit zero stays measured')
+equal(shiftOpeningCounts('12.50', ''), { usd: 12.5, khr: null }, 'opening currencies are independently optional')
 equal(shiftCountPairBlocker('', '120000', { blankMeansUncounted: true }), null,
   'one measured currency is enough to close')
 equal(shiftCountPairBlocker('', '', { blankMeansUncounted: true }), null,
@@ -53,6 +55,11 @@ try {
   const posted = postedBodies.at(-1)
   equal(posted?.closing_counted_usd, null, 'transport posts blank USD as null')
   equal(posted?.closing_counted_khr, 120_000, 'transport posts measured KHR unchanged')
+  const opening = shiftOpeningCounts('', '0')
+  await openShift({ openingFloatUsd: opening.usd, openingFloatKhr: opening.khr })
+  const opened = postedBodies.at(-1)
+  equal(opened?.opening_float_usd, null, 'transport posts blank opening USD as null')
+  equal(opened?.opening_float_khr, 0, 'transport posts explicit opening KHR zero as zero')
 } finally {
   globalThis.fetch = originalFetch
   setSyncServerUrl(originalServerUrl)
