@@ -1,4 +1,4 @@
-import { apiFetch, requireLiveServerWrite, route } from './http.ts'
+import { apiFetch, cacheInvalidateWithDerived, requireLiveServerWrite, route } from './http.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds, type QueryParams } from './query.ts'
 
 type LookupReplacementPayload = {
@@ -121,6 +121,16 @@ export function searchProducts(params: QueryParams = {}): Promise<unknown> {
   // server's perspective, and only ever one of them is being typed into at
   // a time in a single tab.
   return routeCachedProductQuery(cacheKey, appendQuery('/api/products/search', query), 'products:search')
+}
+
+// A write whose client-side deadline fires has an unknown outcome: the Worker
+// may already have committed complete merge cases. Reconciliation must bypass
+// every fresh product read cache so the next search performs a server GET.
+// Keep this scoped to product-derived reads instead of clearing unrelated app
+// caches or offline mirrors; route() still retains its normal offline fallback
+// if the authoritative GET itself cannot be reached.
+export function invalidateProductReadCacheForReconciliation(): void {
+  cacheInvalidateWithDerived('products')
 }
 
 export function getProductBootstrap(params: QueryParams = {}): Promise<unknown> {
