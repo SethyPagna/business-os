@@ -291,8 +291,8 @@ const feeLines = assertAllBilingual([
   'Type: rent', 'Amount: $150.00', 'Date: 2026-09-03', 'Label: September', 'Note: paid in cash',
 ], 'routes/fees.ts inline fee lines')
 // routes/fees.ts emits a bare ISO fee_date; the feed must show ONE date shape.
-assert.ok(feeLines.includes('Date / កាលបរិច្ឆេទ: 09/03/2026'), 'an ISO Date value is normalised to the pinned mm/dd/yyyy')
-assert.equal(lang.localizeTelegramLine('Date: 09/03/2026 10:04'), 'Date / កាលបរិច្ឆេទ: 09/03/2026 10:04', 'an already-formatted date is untouched')
+assert.ok(feeLines.includes('Date / កាលបរិច្ឆេទ: 03/09/2026'), 'an ISO Date value is normalised to the pinned dd/mm/yyyy')
+assert.equal(lang.localizeTelegramLine('Date: 03/09/2026 10:04'), 'Date / កាលបរិច្ឆេទ: 03/09/2026 10:04', 'an already-formatted date is untouched')
 assert.equal(lang.localizeTelegramLine('Note: 2026-09-03'), 'Note / កំណត់ចំណាំ: 2026-09-03', 'only the Date label is reformatted')
 console.log('PASS payloads: sale, stock, transfer, both return kinds and both inline route messages are bilingual')
 
