@@ -13,16 +13,10 @@
 //
 // Matching rules, deliberately mirroring conventions already established
 // elsewhere in this app rather than inventing new ones:
-// - Branch: exact case-insensitive name match against `branches`; no
-//   match auto-creates a new active branch with that name -- the same
-//   auto-create-on-miss behavior lib/importEngine.ts's own
-//   resolveAndCreateBranches already applies for every other import in
-//   this app. A dated stock count is reconciling a REAL branch's real
-//   count -- a sheet naming a branch that doesn't exist yet is normally
-//   because it's newly opened, not a typo (a typo is instead something a
-//   human catches from the returned `branchesCreated` list before
-//   confirming the import -- this function only reports what it did, it
-//   doesn't ask first, same as resolveAndCreateBranches).
+// - Branch: resolve only an existing active canonical Shop/Warehouse.
+//   Explicit unknown/non-canonical names remain unresolved. A blank cell
+//   resolves only when exactly one active canonical branch is marked default.
+//   Import analysis never creates branch identity or stock rows.
 // - Product: SKU first (exact, case-insensitive), then barcode (exact),
 //   then exact case-insensitive name -- same priority order
 //   lib/importEngine.ts's classifyProducts already uses for matching an
@@ -40,6 +34,7 @@ import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
 import { identityBarcodeKey, identityBarcodeKeySql } from './productIdentity'
+import { branchRoleFromName } from './branchRoles'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -90,14 +85,13 @@ export interface ResolvedDatedCountRow {
   }
 }
 
-export type UnresolvedReason = 'invalid_date' | 'invalid_count' | 'missing_branch' | 'missing_identifier' | 'product_not_found' | 'ambiguous_barcode' | 'ambiguous_name'
+export type UnresolvedReason = 'invalid_date' | 'invalid_count' | 'missing_branch' | 'branch_not_found' | 'missing_identifier' | 'product_not_found' | 'ambiguous_barcode' | 'ambiguous_name'
 
 export interface UnresolvedDatedCountRow {
   rowNumber: number
   reason: UnresolvedReason
   raw: RawDatedCountRow
-  // The branch this row's branchName already resolved to (or was
-  // auto-created as), for reasons that only occur AFTER branch
+  // The branch this row's branchName already resolved to, for reasons that only occur AFTER branch
   // resolution succeeds (product_not_found, ambiguous_barcode,
   // ambiguous_name). Carried through so a follow-up decision-applying
   // step (lib/datedStockCountDecisions.ts) never has to re-derive or
@@ -150,7 +144,6 @@ export async function resolveDatedStockCountRows(
     const normalizedDate = normalizeToIsoDate(row.date, 'month-first') || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : '')
     if (!normalizedDate) { unresolved.push({ rowNumber: row.rowNumber, reason: 'invalid_date', raw: row, suggestedActions: [] }); continue }
     if (!Number.isFinite(row.count) || row.count < 0) { unresolved.push({ rowNumber: row.rowNumber, reason: 'invalid_count', raw: row, suggestedActions: [] }); continue }
-    if (!lower(row.branchName)) { unresolved.push({ rowNumber: row.rowNumber, reason: 'missing_branch', raw: row, suggestedActions: [] }); continue }
     if (!lower(row.sku) && !lower(row.barcode) && !lower(row.productName)) {
       unresolved.push({ rowNumber: row.rowNumber, reason: 'missing_identifier', raw: row, suggestedActions: [] })
       continue
@@ -159,22 +152,20 @@ export async function resolveDatedStockCountRows(
   }
   if (!candidates.length) return { resolved: [], unresolved, branchesCreated: [] }
 
-  // ---- Branch resolution (auto-create on miss, see file header) ----
-  const branchNamesByLower = new Map<string, string>() // lower(name) -> first-seen casing
-  for (const row of candidates) {
-    const key = lower(row.branchName)
-    if (key && !branchNamesByLower.has(key)) branchNamesByLower.set(key, String(row.branchName).trim())
+  // ---- Branch resolution (read-only canonical identity) ----
+  const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<{
+    id: number; name: string; is_default: number | null; is_active: number | null
+  }>()
+  const canonicalByRole = new Map<'shop' | 'warehouse', typeof branches>([['shop', []], ['warehouse', []]])
+  const canonicalDefaults: typeof branches = []
+  for (const branch of branches) {
+    if (Number(branch.is_active ?? 0) !== 1) continue
+    const role = branchRoleFromName(branch.name)
+    if (role === 'other') continue
+    canonicalByRole.get(role)!.push(branch)
+    if (Number(branch.is_default ?? 0) === 1) canonicalDefaults.push(branch)
   }
-  const branchIdByLower = new Map<string, number>()
-  const branchesCreated: { id: number; name: string }[] = []
-  for (const [lowerName, name] of branchNamesByLower) {
-    const existing = await db.prepare(`SELECT id FROM branches WHERE lower(name) = @name LIMIT 1`).get<{ id: number }>({ name: lowerName })
-    if (existing) { branchIdByLower.set(lowerName, Number(existing.id)); continue }
-    const inserted = await db.prepare(`INSERT INTO branches (name, is_active) VALUES (@name, 1)`).run({ name })
-    const newId = Number(inserted.lastInsertRowid)
-    branchIdByLower.set(lowerName, newId)
-    branchesCreated.push({ id: newId, name })
-  }
+  const uniqueCanonicalDefault = canonicalDefaults.length === 1 ? canonicalDefaults[0] : null
 
   // ---- Product resolution: sku -> barcode -> exact name, same priority
   // order as importEngine.ts's classifyProducts ----
@@ -230,10 +221,21 @@ export async function resolveDatedStockCountRows(
 
   const matched: { row: RawDatedCountRow & { normalizedDate: string }; branchId: number; productId: number }[] = []
   for (const row of candidates) {
-    const branchId = branchIdByLower.get(lower(row.branchName)) ?? null
-    // Should be unreachable (every branch name was just resolved/created
-    // above), but guard rather than crash on an unexpected empty name.
-    if (branchId == null) { unresolved.push({ rowNumber: row.rowNumber, reason: 'missing_identifier', raw: row, suggestedActions: [] }); continue }
+    const requestedBranchName = lower(row.branchName)
+    const requestedRole = branchRoleFromName(requestedBranchName)
+    const branch = requestedBranchName
+      ? (requestedRole === 'other' ? null : (canonicalByRole.get(requestedRole)?.length === 1 ? canonicalByRole.get(requestedRole)![0] : null))
+      : uniqueCanonicalDefault
+    if (!branch) {
+      unresolved.push({
+        rowNumber: row.rowNumber,
+        reason: requestedBranchName ? 'branch_not_found' : 'missing_branch',
+        raw: row,
+        suggestedActions: [],
+      })
+      continue
+    }
+    const branchId = Number(branch.id)
 
     const skuKey = lower(row.sku)
     const barcodeKey = identityBarcodeKey(row.barcode)
@@ -318,7 +320,7 @@ export async function resolveDatedStockCountRows(
     resolved.push(out)
   }
 
-  return { resolved, unresolved, branchesCreated }
+  return { resolved, unresolved, branchesCreated: [] }
 }
 
 // Request-parsing counterpart to datedStockCountRoute.ts's own
