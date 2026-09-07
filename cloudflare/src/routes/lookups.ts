@@ -6,6 +6,7 @@ import { buildLiveLookupMutationPlan } from '../lib/renameCascade'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { hasPermission } from '../lib/permissions'
 import { assertCatalogTextIntegrity, normalizeCatalogText } from '../lib/catalogText'
+import { mergeLookupSuggestionRows, usedLookupValuesSql, type UsedLookupValue } from '../lib/lookupSuggestions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import type { Env } from '../index'
@@ -97,9 +98,28 @@ function isNormalizedNameCollision(error: unknown): boolean {
 }
 
 function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
+  // Read = the MANAGED vocabulary union the values products actually carry.
+  //
+  // This used to be `SELECT * FROM ${table}` alone, and production's
+  // `categories` table holds ZERO rows while products carry 42 distinct
+  // category strings -- so every product form (Products edit, the
+  // create-products session item form, the fast stock-in inline create)
+  // offered an empty Category list on a catalog full of categories. Merging
+  // here rather than in each caller is what lets every host benefit without
+  // per-host plumbing.
+  //
+  // Rows are tagged `source`; the manager modals keep source === 'lookup'
+  // only, so a used-but-unmanaged name never becomes renameable/deletable.
+  // See lib/lookupSuggestions.ts for the ordering rule and
+  // scripts/test-lookup-suggestions-pure.cjs for the pins.
   app.get(`/${table}`, async (c) => {
-    const rows = await getDb(c.env).prepare(`SELECT * FROM ${table} ORDER BY lower(name) ASC`).all()
-    return c.json(rows || [])
+    const db = getDb(c.env)
+    const column = kind === 'category' ? 'category' : 'unit'
+    const [rows, used] = await Promise.all([
+      db.prepare(`SELECT * FROM ${table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
+      db.prepare(usedLookupValuesSql(column)).all<UsedLookupValue>(),
+    ])
+    return c.json(mergeLookupSuggestionRows(rows || [], used || []))
   })
 
   app.post(`/${table}`, async (c) => {

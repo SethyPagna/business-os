@@ -87,11 +87,21 @@ ok(!/parseShiftCount\(/.test(modal), 'ShiftHistoryModal no longer treats a blank
 const registerBody = gate.slice(gate.indexOf('const submitOpen'), gate.indexOf('const needsRegistration'))
 ok(/shiftCountOrZero\(floatUsd\)/.test(registerBody) && /shiftCountOrZero\(floatKhr\)/.test(registerBody),
   'the register step submits each blank float as 0')
+// The CLOSING pairs moved on to shiftClosingCounts (a2 shift2 / N37): a
+// half-typed pair is still 0 in the other currency -- that rule is inside
+// shiftClosingCounts and is asserted by executing it in
+// tests/shiftCloseAlwaysWorks.test.ts -- but an UNTOUCHED close pair is now
+// "not counted" (null) rather than a $0.00 count nobody made. The OPENING
+// float keeps the plain blank-is-0 rule, because that number is the
+// registration itself.
 const closeBody = gate.slice(gate.indexOf('const submitClose'), gate.indexOf('const dismiss'))
-ok(/shiftCountOrZero\(countedUsd\)/.test(closeBody) && /shiftCountOrZero\(countedKhr\)/.test(closeBody),
-  'the POS close step submits each blank count as 0')
-for (const draft of ['edit.openingUsd', 'edit.openingKhr', 'edit.closingUsd', 'edit.closingKhr', 'close.closingUsd', 'close.closingKhr', 'reopen.openingUsd', 'reopen.openingKhr']) {
+ok(/shiftClosingCounts\(countedUsd, countedKhr\)/.test(closeBody),
+  'the POS close step submits its counts through the shared closing-count rule')
+for (const draft of ['edit.openingUsd', 'edit.openingKhr', 'reopen.openingUsd', 'reopen.openingKhr']) {
   ok(modal.includes(`shiftCountOrZero(${draft})`), `the Shifts popup submits a blank ${draft} as 0`)
+}
+for (const pair of ['edit.closingUsd, edit.closingKhr', 'close.closingUsd, close.closingKhr']) {
+  ok(modal.includes(`shiftClosingCounts(${pair})`), `the Shifts popup closes with the shared rule for ${pair}`)
 }
 ok(!/Number\((?:float|counted|edit|close|reopen)[^)]+\) \|\| 0/.test(gate + modal),
   'no surface coerces an INVALID count to 0 -- only a blank one becomes 0, through the shared helper')

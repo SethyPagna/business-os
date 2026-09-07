@@ -59,17 +59,21 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 1257,
+    line: 1260,
     reason:
       'Filter-metadata effect. Re-runs INDIRECTLY: filterMetaScope (a useMemo over all '
-      + 'six filters, :1234) changes -> the effect at :1242 resets filterMetaLoadedRef '
-      + 'and filterMetaReady -> load()\'s loading cycle re-triggers :1252 -> this effect '
-      + 'runs again with a fresh closure. Verified 2026-09-03; re-verified 2026-09-06 '
-      + 'when a text-affordance import shifted the file by one line and tipped the pin '
-      + 'past DRIFT: the four-hook chain above is unchanged and the prose line numbers, '
-      + 'stale since some earlier shift, are repinned with it. FRAGILE: it depends on '
+      + 'six filters, :1237) changes -> the effect at :1245 resets filterMetaLoadedRef and '
+      + 'filterMetaReady -> load()\'s loading cycle re-triggers :1251 -> this effect runs '
+      + 'again with a fresh closure. Verified 2026-09-03; RE-VERIFIED 2026-09-06 at the '
+      + 'repinned line -- the three sites above were read again and the chain is unchanged. '
+      + 'Read a THIRD time on 2026-09-08, when both sides of the text-affordances merge of '
+      + 'integration tip 3d66725e had repinned this one entry: the four sites are unchanged '
+      + 'and the entry is repinned to the merged file rather than to either side. No path '
+      + 'found where a filter changes without load() running. FRAGILE: it depends on '
       + '`loading` cycling, so if that chain is ever refactored this entry must be '
-      + 're-verified, not trusted.',
+      + 're-verified, not trusted. (Originally pinned :1196: the site had drifted 60 lines, '
+      + 'exactly the DRIFT budget, so the next line added anywhere above it -- there a CSS '
+      + 'import -- tipped it to STALE. A pin at its true line is the point.)',
   },
   {
     file: 'components/products/Products.tsx',

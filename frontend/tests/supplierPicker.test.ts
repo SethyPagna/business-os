@@ -41,16 +41,39 @@ ok('all three manual add surfaces render the ONE shared SupplierPickerField (cro
 // --- The picker itself: typing always breaks the contact link (an id may
 // only ever come from an explicit pick), and picks land on mousedown so
 // the input's blur can't swallow them.
-assert.match(picker, /onChange\(\{ supplierId: null, supplierName: event\.target\.value \}\)/, 'typing clears supplierId')
-assert.match(picker, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(row\) \}\}/, 'suggestion picks beat blur via mousedown')
+// The input + floating list is now the ONE shared SuggestionTextInput (the
+// same control the product form's Category/Brand/Unit/Supplier and the
+// create-products header's Brand render), so the field keeps only what is
+// supplier-specific. The GUARANTEES are unchanged and asserted in both
+// places: the id semantics here, the pointer safety there.
+//
+// The pointer rule this file has always pinned is UNCHANGED: a pick lands on
+// mousedown. A tap synthesises mousedown before the focus change that blurs
+// the input, which is why this picker worked on its four touch surfaces with
+// no touch handler at all -- so a touchstart that picks is not "the mobile
+// path", it is a regression that turns a scroll of the list into a selection.
+const suggestionInput = read('components/shared/SuggestionTextInput.tsx')
+assert.match(picker, /import SuggestionTextInput/, 'the picker wraps the shared control instead of copying it')
+assert.match(
+  picker,
+  /if \(option\) onChange\(\{ supplierId: Number\(option\.payload\), supplierName: option\.value \}\)/,
+  'an id may only ever come from an explicit pick',
+)
+assert.match(
+  picker,
+  /else onChange\(\{ supplierId: null, supplierName: next \}\)/,
+  'typing clears supplierId -- an edited name can never ride on a stale id',
+)
+assert.match(suggestionInput, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'suggestion picks beat blur via mousedown')
+assert.doesNotMatch(suggestionInput, /onTouchStart=\{[^}]*pick\(/, 'a tap already reaches the mousedown path; a touchstart pick would fire mid-scroll')
 assert.match(picker, /fields: ['"]names['"]/, 'suggestions come from the permission-free name-only suppliers read')
-ok('picker: free text stays name-only, picks are mousedown-safe, list is the names-only read')
+ok('picker: free text stays name-only, picks are mousedown-safe on mouse and touch, list is the names-only read')
 
 // --- Locked variant: when the lot is already attributed the field is
 // read-only -- no input element in that branch, so no choice can be
 // collected that the server would ignore.
 {
-  const lockedBlock = picker.slice(picker.indexOf('if (lockedName)'), picker.indexOf('const query'))
+  const lockedBlock = picker.slice(picker.indexOf('if (lockedName)'), picker.indexOf('const suggestionOptions'))
   assert.ok(lockedBlock.includes('supplier_first_attribution'), 'locked variant explains first-attribution-sticks')
   assert.ok(!lockedBlock.includes('<input'), 'locked variant renders NO input')
   ok('picker: attributed lots render read-only, never a dead input')

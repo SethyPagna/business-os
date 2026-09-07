@@ -168,7 +168,14 @@ ok(/expectedRevision: shift\.revision/.test(modal) && /expectedRevision: edit\.e
 // 2026-09-06: blank is 0 through the shared shiftCountOrZero rule (executed
 // in tests/shiftGateUx.test.ts); an INVALID count is still never coerced.
 ok(/shiftCountOrZero\(edit\.openingUsd\)/.test(modal) && !/Number\((?:edit|close|reopen)\.[^)]+\) \|\| 0/.test(modal), 'amend/close/reopen forms record a blank count as 0 through the shared rule and never coerce an invalid one')
-ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /required value=\{close\.closedAt\}/.test(modal), 'historic close starts without a guessed timestamp and requires user entry')
+// Sep 6 2026: the three shift timestamps moved off <input type="datetime-local">
+// onto the shared typed field (see tests/dateEntrySurfaces.test.ts). The native
+// control's `required` attribute went with it and is not missed -- nothing here
+// submits a <form>, so the only thing that ever gated the save is the
+// closeReason blocker printed beside the button, which is asserted instead.
+ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /<DateTimeEntryInput[^>]*value=\{close\.closedAt\}/.test(modal), 'historic close starts without a guessed timestamp and is typed through the shared date+time field')
+ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'an unentered close time still blocks the save with a printed reason, not a bare disabled button')
+ok(!/type="datetime-local"/.test(modal), 'no shift timestamp may fall back to the native control that rejects a typed 9032026')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
 ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')
 ok((modal.match(/await refreshDetails\(result\.shift\)/g) || []).length >= 4 && !/setAmendments\(\[\]\)[\s\S]{0,180}shift_reopen_saved/.test(modal), 'all lifecycle saves reload amendments, including close and reopen')
