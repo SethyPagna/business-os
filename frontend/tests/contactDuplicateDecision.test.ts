@@ -47,10 +47,10 @@ test('only an allowed reviewed exact candidate becomes a create-separate decisio
 })
 
 test('structured duplicate review survives the legacy nested api error shape', () => {
-  const error = { code: 'possible_duplicate', duplicate: { ...match, ...check } }
+  const error = { code: 'contact_duplicate_decision_required', duplicate: { ...match, ...check } }
   assert.deepEqual(readContactDuplicateDecisionError(error), check)
   assert.deepEqual(normalizeContactDuplicateCheck(check), check)
-  assert.equal(readContactDuplicateDecisionError({ code: 'possible_duplicate', duplicate: match }), null)
+  assert.equal(readContactDuplicateDecisionError({ code: 'contact_duplicate_decision_required', duplicate: match }), null)
 })
 
 test('live form checks include every secondary option phone and never send a boolean confirmation', () => {
@@ -91,6 +91,14 @@ test('POS never auto-retries or fabricates an existing contact and exposes every
   assert.match(modals, /saveDisabled=\{!!customerDuplicateCheck\}/)
   assert.match(modals, /saveDisabled=\{!!deliveryDuplicateCheck\}/)
   assert.match(shell, /disabled=\{saving \|\| saveDisabled\}/)
+})
+
+test('the Worker response cannot trigger an older cached POS auto-retry or auto-select branch', () => {
+  const route = read('../../cloudflare/src/routes/contacts.ts')
+  assert.match(route, /code: 'contact_duplicate_decision_required'/)
+  assert.doesNotMatch(route, /code: 'possible_duplicate'/)
+  assert.doesNotMatch(route, /code: 'phone_conflict'/)
+  assert.doesNotMatch(route, /body\.confirmDuplicate/)
 })
 
 test('all duplicate-decision copy is available in both languages', () => {

@@ -137,7 +137,10 @@ export function normalizeContactDuplicateCheck(value: unknown): ContactDuplicate
 export function readContactDuplicateDecisionError(error: unknown): ContactDuplicateCheck | null {
   const input = error as Record<string, unknown> | null
   const code = input?.code
-  if (code !== 'possible_duplicate' && code !== 'phone_conflict' && code !== 'contact_duplicate_candidates_changed') return null
+  if (code !== 'contact_duplicate_decision_required'
+    && code !== 'possible_duplicate'
+    && code !== 'phone_conflict'
+    && code !== 'contact_duplicate_candidates_changed') return null
   return normalizeContactDuplicateCheck(input)
     || normalizeContactDuplicateCheck(input?.duplicate)
 }

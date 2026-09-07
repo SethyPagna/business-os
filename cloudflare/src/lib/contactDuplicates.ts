@@ -338,6 +338,23 @@ export function contactDuplicateWriteGuardStatement(
       WHERE ${canonicalPhoneSql("json_extract(option.value, '$.phone')")} IN (SELECT CAST(value AS TEXT) FROM json_each(@phones))
     )
   )`
+  // Unreviewed callers (imports, portal signup, and the first manual write)
+  // need only enforce unique phone ownership. Preserve the established
+  // primary-key collision signal those callers already classify, while D1's
+  // transaction rolls this statement and the following write back together.
+  if (!decision) {
+    return {
+      sql: `INSERT INTO ${table} (id, name)
+        SELECT candidate.id, candidate.name FROM ${table} AS candidate
+        WHERE candidate.id != COALESCE(@excludeId, -1)
+          AND ${phoneMatch}
+        LIMIT 1`,
+      params: {
+        phones: JSON.stringify(phones),
+        excludeId: subject.id == null || subject.id === '' ? null : Number(subject.id),
+      },
+    }
+  }
   const currentMatch = `(${decision && nameKey ? `lower(trim(COALESCE(candidate.name, ''))) = @nameKey OR` : ''} ${phoneMatch})`
   const currentFingerprint = `COALESCE((
     SELECT 'v1|' || group_concat(CAST(current.id AS TEXT) || '@' || current.version, '|')
@@ -357,7 +374,7 @@ export function contactDuplicateWriteGuardStatement(
       phones: JSON.stringify(phones),
       nameKey,
       excludeId: subject.id == null || subject.id === '' ? null : Number(subject.id),
-      candidateFingerprint: decision?.fingerprint || 'v1|',
+      candidateFingerprint: decision.fingerprint,
     },
   }
 }
