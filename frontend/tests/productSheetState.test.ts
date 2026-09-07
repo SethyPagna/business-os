@@ -157,6 +157,7 @@ await runTest('the branch pills and the stock summary share one ordering', () =>
   assert.equal(stocking.branchSummary, oddly.branchSummary, 'the order is a property of the branches, not of the intent')
 })
 
+
 // SHAPE D (the "RECON residue" shape): branch_stock says 28 at the shop and
 // the lot ledger is empty. The old sheet mixed the two -- it took the number
 // from the LOT ledger (0) while a branch line beside it printed 28.
@@ -200,7 +201,10 @@ await runTest('picking a received date narrows the number to that lot', () => {
 // N11's second clause. The warehouse is VISIBLE with its quantity, greyed and
 // unselectable for everyone including admins, and never preselected.
 await runTest('warehouse is shown with its quantity but cannot be picked on a sale surface', () => {
-  const product = { id: 81, name: 'Warehouse only', branch_stock: branchStock(0, 40) }
+  // NOTE: branchStock() carries BOTH canonical rows, so this fixture has a
+  // shop row at zero -- it pins preselection and the greyed pill, and the
+  // genuinely warehouse-only shape (no shop row at all) is the test below.
+  const product = { id: 81, name: 'Shop row at zero', branch_stock: branchStock(0, 40) }
   const state = deriveProductSheetState({ product, groupProduct: false, intent: 'sell', activeBranchId: 1 })
   const warehouse = state.branchOptions.find((option) => option.role === 'warehouse')
   assert.ok(warehouse, 'the warehouse option is still rendered')
@@ -211,6 +215,89 @@ await runTest('warehouse is shown with its quantity but cannot be picked on a sa
   // activeBranchId asked for the warehouse; a sale surface must not open on it.
   assert.equal(state.effectiveBranchId, '2', 'preselection skips a branch no Add button would accept')
   assert.equal(state.displayedStock, 0, 'the shop holds none of it')
+})
+
+// The shape the two rounds above could not see. `branchStock(0, 40)` above
+// CARRIES a shop row at zero, so the sale still resolves to a sellable branch
+// and the correct and the broken pick gates give the same answer on it. A
+// product that exists ONLY at the warehouse -- the normal state of a delivery
+// waiting to be transferred -- has no sellable branch at all: the fallback
+// hands the sheet the warehouse, and a gate that only asks "is there stock"
+// answers YES on 12 units and lets a warehouse sale through.
+//
+// /api/products/search masks this in the wild (cloudflare/src/routes/products.ts
+// attachBranchStock 0-fills every ACTIVE branch, so a live payload almost
+// always carries the shop row), which is exactly why the rule has to hold
+// without it: the offline cache, a narrowed sale-detail search result and any
+// future hydrator that ships only the branches with units all produce this.
+await runTest('a product held ONLY at the warehouse refuses the pick, not just the pill', () => {
+  const product = {
+    id: 83,
+    name: 'Awaiting transfer',
+    unit: 'pcs',
+    branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 12 }],
+    stock_quantity: 12,
+  }
+  const selling = deriveProductSheetState({ product, variants: [], groupProduct: false, intent: 'sell' })
+  // Shown, with its count, exactly as the owner asked.
+  assert.deepEqual(selling.branchOptions.map((option) => option.name), ['Warehouse'])
+  assert.equal(selling.branchOptions[0].quantity, 12)
+  assert.equal(selling.branchOptions[0].selectable, false)
+  assert.equal(selling.branchSummary, 'Warehouse: 12')
+  // Null-or-refused: whichever branch the fallback lands on, a sale may not
+  // be rung against it.
+  assert.equal(
+    selling.effectiveBranchId == null || selling.effectiveBranchOption?.selectable === false,
+    true,
+    'the resolved branch of a sale is either absent or one that cannot sell',
+  )
+  // The gate itself. Before this fix pickAllowed was TRUE here -- 12 > 0 was
+  // the only question asked -- so the Add/Replace button was live on a
+  // warehouse line.
+  assert.equal(selling.pickAllowed, false, 'a sale may not be picked at a branch that cannot sell')
+  assert.equal(selling.pickBlockedReason, 'warehouse_branch', 'and it says so in its own words, not "out of stock"')
+
+  // Control: the same product on a receiving surface is a legitimate pick --
+  // the whole point of a stock surface is to work the warehouse.
+  const stocking = deriveProductSheetState({ product, variants: [], groupProduct: false, intent: 'stock' })
+  assert.equal(stocking.effectiveBranchId, '1')
+  assert.equal(stocking.pickAllowed, true)
+  assert.equal(stocking.pickBlockedReason, null)
+  assert.notEqual(selling.pickAllowed, stocking.pickAllowed, 'the two intents must disagree on this shape')
+
+  // ...and a grouped product whose every row sits at the warehouse answers
+  // the same, so the group path cannot re-open the hole.
+  const rows = [
+    { id: 84, name: 'G', barcode: 'X', branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 3 }] },
+    { id: 85, name: 'G', barcode: 'Y', branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 9 }] },
+  ]
+  const grouped = deriveProductSheetState({ product: rows[0], variants: rows, groupProduct: true, intent: 'sell' })
+  assert.equal(grouped.pickAllowed, false)
+  assert.equal(grouped.pickBlockedReason, 'warehouse_branch')
+})
+
+// The two source-shape halves of the same rule: a refused branch must not be
+// able to look chosen, and the dead button must say WHY in the owner's words.
+await runTest('a blocked branch pill cannot take the active style, and the dead pick names the rule', () => {
+  const sheet = src('components', 'pos', 'ProductDetailSheet.tsx')
+  const block = sheet.split('const branchStep =')[1]?.split(/\r?\n\r?\n/)[0] ?? ''
+  assert.ok(block, 'the branch step must still exist')
+  // pillClass(active, muted) paints ACTIVE (blue, chosen) ahead of muted, so
+  // passing `branch.id === effectiveBranchId` raw renders the greyed warehouse
+  // pill blue on a warehouse-only product -- it reads as the selected branch
+  // of a sale that cannot happen.
+  assert.match(
+    block,
+    /pillClass\(!blocked && branch\.id === effectiveBranchId/,
+    'a branch that cannot sell must never render in the active/blue state',
+  )
+  const body = sheet.split('const renderPickButton =')[1]?.split('\n\n')[0] ?? ''
+  assert.match(
+    body,
+    /pickBlockedReason === 'warehouse_branch'/,
+    'the pick button must print the warehouse rule, not fall through to its normal label',
+  )
+  assert.match(body, /warehouseBlockedMessage/, "and it prints the pack sentence, not a third copy of the wording")
 })
 
 await runTest('a selected warehouse branch is refused on sale surfaces and honoured on stock surfaces', () => {

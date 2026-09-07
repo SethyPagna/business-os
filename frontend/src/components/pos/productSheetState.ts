@@ -73,7 +73,14 @@ export type SheetIntent = 'sell' | 'stock'
 // 'received_date' -- the host asked WHICH intake (trackedBatchProductIds)
 //   and no lot is chosen yet. That question is real on both intents: a
 //   transfer moves a specific lot just as a sale draws from one.
-export type SheetPickBlockedReason = 'out_of_stock' | 'received_date' | null
+// 'warehouse_branch' -- the branch the sheet RESOLVED cannot ring a sale.
+//   A sale question only, and the root of the rule rather than a symptom of
+//   it: greying the pill only stops the operator from CHOOSING the warehouse,
+//   while a product held only at the warehouse is handed that branch by the
+//   fallback with nobody having chosen anything. Without this member the gate
+//   asked one question -- is there stock -- and answered YES on units the
+//   business may not sell.
+export type SheetPickBlockedReason = 'out_of_stock' | 'received_date' | 'warehouse_branch' | null
 
 export type ProductSheetStateInput = {
   product: SheetProductLike
@@ -429,14 +436,23 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   // half of the gate applies to a sale only.
   const pickRow = effectiveVariant ?? product
   const pickInStock = displayedStock > toNumber(pickRow?.out_of_stock_threshold)
-  const pickBlockedReason: SheetPickBlockedReason = intent === 'sell' && !pickInStock
-    ? 'out_of_stock'
-    : (!batchReadyToSell ? 'received_date' : null)
+  const effectiveBranchOption = branchOptions.find((option) => option.id === effectiveBranchId) || null
+  // Asked FIRST, and asked of the branch that was resolved rather than of the
+  // one that was chosen. When nothing sellable exists the preselection above
+  // falls back to the full branch list, so a warehouse-only product arrives
+  // here with the warehouse in hand and stock on it: 'out_of_stock' is not
+  // the true answer, and neither is 'allowed'.
+  const pickAtUnsellableBranch = intent === 'sell' && effectiveBranchOption?.selectable === false
+  const pickBlockedReason: SheetPickBlockedReason = pickAtUnsellableBranch
+    ? 'warehouse_branch'
+    : intent === 'sell' && !pickInStock
+      ? 'out_of_stock'
+      : (!batchReadyToSell ? 'received_date' : null)
 
   return {
     branchOptions,
     effectiveBranchId,
-    effectiveBranchOption: branchOptions.find((option) => option.id === effectiveBranchId) || null,
+    effectiveBranchOption,
     candidatePool,
     effectiveVariant,
     effectiveVariantStock,

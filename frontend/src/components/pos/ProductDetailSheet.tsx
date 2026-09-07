@@ -617,11 +617,13 @@ export default function ProductDetailSheet({
       disabled={!pickAllowed}
       onClick={() => confirmPick(row)}
     >
-      {pickBlockedReason === 'out_of_stock'
-        ? (t('out_of_stock') || 'Out of stock')
-        : pickBlockedReason === 'received_date'
-          ? (t('pick_received_date_first') || 'Pick a received date first')
-          : pickButtonLabel}
+      {pickBlockedReason === 'warehouse_branch'
+        ? warehouseBlockedMessage
+        : pickBlockedReason === 'out_of_stock'
+          ? (t('out_of_stock') || 'Out of stock')
+          : pickBlockedReason === 'received_date'
+            ? (t('pick_received_date_first') || 'Pick a received date first')
+            : pickButtonLabel}
     </button>
   )
 
@@ -641,7 +643,12 @@ export default function ProductDetailSheet({
               key={branch.id}
               type="button"
               aria-disabled={blocked}
-              className={`${pillClass(branch.id === effectiveBranchId, branchOut || blocked)}${blocked ? ' cursor-not-allowed' : ''}`}
+              // pillClass paints ACTIVE ahead of muted, and the branch step
+              // falls back to the warehouse when a product has no sellable
+              // branch at all -- so passing the raw comparison rendered the
+              // refused pill blue, reading as the chosen branch of a sale
+              // that cannot happen. A blocked branch is never 'chosen'.
+              className={`${pillClass(!blocked && branch.id === effectiveBranchId, branchOut || blocked)}${blocked ? ' cursor-not-allowed' : ''}`}
               onClick={() => {
                 // Greyed, NOT hidden and NOT removed: the cashier has to be
                 // able to see that the units are sitting in the warehouse,
