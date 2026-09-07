@@ -248,6 +248,8 @@ runTest('the float is the SHARED float, read-only, with one close affordance', (
   assert.match(float, /aria-expanded=\{isOpen\}/, 'selecting a record must announce that it expands')
   assert.match(float, /fmtDateTime24\(record\.at\)/, 'records read dd/mm/yyyy HH:mm like every other history surface')
   assert.match(float, /record\.actor_username/, 'the acting USERNAME leads every row')
+  assert.match(float, /record\.provenance_unknown[\s\S]*label\('unknown', 'Unknown'\)/,
+    'a generation-proven replay with pruned provenance must say Unknown instead of misattributing it to System')
   assert.match(float, /formatSaleRecordValueLines\(row\.field, value, fmtUSD\)/, 'structured detail must use the readable value formatter')
   assert.match(float, /inline-flex max-w-full flex-col/, 'multiple products or payments must render as separate lines')
 })
