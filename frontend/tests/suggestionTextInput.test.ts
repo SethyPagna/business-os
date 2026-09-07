@@ -136,6 +136,14 @@ check('the create-products header dropped the native datalist for the shared con
   assert.doesNotMatch(sessionModal, /list="create-products-brand-options"/, 'the datalist wiring must go with it')
   assert.match(sessionModal, /<SuggestionTextInput[\s\S]{0,200}id="create-products-brand"/, 'the header Brand renders the shared control')
   assert.match(sessionModal, /id="create-products-brand"[\s\S]{0,200}options=\{brandOptions\}/, 'header and item Brand read the SAME list')
+  // Round-2 defect: swapping the datalist for the shared control also demoted
+  // the field's <label> to a bare <span>, so the caption stopped being a
+  // click/tap target and the control lost its accessible-name association --
+  // in a grid where Branch and Received date both still carry real labels.
+  // The label stays a SIBLING of the control (htmlFor), never a wrapper: a
+  // click on an option row inside a <label> bounces focus back to the input.
+  assert.match(sessionModal, /<label htmlFor="create-products-brand"/, 'the header Brand keeps a real label, like every sibling in that grid')
+  assert.doesNotMatch(sessionModal, /<span[^>]*>\{tr\('brand', 'Brand'\)\}<\/span>/, 'a bare span is what the label had been demoted to')
 })
 
 check('the shared supplier picker delegates to the same control (one implementation)', () => {
