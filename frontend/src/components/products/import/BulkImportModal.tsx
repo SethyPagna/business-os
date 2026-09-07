@@ -35,7 +35,7 @@ import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMo
 import ProductServerImportReviewScreen from './ProductServerImportReviewScreen'
 
 type NotifyFn = (message: string, tone?: 'info' | 'success' | 'warning' | 'error') => void
-const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean }
+const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean; can: (permissionKey: string, actionKey: string) => boolean }
 
 // The destination the dated-stock-count suggestion banner names. Until the
 // import-review audit it named it and went nowhere: the button was wired to
@@ -1115,7 +1115,7 @@ function getBrowserImageEntries(imageFiles: ImageFileMap = {}): BrowserImageEntr
 }
 
 export default function BulkImportModal({ onClose, onDone, t, topMode = 'general', onTopModeChange, products = [] }: BulkImportModalProps) {
-  const { notify, hasPermission } = useApp()
+  const { notify, hasPermission, can } = useApp()
   // Server-side gate lives in routes/importJobs.ts (requires the
   // 'destructive_delete' permission, not just ordinary products-import
   // access, for BOTH destructive modes -- replace_all and replace_columns
@@ -1124,6 +1124,17 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   // replacement for it: someone without this permission would otherwise
   // see a mode they can pick but always get a 403 on.
   const canReplaceAll = hasPermission('destructive_delete')
+  // Same shape, mirroring routes/inventory.ts's own guard exactly: every
+  // dated-stock-count route (resolve, resolve/apply-decisions, preview,
+  // apply -- inventory.ts:1851/1881/1903/1919) calls
+  // getActionTier(user, 'inventory', 'stock_count') !== 'full' and 403s
+  // below Full Access. permissionActions.ts:136 declares stock_count with
+  // review:'block', so can() is true only at the 'full' tier -- the exact
+  // condition the Worker enforces. Disabled, not hidden, per this file's
+  // own precedent at the replace-mode notice below: the operator should
+  // see the destination named and know why it's blocked, not wonder where
+  // it went.
+  const canDatedStockCount = can('inventory', 'stock_count')
   const mode: ImportMode = topMode === 'images' ? 'images' : 'products'
   const [step, setStep] = useState(1)
   const [showColumnsInfo, setShowColumnsInfo] = useState(false)
@@ -2554,8 +2565,9 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setDatedReconciliationOpen(true)}
-                  className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+                  disabled={!canDatedStockCount}
+                  onClick={() => { if (canDatedStockCount) setDatedReconciliationOpen(true) }}
+                  className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600"
                 >
                   {T('dated_reconciliation_suggestion_switch', 'Open the Dated Reconciliation import')}
                 </button>
@@ -2567,6 +2579,11 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                   {T('dated_reconciliation_suggestion_dismiss', 'No, this file is correct')}
                 </button>
               </div>
+              {!canDatedStockCount ? (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                  {T('dated_reconciliation_permission_required', 'The Dated Stock Reconciliation import needs Full Access to Inventory. Ask an administrator for access.')}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>

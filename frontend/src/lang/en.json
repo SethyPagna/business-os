@@ -1549,6 +1549,7 @@
   "date_time_range": "Date & time range",
   "date_to": "To Date",
   "dated_count_mapping_body": "Match each field this import needs to a column in your file. Fields marked required must be mapped; optional ones can be left as \"-- none --\".",
+  "dated_reconciliation_permission_required": "The Dated Stock Reconciliation import needs Full Access to Inventory. Ask an administrator for access.",
   "dated_reconciliation_suggestion_body": "These {count} products (e.g. \"{name}\") appear on more than one date at the same branch. If you're recording repeated stock counts over time, the Dated Stock Reconciliation import handles that better -- it works out what changed between counts instead of overwriting stock in place.",
   "day": "Day",
   "day_detail_time_hint": "Times shown where recorded — imported history carries the date only.",

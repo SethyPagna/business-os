@@ -73,7 +73,7 @@ await runTest('the banner action opens the Dated Reconciliation importer rather 
   const bannerBlock = bannerBlockOf(source)
   assert.doesNotMatch(bannerBlock, /onClick=\{onClose\}/, 'closing this modal is not "choosing Dated Reconciliation"')
   assert.doesNotMatch(bannerBlock, /Cancel this import & choose Dated Reconciliation/, 'the old label promised a destination it never reached')
-  assert.match(bannerBlock, /onClick=\{\(\) => setDatedReconciliationOpen\(true\)\}/)
+  assert.match(bannerBlock, /setDatedReconciliationOpen\(true\)/)
   assert.match(bannerBlock, /Open the Dated Reconciliation import/)
   assert.match(bannerBlock, /onClick=\{\(\) => setDismissedDatedSignal\(true\)\}/)
   assert.match(bannerBlock, /No, this file is correct/)
@@ -205,6 +205,28 @@ await runTest('DatedStockReconciliationModal done step has no reachable Cancel b
     /step === 'upload' \|\| step === 'done' \? T\('cancel'/,
     'the done step must not resolve the left button to Cancel',
   )
+})
+
+// The audit's finding: this banner button is the ONLY door into a flow whose
+// every Worker route (routes/inventory.ts:1851/1881/1904/1919) refuses
+// anyone below Full Access on inventory/stock_count, and nothing on the
+// client checked that -- an operator without the permission could click the
+// button, walk the whole importer, and only 403 at the very end. can()
+// mirrors the exact route guard (permissionActions.ts:136 declares
+// stock_count with review:'block', so can() is true only at the 'full'
+// tier), and the button must be disabled -- not hidden -- with a real
+// explanation, per this file's own precedent at the replace-mode notice.
+await runTest('the banner action is gated by the same permission the Worker routes require, disabled not hidden', () => {
+  const bannerBlock = bannerBlockOf(source)
+  assert.match(bannerBlock, /disabled=\{!canDatedStockCount\}/, 'the open button must be disabled when the permission is missing')
+  assert.match(bannerBlock, /dated_reconciliation_permission_required/, 'a real explanation must sit under the disabled button')
+  assert.match(source, /const canDatedStockCount = can\('inventory', 'stock_count'\)/, 'the check must mirror routes/inventory.ts\'s getActionTier(user, \'inventory\', \'stock_count\') guard')
+  const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
+  const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
+  assert.ok(en.dated_reconciliation_permission_required, 'en pack must carry the new key')
+  assert.ok(km.dated_reconciliation_permission_required, 'km pack must carry the new key')
+  assert.notEqual(km.dated_reconciliation_permission_required, en.dated_reconciliation_permission_required, 'km must not just copy the English text')
+  assert.match(km.dated_reconciliation_permission_required, /[ក-៿]/, 'km pack value must actually be Khmer script')
 })
 
 if (failed > 0) {
