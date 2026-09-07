@@ -5,24 +5,36 @@
 //    add into revenue and profit, just note the credit amount is that much so
 //    instead of $-n... just $n... so we know no need to remove from profit"
 //
-// This bounded test owns the accounting kernel only. The convergence test next
-// door covers the /stats route separately. Every assertion below names the
-// value a credit-EXCLUDING kernel would produce on the same rows, so a green
-// run proves recognized revenue, COGS and profit use the owner's rule.
+// The convergence test next door proves the /stats header and the kernel agree
+// on ONE revenue number. It does not prove that number is the credit-INCLUSIVE
+// one -- it would stay green if both surfaces moved to the collected basis
+// together. This test is the discriminator: every assertion below names the
+// value the credit-EXCLUDING implementation would produce on the very same
+// rows, so a green run means the two implementations actually disagreed here
+// and the shipped one is the owner's.
 //
 //   figure   credit IN (shipped)   credit OUT (what it must not be)
 //   revenue  351                   198
 //   COGS      98                    48
 //   profit   255                   152
 //
-// It also pins the fourth property the owner asked for:
+// It also pins the fourth property the owner asked for and the third surface
+// that has to honour it:
 //   * ONCE, not twice: pending_revenue_usd is a SUBSET of revenue_usd, so
 //     revenue - pending is not another revenue and revenue + pending is not a
 //     total. Nothing may add or subtract the two.
 //   * POSITIVE, always: netSaleExpr floors each row at 0, so the credit the
 //     header prints can never arrive as $-n.
-// Runs the shipped accounting code: salesAnalytics.ts is transpiled and
-// executed against an in-memory SQLite fixture.
+//   * THREE-WAY PARITY: the kernel's pending, the /stats header's pending (the
+//     number the Sales page prints as "Credit") and the frontend's own
+//     saleListCreditUsd fallback are the same figure on the same window, so
+//     the header and its offline fallback can never show two different credits.
+//   * The /stats prose must not contradict the /stats SQL.
+//
+// Runs the SHIPPED code: salesAnalytics.ts and frontend/src/utils/
+// statsFormulas.ts are transpiled and executed, and the header SELECT is
+// extracted from routes/sales.ts with its ${...} holes intact and evaluated
+// against the kernel's own exported fragments.
 //
 // Run (from cloudflare/): node scripts/test-credit-in-revenue-pure.cjs
 const assert = require('node:assert/strict')
@@ -32,7 +44,7 @@ const os = require('node:os')
 const path = require('node:path')
 const Database = require('better-sqlite3')
 
-// ---- 1. Transpile the real kernel -------------------------------------------
+// ---- 1. Transpile the real kernel + the real frontend mirror ----------------
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'credit-in-revenue-'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
 
@@ -46,12 +58,16 @@ const kernelStripped = ('// @ts-nocheck\n' + kernelSrc)
 fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), kernelStripped)
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'),
   fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+fs.writeFileSync(path.join(tmpDir, 'statsFormulas.ts'), '// @ts-nocheck\n'
+  + fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'statsFormulas.ts'), 'utf8'))
 execSync([
   `node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir}`,
   path.join(tmpDir, 'salesAnalytics.ts'),
   path.join(tmpDir, 'businessDateWindow.ts'),
+  path.join(tmpDir, 'statsFormulas.ts'),
 ].join(' '), { cwd: tmpDir, stdio: 'inherit' })
 const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
+const front = require(path.join(tmpDir, 'statsFormulas.js'))
 
 // ---- 2. One mixed window with exactly one credit sale in it -----------------
 const db = new Database(':memory:')
@@ -178,5 +194,64 @@ check('collected cash is the ONE figure the credit stays out of',
 const flooredRow = db.prepare(`SELECT ${lib.netSaleExpr('')} AS net FROM (SELECT 10 AS subtotal_usd, 99 AS discount_usd, 0 AS membership_discount_usd)`).get()
 check('netSaleExpr floors a credit row at 0 rather than emitting a negative', flooredRow.net === 0)
 
-console.log(`\nALL ${passed} KERNEL CHECKS PASSED -- credit is inside revenue (${IN.revenue}), COGS (${IN.cogs}) and profit (${IN.profit}), and is reported once, positive, as ${IN.credit}`)
+// ---- 6. The /stats header: same SQL the Sales page's "Credit" comes from ----
+const salesTs = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
+const m = salesTs.match(/const totals = await db\.prepare\(`([\s\S]*?)`\)\.get</)
+assert.ok(m, 'could not locate the /stats revenue SELECT in routes/sales.ts')
+const dateClauseS = `date(s.created_at, '+7 hours') >= @startDate AND s.created_at >= date(@startDate, '-1 day') AND date(s.created_at, '+7 hours') <= @endDate AND s.created_at < date(@endDate, '+1 day')`
+// eslint-disable-next-line no-new-func -- the input is this repo's own source.
+const headerSql = new Function(
+  'recognizedExpr', 'netSaleExpr', 'netRefundExpr', 'awaitingExpr', 'CUSTOMER_REFUND_JOIN', 'where',
+  'return \`' + m[1] + '\`',
+)(lib.recognizedExpr, lib.netSaleExpr, lib.netRefundExpr, lib.awaitingExpr, lib.CUSTOMER_REFUND_JOIN, [dateClauseS])
+const stats = db.prepare(headerSql).get({ startDate: '2026-08-01', endDate: '2026-08-31' })
+const statsRevenue = Math.round((stats.revenue_usd || 0) * 100) / 100
+const statsCredit = Math.round((stats.pending_revenue_usd || 0) * 100) / 100
+
+check(`/stats revenue_usd includes the credit sale (${statsRevenue} == ${IN.revenue}, not ${OUT.revenue})`,
+  statsRevenue === IN.revenue && statsRevenue !== OUT.revenue)
+check(`/stats revenue_count counts the credit sale (5 non-cancelled, not 4)`,
+  Number(stats.revenue_count) === 5)
+check('/stats uses recognizedExpr for the headline, never collectedSaleExpr',
+  headerSql.includes("<> 'cancelled'") && !headerSql.includes("NOT IN ('cancelled', 'awaiting_payment')"))
+check(`PARITY: the header's credit (${statsCredit}) == the kernel's credit (${kernel.pending_revenue_usd})`,
+  statsCredit === kernel.pending_revenue_usd)
+check(`PARITY: the header's revenue (${statsRevenue}) == the kernel's revenue (${kernel.revenue_usd})`,
+  statsRevenue === kernel.revenue_usd)
+
+// ---- 7. The frontend's own fallback shows the SAME credit -------------------
+// The Sales header prefers /stats and falls back to reducing over the rows it
+// already has. Both paths must produce one credit, or the same page shows two.
+const listRows = db.prepare(`
+  SELECT s.*, COALESCE(rf.refund_usd, 0) AS refund_usd,
+    COALESCE(s.total_usd, 0) - COALESCE(rf.refund_usd, 0) AS net_total_usd
+  FROM sales s ${lib.CUSTOMER_REFUND_JOIN}s.id
+  WHERE date(s.created_at, '+7 hours') BETWEEN '2026-08-01' AND '2026-08-31'
+`).all()
+check('the fallback sees every row of the window (6)', listRows.length === 6)
+check('isCreditSale picks exactly the awaiting_payment row',
+  listRows.filter(front.isCreditSale).map((r) => r.id).join(',') === '4')
+check(`THREE-WAY PARITY: frontend saleListCreditUsd (${front.saleListCreditUsd(listRows)}) == header (${statsCredit}) == kernel (${kernel.pending_revenue_usd})`,
+  front.saleListCreditUsd(listRows) === statsCredit && statsCredit === kernel.pending_revenue_usd)
+check(`the frontend fallback's revenue includes the credit too (${front.saleListRevenueUsd(listRows)} == ${IN.revenue})`,
+  front.saleListRevenueUsd(listRows) === IN.revenue)
+check('the frontend never produces a negative credit, however the row is shaped',
+  front.saleListCreditUsd([{ sale_status: 'awaiting_payment', subtotal_usd: 10, discount_usd: 99, membership_discount_usd: 0 }]) === 0)
+
+// ---- 8. The prose must not contradict the SQL ------------------------------
+// The stale comment is the actual failure mode here: a reader who trusts
+// "never folded into revenue" edits the query back to the pre-Sep-6 rule and
+// every check above goes red at once.
+const statsBlock = salesTs.slice(salesTs.indexOf("app.get('/stats'"), salesTs.indexOf("app.get('/stats-strip'"))
+const statsPreamble = salesTs.slice(Math.max(0, salesTs.indexOf("app.get('/stats'") - 1800), salesTs.indexOf("app.get('/stats'"))
+for (const [name, text] of [['preamble', statsPreamble], ['handler', statsBlock]]) {
+  check(`the /stats ${name} no longer claims the credit is excluded from revenue`,
+    !/never folded into revenue/i.test(text) && !/excluding cancelled\/awaiting_payment"\s*$/m.test(text))
+}
+check('the /stats handler says out loud that the credit is inside revenue',
+  /INSIDE revenue_usd|Credit is included because recognizedExpr/.test(statsBlock))
+check('the sweep can see the sentence it forbids (positive control)',
+  /never folded into revenue/i.test('reported separately as pending, never folded into revenue.'))
+
+console.log(`\nALL ${passed} CHECKS PASSED -- credit is inside revenue (${IN.revenue}), COGS (${IN.cogs}) and profit (${IN.profit}), and is reported once, positive, as ${IN.credit}`)
 })().catch((e) => { console.error(e); process.exit(1) })

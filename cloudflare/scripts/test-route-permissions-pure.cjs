@@ -295,7 +295,8 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
 {
   const compatSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
   const dashboardChecks = compatSrc.match(/denyUnless\(c, 'dashboard'\)/g) || []
-  assert.equal(dashboardChecks.length, 3, `expected exactly 3 denyUnless(c, 'dashboard') call sites (GET /dashboard, GET /analytics, GET /dashboard/startup), found ${dashboardChecks.length}`)
+  assert.equal(dashboardChecks.length, 4, `expected exactly 4 denyUnless(c, 'dashboard') call sites (GET /dashboard, GET /dashboard/stock-alerts, GET /analytics, GET /dashboard/startup), found ${dashboardChecks.length}`)
+  assert.match(compatSrc, /app\.get\('\/dashboard\/stock-alerts', async \(c\) => \{\s*const denied = denyUnless\(c, 'dashboard'\)\s*if \(denied\) return denied/, 'paginated stock alerts must enforce the dashboard permission before querying stock')
   // Was asserting the literal `app.use('/dashboard*', requireAuth)` form.
   // That form is DEAD -- Hono does not treat a bare trailing `*` as a
   // wildcard, so all thirteen of compat.ts's guards matched nothing (proved

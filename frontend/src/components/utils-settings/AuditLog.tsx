@@ -28,7 +28,7 @@ import {
   getAuditLogs as getAuditLogsRequest,
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
-import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
 // N13: the Audit Log answers the same "who did this, and why" as the stock
 // ledgers, so it renders through the one shared history row model instead of
 // its own '--' placeholder.
@@ -165,7 +165,7 @@ function formatDateTime(raw: unknown): string {
   try {
     const date = new Date(iso)
     if (Number.isNaN(date.getTime())) return fallback
-    return date.toLocaleString('en-US', {
+    return fmtDayFirst(date, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -185,7 +185,7 @@ function formatCompactDateTime(raw: unknown): string {
   try {
     const date = new Date(iso)
     if (Number.isNaN(date.getTime())) return String(raw)
-    return date.toLocaleString('en-US', {
+    return fmtDayFirst(date, {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',

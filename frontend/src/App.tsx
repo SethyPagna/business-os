@@ -13,6 +13,7 @@ import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getM
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
+import { ensureTextAffordances } from './components/shared/textAffordances.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
@@ -1721,6 +1722,9 @@ export default function App() {
 
   useVisibilityRecovery(authReady && !!user)
   useIntentChunkWarmup(authReady ? user : null, page, canAccessPage)
+
+  // Mount once at the shell so truncated cells work on every route.
+  useEffect(() => { ensureTextAffordances({ copy: t('copy'), copied: t('copied') }) }, [t])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined

@@ -19,6 +19,7 @@ import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { parsePermissionMap, getPermissionTierFromMap, type PermissionTier } from './utils/permissions.ts'
 import { actionAllowed, isActionOverriddenOff } from './utils/permissionActions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
+import { fmtDayFirst } from './utils/formatters.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
@@ -2352,17 +2353,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       timeZone: displayTimezone,
       ...options,
     }
-    // dd/mm/yyyy day-first (Sep 4 2026), assembled from parts so the order
-    // is ours and not the formatter locale's -- see utils/formatters.ts.
-    // Callers that override the field shape via `options` (a month name, a
-    // weekday, time-only) are handed straight to Intl instead: there is no
-    // day/month order to fix when the fields are not all-numeric.
-    const numericDate = resolved.year === 'numeric' && resolved.month === '2-digit' && resolved.day === '2-digit'
-    if (!numericDate) return date.toLocaleString('en-US', resolved)
-    const parts = new Intl.DateTimeFormat('en-US', resolved).formatToParts(date)
-    const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
-    const time = [get('hour'), get('minute'), get('second')].filter(Boolean).join(':')
-    return `${get('day')}/${get('month')}/${get('year')}${time ? `, ${time}` : ''}`
+    return fmtDayFirst(date, resolved)
   }, [displayTimezone])
 
   const canWriteToServer = !!syncUrl && !syncServerUnreachable
