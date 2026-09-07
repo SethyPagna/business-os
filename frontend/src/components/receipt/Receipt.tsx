@@ -599,10 +599,10 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             with nothing underneath it. One em base for the header and the rows
             is what gives the Price figures a shared right edge down the page. */}
         <div data-receipt-line="true" style={itemGridStyle} className="mb-1 grid border-b border-dashed border-gray-300 pb-1 font-semibold text-gray-500">
-          <span data-receipt-cell="name" className="text-[10px]">{labelFor(lang, 'item')}</span>
-          <span data-receipt-cell="qty" className="whitespace-normal text-center text-[10px] leading-tight">{labelFor(lang, 'qty')}</span>
-          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right text-[10px] leading-tight">{labelFor(lang, 'unitPrice')}</span> : null}
-          <span data-receipt-cell="line-total" className="text-right text-[10px] leading-tight">{labelFor(lang, 'lineTotal')}</span>
+          <span data-receipt-cell="name" className="text-[10px]">Item</span>
+          <span data-receipt-cell="qty" className="whitespace-normal text-center text-[10px] leading-tight">Qty</span>
+          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right text-[10px] leading-tight">Price</span> : null}
+          <span data-receipt-cell="line-total" className="text-right text-[10px] leading-tight">Total</span>
         </div>
         {items.map((item, index) => {
           // Every figure on this line comes from the shared calculation, so the
