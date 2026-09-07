@@ -450,6 +450,83 @@ const lastSent = () => sent[sent.length - 1].body.text
     assert.ok(KHMER.test(lastSent()), `${command} answers bilingually`)
   }
 
+  // --- the two stock replies -------------------------------------------------
+  // `/inventory` and `/stock` were the two replies the Sep 6 2026 redesign
+  // never touched. `/inventory` put two figures on one line
+  // ("Low stock: N · Out of stock: N") and ended with a
+  // `▸ /stock — the product list` pointer -- exactly the kind of line the
+  // redesign deleted from the command reference and forbids there. Both are
+  // driven here over a stub that actually HAS stock, so there are figures on
+  // the lines to count.
+  const inventoryRows = [
+    { name: 'Coca-Cola 330ml', stock_quantity: 0, low_threshold: 5, out_of_stock_threshold: 0 },
+    { name: 'Rice 5kg', stock_quantity: 3, low_threshold: 5, out_of_stock_threshold: 0 },
+  ]
+  const stockedDb = {
+    prepare(sql) {
+      return {
+        all: async () => (/FROM settings/.test(sql) ? settingsRows : /FROM products/.test(sql) ? inventoryRows : []),
+        get: async () => (/FROM products/.test(sql) ? { products: 1240, units: 8630, out_of_stock: 3, low_stock: 12 } : { count: 0, usd: 0, khr: 0, quantity: 0 }),
+      }
+    },
+  }
+  const stocked = loadReal('lib/telegram.ts', {
+    './lowStockSettings': lowStockStub,
+    './db': { getDb: () => stockedDb },
+    './businessDateWindow': businessDateWindow,
+    './telegramLang': lang,
+    './saleTotals': saleTotals,
+    './nativeSaleChange': nativeSaleChange,
+    './salesAnalytics': stubAnalytics,
+    './shiftReconciliation': reconciliationFor(() => stockedDb, stubAnalytics),
+  })
+  const RULE = '━'.repeat(18)
+  await stocked.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
+  const inventoryReply = lastSent()
+  await stocked.handleTelegramWebhook(env, { message: { text: '/stock', chat: { id: -100111 } } })
+  const stockReply = lastSent()
+
+  assert.deepEqual(inventoryReply.split('\n'), [
+    '🏷️ Inventory / ស្តុក',
+    RULE,
+    'Active products / ផលិតផលសកម្ម: 1,240',
+    'Units on hand / ឯកតាក្នុងស្តុក: 8,630',
+    RULE,
+    'Low stock / ស្តុកទាប: 12',
+    'Out of stock / អស់ស្តុក: 3',
+  ], `/inventory does not have the shared header shape:\n${inventoryReply}`)
+  assert.deepEqual(stockReply.split('\n'), [
+    '📦 Low stock / ស្តុកទាប',
+    RULE,
+    'Products / ផលិតផល: 2',
+    RULE,
+    '• OUT / អស់ស្តុក — Coca-Cola 330ml — 0 (⚠ 5)',
+    '• LOW / ស្តុកទាប — Rice 5kg — 3 (⚠ 5)',
+  ], `/stock does not have the shared header shape:\n${stockReply}`)
+
+  // ONE FIGURE PER LINE, the rule the redesign applied to the other five
+  // reports. A labelled line is `English / ខ្មែរ: value`; product bullets are
+  // a list, not a labelled figure, so they are not counted.
+  for (const [command, reply] of [['/inventory', inventoryReply], ['/stock', stockReply]]) {
+    for (const line of reply.split('\n')) {
+      if (line.startsWith('•') || !line.includes(': ') || !line.slice(0, line.indexOf(': ')).includes(SEP)) continue
+      const value = line.slice(line.indexOf(': ') + 2)
+      const figures = value.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []
+      assert.equal(figures.length, 1, `${command} puts ${figures.length} figures on one line: "${line}"`)
+    }
+  }
+
+  // A shop with nothing low says so through the ABSENCE of the second block,
+  // the same way every other report drops a zero line.
+  await wired.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
+  assert.deepEqual(lastSent().split('\n'), [
+    '🏷️ Inventory / ស្តុក',
+    RULE,
+    'Active products / ផលិតផលសកម្ម: 0',
+    'Units on hand / ឯកតាក្នុងស្តុក: 0',
+  ], `a shop with nothing low still printed a zero block:\n${lastSent()}`)
+  console.log('PASS stock replies: the shared header shape, one figure per line, no pointer line')
+
   const quiet = sent.length
   await wired.handleTelegramWebhook(env, { message: { text: 'good morning', chat: { id: -100999 } } })
   await wired.handleTelegramWebhook(env, { message: { text: '/report', chat: {} } })
@@ -457,6 +534,13 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.equal(sent.length, quiet, 'plain chatter, a chat-less update and an empty update send nothing')
 
   assert.ok(sent.every((call) => call.url.startsWith('https://api.telegram.org/bot<redacted>/')), 'every send went through the one Telegram endpoint')
+  // NO POINTER LINES ANYWHERE. The redesign deleted `▸ /report 09/01/2026`
+  // from the command reference on the grounds that a message should not spend
+  // a line telling the reader to send another message; the same rule holds
+  // for every reply this bot composes, not only for the reference.
+  for (const call of sent) {
+    assert.ok(!String(call.body.text || '').includes('▸'), `a reply still carries a pointer line:\n${call.body.text}`)
+  }
   console.log(`PASS commands: ${sent.length} composed replies, allow-list enforced, nothing sent for non-commands`)
 
   // Business day, business date shape.

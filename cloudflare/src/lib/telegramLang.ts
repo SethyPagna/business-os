@@ -467,10 +467,14 @@ export function parseReportDate(argument: string | undefined, today: string): Pa
       `⚠️ ${bi(`I could not read the date "${raw.slice(0, 30)}".`, `មិនអាចអានកាលបរិច្ឆេទ "${raw.slice(0, 30)}" បានទេ។`)}`,
       '',
       bi('Use one of these — the DAY comes first:', 'សូមប្រើទម្រង់ណាមួយ៖ ថ្ងៃមកមុន'),
-      `  ▸ dd/mm/yyyy   — ${bi('e.g.', 'ឧ.')} 01/09/2026 = ${bi('1 September', '1 កញ្ញា')}`,
-      `  ▸ yyyy-mm-dd   — ${bi('e.g.', 'ឧ.')} 2026-09-01`,
-      `  ▸ today ${BILINGUAL_SEPARATOR.trim()} yesterday`,
-      `  ▸ ${bi('nothing at all = today', 'មិនដាក់អ្វីសោះ = ថ្ងៃនេះ')}`,
+      // `•`, not `▸`: the arrow is this bot's POINTER glyph -- "now send that
+      // other command" -- and the Sep 2026 redesign took every pointer line
+      // out of every message. These four are a list of accepted forms, so
+      // they are bulleted like any other list the bot sends.
+      `  • dd/mm/yyyy   — ${bi('e.g.', 'ឧ.')} 01/09/2026 = ${bi('1 September', '1 កញ្ញា')}`,
+      `  • yyyy-mm-dd   — ${bi('e.g.', 'ឧ.')} 2026-09-01`,
+      `  • today ${BILINGUAL_SEPARATOR.trim()} yesterday`,
+      `  • ${bi('nothing at all = today', 'មិនដាក់អ្វីសោះ = ថ្ងៃនេះ')}`,
     ].join('\n'),
   }
 }

@@ -439,7 +439,10 @@ async function inventoryReport(env: Env): Promise<string> {
   const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql} OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)) ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<{ name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }>()
   const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
   if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
-  const lines = [title, labeled('products', rows.length)]
+  // The same shape as the other six reports (Sep 7 2026): the figure block
+  // between rules, then the list. It was the only report still running its
+  // count straight into its bullets with no break.
+  const lines = [title, RULE, labeled('products', rows.length), RULE]
   for (const row of rows) {
     const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
     lines.push(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)} — ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`)
@@ -455,13 +458,30 @@ async function inventorySummaryReport(env: Env): Promise<string> {
     COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END), 0) AS out_of_stock,
     COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0) AND COALESCE(stock_quantity, 0) <= ${lowThresholdSql} THEN 1 ELSE 0 END), 0) AS low_stock
     FROM products WHERE is_active = 1`).get<{ products: number; units: number; out_of_stock: number; low_stock: number }>()
-  return [
+  // Sep 7 2026: the header block, then the stock health as its own section --
+  // the shape the other six reports took on Sep 6, which this one and /stock
+  // were the two replies to miss.
+  //
+  // The two health figures used to share a line ("Low stock: N · Out of
+  // stock: N"), against the one-figure-per-line rule the redesign holds
+  // everywhere else, and a `▸ /stock — the product list` pointer closed the
+  // message: a line spent telling the reader to send another message, exactly
+  // what the shortened command reference dropped. Both are gone; a shop with
+  // nothing low simply has no second section, the same way every other report
+  // drops a zero line.
+  const lowStock = Number(row?.low_stock || 0)
+  const outOfStock = Number(row?.out_of_stock || 0)
+  const lines = [
     reportTitle('🏷️', 'Inventory', 'ស្តុក'),
+    RULE,
     labeled('activeProducts', Number(row?.products || 0).toLocaleString()),
     labeled('unitsOnHand', Number(row?.units || 0).toLocaleString()),
-    `${label('lowStock')}: ${Number(row?.low_stock || 0)} · ${label('outOfStock')}: ${Number(row?.out_of_stock || 0)}`,
-    `▸ /stock — ${bi('the product list', 'បញ្ជីផលិតផល')}`,
-  ].join('\n')
+  ]
+  const health: string[] = []
+  if (lowStock) health.push(labeled('lowStock', lowStock))
+  if (outOfStock) health.push(labeled('outOfStock', outOfStock))
+  if (health.length) lines.push(RULE, ...health)
+  return lines.join('\n')
 }
 
 // ---- Shift report (S4-7, redesigned Sep 6 2026) ----------------------------
