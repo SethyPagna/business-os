@@ -92,7 +92,11 @@ const receiveEntry = getMinimizedWork()[0]!
 dispatchRestore(receiveEntry)
 assert.deepEqual(getMinimizedWork(), [])
 assert.equal(events.at(-1)?.type, RESTORE_WORK_EVENT)
-assert.deepEqual(events.at(-1)?.detail, { kind: 'receive_batch', payload: { productId: 401, branchId: '2' } })
+const restoreDetail = events.at(-1)?.detail as { kind?: string; payload?: unknown; entry?: { key?: string; draftKey?: string } }
+assert.equal(restoreDetail.kind, 'receive_batch')
+assert.deepEqual(restoreDetail.payload, { productId: 401, branchId: '2' })
+assert.equal(restoreDetail.entry?.key, 'receive-batch-401')
+assert.equal(restoreDetail.entry?.draftKey, receiveDraftKey)
 assert.equal(consumePendingRestore('fast_stockin'), null)
 assert.equal(consumePendingRestore('receive_batch')?.key, 'receive-batch-401')
 assert.equal(consumePendingRestore('receive_batch'), null)
