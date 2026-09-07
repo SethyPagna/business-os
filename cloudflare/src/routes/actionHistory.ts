@@ -2,8 +2,8 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier } from '../lib/undoAppliers'
+import { getActionTier, getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
+import { SALE_ADD_ITEMS_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages } from '../lib/undoAppliers'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
@@ -131,7 +131,7 @@ function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boo
   return !isSensitiveActionHistory({ entity: body.entity, scope: body.scope, payload })
 }
 
-function mapRow(row: ActionHistoryRow, user: SessionUser) {
+async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
   const undoPayload = parseJson(row.undo_payload)
   const redoPayload = parseJson(row.redo_payload)
   // K1 slice 2: tells the client this row's next transition can be replayed
@@ -144,12 +144,17 @@ function mapRow(row: ActionHistoryRow, user: SessionUser) {
   const applier = replayable
     ? resolveUndoApplier(String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload)
     : null
+  const replayChangesImages = applier
+    ? await mergeReplayChangesProductImages(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, String(row.status || '').toLowerCase() === 'redoable' ? 'redo' : 'undo')
+    : false
   return {
     ...row,
     reversible: !!row.reversible,
     undo_payload: undoPayload,
     redo_payload: redoPayload,
-    server_replayable: !!(applier && canUseNamedAppliers(user, [undoPayload, redoPayload])),
+    server_replayable: !!(applier
+      && canUseNamedAppliers(user, [undoPayload, redoPayload])
+      && (!replayChangesImages || getActionTier(user, 'products', 'image') === 'full')),
   }
 }
 
@@ -184,7 +189,7 @@ app.get('/', async (c) => {
         ORDER BY updated_at DESC, id DESC LIMIT @limit
       `).all<ActionHistoryRow>({ scope, user_id: user?.id || 0, limit })
     }
-    return c.json({ success: true, items: rows.map((row) => mapRow(row, user)) })
+    return c.json({ success: true, items: await Promise.all(rows.map((row) => mapRow(row, user, c.env))) })
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to load action history' }, 500)
   }
@@ -318,6 +323,9 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const payload = direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload)
     const applier = resolveUndoApplier(payload)
     const serverManagedReplay = !!(applier && isServerManagedPayload(payload))
+    const replayChangesProductImages = applier
+      ? await mergeReplayChangesProductImages(c.env, payload, direction)
+      : false
     // The applier's own declared permission gates its replay -- full tier,
     // checked HERE at operate time too (recording is gated the same way, but
     // rows written before this gate existed, or by a user since demoted,
@@ -325,7 +333,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // status flip so a refusal changes nothing.
     if (applier && (applier.name === STOCK_SESSION_KIND
       ? !canReplayStockSessionPayload(user, payload)
-      : applierPermissionTier(user, applier) !== 'full')) {
+      : applierPermissionTier(user, applier) !== 'full'
+        || (replayChangesProductImages && getActionTier(user, 'products', 'image') !== 'full'))) {
       return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
     }
     // Refuse BEFORE any status flip: if the caller cannot replay the payload
@@ -364,7 +373,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
               ? notifyBulkStatus(c.env)
               : notifySaleBulkUpdate(c.env, String(payload.action || '')))
       const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
-      return c.json({ success: true, applied: true, item: row ? mapRow(row, user) : null, payload })
+      return c.json({ success: true, applied: true, item: row ? await mapRow(row, user, c.env) : null, payload })
     }
 
     await db.prepare(`
@@ -379,7 +388,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     return c.json({
       success: true,
       applied,
-      item: row ? mapRow(row, user) : null,
+      item: row ? await mapRow(row, user, c.env) : null,
       payload,
     })
   } catch (error) {

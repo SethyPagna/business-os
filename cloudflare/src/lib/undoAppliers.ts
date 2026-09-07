@@ -118,6 +118,8 @@ export interface MergeReversal {
   /** Immutable source economics/membership for a resumable bulk cluster. */
   bulkClusterPlan?: unknown
   keeperImagePathBefore: string | null
+  /** Duplicate primary captured for image-effect permission checks on replay. */
+  dupImagePathBefore?: string | null
   keeperBarcodeBefore?: string | null
   // Optional for backward compatibility with snapshots written before merge
   // cleanup began carrying the highest selling/wholesale prices to the keeper.
@@ -193,6 +195,57 @@ export interface MergeReversal {
   mergedStateFingerprint?: string
   fingerprintPending?: boolean
   operationId?: string
+}
+
+const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk'])
+
+function mergeReversalHasSavedImageEffect(reversal: MergeReversal): boolean {
+  if ((reversal.dupImagesBefore || []).length || (reversal.imagesMovedToKeeper || []).length) return true
+  if (Object.prototype.hasOwnProperty.call(reversal, 'dupImagePathBefore')) {
+    return !String(reversal.keeperImagePathBefore || '').trim() && Boolean(String(reversal.dupImagePathBefore || '').trim())
+  }
+  return false
+}
+
+/** Whether this saved merge direction will change a cover or gallery. */
+export async function mergeReplayChangesProductImages(
+  env: Env,
+  payload: Record<string, unknown>,
+  direction: 'undo' | 'redo',
+): Promise<boolean> {
+  const kind = String(payload.applier || '')
+  const snapshotId = Number(payload.snapshot_id || 0)
+  if (!PRODUCT_MERGE_APPLIER_KINDS.has(kind) || !Number.isInteger(snapshotId) || snapshotId <= 0) return false
+  const db = getDb(env)
+  const snap = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
+    .get<{ payload_json: string }>([snapshotId, kind])
+  if (!snap) return false
+  let reversals: MergeReversal[] = []
+  try {
+    const parsed = JSON.parse(snap.payload_json) as MergeReversal | { reversals?: MergeReversal[] }
+    reversals = kind === 'product.merge.bulk'
+      ? (Array.isArray((parsed as { reversals?: MergeReversal[] }).reversals) ? (parsed as { reversals: MergeReversal[] }).reversals : [])
+      : [parsed as MergeReversal]
+  } catch (_) {
+    return false
+  }
+  if (reversals.some(mergeReversalHasSavedImageEffect)) return true
+
+  // Old snapshots predate dupImagePathBefore. Query their current cover state
+  // to distinguish an image-free merge from primary-image adoption without
+  // overblocking image-free undo/redo.
+  const legacy = reversals.filter((reversal) => !Object.prototype.hasOwnProperty.call(reversal, 'dupImagePathBefore'))
+  for (const reversal of legacy) {
+    const [keeper, duplicate] = await Promise.all([
+      db.prepare('SELECT image_path FROM products WHERE id = ?').get<{ image_path: string | null }>([Number(reversal.keeperId)]),
+      db.prepare('SELECT image_path FROM products WHERE id = ?').get<{ image_path: string | null }>([Number(reversal.dupId)]),
+    ])
+    const keeperPath = String(keeper?.image_path || '').trim()
+    const duplicatePath = String(duplicate?.image_path || '').trim()
+    const keeperBefore = String(reversal.keeperImagePathBefore || '').trim()
+    if (direction === 'undo' ? keeperPath !== keeperBefore : (!keeperPath && Boolean(duplicatePath))) return true
+  }
+  return false
 }
 
 // What a merge does with the stock still sitting on the row being discarded.

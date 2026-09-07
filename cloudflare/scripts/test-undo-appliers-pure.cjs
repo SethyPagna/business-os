@@ -183,7 +183,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   }
   return require(id)
 })
-const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable } = undoAppliers
+const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayChangesProductImages } = undoAppliers
 
 let passed = 0
 async function check(name, fn) {
@@ -405,6 +405,31 @@ await check('the product.merge.bulk applier (whole-catalog cleanup) is registere
   assert.strictEqual(resolved?.action, 'merge_duplicates')
 })
 
+await check('merge replay image authority is required only for saved cover/gallery effects', async () => {
+  const db = new Database(':memory:')
+  db.exec('CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY, kind TEXT, payload_json TEXT); CREATE TABLE products(id INTEGER PRIMARY KEY, image_path TEXT)')
+  sharedDb = db
+  const base = {
+    keeperId: 1, dupId: 2, keeperImagePathBefore: null, dupImagePathBefore: null,
+    dupImagesBefore: [], imagesMovedToKeeper: [],
+  }
+  db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(1,?,?)').run('product.merge', JSON.stringify(base))
+  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: 1 }, 'undo'), false)
+  db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(2,?,?)').run('product.merge', JSON.stringify({
+    ...base, dupImagesBefore: [{ image_path: '/uploads/a.png', sort_order: 0 }], imagesMovedToKeeper: ['/uploads/a.png'],
+  }))
+  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: 2 }, 'undo'), true)
+  db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(3,?,?)').run('product.merge', JSON.stringify({
+    ...base, dupImagePathBefore: '/uploads/primary.png',
+  }))
+  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: 3 }, 'redo'), true)
+  db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(4,?,?)').run('product.merge.bulk', JSON.stringify({ reversals: [base, {
+    ...base, keeperId: 3, dupId: 4, dupImagesBefore: [{ image_path: '/uploads/b.png', sort_order: 0 }],
+  }] }))
+  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge.bulk', snapshot_id: 4 }, 'redo'), true)
+  sharedDb = null
+})
+
 await check('the supplier.backfill applier is registered and gated on the products edit action', () => {
   assert.ok(registeredUndoAppliers().includes('supplier.backfill'), 'supplier.backfill must be a registered applier')
   const resolved = resolveUndoApplier({ applier: 'supplier.backfill', snapshot_id: 1 })
@@ -581,12 +606,14 @@ await check('source lock: routes/actionHistory.ts stamps server_replayable and r
   assert.ok(/const replayable = isServerReplayable\(row, undoPayload, redoPayload\)/.test(routeSrc), 'mapRow must derive replayability from the shared helper')
   // ...ANDed with the requesting user's full tier on the applier-declared
   // permission, so the UI is never offered a button the operate gate refuses.
-  assert.ok(/server_replayable: !!\(applier && canUseNamedAppliers\(user, \[undoPayload, redoPayload\]\)\)/.test(routeSrc), 'mapRow must gate BOTH directional payloads through the full-tier permission helper')
+  assert.ok(/server_replayable: !!\(applier[\s\S]*canUseNamedAppliers\(user, \[undoPayload, redoPayload\]\)[\s\S]*replayChangesImages[\s\S]*getActionTier\(user, 'products', 'image'\) === 'full'/.test(routeSrc), 'mapRow must gate BOTH the merge action and saved image effects')
   const permissionHelper = routeSrc.slice(routeSrc.indexOf('function canUseNamedAppliers('), routeSrc.indexOf('function canRecordHistory('))
   assert.ok(/else if \(applier && applierPermissionTier\(user, applier\) !== 'full'\) return false/.test(permissionHelper), 'shared helper must retain the full-tier gate for every non-stock applier')
   assert.ok(/payload\.snapshot_version !== 2 \|\| !canReplayStockSessionPayload\(user, payload\)/.test(permissionHelper), 'stock list/replayability must use the authoritative payload permission union and reject old snapshot formats')
   assert.ok(/STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession/.test(routeSrc), 'action history must import the stock permission helper')
   const operateHandler = routeSrc.slice(routeSrc.indexOf('completeServerHistoryTransition'))
+  assert.ok(/await mergeReplayChangesProductImages\(c\.env, payload, direction\)/.test(operateHandler), 'merge replay must inspect saved image effects at operate time')
+  assert.ok(/replayChangesProductImages && getActionTier\(user, 'products', 'image'\) !== 'full'/.test(operateHandler), 'saved image effects must require current full image authority')
   assert.ok(/applier\.name === STOCK_SESSION_KIND[\s\S]*!canReplayStockSessionPayload\(user, payload\)[\s\S]*applierPermissionTier\(user, applier\) !== 'full'/.test(operateHandler), 'stock operate-time permission must use the authoritative union while other appliers keep their static full-tier gate')
   // The require_applied refusal must come BEFORE the status-flip UPDATE inside
   // the transition handler -- refusing after the flip would record a reversal
