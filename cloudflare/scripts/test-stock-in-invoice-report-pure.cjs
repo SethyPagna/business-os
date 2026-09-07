@@ -42,7 +42,16 @@ const productBatches = compile('productBatches.ts', { './db': {}, './batchCode':
 const stockReceiptGate = compile('stockReceiptGate.ts')
 const branchRoles = compile('branchRoles.ts')
 const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branchRoles })
-const stockActionCommit = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch, './stockReceiptGate': stockReceiptGate, './branchRoleGuards': branchRoleGuards })
+const actorSnapshot = compile('actorSnapshot.ts')
+const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
+const stockActionCommit = compile('stockActionCommit.ts', {
+  './db': {},
+  './batchCode': batchCode,
+  './searchMatch': searchMatch,
+  './stockReceiptGate': stockReceiptGate,
+  './branchRoleGuards': branchRoleGuards,
+  './saleCreationSnapshot': saleCreationSnapshot,
+})
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')
 const migrationFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
