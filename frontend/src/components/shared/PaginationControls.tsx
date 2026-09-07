@@ -209,6 +209,17 @@ export default function PaginationControls({
     const countClass = 'h-10 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-10 text-slate-500 dark:text-slate-400'
     // The page box takes its width from what it prints. `ch` is the width of
     // "0" in the current font, which is the right unit for a numeric field.
+    //
+    // With a FLOOR, though. Removing the fixed `w-9` closed the gap the owner
+    // circled, and then overshot: at text-xs a `ch` is about 6-7px, so a
+    // one-digit page gave `calc(1ch + 0.5rem)` ~= 15px of tap target -- 21px
+    // narrower than the 36px box it replaced, on the storefront's only
+    // page-jump control, and half the 40px floor the arrows beside it keep.
+    // `max()` keeps both facts: 40px minimum, and it still grows with the
+    // digits so "108" is snug and nothing reserves room for digits that are
+    // not there. `min-w-10` rather than `min-w-0` for the same reason -- a
+    // flex child told it may collapse below its content is the one thing that
+    // could undo the floor.
     const pageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
     return (
       <div className={`flex w-full justify-center ${className}`}>
@@ -231,8 +242,8 @@ export default function PaginationControls({
                   type="text"
                   inputMode="numeric"
                   aria-label={pageLabel}
-                  style={{ width: `calc(${pageDigits}ch + 0.5rem)` }}
-                  className={`h-10 min-w-0 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100 ${focusRingClass}`}
+                  style={{ width: `max(2.5rem, calc(${pageDigits}ch + 0.5rem))` }}
+                  className={`h-10 min-w-10 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100 ${focusRingClass}`}
                   value={pageDraft}
                   onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                   onBlur={(event) => commitPageDraft(event.currentTarget.value)}

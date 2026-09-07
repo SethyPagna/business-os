@@ -122,7 +122,9 @@ runTest('the page box is sized from its own digits, not a fixed column', () => {
   assert.doesNotMatch(branch, /\bw-9\b/, 'a fixed 36px box around a one-character page number IS the highlighted gap')
   assert.match(branch, /const pageDigits = Math\.max\(1, String\(editablePageInput \? pageDraft : safePage\)\.length\)/,
     'the width must be derived from what the field actually prints')
-  assert.match(branch, /style=\{\{ width: `calc\(\$\{pageDigits\}ch \+ 0\.5rem\)` \}\}/, 'ch is the width of a digit -- the right unit for a numeric field')
+  // The exact expression is pinned in section 4 (it also has to carry a
+  // 40px floor now); here only the unit matters.
+  assert.match(branch, /width: `[^`]*calc\(\$\{pageDigits\}ch \+ 0\.5rem\)/, 'ch is the width of a digit -- the right unit for a numeric field')
 })
 
 runTest('the pill reserves no room for the control that was removed', () => {
@@ -268,8 +270,131 @@ runTest('every hit area in the storefront pill is at least 40px', () => {
   }
 })
 
+// The page field is the third hit area on this row and the only one whose
+// WIDTH is not a class: it comes from an inline `style`, so the `h-\d+` sweep
+// above cannot see it. That sweep therefore passes a field one pixel wide and
+// forty tall -- which is close to what "size it from its own digits" shipped:
+// at text-xs a `ch` is roughly 6-7px, so `calc(1ch + 0.5rem)` on a
+// single-digit page is about 15px of tap target, on the storefront's ONLY
+// page-jump control, and narrower than the `w-9` (36px) box it replaced.
+// Growth from the digit count is right; growing from zero is not.
+function pageFieldTag(): string {
+  const branch = centeredBranch()
+  const at = branch.indexOf('<input')
+  assert.ok(at > 0, 'the editable page field must still be on the row')
+  const next = branch.indexOf('<', at + 1)
+  return branch.slice(at, next < 0 ? branch.length : next)
+}
+
+// The floor a width expression guarantees, in px, or NaN when it guarantees
+// none. Only a `max(<length>, ...)` is a floor; a bare `calc(...)` of
+// content-relative units is not.
+function widthFloorPx(expression: string): number {
+  const floor = /max\(\s*([\d.]+)(rem|px)\b/.exec(expression)
+  if (!floor) return Number.NaN
+  const value = Number(floor[1])
+  return floor[2] === 'rem' ? value * 16 : value
+}
+
+runTest('the width-floor reader tells a floored expression from a bare one (positive control)', () => {
+  // Same rule as the focus reader above: an instrument that answers every
+  // input the same way is indistinguishable from a broken one.
+  assert.ok(Number.isNaN(widthFloorPx('calc(${pageDigits}ch + 0.5rem)')), 'a bare calc of ch units guarantees nothing')
+  assert.equal(widthFloorPx('max(2.5rem, calc(${pageDigits}ch + 0.5rem))'), 40)
+  assert.equal(widthFloorPx('max(40px, calc(${pageDigits}ch + 0.5rem))'), 40)
+  assert.equal(widthFloorPx('max(1rem, calc(${pageDigits}ch + 0.5rem))'), 16, 'and it must report a TOO-SMALL floor as small, not merely as present')
+})
+
+runTest('the page field keeps its digit-driven growth but cannot shrink under 40px', () => {
+  const tag = pageFieldTag()
+  const width = /style=\{\{ width: `([^`]+)`/.exec(tag)
+  assert.ok(width, 'the field must still take its width from an inline expression')
+  const expression = width ? width[1] : ''
+  assert.match(expression, /\$\{pageDigits\}ch/, 'the digit-driven growth is the fix for the gap and must stay')
+  const floor = widthFloorPx(expression)
+  assert.ok(
+    floor >= 40,
+    `the page field's width expression \`${expression}\` has no >= 40px floor. At text-xs a ch is ~6-7px, so a one-digit page gives ~15px of tap target on the only page-jump control of a phone-first catalogue.`,
+  )
+  // `min-w-0` is what lets a flex child collapse below its own content. On
+  // the one control that must not, it is the opposite of the rule.
+  assert.doesNotMatch(tag, /\bmin-w-0\b/, 'the page field must not opt out of its own minimum width')
+})
+
 // ---------------------------------------------------------------------------
-// 5. Behaviour that must NOT change
+// 5. A pager with nothing to page is not a pager
+// ---------------------------------------------------------------------------
+
+runTest('the storefront pill does not render on a single-page result', () => {
+  const branch = centeredBranch()
+  const guardAt = branch.search(/if \(totalPages <= 1\) return null/)
+  assert.ok(
+    guardAt > 0,
+    'an 8-product result renders [< Back disabled][1][/ 1][Next > disabled] twice -- above and below the grid -- a control with nothing it can do',
+  )
+  const returnAt = branch.indexOf('return (')
+  assert.ok(returnAt > guardAt, 'the guard must precede the row it suppresses')
+})
+
+runTest("that guard is the centred layout's alone -- the admin render gate is untouched", () => {
+  // The admin `rangeAsPageSize` pill still carries the per-page chooser
+  // inside itself, so hiding it on one page takes away the only control that
+  // can change how many rows a page holds. `visible` therefore stays "there
+  // is something to page", and the new rule is per-layout.
+  const one = pagerState(1, 8, 20)
+  assert.equal(one.totalPages, 1, 'eight products at 20 per page is one page')
+  assert.equal(one.visible, true, 'and the admin pill must still render on it')
+  assert.equal(pagerState(1, 0, 20).visible, false, 'nothing to page is still nothing to render')
+  assert.equal(pagerState(1, 21, 20).totalPages, 2, 'and two pages still page')
+  const kernel = read('../src/utils/pagerState.ts')
+  assert.match(kernel, /visible: total > 0/, 'the kernel rule itself must not change')
+  const visibleAt = kernel.indexOf('visible: boolean')
+  const docAt = kernel.lastIndexOf('/**', visibleAt)
+  assert.ok(visibleAt > 0 && docAt > 0, 'the `visible` field must still document itself')
+  const doc = kernel.slice(docAt, visibleAt)
+  assert.doesNotMatch(
+    doc,
+    /the pill also carries the per-page chooser/,
+    'that justification stopped being true when the storefront chooser moved to the Filters panel; a comment explaining a rule with a fact that is no longer true is worse than no comment',
+  )
+  assert.match(doc, /per-layout/, 'the doc must say the render decision is now per-layout, and why')
+})
+
+// ---------------------------------------------------------------------------
+// 6. The pager is a landmark, and it says where it went
+// ---------------------------------------------------------------------------
+
+runTest('the centred pager is a labelled navigation landmark', () => {
+  const branch = centeredBranch()
+  const body = branch.slice(branch.indexOf('return ('))
+  const first = /<(\w+)/.exec(body)
+  assert.ok(first, 'the branch must render something')
+  assert.equal(
+    first ? first[1] : '',
+    'nav',
+    "the pager is the storefront's navigation between pages of the catalogue; as a bare <div> it is in no landmark list, so it cannot be jumped to",
+  )
+  const navAt = body.indexOf('<nav')
+  const navTag = body.slice(navAt, body.indexOf('<', navAt + 1))
+  assert.match(navTag, /aria-label=\{/, 'an unnamed landmark is indistinguishable from every other <nav> on the page')
+  assert.doesNotMatch(navTag, /portal_pager_/, '`page` is already translated in all 17 portal language packs; no key needs inventing for this')
+})
+
+runTest('pressing Next announces the page it landed on', () => {
+  const branch = centeredBranch()
+  const live = branch.match(/aria-live=/g) || []
+  assert.equal(live.length, 1, 'exactly one live region -- two would announce the same move twice')
+  assert.match(branch, /aria-live="polite"/, 'polite: paging is not an interruption')
+  const at = branch.indexOf('aria-live')
+  const tagStart = branch.lastIndexOf('<', at)
+  const region = branch.slice(tagStart, branch.indexOf('</span>', at))
+  assert.match(region, /sr-only/, 'the announcement must add no chrome to a row the owner asked to keep bare')
+  assert.match(region, /\{safePage\}/, 'it must carry the page that was moved to')
+  assert.match(region, /\{totalPages\}/, 'and the total, so "next" has a destination')
+})
+
+// ---------------------------------------------------------------------------
+// 7. Behaviour that must NOT change
 // ---------------------------------------------------------------------------
 
 runTest('the chosen page size is written by exactly the same two calls, from its new home', () => {
