@@ -96,6 +96,11 @@ const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () =
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
+// routes/inventory.ts's product financial surfaces read lib/productSalesLedger.ts
+// (the one per-product sales-minus-returns ledger). It is loaded for real here,
+// like every other kernel in this harness, so the route under test is the
+// shipped module graph rather than a stub of it.
+const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
@@ -106,6 +111,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/salesAnalytics': salesAnalytics,
+  '../lib/productSalesLedger': productSalesLedger,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
