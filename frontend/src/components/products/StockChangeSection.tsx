@@ -30,7 +30,16 @@ import CopyableId from '../shared/CopyableId.tsx'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import { minimizeWork } from '../../utils/minimizedWork.ts'
+import {
+  FAST_STOCK_IN_RESTORE_HOST,
+  RESTORE_WORK_EVENT,
+  canRestoreMinimizedWork,
+  markRestoreHandled,
+  minimizeWork,
+  peekPendingRestore,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
 import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
@@ -180,6 +189,11 @@ type StockChangeSectionProps = {
   onRegisterActions?: (actions: StockChangeHeaderActions | null) => void
 }
 
+function FastStockInRestoreCommit({ onCommit }: { onCommit: () => void }) {
+  useEffect(() => { onCommit() }, [onCommit])
+  return null
+}
+
 export default function StockChangeSection({ t, onRegisterActions }: StockChangeSectionProps) {
   // Row write actions (revert / edit reason) reuse the same app context the
   // rest of the Products page reads -- can() gates them exactly as the server
@@ -222,6 +236,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
   const [fastStockInMode, setFastStockInMode] = useState<StockMode>('add')
+  const restoringFastStockInRef = useRef<MinimizedWorkEntry | null>(null)
   const [exportRange, setExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
   // Unsaved failed adjustments (user, Sep 3: "also show the failed in the
   // stock change as well"). These never reached the server -- inventory_
@@ -247,6 +262,42 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     setFastStockInMode(nextMode)
     setFastStockInOpen(true)
   }, [blurLedgerSearch])
+
+  const restoreFastStockIn = useCallback((entry: MinimizedWorkEntry | null | undefined) => {
+    if (!entry || entry.kind !== 'fast_stockin') return
+    if (!canAdjust || !canRestoreMinimizedWork(entry, app.can)) {
+      reparkDeniedRestore(entry)
+      app.notify(tr(t, 'permission_denied', 'You no longer have permission for this action.'), 'error')
+      return
+    }
+    if (restoringFastStockInRef.current?.key === entry.key) return
+    restoringFastStockInRef.current = entry
+    openFastStockIn('add')
+  }, [app, canAdjust, openFastStockIn, t])
+
+  useEffect(() => {
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind?: string; entry?: MinimizedWorkEntry }>).detail
+      if (detail?.kind === 'fast_stockin') restoreFastStockIn(detail.entry)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    restoreFastStockIn(peekPendingRestore('fast_stockin'))
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreFastStockIn])
+
+  const commitFastStockInRestore = useCallback(() => {
+    const entry = restoringFastStockInRef.current
+    if (!entry) return
+    if (!canAdjust || !canRestoreMinimizedWork(entry, app.can)) {
+      restoringFastStockInRef.current = null
+      setFastStockInOpen(false)
+      reparkDeniedRestore(entry)
+      app.notify(tr(t, 'permission_denied', 'You no longer have permission for this action.'), 'error')
+      return
+    }
+    restoringFastStockInRef.current = null
+    markRestoreHandled('fast_stockin')
+  }, [app, canAdjust, t])
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current
@@ -1214,7 +1265,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               minimizeWork({
                 key: 'fast-stockin',
                 kind: 'fast_stockin',
-                pageId: 'branches',
+                ...FAST_STOCK_IN_RESTORE_HOST,
                 label,
                 draftKey: scopedWorkDraftKey('fast_stockin'),
                 requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
@@ -1222,6 +1273,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               app.notify(tr(t, 'minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info')
             }}
           />
+          {restoringFastStockInRef.current ? <FastStockInRestoreCommit onCommit={commitFastStockInRestore} /> : null}
         </Suspense>
       ) : null}
     </div>

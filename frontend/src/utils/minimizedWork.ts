@@ -75,6 +75,21 @@ const FALLBACK_PERMISSION_BY_KIND: Partial<Record<MinimizedWorkKind, MinimizedWo
   // Keep legacy/malformed parked edit entries safe even if they predate the
   // explicit requiredPermission metadata now written by the host.
   edit_product: { permissionKey: 'products', actionKey: 'edit' },
+  fast_stockin: { permissionKey: 'inventory', actionKey: 'adjust' },
+}
+
+/** Fast stock-in has one canonical restore host. Older builds parked it on
+ * `branches`, where the current Branches hub no longer mounts Inventory, so
+ * normalize persisted entries as they are read as well as newly parked ones. */
+export const FAST_STOCK_IN_RESTORE_HOST = {
+  pageId: 'products',
+  anchor: 'hub:products:stock_changes',
+} as const
+
+function normalizeEntry(entry: MinimizedWorkEntry): MinimizedWorkEntry {
+  return entry.kind === 'fast_stockin'
+    ? { ...entry, ...FAST_STOCK_IN_RESTORE_HOST }
+    : entry
 }
 
 const STORE_BASE_KEY = 'minimized_work'
@@ -84,7 +99,7 @@ function registryDraftKey(): string {
 }
 
 let activeStoreKey = registryDraftKey()
-let entries: MinimizedWorkEntry[] = readWorkDraft<MinimizedWorkEntry[]>(activeStoreKey)?.data ?? []
+let entries: MinimizedWorkEntry[] = (readWorkDraft<MinimizedWorkEntry[]>(activeStoreKey)?.data ?? []).map(normalizeEntry)
 const listeners = new Set<() => void>()
 
 // The app can change signed-in operator without reloading this module. Re-read
@@ -94,7 +109,7 @@ function ensureCurrentScope(): string {
   const nextStoreKey = registryDraftKey()
   if (nextStoreKey === activeStoreKey) return activeStoreKey
   activeStoreKey = nextStoreKey
-  entries = readWorkDraft<MinimizedWorkEntry[]>(activeStoreKey)?.data ?? []
+  entries = (readWorkDraft<MinimizedWorkEntry[]>(activeStoreKey)?.data ?? []).map(normalizeEntry)
   if (pendingRestoreScope !== activeStoreKey) {
     pendingRestore = null
     pendingRestoreScope = null
@@ -111,7 +126,8 @@ function persist(): void {
 
 export function minimizeWork(entry: NewMinimizedWorkEntry): void {
   ensureCurrentScope()
-  entries = [...entries.filter((existing) => existing.key !== entry.key), { ...entry, minimizedAt: Date.now() }]
+  const normalized = normalizeEntry({ ...entry, minimizedAt: Date.now() } as MinimizedWorkEntry)
+  entries = [...entries.filter((existing) => existing.key !== entry.key), normalized]
   persist()
 }
 
@@ -134,8 +150,11 @@ export function subscribeMinimizedWork(listener: () => void): () => void {
 }
 
 /**
- * Restore = remove the chip + hand the entry to whoever hosts it. The
- * caller (the chrome) navigates to entry.pageId FIRST, then dispatches;
+ * Restore = hand the entry to whoever hosts it. Most flows remove their chip
+ * immediately for backward compatibility. Fast stock-in keeps its chip until
+ * the destination's lazy modal has actually committed, because its host is a
+ * conditionally mounted Products hub section.
+ * The caller (the chrome) navigates to entry.pageId FIRST, then dispatches;
  * hosts listen for RESTORE_WORK_EVENT and open their flow when the kind
  * is theirs. The flow's own draft brings the content back.
  *
@@ -148,11 +167,12 @@ let pendingRestoreScope: string | null = null
 
 export function dispatchRestore(entry: MinimizedWorkEntry): void {
   const storeKey = ensureCurrentScope()
-  removeMinimizedWork(entry.key)
-  pendingRestore = entry
+  const normalized = normalizeEntry(entry)
+  if (normalized.kind !== 'fast_stockin') removeMinimizedWork(normalized.key)
+  pendingRestore = normalized
   pendingRestoreScope = storeKey
   window.dispatchEvent(new CustomEvent(RESTORE_WORK_EVENT, {
-    detail: { kind: entry.kind, payload: entry.payload || {}, entry },
+    detail: { kind: normalized.kind, payload: normalized.payload || {}, entry: normalized },
   }))
 }
 
@@ -174,13 +194,23 @@ export function consumePendingRestore(kind: MinimizedWorkKind): MinimizedWorkEnt
   return entry
 }
 
+/** Read a pending restore without accepting it. Fast stock-in uses this while
+ * navigation mounts Products -> Stock Changes and its lazy modal. */
+export function peekPendingRestore(kind: MinimizedWorkKind): MinimizedWorkEntry | null {
+  const storeKey = ensureCurrentScope()
+  if (pendingRestoreScope !== storeKey) return null
+  return pendingRestore?.kind === kind ? pendingRestore : null
+}
+
 /** The event side is one-shot too: a mounted host that handles the event
  * clears pending so a later mount doesn't replay the same restore. */
 export function markRestoreHandled(kind: MinimizedWorkKind): void {
   ensureCurrentScope()
   if (pendingRestore?.kind === kind) {
+    const handled = pendingRestore
     pendingRestore = null
     pendingRestoreScope = null
+    if (kind === 'fast_stockin') removeMinimizedWork(handled.key)
   }
 }
 
@@ -191,7 +221,11 @@ export function markRestoreHandled(kind: MinimizedWorkKind): void {
  * without another explicit operator action.
  */
 export function reparkDeniedRestore(entry: MinimizedWorkEntry): void {
-  markRestoreHandled(entry.kind)
+  ensureCurrentScope()
+  if (pendingRestore?.kind === entry.kind) {
+    pendingRestore = null
+    pendingRestoreScope = null
+  }
   const { minimizedAt: _previousMinimizedAt, ...parked } = entry
   minimizeWork(parked as NewMinimizedWorkEntry)
 }

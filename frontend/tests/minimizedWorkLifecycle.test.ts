@@ -39,6 +39,7 @@ const {
   getMinimizedWork,
   markRestoreHandled,
   minimizeWork,
+  peekPendingRestore,
   reparkDeniedRestore,
   removeMinimizedWork,
 } = await import('../src/utils/minimizedWork.ts')
@@ -69,6 +70,31 @@ assert.equal(memory.has('bos_minimized_work'), false, 'the registry must not per
 // payload or pending restore from shop A must never appear in shop B.
 signIn(22, 'shop-b')
 assert.deepEqual(getMinimizedWork(), [])
+const legacyFastStockDraftKey = scopedWorkDraftKey('fast_stockin')
+writeWorkDraft(scopedWorkDraftKey('minimized_work'), [{
+  key: 'fast-stockin',
+  kind: 'fast_stockin',
+  pageId: 'branches',
+  label: 'Fast stock-in',
+  draftKey: legacyFastStockDraftKey,
+  minimizedAt: 1,
+}])
+signIn(23, 'shop-c')
+assert.deepEqual(getMinimizedWork(), [])
+signIn(22, 'shop-b')
+assert.equal(getMinimizedWork()[0]?.kind, 'fast_stockin')
+assert.equal(getMinimizedWork()[0]?.pageId, 'products', 'legacy Fast Stock-in chips migrate to the live Products host')
+assert.equal(getMinimizedWork()[0]?.anchor, 'hub:products:stock_changes', 'restore names the exact Stock Changes subview')
+assert.equal(canRestoreMinimizedWork(getMinimizedWork()[0]!, () => false), false, 'legacy chips without metadata still require inventory adjustment')
+
+const fastStockEntry = getMinimizedWork()[0]!
+dispatchRestore(fastStockEntry)
+assert.equal(getMinimizedWork()[0]?.key, 'fast-stockin', 'Fast Stock-in chip remains until its lazy modal commits')
+assert.equal(peekPendingRestore('fast_stockin')?.key, 'fast-stockin')
+markRestoreHandled('fast_stockin')
+assert.equal(peekPendingRestore('fast_stockin'), null)
+assert.deepEqual(getMinimizedWork(), [], 'host acknowledgement consumes the chip')
+
 minimizeWork({
   key: 'fast-stockin',
   kind: 'fast_stockin',
@@ -76,7 +102,12 @@ minimizeWork({
   label: 'Fast stock-in',
   draftKey: scopedWorkDraftKey('fast_stockin'),
 })
-assert.equal(getMinimizedWork()[0]?.kind, 'fast_stockin')
+const deniedFastStockEntry = getMinimizedWork()[0]!
+dispatchRestore(deniedFastStockEntry)
+reparkDeniedRestore(deniedFastStockEntry)
+assert.equal(peekPendingRestore('fast_stockin'), null)
+assert.equal(getMinimizedWork()[0]?.key, 'fast-stockin', 'host-side denial reparks the chip instead of consuming it')
+removeMinimizedWork('fast-stockin')
 
 signIn(11, 'shop-a')
 assert.equal(getMinimizedWork()[0]?.key, 'receive-batch-401')
@@ -151,12 +182,22 @@ const receiveSource = readFileSync(new URL('../src/components/inventory/ReceiveB
 const branchesSource = readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
 const branchFormSource = readFileSync(new URL('../src/components/branches/BranchForm.tsx', import.meta.url), 'utf8')
 const feeFormSource = readFileSync(new URL('../src/components/fees/FeeForm.tsx', import.meta.url), 'utf8')
+const stockChangeSource = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
+const inventorySource = readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+const stockSessionsSource = readFileSync(new URL('../src/components/products/StockInSessionsSection.tsx', import.meta.url), 'utf8')
 const feesPageSource = readFileSync(new URL('../src/components/fees/FeesPage.tsx', import.meta.url), 'utf8')
 assert.match(traySource, /entry\.draftKey \|\| \(legacyDraftBase \? scopedWorkDraftKey\(legacyDraftBase\) : null\)/)
 assert.match(traySource, /aria-label=\{tr\('minimized_dismiss_hint', 'Dismiss and discard this draft'/)
 assert.match(traySource, /receive_batch: null/, 'per-product receive drafts must never use a family-wide fallback clear')
 assert.match(traySource, /if \(!canRestoreMinimizedWork\(entry, can\)\) \{[\s\S]*?return[\s\S]*?\}\s*navigateTo\(entry\.pageId, entry\.anchor\)/, 'permission must be rechecked before exact page/section navigation and dispatch')
 assert.match(traySource, /edit_product: null/, 'per-product edit drafts must never use a family-wide fallback clear')
+assert.match(stockChangeSource, /\.\.\.FAST_STOCK_IN_RESTORE_HOST/, 'the canonical Stock Changes host parks the exact hub destination')
+assert.match(stockChangeSource, /peekPendingRestore\('fast_stockin'\)/, 'the conditionally mounted host must see restores dispatched before it mounted')
+assert.match(stockChangeSource, /FastStockInRestoreCommit onCommit=\{commitFastStockInRestore\}/, 'the chip is accepted only after the lazy modal subtree commits')
+assert.match(stockChangeSource, /reparkDeniedRestore\(entry\)/, 'the destination rechecks current permission and reparks a denied restore')
+assert.doesNotMatch(inventorySource, /RESTORE_WORK_EVENT|consumePendingRestore\('fast_stockin'\)/, 'the hidden legacy Inventory host must not steal the restore event')
+assert.match(inventorySource, /\.\.\.FAST_STOCK_IN_RESTORE_HOST/, 'Inventory-created Fast Stock-in chips target the canonical host')
+assert.match(stockSessionsSource, /\.\.\.FAST_STOCK_IN_RESTORE_HOST/, 'session add-more chips target the same canonical host')
 assert.match(receiveSource, /writeWorkDraft\(draftKey, currentDraft\(\)\)[\s\S]*?onMinimize\(\{[\s\S]*?draftKey,[\s\S]*?\}\)[\s\S]*?onClose\(\)/, 'receive minimize must persist before parking and unmounting')
 assert.match(receiveSource, /useCloseGuard\(\{ workKey: product \? `receive-batch-\$\{product\.id\}` : '' \}, onClose, preserveAndMinimize\)/, 'receive X, Cancel and backdrop must retain the shared guard while its prompt can preserve')
 assert.match(receiveSource, /<MinimizeButton disabled=\{saving\} tr=\{tr\} onMinimize=\{preserveAndMinimize\} \/>/, 'receive must show the shared minus beside Close')
