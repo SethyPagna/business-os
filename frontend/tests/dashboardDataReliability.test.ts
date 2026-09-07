@@ -62,7 +62,7 @@ assert.ok((dashboard.match(/compact-analytics-legend/g) || []).length >= 2, 'thr
 assert.doesNotMatch(dashboard, /getBusinessTimezoneOffsetHours/, 'business-hour analytics must not apply the UTC+7 offset twice')
 assert.match(dashboard, /summary\?\.expiring_count/, 'expiry preview badge should show the complete backend count, not the ten-row preview length')
 assert.match(dashboard, /createPortal\([\s\S]*recentSaleDetail[\s\S]*document\.body/, 'dashboard sale details should portal above the page layer')
-assert.match(dashboard, /rpt_pending_credit', 'Credit'/, 'credit is a positive revenue annotation in the dashboard drill')
+assert.match(dashboard, /rpt_pending_credit', 'Not Paid'/, 'Not Paid is a positive revenue annotation in the dashboard drill')
 assert.match(dashboard, /normalizeDashboardGrossMetrics\(row\)/, 'period trend rows must use the same pre-discount gross normalization as the headline')
 assert.match(dashboard, /analytics: displayAnalytics/, 'dashboard exports must receive the normalized headline and trend metrics')
 

@@ -1351,7 +1351,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         label: t('sales') || 'Sales',
         value: String(txCount),
         sub: txCount > 0 ? `${translateOr('stats_avg_sale', 'avg')} ${fmtUSD(Number(totals.avg_order_usd) || 0)}` : undefined,
-        hint: translateOr('stats_sales_hint', 'Every non-cancelled sale in the range. Credit is included in revenue and profit; the amount still owed is shown separately as a positive Credit figure.'),
+        hint: translateOr('stats_sales_hint', 'Every non-cancelled sale in the range. Not Paid is included in revenue and profit; the amount still owed is shown separately as a positive Not Paid figure.'),
         details: byStatus.map((row) => ({
           label: getStatusLabel(String(row.sale_status || 'completed'), t),
           value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.total_usd) || 0)}`,
@@ -1399,7 +1399,7 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
         value: fmtUSD(profitUsd),
         tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
         sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
-        hint: `${translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (credit sales included).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងការលក់ជាឥណទាន)។')}
+        hint: `${translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (Not Paid sales included).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងការលក់ជាប្រាក់ជំពាក់)។')}
 
 ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd }, profitTerms(formulaTotals), fmtUSD, translateOr)}`,
         details: [

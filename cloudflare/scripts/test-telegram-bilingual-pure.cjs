@@ -243,7 +243,7 @@ assert.ok(saleLines.includes('Status / ស្ថានភាព: awaiting paymen
 // `Paid / បានបង់: unpaid / មិនទាន់បង់` -- a label saying "paid", a value
 // saying "not paid", and the amount owed nowhere on the line. It now names
 // the owner's word and the positive figure, in both languages.
-assert.ok(saleLines.includes('Credit / ឥណទាន: $0.80'), `the unsettled amount is one positive Credit line:\n${saleLines.join('\n')}`)
+assert.ok(saleLines.includes('Not Paid / ប្រាក់ជំពាក់: $0.80'), `the unsettled amount is one positive Not Paid line:\n${saleLines.join('\n')}`)
 assert.ok(!saleLines.some((line) => line.startsWith('Paid')), 'no Paid line survives on a wholly unpaid sale')
 assert.ok(!saleLines.join('\n').includes('មិនទាន់បង់'), 'and no "unpaid" marker either')
 assert.ok(saleLines.some((line) => line.startsWith('• Coca Cola 330ml')), 'the product name is left exactly as entered')

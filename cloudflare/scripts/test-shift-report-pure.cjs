@@ -175,7 +175,7 @@ const ORDER = [
   'Shop', 'Cashier', 'Branch', 'Shift', 'From', 'To',
   // The header block: the totals the owner reads first. Credit is the LAST
   // of them and is a positive figure, never a deduction.
-  'Sales', 'Profit', 'Expenses', 'Delivery fee', 'Credit',
+  'Sales', 'Profit', 'Expenses', 'Delivery fee', 'Not Paid',
   // The counts.
   'Invoices', 'Cancelled', 'Edited',
   // The owner's named gap: registered cash, open vs end.
@@ -229,10 +229,10 @@ assert.equal(Math.round((FIGURES.otherExpenseUsd + FIGURES.deliveryCostUsd) * 10
 // THE CREDIT RULING, on the value: positive, the word "credit", and NOT
 // removed from any total above it. Sales stays $210.00 with an $18.00 credit
 // in the window; a report that subtracted credit would print $192.00.
-assert.equal(valueOf('Credit'), '$18.00')
+assert.equal(valueOf('Not Paid'), '$18.00')
 assert.ok(!/-\$|\$-/.test(report), `credit (or anything else) rendered as a negative dollar amount:\n${report}`)
 assert.notEqual(valueOf('Sales'), '$192.00', 'credit was subtracted from sales -- it is revenue, it was simply not collected')
-assert.ok(!/unpaid|owed|outstanding/i.test(report), 'the owner asked for the bare word "credit"')
+assert.ok(!/\bCredit\b|ឥណទាន/.test(report), 'the superseded Credit wording must not render')
 
 // Both currencies, never folded together -- the drawer holds dollars and riel
 // side by side and merging them would invent an exchange rate.
@@ -462,7 +462,7 @@ assert.ok(!/NaN|undefined|null/.test(empty), `an empty shift produced a broken v
 // while every optional line is gone.
 assert.ok(emptyLines.find((line) => line.startsWith(`Sales${SEP}`)).endsWith(': $0.00'))
 assert.ok(emptyLines.find((line) => line.startsWith(`Profit${SEP}`)).endsWith(': $0.00'))
-for (const dropped of ['Expenses', 'Delivery fee', 'Credit', 'Cancelled', 'Edited', 'Delivery cost', 'Other expenses', 'Refunds']) {
+for (const dropped of ['Expenses', 'Delivery fee', 'Not Paid', 'Cancelled', 'Edited', 'Delivery cost', 'Other expenses', 'Refunds']) {
   assert.ok(!emptyLines.some((line) => line.startsWith(`${dropped}${SEP}`)), `a quiet shift still printed a zero "${dropped}" line`)
 }
 // The float is still in the drawer and nothing was taken out of it.
@@ -664,7 +664,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.equal(mappedValue('Profit'), '$92.50', 'profit is the kernel definition, not one computed in the message')
   assert.equal(mappedValue('Other expenses'), '$4.00', 'the expense total comes from the grouped query')
   assert.equal(mappedValue('Refunds'), '$12.00', 'the refunds line must read refund_usd, not the unpaid credit')
-  assert.equal(mappedValue('Credit'), '$18.00', 'credit must read pending_revenue_usd, not the refund')
+  assert.equal(mappedValue('Not Paid'), '$18.00', 'credit must read pending_revenue_usd, not the refund')
   assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
   assert.equal(mappedValue('Delivery cost'), '$3.50', 'the courier money actually paid out')
   // 4.00 other + 3.50 courier, the two lines under it.

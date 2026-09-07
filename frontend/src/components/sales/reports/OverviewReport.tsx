@@ -125,7 +125,7 @@ export default function OverviewReport(p: ReportViewProps) {
         expenses ? `${tr('fees', 'Expenses')} ${fmtMoney(num(expenses.amount_usd), num(expenses.amount_khr))}` : null,
         profitLine ? `${tr('rpt_gross_profit', 'Total Profit')} ${fmtMoney(profitLine.usd)} (${fmtPct(pct(profitLine.usd, basis))})` : null,
         netLine ? `${tr('rpt_total_profit', 'Final Profit')} ${fmtMoney(netLine.usd)}` : null,
-        sales.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Credit')} ${fmtMoney(sales.pending_revenue_usd)}` : null,
+        sales.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(sales.pending_revenue_usd)}` : null,
       ])
     : !sales && (returns || expenses)
       ? joinSummary([
@@ -187,7 +187,7 @@ export default function OverviewReport(p: ReportViewProps) {
     { key: 'payment_method', label: tr('payment_method', 'Payment method'), primary: true, value: (r) => r.payment_method || tr('unknown', 'Unknown') },
     { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
     { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: true },
-    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Credit'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
     { key: 'collected_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_usd },
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.revenue_usd, payments.reduce((s, p) => s + p.revenue_usd, 0)), defaultVisible: false },
   ]
