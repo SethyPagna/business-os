@@ -8,8 +8,8 @@
 // Every one of those is a property of the SHARED PaginationControls' DEFAULT
 // branch, which catalogPagination.tsx reached by passing no layout at all.
 // This test pins the storefront's own shape instead: one centred single-line
-// pill, mounted symmetrically above AND below the grid, with the per-page
-// trigger inside it and no summary row anywhere.
+// navigation pill, mounted symmetrically above AND below the grid, with no
+// page-size selector and no summary row anywhere.
 //
 // It is a source-shape test on purpose -- the storefront pager is JSX with no
 // pure kernel to call, and the defect was entirely "which branch renders".
@@ -57,37 +57,35 @@ runTest('the shared control offers a centred storefront layout without changing 
   assert.match(pagination, /layout = 'default',/, "the default must stay 'default' so all 28 admin consumers are untouched")
 })
 
-runTest("the centred branch prints no 'Showing X-Y of N' summary and no separate 'per page' label", () => {
+runTest("the centred branch prints no summary or per-page control", () => {
   const branch = centeredBranch()
   assert.doesNotMatch(branch, /\{showingLabel\}/, 'the storefront pager must not render the Showing summary')
   assert.doesNotMatch(branch, /\{label\}/, 'the storefront pager must not render the "products" tail of the summary')
-  assert.doesNotMatch(branch, /<span>\{perPageLabel\}\}?<\/span>/, 'the per-page text label belongs in the aria-label, not beside the select')
-  assert.match(branch, /ariaLabel=\{perPageLabel\}/, 'the per-page wording must survive as the accessible name')
+  assert.doesNotMatch(branch, /perPageLabel|<PageSizeSelect/, 'the centered navigation row has no page-size selector')
 })
 
-runTest('the centred per-page trigger is sized to its own value, not a fixed wide column', () => {
+runTest('the centred page field grows with its digits and keeps a 40px floor', () => {
   const branch = centeredBranch()
-  assert.match(branch, /<PageSizeSelect/, 'the per-page control must live INSIDE the pager pill')
-  assert.doesNotMatch(branch, /min-w-\[5\.5rem\]/, 'the 5.5rem floor is exactly what made "50" look oversized')
-  assert.match(branch, /buttonClassName="[^"]*w-auto/, 'the trigger must take its width from its content')
+  assert.match(branch, /max\(2\.5rem, calc\(\$\{pageDigits\}ch \+ 0\.5rem\)\)/)
+  assert.match(branch, /className=\{`h-10 min-w-10/)
 })
 
-runTest('the centred branch centres the pill and orders it back / page / next / per-page', () => {
+runTest('the centred branch centres the pill and orders it Back / page / total / Next', () => {
   const branch = centeredBranch()
   assert.match(branch, /flex w-full justify-center/, 'the pager row must centre itself')
   const backAt = branch.indexOf('aria-label={backLabel}')
-  const pageAt = branch.indexOf('/ {totalPages}')
+  const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
+  const countAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
-  const sizeAt = branch.indexOf('<PageSizeSelect')
-  assert.ok(backAt > 0 && pageAt > backAt, 'page/total must follow Back')
-  assert.ok(nextAt > pageAt, 'Next must follow page/total')
-  assert.ok(sizeAt > nextAt, 'the per-page trigger must be the last element in the pill')
+  assert.ok(backAt > 0 && pageAt > backAt, 'page must follow Back')
+  assert.ok(countAt > pageAt, 'total page count must follow the editable page')
+  assert.ok(nextAt > countAt, 'Next must close the pill')
 })
 
 runTest('the storefront wrapper opts into the centred layout', () => {
   assert.match(catalogPagination, /layout="centered"/, 'catalogPagination.tsx must request the storefront layout')
   assert.match(catalogPagination, /<PaginationControls\b/, 'the storefront must keep consuming the shared control (paginationSurfaceContract)')
-  assert.match(catalogPagination, /editablePageSizeInput=\{false\}/, 'the storefront keeps its fixed 20/50/100 list')
+  assert.match(catalogPagination, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/, 'the storefront keeps its configured 50-item default')
   assert.doesNotMatch(catalogPagination, /rounded-2xl bg-white\/92/, 'the old bordered summary box wrapper must go with the summary')
 })
 
@@ -150,7 +148,7 @@ runTest('an empty result renders no pager at all, and a real multi-page result p
   assert.equal(junk.totalPages, 3)
 })
 
-runTest('the shared control takes its own arrow-disabled state from that same kernel', () => {
+runTest('the shared control takes arrow state from the kernel and hides centered one-page navigation', () => {
   assert.match(pagination, /import \{ clampPageNumber, pagerState \} from '\.\.\/\.\.\/utils\/pagerState\.ts'/, 'one kernel, not a second copy of the arithmetic')
   assert.match(pagination, /const state = pagerState\(page, totalItems, pageSize, DEFAULT_PAGE_SIZE\)/)
   assert.match(pagination, /if \(!state\.visible\) return null/, 'the render gate and the storefront gate must be the same fact')
@@ -159,7 +157,8 @@ runTest('the shared control takes its own arrow-disabled state from that same ke
   const branch = centeredBranch()
   assert.match(branch, /disabled=\{backDisabled\}/, 'so a single-page storefront pill shows a dead Back')
   assert.match(branch, /disabled=\{nextDisabled\}/, 'and a dead Next')
-  assert.match(branch, /<PageSizeSelect/, 'while the per-page chooser beside them stays live')
+  assert.match(branch, /if \(totalPages <= 1\) return null/, 'the centered layout has no useful one-page action')
+  assert.doesNotMatch(branch, /<PageSizeSelect/, 'the centered layout never renders a page-size selector')
 })
 
 runTest('both pager mounts translate Back and Next instead of leaking the raw keys', () => {
