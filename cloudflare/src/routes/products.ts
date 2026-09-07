@@ -2682,6 +2682,21 @@ export async function productMergeChangesImages(
     || (!String(keeper.image_path || '').trim() && Boolean(String(discarded.image_path || '').trim())))
 }
 
+/** Atomic guard for an image-denied merge whose preflight found no image effect. */
+export function productMergeNoImageEffectAssertion(keeperId: number, duplicateId: number) {
+  return {
+    sql: `SELECT CASE WHEN
+      NOT EXISTS(SELECT 1 FROM product_images WHERE product_id = @duplicateId)
+      AND NOT EXISTS(
+        SELECT 1 FROM products keeper JOIN products duplicate
+          ON keeper.id = @keeperId AND duplicate.id = @duplicateId
+        WHERE COALESCE(keeper.image_path, '') = '' AND COALESCE(duplicate.image_path, '') != ''
+      )
+      THEN 1 ELSE json_extract('', '$') END AS merge_image_guard`,
+    params: { keeperId, duplicateId },
+  }
+}
+
 // The ledger line a WRITE-OFF leaves behind, and the fragment that finds it
 // again afterwards. Both live here so the reason text and the id-capture query
 // can never disagree: the "(#id) removed -- stock written off" middle is the
@@ -2852,7 +2867,11 @@ export async function foldDuplicateProductInto(
   const canonicalImagePaths = new Set(canonicalImageRows.map((r) => String(r.image_path)))
   let nextCanonicalImageOrder = canonicalImageRows.length
 
+  const canChangeProductImages = getActionTier(user, 'products', 'image') === 'full'
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [productMergeCasAssertion([canonicalBefore, dupPricing])]
+  if (!canChangeProductImages) {
+    statements.push(productMergeNoImageEffectAssertion(canonicalId, dup.id))
+  }
   let quantityMoved = 0
   let quantityWrittenOff = 0
   for (const row of stockRows) {
@@ -2911,26 +2930,28 @@ export async function foldDuplicateProductInto(
   // same stored object.
   let imagesMovedThisDup = 0
   const imagesMovedPaths: string[] = []
-  for (const image of dupImageRows) {
-    const imagePath = String(image.image_path || '')
-    if (!imagePath || canonicalImagePaths.has(imagePath)) continue
-    canonicalImagePaths.add(imagePath)
-    imagesMovedPaths.push(imagePath)
+  if (canChangeProductImages) {
+    for (const image of dupImageRows) {
+      const imagePath = String(image.image_path || '')
+      if (!imagePath || canonicalImagePaths.has(imagePath)) continue
+      canonicalImagePaths.add(imagePath)
+      imagesMovedPaths.push(imagePath)
+      statements.push({
+        sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@canonicalId, @path, @order)',
+        params: { canonicalId, path: imagePath, order: nextCanonicalImageOrder },
+      })
+      nextCanonicalImageOrder += 1
+      imagesMovedThisDup += 1
+    }
+    statements.push({ sql: 'DELETE FROM product_images WHERE product_id = @id', params: { id: dup.id } })
+    // A canonical with no primary image adopts the duplicate's, so a merge
+    // can only ever add imagery, never remove it.
     statements.push({
-      sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@canonicalId, @path, @order)',
-      params: { canonicalId, path: imagePath, order: nextCanonicalImageOrder },
+      sql: `UPDATE products SET image_path = COALESCE(NULLIF(image_path, ''), @dupImagePath), updated_at = CURRENT_TIMESTAMP
+            WHERE id = @canonicalId AND @dupImagePath IS NOT NULL AND @dupImagePath != ''`,
+      params: { canonicalId, dupImagePath: dup.image_path ?? null },
     })
-    nextCanonicalImageOrder += 1
-    imagesMovedThisDup += 1
   }
-  statements.push({ sql: 'DELETE FROM product_images WHERE product_id = @id', params: { id: dup.id } })
-  // A canonical with no primary image adopts the duplicate's, so a merge
-  // can only ever add imagery, never remove it.
-  statements.push({
-    sql: `UPDATE products SET image_path = COALESCE(NULLIF(image_path, ''), @dupImagePath), updated_at = CURRENT_TIMESTAMP
-          WHERE id = @canonicalId AND @dupImagePath IS NOT NULL AND @dupImagePath != ''`,
-    params: { canonicalId, dupImagePath: dup.image_path ?? null },
-  })
 
   statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
   statements.push({

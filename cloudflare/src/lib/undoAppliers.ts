@@ -881,7 +881,19 @@ export async function recordBulkMergeUndoSnapshot(
 }
 
 // Restore both products to their exact pre-merge state from the snapshot.
-async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
+export function mergeKeeperRestoreStatement(r: MergeReversal, canChangeProductImages: boolean) {
+  const imageSet = canChangeProductImages ? 'image_path=@path,' : ''
+  return {
+    sql: `UPDATE products SET ${imageSet}${r.keeperBarcodeBefore !== undefined ? 'barcode=@barcode,' : ''}updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
+    params: {
+      keeperId: Number(r.keeperId),
+      ...(canChangeProductImages ? { path: r.keeperImagePathBefore ?? null } : {}),
+      ...(r.keeperBarcodeBefore !== undefined ? { barcode: r.keeperBarcodeBefore } : {}),
+    },
+  }
+}
+
+async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<void> {
   const db = getDb(env)
   const keeperId = Number(r.keeperId)
   const dupId = Number(r.dupId)
@@ -899,10 +911,7 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
 
   // 1. Reactivate the merged-away product; restore keeper's image_path.
   stmts.push({ sql: 'UPDATE products SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
-  stmts.push({
-    sql: `UPDATE products SET image_path=@path${r.keeperBarcodeBefore !== undefined ? ',barcode=@barcode' : ''},updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
-    params: { keeperId, path: r.keeperImagePathBefore ?? null, ...(r.keeperBarcodeBefore !== undefined ? { barcode: r.keeperBarcodeBefore } : {}) },
-  })
+  stmts.push(mergeKeeperRestoreStatement(r, canChangeProductImages))
   if (r.keeperPricingBefore) {
     // Cost is restored only when the snapshot recorded it. A pre-Sep-4-2026
     // snapshot has no cost_price_* in its payload, and writing `|| 0` for a
@@ -1046,18 +1055,20 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
 
   // 5. product_images: pull the moved paths off the keeper, restore the dup's
   //    gallery (the fold had deleted every dup image row).
-  const movedPaths = (r.imagesMovedToKeeper || []).map(String).filter(Boolean)
-  for (const grp of chunk(movedPaths, 50)) {
-    if (!grp.length) continue
-    // sql-bound-params: bounded by construction -- this loop caps each group
-    // at 50 image paths, plus keeperId, safely below D1's 100-bind ceiling.
-    const placeholders = grp.map((_, i) => `@p${i}`).join(',')
-    const params: Record<string, unknown> = { keeperId }
-    grp.forEach((p, i) => { params[`p${i}`] = p })
-    stmts.push({ sql: `DELETE FROM product_images WHERE product_id = @keeperId AND image_path IN (${placeholders})`, params })
-  }
-  for (const img of (r.dupImagesBefore || [])) {
-    stmts.push({ sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@dupId, @path, @order)', params: { dupId, path: String(img.image_path), order: img.sort_order == null ? 0 : Number(img.sort_order) } })
+  if (canChangeProductImages) {
+    const movedPaths = (r.imagesMovedToKeeper || []).map(String).filter(Boolean)
+    for (const grp of chunk(movedPaths, 50)) {
+      if (!grp.length) continue
+      // sql-bound-params: bounded by construction -- this loop caps each group
+      // at 50 image paths, plus keeperId, safely below D1's 100-bind ceiling.
+      const placeholders = grp.map((_, i) => `@p${i}`).join(',')
+      const params: Record<string, unknown> = { keeperId }
+      grp.forEach((p, i) => { params[`p${i}`] = p })
+      stmts.push({ sql: `DELETE FROM product_images WHERE product_id = @keeperId AND image_path IN (${placeholders})`, params })
+    }
+    for (const img of (r.dupImagesBefore || [])) {
+      stmts.push({ sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@dupId, @path, @order)', params: { dupId, path: String(img.image_path), order: img.sort_order == null ? 0 : Number(img.sort_order) } })
+    }
   }
 
   // 6. product_batches: point the re-pointed batches back at the dup with their
@@ -1113,9 +1124,9 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
 // first restores the keeper to the exact state the next-oldest reversal was
 // captured against. Each reversal runs in its own batch (validating the two
 // products still exist); a cleanup undo is a rare admin op, not a hot path.
-async function applyBulkMergeReversal(env: Env, reversals: MergeReversal[]): Promise<void> {
+async function applyBulkMergeReversal(env: Env, reversals: MergeReversal[], canChangeProductImages = true): Promise<void> {
   for (let i = reversals.length - 1; i >= 0; i--) {
-    await applyMergeReversal(env, reversals[i])
+    await applyMergeReversal(env, reversals[i], canChangeProductImages)
   }
 }
 
@@ -1593,7 +1604,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
         await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint)
-        await applyMergeReversal(ctx.env, reversal)
+        await applyMergeReversal(ctx.env, reversal, !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full')
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
@@ -1665,7 +1676,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
         await assertMergeStateUnchanged(db, reversals, mergedStateFingerprint)
-        await applyBulkMergeReversal(ctx.env, reversals)
+        await applyBulkMergeReversal(ctx.env, reversals, !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full')
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
