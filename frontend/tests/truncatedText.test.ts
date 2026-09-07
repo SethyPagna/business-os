@@ -192,9 +192,20 @@ for (const file of [
   const source = read(file)
   const titled = (source.match(/dense-cell-truncate[^"]*"\s+title=/g) || []).length
   assert.ok(titled > 0, `${file} must still have titled dense cells for the delegated reveal to serve`)
-  // ...and every one of them opens its record on a row click, which is the
-  // reason the reveal must not take that click.
-  assert.match(source, /data-clickable="true"/, `${file} rows open a record on click`)
+  // ...and every row that can open its record advertises that capability,
+  // which is the reason the reveal must not take that click. Fees is tiered:
+  // read-only rows intentionally omit the marker so a clipped cell can still
+  // own the tap and reveal its value.
+  if (file === 'components/fees/FeesPage.tsx') {
+    assert.match(source, /data-clickable=\{canEditFee \? 'true' : undefined\}/,
+      'editable fee rows defer clipped-cell taps to the record surface')
+    assert.match(source, /tabIndex=\{canEditFee \? 0 : undefined\}/,
+      'read-only fee rows must not advertise keyboard activation')
+    assert.match(source, /const openEdit = \(fee:[^]*?if \(canEditFee\)/,
+      'the fee row action must remain guarded by actual edit capability')
+  } else {
+    assert.match(source, /data-clickable="true"/, `${file} rows open a record on click`)
+  }
   assert.doesNotMatch(source, /TruncatedText/, `${file} must gain the reveal with no edit of its own`)
 }
 
