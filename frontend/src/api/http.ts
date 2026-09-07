@@ -47,6 +47,12 @@ type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal }
 type RouteOptions = {
   isWrite?: boolean
   raceLocalFallback?: boolean
+  staleWhileRevalidate?: boolean
+  // Most reads retain one retry for a transient connection failure. A caller
+  // with one outer deadline can disable retry specifically after apiFetch's
+  // own timeout, while still retrying an immediate failure such as
+  // `Failed to fetch` within that outer deadline.
+  retryTimedOutRead?: boolean
   // Opt a read into "only the latest request in this group survives"
   // semantics: starting a new route() call tagged with the same
   // searchGroup aborts whatever request is still in flight for that
@@ -582,7 +588,16 @@ function hasUsableLocalData(value: any): boolean {
   return true
 }
 
-async function tryServerReadWithRetry<T>(serverFn: RouteFn<T>, signal?: AbortSignal): Promise<T> {
+function isRequestTimeoutError(error: any): boolean {
+  return error?.code === 'request_timeout'
+    || String(error?.message || '').toLowerCase().includes('request timed out after')
+}
+
+async function tryServerReadWithRetry<T>(
+  serverFn: RouteFn<T>,
+  signal?: AbortSignal,
+  retryTimedOutRead = true,
+): Promise<T> {
   try {
     return await serverFn(signal)
   } catch (error: any) {
@@ -590,6 +605,7 @@ async function tryServerReadWithRetry<T>(serverFn: RouteFn<T>, signal?: AbortSig
     // problem -- retrying it would just fire yet another request for a
     // query the user has already moved on from.
     if (isAbortError(error)) throw error
+    if (!retryTimedOutRead && isRequestTimeoutError(error)) throw error
     if (isTransientGatewayError(error?.status)) throw error
     if (!isConnectivityError(error)) throw error
     await sleep(SYNC.READ_SERVER_RETRY_DELAY_MS)
@@ -775,7 +791,9 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       throw abortError
     }
     if (timedOut || e?.name === 'AbortError') {
-      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
+      const timeoutError = new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`) as ApiRuntimeError
+      timeoutError.code = 'request_timeout'
+      throw timeoutError
     }
     throw e
   } finally {
@@ -1172,6 +1190,8 @@ export async function route<T = any>(
   const readServerBaseUrl = getReadServerBaseUrl()
   const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
   const raceLocalFallback = typeof options === 'boolean' ? true : options?.raceLocalFallback !== false
+  const staleWhileRevalidate = typeof options === 'boolean' ? true : options?.staleWhileRevalidate !== false
+  const retryTimedOutRead = typeof options === 'boolean' ? true : options?.retryTimedOutRead !== false
   const browserExplicitlyOffline = typeof navigator !== 'undefined' && navigator.onLine === false
 
   // ?€?€ Reads ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1185,10 +1205,10 @@ export async function route<T = any>(
         return cached
       }
 
-      if (cached !== null && stale) {
+      if (cached !== null && stale && staleWhileRevalidate) {
         // Stale-while-revalidate: return stale now, refresh in background
         logCall(channel, 'cache-stale', 0)
-        tryServerReadWithRetry(serverFn).then(result => {
+        tryServerReadWithRetry(serverFn, undefined, retryTimedOutRead).then(result => {
           cacheSet(channel, result)
           emitCacheRefresh(channel)
         }).catch((error) => {
@@ -1216,7 +1236,7 @@ export async function route<T = any>(
 
         const searchGroup = typeof options === 'object' ? options.searchGroup : undefined
         const groupCtrl = searchGroup ? beginSearchGroup(searchGroup) : null
-        const promise = tryServerReadWithRetry(serverFn, groupCtrl?.signal).then(result => {
+        const promise = tryServerReadWithRetry(serverFn, groupCtrl?.signal, retryTimedOutRead).then(result => {
           cacheSet(channel, result)
           setServerHealth(true)
           logCall(channel, 'server', Date.now() - t0)

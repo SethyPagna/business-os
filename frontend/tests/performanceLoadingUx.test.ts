@@ -1536,8 +1536,8 @@ for (const binding of ['getSales as fetchSales', 'getSalesStats as fetchSalesSta
 assert.match(sales, /import\s*\{\s*getUsers as fetchUsers\s*\}\s*from ['"]\.\.\/\.\.\/api\/userReadTransport\.ts['"]/, 'sales user filter reads must keep the focused user transport')
 assert.match(
   sales,
-  /withLoaderTimeout\(\(\) => fetchSales\(params\), 'Sales', 20000\)/,
-  'sales list should timeout slow reads through the focused sales transport',
+  /withLoaderTimeout\([\s\S]{0,160}fetchSales\(params, \{ signal: controller\.signal \}\)[\s\S]{0,120}'Sales',[\s\S]{0,80}SALES_LIST_REQUEST_TIMEOUT_MS/,
+  'sales list should share one deadline with the focused transport and pass its abort signal',
 )
 assert.match(
   sales,

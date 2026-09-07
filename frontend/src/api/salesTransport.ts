@@ -3,7 +3,7 @@ import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
-import { mirrorTable, routeMirrored } from './localMirrors.ts'
+import { mirrorReadResult, mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
 
@@ -18,6 +18,8 @@ type CustomerRecord = {
 }
 type SaleAttachCustomerResult = ResultRecord & { customer?: CustomerRecord }
 type AttemptedError = Error & { attempted?: unknown }
+export type SalesReadOptions = { signal?: AbortSignal; timeoutMs?: number }
+export const SALES_LIST_REQUEST_TIMEOUT_MS = 20_000
 
 function encodeId(id: number | string): string {
   return encodeURIComponent(String(id))
@@ -98,17 +100,39 @@ export async function updateSalesBulkField(payload: BulkSaleUpdatePayload): Prom
   return result
 }
 
-export function getSales(params: QueryParams = {}): Promise<unknown> {
+export function getSales(params: QueryParams = {}, options: SalesReadOptions = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   const mirror = query ? undefined : mirrorTable('sales')
-  return routeMirrored(
+  return route(
     `sales:get:${query}`,
-    () => apiFetch('GET', appendQuery('/api/sales', query)),
+    async () => mirrorReadResult(
+      mirror,
+      await apiFetch(
+        'GET',
+        appendQuery('/api/sales', query),
+        undefined,
+        options.timeoutMs ?? SALES_LIST_REQUEST_TIMEOUT_MS,
+        { signal: options.signal },
+      ),
+    ),
     async () => {
       const db = await getLocalDb()
       return db.table('sales').orderBy('created_at').reverse().limit(1000).toArray()
     },
-    mirror,
+    // A timed-out list request has already consumed the page's whole read
+    // budget. Keep the ordinary retry for an immediate connection failure,
+    // but do not start another full timeout window after that budget expires.
+    {
+      // Live-server Sales data is a sensitive mirror and is purged by policy.
+      // Waiting for the server path keeps cancellation observable instead of
+      // converting an explicit abort into a background Dexie fallback race.
+      raceLocalFallback: false,
+      // The caller owns the AbortController until this promise settles. Await
+      // a stale cache refresh so returning a stale value cannot make the page
+      // abort its own still-running background request in `finally`.
+      staleWhileRevalidate: false,
+      retryTimedOutRead: false,
+    },
   )
 }
 
