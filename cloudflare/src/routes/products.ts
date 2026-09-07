@@ -3311,6 +3311,67 @@ export async function foldDuplicateProductInto(
 // since this file imports MergeReversal from there). See lib/undoAppliers.ts.
 registerMergeFold(foldDuplicateProductInto)
 
+type DuplicatePreviewStockRow = { branch_id: number; quantity: number }
+type DuplicatePreviewCatalog = {
+  moneyByProductId: Map<number, Record<string, unknown>>
+  stockByProductId: Map<number, DuplicatePreviewStockRow[]>
+  activeBatchCountByProductId: Map<number, number>
+}
+
+/**
+ * Hydrate every product the preview will render in one bounded catalog pass.
+ *
+ * The duplicate detector already returns the complete member ids. Reading
+ * stock, active-batch counts and current money again inside each group's map
+ * turned a 2,000-group preview into roughly 6,000 D1 round trips. Chunking the
+ * unique catalog member set keeps every statement within D1's 100-bind limit
+ * and makes the read count proportional to catalog rows rather than groups.
+ * The correlated batch count uses the existing variant-product index; joining
+ * batches directly would multiply branch rows and corrupt quantities.
+ */
+async function readDuplicatePreviewCatalog(
+  db: ReturnType<typeof getDb>,
+  groups: Awaited<ReturnType<typeof findDuplicateProductGroups>>,
+): Promise<DuplicatePreviewCatalog> {
+  const memberIds = [...new Set(groups.flatMap((group) => [
+    group.canonical.id,
+    ...group.duplicates.map((duplicate) => duplicate.id),
+  ]))]
+  const rows = await selectInChunks(memberIds, 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db.prepare(`
+      SELECT p.id, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => `p.${field}`).join(', ')},
+             bs.branch_id, bs.quantity,
+             (SELECT COUNT(*) FROM product_batches pb
+              WHERE pb.variant_product_id=p.id AND pb.is_active=1) AS active_batch_count
+      FROM products p
+      LEFT JOIN branch_stock bs ON bs.product_id=p.id
+      WHERE p.id IN (${sql})
+      ORDER BY p.id ASC, bs.branch_id ASC
+    `).all<Record<string, unknown>>(params)
+  })
+
+  const moneyByProductId = new Map<number, Record<string, unknown>>()
+  const stockByProductId = new Map<number, DuplicatePreviewStockRow[]>()
+  const activeBatchCountByProductId = new Map<number, number>()
+  for (const row of rows) {
+    const productId = Number(row.id)
+    if (!Number.isSafeInteger(productId) || productId <= 0) continue
+    if (!moneyByProductId.has(productId)) {
+      moneyByProductId.set(productId, {
+        id: productId,
+        ...Object.fromEntries([...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => [field, row[field]])),
+      })
+      activeBatchCountByProductId.set(productId, Number(row.active_batch_count) || 0)
+    }
+    const branchId = Number(row.branch_id)
+    if (!Number.isSafeInteger(branchId) || branchId <= 0) continue
+    if (!stockByProductId.has(productId)) stockByProductId.set(productId, [])
+    stockByProductId.get(productId)!.push({ branch_id: branchId, quantity: Number(row.quantity) || 0 })
+  }
+  return { moneyByProductId, stockByProductId, activeBatchCountByProductId }
+}
+
 app.get('/merge-duplicates/preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
@@ -3324,40 +3385,20 @@ app.get('/merge-duplicates/preview', async (c) => {
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
+  const previewCatalog = await readDuplicatePreviewCatalog(db, groups)
 
-  // One batch of queries per group (not per duplicate) to keep this
-  // proportional to group count rather than duplicate count -- same
-  // "snapshot once per group" instinct the real merge endpoint below
-  // already applies to the canonical's batch set, just extended here to
-  // every stock/batch lookup since a preview has no reason to be any
-  // cheaper-per-call than the thing it's previewing.
-  const previewGroups = await Promise.all(
-    groups.map(async (group) => {
+  const previewGroups = groups.map((group) => {
       const duplicateIds = group.duplicates.map((d) => d.id)
-
-      const stockRows = await selectInChunks(duplicateIds, 0, (chunk) => {
-        const { sql, params } = buildInClause('id', chunk)
-        return db
-          .prepare(`SELECT product_id, branch_id, quantity FROM branch_stock WHERE product_id IN (${sql})`)
-          .all<{ product_id: number; branch_id: number; quantity: number }>(params)
-      })
-      // GROUP BY is per variant_product_id, so a chunked count is still a
-      // complete count for each product -- no cross-chunk re-aggregation.
-      const batchCountRows = await selectInChunks(duplicateIds, 0, (chunk) => {
-        const { sql, params } = buildInClause('id', chunk)
-        return db
-          .prepare(`SELECT variant_product_id, COUNT(*) AS cnt FROM product_batches WHERE variant_product_id IN (${sql}) AND is_active = 1 GROUP BY variant_product_id`)
-          .all<{ variant_product_id: number; cnt: number }>(params)
-      })
-      const batchCountByProductId = new Map<number, number>(batchCountRows.map((r) => [r.variant_product_id, Number(r.cnt) || 0]))
 
       const branchQtyById = new Map<number, number>()
       let totalQuantityToMove = 0
-      for (const row of stockRows) {
-        const qty = Number(row.quantity) || 0
-        if (!qty) continue
-        branchQtyById.set(row.branch_id, (branchQtyById.get(row.branch_id) || 0) + qty)
-        totalQuantityToMove += qty
+      for (const duplicateId of duplicateIds) {
+        for (const row of previewCatalog.stockByProductId.get(duplicateId) || []) {
+          const qty = Number(row.quantity) || 0
+          if (!qty) continue
+          branchQtyById.set(row.branch_id, (branchQtyById.get(row.branch_id) || 0) + qty)
+          totalQuantityToMove += qty
+        }
       }
       const branchBreakdown = [...branchQtyById.entries()]
         .map(([branchId, quantity]) => ({ branchId, branchName: branchNameById.get(branchId) || null, quantity }))
@@ -3367,19 +3408,16 @@ app.get('/merge-duplicates/preview', async (c) => {
         id: dup.id,
         name: dup.name,
         barcode: dup.barcode,
-        quantity: stockRows.filter((r) => r.product_id === dup.id).reduce((sum, r) => sum + (Number(r.quantity) || 0), 0),
-        batchCount: batchCountByProductId.get(dup.id) || 0,
+        quantity: (previewCatalog.stockByProductId.get(dup.id) || []).reduce((sum, row) => sum + (Number(row.quantity) || 0), 0),
+        batchCount: previewCatalog.activeBatchCountByProductId.get(dup.id) || 0,
       }))
 
       // WHAT THIS RUN WILL DO TO THE COST, which no preview said before.
       // A merge takes one mean over the whole cluster's distinct valid
       // non-zero costs. It never averages an already-averaged keeper again.
-      const costRows = await selectInChunks([group.canonical.id, ...duplicateIds], 0, (chunk) => {
-        const { sql, params } = buildInClause('id', chunk)
-        return db
-          .prepare(`SELECT id, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].join(', ')} FROM products WHERE id IN (${sql})`)
-          .all<Record<string, unknown>>(params)
-      })
+      const costRows = [group.canonical.id, ...duplicateIds]
+        .map((id) => previewCatalog.moneyByProductId.get(id))
+        .filter((row): row is Record<string, unknown> => !!row)
       const costById = new Map(costRows.map((r) => [Number(r.id), r]))
       const canonicalCost = costById.get(group.canonical.id) || {}
       const costBefore = {
@@ -3417,8 +3455,7 @@ app.get('/merge-duplicates/preview', async (c) => {
           error: productMergeNumericError([issue]),
         })),
       }
-    }),
-  )
+    })
 
   return c.json({
     success: true,
