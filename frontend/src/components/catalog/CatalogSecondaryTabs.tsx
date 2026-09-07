@@ -15,7 +15,10 @@ import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
+import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell, StatusPill, SummaryTile } from './catalogUi'
 
 type IdValue = string | number
@@ -121,6 +124,8 @@ interface SubmissionDraft {
   platform: string
   note: string
   screenshots: string[]
+  rightsConsent: boolean
+  privacyConsent: boolean
 }
 
 interface CatalogMembershipSectionProps {
@@ -142,6 +147,7 @@ interface CatalogMembershipSectionProps {
   handleSubmitShareProof: () => void
   handleUploadSubmissionImages: () => void
   openPortalImage: (title: string, images: string[], index?: number) => void
+  accountSignedIn: boolean
 }
 
 interface BusinessFact {
@@ -216,12 +222,6 @@ interface AssistantRequestPolicy {
   perUserPerMinute?: number
 }
 
-interface AssistantReference {
-  url?: string
-  title?: string
-  snippet?: string
-}
-
 interface AssistantRecommendation {
   product_id: IdValue
   image_path?: string
@@ -235,8 +235,6 @@ interface AssistantRecommendation {
   how_to_use?: string
   cautions?: string
   ingredients_focus?: string[]
-  online_review_summary?: string
-  online_references?: AssistantReference[]
 }
 
 interface AssistantResponse {
@@ -267,7 +265,14 @@ interface CatalogAiSectionProps {
   assistantResponse?: AssistantResponse | null
   assistantExpandedProductId: IdValue | null
   setAssistantExpandedProductId: Dispatch<SetStateAction<IdValue | null>>
+  assistantDisclosure?: { provider?: string; dataUseNotice?: string } | null
+  assistantDataUseConsent: boolean
+  setAssistantDataUseConsent: (value: boolean) => void
 }
+
+// The assistant notice the merchant cannot edit away -- see its use below.
+const ASSISTANT_AUTOMATED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to a third-party AI provider to produce an answer and is kept for about 30 days, so please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, please speak to a pharmacist or doctor -- and contact the store team for anything about a product.'
+const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបីដើម្បីបង្កើតចម្លើយ ហើយរក្សាទុកប្រហែល៣០ថ្ងៃ ដូច្នេះសូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
 
 type CatalogSecondaryTabsProps = {
   tab?: string
@@ -278,7 +283,19 @@ function normalizePortalColor(value: unknown, fallback: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
 }
 
-function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
+function CatalogMembershipSection({
+  copy,
+  previewConfig,
+  submissionDraft,
+  setSubmissionDraft,
+  submissionSaving,
+  handleSubmissionPaste,
+  handleSubmitShareProof,
+  handleUploadSubmissionImages,
+  openPortalImage,
+  membershipError,
+  accountSignedIn,
+}: CatalogMembershipSectionProps) {
   // The anonymous membership lookup was removed (§2, user request). Typing a
   // membership number to see purchases/points exposed customer data on a
   // public surface; a customer's own history now lives behind a real account
@@ -300,6 +317,90 @@ function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
           </div>
         </div>
       </div>
+      {previewConfig.submissionEnabled ? (
+        <div className="mt-4 rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900">
+          <h3 className="text-base font-semibold text-slate-900 dark:text-white">{copy('shareProofTitle', 'Send share proof', 'ផ្ញើភស្តុតាងចែករំលែក')}</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-neutral-300">
+            {previewConfig.submissionInstructions || copy('shareProofInstructions', 'Upload screenshots for staff review. A submission does not guarantee points or approval.', 'បញ្ចូលរូបថតអេក្រង់សម្រាប់បុគ្គលិកពិនិត្យ។ ការផ្ញើមិនធានាថានឹងទទួលបានពិន្ទុ ឬការអនុម័តទេ។')}
+          </p>
+
+          {!accountSignedIn ? (
+            <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
+              {copy('submissionSignInRequired', 'Sign in before sending a screenshot.', 'សូមចូលគណនីមុនពេលផ្ញើរូបថតអេក្រង់។')}
+            </p>
+          ) : null}
+
+          <div className="mt-4 grid gap-3">
+            <div>
+              <label htmlFor="portal-submission-platform" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('submissionPlatform', 'Platform', 'បណ្ដាញ')}</label>
+              <AppSelect
+                id="portal-submission-platform"
+                name="portal_submission_platform"
+                value={submissionDraft.platform}
+                onChange={(platform) => setSubmissionDraft((current) => ({ ...current, platform }))}
+                ariaLabel={copy('submissionPlatform', 'Platform', 'បណ្ដាញ')}
+                className="mt-1 w-full"
+                buttonClassName="h-11 w-full"
+                options={['Facebook', 'Instagram', 'TikTok', 'Telegram', 'Other'].map((value) => ({ value, label: value }))}
+              />
+            </div>
+            <div>
+              <label htmlFor="portal-submission-note" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('submissionNote', 'Optional note', 'កំណត់ចំណាំ (ស្រេចចិត្ត)')}</label>
+              <textarea
+                id="portal-submission-note"
+                name="portal_submission_note"
+                className="input mt-1 min-h-24 resize-y"
+                maxLength={1000}
+                value={submissionDraft.note}
+                onPaste={handleSubmissionPaste}
+                onChange={(event) => setSubmissionDraft((current) => ({ ...current, note: event.target.value }))}
+                placeholder={copy('submissionPasteHint', 'You can paste screenshots here or use the upload button.', 'អ្នកអាចបិទភ្ជាប់រូបថតអេក្រង់នៅទីនេះ ឬប្រើប៊ូតុងបញ្ចូល។')}
+              />
+            </div>
+            <button type="button" className="btn-secondary w-fit text-sm" onClick={handleUploadSubmissionImages} disabled={!accountSignedIn || submissionSaving}>
+              <Upload className="mr-2 inline h-4 w-4" />
+              {copy('uploadScreenshots', 'Upload screenshots', 'បញ្ចូលរូបថតអេក្រង់')}
+            </button>
+            {submissionDraft.screenshots.length ? (
+              <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={copy('selectedScreenshots', 'Selected screenshots', 'រូបថតអេក្រង់ដែលបានជ្រើស')}>
+                {submissionDraft.screenshots.map((src, index) => (
+                  <li key={`${index}-${src.slice(-24)}`} className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-neutral-700">
+                    <button type="button" className="block aspect-square w-full" onClick={() => openPortalImage(copy('submissionScreenshot', 'Submission screenshot', 'រូបថតអេក្រង់ដែលបានផ្ញើ'), submissionDraft.screenshots, index)}>
+                      <img src={src} alt={`${copy('submissionScreenshot', 'Submission screenshot', 'រូបថតអេក្រង់ដែលបានផ្ញើ')} ${index + 1}`} className="h-full w-full object-cover" />
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-rose-700 shadow"
+                      onClick={() => setSubmissionDraft((current) => ({ ...current, screenshots: current.screenshots.filter((_, itemIndex) => itemIndex !== index) }))}
+                      aria-label={`${copy('remove', 'Remove', 'លុប')} ${index + 1}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 p-3 text-sm leading-6 dark:border-neutral-700">
+              <input type="checkbox" className="mt-1 h-4 w-4" checked={submissionDraft.rightsConsent} onChange={(event) => setSubmissionDraft((current) => ({ ...current, rightsConsent: event.target.checked }))} />
+              <span>{copy('submissionRightsConsent', 'I created these screenshots or have permission to send them for staff review.', 'ខ្ញុំបានបង្កើតរូបថតអេក្រង់ទាំងនេះ ឬមានការអនុញ្ញាតឱ្យផ្ញើសម្រាប់បុគ្គលិកពិនិត្យ។')}</span>
+            </label>
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 p-3 text-sm leading-6 dark:border-neutral-700">
+              <input type="checkbox" className="mt-1 h-4 w-4" checked={submissionDraft.privacyConsent} onChange={(event) => setSubmissionDraft((current) => ({ ...current, privacyConsent: event.target.checked }))} />
+              <span>{copy('submissionPrivacyConsent', 'I agree that the store may keep the screenshots and note for staff review under the Privacy Policy.', 'ខ្ញុំយល់ព្រមឱ្យហាងរក្សាទុករូបថតអេក្រង់ និងកំណត់ចំណាំសម្រាប់បុគ្គលិកពិនិត្យក្រោមគោលការណ៍ឯកជនភាព។')}</span>
+            </label>
+            {membershipError ? <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">{membershipError}</p> : null}
+            <button
+              type="button"
+              className="btn-primary w-fit text-sm"
+              onClick={handleSubmitShareProof}
+              disabled={!accountSignedIn || submissionSaving || !submissionDraft.screenshots.length || !submissionDraft.rightsConsent || !submissionDraft.privacyConsent}
+            >
+              <Send className="mr-2 inline h-4 w-4" />
+              {submissionSaving ? copy('saving', 'Saving...', 'កំពុងរក្សាទុក...') : copy('submitForReview', 'Submit for review', 'ផ្ញើសម្រាប់ពិនិត្យ')}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </SectionShell>
   )
 }
@@ -463,7 +564,13 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                         <Icon className="h-4 w-4" />
                       </span>
                       <div className="min-w-0">
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-neutral-500">{item.label}</div>
+                        {/* The field name ("Phone", "Address", ...) is the
+                            only thing that says what the value beside it is,
+                            so it is real copy, not decoration: slate-400 is
+                            2.56:1 on this card and neutral-500 is 3.29:1 on
+                            the dark one. slate-500/neutral-400 is the muted
+                            pair the rest of the storefront settled on. */}
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">{item.label}</div>
                         <div className={`portal-contact-value text-sm font-medium text-slate-800 dark:text-neutral-100 ${item.key === 'address' ? 'portal-contact-value-address' : ''}`} title={item.value}>{item.value}</div>
                       </div>
                     </div>
@@ -524,12 +631,15 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
               {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-neutral-400">{addressFact.value}</div> : null}
             </div>
           </div>
-          <iframe
-            title="portal-about-map"
+          {/* N45: the map is the storefront's only automatically-loading
+              third party, so it waits for a click instead of fetching Google
+              the moment this tab renders. Declining is a plain link, not a
+              dead end. */}
+          <PortalEmbedConsent
+            copy={copy}
             src={mapEmbedUrl}
-            className="h-72 w-full border-0"
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
+            title="portal-about-map"
+            address={addressFact?.value || ''}
           />
         </div>
       ) : null}
@@ -649,6 +759,9 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
     assistantResponse,
     assistantExpandedProductId,
     setAssistantExpandedProductId,
+    assistantDisclosure,
+    assistantDataUseConsent,
+    setAssistantDataUseConsent,
   } = props
 
   return (
@@ -733,8 +846,26 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
               <div className="mt-1 text-right text-xs text-slate-500">{assistantQuestion.length}/{questionCharLimit}</div>
             </div>
 
+            <label className="mt-3 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-800/70 dark:text-neutral-200">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0"
+                checked={assistantDataUseConsent}
+                onChange={(event) => setAssistantDataUseConsent(event.target.checked)}
+              />
+              <span>
+                {replaceVars(copy(
+                  'assistantDataUseConsent',
+                  'I understand that my question and optional shopping preferences are sent to {provider} and may be processed outside Cambodia. I will not include personal, medical, or payment details.',
+                  'ខ្ញុំយល់ថាសំណួរ និងចំណូលចិត្តទិញទំនិញស្រេចចិត្តរបស់ខ្ញុំត្រូវបានផ្ញើទៅ {provider} ហើយអាចត្រូវបានដំណើរការនៅក្រៅប្រទេសកម្ពុជា។ ខ្ញុំនឹងមិនបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន សុខភាព ឬការទូទាត់ទេ។',
+                ), {
+                  provider: assistantDisclosure?.provider || copy('configuredAiProvider', 'the configured AI provider', 'អ្នកផ្តល់សេវា AI ដែលបានកំណត់'),
+                })}
+              </span>
+            </label>
+
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" className="btn-primary text-sm" onClick={askAssistant} disabled={assistantLoading}>
+              <button type="button" className="btn-primary text-sm" onClick={askAssistant} disabled={assistantLoading || !assistantDataUseConsent}>
                 <Send className="mr-2 inline h-4 w-4" />
                 {assistantLoading ? copy('assistantLoading', 'Thinking...') : copy('askAssistant', 'Ask AI assistant')}
               </button>
@@ -756,6 +887,20 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
             <div className="rounded-[28px] border border-amber-200 bg-amber-50 px-4 py-4 text-xs leading-6 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
               {previewConfig.aiDisclaimer || copy('assistantNotice', 'AI generated, for reference only.')}
             </div>
+
+            {/* The block above is the MERCHANT's disclaimer: editable in the
+                portal editor, and therefore possible to shorten to nothing.
+                This one is the app's own and is not editable, because the
+                three things it says are not marketing -- the shopper is
+                talking to software and not a person, their question leaves
+                the shop, and a skin or health question belongs with a
+                pharmacist or a doctor rather than a product recommender
+                (N45). Cosmetics advertising rules treat a therapeutic claim
+                as a different product class; the assistant is instructed not
+                to make one, and a reader is told what it is either way. */}
+            <p className="rounded-[28px] border border-slate-200 bg-white px-4 py-3 text-[11px] leading-6 text-slate-600 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-400">
+              {copy('assistantAutomatedNotice', ASSISTANT_AUTOMATED_EN, ASSISTANT_AUTOMATED_KM)}
+            </p>
           </div>
         </div>
 
@@ -763,7 +908,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
 
         {assistantResponse?.summary ? (
           <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/80">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantResults', 'Suggested matches')}</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">{copy('assistantResults', 'Suggested matches')}</div>
             <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-neutral-300">{assistantResponse.summary}</p>
             {/* Backend returns follow_up_questions (snake_case); the
                 camelCase followUpQuestions was pre-existing dead UI (this
@@ -773,7 +918,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 across the AI response contract. */}
             {(assistantResponse.followUpQuestions?.length || assistantResponse.follow_up_questions?.length) ? (
               <div className="mt-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(assistantResponse.followUpQuestions || assistantResponse.follow_up_questions || []).map((question) => (
                     <button key={question} type="button" className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm dark:bg-neutral-900 dark:text-neutral-200" onClick={() => setAssistantQuestion(question)}>
@@ -796,7 +941,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                     {item.image_path ? (
                       <img src={item.image_path} alt={item.name} className="h-16 w-16 rounded-2xl object-cover" />
                     ) : (
-                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400" aria-hidden="true">
                         <ShoppingBag className="h-5 w-5" />
                       </div>
                     )}
@@ -816,20 +961,6 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                       {item.how_to_use ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantUse', 'How to use')}:</span> {item.how_to_use}</div> : null}
                       {item.cautions ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantCaution', 'Caution')}:</span> {item.cautions}</div> : null}
                       {item.ingredients_focus?.length ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantIngredients', 'Ingredients focus')}:</span> {item.ingredients_focus.join(', ')}</div> : null}
-                      {item.online_review_summary ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantReviews', 'Online review summary')}:</span> {item.online_review_summary}</div> : null}
-                      {item.online_references?.length ? (
-                        <div className="mt-3">
-                          <div className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantEvidence', 'Online references')}:</div>
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                            {item.online_references.map((reference, index) => (
-                              <li key={`${item.product_id}-${index}`}>
-                                {reference.url ? <a href={reference.url} target="_blank" rel="noreferrer" className="text-cyan-700 underline dark:text-amber-300">{reference.title || reference.url}</a> : (reference.title || reference.snippet || copy('reference', 'Reference', 'ឯកសារយោង'))}
-                                {reference.snippet ? <span className="text-slate-500 dark:text-neutral-400"> - {reference.snippet}</span> : null}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
                     </div>
                   ) : null}
                 </article>

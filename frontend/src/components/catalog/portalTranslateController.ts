@@ -100,14 +100,17 @@ export function writePortalTranslateTarget(sourceLang: unknown, targetLang: unkn
   const cookieValue = target === 'original' ? '' : `/${from}/${target}`
   if (!cookieValue) clearGoogleTranslateCookies()
   else {
-    const host = typeof window !== 'undefined' ? String(window.location?.hostname || '') : ''
-    const suffixes = [
-      'path=/; SameSite=Lax',
-      host && host.includes('.') ? `domain=.${host}; path=/; SameSite=Lax` : '',
-    ].filter(Boolean)
-    suffixes.forEach((suffix) => {
-      document.cookie = `googtrans=${cookieValue}; ${suffix}`
-    })
+    // Host-only, deliberately. Writing this at `domain=.${host}` as well
+    // would broadcast a visitor's translation choice to every sibling
+    // hostname on the registrable domain -- the staff app among them -- for
+    // a preference that only concerns the page they are reading. The cookie
+    // policy says this cookie is written "for this site"; a domain-wide
+    // write would make that sentence false. Google's widget reads
+    // document.cookie on this page, where a host-only cookie is visible.
+    // clearGoogleTranslateCookies() still clears the wide variants, so a
+    // cookie left by an older build or by the widget itself is still
+    // removable (N45).
+    document.cookie = `googtrans=${cookieValue}; path=/; SameSite=Lax`
   }
   try {
     window.localStorage?.setItem(PORTAL_TRANSLATE_STORAGE_KEY, target)

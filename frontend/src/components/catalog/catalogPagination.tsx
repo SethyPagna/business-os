@@ -1,21 +1,8 @@
 import PaginationControls from '../shared/PaginationControls'
 
-const CATALOG_PAGE_SIZE_OPTIONS = [20, 50, 100]
-// The preset list's display order is ascending (20/50/100) and unrelated to
-// which one is the actual default. Keeping those two concerns separate still
-// matters -- reading OPTIONS[0] as "the default" is how this drifted before,
-// and it would drift again the moment someone reorders the presets.
-//
-// The VALUE reverses Part 151's org-wide "default page size is 50" at
-// explicit request (Aug 25 2026): "for the public website also do 20 per
-// page". 50 product cards is a long scroll on a phone, and this is the
-// storefront -- the surface most likely to be opened on one. Recorded rather
-// than quietly overwritten, since Part 151 was a deliberate decision.
-//
-// Matches DEFAULT_PAGE_SIZE in shared/PaginationControls.tsx (the admin
-// side) and the server-side fallback in routes/portal.ts, so a page load
-// that omits pageSize gets the same 20 from either end.
-export const CATALOG_DEFAULT_PAGE_SIZE = 20
+// Preserve the existing catalogue default while removing the shopper-facing
+// size selector. The public pager changes page only.
+export const CATALOG_DEFAULT_PAGE_SIZE = 50
 
 type NumericInput = number | string | null | undefined
 type Translate = (key: string) => string | undefined
@@ -25,7 +12,6 @@ type CatalogPaginationControlsProps = {
   pageSize?: NumericInput
   totalItems?: NumericInput
   onPageChange?: (page: number) => void
-  onPageSizeChange?: (pageSize: number) => void
   label?: string
   t?: Translate
   className?: string
@@ -50,7 +36,6 @@ export default function CatalogPaginationControls({
   pageSize = CATALOG_DEFAULT_PAGE_SIZE,
   totalItems = 0,
   onPageChange,
-  onPageSizeChange,
   label = 'products',
   t,
   className = '',
@@ -61,17 +46,17 @@ export default function CatalogPaginationControls({
       pageSize={pageSize}
       totalItems={totalItems}
       onPageChange={onPageChange}
-      onPageSizeChange={onPageSizeChange}
-      pageSizeOptions={CATALOG_PAGE_SIZE_OPTIONS}
       label={label}
       t={t}
-      editablePageSizeInput={false}
-      // The storefront's own layout: one centred pill with the per-page
-      // chooser inside it and no "Showing X-Y of N" row. The old wrapper
-      // classes here (a rounded card with its own background) existed to
-      // dress that summary row's box; with the summary gone there is no box
+      // The storefront's own layout: one centred pill -- Back / page / count /
+      // Next and nothing else -- and no "Showing X-Y of N" row. The old
+      // wrapper classes here (a rounded card with its own background) existed
+      // to dress that summary row's box; with the summary gone there is no box
       // left to dress, and a full-width card behind a centred pill would just
       // reintroduce the bar the owner asked us to remove.
+      //
+      // No onPageSizeChange, pageSizeOptions, or editable input: the public
+      // storefront has one fixed server-aligned page size and one pager.
       layout="centered"
       className={className}
     />

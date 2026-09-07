@@ -1,3 +1,27 @@
+# N45. The Worker sets security headers on /api/*, but the storefront HTML,
+# JS and CSS are served by the static-asset layer BEFORE any Worker code
+# runs, so until now the public pages carried none at all. This block is the
+# only place that can reach them.
+#
+# The CSP is REPORT-ONLY on purpose. index.html carries a synchronous inline
+# bootstrap (it swaps the manifest/icons before iOS can snapshot the page),
+# so an enforcing policy needs 'unsafe-inline' for scripts -- which buys
+# almost nothing. Report-only lets the real violations be collected first;
+# move that bootstrap to a hashed or external script, then rename this to
+# Content-Security-Policy and drop 'unsafe-inline'.
+#
+# The allowed origins are the storefront's real third parties and nothing
+# else: Google Translate (visitor-selected language) and the Google Maps
+# frame (two-click, see legal/PortalEmbedConsent.tsx). camera=(self) stays
+# permitted because the barcode scanner needs it.
+/*
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(self), payment=(), usb=()
+  Strict-Transport-Security: max-age=15552000; includeSubDomains
+  Content-Security-Policy-Report-Only: default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://translate.googleapis.com https://translate-pa.googleapis.com; script-src 'self' 'unsafe-inline' https://translate.google.com https://translate.googleapis.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://www.gstatic.com; frame-src https://www.google.com https://maps.google.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'
+
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 

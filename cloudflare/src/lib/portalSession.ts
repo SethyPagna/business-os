@@ -13,13 +13,27 @@ import type { Env } from '../index'
 // origin (leangbeauty.com) is never sent to admin.leangbeauty.com.
 
 const PORTAL_COOKIE_NAME = 'bos_portal'
-// Storefront accounts exist to REMEMBER a customer (their cart + wishlist),
-// so the session is long-lived by design ("permanent memory"). 10 years is
-// indistinguishable from "always"; the cookie itself is capped below.
-const PORTAL_SESSION_MS = 10 * 365 * 24 * 60 * 60 * 1000
 // RFC 6265bis cookie Expires ceiling (Hono throws past ~400 days) — same cap
 // lib/auth.ts uses.
 const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
+// Storefront accounts remember a customer's saved list. Session rows contain
+// only the account id and a one-way token hash; IP addresses and user-agent
+// strings are not persisted in this long-lived table.
+// the row expires exactly when the cookie the browser holds does, and every
+// visit past the halfway mark pushes both out again.
+//
+// It used to be ten years, which broke this twice over (N45). The row sat in
+// portal_sessions with the visitor's last_ip and user-agent for a decade,
+// unreachable by the retention sweep, which deletes a row once its expires_at
+// is in the past -- so "expired sessions are deleted automatically" in the
+// privacy policy was not true of the ones that mattered. And because
+// slidePortalSession() computes the next expiry as min(now + ttl, now +
+// MAX_COOKIE_AGE_MS), a ten-year ttl made every candidate expiry EARLIER
+// than the stored one, so the slide returned without doing anything and the
+// cookie was never re-issued: a customer who visited daily was still signed
+// out at 399 days. Matching the two ceilings fixes the retention hole and
+// turns the sliding back on.
+const PORTAL_SESSION_MS = MAX_COOKIE_AGE_MS
 const SLIDE_AFTER_FRACTION = 0.5
 
 async function hashToken(token: string): Promise<string> {
@@ -46,19 +60,16 @@ export type PortalAccount = {
 export async function createPortalSession(
   env: Env,
   accountId: number,
-  options: { userAgent?: string | null; ip?: string | null } = {},
 ): Promise<{ token: string; expiresAt: string }> {
   const token = randomToken()
   const tokenHash = await hashToken(token)
   const expiresAt = new Date(Date.now() + PORTAL_SESSION_MS).toISOString()
   await getDb(env).prepare(`
-    INSERT INTO portal_sessions (account_id, token_hash, user_agent, last_ip, expires_at)
-    VALUES (@account_id, @token_hash, @user_agent, @ip, @expires_at)
+    INSERT INTO portal_sessions (account_id, token_hash, expires_at)
+    VALUES (@account_id, @token_hash, @expires_at)
   `).run({
     account_id: accountId,
     token_hash: tokenHash,
-    user_agent: options.userAgent || null,
-    ip: options.ip || null,
     expires_at: expiresAt,
   })
   return { token, expiresAt }

@@ -1,4 +1,5 @@
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useId, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ReactNode } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
@@ -135,7 +136,7 @@ function DetailSectionBlock({
           ))}
         </ul>
       ) : (
-        <p {...getKhmerTextProps(items[0] || emptyText, `whitespace-pre-line text-sm leading-6 ${items.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`)}>
+        <p {...getKhmerTextProps(items[0] || emptyText, `whitespace-pre-line text-sm leading-6 ${items.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
           {items[0] || emptyText}
         </p>
       )}
@@ -143,9 +144,57 @@ function DetailSectionBlock({
   )
 }
 
+// Everything focus can land on inside the sheet, in DOM order -- the two
+// ends of this list are where a trapped Tab wraps around.
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, onAddToBucket, bucketQty = 0 }: ProductDetailFlyoutProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null)
+  const titleId = useId()
+
+  // A sheet that covers the page has to BEHAVE like a dialog, not just be
+  // labelled one. The base tree announced role="dialog" aria-modal="true"
+  // and then did none of the four things that makes true: focus stayed on
+  // the card behind it, Tab walked straight out into the catalog underneath,
+  // Escape did nothing, and closing left focus on <body>.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null
+    const raf = requestAnimationFrame(() => closeButtonRef.current?.focus())
+    return () => {
+      cancelAnimationFrame(raf)
+      previouslyFocusedRef.current?.focus?.()
+    }
+  }, [])
+
+  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      // The image lightbox opens inside this sheet and closes on Escape
+      // too; without this the one keypress would shut both.
+      if (lightboxOpen) return
+      event.stopPropagation()
+      onClose()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+    if (!focusable || focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    const current = typeof document === 'undefined' ? null : document.activeElement
+    if (event.shiftKey && (current === first || !dialogRef.current?.contains(current))) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && current === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
   const product = view.product
   if (!product) return null
 
@@ -166,38 +215,56 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   const cautionItems = productCautionItems.length
     ? productCautionItems
     : (String(cautionDefault || '').trim() ? [String(cautionDefault).trim()] : [])
+
+  // Alt text a shopper can actually use: the product name PLUS its brand, so
+  // "Hydrating Toner" and "Hydrating Toner - Some Brand" are distinguishable
+  // when several tabs of the storefront are open. Empty when the product has
+  // no name at all, which is the correct "decorative" signal -- the sheet
+  // header right above already carries whatever identity exists.
+  const galleryImageAlt = [product.name, brandValues[0]].filter(Boolean).join(' - ')
+  const imageLabel = (index: number) => copy('dotsLabel', 'Image {current} of {total}')
+    .replace('{current}', String(index + 1))
+    .replace('{total}', String(gallery.length))
   const needMoreDetailsText = String(needMoreDetailsDefault || '').trim()
     || copy('productNeedMoreDetailsFallback', 'Contact us for more product details.')
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+      {/* The dim behind the sheet used to be the same element that closed
+          it on click, which put a nameless click target in the tree wrapped
+          around the dialog itself. It is a backdrop: presentational, with
+          Escape as the keyboard equivalent of clicking it. */}
+      <div className="absolute inset-0 bg-black/50" aria-hidden="true" onClick={onClose} />
       <div
-        className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:bg-neutral-900"
-        onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:bg-neutral-900"
         role="dialog"
         aria-modal="true"
-        aria-label={product.name || copy('productDetails', 'Product details')}
+        aria-labelledby={titleId}
       >
         <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-neutral-800">
           <div className="min-w-0 pr-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
               {copy('productShopName', "Shop's Product Name")}
             </div>
-            <div {...getKhmerTextProps(product.name || '', 'break-words text-base font-semibold text-slate-900 dark:text-white')}>
-              {product.name}
+            <div id={titleId} {...getKhmerTextProps(product.name || '', 'break-words text-base font-semibold text-slate-900 dark:text-white')}>
+              {product.name || copy('productDetails', 'Product details')}
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label={copy('close', 'Close')}
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
           {/* One image at a time, as a card. Arrows step through the set and
               the image itself opens the lightbox, where the photos can be
               viewed on their own without the rest of the page. The thumbnail
@@ -210,10 +277,10 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 onClick={() => setLightboxOpen(true)}
                 aria-label={copy('viewImages', 'View images')}
               >
-                <CatalogProductImage src={activeImage} alt={product.name || ''} className="h-full w-full object-contain" />
+                <CatalogProductImage src={activeImage} alt={galleryImageAlt} className="h-full w-full object-contain" />
               </button>
             ) : (
-              <div className="flex h-full items-center justify-center text-slate-300">
+              <div className="flex h-full items-center justify-center text-slate-300" aria-hidden="true">
                 <ShoppingBag className="h-14 w-14" />
               </div>
             )}
@@ -235,19 +302,24 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 >
                   <ChevronRight className="h-5 w-5" />
                 </button>
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white">
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white" aria-live="polite" aria-atomic="true">
                   {activeIndex + 1}/{gallery.length}
                 </div>
               </>
             ) : null}
           </div>
           {gallery.length > 1 ? (
-            <div className="flex gap-2 overflow-x-auto p-3">
+            <div className="flex gap-2 overflow-x-auto overscroll-x-contain p-3">
               {gallery.map((image, index) => (
                 <button
                   type="button"
                   key={`${image}-${index}`}
                   onClick={() => setActiveIndex(index)}
+                  // The thumbnail image is deliberately alt="" (it repeats the
+                  // photo above), which left this button with no accessible
+                  // name at all -- a screen reader read a row of "button".
+                  aria-label={imageLabel(index)}
+                  aria-current={index === activeIndex ? 'true' : undefined}
                   className={`h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg border-2 ${index === activeIndex ? 'border-slate-900 dark:border-white' : 'border-transparent'}`}
                 >
                   <CatalogProductImage src={image} alt="" className="h-full w-full object-cover" />
@@ -271,7 +343,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               <div className="text-xl font-semibold text-slate-900 dark:text-white">
                 {view.pricePresentation.primaryText}
                 {view.pricePresentation.originalText ? (
-                  <span className="ml-2 text-sm font-normal text-slate-400 line-through dark:text-neutral-500">
+                  <span className="ml-2 text-sm font-normal text-slate-500 line-through dark:text-neutral-400">
                     {view.pricePresentation.originalText}
                   </span>
                 ) : null}
@@ -279,13 +351,13 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             ) : null}
 
             <DetailField label={copy('productOfficialName', 'Official Product Name')}>
-              <p {...getKhmerTextProps(parsed.officialName || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.officialName ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`)}>
+              <p {...getKhmerTextProps(parsed.officialName || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.officialName ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
                 {parsed.officialName || emptyDetailText}
               </p>
             </DetailField>
 
             <DetailField label={copy('productIntroduction', 'Introduction')}>
-              <p {...getKhmerTextProps(parsed.intro || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.intro ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`)}>
+              <p {...getKhmerTextProps(parsed.intro || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.intro ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
                 {parsed.intro || emptyDetailText}
               </p>
             </DetailField>
@@ -293,13 +365,13 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             <DetailSectionBlock sectionKey="features_benefits" items={featureItems} copy={copy} emptyText={emptyDetailText} />
 
             <DetailField label={copy('productCategory', 'Category')}>
-              <p className={`text-sm leading-6 ${categoryValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`}>
+              <p className={`text-sm leading-6 ${categoryValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`}>
                 {categoryValues.join(', ') || emptyDetailText}
               </p>
             </DetailField>
 
             <DetailField label={copy('productBrand', 'Brand')}>
-              <p className={`text-sm leading-6 ${brandValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`}>
+              <p className={`text-sm leading-6 ${brandValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`}>
                 {brandValues.join(', ') || emptyDetailText}
               </p>
             </DetailField>
@@ -366,7 +438,6 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               next: copy('nextImage', 'Next image'),
               imageCount: copy('imageCount', '{current}/{total}'),
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-              close: copy('close', 'Close'),
             }}
           />
         ) : null}

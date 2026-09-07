@@ -306,4 +306,44 @@ check('the public recommendation payload NEVER carries a raw stock count -- only
   assert.strictEqual(payload.stock_status, 'low_stock')
 })
 
+check('a fabricated review or citation never reaches the shopper, however the model answers', () => {
+  // The prompt tells the model it has no web access and must leave these
+  // empty. This is the case where it does not comply: the payload arrives
+  // with a confident-looking review summary and a citation to a page that
+  // does not exist. Instructing is not enforcing -- a made-up review shown
+  // on the shop's own site is a claim the SHOP made, so the parser drops
+  // both fields rather than tidying them up (N45).
+  const candidate = product({ id: 11, name: 'Serum', stock_status: 'in_stock' })
+  const raw = JSON.stringify({
+    summary: 'here you go',
+    off_topic: false,
+    recommendations: [{
+      product_id: 11, name: 'Serum', reason: 'fits',
+      online_review_summary: 'Reviewers on beautyforum.example say it cleared their acne in two weeks.',
+      citations: [{ title: 'Independent review', source: 'beautyforum.example', url: 'https://beautyforum.example/serum', note: '4.8 stars' }],
+    }],
+  })
+  const result = parseAssistantPayload(raw, new Map([[11, candidate]]), 'disclaimer')
+  const payload = result.recommendations[0]
+  assert.ok(!('online_review_summary' in payload), 'a model-authored review summary must never be served')
+  assert.ok(!('citations' in payload), 'a model-authored citation must never be served')
+})
+
+check('the health-claim rules sit AFTER the merchant instructions in the prompt', () => {
+  // Ordering is the whole point: a merchant can set free-text extra
+  // instructions, and if the safety rules were emitted before them a shop
+  // could tell the assistant to promise a cure. Read off the real source,
+  // because buildPrompt is not exported.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalAi.ts'), 'utf8')
+  const merchant = source.indexOf('Extra merchant instructions:')
+  const noClaims = source.indexOf('NO HEALTH OR EFFICACY CLAIMS')
+  const notClinician = source.indexOf('YOU ARE NOT A CLINICIAN')
+  assert.ok(merchant > 0, 'the merchant extra-instructions line must still exist')
+  assert.ok(noClaims > merchant, 'the no-claims rule must come after merchant instructions so it cannot be overridden')
+  assert.ok(notClinician > merchant, 'the not-a-clinician rule must come after merchant instructions')
+  for (const banned of ['cures', 'clinically proven', 'pharmacist']) {
+    assert.ok(source.includes(banned), `the prompt must still name ${banned}`)
+  }
+})
+
 console.log(`\n${checks} check(s) passed.`)

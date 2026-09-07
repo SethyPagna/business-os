@@ -281,3 +281,105 @@ body[data-public-portal='true'] video,
     min-height: 44px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Accessibility floor for the public storefront (N45).
+
+   1. A VISIBLE focus indicator. Several storefront inputs carry Tailwind's
+      `outline-none` with only a border/background swap as the replacement --
+      a 1px border tint is not a focus indicator a keyboard-only shopper can
+      follow, and on the search field inside the filter menu there was nothing
+      at all. This paints one ring for every focusable thing on the portal,
+      after the component's own styles, and only for :focus-visible so a mouse
+      click does not light it up. sky-700 (#0369a1) is 5.93:1 on the light
+      ground and amber-300 (#fcd34d) is 11.4:1 on the dark one, both well past
+      the 3:1 WCAG 1.4.11 floor for a UI component.
+
+      The ROOT SET matters more than the rule. There are three markers and the
+      live storefront only ever carries the third: CatalogPage (the admin
+      preview route) stamps body[data-public-portal] and wraps its surfaces in
+      [data-portal-root], while PublicCatalogPage -- the customer route -- has
+      neither and instead marks its own outermost <div> with
+      data-public-media-protection. Scoping this rule to the first two roots
+      alone left every drawer on the real shop (bucket, account, wishlist,
+      contact) with no ring at all, which is exactly the surface the rule
+      exists for. :focus-visible and prefers-reduced-motion therefore name all
+      three roots, and the pointer:coarse block above names every root they do
+      EXCEPT [data-portal-root] -- that marker is also stamped around the admin
+      portal editor (CatalogPage's !publicView return), and raising every
+      button there to 44px would rewrite an admin surface's density on a
+      tablet. A ring and a motion switch cost nothing, so they take the wider
+      set. tests/portalAccessibility.test.ts pins that one-directional
+      relationship: a root may have a ring without touch targets, never touch
+      targets without a ring.
+
+      What this rule can NEVER reach: anything shared/PortalMenu.tsx sends
+      through createPortal() to document.body, because that subtree is not a
+      descendant of any of the three roots. Those inputs carry their own
+      focus-visible:outline-* utilities instead (PortalFilterCombobox,
+      CatalogPreviewSurface's language search), and the CatalogAccountSection
+      inputs carry theirs too so the form does not depend on this rule.
+   --------------------------------------------------------------------------- */
+body[data-public-portal='true'] :focus-visible,
+[data-public-media-protection='true'] :focus-visible,
+[data-portal-root='true'] :focus-visible {
+  outline: 3px solid #0369a1;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+[data-portal-root='true'].dark :focus-visible,
+.dark [data-portal-root='true'] :focus-visible,
+[data-public-media-protection='true'].dark :focus-visible,
+.dark [data-public-media-protection='true'] :focus-visible {
+  outline-color: #fcd34d;
+}
+
+/* 2. Skip-to-content. Off-screen until focused, then anchored top-left over
+      the header so the first Tab on the storefront jumps past the social /
+      language / theme row straight into the catalogue. */
+.portal-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+
+.portal-skip-link:focus,
+.portal-skip-link:focus-visible {
+  left: 0.75rem;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  width: auto;
+  height: auto;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.75rem;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* 3. prefers-reduced-motion. The promo strip drifts on its own and several
+      cards translate/scale on hover; a visitor who has asked their OS for
+      less motion gets none of it. The strip's JS drift checks the same query
+      (PortalPromoStrip), so this covers the CSS half only. */
+@media (prefers-reduced-motion: reduce) {
+  body[data-public-portal='true'] *,
+  [data-public-media-protection='true'] *,
+  [data-portal-root='true'] * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  body[data-public-portal='true'] .group:hover .group-hover\:scale-105,
+  body[data-public-portal='true'] .group:hover .group-hover\:scale-\[1\.03\],
+  [data-portal-root='true'] .group:hover .group-hover\:scale-105,
+  [data-portal-root='true'] .group:hover .group-hover\:scale-\[1\.03\],
+  [data-public-media-protection='true'] .group:hover .group-hover\:scale-105,
+  [data-public-media-protection='true'] .group:hover .group-hover\:scale-\[1\.03\] {
+    transform: none !important;
+  }
+}
