@@ -15,6 +15,7 @@ export const RESTORE_WORK_EVENT = 'bos:restore-work'
 
 export type MinimizedWorkKind =
   | 'add_product'
+  | 'edit_product'
   | 'fast_stockin'
   | 'receive_batch'
   | 'create_products_session'
@@ -27,10 +28,9 @@ export type MinimizedWorkPermission = {
   actionKey: string
 }
 
-export type MinimizedWorkEntry = {
+type MinimizedWorkEntryBase = {
   /** Unique key -- re-minimizing the same flow replaces its chip. */
   key: string
-  kind: MinimizedWorkKind
   /** The sidebar page hosting the flow (live navigationConfig id -- the
    * hubs' ids post-E-phase: 'products', 'branches', 'sales', ...). */
   pageId: string
@@ -49,6 +49,32 @@ export type MinimizedWorkEntry = {
    * must not reopen an action the current operator can no longer perform. */
   requiredPermission?: MinimizedWorkPermission
   minimizedAt: number
+}
+
+/** Product edits must point at one exact entity draft. A family-wide fallback
+ * could discard or restore a different product's changes. */
+export type MinimizedWorkEntry =
+  | (MinimizedWorkEntryBase & {
+      kind: 'edit_product'
+      payload: { productId: string | number }
+      draftKey: string
+    })
+  | (MinimizedWorkEntryBase & {
+      kind: Exclude<MinimizedWorkKind, 'edit_product'>
+      payload?: Record<string, unknown>
+      draftKey?: string
+    })
+
+type NewMinimizedWorkEntry = MinimizedWorkEntry extends infer Entry
+  ? Entry extends MinimizedWorkEntry
+    ? Omit<Entry, 'minimizedAt'>
+    : never
+  : never
+
+const FALLBACK_PERMISSION_BY_KIND: Partial<Record<MinimizedWorkKind, MinimizedWorkPermission>> = {
+  // Keep legacy/malformed parked edit entries safe even if they predate the
+  // explicit requiredPermission metadata now written by the host.
+  edit_product: { permissionKey: 'products', actionKey: 'edit' },
 }
 
 const STORE_BASE_KEY = 'minimized_work'
@@ -83,7 +109,7 @@ function persist(): void {
   for (const listener of listeners) listener()
 }
 
-export function minimizeWork(entry: Omit<MinimizedWorkEntry, 'minimizedAt'>): void {
+export function minimizeWork(entry: NewMinimizedWorkEntry): void {
   ensureCurrentScope()
   entries = [...entries.filter((existing) => existing.key !== entry.key), { ...entry, minimizedAt: Date.now() }]
   persist()
@@ -134,7 +160,7 @@ export function canRestoreMinimizedWork(
   entry: MinimizedWorkEntry,
   can: (permissionKey: string, actionKey: string) => boolean,
 ): boolean {
-  const required = entry.requiredPermission
+  const required = entry.requiredPermission || FALLBACK_PERMISSION_BY_KIND[entry.kind]
   return !required || can(required.permissionKey, required.actionKey)
 }
 
@@ -167,5 +193,5 @@ export function markRestoreHandled(kind: MinimizedWorkKind): void {
 export function reparkDeniedRestore(entry: MinimizedWorkEntry): void {
   markRestoreHandled(entry.kind)
   const { minimizedAt: _previousMinimizedAt, ...parked } = entry
-  minimizeWork(parked)
+  minimizeWork(parked as NewMinimizedWorkEntry)
 }

@@ -18,6 +18,9 @@ import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 
 const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   add_product: 'product_new_standalone-create',
+  // Product edit drafts are entity-specific. The host always supplies the
+  // exact actor-scoped key; an older chip must never clear a sibling edit.
+  edit_product: null,
   fast_stockin: 'fast_stockin',
   create_products_session: 'create_products_session',
   // Receive drafts are per product. New chips always carry their exact
