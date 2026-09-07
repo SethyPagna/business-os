@@ -17,6 +17,22 @@
 //       inside the same receipt, never as a second row;
 //   (c) fast stock-in sessions (per-line POST /batches or /adjust carrying a
 //       sessionId, no operations row) are unchanged.
+//
+// RECORD CORRECTION (2026-09-06). Commit ea29b009 on the a2 integration
+// branch removed this UNION from lib/stockInSessionsQuery.ts and its message
+// says it did so to 'preserve the indexed session query'. That reason is not
+// true: the query a7ff72f7 had just cherry-picked was already indexed -- the
+// list's own test asserts the revert lookup keeps the reference_id index
+// (test-stock-in-sessions-pure.cjs: doesNotMatch /CAST\(rx\.reference_id AS
+// TEXT\)/), and that assertion was green on both sides of ea29b009. What
+// ea29b009 actually reverted was a smuggled copy of this lane's commit
+// 2bf8dd10, i.e. the zero-quantity session-line feature itself.
+//
+// Reverting it was the right call, for a reason the message does not give:
+// the feature had arrived without its tests. It belongs to this lane and
+// arrives with them -- this file and frontend/tests/stockInSessionZeroLines
+// .test.ts. A reconciler reading the commit message alone would reject the
+// UNION a second time for a performance concern that does not exist.
 const assert = require('node:assert/strict')
 const { execSync } = require('node:child_process')
 const fs = require('node:fs')
