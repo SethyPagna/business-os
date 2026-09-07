@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { copyFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  balancedAnd,
   buildFullRowGuards,
   fingerprint,
   guardPayloadBytes,
@@ -282,6 +283,45 @@ try {
   assert(compactGuardPayloadBytes <= maxGuardPayloadBytes, 'positional full-row guard payload exceeded its transport budget')
   assert(compactGuards.every((guard) => !guard.params[0].includes('"branch_id":')), 'full-row guard payload still repeats column names in every row')
   assert(compactGuards[0].sql.includes("json_extract(expected.value, '$[0]')"), 'full-row guard does not use the pinned positional id index')
+  const salesGuard = compactGuards.at(-2)
+  const salesColumns = generatedManifest.full_row_precondition.expected_columns_from_sealed_production_schema.sales
+  assert((salesGuard.sql.match(/actual\."/g) || []).length === salesColumns.length + 1, 'balanced sales guard omitted or duplicated a full-row column predicate')
+  let expressionDepth = 0
+  let maximumExpressionDepth = 0
+  for (const character of balancedAnd(salesColumns.map((_, index) => `value_${index} IS expected_${index}`))) {
+    if (character === '(') maximumExpressionDepth = Math.max(maximumExpressionDepth, ++expressionDepth)
+    else if (character === ')') expressionDepth -= 1
+  }
+  assert(expressionDepth === 0 && maximumExpressionDepth <= 6, 'sales full-row AND expression is not logarithmically balanced')
+  const depthBatchPath = join(work, 'depth-limit-batch.json')
+  writeFileSync(depthBatchPath, JSON.stringify([
+    ...compactGuards.map(({ sql, params }) => ({ sql, params })),
+    ...generatedBatch.statements.map(({ sql }) => ({ sql, params: [] })),
+  ]))
+  const depthProbeSource = `
+import json, sqlite3, sys
+database_path, batch_path = sys.argv[1:3]
+with open(batch_path, encoding='utf-8') as handle:
+    statements = json.load(handle)
+connection = sqlite3.connect(database_path)
+connection.setlimit(sqlite3.SQLITE_LIMIT_EXPR_DEPTH, 100)
+connection.execute('BEGIN IMMEDIATE')
+try:
+    for statement in statements:
+        connection.execute(statement['sql'], statement['params'])
+finally:
+    connection.rollback()
+connection.close()
+`
+  const pythonCommands = process.platform === 'win32' ? ['py', 'python'] : ['python3', 'python']
+  let depthProbe
+  for (const command of pythonCommands) {
+    const candidate = spawnSync(command, ['-c', depthProbeSource, applyDatabasePath, depthBatchPath], { encoding: 'utf8' })
+    if (!candidate.error || candidate.error.code !== 'ENOENT') { depthProbe = candidate; break }
+  }
+  assert(depthProbe && depthProbe.status === 0, `91-statement SQLite depth-100 probe failed: ${String(depthProbe?.stderr || depthProbe?.error || 'Python unavailable').trim()}`)
+  const maximumWriteAndCount = Math.max(...generatedBatch.statements.map((statement) => (statement.sql.match(/\bAND\b/g) || []).length))
+  assert(maximumWriteAndCount < 20, 'a reviewed static write has an unexpectedly deep AND precondition')
   let disposed = false
   const confirmations = {
     'confirm-reviewed-execution': true,
@@ -431,7 +471,7 @@ try {
     bad_confirmation_rejected_before_binding: confirmationRejectedBeforeBinding,
     token_error_redacted: tokenFailureSafe,
     operator: { status: operatorResult.status, batch_calls: successfulBinding.state.batchCalls, atomic_statements: successfulBinding.state.statementCounts[0], disposed },
-    compact_guard_payload: { bytes: compactGuardPayloadBytes, maximum: maxGuardPayloadBytes, positional: true, reordered_columns_rejected: reorderedColumnsRejected, null_text_drift_rejected: nullTextDriftRejected, numeric_type_drift_rejected: numericTypeDriftRejected },
+    compact_guard_payload: { bytes: compactGuardPayloadBytes, maximum: maxGuardPayloadBytes, positional: true, sales_and_depth: maximumExpressionDepth, sqlite_depth_100_all_91_statements: depthProbe.status === 0, maximum_write_and_count: maximumWriteAndCount, reordered_columns_rejected: reorderedColumnsRejected, null_text_drift_rejected: nullTextDriftRejected, numeric_type_drift_rejected: numericTypeDriftRejected },
     concurrent_target_drift: { refused_atomically: concurrentDriftRefused, preserved_non_branch_edit: concurrentAfter.amount_usd, branch_changes: concurrentAfter.branch_changes, audit: concurrentAfter.audit },
     unrelated_concurrent_write: { repair_succeeded: unrelatedResult.status === 'applied_and_verified', preserved: unrelatedPreserved === 1 },
     recovery_operator: { status: recoveryOperatorResult.status, atomic_statements: recoveryOperatorBinding.state.statementCounts[0], disposed: recoveryOperatorDisposed },

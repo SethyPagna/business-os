@@ -267,6 +267,19 @@ const safeIdentifier = (value) => {
   return `"${value}"`
 }
 
+function balancedAnd(terms) {
+  assert(Array.isArray(terms) && terms.length > 0 && terms.every((term) => typeof term === 'string' && term), 'balanced AND requires non-empty SQL terms')
+  let level = [...terms]
+  while (level.length > 1) {
+    const next = []
+    for (let index = 0; index < level.length; index += 2) {
+      next.push(index + 1 < level.length ? `(${level[index]}\n      AND ${level[index + 1]})` : level[index])
+    }
+    level = next
+  }
+  return level[0]
+}
+
 function fullRowGuard(table, rows, columns, label) {
   assert(guardTableAllowlist.has(table), 'full-row guard table is not allowlisted')
   assert(rows.length > 0 && rows.length <= 99, 'full-row guard chunk must contain 1 to 99 rows')
@@ -284,10 +297,10 @@ function fullRowGuard(table, rows, columns, label) {
       return value
     })
   })
-  const comparisons = columns.map((column, index) => {
+  const comparisons = balancedAnd(columns.map((column, index) => {
     const columnSql = safeIdentifier(column)
     return `actual.${columnSql} IS json_extract(expected.value, '$[${index}]')`
-  }).join('\n      AND ')
+  }))
   return {
     label,
     expected_changes: 0,
@@ -467,6 +480,7 @@ if (isMain) main().catch((error) => {
 })
 
 export {
+  balancedAnd,
   expectedActor,
   buildFullRowGuards,
   executePreparedBatch,
