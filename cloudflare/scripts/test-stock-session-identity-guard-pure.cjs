@@ -136,7 +136,7 @@ async function refusal(commit, env, request) {
 }
 
 async function main() {
-  const { commitStockSession } = loadModule('lib/stockSession.ts')
+  const { commitStockSession, sessionProductDuplicateReason } = loadModule('lib/stockSession.ts')
   const { identityBarcodeKeySql } = loadModule('lib/productIdentity.ts')
   const { identityBarcodeKey } = loadModule('lib/productDetailRule.ts')
 
@@ -236,8 +236,67 @@ async function main() {
     })
     const result = await refusal(commitStockSession, env, request)
     assert.ok(result, 'one request may not create the twin either')
-    assert.equal(result.code, 'duplicate_product')
-    assert.match(result.message, /same product identity/)
+    assert.equal(result.code, 'duplicate_session_item')
+    assert.equal(result.message, 'Duplicate: You added this item already.')
+  })
+
+  await check('session warning parity is name OR meaningful folded barcode', () => {
+    assert.equal(sessionProductDuplicateReason(
+      { name: ' Rose   Lip Oil ', barcode: '111' },
+      { name: 'rose lip oil', barcode: '222' },
+    ), 'name')
+    assert.equal(sessionProductDuplicateReason(
+      { name: 'First', barcode: '748485110011' },
+      { name: 'Second', barcode: '0748485110011' },
+    ), 'barcode')
+    assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '' }, { name: 'B', barcode: '' }), null)
+    assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '0' }, { name: 'B', barcode: '000' }), null)
+  })
+
+  await check('two existing products with the same normalized name are refused before any write', async () => {
+    const { sql, env } = fixture()
+    sql.exec(`
+      INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
+        VALUES(2,'  rose   lip oil ','9999999999999',4,0,0,1);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
+    `)
+    const request = {
+      client_request_id: 'session-name-duplicate', mode: 'stock_in',
+      defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Bong Long' },
+      items: [1, 2].map((productId) => ({
+        line_id: `line-${productId}`, kind: 'receive', product_id: productId,
+        quantity: 1, unit_cost_usd: 5,
+      })),
+    }
+    const result = await refusal(commitStockSession, env, request)
+    assert.deepEqual(result, {
+      status: 409,
+      code: 'duplicate_session_item',
+      message: 'Duplicate: You added this item already.',
+    })
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM inventory_movements').get().c, 0)
+  })
+
+  await check('two existing products with folded-equal barcodes are refused even when names differ', async () => {
+    const { sql, env } = fixture()
+    sql.exec(`
+      INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
+        VALUES(2,'Other label','03614274226546',4,0,0,1);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
+    `)
+    const request = {
+      client_request_id: 'session-barcode-duplicate', mode: 'stock_in',
+      defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Bong Long' },
+      items: [1, 2].map((productId) => ({
+        line_id: `line-${productId}`, kind: 'receive', product_id: productId,
+        quantity: 1, unit_cost_usd: 5,
+      })),
+    }
+    const result = await refusal(commitStockSession, env, request)
+    assert.equal(result?.status, 409)
+    assert.equal(result?.code, 'duplicate_session_item')
+    assert.equal(result?.message, 'Duplicate: You added this item already.')
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM inventory_movements').get().c, 0)
   })
 
   if (failures.length) {
