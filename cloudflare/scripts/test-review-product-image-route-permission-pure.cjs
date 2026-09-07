@@ -22,6 +22,9 @@ class NoReviewApplierError extends Error {}
 class ReviewRequesterPermissionError extends Error {
   constructor(message) { super(message); this.code = 'request_permission_revoked' }
 }
+class ProductImageAssetError extends Error {
+  constructor(imagePath) { super(`Image asset ${imagePath} does not exist.`); this.code = 'missing_image_asset' }
+}
 
 function loadRoute(state) {
   const filePath = path.join(srcRoot, 'routes', 'reviewQueue.ts')
@@ -42,8 +45,9 @@ function loadRoute(state) {
     '../lib/reviewApply': {
       NoReviewApplierError,
       ReviewRequesterPermissionError,
-      applyApprovedPendingAction: async () => { throw new ReviewRequesterPermissionError('The requester no longer has permission to change product images.') },
+      applyApprovedPendingAction: async () => { throw state.applyError },
     },
+    '../lib/productImagePermission': { ProductImageAssetError },
     '../lib/audit': { audit: async () => { state.audits++ } },
     '../lib/actorSnapshot': { actorSnapshot: (user) => user.name },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
@@ -70,6 +74,7 @@ async function main() {
     row: { id: 5, status: 'open', section: 'products', action_type: 'update', entity_type: 'product' },
     marked: 0,
     audits: 0,
+    applyError: new ReviewRequesterPermissionError('The requester no longer has permission to change product images.'),
   }
   const response = await loadRoute(state).request('/5/approve', { method: 'POST' }, {
     TEST_USER: { id: 99, name: 'Reviewer' },
@@ -82,6 +87,19 @@ async function main() {
   assert.equal(state.marked, 0, 'failed authorization must leave the pending row open')
   assert.equal(state.audits, 0, 'failed authorization must not audit an approval')
   console.log('PASS revoked requester image authority returns a typed conflict and leaves review open')
+
+  state.applyError = new ProductImageAssetError('/uploads/missing.png')
+  const missingResponse = await loadRoute(state).request('/5/approve', { method: 'POST' }, {
+    TEST_USER: { id: 99, name: 'Reviewer' },
+  })
+  assert.equal(missingResponse.status, 409)
+  assert.deepEqual(await missingResponse.json(), {
+    error: 'Image asset /uploads/missing.png does not exist.',
+    code: 'missing_image_asset',
+  })
+  assert.equal(state.marked, 0)
+  assert.equal(state.audits, 0)
+  console.log('PASS missing legacy review image returns a typed conflict and leaves review open')
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })

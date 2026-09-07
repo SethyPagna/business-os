@@ -12,6 +12,7 @@ import {
   type PendingActionStatus,
 } from '../lib/pendingActions'
 import { applyApprovedPendingAction, NoReviewApplierError, ReviewRequesterPermissionError } from '../lib/reviewApply'
+import { ProductImageAssetError } from '../lib/productImagePermission'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -156,6 +157,9 @@ app.post('/:id/approve', async (c) => {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)
     }
     if (err instanceof ReviewRequesterPermissionError) {
+      return c.json({ error: err.message, code: err.code }, 409)
+    }
+    if (err instanceof ProductImageAssetError) {
       return c.json({ error: err.message, code: err.code }, 409)
     }
     return c.json({ error: (err as Error).message || 'Failed to apply the approved change' }, 500)
