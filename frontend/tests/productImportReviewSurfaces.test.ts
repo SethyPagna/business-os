@@ -29,6 +29,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { TARGET_FIELDS } from '../src/components/products/import/datedStockReconciliationMapping.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const frontend = path.join(here, '..')
@@ -239,6 +240,39 @@ runTest('both packs carry every dated-count reason and action label, really tran
     assert.ok(km[key], `km.json is missing ${key}`)
     assert.notEqual(km[key], en[key], `km.json ${key} is still the English string`)
     assert.match(km[key], /[ក-៿]/, `km.json ${key} carries no Khmer script`)
+  }
+})
+
+// --- 5. the mapping step's 16 TARGET_FIELDS strings route through i18n ---
+
+// TARGET_FIELDS' label/hint pairs (datedStockReconciliationMapping.ts) were
+// rendered bare at DatedStockReconciliationModal.tsx:433/435 -- 8 fields x
+// (label + hint) = 16 hardcoded English strings on a screen this lane made
+// reachable. Every entry now carries a tKey/hintKey the modal looks up
+// through T(), falling back to the same label/hint text.
+
+runTest('every TARGET_FIELDS entry declares a tKey and hintKey', () => {
+  for (const field of TARGET_FIELDS) {
+    assert.ok(field.tKey, `TARGET_FIELDS['${field.key}'] has no tKey`)
+    assert.ok(field.hintKey, `TARGET_FIELDS['${field.key}'] has no hintKey`)
+  }
+})
+
+runTest('the mapping screen renders those fields through T(), never the bare label/hint', () => {
+  assert.match(dated, /T\(field\.tKey/, 'the label is not looked up through T(field.tKey, ...)')
+  assert.match(dated, /T\(field\.hintKey/, 'the hint is not looked up through T(field.hintKey, ...)')
+  assert.doesNotMatch(dated, /\{field\.label\}/, 'the label is still rendered bare')
+  assert.doesNotMatch(dated, /\{field\.hint\}/, 'the hint is still rendered bare')
+})
+
+runTest('both packs carry every TARGET_FIELDS tKey/hintKey, really translated', () => {
+  for (const field of TARGET_FIELDS) {
+    for (const key of [field.tKey, field.hintKey]) {
+      assert.ok(en[key], `en.json is missing ${key}`)
+      assert.ok(km[key], `km.json is missing ${key}`)
+      assert.notEqual(km[key], en[key], `km.json ${key} is still the English string`)
+      assert.match(km[key], /[ក-៿]/, `km.json ${key} carries no Khmer script`)
+    }
   }
 })
 
