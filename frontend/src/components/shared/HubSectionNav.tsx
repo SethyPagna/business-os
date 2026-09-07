@@ -90,46 +90,46 @@ export default function HubSectionNav({
   const content = <Fragment key="hub-content">{children}</Fragment>
   if (layered || visible.length <= 1) return <>{content}</>
 
-  if (!layered) {
-    // Desktop/tablet always, and compact + "sections" preference: the chip
-    // row, with a clearer treatment (caption + stronger divider) at md+.
-    return (
-      <>
-        {/* No "Sections" caption above the chip row (user, Sep 3 2026): the
-            chips already read as a section switcher, and the word was one
-            more line of chrome above every hub page. The md+ divider below
-            stays -- that is what separates the switcher from the body. The
-            `sections` lang key is still live as the Settings toggle's option
-            label. */}
-        <div className="min-w-0 shrink-0 px-3 pt-3 sm:px-4 sm:pt-4">
-          {/* `bos-nav-chrome` is what declares the --nav-* tokens on this
-              element, so the row carries the design language without any
-              colour utility left on it to fight the stylesheet for
-              specificity -- the same arrangement Sidebar's chrome uses. */}
-          <div className="bos-nav-chrome hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl p-1 md:inline-flex">
-            {visible.map((section) => {
-              const Icon = section.icon
-              const isActive = active === section.id
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => onChange(section.id)}
-                  aria-pressed={isActive}
-                  className="hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 break-words rounded-lg px-2.5 py-2 text-center text-[13px] font-semibold leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0"
-                >
-                  {Icon ? <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : null} {section.label}
-                  {section.badge}
-                </button>
-              )
-            })}
-          </div>
-          <div className="bos-nav-chrome hub-section-rule mt-2 hidden md:block" aria-hidden="true" />
+  // Everything below is the only remaining path: the return above already
+  // answered every truthy `layered`, so the `if (!layered)` that used to
+  // wrap this -- and the second `return <>{content}</>` behind it -- were a
+  // branch and a return no input could reach.
+  // Desktop/tablet always, and compact + "sections" preference: the chip
+  // row, with a clearer treatment (caption + stronger divider) at md+.
+  return (
+    <>
+      {/* No "Sections" caption above the chip row (user, Sep 3 2026): the
+          chips already read as a section switcher, and the word was one
+          more line of chrome above every hub page. The md+ divider below
+          stays -- that is what separates the switcher from the body. The
+          `sections` lang key is still live as the Settings toggle's option
+          label. */}
+      <div className="min-w-0 shrink-0 px-3 pt-3 sm:px-4 sm:pt-4">
+        {/* `bos-nav-chrome` is what declares the --nav-* tokens on this
+            element, so the row carries the design language without any
+            colour utility left on it to fight the stylesheet for
+            specificity -- the same arrangement Sidebar's chrome uses. */}
+        <div className="bos-nav-chrome hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl p-1 md:inline-flex">
+          {visible.map((section) => {
+            const Icon = section.icon
+            const isActive = active === section.id
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => onChange(section.id)}
+                aria-pressed={isActive}
+                className="hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 break-words rounded-lg px-2.5 py-2 text-center text-[13px] font-semibold leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0"
+              >
+                {Icon ? <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : null} {section.label}
+                {section.badge}
+              </button>
+            )
+          })}
         </div>
-        {content}
-      </>
-    )
-  }
-
-  return <>{content}</>
+        <div className="bos-nav-chrome hub-section-rule mt-2 hidden md:block" aria-hidden="true" />
+      </div>
+      {content}
+    </>
+  )
 }

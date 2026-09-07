@@ -461,6 +461,14 @@ runTest('the chip row wears the chrome, not grey-on-white with a per-hub hue', (
     'and with it the early return that shipped a host row instead of the chrome')
   assert.doesNotMatch(code(hubNav), /useIsCompactViewport|isCompact/,
     'the viewport hook went with the escape hatch it existed for')
+  // One early return for "this hub shows no chip row", one path that draws
+  // it. The shipped file had a THIRD: an `if (!layered)` wrapper whose
+  // condition the early return above it had already decided, and a second
+  // `return <>{content}</>` behind it that no input could reach.
+  assert.equal((code(hubNav).match(/return <>\{content\}<\/>/g) || []).length, 1,
+    'exactly one content-only return -- the unreachable twin is gone')
+  assert.doesNotMatch(code(hubNav), /if \(!layered\)/,
+    'and the branch that guarded it, whose condition was already decided')
   // The escape hatch existed for one row-wide behaviour -- sideways scrolling
   // for Review's long "Deleted sales (old system)" label. The shared row wraps
   // instead (the standing "no horizontal overflow at 375" rule), so there is
