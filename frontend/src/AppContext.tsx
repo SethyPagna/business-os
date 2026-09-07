@@ -11,7 +11,7 @@ import {
   shouldResetForRuntimeChange,
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
-import { isWSConnected, resumeWS } from './api/websocket.ts'
+import { disconnectWS, isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
@@ -808,6 +808,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [])
 
   const handleUnauthorizedSession = useCallback(async (message = 'Please sign in again to continue.'): Promise<void> => {
+    disconnectWS()
     await clearLocalBusinessState({
       clearAuth: true,
       preserveSyncServer: true,
@@ -1701,6 +1702,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [persistAuthenticatedUser])
 
   const logout = useCallback(async () => {
+    disconnectWS()
     try {
       const api = getAppApi()
       await withLoaderTimeout(() => api.logout?.(), 'Logout', APP_LOGOUT_TIMEOUT_MS)

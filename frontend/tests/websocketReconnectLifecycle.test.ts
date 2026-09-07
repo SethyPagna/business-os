@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 type Timer = { id: number; due: number; callback: () => void }
 
@@ -120,6 +121,29 @@ function failLatest(code = 1006): void {
   socket.onclose?.({ code, reason: '' })
 }
 
+const appContextSource = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+assert.match(appContextSource, /import \{ disconnectWS, isWSConnected, resumeWS \} from '\.\/api\/websocket\.ts'/)
+
+const unauthorizedStart = appContextSource.indexOf('const handleUnauthorizedSession = useCallback')
+const unauthorizedEnd = appContextSource.indexOf('const applyBootstrapPayload = useCallback', unauthorizedStart)
+const unauthorizedBlock = appContextSource.slice(unauthorizedStart, unauthorizedEnd)
+assert.ok(unauthorizedStart >= 0 && unauthorizedEnd > unauthorizedStart, 'unauthorized cleanup block is missing')
+assert.ok(
+  unauthorizedBlock.indexOf('disconnectWS()') >= 0
+    && unauthorizedBlock.indexOf('disconnectWS()') < unauthorizedBlock.indexOf('await clearLocalBusinessState('),
+  'confirmed unauthorized cleanup must disconnect before clearing local auth state',
+)
+
+const logoutStart = appContextSource.indexOf('const logout = useCallback(async () => {')
+const logoutEnd = appContextSource.indexOf('// Notifications.', logoutStart)
+const logoutBlock = appContextSource.slice(logoutStart, logoutEnd)
+assert.ok(logoutStart >= 0 && logoutEnd > logoutStart, 'logout block is missing')
+assert.ok(
+  logoutBlock.indexOf('disconnectWS()') >= 0
+    && logoutBlock.indexOf('disconnectWS()') < logoutBlock.indexOf('api.logout?.()'),
+  'logout must cancel WebSocket reconnect work before the server logout request',
+)
+
 try {
   const { setSyncServerUrl } = await import('../src/api/httpState.ts')
   const { connectWS, disconnectWS, resumeWS } = await import('../src/api/websocket.ts')
@@ -150,7 +174,7 @@ try {
   failLatest()
   assert.equal(timers.length, 1)
   disconnectWS()
-  assert.equal(timers.length, 0, 'logout/manual disconnect must cancel the cooldown wake-up')
+  assert.equal(timers.length, 0, 'the disconnect helper must cancel the cooldown wake-up')
   advance(120_000)
   assert.equal(FakeWebSocket.instances.length, 4, 'a cancelled cooldown must not reconnect later')
 
