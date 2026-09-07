@@ -23,7 +23,14 @@ import {
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
 
-type RowDecision = { action?: string; field_overrides?: Record<string, unknown> } | null
+type RowDecision = { action?: string; field_overrides?: Record<string, unknown>; target_existing_id?: number } | null
+
+type ContactMatchCandidate = {
+  id: number
+  name: string | null
+  phone: string | null
+  membership_number?: string | null
+}
 
 type ReviewRow = {
   rowNumber: number
@@ -34,6 +41,8 @@ type ReviewRow = {
   warnings?: Array<{ kind: string; message: string }>
   data?: Record<string, unknown>
   decision?: RowDecision
+  contactMatchCandidates?: ContactMatchCandidate[]
+  contactMatchTargetInvalid?: boolean
 }
 
 interface ContactImportConflictsModalProps {
@@ -82,6 +91,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   const [error, setError] = useState<string | null>(null)
   const [choices, setChoices] = useState<Record<number, RowChoice>>({})
   const [renameDrafts, setRenameDrafts] = useState<Record<number, string>>({})
+  const [selectedTargets, setSelectedTargets] = useState<Record<number, number>>({})
   const [resolvedRows, setResolvedRows] = useState<Set<number>>(() => new Set())
   const [savingRow, setSavingRow] = useState<number | null>(null)
   // S4-21: every CHOICE here is applied per row by its own button, so
@@ -144,15 +154,20 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
         // instead of assuming every row is fresh.
         const nextChoices: Record<number, RowChoice> = {}
         const nextDrafts: Record<number, string> = {}
+        const nextTargets: Record<number, number> = {}
         const nextResolved = new Set<number>()
         for (const row of loadedRows) {
           const restored = restoreContactRowDecision(row.decision)
           if (restored.choice) nextChoices[row.rowNumber] = restored.choice
           if (restored.rename) nextDrafts[row.rowNumber] = restored.rename
-          if (restored.resolved) nextResolved.add(row.rowNumber)
+          const targetId = Number(row.decision?.target_existing_id)
+          if (Number.isSafeInteger(targetId) && targetId > 0) nextTargets[row.rowNumber] = targetId
+          const targetRequired = row.contactMatchTargetInvalid === true || (row.contactMatchCandidates?.length || 0) > 1
+          if (restored.resolved && (!targetRequired || row.decision?.action !== 'apply' || targetId > 0)) nextResolved.add(row.rowNumber)
         }
         setChoices(nextChoices)
         setRenameDrafts(nextDrafts)
+        setSelectedTargets(nextTargets)
         setResolvedRows(nextResolved)
         setSelectedRows(new Set())
       })
@@ -206,10 +221,17 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
     // `apply` keeps classifyContacts' safe default merge, but records that
     // the reviewer explicitly chose it. Without this durable marker a page
     // change/reopen made a completed row look unresolved again.
+    const candidates = row.contactMatchCandidates || []
+    const selectedTargetId = selectedTargets[row.rowNumber]
+      || (candidates.length === 1 ? Number(candidates[0].id) : Number(row.existingId))
+    if (!Number.isSafeInteger(selectedTargetId) || selectedTargetId <= 0) {
+      notify(tr('contacts_import_conflict_target_required', 'Choose the exact existing contact before saving this merge'), 'error')
+      return
+    }
     setSavingRow(row.rowNumber)
     try {
       await updateImportJobDecisions(jobId, {
-        [String(row.rowNumber)]: { action: 'apply' },
+        [String(row.rowNumber)]: { action: 'apply', target_existing_id: selectedTargetId },
       })
       markResolved(row.rowNumber)
       notify(tr('contacts_import_conflict_merge_saved', 'Saved -- this row will merge into the existing contact'), 'success')
@@ -331,10 +353,18 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
     if (!targetRows.length) return
     setSavingBulk(true)
     try {
-      const decisions: Record<string, { action: string; field_overrides?: Record<string, unknown> }> = {}
+      const decisions: Record<string, { action: string; field_overrides?: Record<string, unknown>; target_existing_id?: number }> = {}
       for (const row of targetRows) {
         if (choice === 'merge') {
-          decisions[String(row.rowNumber)] = { action: 'apply' }
+          const candidates = row.contactMatchCandidates || []
+          const targetId = selectedTargets[row.rowNumber]
+            || (candidates.length === 1 ? Number(candidates[0].id) : Number(row.existingId))
+          if (!Number.isSafeInteger(targetId) || targetId <= 0) {
+            notify(tr('contacts_import_conflict_bulk_target_required', 'Choose an existing contact for every selected ambiguous row before merging'), 'error')
+            setSavingBulk(false)
+            return
+          }
+          decisions[String(row.rowNumber)] = { action: 'apply', target_existing_id: targetId }
         } else if (choice === 'delete') {
           decisions[String(row.rowNumber)] = { action: 'skip' }
         } else {
@@ -486,6 +516,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                 const choice = choices[row.rowNumber] || 'merge'
                 const isSelected = selectedRows.has(row.rowNumber)
                 const isExpanded = expandedRows.has(row.rowNumber)
+                const matchCandidates = row.contactMatchCandidates || []
                 const detailEntries = Object.entries(row.data || {}).filter(([key]) => !key.startsWith('_'))
                 return (
                   <div
@@ -515,6 +546,31 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                     <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">{warning?.message || row.message}</p>
                     {phoneWarning ? (
                       <p className="-mt-2 mb-3 text-xs text-amber-600 dark:text-amber-400">{phoneWarning.message}</p>
+                    ) : null}
+
+                    {choice === 'merge' && (row.contactMatchTargetInvalid || matchCandidates.length > 1) ? (
+                      <label className="mb-3 block text-xs font-medium text-gray-700 dark:text-gray-200">
+                        {tr('contacts_import_conflict_choose_target', 'Choose the existing contact to merge into')}
+                        <select
+                          value={selectedTargets[row.rowNumber] || ''}
+                          onChange={(event) => {
+                            const value = Number(event.target.value)
+                            setSelectedTargets((current) => Number.isSafeInteger(value) && value > 0
+                              ? { ...current, [row.rowNumber]: value }
+                              : Object.fromEntries(Object.entries(current).filter(([key]) => Number(key) !== row.rowNumber)))
+                          }}
+                          className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                        >
+                          <option value="">{tr('contacts_import_conflict_choose_target_placeholder', 'Select an existing contact...')}</option>
+                          {matchCandidates.map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>
+                              {candidate.name || tr('unknown', 'Unknown')} (ID {candidate.id})
+                              {candidate.phone ? ` — ${candidate.phone}` : ''}
+                              {candidate.membership_number ? ` — ${candidate.membership_number}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     ) : null}
 
                     {isExpanded ? (
