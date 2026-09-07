@@ -5,7 +5,7 @@ requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
 Last reconciled: 2026-09-07T14:33:21.332Z. Functional fixes precede UI polish.
-Current production: **560bfbcb**, Worker **03aa25a5-d482-45e9-9459-727b92ccf06c**, 100% at **2026-09-07T15:36:03.629193Z**. F41/F44/F45 deployed from the separate stability branch. No migration. Live signed-in Sales loads matching bundle; English and Khmer Not Paid verified. Historical correction still unapplied; product merge still eight completed cases.
+Current production: **560bfbcb**, Worker **03aa25a5-d482-45e9-9459-727b92ccf06c**, 100% at **2026-09-07T15:36:03.629193Z**. F41/F44/F45 deployed from the separate stability branch. No migration. Live signed-in Sales loads matching bundle; English and Khmer Not Paid verified. Historical correction: first 99 expense rows applied; 43 groups remain. Full REST postcheck confirms 1 applied/43 pending, exact 2 audits, zero violations. Product merge remains eight completed cases.
 
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
 **498efadb-f833-471d-a8b7-b4326950bd26**, deployed 2026-09-07 09:54:13 UTC.
@@ -131,3 +131,6 @@ stand in for deployment, and missing historical evidence is never fabricated.
 - Public fix branch codex/release-stability-20260907 at 560bfbcbbc6730e9bba305bec6b70af752579ad9 contains only F41, F44 and F45, separate from F39/F40. GitHub pushed. Backend 280/280 passed; frontend 307/309 initially passed, two stale assertions corrected and focused rerun passed 3/3; both types, i18n, build and deploy dry-run passed. Initial attempt failed after asset upload; retry succeeded, independently confirmed as Worker03aa25a5 at100% at15:36:03UTC.
 - F39/F40 independent review found post-commit finalizer errors, unknown first-request timeout handling, normal-budget confirmation regression, and whole-cluster workload-bound gaps. Corrections are integrated progressively; not yet certified or deployed. Complex multi-product clusters must be refused before any fold unless a reviewed whole-cluster plan fits the bound. Their eventual correction remains open.
 - Three grouped historical execution attempts through the remote development proxy failed. Each full REST postcheck reports 44 pending, 0 applied, 0 audits, 0 violations across all 4,333 target rows. Private atomic file-import transport is being prepared with the same reviewed manifest and audit/full-row guards; no historical repair is claimed complete.
+
+Historical import follow-through: fees-001 committed 99 Shop branch corrections. CLI exit 0 output framing caused a safe pause; independent postcheck-after-file-import.json confirms exact state and audits. No later group ran. Parsing correction and explicit resume remain; the completed group must be skipped.
+
