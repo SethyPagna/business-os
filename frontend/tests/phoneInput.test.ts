@@ -156,6 +156,33 @@ assert.deepEqual(
   assert.equal(beforeInputPrevented, true, 'the duplicate beforeinput mutation is cancelled')
 }
 
+{
+  const input = {
+    value: '012 345',
+    selectionStart: 4,
+    selectionEnd: 4,
+    setSelectionRange() {},
+  } as unknown as HTMLInputElement
+  let writes = 0
+  let keyPrevented = false
+  let beforeInputPrevented = false
+  const onValue = () => { writes += 1 }
+  assert.equal(handlePhoneInputKeyDown({
+    key: 'Backspace',
+    currentTarget: input,
+    preventDefault() { keyPrevented = true },
+    nativeEvent: { isComposing: true, keyCode: 229 },
+  }, onValue), false)
+  assert.equal(handlePhoneInputBeforeInput({
+    currentTarget: input,
+    preventDefault() { beforeInputPrevented = true },
+    nativeEvent: { inputType: 'deleteContentBackward', isComposing: false },
+  }, onValue), false)
+  assert.equal(writes, 0, 'a composing keydown followed by a non-composing beforeinput must not mutate the value')
+  assert.equal(keyPrevented, false, 'the composing keydown remains native')
+  assert.equal(beforeInputPrevented, false, 'the related beforeinput remains native')
+}
+
 globalThis.requestAnimationFrame = originalRequestAnimationFrame
 assert.deepEqual(
   formatPhoneInputEdit('012 3945 678', 6, 6),

@@ -24,6 +24,7 @@ type PhoneDeleteDirection = 'backward' | 'forward'
 
 const handledKeyDownInputs = new WeakSet<HTMLInputElement>()
 const modifiedKeyDownInputs = new WeakSet<HTMLInputElement>()
+const composingKeyDownInputs = new WeakSet<HTMLInputElement>()
 
 function markForNextBeforeInput(group: WeakSet<HTMLInputElement>, input: HTMLInputElement): void {
   group.add(input)
@@ -161,7 +162,10 @@ function applyPhoneSeparatorDeletion(
  * are not immediately beside a formatting space.
  */
 export function handlePhoneInputKeyDown(event: PhoneInputKeyEvent, onValue: (value: string) => void): boolean {
-  if (event.nativeEvent?.isComposing || event.nativeEvent?.keyCode === 229) return false
+  if (event.nativeEvent?.isComposing || event.nativeEvent?.keyCode === 229) {
+    markForNextBeforeInput(composingKeyDownInputs, event.currentTarget)
+    return false
+  }
   const direction = event.key === 'Backspace' ? 'backward' : event.key === 'Delete' ? 'forward' : null
   if (!direction) return false
 
@@ -188,6 +192,7 @@ export function handlePhoneInputBeforeInput(event: PhoneInputBeforeInputEvent, o
   if (!direction) return false
 
   const input = event.currentTarget
+  if (composingKeyDownInputs.has(input)) return false
   if (modifiedKeyDownInputs.has(input)) return false
   if (handledKeyDownInputs.has(input)) {
     event.preventDefault()
