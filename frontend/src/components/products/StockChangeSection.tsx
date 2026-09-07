@@ -1217,6 +1217,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 pageId: 'branches',
                 label,
                 draftKey: scopedWorkDraftKey('fast_stockin'),
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
               })
               app.notify(tr(t, 'minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info')
             }}
