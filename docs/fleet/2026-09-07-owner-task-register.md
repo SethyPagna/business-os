@@ -4,7 +4,7 @@ This is the current request register. `progress.md` links here. Append new owner
 requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
-Last reconciled: 2026-09-07T10:13:09.871Z. Functional fixes precede UI polish.
+Last reconciled: 2026-09-07T11:35:45.257Z. Functional fixes precede UI polish.
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
 **498efadb-f833-471d-a8b7-b4326950bd26**, deployed 2026-09-07 09:54:13 UTC.
 Public Git branch: codex/release-fixes-20260907. Migrations 0128–0132 and required
@@ -12,8 +12,11 @@ security configuration applied. Full 306 frontend files and 274 backend suites,
 both typechecks, i18n, build, and frozen browser smoke passed before deployment.
 Live assets match the release; Sales bootstrap timed out during network failures
 and is still under investigation (F36). Do not call every live workflow certified.
-Historical metadata correction and duplicate merge have not run. F32 follows in
-a separate deployment after its integrated/browser checks.
+Delivery addition F32 is now deployed as **c475e637d197**, Worker
+**d5aeeb82-cb0d-4047-8abf-8e96ba17f602**, 100% at 11:10:18 UTC; migration 0133
+preserved all nine prior amendment rows and revisions. Live Sales and Records
+loaded after connection recovery. F36 has further retry-visibility fixes pending.
+Historical metadata correction and duplicate merge have not run.
 
 State definitions: **Local pass** means implemented with relevant local evidence,
 not production completion. **Integrated** means source is composed but final
@@ -57,11 +60,12 @@ Every shipped row must eventually record its actual deployment version.
 | F29 | Remove duplicate delivery_actual_cost_usd field and rejected stopgap kind comment in Sales merge fallout. | Integrated / sales | Source/type/parity gates cover composed Sales. |
 | F30 | Finish earlier N18/N21/N23 and N28–N36/audit lanes without losing their fixes. | Reconciled; release pending / root | Canonical ea9f0d1b base includes checkpoint 2 and earlier integrations; individual follow-up fixes retained. |
 | F31 | GitHub commits describe individual fixes, not checkpoint/batch commits. | Prepared / lineage, root | Separate public release history preserves messages/authors; eight internal reports excluded, required clean test fixture retained. Pushed release branch at 821efc94. |
-| F32 | NEW: sale originally without delivery must allow later adding driver, customer delivery fee and actual delivery cost. | Active priority / sales; identity review | Added from owner's latest status request. Trace UI/API/status/money/Records/undo; separate fix commit required. |
-| F33 | Preserve creation-time basket history for future sales; unavailable historical snapshots must remain explicitly unknown. | Open follow-through / root | Review found live product names can change after rename/merge. Existing history must not invent original labels; durable future creation snapshot remains a follow-up to F21. |
+| F32 | Sale originally without delivery allows later driver, customer fee and actual cost. | Deployed c475e637 / sales | Full backend 276 suites; all frontend 306 files covered; independent money/migration review and browser actual retry/driver/totals/Records passed. |
+| F33 | Preserve original basket, payments, driver and actor for future sales. | Integrated / media; independent reviews pass | Four writers + migration0134 + immutable Records; 273/277 backend suites pass, four legacy harness failures assigned. Browser creation check pending. |
 | F34 | Sales list/detail Records SQL failed in real D1. | Deployed 821efc94 / sales | Frozen actual Worker list/detail now 200; count and compound ordering repaired. |
 | F35 | Fast Stock minimize restored wrong host and consumed the chip. | Deployed 821efc94 / media | Exact user5 frozen browser restore passed; preserves draft and consumes only after modal mounts. |
-| F36 | Live Sales bootstrap timed out twice after deployment amid network interruptions. | Active diagnosis / root, minimize | Live tail also shows successful Sales responses in 629–867ms; identify network versus frontend loader failure before claiming cause. |
+| F36 | Sales read retry/deadline/cache cancellation and visible manual Retry after failure. | Active final browser fix / media, responsive | Late fallback cache-write race repaired and independently certified; browser found queued second read masking error, now assigned. |
+| F37 | Duplicate preview times out on large catalogs because it queries stock/batches/cost per group. | Active priority / identity | Live two12s preview failures; roughly6000 database calls for2007 groups. Replace with shared bounded reads and verify query-count/parity. |
 
 ## Public portal and legal requests
 
