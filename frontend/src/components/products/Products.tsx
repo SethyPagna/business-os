@@ -59,7 +59,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { createLongPressHandlers, createLongPressState, consumeLongPressClick } from '../../utils/longPress.ts'
 import type { LongPressState } from '../../utils/longPress.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
-import { mergeDuplicateChunkRequiresManualResume } from './mergeDuplicatesRun.ts'
+import { mergeDuplicateChunkCanContinueAutomatically, mergeDuplicateChunkRequiresManualResume } from './mergeDuplicatesRun.ts'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.ts'
 import {
   beginTrackedRequest,
@@ -1962,6 +1962,13 @@ function ProductsFullEditor() {
           await load(true)
           setMergeDuplicatesReviewOpen(false)
           return
+        }
+        if (result?.interruptionCode === 'merge_budget_reached') {
+          if (!mergeDuplicateChunkCanContinueAutomatically(result)) {
+            throw new Error(result?.error || 'Duplicate merge stopped before the remaining products were processed. Retry to continue safely.')
+          }
+          callCeiling = Math.max(callCeiling, calls + result.maxAdditionalRequests)
+          continue
         }
         if (result?.complete) {
           completed = true
