@@ -3,7 +3,7 @@ import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
 import { formatPhoneP8, collectContactPhones } from './contactDuplicates'
-import { passwordTooShort, passwordMinLengthError } from './passwordPolicy'
+import { checkPortalPassword } from './passwordPolicy'
 import type { Env } from '../index'
 
 // The account decision engine for the storefront. Route code (routes/portal.ts)
@@ -152,7 +152,11 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   }
   if (!name) return { ok: false, status: 400, error: 'Your name is required.', code: 'name_required', abuse: false }
   if (!canonical) return { ok: false, status: 400, error: 'A valid phone number is required.', code: 'phone_required', abuse: false }
-  if (passwordTooShort(password)) return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
+  // Portal accounts get the stricter rule (lib/passwordPolicy.ts): the
+  // storefront privacy policy promises eight characters, and a phone number
+  // is both the login identifier here and the commonest password there is.
+  const weak = checkPortalPassword({ password, phone: canonical, name })
+  if (weak) return { ok: false, status: 400, error: weak.error, code: weak.code, abuse: false }
 
   const db = getDb(env)
   const passwordHash = bcrypt.hashSync(password, BCRYPT_COST)

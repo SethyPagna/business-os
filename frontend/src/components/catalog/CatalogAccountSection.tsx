@@ -15,6 +15,13 @@ import type { PortalAccountProfile } from './portalAccount.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
+// Kept in step with PORTAL_MIN_PASSWORD_LENGTH in
+// cloudflare/src/lib/passwordPolicy.ts, which is what actually enforces it,
+// and with the storefront privacy policy that promises the number out loud.
+// tests/portalPasswordPolicyParity.test.ts fails if the three drift (N45).
+const PORTAL_MIN_PASSWORD_LENGTH = 8
+const PASSWORD_HINT_EN = 'At least 8 characters. Please do not use your phone number or your name.'
+const PASSWORD_HINT_KM = 'យ៉ាងតិច៨តួអក្សរ។ សូមកុំប្រើលេខទូរស័ព្ទ ឬឈ្មោះរបស់អ្នក។'
 const REMINDER = 'If you have previously bought from Leang Cosmetics/Leang Beauty, please contact us for your membership ID — your phone number must match. Just a reminder.'
 
 export default function CatalogAccountSection({
@@ -225,8 +232,11 @@ export default function CatalogAccountSection({
                   <input
                     type="password" autoComplete="new-password" value={signupPassword}
                     onChange={(e) => setSignupPassword(e.target.value)}
-                    className={inputClass} required minLength={6}
+                    className={inputClass} required minLength={PORTAL_MIN_PASSWORD_LENGTH}
                   />
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                    {copy('signupPasswordHint', PASSWORD_HINT_EN, PASSWORD_HINT_KM)}
+                  </p>
                 </Field>
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:bg-amber-400/10 dark:text-amber-200">
                   {copy('signupReminder', REMINDER)}

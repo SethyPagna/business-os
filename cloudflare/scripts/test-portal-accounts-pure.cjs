@@ -218,6 +218,31 @@ async function run() {
     assert.strictEqual(res.abuse, false)
   })
 
+  await check('a seven-character password is refused: the portal minimum is eight, not the staff six', async () => {
+    const res = await signupPortalAccount(env, { name: 'Sevenish', phone: '070 111 333', password: 'abcdefg', consent: true })
+    assert.strictEqual(res.ok, false)
+    assert.strictEqual(res.code, 'password_weak')
+    assert.match(String(res.error), /at least 8 characters/)
+  })
+
+  await check('the phone number is refused as a password however it is written', async () => {
+    const res = await signupPortalAccount(env, { name: 'Phoney', phone: '070 111 444', password: '+855 70 111 444', consent: true })
+    assert.strictEqual(res.ok, false)
+    assert.strictEqual(res.code, 'password_is_phone')
+    assert.strictEqual(res.abuse, false)
+  })
+
+  await check('a head-of-the-stuffing-list password is refused even at full length', async () => {
+    const res = await signupPortalAccount(env, { name: 'Common', phone: '070 111 555', password: 'Password123', consent: true })
+    assert.strictEqual(res.ok, false)
+    assert.strictEqual(res.code, 'password_common')
+  })
+
+  await check('a long passphrase with no symbols or digits is accepted', async () => {
+    const res = await signupPortalAccount(env, { name: 'Passphrase', phone: '070 111 666', password: 'correct horse battery', consent: true })
+    assert.strictEqual(res.ok, true, JSON.stringify(res))
+  })
+
   await check('signin succeeds with name OR membership id + phone + password', async () => {
     // From the new-customer account created earlier: name 'Dara', phone 099888777.
     const byName = await signinPortalAccount(env, { identifier: 'dara', phone: '+855 99 888 777', password: 'secret123', consent: true })
