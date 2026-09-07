@@ -5,9 +5,10 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
-import { clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../api/batchesTransport.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
@@ -35,6 +36,14 @@ type ReceiveBatchModalProps = {
   defaultBranchId?: string
   notify: (message: string, type?: string) => void
   onClose: () => void
+  onMinimize?: (request: {
+    branchId: string
+    draftKey: string
+    label: string
+    productId: InventoryId
+    productName: string
+    productUnit: string
+  }) => void
   onReceived: () => void
   t: Translator
   tr: TranslationWithFallback
@@ -51,6 +60,7 @@ export default function ReceiveBatchModal({
   defaultBranchId,
   notify,
   onClose,
+  onMinimize,
   onReceived,
   t,
   tr,
@@ -180,7 +190,26 @@ export default function ReceiveBatchModal({
   // and its Discard runs the same `clearWorkDraft` the nav guard's
   // "Discard & Leave" runs. A null product yields an unregistered key,
   // which the guard treats as clean (fails open, never blocks a close).
-  const closeGuard = useCloseGuard({ workKey: product ? `receive-batch-${product.id}` : '' }, onClose)
+  const currentDraft = () => ({
+    quantity, receivedDate, expiryDate, notes, supplierName, supplierId,
+    unitCost, paymentStatus, creditDueDate,
+  })
+  const preserveAndMinimize = product && onMinimize ? () => {
+    // Persist synchronously before the host unmounts this modal. The normal
+    // debounce cleanup cancels a pending timer, so relying on it here could
+    // lose the final keystroke the minus button promised to preserve.
+    writeWorkDraft(draftKey, currentDraft())
+    onMinimize({
+      branchId,
+      draftKey,
+      label: `${tr('receive_batch', 'Receive Batch')}${product.name ? ` — ${product.name}` : ''}`,
+      productId: product.id ?? '',
+      productName: product.name || '',
+      productUnit: product.unit || '',
+    })
+    onClose()
+  } : undefined
+  const closeGuard = useCloseGuard({ workKey: product ? `receive-batch-${product.id}` : '' }, onClose, preserveAndMinimize)
 
   if (!product) return null
 
@@ -286,6 +315,9 @@ export default function ReceiveBatchModal({
             <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {preserveAndMinimize ? (
+              <MinimizeButton disabled={saving} tr={tr} onMinimize={preserveAndMinimize} />
+            ) : null}
             <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
               <X className="h-4 w-4" />
             </button>

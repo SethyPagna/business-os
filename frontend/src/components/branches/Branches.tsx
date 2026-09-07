@@ -35,6 +35,13 @@ import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import {
+  RESTORE_WORK_EVENT,
+  consumePendingRestore,
+  markRestoreHandled,
+  minimizeWork,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
+import {
   beginTrackedRequest,
   getFirstLoaderError,
   invalidateTrackedRequest,
@@ -376,6 +383,45 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // D4b receive entry point: which product card's "receive" was clicked,
   // and into which branch (preselected in the shared modal).
   const [receiveTarget, setReceiveTarget] = useState<{ product: BranchStockProduct; branchId: string } | null>(null)
+  const restoreReceiveBatch = useCallback((entry: MinimizedWorkEntry): boolean => {
+    if (!canReceiveStock) return false
+    const payload = entry.payload || {}
+    const productId = payload.productId
+    const branchId = String(payload.branchId || '')
+    if ((typeof productId !== 'number' && typeof productId !== 'string') || !String(productId).trim() || !branchId) return false
+    setReceiveTarget({
+      product: {
+        id: productId,
+        name: String(payload.productName || ''),
+        unit: String(payload.productUnit || ''),
+      },
+      branchId,
+    })
+    return true
+  }, [canReceiveStock])
+  useEffect(() => {
+    const pending = canReceiveStock ? consumePendingRestore('receive_batch') : null
+    if (pending) restoreReceiveBatch(pending)
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'receive_batch' || !canReceiveStock) return
+      const entry = detail.entry as MinimizedWorkEntry | undefined
+      // New dispatches carry the complete entry. Keep the payload-only fallback
+      // for a chip created by an older same-version tab.
+      const candidate = entry || {
+        key: `receive-batch-${String(detail.payload?.productId || '')}`,
+        kind: 'receive_batch',
+        pageId: 'branches',
+        label: '',
+        payload: detail.payload || {},
+        minimizedAt: Date.now(),
+      }
+      if (!restoreReceiveBatch(candidate)) return
+      markRestoreHandled('receive_batch')
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [canReceiveStock, restoreReceiveBatch])
   // A Set (not a single value) so more than one branch card can be open at
   // once -- was accordion-style (opening one silently closed any other),
   // reported as "can only open one branch at a time, should allow checking
@@ -1836,6 +1882,17 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             defaultBranchId={receiveTarget.branchId}
             notify={notify}
             onClose={() => setReceiveTarget(null)}
+            onMinimize={({ branchId, draftKey, label, productId, productName, productUnit }) => {
+              minimizeWork({
+                key: `receive-batch-${String(productId)}`,
+                kind: 'receive_batch',
+                pageId: 'branches',
+                label,
+                payload: { branchId, productId, productName, productUnit },
+                draftKey,
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
+            }}
             onReceived={() => {
               const branchId = receiveTarget.branchId
               setReceiveTarget(null)
