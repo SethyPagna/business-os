@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
-import { formatPhoneP8, collectContactPhones } from './contactDuplicates'
+import { formatPhoneP8, collectContactPhones, contactDuplicateWriteGuardStatement } from './contactDuplicates'
 import { passwordMinLengthError, passwordTooShort } from './passwordPolicy'
 import type { Env } from '../index'
 
@@ -100,8 +100,8 @@ function existingReject(): SignupResult {
 //
 // mintMembershipNumber() reads BOTH customers.membership_number and
 // portal_accounts.membership_id directly, so a stale/orphaned account row
-// (e.g. a signup whose contact fold failed below) can never collide with a
-// fresh mint here. Every id issued here is mirrored into customers too
+// from older data can never collide with a fresh mint here. Every id issued
+// here is mirrored into customers too
 // (claimAccount either claims an existing customer's number or creates the
 // customer row). The INSERT below is still the final arbiter for a lost race.
 async function generateMembershipId(env: Env): Promise<string> {
@@ -188,11 +188,12 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   return claimAccount(env, { membershipId: newMembershipId, name, canonical, passwordHash, contactId: null, createContact: true, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
 }
 
-// Race-safe creation: claim the phone by inserting portal_accounts FIRST and
-// letting the UNIQUE constraint arbitrate (D1 has no interactive transaction,
-// so a prior read can never be trusted for uniqueness). Only the winner goes
-// on to create/link the contact, so two concurrent signups can never produce
-// two contacts for one phone.
+// Race-safe creation: an existing customer claim only inserts the account.
+// A genuinely-new customer instead commits the canonical-phone guard, folded
+// contact, linked account and durable consent in ONE D1 batch. A staff-created
+// contact that wins after signup's advisory read therefore makes the guard
+// throw and rolls the account write back; an account constraint that fires
+// after the contact insert rolls the contact back too.
 //
 // Two UNIQUE indexes can fire here (migration 0087): idx_portal_accounts_phone
 // and idx_portal_accounts_membership. A phone collision (or a membership-id
@@ -229,8 +230,50 @@ async function claimAccount(
     params.consent_version = PORTAL_CONSENT_VERSION
     params.consent_locale = args.consentLocale || 'und'
     try {
-      const res = await db.prepare(sql).run(params)
-      accountId = res.lastInsertRowid
+      if (args.createContact) {
+        const contactGuard = contactDuplicateWriteGuardStatement(
+          'customers',
+          { phones: [args.canonical] },
+        )
+        if (!contactGuard) throw new Error('portal_contact_guard_missing')
+
+        const batchResults = await db.batch([
+          contactGuard,
+          {
+            sql: 'INSERT INTO customers (name, phone, phone_normalized, membership_number) VALUES (@name, @phone, @phone_normalized, @membership_number)',
+            params: {
+              name: args.name,
+              phone: formatPhoneP8(args.canonical),
+              phone_normalized: args.canonical,
+              membership_number: membershipId,
+            },
+          },
+          {
+            sql: `INSERT INTO portal_accounts (
+              membership_id, name, phone, password_hash, contact_id,
+              consent_version, consent_at, consent_locale
+            ) VALUES (
+              @membership_id, @name, @phone, @password_hash,
+              COALESCE((
+                SELECT id FROM customers
+                WHERE lower(trim(membership_number)) = lower(trim(@membership_id))
+                  AND phone_normalized = @phone
+                LIMIT 1
+              ), json_extract('portal_contact_missing', '$')),
+              @consent_version, CURRENT_TIMESTAMP, @consent_locale
+            )`,
+            params,
+          },
+        ])
+        const insertedAccountId = Number(batchResults[2]?.meta?.last_row_id ?? 0)
+        if (!Number.isSafeInteger(insertedAccountId) || insertedAccountId <= 0) {
+          throw new Error('portal_account_insert_result_missing')
+        }
+        accountId = insertedAccountId
+      } else {
+        const res = await db.prepare(sql).run(params)
+        accountId = res.lastInsertRowid
+      }
       break
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -251,25 +294,6 @@ async function claimAccount(
     // exhaustion behaviour (throw); the global error handler turns this into
     // a 500 rather than the misleading "verification_failed" reminder.
     throw lastError instanceof Error ? lastError : new Error('Could not mint a unique membership id')
-  }
-
-  // Fold the name into a new contact for a genuinely-new customer, then link
-  // it. Best-effort: the account already exists and is usable if this fails.
-  if (args.createContact) {
-    try {
-      const contact = await db.prepare(
-        'INSERT INTO customers (name, phone, phone_normalized, membership_number) VALUES (@name, @phone, @phone_normalized, @membership_number)',
-      ).run({
-        name: args.name,
-        phone: formatPhoneP8(args.canonical),
-        phone_normalized: args.canonical,
-        membership_number: membershipId,
-      })
-      await db.prepare('UPDATE portal_accounts SET contact_id = @cid WHERE id = @id').run({ cid: contact.lastInsertRowid, id: accountId })
-    } catch (_) {
-      // Contact fold failed — leave the account contact-less rather than fail
-      // the signup; staff can reconcile from Contacts.
-    }
   }
 
   return { ok: true, accountId, membershipId, name: args.name }

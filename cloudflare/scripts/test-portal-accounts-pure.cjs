@@ -80,7 +80,7 @@ const contactDuplicates = loadReal('lib/contactDuplicates.ts', {
 })
 const { canonicalizePhone } = phone
 const { getPortalLockoutState, recordPortalFailure, clearPortalLockout } = loadReal('lib/portalAuthLockout.ts', { './db': dbModule })
-const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccounts.ts', {
+const { signupPortalAccount, signinPortalAccount, PORTAL_CONSENT_VERSION } = loadReal('lib/portalAccounts.ts', {
   './db': dbModule,
   './membershipNumber': membershipNumber,
   './phone': phone,
@@ -101,9 +101,10 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
 // pin it to an already-taken id, to force every retry attempt to collide)
 // while keeping every other export (isMembershipCollision included) real --
 // see the exhaustion check below, which is the only caller that overrides.
-function makeIsolatedPortal(membershipOverride = membershipNumber) {
+function makeIsolatedPortal(membershipOverride = membershipNumber, hooks = {}) {
   const rawDb2 = openDb(loadAll())
   let insertAttempts = 0
+  let batchAttempts = 0
   const db2 = {
     prepare(sql) {
       const stmt = rawDb2.prepare(sql)
@@ -118,7 +119,12 @@ function makeIsolatedPortal(membershipOverride = membershipNumber) {
         },
       }
     },
-    batch: (items) => rawDb2.batch(items),
+    batch: async (items) => {
+      batchAttempts += 1
+      insertAttempts += items.filter((item) => /INSERT INTO portal_accounts/i.test(item.sql)).length
+      if (hooks.beforeBatch) await hooks.beforeBatch({ rawDb: rawDb2, items, batchAttempt: batchAttempts })
+      return rawDb2.batch(items)
+    },
   }
   const { signupPortalAccount: signup2 } = loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db2 },
@@ -127,11 +133,12 @@ function makeIsolatedPortal(membershipOverride = membershipNumber) {
     './passwordPolicy': passwordPolicy,
     './contactDuplicates': contactDuplicates,
   })
-  return { signup: signup2, rawDb: rawDb2, getInsertAttempts: () => insertAttempts }
-}
-
-function freshSignup() {
-  return makeIsolatedPortal().signup
+  return {
+    signup: signup2,
+    rawDb: rawDb2,
+    getInsertAttempts: () => insertAttempts,
+    getBatchAttempts: () => batchAttempts,
+  }
 }
 
 function seedCustomer(fields) {
@@ -190,6 +197,62 @@ async function run() {
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(res.abuse, true)
+  })
+
+  await check('a staff-created customer that wins after the signup read leaves no account or duplicate contact', async () => {
+    let injected = false
+    const { signup, rawDb: raceDb, getBatchAttempts } = makeIsolatedPortal(membershipNumber, {
+      beforeBatch: ({ rawDb: hookDb }) => {
+        if (injected) return
+        injected = true
+        hookDb.prepare(
+          'INSERT INTO customers (name, phone, phone_normalized, membership_number) VALUES (@name, @phone, @phone_normalized, @membership_number)',
+        ).run({
+          name: 'Staff Race Winner',
+          phone: '097 101 202',
+          phone_normalized: '097101202',
+          membership_number: 'STAFF-RACE-WINNER',
+        })
+      },
+    })
+
+    const res = await signup(env, { name: 'Portal Visitor', phone: '+855 97 101 202', password: 'secret123', consent: true })
+    assert.strictEqual(res.ok, false)
+    assert.strictEqual(res.code, 'verification_failed')
+    assert.strictEqual(res.status, 409)
+    assert.strictEqual(getBatchAttempts(), 1, 'a hard phone owner is not retried as a mint collision')
+    assert.strictEqual(raceDb.prepare('SELECT COUNT(*) AS n FROM customers').get().n, 1, 'only the staff-created customer remains')
+    assert.strictEqual(raceDb.prepare('SELECT COUNT(*) AS n FROM portal_accounts').get().n, 0, 'the losing signup creates no account')
+    const publicResult = JSON.stringify(res)
+    assert.ok(!publicResult.includes('Staff Race Winner'), 'the generic public result never exposes the competing customer name')
+    assert.ok(!publicResult.includes('STAFF-RACE-WINNER'), 'the generic public result never exposes the competing membership id')
+  })
+
+  await check('an account-phone race after contact staging rolls the new contact back atomically', async () => {
+    let injected = false
+    const { signup, rawDb: raceDb } = makeIsolatedPortal(membershipNumber, {
+      beforeBatch: ({ rawDb: hookDb }) => {
+        if (injected) return
+        injected = true
+        hookDb.prepare(
+          'INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES (@membership_id, @name, @phone, @password_hash, NULL)',
+        ).run({
+          membership_id: 'ACCOUNT-RACE-WINNER',
+          name: 'Account Race Winner',
+          phone: '096303404',
+          password_hash: 'not-used-by-test',
+        })
+      },
+    })
+
+    const res = await signup(env, { name: 'Portal Visitor', phone: '096 303 404', password: 'secret123', consent: true })
+    assert.strictEqual(res.ok, false)
+    assert.strictEqual(res.code, 'verification_failed')
+    assert.strictEqual(raceDb.prepare('SELECT COUNT(*) AS n FROM customers').get().n, 0, 'the contact insert rolls back with the account collision')
+    assert.strictEqual(raceDb.prepare('SELECT COUNT(*) AS n FROM portal_accounts').get().n, 1, 'only the racing account remains')
+    const publicResult = JSON.stringify(res)
+    assert.ok(!publicResult.includes('Account Race Winner'), 'the competing account name is not exposed')
+    assert.ok(!publicResult.includes('ACCOUNT-RACE-WINNER'), 'the competing account membership id is not exposed')
   })
 
   await check('signup (existing customer) succeeds with membership id + MATCHING phone, links the contact', async () => {
@@ -292,7 +355,7 @@ async function run() {
     // on membership_id and the other must re-mint + retry -- not bounce the
     // real customer into "verification_failed" for a collision that was
     // entirely this function's own doing.
-    const signup2 = freshSignup()
+    const { signup: signup2, rawDb: concurrentDb } = makeIsolatedPortal()
     const [a, b] = await Promise.all([
       signup2(env, { name: 'Dara', phone: '099 111 222', password: 'secret123', consent: true }),
       signup2(env, { name: 'Sokha', phone: '099 333 444', password: 'secret123', consent: true }),
@@ -302,6 +365,11 @@ async function run() {
     assert.match(a.membershipId, /^LC-\d{5}$/, `first id must be house format, got ${a.membershipId}`)
     assert.match(b.membershipId, /^LC-\d{5}$/, `second id must be house format, got ${b.membershipId}`)
     assert.notStrictEqual(a.membershipId, b.membershipId, 'concurrent signups must not share a membership id')
+    const accounts = concurrentDb.prepare('SELECT contact_id, consent_version, consent_at FROM portal_accounts ORDER BY id').all()
+    assert.strictEqual(accounts.length, 2)
+    assert.ok(accounts.every((row) => Number(row.contact_id) > 0), 'each committed account is linked to its folded contact')
+    assert.ok(accounts.every((row) => row.consent_version === PORTAL_CONSENT_VERSION && row.consent_at), 'each atomic account persists current consent')
+    assert.strictEqual(concurrentDb.prepare('SELECT COUNT(*) AS n FROM customers').get().n, 2, 'one folded contact commits per account')
   })
 
   await check('a USER-SUPPLIED membership id that collides on the race still rejects (never re-minted)', async () => {
