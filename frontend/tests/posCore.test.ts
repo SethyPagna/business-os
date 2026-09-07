@@ -16,6 +16,7 @@ import { buildVariantOptionLabels,
   getVariantRootProduct,
   isSaleRecorded,
   resolveCartPriceValues,
+  resolvePosDisplayStock,
   batchReceivedInstant,
   sortBatchesForPicker,
 } from '../src/components/pos/posCore.ts'
@@ -79,6 +80,23 @@ await runTest('product lookup ignores invalid ids', () => {
   assert.equal(productsById.get(1)?.name, 'Valid')
   assert.equal(productsById.has(Number.NaN), false)
   assert.equal(productsById.size, 1)
+})
+
+await runTest('POS stock is aggregate without a branch and scoped after branch selection or cart assignment', () => {
+  const product = {
+    id: 1,
+    stock_quantity: 8,
+    branch_stock: [
+      { branch_id: 1, quantity: 3 },
+      { branch_id: 2, quantity: 5 },
+    ],
+  }
+
+  assert.equal(resolvePosDisplayStock(product), 8, 'all-branch catalogue should show the aggregate quantity')
+  assert.equal(resolvePosDisplayStock(product, 1), 3, 'selected branch should show only that branch quantity')
+  assert.equal(resolvePosDisplayStock(product, null, 2), 5, 'cart assignment should show only its branch quantity')
+  assert.equal(resolvePosDisplayStock(product, 1, 2), 3, 'active branch filter keeps precedence over cart fallback')
+  assert.equal(resolvePosDisplayStock(product, 99), 0, 'a missing selected branch has no sellable stock')
 })
 
 await runTest('same-name standalone products collapse into one POS card with distinct choices', () => {

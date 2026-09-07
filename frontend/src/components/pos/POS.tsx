@@ -54,6 +54,7 @@ import {
   isSaleRecorded,
   findCheckoutBlocker,
   resolveChangeExchangeRate,
+  resolvePosDisplayStock,
   type ManualDiscountType,
 } from './posCore.ts'
 import { promotionBadgeForProduct, type PromotionRule } from '../../utils/promotionRules.ts'
@@ -2266,39 +2267,12 @@ export default function POS() {
     [defaultBranchId],
   )
 
-  /**
-   * Stock quantity relevant to the active branch filter or item branch
-   * assignment.
-   *
-   * With no branch filter and no cart line yet, this used to fall back to
-   * `product.stock_quantity` -- the sum across ALL branches. A sale line
-   * only ever books against ONE branch (`pickBestBranchId` picks it on the
-   * first add, and every quantity check after that is scoped to that same
-   * branch via `getBranchStockQty`), so a product split e.g. 3+3 across two
-   * branches displayed "6" on the card but could only ever actually accept
-   * 3 into the cart -- the 4th unit always failed with "not enough stock"
-   * even though the card's own number said otherwise. Falling back to the
-   * same single best branch `pickBestBranchId` would assign makes the
-   * number on the card match the real ceiling enforced when adding.
-   */
+  // Product cards use aggregate stock in the unfiltered catalogue. Once a
+  // branch filter or cart assignment exists, quantity checks remain scoped to
+  // that one branch.
   const getDisplayStock = useCallback((product: ProductRecord | undefined, cartItem: { branch_id?: string | number | null } | null = null) => {
-    if (!product) return 0
-
-    if (primaryBranchFilterId != null) {
-      return getBranchStockQty(product, primaryBranchFilterId)
-    }
-
-    if (cartItem?.branch_id) {
-      return getBranchStockQty(product, cartItem.branch_id)
-    }
-
-    const bestBranchId = pickBestBranchId(product)
-    if (bestBranchId != null) {
-      return getBranchStockQty(product, bestBranchId)
-    }
-
-    return Number(product.stock_quantity || 0)
-  }, [primaryBranchFilterId, getBranchStockQty, pickBestBranchId])
+    return resolvePosDisplayStock(product, primaryBranchFilterId, cartItem?.branch_id)
+  }, [primaryBranchFilterId])
 
   const openProductCard = useCallback((product: ProductRecord, { groupProduct = false, inStock = false }: { groupProduct?: boolean; inStock?: boolean } = {}) => {
     if (!product) return
