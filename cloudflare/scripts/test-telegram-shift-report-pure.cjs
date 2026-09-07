@@ -225,9 +225,24 @@ check(`every labelled line has one English label and one Khmer label (${labelled
 
 // The day summary is built from the same header order, so the parity check
 // and the section order have to hold there too -- one shape, every report.
+//
+// THE FIXTURE CARRIES THE SHIFT'S OWN NUMBERS, courier payout included,
+// because the two reports print the same word -- `Expenses / ចំណាយ` -- and a
+// shared word may not name two different sums. It named two until Sep 7 2026:
+// the day header added up the fees table alone and printed no delivery-cost
+// component at all, so a single-shift day showed `/shift` "Expenses: $17.00"
+// against `/report` "Expenses: $9.50" with nothing on either message
+// explaining the $7.50 gap.
 const daySummary = telegram.formatDaySummary({
   date: '2026-09-06',
-  sales: { count: 24, usd: 486.25, cancelled: 1, refundUsd: 15, profitUsd: 142.6, deliveryFeeUsd: 12, creditUsd: 38 },
+  sales: {
+    count: 24, usd: 486.25, cancelled: 1, refundUsd: 15, profitUsd: 142.6,
+    deliveryFeeUsd: 12, creditUsd: 38,
+    // Same source as the shift's: getSalesTotals' delivery_actual_cost_usd /
+    // _count. A NULL cost is "not recorded", never $0.00 (see
+    // deliveryActualCostExpr), which is what the count is for.
+    deliveryCostUsd: 7.5, deliveryCostRecorded: 3,
+  },
   fees: { count: 2, usd: 9.5, khr: 20000 },
   stockIn: { count: 3, quantity: 120 },
   stockOut: { count: 1, quantity: 4 },
@@ -238,12 +253,39 @@ assert.deepEqual(daySections.slice(0, 7), [
   RULE,
   'Sales / ការលក់: $486.25',
   'Profit / ចំណេញ: $142.60',
-  'Expenses / ចំណាយ: $9.50 · 20,000៛',
+  'Expenses / ចំណាយ: $17.00 · 20,000៛',
   'Delivery fee / ថ្លៃដឹក: $12.00',
   'Credit / ឥណទាន: $38.00',
 ], daySummary)
 check(`the day summary leads with the SAME five totals in the same order (${daySections.length} lines)`, true)
-check('the day summary fits one phone screen too', daySections.length <= 20, daySummary)
+// The day's Expenses total is arithmetic, exactly as the shift's is above:
+// the fees table plus the courier money actually paid out, and nothing else.
+check('the day Expenses total is the fees table plus the recorded delivery cost',
+  Math.round((9.5 + 7.5) * 100) / 100 === 17
+  && daySummary.includes('Expenses / ចំណាយ: $17.00 · 20,000៛'), daySummary)
+// ...and it prints the same two component lines under it that the shift does,
+// so the reader can see which half is which without a second command.
+check('and it prints the same two component lines the shift prints',
+  daySummary.includes('Delivery cost / ថ្លៃដើមដឹកជញ្ជូន: $7.50')
+  && daySummary.includes('Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛'), daySummary)
+
+// THE SHARED HEADER, BYTE FOR BYTE. One set of numbers, two reports, one
+// block of five lines: if either formatter ever computes a header figure its
+// own way again, these two strings stop matching.
+const headerBlock = (text) => {
+  const rows = text.split('\n')
+  const first = rows.indexOf(RULE)
+  const next = rows.indexOf(RULE, first + 1)
+  return rows.slice(first + 1, next < 0 ? rows.length : next)
+}
+check('one set of numbers renders a byte-identical five-line header in both reports',
+  headerBlock(report).length === 5 && headerBlock(report).join('\n') === headerBlock(daySummary).join('\n'),
+  `${headerBlock(report).join('\n')}\n---\n${headerBlock(daySummary).join('\n')}`)
+
+// The cap moved from 20 to 24 on Sep 7 2026 with the expense split above: a
+// day with two cashiers, both currencies, stock movement in and out AND a
+// recorded courier payout is the fullest message this formatter can produce.
+check('the day summary fits one phone screen too', daySections.length <= 24, daySummary)
 check('and its cashier bullets are name, receipts, money -- nothing else',
   daySummary.includes('• za01 — 18 · $300.00') && daySummary.includes('• sok — 6 · $186.25'), daySummary)
 const dayEn = languageView(daySummary, 'en')

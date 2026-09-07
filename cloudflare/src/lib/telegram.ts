@@ -179,6 +179,12 @@ type UnitBucket = { count: number; quantity: number } | null | undefined
 type SalesBucket = {
   count: number; usd: number; cancelled: number; refundUsd: number
   profitUsd: number; deliveryFeeUsd: number; creditUsd: number
+  // The courier money actually paid out over the day, and how many sales
+  // recorded any (a missing cost is NULL, never 0 -- deliveryActualCostExpr,
+  // which is why the count exists). It rides along for ONE reason: the day
+  // header and the shift header print the same word "Expenses", so they have
+  // to add up the same two things. See expenseBlock() below.
+  deliveryCostUsd: number; deliveryCostRecorded: number
 }
 type DayStats = { date: string; sales: SalesBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
 type CashierRow = { cashier: string; count: number; usd: number }
@@ -224,6 +230,10 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
       // never subtracted from anything (the owner: "just use credit ...
       // instead of $-n ... just $n").
       creditUsd: totals.pending_revenue_usd,
+      // Same call, same two fields the shift report reads -- so the two
+      // reports' "Expenses" is one sum with one source, not a lookalike.
+      deliveryCostUsd: totals.delivery_actual_cost_usd,
+      deliveryCostRecorded: totals.delivery_actual_cost_count,
     },
     fees,
     stockIn,
@@ -268,6 +278,37 @@ const counted = (count: unknown, noun: 'movement(s)' | 'unit(s)'): string =>
   localizeTelegramValue(`${Number(count) || 0} ${noun}`)
 
 /**
+ * "Expenses" -- the ONE definition, shared by the shift report and the day
+ * summary because they print the same word for it.
+ *
+ * They did not share it until Sep 7 2026: the day header added up the fees
+ * table alone while the shift header added the fees to the courier money
+ * actually paid out, so a single-shift day showed `/shift` "Expenses: $17.00"
+ * against `/report` "Expenses: $9.50" and nothing on either message said why.
+ *
+ * An UNRECORDED courier cost is NULL, never $0.00 (deliveryActualCostExpr in
+ * salesAnalytics.ts) -- `recorded` is the count of sales that carry one, and a
+ * zero there keeps delivery out of the total entirely rather than claiming
+ * delivery was free.
+ *
+ * The two component lines print only when the total really has two parts.
+ * With one part the total IS that part, and printing it twice under two names
+ * is the repeated figure the owner asked us to take out ("no explanation just
+ * arrange all reports more concise").
+ */
+function expenseBlock(input: { otherUsd: unknown; otherKhr: unknown; deliveryCostUsd: unknown; deliveryCostRecorded: unknown }): { header: string | null; components: string[] } {
+  const courierUsd = Number(input.deliveryCostRecorded) > 0 ? round2(Number(input.deliveryCostUsd) || 0) : 0
+  const otherUsd = round2(Number(input.otherUsd) || 0)
+  const otherKhr = Number(input.otherKhr) || 0
+  const totalUsd = round2(otherUsd + courierUsd)
+  const split = courierUsd > 0 && (otherUsd > 0 || otherKhr > 0)
+  return {
+    header: totalUsd || otherKhr ? labeled('expenses', money(totalUsd, otherKhr)) : null,
+    components: split ? [labeled('deliveryCost', usd(courierUsd)), labeled('expensesOther', money(otherUsd, otherKhr))] : [],
+  }
+}
+
+/**
  * The day summary -- `/report`, and the scheduled push.
  *
  * SAME SHAPE AS THE SHIFT REPORT, deliberately (owner, Sep 6 2026: "arrange
@@ -297,20 +338,33 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // the owner wants stated, not a blank. Every other header line is dropped
   // when it is zero.
   if (showSales) header.push(labeled('sales', usd(stats.sales?.usd)), labeled('profit', usd(stats.sales?.profitUsd)))
-  if (categories?.fees !== false && (stats.fees?.usd || stats.fees?.khr)) header.push(labeled('expenses', money(stats.fees?.usd, stats.fees?.khr)))
+  // The SAME sum the shift header prints, through the same function: the fees
+  // of the day plus the courier money actually paid out. The `fees` switch
+  // still governs whether the line exists at all.
+  const expenses = expenseBlock({
+    otherUsd: categories?.fees === false ? 0 : stats.fees?.usd,
+    otherKhr: categories?.fees === false ? 0 : stats.fees?.khr,
+    deliveryCostUsd: showSales ? stats.sales?.deliveryCostUsd : 0,
+    deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
+  })
+  if (expenses.header) header.push(expenses.header)
   if (showSales && stats.sales?.deliveryFeeUsd) header.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
   if (showSales && stats.sales?.creditUsd) header.push(labeled('credit', usd(stats.sales.creditUsd)))
   if (header.length) lines.push(RULE, ...header)
 
   if (showSales) {
-    // Counts, then the one refunds figure. Both are already inside the
-    // header's Sales (refunds subtracted, voids contributing nothing); they
-    // are the breakdown of it, never a second total.
+    // The counts, on their own. They are the breakdown of the header's Sales
+    // (refunds subtracted, voids contributing nothing), never a second total.
     const counts = [labeled('invoices', Number(stats.sales?.count) || 0)]
     if (stats.sales?.cancelled) counts.push(labeled('cancelled', Number(stats.sales.cancelled) || 0))
-    if (stats.sales?.refundUsd) counts.push(labeled('refunds', usd(stats.sales.refundUsd)))
     lines.push(RULE, ...counts)
   }
+
+  // Then the money breakdown, in the shift report's order: the expense split
+  // (only when there are two parts of it), then the ONE refunds figure.
+  const breakdown = [...expenses.components]
+  if (showSales && stats.sales?.refundUsd) breakdown.push(labeled('refunds', usd(stats.sales.refundUsd)))
+  if (breakdown.length) lines.push(RULE, ...breakdown)
 
   const stock: string[] = []
   if (categories?.stock_in !== false && (stats.stockIn?.count || stats.stockIn?.quantity)) stock.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
@@ -542,9 +596,12 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // The header block: the five totals the owner named, each dropped when it
   // is zero -- Sales and Profit are the two the shop always wants, so they
   // print unconditionally even at $0.00 (a quiet shift is still a real one).
-  const totalExpensesUsd = round2((figures.otherExpenseUsd || 0) + (figures.deliveryCostRecorded > 0 ? figures.deliveryCostUsd : 0))
+  const expenses = expenseBlock({
+    otherUsd: figures.otherExpenseUsd, otherKhr: figures.otherExpenseKhr,
+    deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
+  })
   lines.push(RULE, labeled('sales', usd(figures.revenueUsd)), labeled('profit', usd(figures.profitUsd)))
-  if (totalExpensesUsd || figures.otherExpenseKhr) lines.push(labeled('expenses', money(totalExpensesUsd, figures.otherExpenseKhr)))
+  if (expenses.header) lines.push(expenses.header)
   if (figures.deliveryFeeUsd) lines.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
   // Always positive, always the word "credit" -- never "$-n", never
   // subtracted from anything above it (see the owner's separate ruling).
@@ -576,9 +633,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     reviewCodes: !figures.cash || figures.cash.needsReview ? ['tender_incomplete'] : [],
   })
   const cashKnown = !recon.needs_review
-  const context: string[] = []
-  if (figures.deliveryCostRecorded > 0) context.push(labeled('deliveryCost', usd(figures.deliveryCostUsd)))
-  if (figures.otherExpenseUsd || figures.otherExpenseKhr) context.push(labeled('expensesOther', money(figures.otherExpenseUsd, figures.otherExpenseKhr)))
+  const context: string[] = [...expenses.components]
   if (figures.refundUsd) context.push(labeled('refunds', usd(figures.refundUsd)))
   // The closing count only exists once the employee has ended the shift by
   // hand, so an open shift shows no difference against a count that was
