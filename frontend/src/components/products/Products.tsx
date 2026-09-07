@@ -403,6 +403,7 @@ type ProductApi = {
   previewWireImages: () => Promise<ProductApiResponse | undefined>
   wireImages: (changes: WireImageChange[]) => Promise<ProductApiResponse | undefined>
   unwireImages: (productIds: number[]) => Promise<ProductApiResponse | undefined>
+  invalidateProductReadCacheForReconciliation: () => Promise<void>
   searchProducts: (query: Record<string, unknown>) => Promise<ProductSearchResponse | ProductRecord[] | undefined>
   transferStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
   updateProduct: (id: EntityId, payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
@@ -530,6 +531,10 @@ const productApi: ProductApi = {
   previewWireImages: async () => toProductApiResponse(await (await loadProductWriteModule()).previewWireProductImages()),
   wireImages: async (changes) => toProductApiResponse(await (await loadProductWriteModule()).wireProductImages(changes)),
   unwireImages: async (productIds) => toProductApiResponse(await (await loadProductWriteModule()).unwireProductImages(productIds)),
+  invalidateProductReadCacheForReconciliation: async () => {
+    const module = await loadProductReadModule()
+    module.invalidateProductReadCacheForReconciliation()
+  },
   searchProducts: async (query) => {
     const module = await loadProductReadModule()
     return (await module.searchProducts(query as Parameters<ProductReadModule['searchProducts']>[0])) as ProductSearchResponse | ProductRecord[]
@@ -2046,7 +2051,10 @@ function ProductsFullEditor() {
       // A request can commit its atomic cases before a timeout or cancellation
       // reaches the client. Reload in every started-run failure path; retrying
       // re-scans only active cases under the same server contract.
-      if (calls > 0 || controller.signal.aborted) await load(true)
+      if (calls > 0 || controller.signal.aborted) {
+        await productApi.invalidateProductReadCacheForReconciliation()
+        await load(true)
+      }
       const undoWarning = undoPendingCount > 0
         ? (t('merge_duplicates_undo_unavailable') || 'Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.')
           .replace('{count}', String(undoPendingCount))
