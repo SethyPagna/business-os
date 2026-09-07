@@ -16,7 +16,7 @@
 
 import type { Env } from './index'
 import { getDb } from './lib/db'
-import { runImportAnalyze, runImportApply, markJobFailed } from './lib/importEngine'
+import { runImportAnalyze, runImportApply, markJobFailed, isImportApplyAuthorizationError } from './lib/importEngine'
 import { runBulkDeleteJob } from './lib/bulkDeleteEngine'
 import { continueCloudflareBackupAssetCopy, type BackupQueueMessage } from './lib/backup'
 import { runQueuedDriveRestoreStage, runQueuedDriveSync, type DriveSyncQueueMessage } from './lib/driveSyncQueue'
@@ -51,6 +51,15 @@ export async function handleImportQueue(batch: MessageBatch<ImportJobMessage>, e
       message.ack()
     } catch (error) {
       console.error('[import-queue] job failed', message.body, error)
+      if (isImportApplyAuthorizationError(error)) {
+        // runImportApply has already persisted the stable permission error.
+        // A role revocation is not transient infrastructure failure, so
+        // retrying the same approving actor would only repeat the denial
+        // until DLQ. A user-triggered Retry stamps a currently authorized
+        // actor and is the explicit recovery path.
+        message.ack()
+        continue
+      }
       // D1 writes inside runImportAnalyze/runImportApply already record the
       // failure onto the job row (status='failed', last_error) before
       // re-throwing -- retrying here covers transient infra errors (a D1

@@ -121,7 +121,11 @@ function loadImportRoute(state) {
           if (/COUNT\(\*\).*import_job_files/i.test(sql)) return { n: 1 }
           return undefined
         },
-        async run() { state.dbWrites++; return { changes: 1, lastInsertRowid: 1 } },
+        async run(params = {}) {
+          state.dbWrites++
+          if (/UPDATE import_jobs SET/i.test(sql) && typeof params.policy === 'string') state.job.policy_json = params.policy
+          return { changes: 1, lastInsertRowid: 1 }
+        },
       }
     },
     async batch() { state.batches++; return [] },
@@ -134,6 +138,35 @@ function loadImportRoute(state) {
     getProductImportReplaceColumns: (policyJson) => {
       const requested = JSON.parse(policyJson || '{}').replace_columns
       return Array.isArray(requested) ? [...new Set(requested.filter((value) => value === 'image_path' || value === 'selling_price_usd'))] : []
+    },
+    productImportChangesImages: async (_env, job) => {
+      const policy = JSON.parse(job.policy_json || '{}')
+      const decisions = policy.decisionsByRowNumber || {}
+      const updates = []
+      for (const row of state.analyzedRows) {
+        if (decisions[String(row.row_number)]?.action === 'skip') continue
+        const result = JSON.parse(row.result_json || '{}')
+        const imagePath = media.sanitizeMediaPath(state.lateImagePaths[row.row_number] || result.data?.image_path, '')
+        if (!imagePath || result.plannedMode === 'merge_stock') continue
+        if (policy.import_mode === 'replace_columns') {
+          const requested = Array.isArray(policy.replace_columns)
+            ? [...new Set(policy.replace_columns.filter((value) => value === 'image_path' || value === 'selling_price_usd'))]
+            : []
+          if (requested.length && !requested.includes('image_path')) continue
+        }
+        if (row.action === 'create' || !Number.isInteger(Number(result.existingId)) || Number(result.existingId) <= 0) return true
+        updates.push({ id: Number(result.existingId), imagePath })
+      }
+      if (!updates.length) return false
+      const current = new Map(state.currentProducts.map((row) => [Number(row.id), media.sanitizeMediaPath(row.image_path, '')]))
+      const identities = await productImagePermission.resolveProductImagePathIdentities(db, [
+        ...updates.map((entry) => entry.imagePath),
+        ...current.values(),
+      ])
+      return updates.some((entry) => {
+        const currentPath = current.get(entry.id) || ''
+        return (identities.get(currentPath) || currentPath) !== (identities.get(entry.imagePath) || entry.imagePath)
+      })
     },
     computeImportImageMatch: async () => ({
       rowImagePaths: new Map(Object.entries(state.lateImagePaths).map(([rowNumber, imagePath]) => [Number(rowNumber), imagePath])),
@@ -237,6 +270,7 @@ async function main() {
     const response = await request(state, '/job-1/approve')
     assert.equal(response.status, 200)
     assert.equal(state.queue.length, 1)
+    assert.equal(JSON.parse(state.job.policy_json).apply_authorized_by_id, state.user.id)
     console.log('PASS unchanged imported image path remains approvable with image action blocked')
   }
 
@@ -323,6 +357,15 @@ async function main() {
     assert.equal(response.status, 403)
     assert.equal(state.dbWrites + state.queue.length, 0)
     console.log('PASS apply retry rechecks changed product image authority')
+  }
+
+  {
+    const state = freshState(role({ products: true, 'products:image': true }), { status: 'failed', analyzedRows: [resultRow('update', '/uploads/new.png')] })
+    const response = await request(state, '/job-1/retry')
+    assert.equal(response.status, 200)
+    assert.equal(JSON.parse(state.job.policy_json).apply_authorized_by_id, state.user.id)
+    assert.equal(state.queue[0]?.kind, 'apply')
+    console.log('PASS authorized apply retry stamps the current actor before enqueue')
   }
 
   {

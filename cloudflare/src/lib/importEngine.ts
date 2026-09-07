@@ -76,6 +76,10 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
 import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
+import { getActionTier, hasPermission, isActionBlocked } from './permissions'
+import type { SessionUser } from './auth'
+import { sanitizeMediaPath } from './media'
+import { resolveProductImagePathIdentities } from './productImagePermission'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
 import { applyUnifiedStockAdd, applyUnifiedStockSale, batchIdentity, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
@@ -100,6 +104,65 @@ import {
 export type ImportType = 'products' | 'customers' | 'suppliers' | 'delivery_contacts' | 'inventory' | 'sales' | 'stock_actions'
 
 export type RowAction = 'create' | 'update' | 'skip' | 'error'
+
+type ImportApplyJob = {
+  id: string
+  type: ImportType
+  policy_json: string | null
+  summary_json?: string | null
+}
+
+export class ImportApplyAuthorizationError extends Error {
+  readonly code = 'import_apply_permission_revoked'
+  readonly permission: string
+
+  constructor(permission: string, message: string) {
+    super(message)
+    this.name = 'ImportApplyAuthorizationError'
+    this.permission = permission
+  }
+}
+
+export function isImportApplyAuthorizationError(error: unknown): error is ImportApplyAuthorizationError {
+  return error instanceof ImportApplyAuthorizationError
+    || (!!error && typeof error === 'object' && (error as { code?: unknown }).code === 'import_apply_permission_revoked')
+}
+
+function parsePolicyObject(text: string | null | undefined): Record<string, any> {
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch (_) {
+    return {}
+  }
+}
+
+function permissionsForImportType(type: ImportType): string[] {
+  if (type === 'stock_actions') return ['products', 'inventory', 'sales']
+  if (type === 'customers' || type === 'suppliers' || type === 'delivery_contacts') return ['contacts']
+  if (type === 'inventory') return ['inventory']
+  if (type === 'sales') return ['sales']
+  return ['products']
+}
+
+function importActionSection(type: ImportType): string {
+  if (type === 'customers' || type === 'suppliers' || type === 'delivery_contacts') return 'contacts'
+  if (type === 'inventory' || type === 'stock_actions') return 'inventory'
+  if (type === 'sales') return 'sales'
+  return 'products'
+}
+
+async function loadImportApplyActor(db: D1Compat, actorId: number): Promise<SessionUser | null> {
+  const actor = await db.prepare(`
+    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
+           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    WHERE u.id = @id AND u.is_active = 1 AND u.deleted_at IS NULL
+  `).get<SessionUser>({ id: actorId })
+  return actor ?? null
+}
 
 // Stable machine-readable tag for a row warning, distinct from `message`
 // (the human-readable sentence). Grouping/reporting code (see
@@ -155,6 +218,122 @@ export type ImportRowResult = {
   // update + branch_stock quantity REPLACE), so old imports and every
   // other row shape keep writing exactly as before.
   plannedMode?: 'merge_stock' | 'override_add' | 'override_replace'
+}
+
+// Shared by the synchronous approval/retry routes and every asynchronous
+// apply invocation. Reading the analyzed plan plus the current catalog is
+// what distinguishes an unchanged image identity from a real image write;
+// merely seeing an image_path column is not enough because legacy encoded
+// aliases can resolve to the same stored asset.
+export async function productImportChangesImages(env: Env, job: ImportApplyJob): Promise<boolean> {
+  if (job.type !== 'products') return false
+  const db = getDb(env)
+  const policy = parsePolicyObject(job.policy_json)
+  const decisions = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object'
+    ? policy.decisionsByRowNumber
+    : {}
+  const summary = parsePolicyObject(job.summary_json)
+  const rows = await db.staging.prepare(`
+    SELECT row_number, action, result_json
+    FROM import_job_rows
+    WHERE job_id = @id AND phase = 'analyze' AND action IN ('create', 'update')
+  `).all<{ row_number: number; action: string; result_json: string }>({ id: job.id })
+
+  const parsedRows = rows.map((row) => ({ row, result: parsePolicyObject(row.result_json) as ImportRowResult }))
+  let lateImagePaths: Map<number, string> | null = null
+  const imageOverridesChanged = policy.imageOverrides && typeof policy.imageOverrides === 'object' && Object.keys(policy.imageOverrides).length > 0
+  const limitDecisionsChanged = policy.imageLimitDecisions && typeof policy.imageLimitDecisions === 'object' && Object.keys(policy.imageLimitDecisions).length > 0
+  if (policy.wire_images === true && (!summary.imageMatch || imageOverridesChanged || limitDecisionsChanged)) {
+    const sourceRows = parsedRows.flatMap(({ row, result }) => result?.data
+      ? [{ ...(result.data as Record<string, unknown>), _rowNumber: row.row_number }]
+      : [])
+    const match = await computeImportImageMatch(db, job.id, sourceRows, job.policy_json)
+    lateImagePaths = match.rowImagePaths
+  }
+
+  const effectiveResults: ImportRowResult[] = []
+  for (const { row, result } of parsedRows) {
+    if (decisions[String(row.row_number)]?.action === 'skip') continue
+    if (!result?.data) continue
+    result.action = row.action as RowAction
+    const latePath = lateImagePaths?.get(row.row_number)
+    if (latePath) result.data.image_path = latePath
+    effectiveResults.push(result)
+  }
+  return productImportResultsChangeImages(db, effectiveResults, job.policy_json)
+}
+
+export async function productImportResultsChangeImages(
+  db: D1Compat,
+  results: ImportRowResult[],
+  policyJson: string | null,
+): Promise<boolean> {
+  const policy = parsePolicyObject(policyJson)
+  const updates: Array<{ id: number; imagePath: string }> = []
+  for (const result of results) {
+    if (result.action !== 'create' && result.action !== 'update') continue
+    const nextImagePath = sanitizeMediaPath(result.data?.image_path, '')
+    if (!nextImagePath) continue
+    const existingId = Number(result.existingId)
+    if (result.action === 'create' || !Number.isInteger(existingId) || existingId <= 0) return true
+    if (result.plannedMode === 'merge_stock') continue
+    if (policy.import_mode === 'replace_columns') {
+      const replaceColumns = getProductImportReplaceColumns(policyJson)
+      if (replaceColumns.length && !replaceColumns.includes('image_path')) continue
+    }
+    updates.push({ id: existingId, imagePath: nextImagePath })
+  }
+  if (!updates.length) return false
+
+  const currentById = new Map<number, string>()
+  const ids = [...new Set(updates.map((entry) => entry.id))]
+  for (let offset = 0; offset < ids.length; offset += 90) {
+    const chunk = ids.slice(offset, offset + 90)
+    const placeholders = chunk.map(() => '?').join(',')
+    const currentRows = await db.prepare(`SELECT id, image_path FROM products WHERE id IN (${placeholders})`)
+      .all<{ id: number; image_path: string | null }>(chunk)
+    for (const current of currentRows) currentById.set(Number(current.id), sanitizeMediaPath(current.image_path, ''))
+  }
+  const identities = await resolveProductImagePathIdentities(db, [
+    ...updates.map((entry) => entry.imagePath),
+    ...currentById.values(),
+  ])
+  return updates.some((entry) => {
+    const currentPath = currentById.get(entry.id) || ''
+    return (identities.get(currentPath) || currentPath) !== (identities.get(entry.imagePath) || entry.imagePath)
+  })
+}
+
+export function stripProductImportImageFields(results: ImportRowResult[]): void {
+  for (const result of results) {
+    if (result.data && typeof result.data === 'object') delete result.data.image_path
+  }
+}
+
+export async function assertCurrentImportApplyAuthority(
+  env: Env,
+  job: ImportApplyJob,
+): Promise<{ actor: SessionUser; allowProductImageWrites: boolean }> {
+  const policy = parsePolicyObject(job.policy_json)
+  const actorId = Number(policy.apply_authorized_by_id)
+  if (!Number.isInteger(actorId) || actorId <= 0) {
+    throw new ImportApplyAuthorizationError('import', 'The user who authorized this import is missing. Retry it with a currently authorized user.')
+  }
+  const actor = await loadImportApplyActor(getDb(env), actorId)
+  if (!actor) {
+    throw new ImportApplyAuthorizationError('import', 'The user who authorized this import is no longer active. Retry it with a currently authorized user.')
+  }
+  const missingPermission = permissionsForImportType(job.type).find((permission) => !hasPermission(actor, permission))
+  if (missingPermission) {
+    throw new ImportApplyAuthorizationError(missingPermission, `The user who authorized this import no longer has ${missingPermission} permission.`)
+  }
+  const section = importActionSection(job.type)
+  if (isActionBlocked(actor, section, 'import')) {
+    throw new ImportApplyAuthorizationError(`${section}:import`, `The user who authorized this import no longer has ${section}:import permission.`)
+  }
+
+  const allowProductImageWrites = job.type !== 'products' || getActionTier(actor, 'products', 'image') === 'full'
+  return { actor, allowProductImageWrites }
 }
 
 // Human-readable label for each warning kind, used as the group heading in
@@ -5075,6 +5254,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   }
 
   try {
+    const job = await db.prepare(`SELECT id, type, policy_json, summary_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
+    if (!job) throw new Error('Import job not found')
+    // The HTTP approval/retry request is only the enqueue boundary. A role
+    // can be edited or revoked while the message waits, and every later
+    // chunk is a fresh queue invocation. Resolve the persisted approving
+    // actor from live users/roles before this invocation changes job/chunk
+    // state or composes any catalog, stock, sales, or image write.
+    const authority = await assertCurrentImportApplyAuthority(env, job)
     if (jobRow.status !== 'applying') {
       // Reclaim 'applying' status on every entry that isn't already an
       // in-progress continuation -- see runImportAnalyze's identical block
@@ -5090,8 +5277,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       return { applied: 0, failed: 0 }
     }
 
-    const job = await db.prepare(`SELECT type, policy_json FROM import_jobs WHERE id = @id`).get<{ type: ImportType; policy_json: string | null }>({ id: jobId })
-    if (!job) throw new Error('Import job not found')
     // Unified stock actions have their own dedicated, isolated apply path --
     // each add/sale/create is committed by stockActionCommit.ts's atomic,
     // idempotent, oversell-proof writer. It deliberately never reaches the
@@ -5124,9 +5309,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       : null
 
     let imageMatchCache = state.imageMatch
-    if (job.type === 'products' && !imageMatchCache && shouldWireImages(job.policy_json)) {
+    let deniedImagePaths: Map<number, string> | undefined
+    if (job.type === 'products' && authority.allowProductImageWrites && !imageMatchCache && shouldWireImages(job.policy_json)) {
       const allRows = await readAllMaterializedRows(db, jobId, decisions)
       imageMatchCache = await computeAndCacheImageMatch(db, jobId, allRows, job.policy_json, cursor, state)
+    } else if (job.type === 'products' && !authority.allowProductImageWrites && shouldWireImages(job.policy_json)) {
+      // Compute the current invocation's effective paths without caching or
+      // renaming anything. The result is used only to decide whether this
+      // chunk contains a real image mutation after authority was revoked.
+      const allRows = await readAllMaterializedRows(db, jobId, decisions)
+      deniedImagePaths = (await computeImportImageMatch(db, jobId, allRows, job.policy_json)).rowImagePaths
     }
 
     // Auto-rename matched images now that this job is actually committing
@@ -5134,7 +5326,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // match becomes final). Renames are keyed by fileId, global to the
     // job -- not row-window-scoped -- so this only needs to run once, on
     // this run's first chunk, not repeated per window.
-    if (isFreshStart && job.type === 'products' && imageMatchCache?.hasRenamePlan) {
+    if (isFreshStart && job.type === 'products' && authority.allowProductImageWrites && imageMatchCache?.hasRenamePlan) {
       // Read here rather than carried in chunk state: this runs on the first
       // chunk only, so serialising the whole plan on all ~58 of them paid for
       // something used once.
@@ -5168,10 +5360,26 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       ? new Map(windowEntries.flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
       : undefined
 
-    const rowImagePaths = imageMatchCache ? await readRowImagePaths(db, jobId, windowRows) : undefined
+    const rowImagePaths = authority.allowProductImageWrites && imageMatchCache
+      ? await readRowImagePaths(db, jobId, windowRows)
+      : deniedImagePaths
     const results = job.type === 'products'
       ? await classifyProducts(db, windowRows, jobId, job.policy_json, rowImagePaths)
       : await classifyRows(db, job.type, windowRows, jobId, job.policy_json)
+    for (const result of results) {
+      const decision = decisions[String(result.rowNumber)]
+      if (decision?.action === 'skip') result.action = 'skip'
+    }
+    if (job.type === 'products' && !authority.allowProductImageWrites) {
+      if (await productImportResultsChangeImages(db, results, job.policy_json)) {
+        throw new ImportApplyAuthorizationError('products:image', 'The user who authorized this import no longer has permission to change product images.')
+      }
+      // This invocation's effective results resolve to unchanged images.
+      // Remove the field anyway: equality is
+      // permission to continue the non-image import, not permission to
+      // rewrite an alias-equivalent path or touch image bookkeeping.
+      stripProductImportImageFields(results)
+    }
     sw.lap('classifyChunkMs')
 
     // Replace mode (column-level) -- job-level choice, computed once per
@@ -5181,11 +5389,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // below in this same function.
     const productImportMode = job.type === 'products' ? getProductImportMode(job.policy_json) : 'merge'
     const productReplaceColumns = productImportMode === 'replace_columns' ? getProductImportReplaceColumns(job.policy_json) : []
-
-    for (const result of results) {
-      const decision = decisions[String(result.rowNumber)]
-      if (decision?.action === 'skip') result.action = 'skip'
-    }
 
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
     if (job.type === 'products' || job.type === 'inventory' || job.type === 'sales') {

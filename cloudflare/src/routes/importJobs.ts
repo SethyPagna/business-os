@@ -6,7 +6,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, computeImportImageMatch, getProductImportReplaceColumns, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, computeImportImageMatch, productImportChangesImages, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
@@ -16,8 +16,6 @@ import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from 
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { sanitizeMediaPath } from '../lib/media'
-import { resolveProductImagePathIdentities } from '../lib/productImagePermission'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -99,77 +97,9 @@ function requireProductImageAction(c: any) {
   return null
 }
 
-async function productImportChangesImages(env: Env, job: Record<string, unknown>): Promise<boolean> {
-  if (String(job.type || '') !== 'products') return false
-  const db = getDb(env)
-  const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
-  const decisions = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object'
-    ? policy.decisionsByRowNumber
-    : {}
-  const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
-  const rows = await db.staging.prepare(`
-    SELECT row_number, action, result_json
-    FROM import_job_rows
-    WHERE job_id = @id AND phase = 'analyze' AND action IN ('create', 'update')
-  `).all<{ row_number: number; action: string; result_json: string }>({ id: String(job.id || '') })
-
-  const parsedRows = rows.map((row) => ({ row, result: safeJsonParse<ImportRowResult | null>(row.result_json, null) }))
-  let lateImagePaths: Map<number, string> | null = null
-  // Wire can be enabled after analyze, so those persisted results have no
-  // matched image yet. Re-run the same matcher apply uses instead of treating
-  // the mere presence of files/overrides as a mutation: unmatched files and
-  // overrides aimed at skipped rows do not touch the catalog.
-  const imageOverridesChanged = policy.imageOverrides && typeof policy.imageOverrides === 'object' && Object.keys(policy.imageOverrides).length > 0
-  const limitDecisionsChanged = policy.imageLimitDecisions && typeof policy.imageLimitDecisions === 'object' && Object.keys(policy.imageLimitDecisions).length > 0
-  if (policy.wire_images === true && (!summary.imageMatch || imageOverridesChanged || limitDecisionsChanged)) {
-    const sourceRows = parsedRows.flatMap(({ row, result }) => result?.data
-      ? [{ ...(result.data as Record<string, unknown>), _rowNumber: row.row_number }]
-      : [])
-    const match = await computeImportImageMatch(db, String(job.id || ''), sourceRows, job.policy_json as string)
-    lateImagePaths = match.rowImagePaths
-  }
-
-  const updates: Array<{ id: number; imagePath: string }> = []
-  for (const { row, result } of parsedRows) {
-    if (decisions[String(row.row_number)]?.action === 'skip') continue
-    const nextImagePath = sanitizeMediaPath(lateImagePaths?.get(row.row_number) || result?.data?.image_path, '')
-    if (!nextImagePath) continue
-    const existingId = Number(result?.existingId)
-    if (row.action === 'create' || !Number.isInteger(existingId) || existingId <= 0) return true
-    if (result?.plannedMode === 'merge_stock') continue
-    if (policy.import_mode === 'replace_columns') {
-      const replaceColumns = getProductImportReplaceColumns(job.policy_json as string)
-      // An empty normalized selection falls through to the exhaustive update
-      // in importEngine. Only a real, non-empty selection that omits the image
-      // column proves the analyzed image will not be written.
-      if (replaceColumns.length && !replaceColumns.includes('image_path')) continue
-    }
-    updates.push({ id: existingId, imagePath: nextImagePath })
-  }
-  if (!updates.length) return false
-
-  const currentById = new Map<number, string>()
-  const ids = [...new Set(updates.map((entry) => entry.id))]
-  for (let offset = 0; offset < ids.length; offset += 90) {
-    const chunk = ids.slice(offset, offset + 90)
-    const placeholders = chunk.map(() => '?').join(',')
-    const currentRows = await db.prepare(`SELECT id, image_path FROM products WHERE id IN (${placeholders})`)
-      .all<{ id: number; image_path: string | null }>(chunk)
-    for (const current of currentRows) currentById.set(Number(current.id), sanitizeMediaPath(current.image_path, ''))
-  }
-  const identities = await resolveProductImagePathIdentities(db, [
-    ...updates.map((entry) => entry.imagePath),
-    ...currentById.values(),
-  ])
-  return updates.some((entry) => {
-    const currentPath = currentById.get(entry.id) || ''
-    return (identities.get(currentPath) || currentPath) !== (identities.get(entry.imagePath) || entry.imagePath)
-  })
-}
-
 async function requireChangedProductImportImageAction(c: any, job: Record<string, unknown>) {
   if (String(job.type || '') !== 'products' || getActionTier(c.get('user'), 'products', 'image') === 'full') return null
-  return (await productImportChangesImages(c.env, job)) ? requireProductImageAction(c) : null
+  return (await productImportChangesImages(c.env, job as any)) ? requireProductImageAction(c) : null
 }
 
 function serializeJob(job: Record<string, unknown>) {
@@ -1240,6 +1170,8 @@ app.post('/:id/approve', async (c) => {
   }
 
   const db = getDb(c.env)
+  policy.apply_authorized_by_id = c.get('user')?.id ?? null
+  policy.apply_authorized_at = new Date().toISOString()
   if (job.type === 'stock_actions') {
     policy.stock_action_conflicts_confirmed = requiresStockConfirmation
     policy.stock_action_confirmed_by = c.get('user')?.id ?? null
@@ -1372,15 +1304,19 @@ app.post('/:id/retry', async (c) => {
     return c.json({ success: false, error: 'This import is waiting for review. Use Confirm to apply it, or cancel it to start over.' }, 409)
   }
   const mode = retryMode
+  const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
   if (mode === 'apply') {
     const imageDenied = await requireChangedProductImportImageAction(c as any, job)
     if (imageDenied) return imageDenied
+    policy.apply_authorized_by_id = c.get('user')?.id ?? null
+    policy.apply_authorized_at = new Date().toISOString()
   }
   await db.prepare(`
     UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0,
-      processed_rows = 0, failed_rows = 0, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+      processed_rows = 0, failed_rows = 0, last_error = NULL,
+      policy_json = COALESCE(@policy, policy_json), updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
-  `).run({ id })
+  `).run({ id, policy: mode === 'apply' ? JSON.stringify(policy) : null })
   await c.env.IMPORT_QUEUE.send({ jobId: id, kind: mode })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_retry', id, job, queued || null, { source: 'api', mode })
