@@ -3317,6 +3317,48 @@ type DuplicatePreviewCatalog = {
   moneyByProductId: Map<number, Record<string, unknown>>
   stockByProductId: Map<number, DuplicatePreviewStockRow[]>
   activeBatchCountByProductId: Map<number, number>
+  complexLinkedProductIds: Set<number>
+}
+
+function multiClusterComplexLinkStatements(
+  groups: Awaited<ReturnType<typeof findDuplicateProductGroups>>,
+): Array<{ sql: string; params: Record<string, unknown> }> {
+  const ids = [...new Set(groups
+    .filter((group) => group.duplicates.length > 1)
+    .flatMap((group) => [group.canonical.id, ...group.duplicates.map((duplicate) => duplicate.id)]))]
+  return chunkForBinding(ids).map((chunk) => {
+    const { sql, params } = buildInClause('complexProduct', chunk)
+    const linkedSelects = MERGE_REPARENT_TABLES.map(({ table, column }) =>
+      `SELECT ${column} AS product_id FROM ${table} WHERE ${column} IN (${sql})`)
+    return {
+      sql: `
+        SELECT DISTINCT product_id FROM (
+          SELECT product_id FROM branch_stock WHERE product_id IN (${sql})
+          UNION ALL SELECT product_id FROM product_images WHERE product_id IN (${sql})
+          UNION ALL SELECT variant_product_id AS product_id FROM product_batches WHERE variant_product_id IN (${sql})
+          ${linkedSelects.map((select) => `UNION ALL ${select}`).join('\n')}
+          UNION ALL SELECT parent_id AS product_id FROM products WHERE parent_id IN (${sql})
+          UNION ALL
+          SELECT CAST(j.value AS INTEGER) AS product_id
+          FROM promotion_rules pr,
+               json_each(CASE WHEN json_valid(pr.product_ids) THEN pr.product_ids ELSE '[]' END) j
+          WHERE CAST(j.value AS INTEGER) IN (${sql})
+        )
+      `,
+      params,
+    }
+  })
+}
+
+async function readMultiClusterComplexProductIds(
+  db: ReturnType<typeof getDb>,
+  groups: Awaited<ReturnType<typeof findDuplicateProductGroups>>,
+): Promise<Set<number>> {
+  const statements = multiClusterComplexLinkStatements(groups)
+  const results = statements.length ? await db.batch(statements) : []
+  return new Set(results.flatMap((result) => Array.isArray(result.results)
+    ? result.results.map((row) => Number((row as { product_id?: unknown }).product_id))
+    : []).filter((id) => Number.isSafeInteger(id) && id > 0))
 }
 
 /**
@@ -3356,7 +3398,12 @@ async function readDuplicatePreviewCatalog(
       params,
     }
   })
-  const readResults = readStatements.length ? await db.batch(readStatements) : []
+  const complexLinkStatements = multiClusterComplexLinkStatements(groups)
+  const batchedResults = readStatements.length || complexLinkStatements.length
+    ? await db.batch([...readStatements, ...complexLinkStatements])
+    : []
+  const readResults = batchedResults.slice(0, readStatements.length)
+  const complexLinkResults = batchedResults.slice(readStatements.length)
   const rows = readResults.flatMap((result) => Array.isArray(result.results)
     ? result.results as Record<string, unknown>[]
     : [])
@@ -3364,6 +3411,9 @@ async function readDuplicatePreviewCatalog(
   const moneyByProductId = new Map<number, Record<string, unknown>>()
   const stockByProductId = new Map<number, DuplicatePreviewStockRow[]>()
   const activeBatchCountByProductId = new Map<number, number>()
+  const complexLinkedProductIds = new Set(complexLinkResults.flatMap((result) => Array.isArray(result.results)
+    ? result.results.map((row) => Number((row as { product_id?: unknown }).product_id))
+    : []).filter((id) => Number.isSafeInteger(id) && id > 0))
   for (const row of rows) {
     const productId = Number(row.id)
     if (!Number.isSafeInteger(productId) || productId <= 0) continue
@@ -3379,7 +3429,7 @@ async function readDuplicatePreviewCatalog(
     if (!stockByProductId.has(productId)) stockByProductId.set(productId, [])
     stockByProductId.get(productId)!.push({ branch_id: branchId, quantity: Number(row.quantity) || 0 })
   }
-  return { moneyByProductId, stockByProductId, activeBatchCountByProductId }
+  return { moneyByProductId, stockByProductId, activeBatchCountByProductId, complexLinkedProductIds }
 }
 
 app.get('/merge-duplicates/preview', async (c) => {
@@ -3439,9 +3489,13 @@ app.get('/merge-duplicates/preview', async (c) => {
         cost_price_usd: Number(economics.merged.cost_price_usd ?? costBefore.cost_price_usd) || 0,
         cost_price_khr: Number(economics.merged.cost_price_khr ?? costBefore.cost_price_khr) || 0,
       }
+      const groupMemberIds = [group.canonical.id, ...duplicateIds]
       const mergeBlockers = group.duplicates.length > MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER ? [{
           code: 'cluster_exceeds_atomic_limit',
           error: `This ${group.duplicates.length + 1}-row identity cluster exceeds the safe atomic merge limit and needs a dedicated manifest.`,
+        }] : group.duplicates.length > 1 && groupMemberIds.some((id) => previewCatalog.complexLinkedProductIds.has(id)) ? [{
+          code: 'cluster_requires_manifest',
+          error: 'This multi-row identity cluster has linked stock or history. It remains unchanged and needs a dedicated manifest.',
         }] : []
 
       return {
@@ -3512,11 +3566,12 @@ export const MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST = 25
 // The runtime counter can stop only between complete identity clusters. A
 // first cluster therefore needs its own hard ceiling: an empty fold is already
 // 41 D1 statements and six adapter calls, while stock, images and lots add
-// more. Three folds leave ample room below D1's invocation limit even for a
-// non-trivial product. Larger clusters remain visible and explicitly blocked
+// more. Two individually capped folds use at most 570 statements, leaving
+// headroom under the 700-statement request budget for the catalog scan and
+// group guards. Larger clusters remain visible and explicitly blocked
 // for a dedicated manifest rather than being split and corrupting their one
 // whole-cluster cost mean.
-export const MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER = 3
+export const MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER = 2
 export const MERGE_DUPLICATES_REQUEST_BUDGET_MS = 20_000
 export const MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET = 700
 
@@ -3600,6 +3655,7 @@ app.post('/merge-duplicates', async (c) => {
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
+  const complexMultiClusterProductIds = await readMultiClusterComplexProductIds(db, groups)
 
   const groupSummaries: Array<{
     canonicalId: number
@@ -3656,6 +3712,21 @@ app.post('/merge-duplicates', async (c) => {
           mergedName: dup.name,
           code: 'cluster_exceeds_atomic_limit',
           error: `This ${group.duplicates.length + 1}-row identity cluster exceeds the safe atomic merge limit and needs a dedicated manifest.`,
+        })
+      }
+      continue
+    }
+    if (group.duplicates.length > 1
+      && [canonicalId, ...group.duplicates.map((duplicate) => duplicate.id)]
+        .some((id) => complexMultiClusterProductIds.has(id))) {
+      for (const dup of group.duplicates) {
+        refusals.push({
+          caseKey: productMergeCaseKey(canonicalId, dup.id),
+          keeperId: canonicalId,
+          mergedId: dup.id,
+          mergedName: dup.name,
+          code: 'cluster_requires_manifest',
+          error: 'This multi-row identity cluster has linked stock or history. It remains unchanged and needs a dedicated manifest.',
         })
       }
       continue
@@ -3721,6 +3792,7 @@ app.post('/merge-duplicates', async (c) => {
     // earlier one committed, the next request recovers the original raw
     // DISTINCT costs instead of averaging the synthetic keeper again.
     for (const dup of group.duplicates) {
+      let stopAfterCommittedCase = false
       try {
         const operationId = crypto.randomUUID()
         const result = await foldDuplicateProductInto(
@@ -3738,6 +3810,7 @@ app.post('/merge-duplicates', async (c) => {
         if (!result.undoReady) {
           undoPendingCount += 1
           if (result.operationId) undoPendingOperationIds.push(result.operationId)
+          stopAfterCommittedCase = true
         }
       } catch (error) {
         if (isProductMergeInfrastructureError(error)) {
@@ -3768,6 +3841,12 @@ app.post('/merge-duplicates', async (c) => {
       mergedNames.push(dup.name)
       processedCaseKeys.push(productMergeCaseKey(canonicalId, dup.id))
       mergedProductsCount += 1
+      if (stopAfterCommittedCase) {
+        groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
+        completedGroupsForBudget += 1
+        interruptionCode = 'merge_infrastructure_interrupted'
+        break mergeGroups
+      }
     }
 
       groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
@@ -3797,8 +3876,8 @@ app.post('/merge-duplicates', async (c) => {
   const refusedCaseKeys = new Set(refusals.map((refusal) => refusal.caseKey))
   const onlyRefusedCasesRemain = remainingGroups != null && remainingGroups.every((group) =>
     group.duplicates.every((duplicate) => refusedCaseKeys.has(productMergeCaseKey(group.canonical.id, duplicate.id))))
-  const complete = remainingProducts === 0 || onlyRefusedCasesRemain
-  const stalled = !complete && remainingProducts != null && remainingProducts > 0 && !madeProgress
+  const complete = remainingProducts === 0
+  const stalled = !complete && !onlyRefusedCasesRemain && remainingProducts != null && remainingProducts > 0 && !madeProgress
 
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
@@ -3806,6 +3885,7 @@ app.post('/merge-duplicates', async (c) => {
   return c.json({
     success: true,
     complete,
+    blockedOnly: onlyRefusedCasesRemain,
     interrupted: interruptionCode != null,
     interruptionCode,
     error: interruptionCode ? productMergeInterruptionMessage(interruptionCode) : undefined,
