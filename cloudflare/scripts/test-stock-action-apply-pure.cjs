@@ -463,6 +463,35 @@ async function test(name, fn) {
     assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-gate'`).get().status, 'completed_with_errors')
   })
 
+  // 9b) The EARLY create-row gate at importEngine.ts's dispatchStockActionSingle
+  // (the `if (plan.kind === 'create' && receivesStock)` block) is the only
+  // reason a refused create row does not still register its product: refused
+  // inside applyUnifiedStockAdd instead, the product insert (ensureUnifiedStockProduct)
+  // would already have run, and the re-import that follows the fixed sheet
+  // carries a NEW job id, so the orphan product becomes a duplicate on retry.
+  // Deleting that whole block leaves every other test in this file green --
+  // this case is the only thing that pins it (sibling:F13 verifier wave 9).
+  await test('a NEW product create row with no supplier is refused before the product is inserted', async () => {
+    const { sqlite, db } = makeDb()
+    seedJob(sqlite, 'job-create-gate', [
+      // brand-new barcode, receives stock, no supplier column at all.
+      { _rowNumber: 2, name: 'Brand New', barcode: 'BN99', shop: '3', date: '2026-08-27', action: 'create', cost_price: '5' },
+    ], { stock_action_mode: 'direct' })
+    const { out } = await runJobToCompletion(db, 'job-create-gate', JSON.stringify({ stock_action_mode: 'direct' }))
+    assert.deepStrictEqual(out, { applied: 0, failed: 1 })
+    const refused = JSON.parse(sqlite.prepare(`SELECT result_json FROM import_job_rows WHERE job_id='job-create-gate' AND row_number=2`).get().result_json)
+    assert.strictEqual(refused.action, 'error')
+    assert.match(refused.message, /A stock-in must name the supplier the goods came from/)
+    // The discriminating assertion: without the early gate, dispatchStockActionSingle
+    // would already have inserted the product before applyUnifiedStockAdd's
+    // own gate ever ran.
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM products WHERE barcode='BN99'`).get().n, 0,
+      'a refused create must not leave an orphan product row behind for the re-import to duplicate')
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches`).get().n, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-create-gate'`).get().status, 'completed_with_errors')
+  })
+
   // 10) ...and the gate stops at the receipts. A create row whose branch
   // columns are an explicit 0 registers a product and writes NO stock: there
   // is no receipt, so there is nothing for a supplier or a cost to describe.
