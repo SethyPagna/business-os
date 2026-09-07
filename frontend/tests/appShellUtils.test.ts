@@ -106,7 +106,7 @@ runTest('successful login reconnects websocket writes immediately', () => {
   // login also clears any WS backoff/suppression window left over from a
   // prior session (e.g. a revoked session after a password change). resumeWS
   // itself clears that suppression and then calls reconnectWS() internally.
-  assert.match(appContextSource, /import \{ isWSConnected, resumeWS \} from '\.\/api\/websocket\.ts'/)
+  assert.match(appContextSource, /import \{ disconnectWS, isWSConnected, resumeWS \} from '\.\/api\/websocket\.ts'/)
   assert.match(appContextSource, /cacheClearAll\(\)\s+getAppApi\(\)\.ensureSessionRecoveryListeners\?\.\(\)[\s\S]*?\n\s+resumeWS\(\)\s+startHealthCheck\(\)/)
 })
 
