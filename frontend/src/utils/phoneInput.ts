@@ -4,6 +4,13 @@ export type PhoneInputEdit = {
   selectionEnd: number
 }
 
+type PhoneInputKeyEvent = {
+  key: string
+  currentTarget: HTMLInputElement
+  preventDefault: () => void
+  nativeEvent?: { isComposing?: boolean; keyCode?: number }
+}
+
 function hasLeadingPlus(value: string): boolean {
   const plusIndex = value.indexOf('+')
   if (plusIndex < 0) return false
@@ -82,17 +89,54 @@ export function formatPhoneInputEdit(
   }
 }
 
+function restorePhoneInputSelection(input: HTMLInputElement, edit: PhoneInputEdit): void {
+  if (typeof requestAnimationFrame !== 'function') return
+  requestAnimationFrame(() => {
+    try {
+      if (typeof document === 'undefined' || document.activeElement === input) {
+        input.setSelectionRange(edit.selectionStart, edit.selectionEnd)
+      }
+    } catch (_) {}
+  })
+}
+
 /** Formats a controlled phone input and restores its caret after React renders. */
 export function formatPhoneInputElement(input: HTMLInputElement): string {
   const edit = formatPhoneInputEdit(input.value, input.selectionStart, input.selectionEnd)
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(() => {
-      try {
-        if (typeof document === 'undefined' || document.activeElement === input) {
-          input.setSelectionRange(edit.selectionStart, edit.selectionEnd)
-        }
-      } catch (_) {}
-    })
-  }
+  restorePhoneInputSelection(input, edit)
   return edit.value
+}
+
+/**
+ * Makes deletion across an auto-inserted separator take one key press.
+ * Native editing remains in charge for selections, composition, and keys that
+ * are not immediately beside a formatting space.
+ */
+export function handlePhoneInputKeyDown(event: PhoneInputKeyEvent, onValue: (value: string) => void): boolean {
+  if (event.nativeEvent?.isComposing || event.nativeEvent?.keyCode === 229) return false
+  const direction = event.key === 'Backspace' ? 'backward' : event.key === 'Delete' ? 'forward' : null
+  if (!direction) return false
+
+  const input = event.currentTarget
+  const start = input.selectionStart
+  const end = input.selectionEnd
+  if (start == null || end == null || start !== end) return false
+
+  const separatorIndex = direction === 'backward' ? start - 1 : start
+  if (separatorIndex < 0 || input.value[separatorIndex] !== ' ') return false
+
+  let digitIndex = direction === 'backward' ? separatorIndex - 1 : separatorIndex + 1
+  const step = direction === 'backward' ? -1 : 1
+  while (digitIndex >= 0 && digitIndex < input.value.length && !/\d/.test(input.value[digitIndex])) {
+    digitIndex += step
+  }
+  if (digitIndex < 0 || digitIndex >= input.value.length) return false
+
+  const unformatted = `${input.value.slice(0, digitIndex)}${input.value.slice(digitIndex + 1)}`
+  const rawCaret = direction === 'backward' ? digitIndex : start
+  const edit = formatPhoneInputEdit(unformatted, rawCaret, rawCaret)
+  event.preventDefault()
+  onValue(edit.value)
+  restorePhoneInputSelection(input, edit)
+  return true
 }

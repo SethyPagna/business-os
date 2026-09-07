@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { formatPhoneInputEdit, formatPhoneInputValue } from '../src/utils/phoneInput.ts'
+import { formatPhoneInputEdit, formatPhoneInputValue, handlePhoneInputKeyDown } from '../src/utils/phoneInput.ts'
 
 assert.equal(formatPhoneInputValue(''), '')
 assert.equal(formatPhoneInputValue('0'), '0')
@@ -19,6 +19,60 @@ assert.deepEqual(
   { value: '012 345', selectionStart: 3, selectionEnd: 3 },
   'backspace at an inserted separator keeps the caret before that separator',
 )
+
+const originalRequestAnimationFrame = globalThis.requestAnimationFrame
+globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+  callback(0)
+  return 1
+}) as typeof requestAnimationFrame
+
+function deletionEvent(value: string, caret: number, key: 'Backspace' | 'Delete', composing = false) {
+  let prevented = false
+  let selection: [number, number] = [caret, caret]
+  const input = {
+    value,
+    selectionStart: caret,
+    selectionEnd: caret,
+    setSelectionRange(start: number, end: number) {
+      selection = [start, end]
+    },
+  } as HTMLInputElement
+  const event = {
+    key,
+    currentTarget: input,
+    preventDefault() { prevented = true },
+    nativeEvent: { isComposing: composing, keyCode: composing ? 229 : 0 },
+  }
+  let nextValue = value
+  const handled = handlePhoneInputKeyDown(event, (next) => {
+    nextValue = next
+    input.value = next
+  })
+  return { handled, prevented, nextValue, selection }
+}
+
+assert.deepEqual(
+  deletionEvent('012 345', 4, 'Backspace'),
+  { handled: true, prevented: true, nextValue: '013 45', selection: [2, 2] },
+  'Backspace after an inserted space removes the preceding digit in one press',
+)
+assert.deepEqual(
+  deletionEvent('012 345', 3, 'Delete'),
+  { handled: true, prevented: true, nextValue: '012 45', selection: [3, 3] },
+  'Delete before an inserted space removes the following digit instead of recreating the space',
+)
+assert.deepEqual(
+  deletionEvent('012 345', 5, 'Backspace'),
+  { handled: false, prevented: false, nextValue: '012 345', selection: [5, 5] },
+  'ordinary digit deletion stays native',
+)
+assert.deepEqual(
+  deletionEvent('012 345', 4, 'Backspace', true),
+  { handled: false, prevented: false, nextValue: '012 345', selection: [4, 4] },
+  'IME composition is never intercepted',
+)
+
+globalThis.requestAnimationFrame = originalRequestAnimationFrame
 assert.deepEqual(
   formatPhoneInputEdit('012 3945 678', 6, 6),
   { value: '012 394 5678', selectionStart: 6, selectionEnd: 6 },
@@ -44,5 +98,6 @@ for (const source of contactSources) {
 const combinedSource = contactSources.join('\n')
 assert.equal((combinedSource.match(/autoComplete="tel"/g) || []).length, 7, 'all seven owned primary, option, and POS quick-add phone inputs remain telephone inputs')
 assert.equal((combinedSource.match(/formatPhoneInputElement\(/g) || []).length, 7, 'all seven owned phone inputs format progressively')
+assert.equal((combinedSource.match(/handlePhoneInputKeyDown\(event/g) || []).length, 7, 'all seven owned phone inputs handle deletion across inserted spaces')
 
 console.log('phone input tests passed')
