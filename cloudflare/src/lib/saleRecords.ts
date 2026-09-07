@@ -77,6 +77,7 @@
 //                    explicitly unknown rather than silently erasing them.
 
 import { parseSqliteTimestampMs } from './saleAmendments'
+import { parseSaleCreationSnapshot, type SaleCreationSnapshotV1 } from './saleCreationSnapshot'
 
 // ---------------------------------------------------------------------------
 // The closed set of kinds. Closed on purpose: the float renders a localized
@@ -188,12 +189,71 @@ export interface SaleRecordSaleRow {
   amount_paid_khr?: unknown
   change_usd?: unknown
   change_khr?: unknown
+  creation_snapshot_json?: unknown
   items?: Array<{
     product_name?: unknown
     quantity?: unknown
     applied_price_usd?: unknown
     total_usd?: unknown
   }>
+}
+
+/**
+ * Decode the append-only creation envelope written by migration 0134 writers.
+ *
+ * This deliberately does not merge with the current sale row. Once a valid
+ * snapshot exists, every creation field comes from that one envelope so a
+ * later product rename, tender correction or driver edit cannot leak into the
+ * creation record. Unknown/new snapshot versions fall back to the legacy
+ * evidence reconstruction below rather than being partially guessed.
+ */
+export function saleCreatedRecordFromSnapshot(
+  sale: SaleRecordSaleRow,
+  snapshot: SaleCreationSnapshotV1,
+): SaleRecord {
+  const at = text(snapshot.recorded_at)
+  const driver = snapshot.delivery || {
+    is_delivery: false,
+    driver_name: null,
+    driver_phone: null,
+    delivery_fee_usd: null,
+    delivery_actual_cost_usd: null,
+  }
+  return {
+    id: `sale:${sale.id}`,
+    source: 'sale',
+    at,
+    at_ms: atMs(at),
+    actor_username: text(snapshot.actor?.username),
+    kind: 'sale_created',
+    via: snapshot.origin,
+    subject: text(snapshot.receipt_number) || text(sale.receipt_number),
+    summary: `Sale ${text(snapshot.receipt_number) || `#${sale.id}`} recorded`,
+    before: null,
+    after: {
+      receipt_number: text(snapshot.receipt_number),
+      sale_status: text(snapshot.sale_status),
+      products: snapshot.products.map((item) => ({
+        product: text(item.product),
+        sku: text(item.sku),
+        quantity: numberOrNull(item.quantity),
+        unit_price_usd: numberOrNull(item.unit_price_usd),
+        line_total_usd: numberOrNull(item.line_total_usd),
+      })),
+      total_usd: numberOrNull(snapshot.total_usd),
+      payment_method: text(snapshot.payment_method),
+      payment_details: snapshot.payment_details,
+      amount_paid_usd: numberOrNull(snapshot.amount_paid_usd),
+      amount_paid_khr: numberOrNull(snapshot.amount_paid_khr),
+      change_usd: numberOrNull(snapshot.change_usd),
+      change_khr: numberOrNull(snapshot.change_khr),
+      is_delivery: Boolean(driver.is_delivery),
+      delivery_contact_name: text(driver.driver_name),
+      delivery_contact_phone: text(driver.driver_phone),
+      delivery_fee_usd: numberOrNull(driver.delivery_fee_usd),
+      delivery_actual_cost_usd: numberOrNull(driver.delivery_actual_cost_usd),
+    },
+  }
 }
 
 /**
@@ -872,7 +932,10 @@ export function buildSaleRecords(input: {
   returnBulk?: SaleRecordReturnBulkEventRow[]
   mutations?: SaleRecordMutationRow[]
 }): SaleRecord[] {
-  const records: SaleRecord[] = [saleCreatedRecord(reconstructSaleCreation(input))]
+  const creationSnapshot = parseSaleCreationSnapshot(input.sale.creation_snapshot_json)
+  const records: SaleRecord[] = [creationSnapshot
+    ? saleCreatedRecordFromSnapshot(input.sale, creationSnapshot)
+    : saleCreatedRecord(reconstructSaleCreation(input))]
   const missingReturnBulkReplays: Array<{
     original: SaleRecord | null
     firstSurviving: SaleRecord | null

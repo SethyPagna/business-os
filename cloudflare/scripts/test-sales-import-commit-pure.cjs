@@ -16,6 +16,8 @@ function compileLib(name, localRequire) {
 }
 
 function compileSubject() {
+  let actorSnapshot
+  let saleCreationSnapshot
   const localRequire = (request) => {
     if (request === './db') return {}
     if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
@@ -24,6 +26,14 @@ function compileSubject() {
     // The REAL receipt-number module, not a stub: an imported sale's receipt
     // id and its legacy-label routing are exactly what this test checks.
     if (request === './receiptNumber') return compileLib('receiptNumber', localRequire)
+    if (request === './actorSnapshot') {
+      actorSnapshot ||= compileLib('actorSnapshot', localRequire)
+      return actorSnapshot
+    }
+    if (request === './saleCreationSnapshot') {
+      saleCreationSnapshot ||= compileLib('saleCreationSnapshot', localRequire)
+      return saleCreationSnapshot
+    }
     return require(request)
   }
   return compileLib('salesImportCommit', localRequire)
@@ -87,12 +97,13 @@ function saleData(overrides = {}) {
 
 ;(async () => {
   const subject = compileSubject()
+  const actor = { id: 41, username: 'current-importer', name: 'Ignored Full Name' }
 
   // Existing concurrent-looking row proves line linkage uses the import's
   // deterministic key, never "latest id" ordering.
   const normal = setup()
   normal.sqlite.prepare(`INSERT INTO sales (receipt_number, client_request_id) VALUES ('OTHER', 'other-request')`).run()
-  const input = { jobId: 'job-1', rowNumber: 2, data: saleData(), nowIso: '2026-08-28T08:00:00.000Z' }
+  const input = { jobId: 'job-1', rowNumber: 2, data: saleData(), nowIso: '2026-08-28T08:00:00.000Z', actor }
   const first = await subject.applyHistoricalSaleImport(normal.db, input)
   const retry = await subject.applyHistoricalSaleImport(normal.db, input)
   assert.equal(first.alreadyApplied, false)
@@ -106,6 +117,16 @@ function saleData(overrides = {}) {
     normal.sqlite.prepare(`SELECT receipt_number, legacy_receipt_number FROM sales WHERE client_request_id = 'sales-import:job-1:2'`).all(),
     [{ receipt_number: '20260828-143000', legacy_receipt_number: 'R-100' }],
   )
+  const creation = JSON.parse(normal.sqlite.prepare(`SELECT creation_snapshot_json FROM sales WHERE client_request_id = 'sales-import:job-1:2'`).get().creation_snapshot_json)
+  assert.equal(creation.version, 1)
+  assert.equal(creation.origin, 'sales_import')
+  assert.deepEqual(creation.actor, { id: 41, username: 'current-importer' })
+  assert.deepEqual(creation.cashier, { id: null, username: 'Admin' })
+  assert.deepEqual(creation.products, [{
+    product_id: 10, product: 'Widget', sku: 'SKU-1', quantity: 2, unit_price_usd: 5, line_total_usd: 10,
+  }])
+  assert.equal(creation.sale_at, '2026-08-28T07:30:00.000Z')
+  assert.equal(creation.recorded_at, input.nowIso)
   assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sale_items`).get().n, 1)
   assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, '20260828-143000')
   assert.equal(normal.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5, 'ordinary history import never deducts current stock')
@@ -123,7 +144,7 @@ function saleData(overrides = {}) {
   ].entries()) {
     const rejected = setup()
     await assert.rejects(
-      () => subject.applyHistoricalSaleImport(rejected.db, { jobId: `job-rejected-${index}`, rowNumber: 3, data, nowIso: input.nowIso }),
+      () => subject.applyHistoricalSaleImport(rejected.db, { jobId: `job-rejected-${index}`, rowNumber: 3, data, nowIso: input.nowIso, actor }),
       /Only allow Shop sale/,
     )
     assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
@@ -132,7 +153,7 @@ function saleData(overrides = {}) {
 
   const returned = setup()
   const returnedData = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
-  const returnedInput = { jobId: 'job-return', rowNumber: 8, data: returnedData, nowIso: '2026-08-28T08:00:00.000Z' }
+  const returnedInput = { jobId: 'job-return', rowNumber: 8, data: returnedData, nowIso: '2026-08-28T08:00:00.000Z', actor }
   await subject.applyHistoricalSaleImport(returned.db, returnedInput)
   await subject.applyHistoricalSaleImport(returned.db, returnedInput)
   assert.equal(returned.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 6)
