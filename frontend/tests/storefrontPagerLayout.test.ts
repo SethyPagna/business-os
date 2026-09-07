@@ -57,19 +57,33 @@ runTest('the shared control offers a centred storefront layout without changing 
   assert.match(pagination, /layout = 'default',/, "the default must stay 'default' so all 28 admin consumers are untouched")
 })
 
-runTest("the centred branch prints no 'Showing X-Y of N' summary and no separate 'per page' label", () => {
+runTest("the centred branch prints no 'Showing X-Y of N' summary and no per-page wording at all", () => {
   const branch = centeredBranch()
   assert.doesNotMatch(branch, /\{showingLabel\}/, 'the storefront pager must not render the Showing summary')
   assert.doesNotMatch(branch, /\{label\}/, 'the storefront pager must not render the "products" tail of the summary')
-  assert.doesNotMatch(branch, /<span>\{perPageLabel\}\}?<\/span>/, 'the per-page text label belongs in the aria-label, not beside the select')
-  assert.match(branch, /ariaLabel=\{perPageLabel\}/, 'the per-page wording must survive as the accessible name')
+  // This used to REQUIRE `ariaLabel={perPageLabel}` here, on the grounds
+  // that the wording should survive as the accessible name of the in-pill
+  // trigger. With the control off the row there is nothing left to name, and
+  // an accessible name for a control that is not there is worse than none.
+  // The wording lives on the Filters field instead -- see
+  // storefrontPagerRow.test.ts, which pins that the field carries its own
+  // label and aria-label.
+  assert.doesNotMatch(branch, /perPageLabel/, 'no per-page wording belongs on a row with no per-page control')
+  const products = read('../src/components/catalog/CatalogProductsSection.tsx')
+  assert.match(products, /ariaLabel=\{copy\('perPage', 'Per page'\)\}/, 'the wording moved with the control, it was not dropped')
 })
 
-runTest('the centred per-page trigger is sized to its own value, not a fixed wide column', () => {
+// Superseded on Sep 6 2026 by the owner's ruling on that same screenshot: the
+// page-size control is not on this row "not as a select, not as a chip", and
+// a menu hung off the count is the same control in a third disguise. This
+// test used to REQUIRE the control inside the pill; it now requires the
+// opposite, and storefrontPagerRow.test.ts pins where the control went and
+// that its write path is unchanged. Both files must agree -- two test files
+// asserting opposite things is how a defect survives a green run.
+runTest('the centred row carries no per-page control, and no fixed wide column', () => {
   const branch = centeredBranch()
-  assert.match(branch, /<PageSizeSelect/, 'the per-page control must live INSIDE the pager pill')
+  assert.doesNotMatch(branch, /<PageSizeSelect/, 'the per-page control must not be on the pager row')
   assert.doesNotMatch(branch, /min-w-\[5\.5rem\]/, 'the 5.5rem floor is exactly what made "50" look oversized')
-  assert.match(branch, /w-auto/, 'the trigger must take its width from its content')
 })
 
 // Superseded on Sep 6 2026 by the owner's screenshot of this row: a red X
@@ -78,22 +92,22 @@ runTest('the centred per-page trigger is sized to its own value, not a fixed wid
 // the page number. The order below is the replacement contract; the "no
 // separate box, no dead space" rules that make it a fix rather than a
 // reshuffle live in storefrontPagerRow.test.ts.
-runTest('the centred branch centres the pill and orders it back / count / next', () => {
+runTest('the centred branch centres the pill and orders it back / page / count / next', () => {
   const branch = centeredBranch()
   assert.match(branch, /flex w-full justify-center/, 'the pager row must centre itself')
   const backAt = branch.indexOf('aria-label={backLabel}')
   const pageAt = branch.indexOf('aria-label={pageLabel}')
-  const sizeAt = branch.indexOf('<PageSizeSelect')
+  const countAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
   assert.ok(backAt > 0 && pageAt > backAt, 'the page number must follow Back')
-  assert.ok(sizeAt > pageAt, 'the count -- which is also the per-page trigger -- must follow the page number')
-  assert.ok(nextAt > sizeAt, 'Next must close the pill; nothing may sit after it')
+  assert.ok(countAt > pageAt, 'the total-pages count -- plain text now -- must follow the page number')
+  assert.ok(nextAt > countAt, 'Next must close the pill; nothing may sit after it')
 })
 
 runTest('the storefront wrapper opts into the centred layout', () => {
   assert.match(catalogPagination, /layout="centered"/, 'catalogPagination.tsx must request the storefront layout')
   assert.match(catalogPagination, /<PaginationControls\b/, 'the storefront must keep consuming the shared control (paginationSurfaceContract)')
-  assert.match(catalogPagination, /editablePageSizeInput=\{false\}/, 'the storefront keeps its fixed 20/50/100 list')
+  assert.match(catalogPagination, /export const CATALOG_PAGE_SIZE_OPTIONS = \[20, 50, 100\]/, 'the storefront keeps its fixed 20/50/100 list, now shared with the Filters field that offers it')
   assert.doesNotMatch(catalogPagination, /rounded-2xl bg-white\/92/, 'the old bordered summary box wrapper must go with the summary')
 })
 
@@ -165,7 +179,10 @@ runTest('the shared control takes its own arrow-disabled state from that same ke
   const branch = centeredBranch()
   assert.match(branch, /disabled=\{backDisabled\}/, 'so a single-page storefront pill shows a dead Back')
   assert.match(branch, /disabled=\{nextDisabled\}/, 'and a dead Next')
-  assert.match(branch, /<PageSizeSelect/, 'while the per-page chooser beside them stays live')
+  // The chooser that rescues a shopper from a 100-per-page dead end is no
+  // longer beside them -- it is a Filters field, and it does not depend on
+  // this pill rendering at all.
+  assert.match(catalogProducts, /options=\{CATALOG_PAGE_SIZE_OPTIONS\}/, 'the per-page chooser stays live somewhere the shopper can reach')
 })
 
 runTest('both pager mounts translate Back and Next instead of leaking the raw keys', () => {
@@ -175,6 +192,7 @@ runTest('both pager mounts translate Back and Next instead of leaking the raw ke
     assert.match(map, /back: copy\('back', 'Back'\)/, "'back' fell through the map and printed itself as the button label")
     assert.match(map, /next: copy\('next', 'Next'\)/, "'next' fell through the map and printed itself as the button label")
     assert.doesNotMatch(map, /showing:/, 'the Showing key is retired with the summary bar')
+    assert.doesNotMatch(map, /per_page:/, 'and per_page with the control it labelled -- the Filters field localises its own label')
   }
 })
 

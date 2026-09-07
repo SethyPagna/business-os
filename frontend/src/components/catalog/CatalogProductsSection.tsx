@@ -15,7 +15,8 @@ import Trophy from 'lucide-react/dist/esm/icons/trophy.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
-import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogItems } from './catalogPagination'
+import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, CATALOG_PAGE_SIZE_OPTIONS, paginateCatalogItems } from './catalogPagination'
+import PageSizeSelect from '../shared/PageSizeSelect'
 import { SectionShell, StatusPill } from './catalogUi'
 import PortalFilterCombobox from './PortalFilterCombobox'
 import PortalPromoStrip from './PortalPromoStrip.tsx'
@@ -470,6 +471,42 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
         </div>
       ) : null}
+
+      {/* Per page. Owner, Sep 6 2026, with a phone screenshot of the pager:
+          a red X through the separate page-size box on that row. The control
+          is not deleted -- a shopper who narrows 3,555 products to 12 still
+          has to be able to put the size back -- it moves to where the other
+          "how is this list shaped" controls already are. renderFilterFields
+          is rendered twice from this one source (the popover below `lg`, the
+          permanent rail at `lg` and up), so both breakpoints get it and
+          neither can drift.
+
+          The write path is byte-for-byte what the pager row used to do:
+          updatePageSize then updatePage(1), which is what persists
+          portalProductPageSize. h-11 clears the coarse-pointer floor on its
+          own rather than relying on the portal stylesheet to raise it. */}
+      {updatePageSize ? (
+        <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
+          <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
+            <div className="min-w-0 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-neutral-400 lg:pt-0">
+              <span className="block truncate">{copy('perPage', 'Per page')}</span>
+            </div>
+            <PageSizeSelect
+              value={effectivePageSize}
+              options={CATALOG_PAGE_SIZE_OPTIONS}
+              onChange={(size) => {
+                updatePageSize?.(size)
+                updatePage?.(1)
+              }}
+              ariaLabel={copy('perPage', 'Per page')}
+              allowCustom={false}
+              className="w-full min-w-0"
+              buttonClassName="h-11 w-full rounded-[0.95rem] px-3 text-sm font-semibold"
+              menuClassName="min-w-[8rem]"
+            />
+          </div>
+        </div>
+      ) : null}
     </>
   )
 
@@ -677,11 +714,15 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       ) : null}
 
-      {/* Back / page / total / Next / per-page, centred, above the grid --
-          and the identical mount below it. `back` and `next` have to be in
-          this map: PaginationControls treats any truthy return as the label,
-          so the map's `|| key` fallback was printing the raw lowercase keys
-          "back" and "next" as the button captions in every language. */}
+      {/* Back / page / total / Next, centred, above the grid -- and the
+          identical mount below it. `back` and `next` have to be in this map:
+          PaginationControls treats any truthy return as the label, so the
+          map's `|| key` fallback was printing the raw lowercase keys "back"
+          and "next" as the button captions in every language.
+
+          No per-page entry any more, in the map or on the row: the owner
+          struck that control off this row and it is a Filters field now
+          (renderFilterFields above), which localises its own label. */}
       {showPager ? (
         <CatalogPaginationControls
           className="mb-4"
@@ -694,13 +735,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             of: copy('of', 'of'),
             back: copy('back', 'Back'),
             next: copy('next', 'Next'),
-            per_page: copy('perPage', 'per page'),
           })[key] || key}
           onPageChange={updatePage}
-          onPageSizeChange={(size) => {
-            updatePageSize?.(size)
-            updatePage?.(1)
-          }}
         />
       ) : null}
 
@@ -924,13 +960,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             of: copy('of', 'of'),
             back: copy('back', 'Back'),
             next: copy('next', 'Next'),
-            per_page: copy('perPage', 'per page'),
           })[key] || key}
           onPageChange={updatePage}
-          onPageSizeChange={(size) => {
-            updatePageSize?.(size)
-            updatePage?.(1)
-          }}
         />
       ) : null}
 

@@ -1,6 +1,10 @@
 import PaginationControls from '../shared/PaginationControls'
 
-const CATALOG_PAGE_SIZE_OPTIONS = [20, 50, 100]
+// Exported because the per-page chooser no longer lives on the pager row --
+// it is a field in the Filters panel, and that field and this wrapper have to
+// name the same three presets or the storefront grows two page-size
+// vocabularies.
+export const CATALOG_PAGE_SIZE_OPTIONS = [20, 50, 100]
 // The preset list's display order is ascending (20/50/100) and unrelated to
 // which one is the actual default. Keeping those two concerns separate still
 // matters -- reading OPTIONS[0] as "the default" is how this drifted before,
@@ -25,7 +29,6 @@ type CatalogPaginationControlsProps = {
   pageSize?: NumericInput
   totalItems?: NumericInput
   onPageChange?: (page: number) => void
-  onPageSizeChange?: (pageSize: number) => void
   label?: string
   t?: Translate
   className?: string
@@ -50,7 +53,6 @@ export default function CatalogPaginationControls({
   pageSize = CATALOG_DEFAULT_PAGE_SIZE,
   totalItems = 0,
   onPageChange,
-  onPageSizeChange,
   label = 'products',
   t,
   className = '',
@@ -61,17 +63,19 @@ export default function CatalogPaginationControls({
       pageSize={pageSize}
       totalItems={totalItems}
       onPageChange={onPageChange}
-      onPageSizeChange={onPageSizeChange}
-      pageSizeOptions={CATALOG_PAGE_SIZE_OPTIONS}
       label={label}
       t={t}
-      editablePageSizeInput={false}
-      // The storefront's own layout: one centred pill with the per-page
-      // chooser inside it and no "Showing X-Y of N" row. The old wrapper
-      // classes here (a rounded card with its own background) existed to
-      // dress that summary row's box; with the summary gone there is no box
+      // The storefront's own layout: one centred pill -- Back / page / count /
+      // Next and nothing else -- and no "Showing X-Y of N" row. The old
+      // wrapper classes here (a rounded card with its own background) existed
+      // to dress that summary row's box; with the summary gone there is no box
       // left to dress, and a full-width card behind a centred pill would just
       // reintroduce the bar the owner asked us to remove.
+      //
+      // No onPageSizeChange, and no pageSizeOptions/editablePageSizeInput to
+      // configure one: the owner struck the page-size control off this row, so
+      // the prop would be a seam whose only use is re-growing the defect. The
+      // chooser is a Filters field -- see CatalogProductsSection.
       layout="centered"
       className={className}
     />

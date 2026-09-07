@@ -11,8 +11,12 @@
 //
 //   * the box: a <PageSizeSelect> mounted as a sibling AFTER the Next button,
 //     with the boxed default chrome (border + white background + its own
-//     radius). It is now the count itself -- "/ 72" is the trigger, drawn
-//     unstyled and caret-less inside the pill.
+//     radius). The first attempt at this only removed the CHROME: the count
+//     "/ 72" became the trigger, unstyled and caret-less. That is the same
+//     control in a third disguise -- still a tap target on the row, and on
+//     the one element that looks static. The owner struck the CONTROL off
+//     the row, so there is now none: the count is text, and the chooser is a
+//     field in the Filters panel.
 //   * the gap: a fixed `w-9` page input (36px of box around a one-character
 //     page number), `gap-1` + `px-1` around it, and a `pr-1` on the pill
 //     reserving room for the box. The input is now sized from its own digit
@@ -61,39 +65,52 @@ function centeredBranch(): string {
   return branch.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 }
 
+// The shared filter body -- one source, rendered into the sub-`lg` Filters
+// popover AND the `lg` rail. This is where the per-page chooser went when it
+// came off the pager row. Comments stripped for the same reason.
+function filterFieldsBody(): string {
+  const start = catalogProducts.indexOf('const renderFilterFields = () => (')
+  assert.ok(start > 0, 'CatalogProductsSection must still share one filter body between its two filter surfaces')
+  const rest = catalogProducts.slice(start)
+  const end = rest.indexOf('\n  return (\n    <SectionShell')
+  assert.ok(end > 0, 'the filter body should end where the component starts rendering')
+  return rest.slice(0, end).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+}
+
 // ---------------------------------------------------------------------------
 // 1. No separate page-size box on the row
 // ---------------------------------------------------------------------------
 
-runTest('nothing sits after Next: the page size is not a control of its own', () => {
+runTest('the row carries no page-size control, in any disguise', () => {
   const branch = centeredBranch()
   const nextAt = branch.indexOf('aria-label={nextLabel}')
   assert.ok(nextAt > 0, 'the Next button must still be findable')
+  // Not after Next (where the struck-out "50 v" box sat), and not anywhere
+  // else on the row either -- hanging the menu off the count moved the box,
+  // it did not remove the control.
+  assert.doesNotMatch(branch, /<PageSizeSelect/, 'no page-size control may be mounted on the storefront pager row at all')
   const afterNext = branch.slice(nextAt)
-  assert.doesNotMatch(afterNext, /<PageSizeSelect/, 'the struck-out "50 v" box was a PageSizeSelect mounted after Next')
-  // Whatever closes the pill after Next must be markup only -- no further
-  // control of any kind, or the row grows a second thing to look at.
-  assert.doesNotMatch(afterNext.replace(/aria-label=\{nextLabel\}/, ''), /<(button|input|select|PageSizeSelect)\b/, 'Next must be the last interactive element in the pill')
+  assert.doesNotMatch(afterNext.replace(/aria-label=\{nextLabel\}/, ''), /<(button|input|select)\b/, 'Next must be the last interactive element in the pill')
 })
 
-runTest('the count IS the per-page menu, printed as plain inline text', () => {
+runTest('the count is plain text -- the row has exactly two tap targets', () => {
   const branch = centeredBranch()
-  assert.match(branch, /buttonContent=\{`\/ \$\{totalPages\}`\}/, 'the "/ 72" count must be the trigger content')
-  assert.match(branch, /\n\s*hideCaret\n/, 'a caret would re-announce it as a dropdown box')
-  assert.match(branch, /\n\s*unstyled\n/, 'the trigger must drop the boxed border/background chrome, or it is the same box in a new place')
-  assert.match(branch, /ariaLabel=\{perPageLabel\}/, 'the per-page wording survives as the accessible name')
-  // A caller with no page-size handler still gets a readable count.
-  assert.match(branch, /<span className=\{countClass\}>\/ \{totalPages\}<\/span>/, 'without onPageSizeChange the count must still render as text')
+  assert.match(branch, /<span className=\{countClass\}>\/ \{totalPages\}<\/span>/, 'the count must render as a span, unconditionally')
+  assert.doesNotMatch(branch, /buttonContent=/, 'a buttonContent count is a trigger wearing the count')
+  assert.doesNotMatch(branch, /hideCaret/, 'hiding a caret is what a disguised control needs; a span needs nothing')
+  // Back and Next are the only buttons; the page field is the only input.
+  assert.equal((branch.match(/<button\b/g) || []).length, 2, 'Back and Next, and nothing else')
+  assert.equal((branch.match(/<input\b/g) || []).length, 1, 'the editable page number is the only field on the row')
 })
 
-runTest('the unstyled seam strips only chrome, and is off for every other caller', () => {
-  assert.match(pageSizeSelect, /unstyled\?: boolean/, 'PageSizeSelect must expose the seam as an explicit opt-in')
-  assert.match(pageSizeSelect, /unstyled = false,/, 'default false keeps all 28 admin consumers byte-identical')
-  assert.match(pageSizeSelect, /unstyled\n\s*\? 'inline-flex min-w-0 items-center justify-center outline-none transition disabled:cursor-not-allowed disabled:opacity-50'/,
-    'the unstyled base must keep layout + disabled behaviour and drop border/background/radius/padding/shadow/text-size')
-  // Only the storefront asks for it.
+runTest('PageSizeSelect kept no seam that only the removed row-control needed', () => {
+  // The first attempt gave PageSizeSelect an `unstyled` variant so the count
+  // could be a trigger without looking like one. With the control off the row
+  // nothing consumes it, and a styling escape hatch with no caller is the
+  // next reader's invitation to put the box back.
+  assert.doesNotMatch(pageSizeSelect, /unstyled/, 'the unstyled seam must go with the control it existed for')
   const paginationCode = pagination.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-  assert.equal((paginationCode.match(/\bunstyled\b/g) || []).length, 1, 'exactly one caller (the centred storefront pill) may go unstyled')
+  assert.doesNotMatch(paginationCode, /\bunstyled\b/, 'and no caller may still ask for it')
 })
 
 // ---------------------------------------------------------------------------
@@ -157,13 +174,36 @@ runTest('every hit area in the storefront pill is at least 40px', () => {
 // 4. Behaviour that must NOT change
 // ---------------------------------------------------------------------------
 
-runTest('the chosen page size still leaves the pill the same way it always did', () => {
-  const branch = centeredBranch()
-  assert.match(branch, /onChange=\{\(nextValue\) => onPageSizeChange\?\.\(nextValue\)\}/, 'the size must still be reported to the caller')
-  assert.match(catalogPagination, /onPageSizeChange=\{onPageSizeChange\}/, 'catalogPagination must keep forwarding the handler')
-  assert.match(catalogPagination, /layout="centered"/, 'and keep opting into this layout')
-  const mounts = catalogProducts.match(/updatePageSize\?\.\(size\)\n\s*updatePage\?\.\(1\)/g) || []
-  assert.equal(mounts.length, 2, 'both pager mounts must still set the size and return to page 1 -- persistence path unchanged')
+runTest('the chosen page size is written by exactly the same two calls, from its new home', () => {
+  // Moving the control must not move the WRITE. `updatePageSize` +
+  // `updatePage(1)` is what persists portalProductPageSize, and it is now
+  // called once, from the shared filter body.
+  const writes = catalogProducts.match(/updatePageSize\?\.\(size\)\n\s*updatePage\?\.\(1\)/g) || []
+  assert.equal(writes.length, 1, 'one chooser, one write path -- two would be two ways to persist the same fact')
+  const fields = filterFieldsBody()
+  assert.match(fields, /updatePageSize\?\.\(size\)\n\s*updatePage\?\.\(1\)/, 'and it must be the Filters field that calls it')
+  assert.match(fields, /<PageSizeSelect/, 'the chooser itself lives in the shared filter body')
+  assert.match(fields, /options=\{CATALOG_PAGE_SIZE_OPTIONS\}/, 'it offers the storefront presets, not a second list')
+  assert.match(fields, /allowCustom=\{false\}/, 'and keeps the storefront\'s fixed 20/50/100, as editablePageSizeInput={false} used to')
+  // The pager row no longer has a per-page prop for anyone to pass. Comments
+  // stripped: catalogPagination.tsx explains in prose why the prop is gone,
+  // and naming a removed prop must not read as still declaring it.
+  const wrapperCode = catalogPagination.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  assert.doesNotMatch(wrapperCode, /onPageSizeChange/, 'the storefront wrapper must not offer a prop whose only use is re-growing the box')
+  assert.doesNotMatch(wrapperCode, /editablePageSizeInput/, 'nor the flag that configured it')
+  assert.match(catalogPagination, /layout="centered"/, 'and must keep opting into the centred layout')
+})
+
+runTest('both breakpoints get the chooser from that one mount', () => {
+  // renderFilterFields is called twice: the popover below `lg`, and the
+  // permanent rail at `lg` and up. If the chooser had gone into either call
+  // site instead of the shared body, one breakpoint would silently lose the
+  // only control that can undo a 100-per-page choice.
+  const calls = catalogProducts.match(/\{renderFilterFields\(\)\}/g) || []
+  assert.equal(calls.length, 2, 'the filter body must still be rendered at both breakpoints')
+  const railAt = catalogProducts.indexOf('<aside className="hidden min-w-0 lg:sticky')
+  const popoverAt = catalogProducts.indexOf('role="dialog"')
+  assert.ok(railAt > 0 && popoverAt > railAt, 'one call is the lg rail, the other the sub-lg Filters dialog')
 })
 
 runTest('the arrows are still dead exactly at the bounds', () => {

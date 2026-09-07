@@ -157,17 +157,24 @@ export default function PaginationControls({
     // arrow from it into the empty gap left between "< back" and "1 / 72".
     // Two defects on one row, and this branch fixes both at their causes.
     //
-    // 1. THE BOX. The page size is no longer a control of its own. It is a
-    //    small menu opened FROM THE COUNT: the "/ 72" IS the trigger, drawn
-    //    as plain inline text (`unstyled`, no caret) so the row carries one
-    //    pill and not a pill plus a box. That is the idiom the compact
-    //    `rangeAsPageSize` branch below already uses, where the "1-20" item
-    //    range is itself the per-page dropdown. Nothing is lost: "per page"
-    //    remains the trigger's accessible name, the options are still the
-    //    caller's presets, and the chosen size still flows out through
-    //    onPageSizeChange, so the storefront keeps persisting it exactly as
-    //    before. A caller that passes no onPageSizeChange gets the same
-    //    count as static text.
+    // 1. THE BOX. The page size is not a control on this row at all. The
+    //    first attempt kept it as a menu opened FROM THE COUNT -- "/ 72" as
+    //    an unstyled, caret-less trigger. That is the same control in a
+    //    third disguise: it still puts a tap target on the row, and it puts
+    //    it on the one element that LOOKS static, so a shopper reaching for
+    //    the page count opens a menu they did not ask for. The owner struck
+    //    the control off this row, not its chrome.
+    //
+    //    So the count is plain text here, and the chooser is a field in the
+    //    Filters panel (CatalogProductsSection.renderFilterFields) -- which
+    //    is the popover below `lg` and the permanent rail above it, from a
+    //    single mount, so both breakpoints get it. The persistence path is
+    //    untouched: that field still calls updatePageSize + updatePage(1),
+    //    which is what writes portalProductPageSize.
+    //
+    //    This branch therefore renders no per-page control at all. It is not
+    //    a layout that has a place to put one, so there is no prop for a
+    //    caller to re-grow the defect through.
     //
     // 2. THE GAP. It was structural, not cosmetic: a fixed `w-9` page input
     //    (36px of box around a one-character page number), a `gap-1` and a
@@ -218,24 +225,7 @@ export default function PaginationControls({
             ) : (
               <span className="px-1 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
             )}
-            {onPageSizeChange ? (
-              <PageSizeSelect
-                value={safePageSize}
-                options={pageSizeOptions}
-                onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-                ariaLabel={perPageLabel}
-                allowCustom={editablePageSizeInput}
-                hideCaret
-                unstyled
-                buttonContent={`/ ${totalPages}`}
-                className="shrink-0"
-                buttonClassName={`${countClass} w-auto rounded-full hover:bg-slate-100 dark:hover:bg-slate-800`}
-                menuClassName="min-w-[7rem]"
-                optionClassName="text-xs"
-              />
-            ) : (
-              <span className={countClass}>/ {totalPages}</span>
-            )}
+            <span className={countClass}>/ {totalPages}</span>
           </div>
           <button
             type="button"
