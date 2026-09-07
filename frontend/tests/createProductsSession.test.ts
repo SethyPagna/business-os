@@ -555,7 +555,7 @@ runTest('the catalog-identity helper remains narrower than the session warning',
   assert.equal(isSameQueuedProduct({ name: 'A', barcode: '', unitCostUsd: 1 }, { name: 'A', barcode: '', unitCostUsd: 1 }), true)
 })
 
-runTest('same-session duplicate warning matches normalized name OR meaningful folded barcode', () => {
+runTest('same-session duplicate warning matches normalized name OR guarded barcode identity', () => {
   assert.equal(sessionProductDuplicateReason(
     { name: ' Rose   Lip Oil ', barcode: '111' },
     { name: 'rose lip oil', barcode: '222' },
@@ -566,7 +566,14 @@ runTest('same-session duplicate warning matches normalized name OR meaningful fo
   ), 'barcode')
   assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '' }, { name: 'B', barcode: '' }), null)
   assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '0' }, { name: 'B', barcode: '000' }), null)
-  assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '0123456' }, { name: 'B', barcode: '123456' }), 'barcode')
+  assert.equal(sessionProductDuplicateReason(
+    { name: 'UPC-E article', barcode: '01234565' },
+    { name: 'Internal-code article', barcode: '1234565' },
+  ), null, 'a valid UPC-E must not collide with its stripped seven-digit text')
+  assert.equal(sessionProductDuplicateReason(
+    { name: 'UPC-E article', barcode: '01234565' },
+    { name: 'UPC-A article', barcode: '012345000065' },
+  ), 'barcode', 'the actual UPC-E / UPC-A pair remains the same session item')
 })
 
 runTest('duplicate lookup includes saved and queued rows and excludes the line being edited', () => {

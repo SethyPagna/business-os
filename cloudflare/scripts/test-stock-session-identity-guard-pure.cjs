@@ -240,7 +240,7 @@ async function main() {
     assert.equal(result.message, 'Duplicate: You added this item already.')
   })
 
-  await check('session warning parity is name OR meaningful folded barcode', () => {
+  await check('session warning parity is name OR guarded barcode identity', () => {
     assert.equal(sessionProductDuplicateReason(
       { name: ' Rose   Lip Oil ', barcode: '111' },
       { name: 'rose lip oil', barcode: '222' },
@@ -251,6 +251,57 @@ async function main() {
     ), 'barcode')
     assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '' }, { name: 'B', barcode: '' }), null)
     assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '0' }, { name: 'B', barcode: '000' }), null)
+    assert.equal(sessionProductDuplicateReason(
+      { name: 'UPC-E article', barcode: '01234565' },
+      { name: 'Internal-code article', barcode: '1234565' },
+    ), null, 'a valid UPC-E must not collide with its stripped seven-digit text')
+    assert.equal(sessionProductDuplicateReason(
+      { name: 'UPC-E article', barcode: '01234565' },
+      { name: 'UPC-A article', barcode: '012345000065' },
+    ), 'barcode', 'the actual UPC-E / UPC-A pair remains the same session item')
+  })
+
+  await check('valid UPC-E and unrelated seven-digit internal codes can be received together', async () => {
+    const { sql, env } = fixture()
+    sql.exec(`
+      UPDATE products SET name='UPC-E article', barcode='01234565' WHERE id=1;
+      INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
+        VALUES(2,'Internal-code article','1234565',4,0,0,1);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
+    `)
+    const request = {
+      client_request_id: 'session-upce-internal-control', mode: 'stock_in',
+      defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Bong Long' },
+      items: [1, 2].map((productId) => ({
+        line_id: `line-upce-control-${productId}`, kind: 'receive', product_id: productId,
+        quantity: 1, unit_cost_usd: 5,
+      })),
+    }
+    const receipt = await commitStockSession(env, user, request)
+    assert.equal(receipt.memberCount, 2)
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM inventory_movements').get().c, 2)
+  })
+
+  await check('actual UPC-E and UPC-A pair is refused before any session write', async () => {
+    const { sql, env } = fixture()
+    sql.exec(`
+      UPDATE products SET name='UPC-E article', barcode='01234565' WHERE id=1;
+      INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
+        VALUES(2,'UPC-A article','012345000065',4,0,0,1);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
+    `)
+    const request = {
+      client_request_id: 'session-upce-upca-duplicate', mode: 'stock_in',
+      defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Bong Long' },
+      items: [1, 2].map((productId) => ({
+        line_id: `line-upc-pair-${productId}`, kind: 'receive', product_id: productId,
+        quantity: 1, unit_cost_usd: 5,
+      })),
+    }
+    const result = await refusal(commitStockSession, env, request)
+    assert.equal(result?.status, 409)
+    assert.equal(result?.code, 'duplicate_session_item')
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM inventory_movements').get().c, 0)
   })
 
   await check('two existing products with the same normalized name are refused before any write', async () => {

@@ -5,6 +5,7 @@ import { getActionTier, isAdminControlUser } from './permissions'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { identityBarcodeKey, normalizeProductGroupName } from './productDetailRule'
 import { identityBarcodeKeySql } from './productIdentity'
+import { barcodeKeysMatch } from './searchMatch'
 import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
 import { normalizeMultiValue, planInsertRow, tableColumns, validateProductImageGallery } from './productWrites'
@@ -109,7 +110,7 @@ export function sessionProductDuplicateReason(
   const leftBarcode = String(left.barcode ?? '').trim()
   const rightBarcode = String(right.barcode ?? '').trim()
   if (!leftBarcode || !rightBarcode || /^0+$/.test(leftBarcode) || /^0+$/.test(rightBarcode)) return null
-  return identityBarcodeKey(leftBarcode) === identityBarcodeKey(rightBarcode) ? 'barcode' : null
+  return barcodeKeysMatch(leftBarcode, rightBarcode) ? 'barcode' : null
 }
 
 export class StockSessionError extends Error {

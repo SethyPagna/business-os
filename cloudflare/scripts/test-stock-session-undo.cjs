@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest } = require('./test-stock-session-atomic.cjs')
+const { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest, seedDistinctProducts } = require('./test-stock-session-atomic.cjs')
 
 function payload(f, receipt) {
   return JSON.parse(f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(receipt.actionHistoryId).undo_payload)
@@ -261,15 +261,16 @@ async function main() {
   }
   {
     const f = fixture()
+    seedDistinctProducts(f, 25)
     const request = receiveRequest('largest-session-1')
-    request.items = Array.from({ length: 25 }, (_, i) => ({ line_id: `line-${i}`, kind: 'receive', product_id: 1, quantity: 1, unit_cost_usd: 2 }))
+    request.items = Array.from({ length: 25 }, (_, i) => ({ line_id: `line-${i}`, kind: 'receive', product_id: i + 1, quantity: 1, unit_cost_usd: 2 }))
     const r = await api.commitStockSession(f.env, user, request)
     await Promise.all([replay(f, r, 'undo', 0), replay(f, r, 'undo', 0)])
-    assert.equal(f.sql.prepare('SELECT stock_quantity FROM products').get().stock_quantity, 0)
+    assert.equal(f.sql.prepare('SELECT SUM(stock_quantity) quantity FROM products').get().quantity, 0)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 50)
     await replay(f, r, 'redo', 1)
-    assert.equal(f.sql.prepare('SELECT stock_quantity FROM products').get().stock_quantity, 25)
-    console.log('PASS 25 repeated members undo/redo aggregate exactly; concurrent same-generation applies once')
+    assert.equal(f.sql.prepare('SELECT SUM(stock_quantity) quantity FROM products').get().quantity, 25)
+    console.log('PASS 25 distinct members undo/redo aggregate exactly; concurrent same-generation applies once')
   }
   {
     const f = fixture()
