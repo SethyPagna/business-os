@@ -40,7 +40,10 @@ assert.match(productFormSource, /function canManageProductImages/, 'product imag
 assert.match(productFormSource, /actionAllowed\([\s\S]*?'products',[\s\S]*?'image'/, 'the image gate must use the same action contract as the permission editor/backend')
 assert.match(productFormSource, /canManageImages \? \([\s\S]*?onClick=\{addImages\}/, 'upload controls must stay hidden when products:image is blocked')
 assert.match(productFormSource, /<MinimizeButton[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'header and close-prompt minimize must use the same preservation path')
-assert.match(productsSource, /onMinimize=\{!modalProduct \?/, 'only standalone create receives the minimized-chip callback')
+assert.match(productsSource, /onMinimize=\{\(label:[\s\S]*?if \(modalProduct\) \{[\s\S]*?kind: 'edit_product'[\s\S]*?draftKey,[\s\S]*?requiredPermission: \{ permissionKey: 'products', actionKey: 'edit' \}/,
+  'edit minimize must park the exact entity draft behind products:edit')
+assert.match(productsSource, /\} else \{[\s\S]*?kind: 'add_product'[\s\S]*?requiredPermission: \{ permissionKey: 'products', actionKey: 'add' \}/,
+  'the same host callback must keep standalone create behind products:add')
 const sessionProductForm = createSessionSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
 const stockInProductForm = fastStockInSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
 assert.doesNotMatch(sessionProductForm, /onMinimize=/, 'create session must not fake a restorable minimized item')
