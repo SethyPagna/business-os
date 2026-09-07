@@ -267,7 +267,13 @@ export function resolveUnifiedStockImportRows(
       sheetCostPriceUsd: cost.value,
       batchLabel: batchLabel || null,
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
-      freeGoods: parseFreeGoodsFlag(raw.free_goods),
+      // Same spellings the client's own header-alias map accepts for this
+      // column (unifiedStockImport.ts's free_goods aliases) -- otherwise a
+      // sheet headed "Free" / "FreeGoods" / "Is Free" / "Free Item" passes
+      // the client mirror clean and is refused free_goods_required by the
+      // server for a box the operator already ticked (sibling:F13 verifier
+      // wave 9).
+      freeGoods: parseFreeGoodsFlag(raw.free_goods ?? raw.freegoods ?? raw.free ?? raw.is_free ?? raw.free_item),
       branchRefs,
       plan: null,
       conflicts,

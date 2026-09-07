@@ -84,6 +84,17 @@ assert.strictEqual(freeGoodsRows[0].freeGoods, true)
 assert.strictEqual(freeGoodsRows[1].freeGoods, false)
 assert.strictEqual(freeGoodsRows[2].freeGoods, false)
 
+// A sheet headed "Free" (normalizes to the raw key `free`, not `free_goods`)
+// must read the same as the canonical header -- the client's own header
+// alias map (unifiedStockImport.ts) accepts "Free"/"FreeGoods"/"Is Free"/
+// "Free Item" for this column, so the Worker must honor the same spellings
+// or a clean client mirror gets refused free_goods_required on upload
+// (sibling:F13 verifier wave 9; red before the raw.free fallback existed).
+const freeAliasRows = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free: 'yes' },
+], 'direct', products, branches, current)
+assert.strictEqual(freeAliasRows[0].freeGoods, true, 'a "Free" header column must be read the same as free_goods')
+
 const reconcile = subject.resolveUnifiedStockImportRows([
   { name: 'Serum', barcode: 'ABC', shop: '10', warehouse: '1', date: '2026-08-27', action: '' },
 ], 'reconcile', products, branches, current)
