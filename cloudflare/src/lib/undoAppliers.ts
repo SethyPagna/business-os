@@ -115,6 +115,8 @@ export interface MergeReversal {
   dupId: number
   dupName: string | null
   mergeContext: string
+  /** Immutable source economics/membership for a resumable bulk cluster. */
+  bulkClusterPlan?: unknown
   keeperImagePathBefore: string | null
   keeperBarcodeBefore?: string | null
   // Optional for backward compatibility with snapshots written before merge
@@ -663,7 +665,7 @@ export function buildAtomicMergeHistoryStatements(
     {
       sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
               undo_payload,redo_payload,created_by_id,created_by_name)
-            VALUES('products','product',@entityId,@label,@undoLabel,@redoLabel,1,'undoable',
+            VALUES('products','product',@entityId,@label,@undoLabel,@redoLabel,0,'recorded',
               json_object('applier','product.merge','snapshot_id',last_insert_rowid(),'operation_id',@operationId),
               json_object('applier','product.merge','snapshot_id',last_insert_rowid(),'operation_id',@operationId),
               @byId,@byName)`,
@@ -692,31 +694,54 @@ export async function finalizeAtomicMergeHistory(
 ): Promise<{ snapshotId: number; actionHistoryId: number; fingerprintReady: boolean }> {
   const db = getDb(env)
   const history = await db.prepare(`
-    SELECT id, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id
+    SELECT id, reversible, status, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id
     FROM action_history
     WHERE json_extract(undo_payload,'$.operation_id')=@operationId
       AND json_extract(undo_payload,'$.applier')='product.merge'
     ORDER BY id DESC LIMIT 1
-  `).get<{ id: number; snapshot_id: number }>({ operationId })
+  `).get<{ id: number; reversible: number; status: string; snapshot_id: number }>({ operationId })
   const snapshotId = Number(history?.snapshot_id)
   const actionHistoryId = Number(history?.id)
   if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !Number.isSafeInteger(actionHistoryId) || actionHistoryId <= 0) {
     throw new Error('The atomic merge committed without a resolvable history record.')
   }
   try {
+    const ready = await db.prepare(`
+      SELECT CAST(json_extract(payload_json,'$.fingerprintPending') AS INTEGER) AS pending
+      FROM undo_snapshots WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
+    `).get<{ pending: number | null }>({ snapshotId })
+    if (Number(ready?.pending) === 0 && Number(history?.reversible) === 1 && history?.status === 'undoable') {
+      return { snapshotId, actionHistoryId, fingerprintReady: true }
+    }
     const mergedStateFingerprint = await mergeStateFingerprint(db, [reversal])
     const stored = { ...reversal, operationId, fingerprintPending: false, mergedStateFingerprint }
-    const result = await db.prepare(`
-      UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP
-      WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
-        AND json_extract(payload_json,'$.operationId')=@operationId
-        AND json_extract(payload_json,'$.fingerprintPending')=1
-    `).run({ payload: JSON.stringify(stored), snapshotId, operationId })
-    return { snapshotId, actionHistoryId, fingerprintReady: Number(result.changes || 0) === 1 }
+    await db.batch([
+      {
+        sql: `UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP
+              WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
+                AND json_extract(payload_json,'$.operationId')=@operationId
+                AND json_extract(payload_json,'$.fingerprintPending')=1`,
+        params: { payload: JSON.stringify(stored), snapshotId, operationId },
+      },
+      {
+        sql: `UPDATE action_history SET reversible=1,status='undoable',updated_at=CURRENT_TIMESTAMP
+              WHERE id=@historyId AND reversible=0 AND status='recorded'
+                AND json_extract(undo_payload,'$.operation_id')=@operationId`,
+        params: { historyId: actionHistoryId, operationId },
+      },
+      {
+        sql: `SELECT CASE WHEN
+                EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshotId AND json_extract(payload_json,'$.fingerprintPending')=0)
+                AND EXISTS(SELECT 1 FROM action_history WHERE id=@historyId AND reversible=1 AND status='undoable')
+              THEN 1 ELSE json_extract('', '$') END AS merge_history_guard`,
+        params: { snapshotId, historyId: actionHistoryId },
+      },
+    ])
+    return { snapshotId, actionHistoryId, fingerprintReady: true }
   } catch {
-    // The merge and its history are already atomically durable. Keep the
-    // explicit pending flag so undo fails closed, and report the state to the
-    // caller rather than turning a committed merge into an ambiguous retry.
+    // The merge and its audit are already durable. Keep the history visibly
+    // non-reversible while the explicit pending flag makes undo fail closed;
+    // never advertise an Undo control before its fingerprint is complete.
     return { snapshotId, actionHistoryId, fingerprintReady: false }
   }
 }
