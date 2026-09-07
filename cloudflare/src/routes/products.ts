@@ -3411,7 +3411,7 @@ app.get('/merge-duplicates/preview', async (c) => {
         cost_price_usd: Number(economics.merged.cost_price_usd ?? costBefore.cost_price_usd) || 0,
         cost_price_khr: Number(economics.merged.cost_price_khr ?? costBefore.cost_price_khr) || 0,
       }
-      const mergeBlockers = group.duplicates.length > 25 ? [{
+      const mergeBlockers = group.duplicates.length > MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER ? [{
           code: 'cluster_exceeds_atomic_limit',
           error: `This ${group.duplicates.length + 1}-row identity cluster exceeds the safe atomic merge limit and needs a dedicated manifest.`,
         }] : []
@@ -3481,6 +3481,14 @@ async function readAppliedBulkClusterPlan(
 }
 
 export const MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST = 25
+// The runtime counter can stop only between complete identity clusters. A
+// first cluster therefore needs its own hard ceiling: an empty fold is already
+// 41 D1 statements and six adapter calls, while stock, images and lots add
+// more. Three folds leave ample room below D1's invocation limit even for a
+// non-trivial product. Larger clusters remain visible and explicitly blocked
+// for a dedicated manifest rather than being split and corrupting their one
+// whole-cluster cost mean.
+export const MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER = 3
 export const MERGE_DUPLICATES_REQUEST_BUDGET_MS = 20_000
 export const MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET = 700
 
@@ -3530,7 +3538,7 @@ function isProductMergeInfrastructureError(error: unknown): boolean {
 
 function productMergeInterruptionMessage(code: MergeDuplicateInterruptionCode): string {
   return code === 'merge_budget_reached'
-    ? 'This safe chunk finished before the next duplicate group started. Review the refreshed preview and choose Merge again to continue.'
+    ? 'This safe chunk finished before the next duplicate group started. Processing can continue under the same confirmed run.'
     : 'The database became busy after completed groups were saved. Review the refreshed preview and choose Merge again to continue.'
 }
 
@@ -3544,6 +3552,7 @@ app.post('/merge-duplicates', async (c) => {
   const requestBody: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
   const rawRequestId = String(requestBody.client_request_id || '').trim()
   const requestId = rawRequestId && rawRequestId.length <= 120 ? rawRequestId : null
+  const requestStartedAt = Date.now()
   const groups = await findDuplicateProductGroups(db)
   const remainingProductsBefore = groups.reduce((sum, group) => sum + group.duplicates.length, 0)
   if (!groups.length) {
@@ -3574,7 +3583,6 @@ app.post('/merge-duplicates', async (c) => {
   const actionHistoryIds: number[] = []
   const processedCaseKeys: string[] = []
   let undoPendingCount = 0
-  const requestStartedAt = Date.now()
   let completedGroupsForBudget = 0
   let interruptionCode: MergeDuplicateInterruptionCode | null = null
   // Pairs this run REFUSED and left exactly as they were. Same rule as the
@@ -3609,7 +3617,7 @@ app.post('/merge-duplicates', async (c) => {
     // previously averaged keeper back into the next mean. A cluster larger
     // than the transaction budget is quarantined for a dedicated manifest
     // workflow instead of issuing an unbounded D1 batch.
-    if (group.duplicates.length > MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) {
+    if (group.duplicates.length > MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER) {
       for (const dup of group.duplicates) {
         refusals.push({
           caseKey: productMergeCaseKey(canonicalId, dup.id),
@@ -3768,7 +3776,14 @@ app.post('/merge-duplicates', async (c) => {
     remainingGroupCount: remainingGroups?.length ?? null,
     // Because a cluster is never split, the exact conservative request bound
     // is one remaining group per call rather than ceil(products / 25).
-    maxAdditionalRequests: remainingGroups?.length ?? null,
+    // A normal budget yield can continue under the same operator confirmation.
+    // The groups seen at this call's initial scan are a conservative ceiling:
+    // every successful continuation must complete at least one whole group.
+    // Infrastructure failures keep this null because they require a fresh
+    // reconciliation instead of automatic retries.
+    maxAdditionalRequests: interruptionCode === 'merge_budget_reached'
+      ? groups.length
+      : remainingGroups?.length ?? null,
     requestId,
     processedCaseKeys,
     groups: groupSummaries,
