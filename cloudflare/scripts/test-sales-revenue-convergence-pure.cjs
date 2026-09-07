@@ -163,6 +163,7 @@ insItem.run(3, 3, 1, 8, 35, 1, 103, 'C')    // S3 cost 8
 insItem.run(4, 4, 1, 50, 180, 1, 104, 'D') // S4 awaiting cost is included in business COGS
 insItem.run(5, 5, 1, 999, 999, 1, 105, 'E') // S5 cancelled -> excluded
 insItem.run(6, 6, 1, 12, 60, 1, 106, 'F')   // S6 cost 12
+db.prepare('UPDATE sale_items SET product_discount_usd = 10 WHERE id = 1').run()
 
 const insRet = db.prepare('INSERT INTO returns (id, sale_id, total_refund_usd, status, return_scope, created_at, branch_id) VALUES (?,?,?,?,?,?,?)')
 insRet.run(1, 1, 20, 'completed', 'customer', AT(16), 1)  // S1 customer refund 20
@@ -244,8 +245,13 @@ check('awaiting-payment contributes positively to revenue while remaining Not Pa
 const daySeries = await lib.getSalesPeriodSeries({ __db: db }, filters, 'day')
 const seriesRevenue = Math.round(daySeries.reduce((s, r) => s + r.revenue_usd, 0) * 100) / 100
 const seriesProfit = Math.round(daySeries.reduce((s, r) => s + r.profit_usd, 0) * 100) / 100
+const seriesItemDiscount = Math.round(daySeries.reduce((s, r) => s + r.item_discount_usd, 0) * 100) / 100
+const seriesTotalDiscount = Math.round(daySeries.reduce((s, r) => s + r.total_discount_usd, 0) * 100) / 100
 check(`per-day trend revenue sums to the headline (${EXPECT.revenue})`, seriesRevenue === EXPECT.revenue)
 check(`per-day trend profit sums to the headline (${EXPECT.profit})`, seriesProfit === EXPECT.profit)
+check('per-day trend carries the line discount needed to restore pre-discount gross',
+  seriesItemDiscount === 10 && seriesItemDiscount === kernel.item_discount_usd)
+check('per-day trend total discounts sum to the same headline contract', seriesTotalDiscount === kernel.total_discount_usd)
 
 // ---- 6. Per-sale day drill must SUM to that day's total --------------------
 // S6 is local Aug 15; its one recognized sale nets 60, less the 20 refund put on that same basis (20 * 60/80 = 15), so 45.
