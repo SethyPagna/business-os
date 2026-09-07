@@ -37,7 +37,31 @@ const currentBatchReferencesGuard = `NOT EXISTS (
      OR COALESCE(pb.is_active, 0) != 1
      OR lower(trim(COALESCE(pb.lot_code, ''))) != lower(trim(CAST(json_extract(expected.value, '$.batch_label') AS TEXT)))
      OR bbs.batch_id IS NULL
+     OR (SELECT COUNT(*)
+         FROM product_batches matching_pb
+         WHERE matching_pb.variant_product_id = CAST(json_extract(expected.value, '$.product_id') AS INTEGER)
+           AND COALESCE(matching_pb.is_active, 0) = 1
+           AND lower(trim(COALESCE(matching_pb.lot_code, ''))) = lower(trim(CAST(json_extract(expected.value, '$.batch_label') AS TEXT)))) != 1
 )`
+
+// The classifier and writer pre-read are previews. Keep the selected branch
+// and the global Shop identity inside the same D1 transaction as every sale,
+// stock, movement, and idempotency-ledger write. This also protects receipts
+// with no batch/lot reference, where currentBatchReferencesGuard is vacuous.
+const currentSaleBranchGuard = `EXISTS (
+  SELECT 1
+  FROM branches selected_shop
+  WHERE selected_shop.id = @branch_id
+    AND selected_shop.is_active = 1
+    AND lower(trim(selected_shop.name)) = 'shop'
+) AND (
+  SELECT COUNT(*)
+  FROM branches active_shop
+  WHERE active_shop.is_active = 1
+    AND lower(trim(active_shop.name)) = 'shop'
+) = 1`
+
+const currentImportReferencesGuard = `(${currentSaleBranchGuard}) AND (${currentBatchReferencesGuard})`
 
 /** Commit one reviewed historical receipt as an indivisible, retry-safe unit. */
 export async function applyHistoricalSaleImport(
@@ -125,6 +149,11 @@ export async function applyHistoricalSaleImport(
        OR COALESCE(pb.is_active, 0) != 1
        OR lower(trim(COALESCE(pb.lot_code, ''))) != lower(trim(CAST(json_extract(expected.value, '$.batch_label') AS TEXT)))
        OR bbs.batch_id IS NULL
+       OR (SELECT COUNT(*)
+           FROM product_batches matching_pb
+           WHERE matching_pb.variant_product_id = CAST(json_extract(expected.value, '$.product_id') AS INTEGER)
+             AND COALESCE(matching_pb.is_active, 0) = 1
+             AND lower(trim(COALESCE(matching_pb.lot_code, ''))) = lower(trim(CAST(json_extract(expected.value, '$.batch_label') AS TEXT)))) != 1
   `).get<{ n: number }>({ batch_refs_json: batchRefsJson, branch_id: saleHeaderBranchId })
   if (Number(invalidBatchReferences?.n || 0) > 0) {
     throw new Error(`Sale on row ${rowNumber} references a batch/lot that is missing, inactive, assigned to another product, renamed, or unavailable at the Shop`)
@@ -182,11 +211,11 @@ export async function applyHistoricalSaleImport(
     batch_refs_json: batchRefsJson,
     branch_id: saleHeaderBranchId,
   }
-  const writeGuard = `(${pendingGuard}) AND (${currentBatchReferencesGuard})`
+  const writeGuard = `(${pendingGuard}) AND (${currentImportReferencesGuard})`
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
     sql: `INSERT OR IGNORE INTO import_sales_commits (job_id, group_key, row_number, status)
           SELECT @job_id, @group_key, @row_number, 'pending'
-          WHERE ${currentBatchReferencesGuard}`,
+          WHERE ${currentImportReferencesGuard}`,
     params: common,
   }, {
     sql: `INSERT INTO sales (
@@ -302,7 +331,7 @@ export async function applyHistoricalSaleImport(
   statements.push({
     sql: `UPDATE import_sales_commits SET status = 'applied', applied_at = CURRENT_TIMESTAMP
           WHERE job_id = @job_id AND group_key = @group_key AND status = 'pending'
-            AND ${currentBatchReferencesGuard}`,
+            AND ${currentImportReferencesGuard}`,
     params: common,
   })
   await db.batch(statements)
@@ -310,6 +339,6 @@ export async function applyHistoricalSaleImport(
   const committed = await db.prepare(`
     SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key
   `).get<{ status: string }>({ job_id: jobId, group_key: groupKey })
-  if (committed?.status !== 'applied') throw new Error('Historical sale did not commit because its batch/lot reference changed before the atomic write')
+  if (committed?.status !== 'applied') throw new Error('Historical sale did not commit because its Shop branch or batch/lot reference changed before the atomic write')
   return { alreadyApplied: false, clientRequestId }
 }
