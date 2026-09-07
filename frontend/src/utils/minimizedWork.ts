@@ -9,11 +9,16 @@
 // RESTORE_WORK_EVENT; the host listens and reopens its flow, whose own
 // draft (slice 1) repopulates the content.
 
-import { readWorkDraft, writeWorkDraft, clearWorkDraft } from './workDrafts.ts'
+import { readWorkDraft, writeWorkDraft, clearWorkDraft, scopedWorkDraftKey } from './workDrafts.ts'
 
 export const RESTORE_WORK_EVENT = 'bos:restore-work'
 
-export type MinimizedWorkKind = 'add_product' | 'fast_stockin' | 'product_detail'
+export type MinimizedWorkKind =
+  | 'add_product'
+  | 'fast_stockin'
+  | 'receive_batch'
+  | 'create_products_session'
+  | 'product_detail'
 
 export type MinimizedWorkEntry = {
   /** Unique key -- re-minimizing the same flow replaces its chip. */
@@ -26,26 +31,53 @@ export type MinimizedWorkEntry = {
   label: string
   /** Optional restore detail (e.g. a product id for a detail tab). */
   payload?: Record<string, unknown>
+  /** The exact actor-scoped draft this chip represents. Supplying the exact
+   * key lets chip dismissal discard one per-product/session draft without
+   * clearing a sibling flow owned by the same user. */
+  draftKey?: string
   minimizedAt: number
 }
 
-const STORE_KEY = 'bos_minimized_work'
+const STORE_BASE_KEY = 'minimized_work'
 
-let entries: MinimizedWorkEntry[] = readWorkDraft<MinimizedWorkEntry[]>(STORE_KEY)?.data ?? []
+function registryDraftKey(): string {
+  return scopedWorkDraftKey(STORE_BASE_KEY)
+}
+
+let activeStoreKey = registryDraftKey()
+let entries: MinimizedWorkEntry[] = readWorkDraft<MinimizedWorkEntry[]>(activeStoreKey)?.data ?? []
 const listeners = new Set<() => void>()
 
+// The app can change signed-in operator without reloading this module. Re-read
+// the registry whenever the actor/org scope changes so one operator never sees
+// another operator's parked labels or restores their local draft.
+function ensureCurrentScope(): string {
+  const nextStoreKey = registryDraftKey()
+  if (nextStoreKey === activeStoreKey) return activeStoreKey
+  activeStoreKey = nextStoreKey
+  entries = readWorkDraft<MinimizedWorkEntry[]>(activeStoreKey)?.data ?? []
+  if (pendingRestoreScope !== activeStoreKey) {
+    pendingRestore = null
+    pendingRestoreScope = null
+  }
+  return activeStoreKey
+}
+
 function persist(): void {
-  if (entries.length) writeWorkDraft(STORE_KEY, entries)
-  else clearWorkDraft(STORE_KEY)
+  const storeKey = ensureCurrentScope()
+  if (entries.length) writeWorkDraft(storeKey, entries)
+  else clearWorkDraft(storeKey)
   for (const listener of listeners) listener()
 }
 
 export function minimizeWork(entry: Omit<MinimizedWorkEntry, 'minimizedAt'>): void {
+  ensureCurrentScope()
   entries = [...entries.filter((existing) => existing.key !== entry.key), { ...entry, minimizedAt: Date.now() }]
   persist()
 }
 
 export function removeMinimizedWork(key: string): void {
+  ensureCurrentScope()
   const next = entries.filter((entry) => entry.key !== key)
   if (next.length === entries.length) return
   entries = next
@@ -53,6 +85,7 @@ export function removeMinimizedWork(key: string): void {
 }
 
 export function getMinimizedWork(): MinimizedWorkEntry[] {
+  ensureCurrentScope()
   return entries
 }
 
@@ -72,22 +105,32 @@ export function subscribeMinimizedWork(listener: () => void): () => void {
  * call consumePendingRestore(kind) on mount. Both paths are one-shot.
  */
 let pendingRestore: MinimizedWorkEntry | null = null
+let pendingRestoreScope: string | null = null
 
 export function dispatchRestore(entry: MinimizedWorkEntry): void {
+  const storeKey = ensureCurrentScope()
   removeMinimizedWork(entry.key)
   pendingRestore = entry
+  pendingRestoreScope = storeKey
   window.dispatchEvent(new CustomEvent(RESTORE_WORK_EVENT, { detail: { kind: entry.kind, payload: entry.payload || {} } }))
 }
 
 export function consumePendingRestore(kind: MinimizedWorkKind): MinimizedWorkEntry | null {
+  const storeKey = ensureCurrentScope()
+  if (pendingRestoreScope !== storeKey) return null
   if (pendingRestore?.kind !== kind) return null
   const entry = pendingRestore
   pendingRestore = null
+  pendingRestoreScope = null
   return entry
 }
 
 /** The event side is one-shot too: a mounted host that handles the event
  * clears pending so a later mount doesn't replay the same restore. */
 export function markRestoreHandled(kind: MinimizedWorkKind): void {
-  if (pendingRestore?.kind === kind) pendingRestore = null
+  ensureCurrentScope()
+  if (pendingRestore?.kind === kind) {
+    pendingRestore = null
+    pendingRestoreScope = null
+  }
 }
