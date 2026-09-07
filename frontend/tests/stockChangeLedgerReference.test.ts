@@ -170,6 +170,31 @@ const reasonPx = FLOOR - fixedPx - percentPx
 // id is still whole while a clipped one is not.
 assert.ok(reasonPx >= 140, `the Reason column is left ${Math.round(reasonPx)}px at the ${FLOOR}px floor; the receipt line needs at least 140`)
 assert.match(sc, /min-w-\[980px\]/, 'the table keeps its 980px floor -- widening it would add a horizontal scrollbar at 1280')
+
+// ...and the SOURCE must justify that floor with what it GUARANTEES, not with a
+// per-character estimate of a string it does not guarantee. The first round sold
+// the 140px as room for "the widest receipt this ledger prints,
+// 'Return RET-20260902-0007' (~118px + padding)" -- unmeasurable from source,
+// and flatly contradicted by the Reason cell two hundred lines below it and by
+// the paragraph directly above, both of which say a long return label WRAPS at
+// this floor rather than fitting on one line. A comment that disagrees with the
+// rule it sits on is worse than no comment: the next reader trims the column to
+// the number the comment claims. So the justification is pinned as prose too.
+const beforeColgroup = sc.split('<colgroup>')[0]
+// Read as one line: the comment is hard-wrapped, so a phrase spanning a line
+// break is invisible to a literal regex -- which is how the stale sentence
+// survived a round that claimed to have removed it.
+const colgroupComment = beforeColgroup.slice(beforeColgroup.lastIndexOf('{/*')).replace(/\s+/g, ' ')
+assert.ok(colgroupComment.includes('Reason keeps'), 'the column budget must state what the Reason floor is solved against')
+assert.ok(
+  !/widest receipt this ledger prints/.test(colgroupComment),
+  'the colgroup comment still sizes the Reason floor by a per-character estimate of a label that wraps at that floor',
+)
+assert.match(
+  colgroupComment,
+  /wraps onto a second row/,
+  'the colgroup comment must say what happens beyond the floor: a longer receipt wraps onto a second row rather than clipping',
+)
 console.log(`PASS the column budget gives Product ${product} and still leaves Reason ${Math.round(reasonPx)}px at the ${FLOOR}px floor`)
 
 // (d) The clipped name is REVEALABLE, through the shared component -- not a

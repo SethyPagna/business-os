@@ -642,9 +642,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                   chip's own px-1.5), Quantity 5rem (the uppercase 'QUANTITY'
                   header, wider than any signed integer under it),
                   Before -> After 5.75rem ('1280 → 1300');
-                - Reason keeps >= 140px at the table's 980px floor, which is
-                  what its first line needs for the widest receipt this ledger
-                  prints, 'Return RET-20260902-0007' (~118px + padding);
+                - Reason keeps >= 140px at the 980px floor: enough for a
+                  composed sale receipt ("Sale 20260901-142200") plus the
+                  compact copy button on one line; a longer return label
+                  wraps onto a second row rather than clipping, per the owner
+                  ruling that a receipt id is never truncated;
                 - Product keeps the largest proportional share, 24%.
               22.5rem fixed + 48.5% = 360px + 475px at 980, leaving Reason
               145px -- so the table still fits its floor with no horizontal
