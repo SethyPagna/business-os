@@ -37,6 +37,35 @@ export type ProductRecord = ProductGroupRecord & {
   wholesale_auto_optout?: unknown
 }
 
+/**
+ * Stock shown by POS for a product card or an existing cart line.
+ *
+ * A selected branch and an already-assigned cart line are branch-scoped. The
+ * unfiltered catalogue is an all-branch view, so its card uses the product's
+ * aggregate stock_quantity instead of choosing whichever single branch has
+ * the most stock.
+ */
+export function resolvePosDisplayStock(
+  product: ProductRecord | null | undefined,
+  selectedBranchId?: string | number | null,
+  cartBranchId?: string | number | null,
+): number {
+  if (!product) return 0
+  const branchId = selectedBranchId != null && selectedBranchId !== ''
+    ? selectedBranchId
+    : cartBranchId != null && cartBranchId !== ''
+      ? cartBranchId
+      : null
+  if (branchId == null) return Number(product.stock_quantity || 0)
+  const numericBranchId = Number(branchId)
+  if (!Number.isFinite(numericBranchId)) return 0
+  const branchStock = Array.isArray(product.branch_stock)
+    ? product.branch_stock as Array<Record<string, unknown>>
+    : []
+  const row = branchStock.find((entry) => Number(entry.branch_id) === numericBranchId)
+  return row ? Number(row.quantity || 0) : 0
+}
+
 type PriceConverters = {
   usdToKhr?: (value: unknown, rate: unknown) => number
 }
