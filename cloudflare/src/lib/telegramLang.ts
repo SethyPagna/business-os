@@ -146,17 +146,17 @@ const LABELS = {
 
   // --- shift report (S4-7, redesigned Sep 6 2026 per the owner's "so long...
   // much more simpler so easy to understand at a glance" ruling) -----------
-  // The line set is now the SHORT one: shop, cashier, from/to, a header block
+  // The line set is now the SHORT one: shift id, from/to, shop, cashier, a header block
   // of key totals (sales, profit, expenses, delivery fee, credit), invoice
-  // counts, registered cash open vs end (the owner's explicit ask -- "you
+  // counts, registered opening vs closing cash (the owner's explicit ask -- "you
   // didn't mention the registered cash dollar and khr in open vs end"), then
-  // expenses split into delivery cost / other expenses, at most one refunds
-  // line and one informational difference line. No arithmetic is spelled out
+  // expenses split into delivery cost / other expenses and one informational
+  // difference line. No arithmetic is spelled out
   // and no line explains itself in a sentence -- see formatShiftReport.
-  // From/To/Cashier/Branch reuse the labels below rather than growing
+  // From/To/Cashier reuse the labels below rather than growing
   // shift-specific twins.
   shop: { en: 'Shop', km: 'ហាង' },
-  shift: { en: 'Shift', km: 'វេន' },
+  shift: { en: 'ID', km: 'លេខសម្គាល់' },
   invoices: { en: 'Invoices', km: 'វិក្កយបត្រ' },
   // The owner said "deleted". Nothing in this system deletes a sale -- the
   // only two `DELETE FROM sales` sites in routes/sales.ts and routes/returns.ts
@@ -180,16 +180,20 @@ const LABELS = {
   deliveryCost: { en: 'Delivery cost', km: 'ថ្លៃដើមដឹកជញ្ជូន' },
   // Copied from km.json's shift_opening_cash / shift_counted_cash -- the same
   // words the shift screen itself uses for these two figures, so a cashier
-  // reading the phone message and the shift screen sees the same terms for
-  // "open" and "end".
+  // reading the phone message and the shift screen sees the same terms.
   cashOpen: { en: 'Opening cash', km: 'សាច់ប្រាក់ដើមវេន' },
-  cashEnd: { en: 'Counted cash', km: 'សាច់ប្រាក់បានរាប់' },
+  cashEnd: { en: 'Closing cash', km: 'សាច់ប្រាក់បិទវេន' },
   // ONE refunds line (no per-return breakdown) and ONE informational
   // difference line -- never "shortage", never a must-match claim. Computed
   // by lib/shiftReconciliation.ts, the one shared drawer definition, but
   // printed as a single fact rather than a five-part formula.
   refunds: { en: 'Refunds', km: 'ការសងប្រាក់' },
   difference: { en: 'Difference', km: 'ភាពខុសគ្នា' },
+  cashReview: { en: 'Cash review needed', km: 'ត្រូវពិនិត្យសាច់ប្រាក់' },
+  reviewTender: { en: 'Incomplete tender record', km: 'កំណត់ត្រាទូទាត់មិនគ្រប់' },
+  reviewChange: { en: 'Change given is ambiguous', km: 'ប្រាក់អាប់មិនច្បាស់' },
+  reviewLimit: { en: 'Too many sales to total', km: 'ការលក់ច្រើនពេកមិនអាចបូកសរុប' },
+  reviewCashMethod: { en: 'No payment method is set as cash', km: 'គ្មានវិធីទូទាត់ណាកំណត់ជាសាច់ប្រាក់' },
   // The sale's unpaid amount stays a positive memo -- see formatShiftReport
   // and formatDaySummary. This label is deliberately separate from supplier
   // and store credit, which are different financial concepts.

@@ -64,6 +64,9 @@ for (const [heading, km] of Object.entries(lang.TELEGRAM_HEADINGS)) {
 // English text, so two keys sharing one English word would be a coin flip.
 const englishLabels = Object.values(lang.TELEGRAM_LABELS).map((entry) => entry.en)
 assert.equal(new Set(englishLabels).size, englishLabels.length, 'two label keys share one English label')
+assert.deepEqual(lang.TELEGRAM_LABELS.cashEnd, { en: 'Closing cash', km: 'សាច់ប្រាក់បិទវេន' })
+assert.deepEqual(lang.TELEGRAM_LABELS.credit, { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' })
+assert.deepEqual(lang.TELEGRAM_LABELS.cashReview, { en: 'Cash review needed', km: 'ត្រូវពិនិត្យសាច់ប្រាក់' })
 console.log(`PASS dictionary: ${englishLabels.length} labels, ${Object.keys(lang.TELEGRAM_HEADINGS).length} headings, all bilingual`)
 
 // --- 2. the Khmer agrees with the app's language pack -----------------------
