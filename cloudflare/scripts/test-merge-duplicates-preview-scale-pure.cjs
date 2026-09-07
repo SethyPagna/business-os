@@ -66,7 +66,7 @@ class CapturingHono {
 }
 
 function countingAdapter(d1) {
-  const metrics = { queries: 0, maxBoundParams: 0, sql: [] }
+  const metrics = { queries: 0, batchRoundTrips: 0, maxBatchStatements: 0, maxBoundParams: 0, sql: [] }
   const record = (sql, params) => {
     metrics.queries += 1
     const bound = Array.isArray(params) ? params.length : Object.keys(params || {}).length
@@ -87,7 +87,16 @@ function countingAdapter(d1) {
         },
       }
     },
-    batch(statements) { return d1.batch(statements) },
+    async batch(statements) {
+      metrics.batchRoundTrips += 1
+      metrics.maxBatchStatements = Math.max(metrics.maxBatchStatements, statements.length)
+      const results = []
+      for (const item of statements) {
+        record(item.sql, item.params)
+        results.push({ success: true, results: await d1.prepare(item.sql).all(item.params || {}) })
+      }
+      return results
+    },
   }
 }
 
@@ -246,6 +255,8 @@ async function invokePreview(handler, user) {
   // detector query and one branch-name query. This bound is deliberately
   // independent of group count; the old per-group route executes 6,002.
   assert.ok(adapter.metrics.queries <= 43, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
+  assert.equal(adapter.metrics.batchRoundTrips, 1, 'the 41 preview hydration statements must share one D1 round trip')
+  assert.equal(adapter.metrics.maxBatchStatements, 41)
   assert.ok(adapter.metrics.maxBoundParams <= 100, `preview bound ${adapter.metrics.maxBoundParams} params in one statement`)
   assert.ok(
     adapter.metrics.sql.some((sql) => /FROM products p LEFT JOIN branch_stock/i.test(sql)),
