@@ -50,11 +50,11 @@ function role(grants) {
   }
 }
 
-function resultRow(action, imagePath, existingId = 77, rowNumber = 2) {
+function resultRow(action, imagePath, existingId = 77, rowNumber = 2, plannedMode) {
   return {
     row_number: rowNumber,
     action,
-    result_json: JSON.stringify({ rowNumber, action, existingId, data: { image_path: imagePath } }),
+    result_json: JSON.stringify({ rowNumber, action, existingId, plannedMode, data: { name: `Product ${rowNumber}`, image_path: imagePath } }),
   }
 }
 
@@ -72,6 +72,7 @@ function freshState(user, options = {}) {
     },
     analyzedRows: options.analyzedRows || [],
     currentProducts: options.currentProducts || [{ id: 77, image_path: '/uploads/old.png' }],
+    lateImagePaths: options.lateImagePaths || {},
     dbWrites: 0,
     batches: 0,
     queue: [],
@@ -124,6 +125,10 @@ function loadImportRoute(state) {
     PREFLIGHT_MAX_ROWS: 1000,
     SERIOUS_IMPORT_WARNING_KINDS: [],
     IMPORT_WARNING_LABELS: {},
+    computeImportImageMatch: async () => ({
+      rowImagePaths: new Map(Object.entries(state.lateImagePaths).map(([rowNumber, imagePath]) => [Number(rowNumber), imagePath])),
+      rowGalleryPaths: new Map(), matched: [], unmatched: [], overLimit: [], renamePlan: new Map(),
+    }),
   }, { get(target, property) { if (!(property in target)) target[property] = async () => undefined; return target[property] } })
   const exactStubs = {
     hono: { Hono },
@@ -211,9 +216,9 @@ async function main() {
   {
     const state = freshState(blocked(), { policy: { wire_images: true }, analyzedRows: [] })
     const response = await request(state, '/job-1/approve')
-    assert.equal(response.status, 403)
-    assert.equal(state.dbWrites + state.queue.length, 0)
-    console.log('PASS approval rechecks a wire plan selected after analyze')
+    assert.equal(response.status, 200)
+    assert.equal(state.queue.length, 1)
+    console.log('PASS a late wire plan with no actual image match remains approvable')
   }
 
   {
@@ -226,13 +231,44 @@ async function main() {
 
   {
     const state = freshState(blocked(), {
-      policy: { decisionsByRowNumber: { 2: { action: 'skip' } } },
+      policy: { wire_images: true, imageOverrides: { 5: 2 }, decisionsByRowNumber: { 2: { action: 'skip' } } },
+      analyzedRows: [resultRow('update', '/uploads/new.png')],
+      lateImagePaths: { 2: '/uploads/override.png' },
+      summary: { imageMatch: { matchedCount: 1 } },
+    })
+    const response = await request(state, '/job-1/approve')
+    assert.equal(response.status, 200)
+    assert.equal(state.queue.length, 1)
+    console.log('PASS a skipped changed-image row and its manual override do not require image authority')
+  }
+
+  {
+    const state = freshState(blocked(), {
+      policy: { import_mode: 'replace_columns', replace_columns: ['selling_price_usd'] },
       analyzedRows: [resultRow('update', '/uploads/new.png')],
     })
     const response = await request(state, '/job-1/approve')
     assert.equal(response.status, 200)
     assert.equal(state.queue.length, 1)
-    console.log('PASS a skipped changed-image row does not require image authority')
+    console.log('PASS replace-columns excluding image_path ignores analyzed image data')
+  }
+
+  {
+    const state = freshState(blocked(), { analyzedRows: [resultRow('update', '/uploads/new.png', 77, 2, 'merge_stock')] })
+    const response = await request(state, '/job-1/approve')
+    assert.equal(response.status, 200)
+    assert.equal(state.queue.length, 1)
+    console.log('PASS merge-stock ignores analyzed image data')
+  }
+
+  {
+    const state = freshState(blocked(), {
+      policy: { wire_images: true }, analyzedRows: [resultRow('update', '')], lateImagePaths: { 2: '/uploads/new.png' },
+    })
+    const response = await request(state, '/job-1/approve')
+    assert.equal(response.status, 403)
+    assert.equal(state.dbWrites + state.queue.length, 0)
+    console.log('PASS a late wire plan with an effective image change is blocked')
   }
 
   {

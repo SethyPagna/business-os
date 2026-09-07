@@ -6,7 +6,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, computeImportImageMatch, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
@@ -106,29 +106,40 @@ async function productImportChangesImages(env: Env, job: Record<string, unknown>
     ? policy.decisionsByRowNumber
     : {}
   const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
-  const imageOverrides = policy.imageOverrides && typeof policy.imageOverrides === 'object'
-    ? policy.imageOverrides
-    : {}
-  // Assign/wire can be chosen after analyze. In that case the persisted
-  // analyze rows do not yet contain the path apply will resolve, so fail
-  // closed when authority was revoked before approval. A wire plan analyzed
-  // with imageMatch present continues to use the exact per-row comparison.
-  if (Object.keys(imageOverrides).length > 0 || (policy.wire_images === true && !summary.imageMatch)) return true
   const rows = await db.staging.prepare(`
     SELECT row_number, action, result_json
     FROM import_job_rows
     WHERE job_id = @id AND phase = 'analyze' AND action IN ('create', 'update')
-      AND trim(COALESCE(json_extract(result_json, '$.data.image_path'), '')) <> ''
   `).all<{ row_number: number; action: string; result_json: string }>({ id: String(job.id || '') })
 
+  const parsedRows = rows.map((row) => ({ row, result: safeJsonParse<ImportRowResult | null>(row.result_json, null) }))
+  let lateImagePaths: Map<number, string> | null = null
+  // Wire can be enabled after analyze, so those persisted results have no
+  // matched image yet. Re-run the same matcher apply uses instead of treating
+  // the mere presence of files/overrides as a mutation: unmatched files and
+  // overrides aimed at skipped rows do not touch the catalog.
+  const imageOverridesChanged = policy.imageOverrides && typeof policy.imageOverrides === 'object' && Object.keys(policy.imageOverrides).length > 0
+  const limitDecisionsChanged = policy.imageLimitDecisions && typeof policy.imageLimitDecisions === 'object' && Object.keys(policy.imageLimitDecisions).length > 0
+  if (policy.wire_images === true && (!summary.imageMatch || imageOverridesChanged || limitDecisionsChanged)) {
+    const sourceRows = parsedRows.flatMap(({ row, result }) => result?.data
+      ? [{ ...(result.data as Record<string, unknown>), _rowNumber: row.row_number }]
+      : [])
+    const match = await computeImportImageMatch(db, String(job.id || ''), sourceRows, job.policy_json as string)
+    lateImagePaths = match.rowImagePaths
+  }
+
   const updates: Array<{ id: number; imagePath: string }> = []
-  for (const row of rows) {
+  for (const { row, result } of parsedRows) {
     if (decisions[String(row.row_number)]?.action === 'skip') continue
-    const result = safeJsonParse<ImportRowResult | null>(row.result_json, null)
-    const nextImagePath = sanitizeMediaPath(result?.data?.image_path, '')
+    const nextImagePath = sanitizeMediaPath(lateImagePaths?.get(row.row_number) || result?.data?.image_path, '')
     if (!nextImagePath) continue
     const existingId = Number(result?.existingId)
     if (row.action === 'create' || !Number.isInteger(existingId) || existingId <= 0) return true
+    if (result?.plannedMode === 'merge_stock') continue
+    if (policy.import_mode === 'replace_columns') {
+      const replaceColumns = Array.isArray(policy.replace_columns) ? policy.replace_columns : []
+      if (!replaceColumns.includes('image_path')) continue
+    }
     updates.push({ id: existingId, imagePath: nextImagePath })
   }
   if (!updates.length) return false
