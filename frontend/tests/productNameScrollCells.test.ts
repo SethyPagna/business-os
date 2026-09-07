@@ -173,11 +173,16 @@ const NAME_CELLS: Array<[string, string, string]> = [
   // -- NOT table-fixed, no colgroup -- so a long label inside the
   // `colSpan={columnCount}` cell wraps and grows the header row.
   //
-  // Markers: the FIRST `{group.label}` in the file is the desktop title
-  // (the mobile one is later and is reached by its own unique marker), and
-  // `({group.items.length})</button>` occurs only in the mobile title.
+  // On BOTH the class belongs to an inner span, never to the button: the
+  // button is the 44px touch target and carries the chevron and the variant
+  // count, and a scroller on the button scrolls those two out of view with the
+  // name (and `display: block` from the shared rule stops the label centring
+  // in the target). The next test pins that separately.
+  //
+  // Markers: the FIRST `{group.label}` in the file is the desktop title's own
+  // span; the mobile one is reached by the count span that follows only it.
   ['Inventory / Branches > Products desktop group title', 'components/inventory/InventoryProductsSurface.tsx', '{group.label}'],
-  ['Inventory / Branches > Products mobile group title', 'components/inventory/InventoryProductsSurface.tsx', '({group.items.length})</button>'],
+  ['Inventory / Branches > Products mobile group title', 'components/inventory/InventoryProductsSurface.tsx', '{group.label}</span><span className="shrink-0 font-normal">('],
   ['Products image-only view', 'components/products/ProductsImageOnlyView.tsx', 'text-sm font-medium text-gray-800 dark:text-gray-100'],
   // The expanded branch's own stock grid on the Branches page. This is a
   // SECOND "Branches > Products" surface, separate from the
@@ -250,6 +255,28 @@ runTest('every product-name cell carries the one shared class', () => {
   for (const [label, file, marker] of NAME_CELLS) {
     const owner = classNear(read(file), marker)
     assert.ok(owner.includes('scroll-x-clean'), `${label}: name cell classes are "${owner}"`)
+  }
+})
+
+runTest('a group title scrolls its NAME, not its chevron and variant count', () => {
+  // A group title is a button with three parts: the ▸/▾ chevron, the product
+  // name, and the count of variants under it. Putting the scroller on the
+  // BUTTON scrolls all three -- so the affordance that says the group is
+  // collapsed, and the number that says how many rows are hidden, slide out of
+  // view as soon as the name is long enough to need scrolling. It also makes
+  // the button `display: block` (the shared rule), which stops the label
+  // centring inside the 44px touch target. The class belongs on an inner span.
+  const source = read('components/inventory/InventoryProductsSurface.tsx')
+  const marks = [...source.matchAll(/aria-expanded=\{!collapsed\.has\(group\.key\)\}/g)]
+  assert.equal(marks.length, 2, `both group titles on this surface must be reached; found ${marks.length}`)
+  for (const mark of marks) {
+    const opener = source.lastIndexOf('<button', mark.index)
+    assert.ok(opener > -1, 'a group title must be a button')
+    const start = source.indexOf('className="', opener) + 'className="'.length
+    const cls = source.slice(start, source.indexOf('"', start))
+    assert.doesNotMatch(cls, /\bscroll-x-clean\b/, `the group-title BUTTON must not scroll: its classes are "${cls}"`)
+    assert.match(cls, /\bmin-h-11\b/, `the 44px touch target must survive: classes are "${cls}"`)
+    assert.match(cls, /\bitems-center\b/, `the label must centre in the touch target: classes are "${cls}"`)
   }
 })
 

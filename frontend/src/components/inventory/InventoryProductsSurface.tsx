@@ -242,11 +242,15 @@ export default function InventoryProductsSurface({
           : error ? <div className="card p-6 text-center text-sm text-red-600">{error}</div>
             : groups.length === 0 ? <div className="card p-6 text-center text-sm text-gray-400">{t('no_data') || 'No data'}</div>
               : groups.map((group) => <div key={group.key} className="min-w-0 space-y-1">
-                {/* N36: same group-title rule as this surface's desktop table
-                    above -- the label is the product name, so it scrolls in place
-                    instead of wrapping to a second row. min-h-11 stays: it is the
-                    44px touch target, not a wrapping affordance. */}
-                {group.items.length > 1 ? <button type="button" className="min-h-11 w-full scroll-x-clean text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
+                {/* N36: same group-title rule, and the same THREE-part shape, as
+                    this surface's desktop table above -- the label is the product
+                    name, so it scrolls in place instead of wrapping to a second
+                    row. The scroller sits on the label's own span, never on the
+                    button: on the button it carries the chevron and the variant
+                    count out of view with the name, and the shared rule's block
+                    display stops the label centring in the target. min-h-11
+                    stays -- it is the 44px touch target, not a wrap affordance. */}
+                {group.items.length > 1 ? <button type="button" className="flex min-h-11 w-full items-center gap-1 text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}><span className="shrink-0">{collapsed.has(group.key) ? '▸' : '▾'}</span><span className="scroll-x-clean">{group.label}</span><span className="shrink-0 font-normal">({group.items.length})</span></button> : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-2 text-sm">
                   {/* N36: same shared class as this surface's desktop row above. */}
                   <div className="flex min-w-0 items-start justify-between gap-2"><span className="scroll-x-clean font-medium">{product.name || '—'}</span><strong>{quantity(product)}</strong></div>
