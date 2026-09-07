@@ -185,10 +185,15 @@ const sale16433 = {
   assert.match(src, /value=\{`-\$\{fmtUSD\(displayedDiscountUsd\)\}`\}/)
 
   // FOUR columns, and each one printing the figure the photo puts in it.
+  // The owner requires these four table headings to remain literal English in
+  // EN, KM, and bilingual receipts; the item bodies and all other labels still
+  // use the selected receipt language.
   assert.match(src, /data-receipt-cell="line-total"/, 'the fourth column must exist')
-  assert.match(src, /labelFor\(lang, 'item'\)/)
-  assert.match(src, /labelFor\(lang, 'unitPrice'\)/)
-  assert.match(src, /labelFor\(lang, 'lineTotal'\)/)
+  assert.match(src, /data-receipt-cell="name"[^>]*>Item<\/span>/)
+  assert.match(src, /data-receipt-cell="qty"[^>]*>Qty<\/span>/)
+  assert.match(src, /data-receipt-cell="price"[^>]*>Price<\/span>/)
+  assert.match(src, /data-receipt-cell="line-total"[^>]*>Total<\/span>/)
+  assert.doesNotMatch(src, /data-receipt-cell="(?:name|qty|price|line-total)"[^>]*>\{labelFor\(lang,/)
   // Price column = selling unit price + the per-UNIT cut. If this regresses
   // to applied_price_usd the receipt goes back to "discounted price
   // (-discount)", which is the thing the owner has now asked for twice.
