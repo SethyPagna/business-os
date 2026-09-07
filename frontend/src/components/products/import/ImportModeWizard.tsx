@@ -28,7 +28,11 @@ interface ImportModeWizardProps {
   branches?: { id: string | number; name?: string | null }[]
 }
 
-export default function ImportModeWizard({ onClose, onDone, t }: ImportModeWizardProps) {
+// `products` was declared here and then dropped: Products.tsx has always
+// passed it, nothing read it, so the Dated Reconciliation flow
+// BulkImportModal now hands off to had no way to name a candidate product
+// and could only label one "#123". Forwarded, not re-fetched.
+export default function ImportModeWizard({ onClose, onDone, t, products }: ImportModeWizardProps) {
   const [mode, setMode] = useState<ProductImportTopMode>('general')
   const [screen, setScreen] = useState<'hub' | 'classic'>('hub')
 
@@ -66,7 +70,7 @@ export default function ImportModeWizard({ onClose, onDone, t }: ImportModeWizar
       {mode === 'stock_actions' ? (
         <StockActionImportModal onClose={onClose} onDone={onDone} t={t} topMode={mode} onTopModeChange={setMode} />
       ) : (
-        <BulkImportModal key={mode} onClose={onClose} onDone={onDone} t={t} topMode={mode} onTopModeChange={setMode} />
+        <BulkImportModal key={mode} onClose={onClose} onDone={onDone} t={t} topMode={mode} onTopModeChange={setMode} products={products} />
       )}
     </Suspense>
   )

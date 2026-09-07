@@ -6,6 +6,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
 import DateEntryInput from './DateEntryInput.tsx'
+import { normalizeTimeEntry } from '../../utils/dateEntry.ts'
 import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './statsStripPresets.ts'
 
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
@@ -105,32 +106,9 @@ function displayDate(iso: string): string {
 // 9032026, 932026, 20260903 -- so the range row reads them exactly like the
 // batch and stock-adjust dates. Same 1970-2999 window as before.
 
-// Accepts 24-hour time typed loosely -- "14:30", "1430", "930", "9", "9:5" --
-// and normalizes to "HH:MM" (00:00–23:59). Returns '' to clear on empty input,
-// or null when the text can't be read as a valid 24-hour time (so the caller
-// can snap the field back to its stored value rather than store garbage).
-function normalizeTime(raw: string): string | null {
-  const s = raw.trim()
-  if (!s) return ''
-  let hour: number
-  let minute: number
-  const colon = /^(\d{1,2}):(\d{1,2})$/.exec(s)
-  if (colon) {
-    hour = Number(colon[1])
-    minute = Number(colon[2])
-  } else if (/^\d{3,4}$/.test(s)) {
-    const p = s.padStart(4, '0')
-    hour = Number(p.slice(0, 2))
-    minute = Number(p.slice(2))
-  } else if (/^\d{1,2}$/.test(s)) {
-    hour = Number(s)
-    minute = 0
-  } else {
-    return null
-  }
-  if (hour > 23 || minute > 59) return null
-  return `${pad2(hour)}:${pad2(minute)}`
-}
+// The 24-hour time reader moved to utils/dateEntry.ts as normalizeTimeEntry,
+// so this row and the shift date+time fields read "930" the same way. Same
+// behaviour: '' clears, null means unreadable so the caller snaps back.
 
 function todayIso(): string {
   return statsPresetRange('today').startDate
@@ -252,7 +230,12 @@ export default function DateTimeRangePicker({
   }
 
   const commitTime = (which: 'start' | 'end', raw: string) => {
-    const norm = normalizeTime(raw)
+    // The shared normalizer returns both canonical HH:mm and minutes for the
+    // shift forms. This range picker needs the canonical string only. Keep a
+    // cleared field distinct from unreadable text: both have value:null in
+    // the parser, but clear commits '' while invalid input snaps back.
+    const result = normalizeTimeEntry(raw)
+    const norm = raw.trim() ? result.value : ''
     if (norm === null) {
       // Unparseable -- snap the field back to the stored value.
       if (which === 'start') setStartTimeText(value.startTime)

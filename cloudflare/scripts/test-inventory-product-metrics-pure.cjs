@@ -35,11 +35,20 @@ function loadTs(relativePath, exactStubs = {}) {
 
 const localDateAtOrAfter = (column) => `date(${column}, '+7 hours') >= @startDate AND ${column} >= date(@startDate, '-1 day')`
 const localDateAtOrBefore = (column) => `date(${column}, '+7 hours') <= @endDate AND ${column} < date(@endDate, '+1 day')`
-const recognizedExpr = (prefix) => `COALESCE(NULLIF(${prefix}sale_status, ''), 'completed') <> 'cancelled'`
+// The sales-minus-returns arithmetic lives in lib/productSalesLedger.ts now
+// (audit sibling:F14 -- it was four hand-copied joins in routes/inventory.ts,
+// all four off the salesAnalytics scoping rules in the same four ways). It is
+// loaded for real here, with the real kernel behind it, so this test measures
+// the shipped SQL rather than a transcription of it.
+const productSalesLedger = loadTs('lib/productSalesLedger.ts', {
+  './salesAnalytics': loadTs('lib/salesAnalytics.ts', {
+    './businessDateWindow': { localDateAtOrAfter, localDateAtOrBefore },
+  }),
+})
 const inventory = loadTs('routes/inventory.ts', {
   hono: { Hono },
   '../lib/businessDateWindow': { localDateAtOrAfter, localDateAtOrBefore },
-  '../lib/salesAnalytics': { recognizedExpr },
+  '../lib/productSalesLedger': productSalesLedger,
   '../index': {},
 })
 const familyPagination = loadTs('lib/familyPagination.ts')
@@ -82,12 +91,13 @@ function setupDatabase() {
       quantity REAL, total_usd REAL, total_khr REAL, cost_price_usd REAL, cost_price_khr REAL
     );
     CREATE TABLE returns (
-      id INTEGER PRIMARY KEY, branch_id INTEGER, status TEXT, return_scope TEXT, created_at TEXT
+      id INTEGER PRIMARY KEY, sale_id INTEGER, branch_id INTEGER, status TEXT,
+      return_scope TEXT, created_at TEXT
     );
     CREATE TABLE return_items (
       id INTEGER PRIMARY KEY, return_id INTEGER, product_id INTEGER, branch_id INTEGER,
       quantity REAL, total_usd REAL, total_khr REAL, cost_price_usd REAL, cost_price_khr REAL,
-      return_to_stock INTEGER
+      return_to_stock INTEGER, stock_action TEXT
     );
     INSERT INTO products VALUES
       (1,'Serum','serum',NULL,1,'2026-01-01',14,2,3,8000,12000),
@@ -100,24 +110,30 @@ function setupDatabase() {
       (3,2,'completed','2026-09-05 04:00:00',10,40000,0,0,0,0),
       (4,1,'cancelled','2026-09-05 05:00:00',40,160000,0,0,0,0),
       (5,1,'completed','2026-09-05 06:00:00',12,48000,2,8000,0,0),
-      (6,1,'completed','2026-08-20 06:00:00',100,400000,0,0,0,0);
+      (6,1,'completed','2026-08-20 06:00:00',100,400000,0,0,0,0),
+      (7,2,'completed','2026-09-05 05:30:00',12,48000,0,0,0,0);
     INSERT INTO sale_items VALUES
       (1,1,1,1,2,20,80000,3,12000),
       (2,2,1,1,5,50,200000,3,12000),
       (3,3,1,2,1,10,40000,3,12000),
       (4,4,1,1,4,40,160000,3,12000),
       (5,5,2,1,1,12,48000,4,16000),
-      (6,6,1,1,10,100,400000,3,12000);
+      (6,6,1,1,10,100,400000,3,12000),
+      (7,7,2,2,1,12,48000,4,16000);
+    -- Every return names the SALE it reverses (audit sibling:F14): a refund is
+    -- recognised in that sale's bucket and inherits its branch, so return 2
+    -- lands on branch B's sale 7 rather than being kept out of branch A by a
+    -- separate filter on the returns desk.
     INSERT INTO returns VALUES
-      (1,1,'completed','customer','2026-09-05 07:00:00'),
-      (2,2,'completed','customer','2026-09-05 07:00:00'),
-      (3,1,'cancelled','customer','2026-09-05 07:00:00'),
-      (4,1,'completed','supplier','2026-09-05 07:00:00');
+      (1,2,1,'completed','customer','2026-09-05 07:00:00'),
+      (2,7,2,'completed','customer','2026-09-05 07:00:00'),
+      (3,2,1,'cancelled','customer','2026-09-05 07:00:00'),
+      (4,2,1,'completed','supplier','2026-09-05 07:00:00');
     INSERT INTO return_items VALUES
-      (1,1,1,1,1,10,40000,3,12000,1),
-      (2,2,2,2,1,12,48000,4,16000,1),
-      (3,3,1,1,1,10,40000,3,12000,1),
-      (4,4,1,1,1,10,40000,3,12000,1);
+      (1,1,1,1,1,10,40000,3,12000,1,'restock'),
+      (2,2,2,2,1,12,48000,4,16000,1,'restock'),
+      (3,3,1,1,1,10,40000,3,12000,1,'restock'),
+      (4,4,1,1,1,10,40000,3,12000,1,'restock');
   `)
   return d1
 }
@@ -173,8 +189,8 @@ async function main() {
   const inventorySource = fs.readFileSync(path.join(srcRoot, 'routes/inventory.ts'), 'utf8')
   assert.doesNotMatch(inventorySource, /NOT IN \('awaiting_payment', 'cancelled'\)/,
     'inventory row and sibling summary calculations must not exclude awaiting-payment sales')
-  assert.equal((inventorySource.match(/recognizedExpr\('s\.'\)/g) || []).length, 4,
-    'all inventory product revenue/COGS queries share the canonical recognition predicate')
+  assert.equal((inventorySource.match(/buildProductSalesLedgerSql\(/g) || []).length, 4,
+    'all four inventory product revenue/COGS surfaces share ONE ledger, which is where the canonical recognition predicate lives')
 
   const secondPage = await familyPagination.paginateProductFamilies({
     db, selectColumns: 'p.id, p.name', joinSql: '', whereSql: 'WHERE p.is_active = 1', params: {},

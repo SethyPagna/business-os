@@ -1568,7 +1568,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                           stays on the product's own detail
                                           surfaces. */}
                                       <div className="min-w-0">
-                                        <div className="whitespace-normal break-words font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
+                                        {/* N36 (owner, Sep 6 2026): "for product names, make
+                                            it horizontal scroll instead of pushing rows". A
+                                            branch stock card is a product row like any other,
+                                            so it takes the same shared .scroll-x-clean class
+                                            (styles/main.css) every other product-name cell
+                                            uses -- break-words here grew the card to two or
+                                            three lines and left the qty beside a ragged block. */}
+                                        <div className="scroll-x-clean font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
                                       </div>
                                       <span
                                         className={`shrink-0 whitespace-nowrap text-sm font-bold tabular-nums ${
@@ -1617,7 +1624,10 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                       className="col-span-full flex min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-left text-xs transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/60 dark:hover:bg-slate-800"
                                     >
                                       {groupCollapsed ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />}
-                                      <span className="min-w-0 whitespace-normal break-words font-semibold text-slate-700 dark:text-slate-200">{group.name}</span>
+                                      {/* N36: a group title IS a product name, so it follows
+                                          the rows under it onto .scroll-x-clean rather than
+                                          wrapping the header to a second line. */}
+                                      <span className="scroll-x-clean font-semibold text-slate-700 dark:text-slate-200">{group.name}</span>
                                       <span className="flex-shrink-0 rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
                                         {group.rows.length}
                                       </span>

@@ -58,14 +58,21 @@
     font: inherit;
     font-family: inherit;
   }
-html[data-public-portal='true'],
-body[data-public-portal='true'] {
+html[data-public-portal='true'] {
   height: auto;
   min-height: 100%;
   overflow-y: auto !important;
   overflow-x: hidden;
   overscroll-behavior-y: auto;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y pinch-zoom;
+}
+
+body[data-public-portal='true'] {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  overscroll-behavior-y: auto;
   touch-action: pan-y pinch-zoom;
 }
 
@@ -936,6 +943,96 @@ body.lang-km .compact-analytics-legend {
   line-height: var(--km-line-height, 1.6);
 }
 
+/* Product rows: one-line price strip, horizontally scrolling names ----------
+   Owner, Sep 6 2026: "the qty unit is being pushed to next row if selling
+   price, wholesale price, cost price is fully there ... keep it visible
+   compact one line", and "for product names, make it horizontal scroll
+   instead of pushing rows ... clean no need show the scroll bar".
+
+   .scroll-x-clean is ONE class for every product-name cell (Products desktop
+   table row, Products mobile card, both group titles in ProductsListSurface,
+   Inventory / Branches > Products desktop + mobile rows, ProductsImageOnly).
+   Deliberately NO `touch-action: pan-x` -- unlike .compact-action-row above,
+   a name cell sits inside a vertically scrolling LIST, and pinning the axis
+   would make a vertical swipe that happens to start on a product name do
+   nothing at all. Default `touch-action` lets the browser pick the axis from
+   the gesture, which is what "smooth ios pwa and android pwa" means here.
+   overscroll-behavior-inline stops a horizontal fling chaining out to the
+   page/PWA back-swipe. */
+.scroll-x-clean {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-x-clean::-webkit-scrollbar { width: 0; height: 0; display: none; }
+/* A Khmer cluster carries ~1.6em of ink and `overflow-y: hidden` cannot be
+   given an overflow-clip-margin, so without this floor every coeng subscript
+   in a scrolling name would be sheared off -- the same defect the dense-table
+   block below restates this floor for. */
+body.lang-km .scroll-x-clean,
+.scroll-x-clean.khmer-text { line-height: var(--km-line-height, 1.6); }
+
+/* .price-strip -- selling | wholesale | cost | qty+unit on ONE line.
+   Arithmetic for the reported wrap, at 375px on the Products mobile card:
+   page px-3 + card px-3 + the w-16 thumbnail and its gap-3 leave 375 - 24 -
+   24 - 64 - 12 = 251px of text column. Three "$123.45" figures at .75rem are
+   ~131px, a 4-digit qty ~27px, a coloured unit chip ~37px and three "|"
+   ~10px = 206px of ink -- but the old row also spent six `gap-x-1.5` gaps,
+   36px. That clears 251px only when nothing else is on the line, and loses as
+   soon as select mode adds its checkbox (-28px -> 223px) or the viewport is a
+   360px Android (-15px -> 236px). Hence the wrap.
+   Four levers, and all four are spent: .1875rem per gap instead of .375rem
+   (-18.0px), the digits one notch down to .7rem (-11.3px), tightened tracking
+   (-3.2px) and the negative margin either side of "|" (-6.0px).
+   Model (tests/productRowPriceStrip.test.ts is the AUTHORITY over this
+   comment; these two figures are asserted against it): OLD 242.1px,
+   NEW 203.7px. That clears all four cases -- 251, 236, 223 and the tightest,
+   208px on a 360px Android in select mode.
+   The model excludes a promotion label and a long Khmer unit, and the
+   tightest Latin case has only ~4px of headroom, so the browser is still the
+   authority over the model. Nothing is hidden and nothing wraps: flex-wrap is
+   nowrap, and any residual overflow scrolls cleanly instead of pushing the
+   qty to a second row. */
+.price-strip {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0 .1875rem;
+  font-size: .7rem;
+  line-height: 1rem;
+  letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+.price-strip::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.price-strip > * { flex: 0 0 auto; white-space: nowrap; }
+/* The blank either side of "|" is the cheapest width on the row, so it is
+   spent first -- the digits stay legible and the divider stays visible. */
+.price-strip .price-strip-divider { margin: 0 -.0625rem; }
+/* The qty cell's unit chip: renderUnitChip's uncoloured variant is text-xs,
+   which after the step-down would render LARGER than the prices beside it.
+   Class+type beats Tailwind's single class, so both variants sit at the 10px
+   the coloured chip already uses. */
+.price-strip-qty > span { font-size: .625rem; }
+body.lang-km .price-strip { line-height: var(--km-line-height, 1.6); }
+
 .dense-data-shell {
   overflow:hidden;
   border:1px solid #e2e8f0;
@@ -1005,8 +1102,62 @@ body.lang-km .compact-analytics-legend {
   text-transform:uppercase;
 }
 .dark .dense-data-table .dense-day-row td { background:#202024; color:#a1a1aa; }
-.dense-cell-truncate { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* -webkit-touch-callout: press-and-hold on a clipped one of these opens the
+   reveal panel (textAffordances.ts's touchstart gate), and iOS would
+   otherwise raise its own selection callout on top of it. The controller
+   already suppresses the Android/desktop context menu from JS; this is the
+   half only CSS can do. */
+.dense-cell-truncate { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; -webkit-touch-callout:none; }
 .dense-id { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:.68rem; letter-spacing:-.025em; }
+
+/* Text affordances -- the ONE float shared by the copy gesture and the
+   tap-to-reveal (src/components/shared/textAffordances.ts). It is created
+   in plain DOM on document.body by the delegated controller, not rendered
+   by React, precisely so it can open over a `.dense-cell-truncate` cell on
+   a surface that imports nothing from that module. That is why its styling
+   lives here as real classes instead of Tailwind utilities on a component.
+   z-1200 matches InfoHint's topmost explanatory layer: these values are
+   frequently opened from inside z-[1050] modals, and z-1000 put the panel
+   behind the surface that contained the ellipsis. */
+[data-copy-value] { cursor:copy; -webkit-touch-callout:none; }
+.text-affordance-float {
+  position:fixed;
+  z-index:1200;
+  display:flex;
+  flex-direction:column;
+  gap:.375rem;
+  overflow-y:auto;
+  border-radius:.5rem;
+  border:1px solid #e2e8f0;
+  background:#fff;
+  padding:.625rem;
+  text-align:left;
+  font-size:.75rem;
+  font-weight:400;
+  line-height:1.55;
+  color:#475569;
+  box-shadow:0 10px 25px -5px rgb(0 0 0 / .18), 0 8px 10px -6px rgb(0 0 0 / .12);
+}
+/* Tailwind's preflight `[hidden]{display:none}` and this rule's `display:flex`
+   have equal specificity, so state the closed case explicitly rather than
+   depending on stylesheet order. */
+.text-affordance-float[hidden] { display:none; }
+.dark .text-affordance-float { border-color:#475569; background:#1e293b; color:#cbd5e1; }
+.text-affordance-value { white-space:pre-line; overflow-wrap:anywhere; user-select:text; }
+.text-affordance-copy {
+  align-self:flex-start;
+  border-radius:.375rem;
+  border:1px solid #e2e8f0;
+  padding:.125rem .5rem;
+  font-size:.6875rem;
+  font-weight:600;
+  color:#334155;
+}
+.text-affordance-copy:hover { background:#f1f5f9; }
+.text-affordance-copy[data-copied='true'] { border-color:#10b981; background:#ecfdf5; color:#047857; }
+.dark .text-affordance-copy { border-color:#475569; color:#e2e8f0; }
+.dark .text-affordance-copy:hover { background:#334155; }
+.dark .text-affordance-copy[data-copied='true'] { border-color:#059669; background:rgb(6 78 59 / .35); color:#6ee7b7; }
 
 /* S4-22. The dense table's line boxes are absolute (1rem on a .75rem cell = 1.33em,
    .9rem on a .68rem header = 1.32em), which is below the 1.55-1.61em of ink a Khmer

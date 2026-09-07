@@ -51,6 +51,9 @@ assert.deepStrictEqual(subject.UNIFIED_STOCK_COLUMNS, [
   // supplier is OPTIONAL (migration 0062): blank/absent keeps the original
   // ten-column contract importable, present attributes the batch.
   'supplier',
+  // free_goods is OPTIONAL (N14-D): the operator's explicit "these goods
+  // were free" declaration for a $0.00 cost_price row.
+  'free_goods',
 ])
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"reconcile"}'), 'reconcile')
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"wrong"}'), 'direct')
@@ -68,6 +71,18 @@ assert.deepStrictEqual(direct[0].plan.branchActions, [{ branchId: 1, direction: 
 assert.strictEqual(direct[1].plan.kind, 'sale')
 assert.strictEqual(direct[1].plan.saleGroupKey, '2026-08-27#1')
 assert.strictEqual(direct[1].sellingPriceUsd, 12, 'blank optional prices inherit from the exact product match')
+assert.strictEqual(direct[0].freeGoods, false, 'no free_goods cell reads as not declared free')
+
+// The N14-D declaration column, read with the same truthy-string rule the
+// frontend mirror (unifiedStockImport.ts's parseFreeGoodsFlag) uses.
+const freeGoodsRows = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: 'yes' },
+  { _rowNumber: 3, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: '' },
+  { _rowNumber: 4, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: 'no' },
+], 'direct', products, branches, current)
+assert.strictEqual(freeGoodsRows[0].freeGoods, true)
+assert.strictEqual(freeGoodsRows[1].freeGoods, false)
+assert.strictEqual(freeGoodsRows[2].freeGoods, false)
 
 const reconcile = subject.resolveUnifiedStockImportRows([
   { name: 'Serum', barcode: 'ABC', shop: '10', warehouse: '1', date: '2026-08-27', action: '' },

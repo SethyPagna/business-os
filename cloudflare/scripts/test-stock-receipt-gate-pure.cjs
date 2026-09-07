@@ -68,7 +68,7 @@ assert.match(inventoryRoute, /attribution/, 'the route must read the correction 
 
 // The third receipt wire. FastStockInModal's ordinary lines and
 // ReceiveBatchModal post here, not to /api/inventory/adjust, so a gate on two
-// of the three wires is not a gate at all.
+// of the four wires is not a gate at all.
 const batchesRoute = read(path.join('src', 'routes', 'batches.ts'))
 assert.match(batchesRoute, /stockReceiptGateCode/, 'POST /api/batches must enforce the same gate')
 assert.match(batchesRoute, /lotSupplierName/, 'a top-up of an attributed lot must be allowed to inherit its supplier')
@@ -80,6 +80,79 @@ assert.doesNotMatch(session, /expanded\('unit_cost_usd'\) \?\? product\?\.cost_p
 assert.match(session, /lotAttributionDeferred: batchId != null/,
   'a session line naming an existing lot defers the SUPPLIER half -- the picker sends null for an attributed lot, and refusing it would reject a complete receipt')
 
+// The FOURTH wire, and the one that had no gate at all until sibling:F13: the
+// stock-action FILE import. lib/stockActionCommit.ts INSERTs a product_batches
+// row carrying supplier_id, supplier_name and unit_cost_usd, so a sheet with
+// neither column filled minted exactly the receipt the three wires above
+// refuse -- and a lot left with a blank cost is read downstream as goods that
+// cost nothing, which nobody declared.
+const importCommit = read(path.join('src', 'lib', 'stockActionCommit.ts'))
+assert.match(importCommit, /stockReceiptGateCode/, 'the stock-action import writer must enforce the same gate')
+assert.match(importCommit, /lot_supplier_name/,
+  "the import add reads the target lot's supplier, so a top-up of an attributed lot is not asked to retype it")
+const importDispatch = read(path.join('src', 'lib', 'importEngine.ts'))
+assert.match(importDispatch, /unifiedStockReceiptRefusal/,
+  'the import dispatcher asks the gate BEFORE it creates a product for a row the writer will refuse')
+
+// ---- the census -----------------------------------------------------------
+// The four surfaces that decide "a stock-in is happening" and must therefore
+// ask the gate. Listed on purpose: the import spent its whole life off this
+// list, and a fifth surface added without a line here is that same omission.
+const RECEIPT_WIRES = [
+  ['src/routes/inventory.ts', inventoryRoute],
+  ['src/routes/batches.ts', batchesRoute],
+  ['src/lib/stockSession.ts', session],
+  ['src/lib/stockActionCommit.ts', importCommit],
+]
+assert.equal(RECEIPT_WIRES.length, 4, 'four wires decide a stock receipt; all four are gated')
+for (const [name, source] of RECEIPT_WIRES) {
+  assert.match(source, /stockReceiptGateCode/, `${name} lost its receipt gate`)
+}
+assert.doesNotMatch(read(path.join('src', 'lib', 'returnsStock.ts')), /stockReceiptGateCode/,
+  'positive control: a stock writer that is NOT a receipt wire must not match, or this census proves nothing')
+
+// A hand-kept list is only as good as the day it was written, so derive the
+// candidates from the source instead: every file that INSERTs a
+// product_batches row is a place a receipt can be minted. Each one must be
+// CLASSIFIED below -- gated, or explicitly declared not-a-receipt with the
+// reason. A new writer fails this until someone answers the question, which
+// is exactly the step that was skipped for the import.
+function tsFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const abs = path.join(dir, entry.name)
+    if (entry.isDirectory()) return tsFiles(abs)
+    return entry.isFile() && entry.name.endsWith('.ts') ? [abs] : []
+  })
+}
+const LOT_INSERT_RE = /INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+product_batches/i
+const lotWriters = tsFiles(path.join(root, 'src'))
+  .filter((abs) => LOT_INSERT_RE.test(fs.readFileSync(abs, 'utf8')))
+  .map((abs) => path.relative(root, abs).split(path.sep).join('/'))
+  .sort()
+const LOT_WRITER_CLASSIFICATION = {
+  // Gated here: this lane (sibling:F13).
+  'src/lib/stockActionCommit.ts': 'gated',
+  // Two unrelated things live in this file. The stock-action dispatcher is
+  // gated (unifiedStockReceiptRefusal, asserted above). The PRODUCTS CSV
+  // import's merge_stock/override lots are NOT: they record a unit cost only
+  // when the sheet supplied one and never record a supplier at all, so that
+  // path can still mint the both-blank receipt this gate refuses everywhere
+  // else. Declared, not overlooked -- gating it is a separate change with its
+  // own blast radius across the product importer.
+  'src/lib/importEngine.ts': 'known-ungated: products CSV stock import',
+  // The shared low-level receive writer, not a surface. Its receipt-originating
+  // callers (routes/batches.ts, routes/inventory.ts POST /adjust) run the gate
+  // before calling it; its other callers -- returns restock, stock revert,
+  // branch transfer -- are corrections, the kernel's one declared exemption.
+  'src/lib/productBatches.ts': 'gated-by-its-receipt-callers',
+  // The `initial:<id>` lot stamped when a product is created. It writes no
+  // supplier_id, no supplier_name and no unit_cost_usd, so it states nothing
+  // the gate could check and invents nothing either.
+  'src/lib/productWrites.ts': 'not-a-receipt: records no supplier and no cost',
+}
+assert.deepEqual(lotWriters, Object.keys(LOT_WRITER_CLASSIFICATION).sort(),
+  'a file that INSERTs a product_batches row appeared or vanished -- classify it in LOT_WRITER_CLASSIFICATION (gated, or declared not-a-receipt with the reason) before this census can be believed again')
+
 // The one create-products surface that builds its own lines. Its blank cost
 // used to become 0 in the browser before the wire ever saw it, so the server
 // gate above could not see a fabrication that had already happened.
@@ -88,4 +161,21 @@ assert.ok(!createModal.includes("cost_price_usd === '' ? 0"),
   'the Add/Create products session must not turn a blank cost into a free receipt before posting')
 assert.ok(createModal.includes('stockReceiptGateCode('), 'both of its line paths run the same kernel the Worker runs')
 
-console.log(`PASS stock-in receipt gate: ${table.cases.length} shared cases, supplier+cost required, $0 only as declared free goods, corrections exempt and enforced on both writers`)
+// The unified stock-action import's own review screen. It raises a
+// 'receipt_gate' issue per row carrying the kernel's own code (gateCode), but
+// until sibling:F13's verifier round 2 that code was a zombie field: the
+// renderer showed ONE sentence ('fill the cost column') for every code,
+// including supplier_required and free_goods_required rows whose cost column
+// IS filled and whose real remedy is a different column entirely. Every
+// sibling gate surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
+// StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
+// BranchStockAdjuster) shows the refusal's OWN reason; this import review
+// must too.
+const stockActionImportModal = fs.readFileSync(
+  path.join(root, '..', 'frontend', 'src', 'components', 'products', 'import', 'StockActionImportModal.tsx'),
+  'utf8',
+)
+assert.match(stockActionImportModal, /STOCK_RECEIPT_GATE_KEYS/,
+  'the stock-action import review must translate each receipt-gate issue through its OWN code, not one sentence for every refusal')
+
+console.log(`PASS stock-in receipt gate: ${table.cases.length} shared cases, supplier+cost required, $0 only as declared free goods, corrections exempt, and all FOUR receipt wires enforced`)

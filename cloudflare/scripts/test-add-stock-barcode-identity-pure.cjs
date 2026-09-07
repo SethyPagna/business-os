@@ -112,6 +112,9 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => db },
   './businessDateWindow': businessDateWindow,
 })
+// routes/inventory.ts's per-product revenue/COGS SQL moved into this shared
+// ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
+const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
@@ -137,6 +140,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/salesAnalytics': salesAnalytics,
+  '../lib/productSalesLedger': productSalesLedger,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,

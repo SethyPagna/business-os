@@ -32,6 +32,13 @@ import {
   UNIFIED_STOCK_HEADERS,
   type UnifiedStockMode,
 } from './unifiedStockImport.ts'
+// Per-code rendering for the receipt-gate issues this screen's pre-check
+// raises (N14-D): every sibling gate surface (FastStockInModal,
+// ReceiveBatchModal, Inventory.tsx, StockAdjustModal, CreateProductsSessionModal,
+// BulkAddStockModal, BranchStockAdjuster) shows the REFUSAL'S OWN reason, not
+// one generic sentence for every code. STOCK_RECEIPT_GATE_CODES fixes the
+// render order so the amber lines are stable across re-parses.
+import { STOCK_RECEIPT_GATE_CODES, STOCK_RECEIPT_GATE_KEYS, STOCK_RECEIPT_GATE_FALLBACKS, type StockReceiptGateCode } from '../../../utils/stockReceiptFields.ts'
 import { unwrapImportJob } from './stockActionImportModel.ts'
 import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMode } from './ProductImportModeTabs'
 
@@ -70,6 +77,21 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   const [fileName, setFileName] = useState('')
   const [rowCount, setRowCount] = useState(0)
   const [issueCount, setIssueCount] = useState(0)
+  // Rows the stock-in receipt gate will refuse (N14-D), tallied PER CODE --
+  // not a single scalar count -- because a supplier_required row and a
+  // free_goods_required row need different remedies, and one generic amber
+  // line was showing the cost-column fix for both (verifier round 2). Each
+  // present code renders its own line before the file is ever uploaded.
+  const [gateCounts, setGateCounts] = useState<Partial<Record<StockReceiptGateCode, number>>>({})
+  // Reconcile mode's own unconditional warning (N14-D): the per-row gate
+  // above is DIRECT-only because a reconcile number is a counted total, not a
+  // change -- but a sheet with no cost_price column at all guarantees every
+  // counted increase resolveRowStockAction turns into an 'add' will meet the
+  // gate as a stock-in with no cost, and stockActionResolver.ts never shows
+  // this mode's rows to the reader at all (unlike direct mode's issue list).
+  // Without this the sheet uploads clean and comes back with every increased
+  // row failed.
+  const [reconcileNoCostColumn, setReconcileNoCostColumn] = useState(false)
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -78,6 +100,40 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   const aliveRef = useRef(true)
 
   useEffect(() => () => { aliveRef.current = false }, [])
+
+  // The sheet is re-read whenever the file OR the mode changes: the receipt
+  // gate is a DIRECT-mode question (a reconcile number is a counted total, not
+  // a change, so only the server knows which way it moves stock), and the
+  // counts must follow the operator's current choice rather than whichever
+  // mode happened to be selected when the file was picked.
+  useEffect(() => {
+    if (!csvText.trim()) { setRowCount(0); setIssueCount(0); setGateCounts({}); setReconcileNoCostColumn(false); return }
+    try {
+      const result = parseUnifiedStockRows(parseCsvRows(csvText) as Record<string, unknown>[], mode)
+      setRowCount(result.rows.length)
+      // The amber lines PARTITION the issues: a gate refusal has its own
+      // remedy and its own line, so counting it in "rows need attention" as
+      // well would report the same rows twice and make a one-column fix
+      // look like two problems.
+      const gateIssues = result.issues.filter((issue) => issue.code === 'receipt_gate')
+      setIssueCount(result.issues.length - gateIssues.length)
+      const counts: Partial<Record<StockReceiptGateCode, number>> = {}
+      for (const issue of gateIssues) {
+        if (!issue.gateCode) continue
+        counts[issue.gateCode] = (counts[issue.gateCode] || 0) + 1
+      }
+      setGateCounts(counts)
+      setReconcileNoCostColumn(mode === 'reconcile' && result.rows.length > 0 && result.headerMap.cost_price == null)
+    } catch (err) {
+      setRowCount(0)
+      setIssueCount(0)
+      setGateCounts({})
+      setReconcileNoCostColumn(false)
+      setError(err instanceof Error ? err.message : tr('stock_import_read_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។'))
+    }
+    // tr is stable enough for a message string; the parse depends only on these.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvText, mode])
 
   const readFile = async (file: File) => {
     setError('')
@@ -88,10 +144,6 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
       if (!content.trim()) { setError(tr('stock_import_empty_file', 'That file has no rows.', 'ឯកសារនោះគ្មានជួរទេ។')); return }
       setCsvText(content)
       setFileName(String(parsed?.name || file.name || 'stock-actions.csv'))
-      const rows = parseCsvRows(content)
-      const result = parseUnifiedStockRows(rows as Record<string, unknown>[])
-      setRowCount(result.rows.length)
-      setIssueCount(result.issues.length)
     } catch (err) {
       setError(err instanceof Error ? err.message : tr('stock_import_read_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។'))
     } finally {
@@ -199,6 +251,48 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
             previewHeadingLabel={tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', String(rowCount))}
           />
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.xlsx,.xls,.xlsm" className="hidden" onChange={handlePick} />
+
+          {STOCK_RECEIPT_GATE_CODES.map((code) => {
+            const count = gateCounts[code] || 0
+            if (!count) return null
+            // 'cost_required' keeps its own established, more specific
+            // sentence (naming the exact column to fill); every other code
+            // renders the REFUSAL'S OWN reason, same as every sibling gate
+            // surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
+            // StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
+            // BranchStockAdjuster) -- never one sentence standing in for all
+            // four codes.
+            const message = code === 'cost_required'
+              ? tr(
+                  'stock_import_receipt_gate_note',
+                  '{count} row(s) add stock with no cost in the file — fill the cost column so each stock-in records what you paid.',
+                  '{count} ជួរដេកបន្ថែមស្តុកដោយគ្មានថ្លៃដើមក្នុងឯកសារ — សូមបំពេញជួរឈរថ្លៃដើម ដើម្បីឲ្យស្តុកចូលនីមួយៗកត់ត្រាថ្លៃដែលអ្នកបានបង់។',
+                ).replace('{count}', String(count))
+              : tr(
+                  'stock_import_gate_code_note',
+                  '{count} row(s): {reason}',
+                  '{count} ជួរដេក៖ {reason}',
+                ).replace('{count}', String(count)).replace('{reason}', tr(STOCK_RECEIPT_GATE_KEYS[code], STOCK_RECEIPT_GATE_FALLBACKS[code]))
+            return (
+              <div key={code} className="inline-flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{message}</span>
+              </div>
+            )
+          })}
+
+          {reconcileNoCostColumn ? (
+            <div className="inline-flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {tr(
+                  'stock_import_reconcile_no_cost_note',
+                  'This file has no cost column. In Reconcile mode, any product whose counted total is higher than what is on hand is a stock-in and needs a supplier and unit cost — add the cost_price (and supplier) columns before importing.',
+                  'ឯកសារនេះគ្មានជួរឈរថ្លៃដើមទេ។ ក្នុងរបៀបផ្សះផ្សា ផលិតផលណាដែលចំនួនរាប់សរុបខ្ពស់ជាងស្តុកបច្ចុប្បន្នគឺជាការបន្ថែមស្តុក ហើយត្រូវការឈ្មោះអ្នកផ្គត់ផ្គង់ និងថ្លៃដើម — សូមបន្ថែមជួរឈរ cost_price (និងអ្នកផ្គត់ផ្គង់) មុននឹងនាំចូល។',
+                )}
+              </span>
+            </div>
+          ) : null}
 
           {issueCount > 0 ? (
             <div className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
