@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mergeDuplicateChunkCanContinueAutomatically, mergeDuplicateChunkRequiresManualResume } from '../src/components/products/mergeDuplicatesRun.ts'
+import { cacheGet, cacheSet } from '../src/api/http.ts'
+import { invalidateProductReadCacheForReconciliation } from '../src/api/productReadTransport.ts'
 
 assert.equal(mergeDuplicateChunkRequiresManualResume({ interruptionCode: 'merge_infrastructure_interrupted' }), true)
 assert.equal(mergeDuplicateChunkRequiresManualResume({ interruptionCode: 'merge_budget_reached' }), false)
@@ -14,7 +16,12 @@ assert.equal(mergeDuplicateChunkCanContinueAutomatically({ interruptionCode: 'me
 const here = dirname(fileURLToPath(import.meta.url))
 const products = readFileSync(join(here, '..', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
 assert.match(products, /calls \+= 1\s+const result = await productApi\.mergeDuplicates/, 'a first-request timeout still records a possibly committed write attempt')
-assert.match(products, /if \(calls > 0 \|\| controller\.signal\.aborted\) await load\(true\)/, 'every started unknown-outcome POST reloads authoritative state')
+assert.match(products, /if \(calls > 0 \|\| controller\.signal\.aborted\) \{\s+await productApi\.invalidateProductReadCacheForReconciliation\(\)\s+await load\(true\)/, 'every started unknown-outcome POST invalidates product reads before reloading authoritative state')
+cacheSet('products:search:page=1', { items: [{ id: 99 }] })
+cacheSet('sales:get', { items: [{ id: 88 }] })
+invalidateProductReadCacheForReconciliation()
+assert.equal(cacheGet('products:search:page=1'), null, 'unknown product write outcomes cannot reconcile from a fresh search cache')
+assert.deepEqual(cacheGet('sales:get'), { items: [{ id: 88 }] }, 'product reconciliation leaves unrelated read caches intact')
 const stopAt = products.indexOf('if (mergeDuplicateChunkRequiresManualResume(result))')
 const continueAt = products.indexOf('const remainingBefore = Number(result?.remainingProductsBefore)', stopAt)
 assert.ok(stopAt > 0 && continueAt > stopAt, 'an interrupted successful response must stop before automatic continuation')
