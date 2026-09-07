@@ -42,6 +42,7 @@ import {
   serializeContactOptions as serializeStoredContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
+import { readContactDuplicateDecisionError, type ContactDuplicateMatch } from './contactDuplicates'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -752,9 +753,27 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       setSelected(null)
       await load({ silent: true, label: 'Customers after save' })
     } catch (error: unknown) {
+      const duplicateCheck = readContactDuplicateDecisionError(error)
+      if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
       notify(getErrorMessage(error, 'Failed'), 'error')
     } finally {
       finishSingleAction(saveInFlightRef)
+    }
+  }
+
+  const handleUseExisting = async (match: ContactDuplicateMatch) => {
+    try {
+      const data = await withLoaderTimeout(
+        () => getCustomerApi().getCustomers({ ids: [String(match.id)] }),
+        'Load existing customer',
+        12000,
+      )
+      const existing = normalizeCustomerRows(data).find((customer) => Number(customer.id) === Number(match.id))
+      if (!existing) throw new Error('The existing customer could not be loaded')
+      setSelected(existing)
+      setModal('detail')
+    } catch (error) {
+      notify(getErrorMessage(error, tr(t, 'contact_duplicate_existing_load_failed', 'Could not load the existing record. Try again.')), 'error')
     }
   }
 
@@ -1264,7 +1283,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
       {modal === 'form' ? (
         <Suspense fallback={null}>
-          <CustomerFormModal customer={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} />
+          <CustomerFormModal customer={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />
         </Suspense>
       ) : null}
       {modal === 'import' ? (

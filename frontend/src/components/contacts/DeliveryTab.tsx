@@ -29,6 +29,7 @@ import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countA
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
+import { createSeparateContactDecision, readContactDuplicateDecisionError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -108,7 +109,7 @@ interface DeliveryPayload {
   gender?: string | null
   userId?: string | number | null
   userName?: string | null
-  confirmDuplicate?: boolean
+  duplicateDecision?: ContactDuplicateDecision
   __rename_cascade?: 'carry' | 'record_only'
 }
 
@@ -255,11 +256,12 @@ function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEdi
 interface DeliveryFormProps {
   contact?: DeliveryContact | null
   onSave: (payload: DeliveryPayload) => Promise<unknown> | unknown
+  onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   t: TranslateFn
 }
 
-function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
+function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFormProps) {
   const init: DeliveryPayload = contact ? { ...contact } : { name: '', phone: '', area: '', address: '', notes: '', gender: '' }
   const [form, setForm] = useState<DeliveryPayload>(init)
   // S4-21: dismissing this modal with edits raises the discard prompt.
@@ -272,23 +274,29 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const set = (key: keyof DeliveryPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
-  const addOption = () => setOptions((current) => {
-    if (current.length >= CONTACT_OPTION_LIMIT) return current
-    return [...current, BLANK_OPTION()]
-  })
-  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
-  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  const [serverDuplicateCheck, setServerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const [pendingDuplicateCheck, setPendingDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const clearServerDuplicateCheck = () => setServerDuplicateCheck(null)
+  const set = (key: keyof DeliveryPayload, value: string) => { clearServerDuplicateCheck(); setForm((current) => ({ ...current, [key]: value })) }
+  const addOption = () => {
+    clearServerDuplicateCheck()
+    setOptions((current) => current.length >= CONTACT_OPTION_LIMIT ? current : [...current, BLANK_OPTION()])
+  }
+  const updateOption = (index: number, nextOption: ContactOption) => { clearServerDuplicateCheck(); setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option))) }
+  const removeOption = (index: number) => { clearServerDuplicateCheck(); setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index)) }
   const livePrimaryOption = getPrimaryContactOption(options, {
     fallback: { name: form.name || '', phone: form.phone || '', area: form.area || '' },
   })
-  const duplicateMatches = useContactDuplicateFlag(
+  const duplicateCheck = useContactDuplicateFlag(
     'delivery_contacts',
     livePrimaryOption.name || form.name || '',
-    livePrimaryOption.phone || form.phone || '',
+    [form.phone || '', ...options.map((option) => option.phone)],
     contact?.id,
   )
+  const activeDuplicateCheck = serverDuplicateCheck || duplicateCheck
+  const duplicateMatches = activeDuplicateCheck.matches
   const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
+  const pendingExactMatch = pendingDuplicateCheck?.matches.find((match) => match.severity === 'exact_match')
 
   // Part 563: validate, then open the review dialog; commitDelivery saves on
   // confirm. The exact-duplicate window.confirm() is folded into the dialog
@@ -301,6 +309,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
       return
     }
     setLocalError('')
+    setPendingDuplicateCheck(exactMatch ? activeDuplicateCheck : null)
     setConfirmOpen(true)
   }
 
@@ -321,15 +330,21 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
     })
     setSaving(true)
     try {
-      await Promise.resolve(onSave({
+      const duplicateDecision = pendingDuplicateCheck ? createSeparateContactDecision(pendingDuplicateCheck) : null
+      const result = await Promise.resolve(onSave({
         ...form,
         name: primaryOption.name || form.name || '',
         phone: primaryOption.phone || form.phone || '',
         area: primaryOption.area || form.area || '',
         address: serializeDeliveryOptions(options),
         gender: form.gender || '',
-        confirmDuplicate: !!exactMatch,
+        ...(duplicateDecision ? { duplicateDecision } : {}),
       }))
+      const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
+      if (nextCheck) {
+        setServerDuplicateCheck(nextCheck)
+        setLocalError(t('contact_duplicate_review_changed') || 'Review the current possible duplicate records before saving.')
+      }
     } finally {
       setSaving(false)
     }
@@ -403,7 +418,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
           </div>
         ) : null}
 
-        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="delivery contact" />
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="delivery contact" onUseExisting={onUseExisting} t={t} />
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
             CustomerFormModal.tsx's own fix. */}
@@ -418,9 +433,9 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
           title={contact ? 'Edit Delivery Contact' : 'Add Delivery Contact'}
           message={(livePrimaryOption.name || form.name || '').trim()}
           items={buildDeliveryReviewItems()}
-          note={exactMatch ? `"${exactMatch.name}" already has this exact name and phone number. Create a separate delivery contact anyway?` : undefined}
-          danger={!!exactMatch}
-          confirmLabel={t('save') || 'Save'}
+          note={pendingExactMatch ? (t('contact_duplicate_possible_message') || 'A contact already has this name and phone number. Use the existing record or create a separate one.') : undefined}
+          danger={!!pendingExactMatch}
+          confirmLabel={pendingExactMatch ? (t('contact_duplicate_create_separately') || 'Create separately') : (t('save') || 'Save')}
           cancelLabel={t('cancel') || 'Cancel'}
           working={saving}
           workingLabel={t('saving') || 'Saving...'}
@@ -869,8 +884,28 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
       }
       setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' })
-    } catch (error: unknown) { notify(getErrorMessage(error, 'Failed'), 'error') }
+    } catch (error: unknown) {
+      const duplicateCheck = readContactDuplicateDecisionError(error)
+      if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
+      notify(getErrorMessage(error, 'Failed'), 'error')
+    }
     finally { finishSingleAction(saveInFlightRef) }
+  }
+
+  const handleUseExisting = async (match: ContactDuplicateMatch) => {
+    try {
+      const data = await withLoaderTimeout(
+        () => getDeliveryApi().getDeliveryContacts({ ids: [String(match.id)] }),
+        'Load existing delivery contact',
+        12000,
+      )
+      const existing = normalizeDeliveryRows(data).find((contact) => Number(contact.id) === Number(match.id))
+      if (!existing) throw new Error('The existing delivery contact could not be loaded')
+      setSelected(existing)
+      setModal('detail')
+    } catch (error) {
+      notify(getErrorMessage(error, t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.'), 'error')
+    }
   }
 
   const handleDelete = async (c: DeliveryContact) => {
@@ -1280,7 +1315,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         }}
       />
 
-      {modal === 'form'   && <DeliveryForm contact={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
+      {modal === 'form'   && <DeliveryForm contact={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
       {modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="deliveryContact" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Delivery contacts after import' })} />

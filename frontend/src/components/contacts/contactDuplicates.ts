@@ -21,7 +21,24 @@ export type ContactDuplicateMatch = {
   membershipNumber: string | null
   matchedPhone: string | null
   severity: ContactDuplicateSeverity
+  version: string
 }
+
+export type ContactDuplicateCandidateVersion = { id: number; version: string }
+
+export type ContactDuplicateReview = {
+  candidateIds: number[]
+  candidateVersions: ContactDuplicateCandidateVersion[]
+  fingerprint: string
+}
+
+export type ContactDuplicateCheck = {
+  matches: ContactDuplicateMatch[]
+  duplicateReview: ContactDuplicateReview
+  allowedActions: Array<'use_existing' | 'create_separate'>
+}
+
+export type ContactDuplicateDecision = ContactDuplicateReview & { action: 'create_separate' }
 
 // Per-contact "worth knowing before you act" history the /duplicates
 // endpoint attaches to every cluster member (routes/contacts.ts's
@@ -53,10 +70,12 @@ const TABLE_ENDPOINT: Record<ContactTableKind, string> = {
   delivery_contacts: '/api/delivery-contacts',
 }
 
-function appendQuery(path: string, params: Record<string, string>): string {
+function appendQuery(path: string, params: Record<string, string | string[]>): string {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
-    if (value) query.set(key, value)
+    if (Array.isArray(value)) {
+      for (const item of value) if (item) query.append(key, item)
+    } else if (value) query.set(key, value)
   }
   const qs = query.toString()
   return qs ? `${path}?${qs}` : path
@@ -68,20 +87,64 @@ function appendQuery(path: string, params: Record<string, string>): string {
 // routes/contacts.ts's checkContactDuplicateBlock).
 export async function checkContactDuplicate(
   table: ContactTableKind,
-  subject: { name: string; phone: string; excludeId?: number | string | null },
-): Promise<ContactDuplicateMatch[]> {
-  if (!subject.name.trim() && !subject.phone.trim()) return []
+  subject: { name: string; phones: string[]; excludeId?: number | string | null },
+): Promise<ContactDuplicateCheck> {
+  const empty = (): ContactDuplicateCheck => ({
+    matches: [],
+    duplicateReview: { candidateIds: [], candidateVersions: [], fingerprint: 'v1|' },
+    allowedActions: [],
+  })
+  const phones = [...new Set(subject.phones.map((phone) => phone.trim()).filter(Boolean))].slice(0, 4)
+  if (!subject.name.trim() && !phones.length) return empty()
   try {
     const path = appendQuery(`${TABLE_ENDPOINT[table]}/check-duplicate`, {
       name: subject.name,
-      phone: subject.phone,
+      phone: phones,
       excludeId: subject.excludeId != null ? String(subject.excludeId) : '',
     })
     const result = await apiFetch('GET', path)
-    return Array.isArray(result?.matches) ? result.matches : []
+    return normalizeContactDuplicateCheck(result) || empty()
   } catch {
-    return []
+    return empty()
   }
+}
+
+export function normalizeContactDuplicateCheck(value: unknown): ContactDuplicateCheck | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const input = value as Record<string, unknown>
+  const reviewInput = input.duplicateReview
+  if (!Array.isArray(input.matches) || !reviewInput || typeof reviewInput !== 'object' || Array.isArray(reviewInput)) return null
+  const review = reviewInput as Record<string, unknown>
+  if (!Array.isArray(review.candidateIds) || !Array.isArray(review.candidateVersions) || typeof review.fingerprint !== 'string') return null
+  const candidateIds = review.candidateIds.map(Number)
+  const candidateVersions = review.candidateVersions.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+    const row = entry as Record<string, unknown>
+    return { id: Number(row.id), version: String(row.version || '') }
+  })
+  if (candidateIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    || candidateVersions.some((entry) => !entry || !Number.isSafeInteger(entry.id) || entry.id <= 0 || !entry.version)) return null
+  const allowedActions = Array.isArray(input.allowedActions)
+    ? input.allowedActions.filter((action): action is 'use_existing' | 'create_separate' => action === 'use_existing' || action === 'create_separate')
+    : []
+  return {
+    matches: input.matches as ContactDuplicateMatch[],
+    duplicateReview: { candidateIds, candidateVersions: candidateVersions as ContactDuplicateCandidateVersion[], fingerprint: review.fingerprint },
+    allowedActions,
+  }
+}
+
+export function readContactDuplicateDecisionError(error: unknown): ContactDuplicateCheck | null {
+  const input = error as Record<string, unknown> | null
+  const code = input?.code
+  if (code !== 'possible_duplicate' && code !== 'phone_conflict' && code !== 'contact_duplicate_candidates_changed') return null
+  return normalizeContactDuplicateCheck(input)
+    || normalizeContactDuplicateCheck(input?.duplicate)
+}
+
+export function createSeparateContactDecision(check: ContactDuplicateCheck): ContactDuplicateDecision | null {
+  if (!check.allowedActions.includes('create_separate')) return null
+  return { action: 'create_separate', ...check.duplicateReview }
 }
 
 // Whole-table sweep for an admin "Possible Duplicates" review panel. Pass

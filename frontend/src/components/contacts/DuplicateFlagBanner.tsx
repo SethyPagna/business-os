@@ -3,7 +3,8 @@ import type { ContactDuplicateMatch, ContactDuplicateSeverity } from './contactD
 interface DuplicateFlagBannerProps {
   matches: ContactDuplicateMatch[]
   entityLabel: string
-  onViewExisting?: (id: number) => void
+  onUseExisting?: (match: ContactDuplicateMatch) => void | Promise<void>
+  t?: (key: string) => string | undefined
 }
 
 // One banner style per severity -- red for the hard "can't save" case,
@@ -18,33 +19,41 @@ const SEVERITY_STYLE: Record<ContactDuplicateSeverity, string> = {
   name_only: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300',
 }
 
-function messageFor(match: ContactDuplicateMatch, entityLabel: string): string {
+function messageFor(match: ContactDuplicateMatch, entityLabel: string, t?: DuplicateFlagBannerProps['t']): string {
   if (match.severity === 'phone_conflict') {
-    return `This phone number already belongs to "${match.name}". Each phone number can only be used by one ${entityLabel} -- use a different number, or edit that record instead.`
+    return tr(t, 'contact_duplicate_phone_conflict_message', `This phone number already belongs to "${match.name}". Use the existing record or enter a different phone number.`)
   }
   if (match.severity === 'exact_match') {
-    return `"${match.name}" already has this exact name and phone number. Saving will create a second, separate record.`
+    return tr(t, 'contact_duplicate_possible_message', `"${match.name}" already has this exact name and phone number. Use the existing record or create a separate one.`)
   }
   return `Another ${entityLabel} named "${match.name}" already exists${match.phone ? ` (${match.phone})` : ''}. Make sure this is a different person.`
 }
 
-export default function DuplicateFlagBanner({ matches, entityLabel, onViewExisting }: DuplicateFlagBannerProps) {
+function tr(t: DuplicateFlagBannerProps['t'], key: string, fallback: string): string {
+  const value = t?.(key)
+  return value && value !== key ? value : fallback
+}
+
+export default function DuplicateFlagBanner({ matches, entityLabel, onUseExisting, t }: DuplicateFlagBannerProps) {
   if (!matches.length) return null
   const top = matches[0]
   return (
     <div className={`rounded-xl border px-3 py-2 text-xs ${SEVERITY_STYLE[top.severity]}`}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="flex-1 leading-relaxed">{messageFor(top, entityLabel)}</p>
-        {onViewExisting && top.id ? (
-          <button
-            type="button"
-            onClick={() => onViewExisting(top.id)}
-            className="shrink-0 whitespace-nowrap font-semibold underline underline-offset-2"
-          >
-            View
-          </button>
-        ) : null}
-      </div>
+      <p className="leading-relaxed">{messageFor(top, entityLabel, t)}</p>
+      {onUseExisting ? (
+        <div className="mt-2 flex flex-wrap gap-2" aria-label={tr(t, 'contact_duplicate_existing_choices', 'Existing records')}>
+          {matches.map((match) => (
+            <button
+              key={match.id}
+              type="button"
+              onClick={() => { void onUseExisting(match) }}
+              className="rounded-md border border-current/30 px-2 py-1 font-semibold hover:bg-white/50 dark:hover:bg-black/10"
+            >
+              {tr(t, 'contact_duplicate_use_existing', 'Use existing')}: {match.name || `#${match.id}`}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
