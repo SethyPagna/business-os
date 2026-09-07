@@ -39,6 +39,7 @@ const {
   getMinimizedWork,
   markRestoreHandled,
   minimizeWork,
+  reparkDeniedRestore,
   removeMinimizedWork,
 } = await import('../src/utils/minimizedWork.ts')
 const { readWorkDraft, scopedWorkDraftKey, writeWorkDraft } = await import('../src/utils/workDrafts.ts')
@@ -102,6 +103,14 @@ assert.equal(consumePendingRestore('receive_batch')?.key, 'receive-batch-401')
 assert.equal(consumePendingRestore('receive_batch'), null)
 assert.equal(readWorkDraft<{ quantity: string }>(receiveDraftKey)?.data.quantity, '7', 'restore keeps the exact draft')
 
+// The grant can change after the tray's check but before a mounted host handles
+// the synchronous restore event. Denial must restore the exact chip and consume
+// its pending replay so permission later returning cannot auto-open the form.
+reparkDeniedRestore(receiveEntry)
+assert.equal(getMinimizedWork()[0]?.draftKey, receiveDraftKey)
+assert.equal(consumePendingRestore('receive_batch'), null)
+removeMinimizedWork(receiveEntry.key)
+
 // A handled event also consumes the pending replay, and removing a chip does
 // not itself make a broad family-draft decision.
 minimizeWork({ key: 'session', kind: 'create_products_session', pageId: 'products', label: 'Create products', draftKey: scopedWorkDraftKey('create_products_session') })
@@ -125,5 +134,6 @@ assert.match(receiveSource, /useCloseGuard\(\{ workKey: product \? `receive-batc
 assert.match(receiveSource, /<MinimizeButton disabled=\{saving\} tr=\{tr\} onMinimize=\{preserveAndMinimize\} \/>/, 'receive must show the shared minus beside Close')
 assert.match(branchesSource, /if \(!canReceiveStock\) return false[\s\S]*?setReceiveTarget/, 'the host must recheck current permission before reopening')
 assert.match(branchesSource, /requiredPermission: \{ permissionKey: 'inventory', actionKey: 'adjust' \}/, 'the parked entry must carry the existing action grant')
+assert.match(branchesSource, /if \(!canReceiveStock\) \{[\s\S]*?reparkDeniedRestore\(entry\)[\s\S]*?return/, 'a host-side permission race must put the exact chip back')
 
 console.log('PASS minimized work is actor-scoped, exact-draft, one-shot and accessible')

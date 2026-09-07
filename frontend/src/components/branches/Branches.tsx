@@ -39,6 +39,7 @@ import {
   consumePendingRestore,
   markRestoreHandled,
   minimizeWork,
+  reparkDeniedRestore,
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
 import {
@@ -400,12 +401,19 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     return true
   }, [canReceiveStock])
   useEffect(() => {
-    const pending = canReceiveStock ? consumePendingRestore('receive_batch') : null
-    if (pending) restoreReceiveBatch(pending)
+    const pending = consumePendingRestore('receive_batch')
+    if (pending) {
+      if (canReceiveStock) restoreReceiveBatch(pending)
+      else reparkDeniedRestore(pending)
+    }
     const onRestore = (event: Event) => {
       const detail = (event as CustomEvent).detail
-      if (detail?.kind !== 'receive_batch' || !canReceiveStock) return
+      if (detail?.kind !== 'receive_batch') return
       const entry = detail.entry as MinimizedWorkEntry | undefined
+      if (!canReceiveStock) {
+        if (entry) reparkDeniedRestore(entry)
+        return
+      }
       // New dispatches carry the complete entry. Keep the payload-only fallback
       // for a chip created by an older same-version tab.
       const candidate = entry || {
