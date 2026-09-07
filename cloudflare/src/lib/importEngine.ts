@@ -5254,6 +5254,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   }
 
   try {
+    // Cancellation is already an authoritative request to perform no import
+    // work. Honor it without requiring a now-stale approving actor; the only
+    // write here is the terminal job status itself.
+    if (jobRow.cancel_requested) {
+      await db.prepare(`UPDATE import_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
+      return { applied: 0, failed: 0 }
+    }
     const job = await db.prepare(`SELECT id, type, policy_json, summary_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
     if (!job) throw new Error('Import job not found')
     // The HTTP approval/retry request is only the enqueue boundary. A role
@@ -5272,11 +5279,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (isFreshStart) {
       await resetChunkState(db, jobId, 'apply')
     }
-    if (jobRow.cancel_requested) {
-      await db.prepare(`UPDATE import_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
-      return { applied: 0, failed: 0 }
-    }
-
     // Unified stock actions have their own dedicated, isolated apply path --
     // each add/sale/create is committed by stockActionCommit.ts's atomic,
     // idempotent, oversell-proof writer. It deliberately never reaches the

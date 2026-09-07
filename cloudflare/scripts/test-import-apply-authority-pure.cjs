@@ -59,6 +59,7 @@ function makeState(actor) {
     actor,
     products: [{ id: 77, image_path: '/uploads/Love Nude.webp' }],
     assets: new Set(['/uploads/Love Nude.webp', '/uploads/new.webp']),
+    cancelRequested: 0,
     runs: [],
     batches: 0,
     job: {
@@ -85,7 +86,7 @@ function makeState(actor) {
         async get() {
           if (/FROM users u/i.test(sql)) return state.actor || undefined
           if (/SELECT status, cancel_requested, started_at FROM import_jobs/i.test(sql)) {
-            return { status: 'queued', cancel_requested: 0, started_at: null }
+            return { status: 'queued', cancel_requested: state.cancelRequested, started_at: null }
           }
           if (/SELECT id, type, policy_json, summary_json FROM import_jobs/i.test(sql)) return state.job
           return undefined
@@ -204,6 +205,14 @@ async function main() {
   assert.equal(activeState.runs.some((entry) => /UPDATE products|INSERT INTO products/i.test(entry.sql || '')), false)
   assert.equal(activeState.runs.some((entry) => /status = 'failed'.*last_error/is.test(entry.sql || '')), true)
   console.log('PASS real runImportApply marks a revoked actor failed before catalog batches')
+
+  activeState = makeState(null)
+  activeState.cancelRequested = 1
+  activeState.job.policy_json = '{}'
+  assert.deepEqual(await engine.runImportApply({}, 'job-1'), { applied: 0, failed: 0 })
+  assert.equal(activeState.runs.some((entry) => /status = 'cancelled'/i.test(entry.sql || '')), true)
+  assert.equal(activeState.runs.some((entry) => /status = 'failed'/i.test(entry.sql || '')), false)
+  console.log('PASS an already-requested cancellation completes before apply-authority checks')
 
   let acked = 0
   let retried = 0
