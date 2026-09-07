@@ -15,6 +15,7 @@ import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { RESOLVED_ACTOR_NAME_COLUMN, resolvedActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -1155,7 +1156,13 @@ app.get('/transfers', async (c) => {
     // array. The current Branches page always requests paging, so no UI data
     // is hidden behind this legacy safety cap.
     const rows = await db.prepare(`
-      SELECT st.*, st.notes AS note, b1.name AS from_name, b2.name AS to_name
+      SELECT st.*, st.notes AS note, b1.name AS from_name, b2.name AS to_name,
+             -- N13 sibling parity: the actor is the ACCOUNT username,
+             -- resolved from st.user_id exactly as every movement surface
+             -- resolves it. Aliased because st.* already emits a user_name
+             -- column and two columns of one name in a result row is
+             -- undefined; withResolvedActorName folds it back below.
+             ${resolvedActorNameSql('st')} AS ${RESOLVED_ACTOR_NAME_COLUMN}
       FROM stock_transfers st
       LEFT JOIN branches b1 ON b1.id = st.from_branch_id
       LEFT JOIN branches b2 ON b2.id = st.to_branch_id
@@ -1163,7 +1170,7 @@ app.get('/transfers', async (c) => {
       ORDER BY st.created_at DESC, st.id DESC
       LIMIT 500
     `).all(bindings)
-    return c.json(rows || [])
+    return c.json((rows || []).map((row) => withResolvedActorName(row)))
   }
 
   const page = clampInt(query.page, 1, 1, 100000)
@@ -1172,7 +1179,13 @@ app.get('/transfers', async (c) => {
   const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM stock_transfers st ${where}`).get<{ count: number }>(bindings)
   const total = Number(countRow?.count || 0)
   const items = await db.prepare(`
-    SELECT st.*, st.notes AS note, b1.name AS from_name, b2.name AS to_name
+    SELECT st.*, st.notes AS note, b1.name AS from_name, b2.name AS to_name,
+           -- N13 sibling parity: the actor is the ACCOUNT username,
+           -- resolved from st.user_id exactly as every movement surface
+           -- resolves it. Aliased because st.* already emits a user_name
+           -- column and two columns of one name in a result row is
+           -- undefined; withResolvedActorName folds it back below.
+           ${resolvedActorNameSql('st')} AS ${RESOLVED_ACTOR_NAME_COLUMN}
     FROM stock_transfers st
     LEFT JOIN branches b1 ON b1.id = st.from_branch_id
     LEFT JOIN branches b2 ON b2.id = st.to_branch_id
@@ -1182,7 +1195,7 @@ app.get('/transfers', async (c) => {
   `).all({ ...bindings, pageSize, offset })
 
   return c.json({
-    items: items || [],
+    items: (items || []).map((row) => withResolvedActorName(row)),
     total,
     page,
     pageSize,

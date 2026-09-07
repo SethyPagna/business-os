@@ -33,7 +33,24 @@
  * writes unqualified predicates a joined `users` would make ambiguous.
  */
 export function movementActorNameSql(alias: string): string {
-  return `COALESCE((SELECT username FROM users WHERE id = ${alias}.user_id), ${alias}.user_name)`
+  return resolvedActorNameSql(alias)
+}
+
+/**
+ * The same rule for any table that stores the pair (actor id, display-name
+ * snapshot). inventory_movements is not the only one: stock_transfers carries
+ * user_id + user_name too, and lib/userIdentity.ts already lists it among the
+ * username-snapshot tables the rename cascade rewrites -- so the Branches
+ * transfer history has to answer "who" the same way the Stock Change ledger
+ * and the /movements drill do. It was the last surface still printing the raw
+ * snapshot ("ung sethy pagna" where the ledger two clicks away says "james").
+ *
+ * Parameterised by column name as well as alias so a future table with a
+ * differently-named pair reaches this rule instead of hand-copying it; the
+ * defaults are the two names both current tables use.
+ */
+export function resolvedActorNameSql(alias: string, idColumn = 'user_id', nameColumn = 'user_name'): string {
+  return `COALESCE((SELECT username FROM users WHERE id = ${alias}.${idColumn}), ${alias}.${nameColumn})`
 }
 
 /**
