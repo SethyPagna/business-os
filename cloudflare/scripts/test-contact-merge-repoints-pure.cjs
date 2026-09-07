@@ -28,9 +28,9 @@ const run = (sql, params) => db.prepare(sql).run(params)
 const count = (sql, params) => Number(db.prepare(sql).get(params).n)
 const one = (sql, params) => db.prepare(sql).get(params)
 
-// --- The repoint statements, verbatim from routes/contacts.ts's merge handler.
-// Each is run below AND asserted present in the route source, so the two can
-// never drift apart.
+// --- The repoint statements, verbatim from lib/contactMerge.ts's planner.
+// Each is run below AND asserted present in the shipping route/planner source,
+// so the behavioral fixture cannot silently drift from the atomic path.
 const CUSTOMER_REPOINTS = [
   `UPDATE sales SET customer_id = @keepId, customer_name = @keeperName, customer_phone = @keeperPhone, customer_address = @keeperAddress WHERE customer_id = @mergeId`,
   `UPDATE returns SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`,
@@ -50,6 +50,7 @@ const SUPPLIER_REPOINTS = [
 ]
 const DELIVERY_REPOINTS = [
   `UPDATE sales SET delivery_contact_id = @keepId, delivery_contact_name = @keeperName WHERE delivery_contact_id = @mergeId`,
+  `UPDATE fees SET delivery_contact_id = @keepId, updated_at = CURRENT_TIMESTAMP WHERE delivery_contact_id = @mergeId`,
 ]
 
 let failed = 0
@@ -84,6 +85,7 @@ run(`INSERT INTO supplier_invoices (source_branch, legacy_id, supplier_id, suppl
 
 // Delivery-linked
 run(`INSERT INTO sales (delivery_contact_id, delivery_contact_name) VALUES (32, 'LoseDrv')`)
+run(`INSERT INTO fees (fee_type, amount_usd, amount_khr, fee_date, delivery_contact_id) VALUES ('delivery', 2, 8200, '2026-09-07', 32)`)
 
 // --------------------------------------------------------------------------
 // Run the repoints exactly as the merge handler does, then delete the losers
@@ -162,13 +164,18 @@ check('delivery-contact merge moves the delivery link on sales', () => {
   assert.strictEqual(count(`SELECT COUNT(*) n FROM sales WHERE delivery_contact_id = 32`), 0)
   assert.strictEqual(count(`SELECT COUNT(*) n FROM sales WHERE delivery_contact_id = 31`), 1)
   assert.strictEqual(one(`SELECT delivery_contact_name FROM sales WHERE delivery_contact_id = 31`).delivery_contact_name, 'KeepDrv', 'delivery snapshot stayed stale')
+  assert.strictEqual(count(`SELECT COUNT(*) n FROM fees WHERE delivery_contact_id = 32`), 0, 'fee still points at deleted delivery contact')
+  assert.strictEqual(count(`SELECT COUNT(*) n FROM fees WHERE delivery_contact_id = 31`), 1, 'fee was not repointed to delivery keeper')
 })
 
 // --------------------------------------------------------------------------
 // Layer 2: source guard -- the route actually issues each repoint.
 // --------------------------------------------------------------------------
 check('routes/contacts.ts merge handler contains every repoint statement', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
+  const source = [
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'contactMerge.ts'), 'utf8'),
+  ].join('\n')
   const norm = (s) => s.replace(/\s+/g, ' ').trim()
   const flat = norm(source)
   for (const sql of [...CUSTOMER_REPOINTS, ...SUPPLIER_REPOINTS, ...DELIVERY_REPOINTS]) {
