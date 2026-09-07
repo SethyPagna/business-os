@@ -62,6 +62,12 @@ const db = {
     }
   },
   async batch(items) {
+    if (items.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))) {
+      return items.map(({ sql, params }) => ({
+        success: true,
+        results: db.prepare(sql).all(params || {}),
+      }))
+    }
     const out = []
     for (const item of items) out.push(db.prepare(item.sql).run(item.params || {}))
     return out

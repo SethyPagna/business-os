@@ -45,6 +45,12 @@ const dbShim = {
     }
   },
   async batch(statements) {
+    if (statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))) {
+      return statements.map(({ sql, params }) => ({
+        success: true,
+        results: db.prepare(sql).all(params || {}),
+      }))
+    }
     const run = db.transaction(() => {
       for (const statement of statements) db.prepare(statement.sql).run(statement.params || {})
     })
@@ -92,6 +98,7 @@ const productImagePermission = loadReal('lib/productImagePermission.ts', {
 const batchCode = loadReal('lib/batchCode.ts')
 const searchMatch = loadReal('lib/searchMatch.ts')
 const productDetailRule = loadReal('lib/productDetailRule.ts')
+const productMergeSnapshot = loadReal('lib/productMergeSnapshot.ts', { './db': { getDb: () => dbShim } })
 const productWrites = loadReal('lib/productWrites.ts', {
   './db': { getDb: () => dbShim },
   './media': media,
@@ -170,6 +177,7 @@ const productsRoute = loadReal('routes/products.ts', {
   // Product merge economics has dedicated route/kernel tests. Gallery wiring
   // never invokes it, but the identity lane imports it from products.ts.
   '../lib/productMerge': {},
+  '../lib/productMergeSnapshot': productMergeSnapshot,
   '../lib/productIdentity': { findDuplicateProductGroups: async () => [] },
   '../lib/productBatches': { attachBatchCounts: async () => {} },
   '../lib/searchMatch': searchMatch,
