@@ -4,7 +4,9 @@ This is the current request register. `progress.md` links here. Append new owner
 requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
-Last reconciled: 2026-09-07T12:35:58.380Z. Functional fixes precede UI polish.
+Last reconciled: 2026-09-07T13:17:47.798Z. Functional fixes precede UI polish.
+Current production: **02eecbe3833b**, Worker **c3a21a40-544b-4678-bacd-bc50441df8a1**, 100% at **2026-09-07 13:14:39 UTC**. Migration 0134 preserved all 15,106 existing Sales rows and prior schema objects. GitHub release branch pushed. F33/F36/F37/F38 now deployed. Live smoke and duplicate merge follow. Historical repair attempts committed no changes; all 4,333 targets matched their original snapshots and audits remained zero.
+
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
 **498efadb-f833-471d-a8b7-b4326950bd26**, deployed 2026-09-07 09:54:13 UTC.
 Public Git branch: codex/release-fixes-20260907. Migrations 0128–0132 and required
@@ -31,7 +33,7 @@ Every shipped row must eventually record its actual deployment version.
 
 | ID | Request and latest accepted detail | State / owner | Evidence or next action |
 |---|---|---|---|
-| F01 | Completed sale changed back to awaiting payment must allow authorized payment method, amount, item and delete/correction actions. | Correction code deployed; F38 acceptance pending / sales | Sales correction and scope tests; final release smoke. |
+| F01 | Completed sale changed back to awaiting payment must allow authorized payment method, amount, item and delete/correction actions. | Deployed 02eecbe3; live follow-through active | Sales correction and scope tests; final release smoke. |
 | F02 | Audit all historical sales with missing branch, Warehouse/multiple branches, or N/A driver. | Audit complete; Pending live / accounting, root | Census covered 15,096 sales and 36,340 lines. Proven null metadata repair prepared; ambiguous fulfillment/driver facts remain unresolved. |
 | F03 | Enforce Shop-only sales; Warehouse stock must transfer first, including added lines, imports, replacements and generated sales. | Deployed 821efc94; recorded limitations retained | Backend enforcement and sibling parity tests integrated. |
 | F04 | Stock-in session times out after 12 seconds. | Deployed 821efc94; recorded limitations retained | Session-specific 60-second transport, stable request identity, durable retry; no global timeout inflation. |
@@ -63,12 +65,12 @@ Every shipped row must eventually record its actual deployment version.
 | F30 | Finish earlier N18/N21/N23 and N28–N36/audit lanes without losing their fixes. | Deployed 821efc94; recorded limitations retained | Canonical ea9f0d1b base includes checkpoint 2 and earlier integrations; individual follow-up fixes retained. |
 | F31 | GitHub commits describe individual fixes, not checkpoint/batch commits. | Public fix commits pushed through c475e637 / lineage, root | Separate public release history preserves messages/authors; eight internal reports excluded, required clean test fixture retained. Pushed release branch at 821efc94. |
 | F32 | Sale originally without delivery allows later driver, customer fee and actual cost. | Deployed c475e637 / sales | Full backend 276 suites; all frontend 306 files covered; independent money/migration review and browser actual retry/driver/totals/Records passed. |
-| F33 | Preserve original basket, payments, driver and actor for future sales. | Certified, release pending / media | Four writers, migration 0134, backup and immutable Records independently pass; original basket/payment remain unchanged after later edits in browser. Backend 278/278 pass. |
+| F33 | Preserve original basket, payments, driver and actor for future sales. | Deployed 02eecbe3; live follow-through active | Four writers, migration 0134, backup and immutable Records independently pass; original basket/payment remain unchanged after later edits in browser. Backend 278/278 pass. |
 | F34 | Sales list/detail Records SQL failed in real D1. | Deployed 821efc94 / sales | Frozen actual Worker list/detail now 200; count and compound ordering repaired. |
 | F35 | Fast Stock minimize restored wrong host and consumed the chip. | Deployed 821efc94 / media | Exact user5 frozen browser restore passed; preserves draft and consumes only after modal mounts. |
-| F36 | Sales read retry/deadline/cache cancellation and visible manual Retry after failure. | Certified, release pending / media, responsive | Frozen 5ec39289 browser: one request aborted at 20s, visible Retry, one manual retry succeeds; late responses never overwrite data or navigation. |
-| F37 | Duplicate preview times out on large catalogs because it queries stock/batches/cost per group. | Certified, release pending / identity | Independent real route 2,000 groups uses 43 reads instead of roughly 6,000; merge rules, prices and blockers preserved. |
-| F38 | Immediately recording payment after changing Completed to Credit reports a false other-device conflict. | Integrated, browser review active / sales | 9d707f1d carries exact committed status version into payment review; real concurrent-write protection and typed tender values retained. |
+| F36 | Sales read retry/deadline/cache cancellation and visible manual Retry after failure. | Deployed 02eecbe3; live follow-through active | Frozen 5ec39289 browser: one request aborted at 20s, visible Retry, one manual retry succeeds; late responses never overwrite data or navigation. |
+| F37 | Duplicate preview times out on large catalogs because it queries stock/batches/cost per group. | Deployed 02eecbe3; live follow-through active | Independent real route 2,000 groups uses 43 reads instead of roughly 6,000; merge rules, prices and blockers preserved. |
+| F38 | Immediately recording payment after changing Completed to Credit reports a false other-device conflict. | Deployed 02eecbe3; live follow-through active | 9d707f1d carries exact committed status version into payment review; real concurrent-write protection and typed tender values retained. |
 
 ## Public portal and legal requests
 
@@ -101,12 +103,10 @@ Every shipped row must eventually record its actual deployment version.
 
 ## Release and follow-through
 
-1. Production is c475e637 with delivery addition; both earlier functional releases are live.
-2. Finish F38 browser review and final frontend certification, then release F33/F36/F37/F38 as individual fix commits.
-3. Execute proven historical Shop metadata correction with service-actor audit, fresh full hashes and one atomic guarded binding batch before migration 0134.
-4. Apply migration 0134 with preservation checks and deploy the certified candidate.
-5. Run requested duplicate merge through the signed-in app, preserving undo IDs.
-6. Continue deferred UI and resolve business/rights facts and Telegram rotation.
+1. Verified application release 02eecbe3 is deployed at 100%; migration 0134 preservation checks pass.
+2. Check live Sales and duplicate preview, then perform requested supported duplicate merge with audit/undo.
+3. Historical correction remains unapplied after remote batch failures. Re-census and re-pin the 65-column schema before a reviewed bounded repair; never reuse the obsolete 64-column bundle.
+4. Continue deferred UI and resolve business/rights facts and Telegram rotation.
 
 Detailed evidence: [takeover ledger](2026-09-07-codex-takeover.md), individual Git
 commits, and private local `outputs/takeover-20260907/` reports. Local checks do not

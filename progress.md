@@ -1,3 +1,9 @@
+> **Third functional release LIVE September 7, 13:14:39 UTC:** 02eecbe3833b,
+> Worker c3a21a40-544b-4678-bacd-bc50441df8a1 at 100%. F33/F36/F37/F38 shipped.
+> Migration 0134 preserved all 15,106 Sales rows and prior schema objects.
+> Live smoke/duplicate merge follow. Historical correction has not committed;
+> both failed attempts left all 4,333 target rows unchanged with zero audit rows.
+
 > **Delivery addition deployed September7 11:10:18 UTC:** c475e637d197,
 > Worker d5aeeb82-cb0d-4047-8abf-8e96ba17f602 at100%. Migration0133 preserved
 > all prior amendments. Live Sales/Records verified after network recovery.
