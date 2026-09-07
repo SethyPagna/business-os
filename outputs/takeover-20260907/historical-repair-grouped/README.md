@@ -6,7 +6,7 @@ The approved transaction model has 44 independently atomic data groups:
 
 - 43 fee groups contain at most 99 rows. Each group executes one full-row guard, immutable audit inserts, and one exact-ID update in one `D1Database.batch()`.
 - One related group contains all 22 Sales headers and 56 sale items. Its two full-row guards, immutable audit, Sales update, and sale-item update execute in one `D1Database.batch()`.
-- Completion uses all 45 exact post-state guards and one immutable completion audit in a final batch.
+- Completion uses all 45 exact post-state guards, the exact plan-start and per-group apply audit payloads, absence of recovery audits, and one immutable completion audit in a final batch.
 
 The first fee group also records the immutable plan-start audit. Every group audit stores the overall manifest hash, the group hash, exact pre/post full-row hashes, fixed maintenance attribution, and verified Cloudflare token identity. Audit records are append-only within this workflow.
 
@@ -27,16 +27,16 @@ The builder requires two reads for every table and rejects any difference. Its o
 
 Before each group, the operator reads only that group and classifies it:
 
-- no apply/recovery audit and exact pre-state: pending;
-- exactly one apply audit and exact post-state: applied;
-- exactly one apply and recovery audit and exact pre-state: recovered;
+- no apply/recovery audit, no terminal completion, and exact pre-state: pending;
+- exactly one expected apply audit payload and exact post-state: applied;
+- exactly one expected apply and recovery audit payload and exact pre-state: recovered;
 - any other combination: inconsistent and blocked.
 
 If the binding response is ambiguous, the operator reads that exact group again. A persisted audit plus exact post-state is accepted as committed, but the invocation pauses before the next group. Exact pre-state with no audit also stops and requires a new explicit operator invocation. Every other outcome requires manual investigation. It never retries or advances after ambiguity within the same invocation.
 
 ## Recovery
 
-Recovery is explicit per group and additionally requires `--confirm-recovery`. The recovery batch requires the exact post-state and one apply audit, appends a recovery audit, and restores only the reviewed branch fields. It does not delete the original audit. The related Sales and sale-item group recovers atomically.
+Recovery is explicit per group and additionally requires `--confirm-recovery`. The recovery batch requires the exact post-state and exactly one apply audit with the reviewed payload, appends a recovery audit, and restores only the reviewed branch fields. It does not delete the original audit. The related Sales and sale-item group recovers atomically.
 
 Time Travel remains the database-wide disaster-recovery mechanism. Per-group logical recovery is preferable for a verified partial execution because it avoids reverting unrelated business writes.
 
