@@ -77,13 +77,15 @@ const batchCode = loadReal('lib/batchCode.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding })
 const permissions = loadReal('lib/permissions.ts')
+const branchRolesKernel = loadReal('lib/branchRoles.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true }) }
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const returnsRoute = loadReal('routes/returns.ts', {
-  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/branchRoles': branchRolesKernel,
+  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
   '../lib/actorSnapshot': actorSnapshotKernel,
   // N21: the display-address kernel routes/returns.ts snapshots through, REAL
   // (it has no imports of its own; a stub would leave it undefined).
