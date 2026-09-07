@@ -384,13 +384,16 @@ export default function InventoryStockModals({
                     ? `${t('adjust_set') || 'Set'} ${t('stock') || 'Stock'} (${t('total') || 'Total'}) *`
                     : `${t('quantity') || 'Quantity'} *`}
                 </label>
+                {/* A set may be typed down to 0 (an emptied branch); an add or a
+                    remove of 0 moves nothing, so the floor follows the type --
+                    the same split utils/stockReceiptFields.ts enforces on submit. */}
                 <input
                   id="inventory-adjust-quantity"
                   name="inventory_adjust_quantity"
                   className="input text-sm"
                   type="number"
                   step="any"
-                  min="0"
+                  min={adjustForm.type === 'set' ? 0 : 1}
                   value={adjustForm.quantity}
                   onChange={e => setAdjustForm(f=>({...f, quantity:e.target.value}))} />
                 {adjustForm.type === 'set' && setDifference != null ? (
@@ -401,6 +404,14 @@ export default function InventoryStockModals({
                         vanished belongs -- as a hint, not a paragraph. */}
                     {isSetDown ? (
                       <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_down_hint') || 'This set lowers the quantity, so it takes stock out: it has no supplier and no cost. Choose the batch to take it from, otherwise the oldest lots are drained first.'} />
+                    ) : null}
+                    {/* N14-D: the mirror image -- a set that RAISES the figure is a
+                        receipt (routes/inventory.ts converts it into an add of the
+                        difference), which is why the supplier and cost fields appear
+                        below. Same isStockIn predicate those fields render on, so
+                        the hint can never show for a submission that owes neither. */}
+                    {isStockIn ? (
+                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_up_hint') || 'This set raises the quantity, so it puts stock in: name the supplier it came from and the unit cost you paid, exactly as an add does.'} />
                     ) : null}
                   </div>
                 ) : null}
@@ -568,8 +579,7 @@ export default function InventoryStockModals({
                 </div>
               ) : null}
               {/* D5a: supplier attribution for the lot this receipt creates or
-                  fills -- the same picker, same rules, as ReceiveBatchModal
-                  and BranchStockAdjuster.
+                  fills -- the same picker, same rules, as ReceiveBatchModal.
                   N14-D repair: shown on `isStockIn`, which is EXACTLY the
                   predicate the receipt gate applies (here and in
                   lib/stockReceiptGate.ts). It used to be narrowed to "this

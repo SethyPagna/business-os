@@ -51,13 +51,20 @@ export default function ReviewLogsPage() {
   const canAuditAll = getPermissionTier('audit_log') === 'full'
   const [section, setSection] = useHubSection<ReviewLogsSection>('review', () => initialSection(canReview, canAudit), getHubDestinations('review', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
 
-  const chips: Array<{ key: ReviewLogsSection; label: string; icon: typeof ClipboardCheck; activeColor: string }> = [
-    ...(canReview ? [{ key: 'review' as const, label: t('review_queue') || 'Review queue', icon: ClipboardCheck, activeColor: 'text-blue-600' }] : []),
+  // No per-chip active hue, and no forked desktop row. Review used to
+  // paint its open chip blue / teal / rose while every other hub picked its
+  // own hues, so "this is the section you are in" was announced in a
+  // different colour on every page -- and the fork meant md+ Review never
+  // reached the restyled shared row at all. The shared row states it once,
+  // in the chrome's accent, and wraps rather than scrolling sideways, so the
+  // long "Deleted sales (old system)" label needs no row of its own.
+  const chips: Array<{ key: ReviewLogsSection; label: string; icon: typeof ClipboardCheck }> = [
+    ...(canReview ? [{ key: 'review' as const, label: t('review_queue') || 'Review queue', icon: ClipboardCheck }] : []),
     ...(canAudit ? [
-      { key: 'audit' as const, label: t('audit_log') || 'Audit Log', icon: ScrollText, activeColor: 'text-teal-600' },
+      { key: 'audit' as const, label: t('audit_log') || 'Audit Log', icon: ScrollText },
     ] : []),
     ...(canAuditAll ? [
-      { key: 'deleted' as const, label: t('legacy_deleted_sales') || 'Deleted sales (old system)', icon: Trash2, activeColor: 'text-rose-600' },
+      { key: 'deleted' as const, label: t('legacy_deleted_sales') || 'Deleted sales (old system)', icon: Trash2 },
     ] : []),
   ]
 
@@ -67,24 +74,9 @@ export default function ReviewLogsPage() {
     <div className="flex min-h-0 flex-1 flex-col space-y-3">
       <HubSectionNav
         pageId="review"
-        sections={chips.map((chip) => ({ id: chip.key, label: chip.label, icon: chip.icon, tone: chip.activeColor }))}
+        sections={chips.map((chip) => ({ id: chip.key, label: chip.label, icon: chip.icon }))}
         active={section}
         onChange={(id) => setSection(id as ReviewLogsSection)}
-        desktopNavigation={chips.length > 1 ? (
-          <div className="min-w-0 shrink-0 px-4 pt-4">
-            <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800">
-              {chips.map((chip) => {
-                const Icon = chip.icon
-                return (
-                  <button key={chip.key} type="button" onClick={() => setSection(chip.key)}
-                    className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium ${section === chip.key ? `bg-white dark:bg-gray-900 shadow ${chip.activeColor}` : 'text-gray-500'}`}>
-                    <Icon className="w-4 h-4" /> {chip.label}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        ) : null}
       >
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
         {section === 'deleted' && canAuditAll ? (
