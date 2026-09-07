@@ -49,13 +49,19 @@
 // inactive, so they need naming before anything can be proposed about them.
 //
 // SAFETY, in the order it matters:
-//   * default mode LISTS. --apply is refused unless it is pointed at a LOCAL
-//     copy, and there is no --remote flag, no D1 binding, no wrangler, no
-//     network anywhere in this file.
-//   * pre/post assertions bracket every apply: products, sale_items linked,
-//     movements linked, batches -- counted before, counted after, and a total
-//     that moved by anything other than the planned amount aborts the
-//     transaction.
+//   * THIS SCRIPT NEVER WRITES. It has no apply mode at all -- not to
+//     production, not to a local copy. It had a flag called --apply that
+//     printed a refusal and changed nothing, which is worse than having no
+//     flag: a CLI that advertises an apply it does not perform invites
+//     somebody to believe a run applied something. The flag is now
+//     --rehearse, it does what its name says (count, plan, count again, check
+//     the counts did not move) and --apply is rejected loudly like --remote.
+//   * the file it is handed is opened READONLY in every mode, so even a
+//     mistaken UPDATE typed into this file could not reach it.
+//   * pre/post assertions bracket the rehearsal: products, sale_items linked,
+//     movements linked, batches -- counted before, counted after, and any
+//     movement at all is an assertion failure, because a rehearsal that moved
+//     something has already broken its own promise.
 //   * the rules come from the SHIPPED source (identityBarcodeKey,
 //     normalizeProductGroupName, resolveMergedCostDetail from
 //     cloudflare/src/lib/productDetailRule.ts; MERGE_REPARENT_TABLES from
@@ -69,12 +75,13 @@
 //   node ops/scripts/migration/plan-group-child-identity.mjs --db <local-copy.sqlite>
 //   node ops/scripts/migration/plan-group-child-identity.mjs --db <local-copy.sqlite> --json plan.json
 //   node ops/scripts/migration/plan-group-child-identity.mjs --db <local-copy.sqlite> --class detail_only
-//   node ops/scripts/migration/plan-group-child-identity.mjs --db <LOCAL-COPY.sqlite> --apply   # local rehearsal only
+//   node ops/scripts/migration/plan-group-child-identity.mjs --db <local-copy.sqlite> --rehearse
 //
 // RECOVERY: see RECOVERY_STEPS at the bottom. In short -- take a fresh copy
-// before --apply; --apply runs inside one transaction and rolls back on any
-// failed assertion; and nothing here can reach production, because nothing here
-// can reach anything but the local file it was handed.
+// before any run that is meant to lead to a change; --rehearse writes nothing
+// and says so with counts on both sides; and nothing here can reach
+// production, because nothing here can reach anything but the local file it
+// was handed, and it opens that readonly.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -431,10 +438,10 @@ export function assertCounts(expected, actual) {
 }
 
 export const RECOVERY_STEPS = Object.freeze([
-  'Take a fresh copy of the database file BEFORE running --apply. The copy is the recovery plan; everything below is a convenience on top of it.',
-  '--apply runs inside a single transaction and rolls it back if any post-assertion fails, so a failed run leaves the file exactly as it was found.',
-  'This script cannot reach production. It has no D1 binding, no wrangler import, no network call and no --remote flag; it opens the one local file it is handed, and opens it readonly unless --apply was passed.',
-  'Applying any of this to production is an OWNER decision and runs through the app\'s own reviewed merge endpoints (POST /api/products/possible-duplicates/merge), which record an undoable action per pair -- never from this script.',
+  'Take a fresh copy of the database file BEFORE any run that is meant to lead to a change. The copy is the recovery plan; everything below is a convenience on top of it.',
+  'There is nothing to roll back: this script has NO apply mode. --rehearse counts the four totals, builds the plan and counts them again, and any movement at all is an assertion failure -- a rehearsal that wrote something has already broken its promise. The merge that must actually run is the app\'s own carry-all kernel.',
+  'This script cannot reach production, and cannot write to the local copy either. It has no D1 binding, no wrangler import, no network call and no --remote flag; it opens the one local file it is handed, and opens it readonly in every mode.',
+  'Applying any of this to production is an OWNER decision and runs through the app\'s own reviewed merge endpoints (POST /api/products/possible-duplicates/merge), which record an undoable action per pair -- never from this script, which has no apply mode at all.',
   'A merge is refused while either product still belongs to a stock-in session that can be undone. Settle or undo that session first rather than working around it.',
   'The residue list (inactive rows with live links, active rows whose barcode was cleared) is REPORTED ONLY. Nothing in this script touches those rows in any mode.',
 ])
@@ -443,13 +450,20 @@ export const RECOVERY_STEPS = Object.freeze([
 // CLI
 // --------------------------------------------------------------------------
 function parseArgs(argv) {
-  const args = { db: '', json: '', apply: false, klass: '', limit: 40 }
+  const args = { db: '', json: '', rehearse: false, klass: '', limit: 40 }
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--db') args.db = argv[i + 1] || ''
     if (argv[i] === '--json') args.json = argv[i + 1] || ''
     if (argv[i] === '--class') args.klass = argv[i + 1] || ''
     if (argv[i] === '--limit') args.limit = Number(argv[i + 1]) || 40
-    if (argv[i] === '--apply') args.apply = true
+    if (argv[i] === '--rehearse') args.rehearse = true
+    if (argv[i] === '--apply') {
+      // Rejected, not ignored, and not quietly aliased to --rehearse. This
+      // flag existed and printed a refusal, so an operator could run it,
+      // see "PRE/POST assertions OK" and reasonably conclude something was
+      // applied. There is no apply here to alias it to.
+      throw new Error('--apply is not a flag this script has. It never writes: use --rehearse for the counted dry run, and the app\'s own merge endpoint to actually merge.')
+    }
     if (argv[i] === '--remote') {
       throw new Error('--remote is not a flag this script has, and never will be. It reads a LOCAL COPY only.')
     }
@@ -525,7 +539,7 @@ export function formatPlan(plan, klass = '', limit = 40) {
 function main() {
   const args = parseArgs(process.argv.slice(2))
   if (!args.db) {
-    console.error('usage: node ops/scripts/migration/plan-group-child-identity.mjs --db <local-copy.sqlite> [--json out.json] [--class leading_zero|genuine_barcode|detail_only] [--limit N] [--apply]')
+    console.error('usage: node ops/scripts/migration/plan-group-child-identity.mjs --db <local-copy.sqlite> [--json out.json] [--class leading_zero|genuine_barcode|detail_only] [--limit N] [--rehearse]')
     process.exitCode = 2
     return
   }
@@ -535,13 +549,14 @@ function main() {
     return
   }
   const Database = cloudflareRequire('better-sqlite3')
-  // readonly is the GUARANTEE, not the intention: in list mode even a mistaken
-  // UPDATE typed into this file could not reach the file it was pointed at.
-  const db = new Database(args.db, { readonly: !args.apply, fileMustExist: true })
+  // readonly is the GUARANTEE, not the intention, and it is unconditional:
+  // there is no mode of this script that writes, so even a mistaken UPDATE
+  // typed into this file could not reach the copy it was pointed at.
+  const db = new Database(args.db, { readonly: true, fileMustExist: true })
   const query = (sql, params) => db.prepare(sql).all(params || {})
   const plan = planGroupChildIdentity(query, loadProductDetailRule(), loadReparentTables())
 
-  if (!args.apply) {
+  if (!args.rehearse) {
     db.close()
     console.log(formatPlan(plan, args.klass, args.limit))
     if (args.json) {
@@ -551,20 +566,23 @@ function main() {
     return
   }
 
-  // --apply: a LOCAL rehearsal, bracketed by the pre/post assertions.
+  // --rehearse: the counted dry run. It says exactly what it is, which is the
+  // whole reason the flag was renamed -- it counts the four totals, builds the
+  // plan against them, counts again, and asserts NOTHING moved. It is the
+  // instrument that proves this script writes nothing, not a merge with the
+  // merging left out.
   const before = readAssertionCounts(query)
   console.log('PRE :', JSON.stringify(before))
-  console.error('--apply is a LOCAL REHEARSAL. It refuses to run without an explicit')
-  console.error('per-pair merge implementation, which this script deliberately does not')
-  console.error('carry: the merge that must run is the app\'s own carry-all kernel')
-  console.error('(POST /api/products/possible-duplicates/merge), which records an undoable')
-  console.error('action per pair. Re-implementing it here would be a second copy of the')
-  console.error('one rule this whole plan exists to respect. Use the plan to drive that')
-  console.error('endpoint against a local Worker, then re-run this script to check POST.')
+  console.log(`plan: ${plan.runnablePairCount} pairs would merge, moving ${plan.movedRowTotal} linked rows`)
+  console.log('This script does not merge them. The merge that must run is the app\'s own')
+  console.log('carry-all kernel (POST /api/products/possible-duplicates/merge), which records')
+  console.log('an undoable action per pair; re-implementing it here would be a second copy of')
+  console.log('the one rule this plan exists to respect. Drive that endpoint from the plan')
+  console.log('against a LOCAL Worker, then re-run this rehearsal to check the deltas.')
   const after = readAssertionCounts(query)
   const problems = assertCounts(expectedCountsAfter(before, 0), after)
   console.log('POST:', JSON.stringify(after))
-  console.log(problems.length ? `ASSERTION FAILURES:\n  ${problems.join('\n  ')}` : 'assertions OK -- nothing was written')
+  console.log(problems.length ? `ASSERTION FAILURES:\n  ${problems.join('\n  ')}` : 'assertions OK -- PRE == POST, nothing was written')
   db.close()
   process.exitCode = problems.length ? 1 : 0
 }

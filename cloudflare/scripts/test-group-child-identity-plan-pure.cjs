@@ -110,7 +110,7 @@ async function main() {
     assert.equal(typeof mod.planOrphanedLinkResidue, 'function')
     assert.ok(Array.isArray(mod.RECOVERY_STEPS) && mod.RECOVERY_STEPS.length >= 4)
     assert.ok(mod.RECOVERY_STEPS.some((s) => /copy|backup/i.test(s)), 'recovery must say a fresh copy is taken first')
-    assert.ok(mod.RECOVERY_STEPS.some((s) => /roll|transaction/i.test(s)), 'and that a failed apply rolls back')
+    assert.ok(mod.RECOVERY_STEPS.some((s) => /nothing to roll back/i.test(s)), 'and that there is nothing to roll back, because there is no apply mode')
     assert.ok(mod.RECOVERY_STEPS.some((s) => /production|owner/i.test(s)), 'and that production is an owner decision')
   })
 
@@ -278,7 +278,7 @@ async function main() {
       assert.doesNotMatch(source, probe.re, `the sweep must not contain ${probe.name}`)
     }
     assert.match(source, /--remote is not a flag this script has/, 'a --remote argument must be rejected, not ignored')
-    assert.match(source, /readonly: !args\.apply/, 'list mode must open the file readonly')
+    assert.match(source, /readonly: true, fileMustExist: true/, 'the local copy is opened readonly in EVERY mode, not only in list mode')
     // The only modules it may pull in, named rather than implied -- so a future
     // edit that reaches for a client library is a red test, not a discovery.
     const required = [...source.matchAll(/cloudflareRequire\('([^']+)'\)/g)].map(([, name]) => name)
@@ -286,6 +286,55 @@ async function main() {
       [...new Set(required)].sort(), ['better-sqlite3', 'typescript'],
       'the sweep may load only the sqlite driver and the transpiler it reads the shipped rule with',
     )
+  })
+
+  // The CLI must not advertise a mode it does not have. It used to carry an
+  // --apply flag whose entire body was a printed refusal: PRE == POST, nothing
+  // written, and the last line an operator saw was "assertions OK". A flag
+  // named apply that applies nothing is worse than no flag, because somebody
+  // will run it and believe the run applied something. The choice made here is
+  // the honest one -- the mode is named --rehearse, and --apply is rejected as
+  // loudly as --remote rather than aliased to it.
+  //
+  // Probed as a function over two inputs: the shipped source and the source as
+  // it stood before this fix, so the check is discriminating rather than a
+  // grep that would have matched either way.
+  const advertisesAnApplyItDoesNotDo = (text) => {
+    const parseAt = text.indexOf('function parseArgs')
+    if (parseAt < 0) return true
+    const parse = text.slice(parseAt, text.indexOf('\n}', parseAt))
+    // An --apply that sets a flag (rather than throwing) is the dishonest shape.
+    return /'--apply'\)\s*args\.\w+\s*=\s*true/.test(parse)
+  }
+  const PRE_FIX_PARSEARGS = [
+    'function parseArgs(argv) {',
+    "  const args = { db: '', json: '', apply: false, klass: '', limit: 40 }",
+    '  for (let i = 0; i < argv.length; i += 1) {',
+    "    if (argv[i] === '--apply') args.apply = true",
+    '  }',
+  ].join('\n')
+
+  check('POSITIVE CONTROL: the pre-fix CLI does advertise an apply it never performs', () => {
+    assert.equal(advertisesAnApplyItDoesNotDo(PRE_FIX_PARSEARGS), true,
+      'the probe must fire on the shape it exists to catch, or it proves nothing about the fixed file')
+  })
+
+  check('the CLI names its dry run --rehearse and rejects --apply outright', () => {
+    const source = require('node:fs').readFileSync(SCRIPT, 'utf8')
+    assert.equal(advertisesAnApplyItDoesNotDo(source), false,
+      '--apply must not set a mode flag: this script has no apply')
+    assert.match(source, /--apply is not a flag this script has/, '--apply is rejected with a sentence that says where to go instead')
+    assert.match(source, /if \(argv\[i\] === '--rehearse'\) args\.rehearse = true/, 'the counted dry run is named --rehearse')
+    assert.match(source, /if \(!args\.rehearse\) \{/, 'and it is the flag main() branches on')
+    // And there is no write path at all, in any mode: the one instrument that
+    // makes "this script never writes" checkable rather than asserted.
+    assert.doesNotMatch(source, /db\.prepare\([^)]*\)\.run\(|\.exec\(|BEGIN TRANSACTION|\bUPDATE \w+ SET\b|\bINSERT INTO \b/,
+      'the sweep must contain no statement that could write to the copy it opened')
+    // The recovery note has to describe the script that shipped, not the one
+    // that was planned: a recovery step promising a rollback of an apply that
+    // does not exist is a lie the next operator would act on.
+    assert.ok(!mod.RECOVERY_STEPS.some((s) => /--apply/.test(s)), 'no recovery step may reference an --apply mode')
+    assert.ok(mod.RECOVERY_STEPS.some((s) => /NO apply mode/.test(s)), 'the recovery steps must say there is no apply mode')
   })
 
   console.log(failed ? `test-group-child-identity-plan-pure: ${failed} FAILED` : 'test-group-child-identity-plan-pure: all checks passed')
