@@ -2,18 +2,10 @@
 // in all four of its layouts, and the storefront wrapper in
 // catalog/catalogPagination.tsx).
 //
-// It was inline in the component, which is why the storefront could grow a
-// SECOND, divergent rule for the same question: CatalogProductsSection gated
-// both of its pager mounts on `totalProducts > effectivePageSize`, so a
-// single-page result rendered no pager -- and the per-page chooser lives
-// INSIDE the pager pill, with the storefront's page size held in component
-// state rather than in the URL. A shopper on 100/page who narrowed the list
-// to 12 products therefore lost the only control that could put it back, with
-// no way to reach it short of reloading the site.
-//
-// Whether a pager is worth rendering and whether its arrows are dead are two
+// Whether there is anything to page and whether the arrows are dead are two
 // different questions, and only the second one is about page COUNT. This
-// module answers both, once.
+// module answers both, once. Whether a given pager should RENDER is a third
+// question, and it belongs to the layout, not here.
 
 export type PagerNumericInput = number | string | null | undefined
 
@@ -32,13 +24,21 @@ export interface PagerState {
   end: number
   backDisabled: boolean
   nextDisabled: boolean
-  /** Whether the pager should render at all.
+  /** Whether there is anything to page at all.
    *
    * Deliberately "there is something to page", NOT "there is more than one
-   * page": the pill also carries the per-page chooser, so hiding it on a
-   * single page takes away the control that changes how many items a page
-   * holds. On one page both arrows are simply disabled, which is what a pager
-   * at the end of a list already looks like. */
+   * page", because the ADMIN pill (`compact rangeAsPageSize`) carries the
+   * per-page chooser inside itself: hiding it on a single page takes away the
+   * one control that changes how many rows a page holds. There, one page just
+   * means two dead arrows, which is what the end of any list looks like.
+   *
+   * That is NOT the same question as "should this pager render", and the two
+   * were the same fact here until Sep 6 2026. Rendering is now decided
+   * per-layout, by each layout, in PaginationControls:
+   *
+   *   - the admin layouts render on a single page, for the reason above;
+   *   - the storefront `centered` layout returns null on a single page because
+   *     its navigation row contains no action when both arrows are disabled. */
   visible: boolean
 }
 
