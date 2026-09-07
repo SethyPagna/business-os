@@ -391,7 +391,7 @@ type ProductApi = {
   getProductsByIds: (ids: number[], options?: Record<string, unknown>) => Promise<ProductRecord[]>
   getUnits: () => Promise<LookupRecord[]>
   mergeDuplicates: (options?: MergeDuplicateRequestOptions) => Promise<ProductApiResponse | undefined>
-  previewMergeDuplicates: () => Promise<ProductApiResponse | undefined>
+  previewMergeDuplicates: (options?: { signal?: AbortSignal }) => Promise<ProductApiResponse | undefined>
   previewZeroQuantityCandidates: (thresholdDays?: number) => Promise<ProductApiResponse | undefined>
   deleteZeroQuantityProducts: (ids: number[]) => Promise<ProductApiResponse | undefined>
   previewWireImages: () => Promise<ProductApiResponse | undefined>
@@ -518,7 +518,7 @@ const productApi: ProductApi = {
     const merge = module.mergeDuplicateProducts as (request?: MergeDuplicateRequestOptions) => Promise<unknown>
     return toProductApiResponse(await merge(options))
   },
-  previewMergeDuplicates: async () => toProductApiResponse(await (await loadProductWriteModule()).previewMergeDuplicateProducts()),
+  previewMergeDuplicates: async (options) => toProductApiResponse(await (await loadProductWriteModule()).previewMergeDuplicateProducts(options)),
   previewZeroQuantityCandidates: async (thresholdDays) => toProductApiResponse(await (await loadProductWriteModule()).previewZeroQuantityCandidates(thresholdDays)),
   deleteZeroQuantityProducts: async (ids) => toProductApiResponse(await (await loadProductWriteModule()).deleteZeroQuantityProducts(ids)),
   previewWireImages: async () => toProductApiResponse(await (await loadProductWriteModule()).previewWireProductImages()),
@@ -1889,8 +1889,8 @@ function ProductsFullEditor() {
   // other product mutation on this page going through `productApi` so
   // there's one place (the ProductApi type above) that has to know the
   // transport layer exists.
-  const loadMergeDuplicatesPreview = async () => {
-    const result = await productApi.previewMergeDuplicates() as {
+  const loadMergeDuplicatesPreview = async (signal: AbortSignal) => {
+    const result = await productApi.previewMergeDuplicates({ signal }) as {
       success?: boolean
       error?: string
       groupCount?: number
