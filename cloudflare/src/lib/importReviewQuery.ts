@@ -74,8 +74,23 @@ export function buildImportReviewOrder(sort: unknown): string {
  */
 export function buildUnresolvedContactReviewWhere(jobId: string, decisionsJson: string): ImportReviewWhere {
   const base = buildImportReviewWhere({ jobId, warningKinds: CONTACT_REVIEW_WARNING_KINDS })
+  const decisionPath = `'$.' || '"' || row_number || '"'`
+  const actionPath = `'$.' || '"' || row_number || '".action'`
+  const targetPath = `'$.' || '"' || row_number || '".target_existing_id'`
   return {
-    sql: `${base.sql} AND json_type(@decisions, '$."' || row_number || '"') IS NULL`,
+    sql: `${base.sql} AND (
+      json_type(@decisions, ${decisionPath}) IS NULL
+      OR COALESCE(json_extract(@decisions, ${actionPath}), '') NOT IN ('apply', 'skip', 'force_create')
+      OR (
+        COALESCE(json_extract(result_json, '$.contactMatchTargetInvalid'), 0) = 1
+        AND json_extract(@decisions, ${actionPath}) = 'apply'
+        AND (
+          COALESCE(json_type(@decisions, ${targetPath}), '') != 'integer'
+          OR json_extract(@decisions, ${targetPath}) <= 0
+          OR json_extract(@decisions, ${targetPath}) > 9007199254740991
+        )
+      )
+    )`,
     params: { ...base.params, decisions: decisionsJson || '{}' },
   }
 }

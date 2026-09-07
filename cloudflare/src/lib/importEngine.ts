@@ -2193,8 +2193,11 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     const compatiblePhoneMatches = phoneMatches.filter((candidate) => normalizeContactName(candidate.name) === normalizeContactName(name))
     const phoneMatch = compatiblePhoneMatches.length === 1 ? compatiblePhoneMatches[0] : null
     const rowDecision = decisions[String(row._rowNumber)]
-    const selectedTargetId = Number(rowDecision?.target_existing_id)
-    const hasSelectedTarget = Number.isSafeInteger(selectedTargetId) && selectedTargetId > 0
+    const selectedTargetValue = rowDecision?.target_existing_id
+    const hasSelectedTarget = typeof selectedTargetValue === 'number'
+      && Number.isSafeInteger(selectedTargetValue)
+      && selectedTargetValue > 0
+    const selectedTargetId = hasSelectedTarget ? selectedTargetValue : NaN
     const rawNameMatches = !membershipMatch && !phoneMatch
       ? [...(byName.get(lower(name)) || [])].sort((a, b) => Number(a.id) - Number(b.id))
       : []
