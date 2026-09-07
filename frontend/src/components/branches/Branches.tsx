@@ -608,7 +608,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const channel = syncChannel.channel
-    if (channel === 'branches' || channel === 'products' || channel === 'inventory' || channel === 'users') void load(true)
+    if (channel === 'branches' || channel === 'products' || channel === 'inventory' || channel === 'users' || channel === 'settings') void load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {
