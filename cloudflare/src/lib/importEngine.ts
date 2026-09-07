@@ -226,6 +226,17 @@ export type ImportRowResult = {
   // before writing, then verifies this exact value in the same D1 batch as
   // the UPDATE so a concurrent manual edit cannot be overwritten.
   expectedUpdatedAt?: string | null
+  // Contacts-only review payload for an exact-name collision that has more
+  // than one current candidate. IDs are sorted and carried explicitly so a
+  // reviewer chooses the intended record; classification never inherits the
+  // database driver's unordered last row.
+  contactMatchCandidates?: Array<{
+    id: number
+    name: string | null
+    phone: string | null
+    membership_number?: string | null
+  }>
+  contactMatchTargetInvalid?: boolean
 }
 
 // Shared by the synchronous approval/retry routes and every asynchronous
@@ -432,7 +443,15 @@ export function summarizeImportWarnings(rows: Array<{ rowNumber: number; warning
 // match (those identify a specific real account; a name match is only ever
 // this app's best guess, and the reviewer may know two different people
 // really do share a name).
-export type RowDecision = { action?: 'apply' | 'skip' | 'force_create'; field_overrides?: Record<string, unknown> }
+export type RowDecision = {
+  action?: 'apply' | 'skip' | 'force_create'
+  field_overrides?: Record<string, unknown>
+  // Contacts only: the exact existing record explicitly selected for a
+  // name-match merge. Revalidated against the live candidate set on every
+  // analyze/apply classification, so a later rename/delete cannot redirect
+  // the import to a different same-name row.
+  target_existing_id?: number
+}
 
 // Keep the materialized/chunked path at least as large as the stock-action
 // route's documented direct-import allowance below. The migration pack's
@@ -2049,10 +2068,10 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   const contactMode = table === 'delivery_contacts' ? 'area' : 'address'
   // Full rows (not just id/name/phone) so a matched row can be merged
   // field-by-field against what's actually stored, per getContactMergePolicy.
-  const existing = await db.prepare(`SELECT * FROM "${table}"`).all<Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
+  const existing = await db.prepare(`SELECT * FROM "${table}" ORDER BY id ASC`).all<Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
   type ExistingContact = Record<string, unknown> & { id: number; name: string | null; phone: string | null }
   const byPhone = new Map<string, ExistingContact[]>()
-  const byName = new Map<string, Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
+  const byName = new Map<string, ExistingContact[]>()
   // Customers only -- membership_number is the account's real identifier
   // (see the auto-generation block below), so a re-import that supplies
   // an existing membership_number should match that specific account even
@@ -2067,7 +2086,11 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       contacts.push(record)
       byPhone.set(phoneKey, contacts)
     }
-    if (str(record.name)) byName.set(lower(record.name), record)
+    if (str(record.name)) {
+      const contacts = byName.get(lower(record.name)) || []
+      contacts.push(record)
+      byName.set(lower(record.name), contacts)
+    }
     if (byMembership && str((record as { membership_number?: unknown }).membership_number)) {
       const membershipKey = lower(str((record as { membership_number?: unknown }).membership_number))
       const contacts = byMembership.get(membershipKey) || []
@@ -2167,18 +2190,31 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     const membershipMatches = table === 'customers' && byMembership && membershipRaw ? byMembership.get(lower(membershipRaw)) || [] : []
     const membershipMatch = membershipMatches.length === 1 ? membershipMatches[0] : null
     const phoneMatches = [...new Map(phoneKeys.flatMap((key) => byPhone.get(key) || []).map((candidate) => [Number(candidate.id), candidate])).values()]
-    const phoneMatch = phoneMatches.find((candidate) => normalizeContactName(candidate.name) === normalizeContactName(name)) || null
-    const rawNameMatch = !membershipMatch && !phoneMatch ? byName.get(lower(name)) || null : null
+    const compatiblePhoneMatches = phoneMatches.filter((candidate) => normalizeContactName(candidate.name) === normalizeContactName(name))
+    const phoneMatch = compatiblePhoneMatches.length === 1 ? compatiblePhoneMatches[0] : null
+    const rowDecision = decisions[String(row._rowNumber)]
+    const selectedTargetId = Number(rowDecision?.target_existing_id)
+    const hasSelectedTarget = Number.isSafeInteger(selectedTargetId) && selectedTargetId > 0
+    const rawNameMatches = !membershipMatch && !phoneMatch
+      ? [...(byName.get(lower(name)) || [])].sort((a, b) => Number(a.id) - Number(b.id))
+      : []
     // A name match is this app's best guess, not a real identifier the way
     // phone (suppliers/delivery contacts) or membership_number (customers)
     // is -- the reviewer can override it with a 'force_create' decision on
     // this row if two genuinely different people happen to share a name,
     // rather than this import silently merging them. Never overridable for
     // a membership/phone match, which identify one specific real account.
-    const forceCreate = decisions[String(row._rowNumber)]?.action === 'force_create'
-    const nameMatch = forceCreate ? null : rawNameMatch
+    const forceCreate = rowDecision?.action === 'force_create'
+    const selectedNameMatch = hasSelectedTarget
+      ? rawNameMatches.find((candidate) => Number(candidate.id) === selectedTargetId) || null
+      : null
+    const nameMatch = forceCreate
+      ? null
+      : hasSelectedTarget ? selectedNameMatch : rawNameMatches.length === 1 ? rawNameMatches[0] : null
     const match = membershipMatch || phoneMatch || nameMatch
-    const phoneConflictMatch = phoneMatches.find((candidate) => Number(candidate.id) !== Number(match?.id ?? NaN)) || null
+    const phoneConflictMatch = match
+      ? phoneMatches.find((candidate) => Number(candidate.id) !== Number(match.id)) || null
+      : phoneMatches.find((candidate) => normalizeContactName(candidate.name) !== normalizeContactName(name)) || null
     // membership_number is the strongest identifier for a customer (see
     // the match-priority comment above), so an explicit number on the row
     // always wins the match itself -- there's no way for this row to
@@ -2249,6 +2285,39 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     } else {
       data.area = contactState.primary.area || str(row.area) || null
       data.gender = normalizeContactGender(row.gender)
+    }
+    const reviewCandidates = rawNameMatches.length
+      ? rawNameMatches
+      : (membershipMatch || phoneMatch) ? [membershipMatch || phoneMatch] as ExistingContact[] : []
+    const contactMatchCandidates = reviewCandidates.map((candidate) => ({
+      id: Number(candidate.id),
+      name: str(candidate.name) || null,
+      phone: str(candidate.phone) || null,
+      ...(table === 'customers' ? { membership_number: str(candidate.membership_number) || null } : {}),
+    }))
+    const selectedStrongMatchDrift = hasSelectedTarget
+      && !forceCreate
+      && !!(membershipMatch || phoneMatch)
+      && Number((membershipMatch || phoneMatch)?.id) !== selectedTargetId
+    const selectedNameMatchDrift = hasSelectedTarget && !forceCreate && !membershipMatch && !phoneMatch && !selectedNameMatch
+    const ambiguousNameMatch = !forceCreate && !membershipMatch && !phoneMatch && rawNameMatches.length > 1 && !selectedNameMatch
+    if (selectedStrongMatchDrift || selectedNameMatchDrift || ambiguousNameMatch) {
+      const message = ambiguousNameMatch && !hasSelectedTarget
+        ? `"${name}" matches ${rawNameMatches.length} existing ${table === 'customers' ? 'customers' : table === 'suppliers' ? 'suppliers' : 'delivery contacts'}. Choose the exact record before importing; no match was guessed.`
+        : `The selected contact id ${selectedTargetId} is no longer a current match for "${name}". Review this row again; no contact was changed.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: phone || name,
+        existingId: null,
+        message,
+        warnings: [{ kind: 'name_match', message }],
+        changes: {},
+        data,
+        contactMatchCandidates,
+        contactMatchTargetInvalid: true,
+      })
+      continue
     }
     if (membershipMatches.length > 1) {
       const message = `Membership number "${membershipRaw}" resolves to ${membershipMatches.length} existing customers after trim/case normalization. This row was refused for review; no membership number was changed.`
@@ -2446,7 +2515,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     // was a same-name match/collision this row bypassed) -- kept as a
     // (non-serious) warning purely for the applied-results audit trail, not
     // to re-prompt review of something the reviewer just explicitly decided.
-    const forcedNote: ImportRowWarning[] = forceCreate && (rawNameMatch || pendingCreateByName.has(lower(name)))
+    const forcedNote: ImportRowWarning[] = forceCreate && (rawNameMatches.length > 0 || pendingCreateByName.has(lower(name)))
       ? [{ kind: 'other', message: `Created as a separate contact from "${name}" on file/record, per reviewer override.` }]
       : []
     const createWarnings = [...forcedNote]
@@ -5449,6 +5518,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     for (const result of results) {
       const decision = decisions[String(result.rowNumber)]
       if (decision?.action === 'skip') result.action = 'skip'
+    }
+    if (['customers', 'suppliers', 'delivery_contacts'].includes(job.type)) {
+      const unresolvedTarget = results.find((result) => result.action === 'error' && result.contactMatchTargetInvalid)
+      if (unresolvedTarget) {
+        throw new Error(`Contact import row ${unresolvedTarget.rowNumber} has an ambiguous or changed merge target. Review the row again before applying.`)
+      }
     }
     if (job.type === 'products' && !authority.allowProductImageWrites) {
       if (await productImportResultsChangeImages(db, results, job.policy_json)) {
