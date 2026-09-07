@@ -34,6 +34,7 @@ export type ContactDuplicateMatch = {
   membershipNumber: string | null
   matchedPhone: string | null
   severity: ContactDuplicateSeverity
+  version: string
 }
 
 export type ContactDuplicateCandidateRow = {
@@ -42,11 +43,23 @@ export type ContactDuplicateCandidateRow = {
   phone: string | null
   address: string | null
   membership_number?: string | null
+  phone_normalized?: string | null
+  updated_at?: string | null
 }
 
 export type ContactDuplicateTable = 'customers' | 'suppliers' | 'delivery_contacts'
 
-export type ContactDuplicateAllowedMatch = { id: number; name: string }
+export type ContactDuplicateCandidateVersion = { id: number; version: string }
+
+export type ContactDuplicateReview = {
+  candidateIds: number[]
+  candidateVersions: ContactDuplicateCandidateVersion[]
+  fingerprint: string
+}
+
+export type ContactDuplicateCreateSeparateDecision = ContactDuplicateReview & {
+  action: 'create_separate'
+}
 
 export type ContactDuplicateGuardStatement = { sql: string; params: Record<string, unknown> }
 
@@ -59,7 +72,80 @@ export type ContactDuplicateGuardStatement = { sql: string; params: Record<strin
 // candidate row type keeps membership_number optional, so non-customer
 // rows simply carry none.
 function candidateColumns(table: ContactDuplicateTable): string {
-  return table === 'customers' ? 'id, name, phone, address, membership_number' : 'id, name, phone, address'
+  return table === 'customers'
+    ? 'id, name, phone, address, membership_number, phone_normalized, updated_at'
+    : 'id, name, phone, address, updated_at'
+}
+
+function textHex(value: unknown): string {
+  return [...new TextEncoder().encode(String(value ?? ''))]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase()
+}
+
+function candidateVersion(row: ContactDuplicateCandidateRow, table: ContactDuplicateTable): string {
+  const values = [row.name, row.phone, row.address, row.updated_at]
+  if (table === 'customers') values.push(row.phone_normalized, row.membership_number)
+  return values.map(textHex).join('.')
+}
+
+export function buildContactDuplicateReview(matches: ContactDuplicateMatch[]): ContactDuplicateReview {
+  const candidateVersions = [...new Map(matches.map((match) => [Number(match.id), {
+    id: Number(match.id),
+    version: String(match.version || ''),
+  }])).values()].sort((a, b) => a.id - b.id)
+  return {
+    candidateIds: candidateVersions.map((candidate) => candidate.id),
+    candidateVersions,
+    fingerprint: `v1|${candidateVersions.map((candidate) => `${candidate.id}@${candidate.version}`).join('|')}`,
+  }
+}
+
+export function parseContactDuplicateCreateSeparateDecision(value: unknown): ContactDuplicateCreateSeparateDecision | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const input = value as Record<string, unknown>
+  if (input.action !== 'create_separate' || !Array.isArray(input.candidateIds) || !Array.isArray(input.candidateVersions)) return null
+  const candidateIds = input.candidateIds.map(Number)
+  const candidateVersions = input.candidateVersions.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+    const row = entry as Record<string, unknown>
+    const id = Number(row.id)
+    const version = typeof row.version === 'string' ? row.version : ''
+    return Number.isSafeInteger(id) && id > 0 && version ? { id, version } : null
+  })
+  if (candidateIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    || candidateVersions.some((entry) => !entry)
+    || typeof input.fingerprint !== 'string') return null
+  const decision: ContactDuplicateCreateSeparateDecision = {
+    action: 'create_separate',
+    candidateIds,
+    candidateVersions: candidateVersions as ContactDuplicateCandidateVersion[],
+    fingerprint: input.fingerprint,
+  }
+  const normalized = buildContactDuplicateReview(decision.candidateVersions.map((entry) => ({
+    id: entry.id,
+    name: '',
+    phone: null,
+    membershipNumber: null,
+    matchedPhone: null,
+    severity: 'name_only',
+    version: entry.version,
+  })))
+  return JSON.stringify(candidateIds) === JSON.stringify(normalized.candidateIds)
+    && decision.fingerprint === normalized.fingerprint
+    ? decision
+    : null
+}
+
+export function contactDuplicateDecisionMatches(
+  review: ContactDuplicateReview,
+  decision: ContactDuplicateCreateSeparateDecision | null,
+): boolean {
+  return Boolean(decision
+    && decision.fingerprint === review.fingerprint
+    && JSON.stringify(decision.candidateIds) === JSON.stringify(review.candidateIds)
+    && JSON.stringify(decision.candidateVersions) === JSON.stringify(review.candidateVersions))
 }
 
 function phoneDigitsSql(column: string): string {
@@ -154,6 +240,7 @@ export function classifyContactDuplicates(
   subject: { name: string; phones: string[] },
   candidates: ContactDuplicateCandidateRow[],
   mode: ContactOptionMode = 'address',
+  table: ContactDuplicateTable = 'customers',
 ): ContactDuplicateMatch[] {
   const subjectName = normalizeContactName(subject.name)
   const subjectPhones = new Set(subject.phones.filter(Boolean))
@@ -171,6 +258,7 @@ export function classifyContactDuplicates(
       membershipNumber: candidate.membership_number || null,
       matchedPhone: sharedPhone,
       severity: sharedPhone ? (sameName ? 'exact_match' : 'phone_conflict') : 'name_only',
+      version: candidateVersion(candidate, table),
     })
   }
   return matches.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
@@ -221,20 +309,27 @@ export async function findContactDuplicates(
     : []
   const rows = [...new Map([...phoneRows, ...nameRows].map((row) => [Number(row.id), row])).values()]
 
-  return classifyContactDuplicates({ name: subject.name, phones }, rows, mode)
+  return classifyContactDuplicates({ name: subject.name, phones }, rows, mode, table)
 }
 
-// Re-check canonical phone ownership inside the same D1 batch as the write.
-// `allowedExactMatches` is the exact id+name snapshot a staff member already
-// acknowledged with confirmDuplicate. A newly-created owner or a renamed
-// acknowledged row is not covered by that earlier confirmation.
+// Re-check the reviewed candidate set inside the same D1 batch as the write.
+// The fingerprint covers every raw identity field the duplicate classifier
+// reads. A new/deleted candidate or any edit to an acknowledged row therefore
+// invalidates the decision even when updated_at has only second precision.
+function candidateIdentityVersionSql(table: ContactDuplicateTable, alias: string): string {
+  const fields = [`${alias}.name`, `${alias}.phone`, `${alias}.address`, `${alias}.updated_at`]
+  if (table === 'customers') fields.push(`${alias}.phone_normalized`, `${alias}.membership_number`)
+  return fields.map((field) => `hex(CAST(COALESCE(${field}, '') AS TEXT))`).join(" || '.' || ")
+}
+
 export function contactDuplicateWriteGuardStatement(
   table: ContactDuplicateTable,
-  subject: { id?: number | string | null; phones: string[] },
-  allowedExactMatches: ContactDuplicateAllowedMatch[] = [],
+  subject: { id?: number | string | null; name?: string; phones: string[] },
+  decision: ContactDuplicateCreateSeparateDecision | null = null,
 ): ContactDuplicateGuardStatement | null {
   const phones = [...new Set(subject.phones.map(normalizePhone).filter((phone): phone is string => !!phone))]
-  if (!phones.length) return null
+  const nameKey = normalizeContactName(subject.name)
+  if (!phones.length && !decision) return null
   const phoneMatch = `(
     ${table === 'customers' ? `candidate.phone_normalized IN (SELECT CAST(value AS TEXT) FROM json_each(@phones)) OR` : ''}
     ${canonicalPhoneSql('candidate.phone')} IN (SELECT CAST(value AS TEXT) FROM json_each(@phones))
@@ -243,26 +338,26 @@ export function contactDuplicateWriteGuardStatement(
       WHERE ${canonicalPhoneSql("json_extract(option.value, '$.phone')")} IN (SELECT CAST(value AS TEXT) FROM json_each(@phones))
     )
   )`
+  const currentMatch = `(${decision && nameKey ? `lower(trim(COALESCE(candidate.name, ''))) = @nameKey OR` : ''} ${phoneMatch})`
+  const currentFingerprint = `COALESCE((
+    SELECT 'v1|' || group_concat(CAST(current.id AS TEXT) || '@' || current.version, '|')
+    FROM (
+      SELECT candidate.id, ${candidateIdentityVersionSql(table, 'candidate')} AS version
+      FROM ${table} AS candidate
+      WHERE candidate.id != COALESCE(@excludeId, -1) AND ${currentMatch}
+      ORDER BY candidate.id ASC
+    ) AS current
+  ), 'v1|')`
   return {
-    // A conflicting candidate is inserted with its own primary key, which
-    // raises a deterministic UNIQUE constraint and rolls the whole D1 batch
-    // back. A clear check selects zero rows and performs no write. Using a
-    // real constraint avoids the generic D1 retry path used for transient
-    // infrastructure errors.
-    sql: `INSERT INTO ${table} (id, name)
-      SELECT candidate.id, candidate.name FROM ${table} AS candidate
-      WHERE candidate.id != COALESCE(@excludeId, -1)
-        AND ${phoneMatch}
-        AND NOT EXISTS (
-          SELECT 1 FROM json_each(@allowedExactMatches) AS allowed
-          WHERE CAST(json_extract(allowed.value, '$.id') AS INTEGER) = candidate.id
-            AND json_extract(allowed.value, '$.name') IS candidate.name
-        )
-      LIMIT 1`,
+    sql: `SELECT CASE
+      WHEN ${currentFingerprint} = @candidateFingerprint THEN 1
+      ELSE json('CONTACT_DUPLICATE_CANDIDATES_CHANGED')
+    END AS contact_duplicate_guard`,
     params: {
       phones: JSON.stringify(phones),
+      nameKey,
       excludeId: subject.id == null || subject.id === '' ? null : Number(subject.id),
-      allowedExactMatches: JSON.stringify(allowedExactMatches),
+      candidateFingerprint: decision?.fingerprint || 'v1|',
     },
   }
 }

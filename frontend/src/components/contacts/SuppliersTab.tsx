@@ -31,6 +31,7 @@ import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countA
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
+import { createSeparateContactDecision, readContactDuplicateDecisionError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -121,7 +122,7 @@ interface SupplierPayload {
   gender?: string | null
   userId?: string | number | null
   userName?: string | null
-  confirmDuplicate?: boolean
+  duplicateDecision?: ContactDuplicateDecision
   __rename_cascade?: 'carry' | 'record_only'
 }
 
@@ -201,11 +202,12 @@ function getErrorMessage(error: unknown, fallback: string): string {
 interface SupplierFormProps {
   supplier?: SupplierRow | null
   onSave: (payload: SupplierPayload) => Promise<unknown> | unknown
+  onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   t: TranslateFn
 }
 
-function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
+function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierFormProps) {
   const init: SupplierPayload = supplier
     ? { ...supplier }
     : { name: '', phone: '', email: '', company: '', contact_person: '', address: '', notes: '', gender: '' }
@@ -225,16 +227,22 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [serverDuplicateCheck, setServerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const [pendingDuplicateCheck, setPendingDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
   const primaryOptionPhone = getPrimaryContactOption(options).phone || form.phone || ''
-  const duplicateMatches = useContactDuplicateFlag('suppliers', form.name || '', primaryOptionPhone, supplier?.id)
+  const duplicateCheck = useContactDuplicateFlag('suppliers', form.name || '', [form.phone || '', ...options.map((option) => option.phone)], supplier?.id)
+  const activeDuplicateCheck = serverDuplicateCheck || duplicateCheck
+  const duplicateMatches = activeDuplicateCheck.matches
   const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
-  const set = (key: keyof SupplierPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
-  const addOption = () => setOptions((current) => {
-    if (current.length >= CONTACT_OPTION_LIMIT) return current
-    return [...current, createContactOption()]
-  })
-  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
-  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  const pendingExactMatch = pendingDuplicateCheck?.matches.find((match) => match.severity === 'exact_match')
+  const clearServerDuplicateCheck = () => setServerDuplicateCheck(null)
+  const set = (key: keyof SupplierPayload, value: string) => { clearServerDuplicateCheck(); setForm((current) => ({ ...current, [key]: value })) }
+  const addOption = () => {
+    clearServerDuplicateCheck()
+    setOptions((current) => current.length >= CONTACT_OPTION_LIMIT ? current : [...current, createContactOption()])
+  }
+  const updateOption = (index: number, nextOption: ContactOption) => { clearServerDuplicateCheck(); setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option))) }
+  const removeOption = (index: number) => { clearServerDuplicateCheck(); setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index)) }
   // Part 563: validate, then open the review dialog; commitSupplier saves on
   // confirm. The exact-duplicate window.confirm() is folded into the dialog
   // (danger note) instead of a separate native popup.
@@ -246,6 +254,7 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
       return
     }
     setLocalError('')
+    setPendingDuplicateCheck(exactMatch ? activeDuplicateCheck : null)
     setConfirmOpen(true)
   }
 
@@ -266,15 +275,21 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
     setSaving(true)
     try {
       const primaryOption = getPrimaryContactOption(options)
-      await Promise.resolve(onSave({
+      const duplicateDecision = pendingDuplicateCheck ? createSeparateContactDecision(pendingDuplicateCheck) : null
+      const result = await Promise.resolve(onSave({
         ...form,
         phone: primaryOption.phone || form.phone || '',
         email: primaryOption.email || form.email || '',
         address: serializeContactOptions(options) || '',
         contact_person: primaryOption.name || form.contact_person || '',
         gender: form.gender || '',
-        confirmDuplicate: !!exactMatch,
+        ...(duplicateDecision ? { duplicateDecision } : {}),
       }))
+      const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
+      if (nextCheck) {
+        setServerDuplicateCheck(nextCheck)
+        setLocalError(t('contact_duplicate_review_changed') || 'Review the current possible duplicate records before saving.')
+      }
     } finally {
       setSaving(false)
     }
@@ -386,7 +401,7 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
           </div>
         ) : null}
 
-        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="supplier" />
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="supplier" onUseExisting={onUseExisting} t={t} />
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
             CustomerFormModal.tsx's own fix. */}
@@ -401,9 +416,9 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
           title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')}
           message={String(form.name || '').trim()}
           items={buildSupplierReviewItems()}
-          note={exactMatch ? `"${exactMatch.name}" already has this exact name and phone number. Create a separate supplier record anyway?` : undefined}
-          danger={!!exactMatch}
-          confirmLabel={supplier ? (t('save') || 'Save') : (t('add_supplier') || 'Add Supplier')}
+          note={pendingExactMatch ? (t('contact_duplicate_possible_message') || 'A contact already has this name and phone number. Use the existing record or create a separate one.') : undefined}
+          danger={!!pendingExactMatch}
+          confirmLabel={pendingExactMatch ? (t('contact_duplicate_create_separately') || 'Create separately') : supplier ? (t('save') || 'Save') : (t('add_supplier') || 'Add Supplier')}
           cancelLabel={t('cancel') || 'Cancel'}
           working={saving}
           workingLabel={t('saving') || 'Saving...'}
@@ -850,9 +865,27 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       setSelected(null)
       await load({ silent: true, label: 'Suppliers after save' })
     } catch (error: unknown) {
+      const duplicateCheck = readContactDuplicateDecisionError(error)
+      if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
       notify(getErrorMessage(error, 'Failed'), 'error')
     } finally {
       finishSingleAction(saveInFlightRef)
+    }
+  }
+
+  const handleUseExisting = async (match: ContactDuplicateMatch) => {
+    try {
+      const data = await withLoaderTimeout(
+        () => getSupplierApi().getSuppliers({ ids: [String(match.id)] }),
+        'Load existing supplier',
+        12000,
+      )
+      const existing = normalizeSupplierRows(data).find((supplier) => Number(supplier.id) === Number(match.id))
+      if (!existing) throw new Error('The existing supplier could not be loaded')
+      setSelected(existing)
+      setModal('detail')
+    } catch (error) {
+      notify(getErrorMessage(error, t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.'), 'error')
     }
   }
 
@@ -1334,7 +1367,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       </>
       )}
 
-      {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
+      {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
       {modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Suppliers after import' })} />
