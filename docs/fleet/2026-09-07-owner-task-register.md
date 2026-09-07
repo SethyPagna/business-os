@@ -4,7 +4,7 @@ This is the current request register. `progress.md` links here. Append new owner
 requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
-Last reconciled: 2026-09-07T11:35:45.257Z. Functional fixes precede UI polish.
+Last reconciled: 2026-09-07T12:09:19.605Z. Functional fixes precede UI polish.
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
 **498efadb-f833-471d-a8b7-b4326950bd26**, deployed 2026-09-07 09:54:13 UTC.
 Public Git branch: codex/release-fixes-20260907. Migrations 0128–0132 and required
@@ -61,11 +61,12 @@ Every shipped row must eventually record its actual deployment version.
 | F30 | Finish earlier N18/N21/N23 and N28–N36/audit lanes without losing their fixes. | Reconciled; release pending / root | Canonical ea9f0d1b base includes checkpoint 2 and earlier integrations; individual follow-up fixes retained. |
 | F31 | GitHub commits describe individual fixes, not checkpoint/batch commits. | Prepared / lineage, root | Separate public release history preserves messages/authors; eight internal reports excluded, required clean test fixture retained. Pushed release branch at 821efc94. |
 | F32 | Sale originally without delivery allows later driver, customer fee and actual cost. | Deployed c475e637 / sales | Full backend 276 suites; all frontend 306 files covered; independent money/migration review and browser actual retry/driver/totals/Records passed. |
-| F33 | Preserve original basket, payments, driver and actor for future sales. | Integrated / media; independent reviews pass | Four writers + migration0134 + immutable Records; 273/277 backend suites pass, four legacy harness failures assigned. Browser creation check pending. |
+| F33 | Preserve original basket, payments, driver and actor for future sales. | Certified, release pending / media | Four writers, migration 0134, backup and immutable Records independently pass; original basket/payment remain unchanged after later edits in browser. Backend 278/278 pass. |
 | F34 | Sales list/detail Records SQL failed in real D1. | Deployed 821efc94 / sales | Frozen actual Worker list/detail now 200; count and compound ordering repaired. |
 | F35 | Fast Stock minimize restored wrong host and consumed the chip. | Deployed 821efc94 / media | Exact user5 frozen browser restore passed; preserves draft and consumes only after modal mounts. |
-| F36 | Sales read retry/deadline/cache cancellation and visible manual Retry after failure. | Active final browser fix / media, responsive | Late fallback cache-write race repaired and independently certified; browser found queued second read masking error, now assigned. |
-| F37 | Duplicate preview times out on large catalogs because it queries stock/batches/cost per group. | Active priority / identity | Live two12s preview failures; roughly6000 database calls for2007 groups. Replace with shared bounded reads and verify query-count/parity. |
+| F36 | Sales read retry/deadline/cache cancellation and visible manual Retry after failure. | Certified, release pending / media, responsive | Frozen 5ec39289 browser: one request aborted at 20s, visible Retry, one manual retry succeeds; late responses never overwrite data or navigation. |
+| F37 | Duplicate preview times out on large catalogs because it queries stock/batches/cost per group. | Certified, release pending / identity | Independent real route 2,000 groups uses 43 reads instead of roughly 6,000; merge rules, prices and blockers preserved. |
+| F38 | Immediately recording payment after changing Completed to Credit reports a false other-device conflict. | Integrated, browser review active / sales | 9d707f1d carries exact committed status version into payment review; real concurrent-write protection and typed tender values retained. |
 
 ## Public portal and legal requests
 
@@ -98,15 +99,12 @@ Every shipped row must eventually record its actual deployment version.
 
 ## Release and follow-through
 
-1. First release deployed; finish live Sales bootstrap diagnosis F36.
-2. F32 delivery addition integrated; run final browser and combined checks, then
-   append public fix commits, apply reviewed 0133 and deploy separately.
-3. Record actual per-workflow live results without conflating local and live checks.
-4. Execute proven historical Shop metadata correction using authenticated actor,
-   fresh full hashes, and one atomic audited binding batch.
+1. Production is c475e637 with delivery addition; both earlier functional releases are live.
+2. Finish F38 browser review and final frontend certification, then release F33/F36/F37/F38 as individual fix commits.
+3. Execute proven historical Shop metadata correction with service-actor audit, fresh full hashes and one atomic guarded binding batch before migration 0134.
+4. Apply migration 0134 with preservation checks and deploy the certified candidate.
 5. Run requested duplicate merge through the signed-in app, preserving undo IDs.
-6. Implement F33 future immutable creation snapshots; never invent legacy history.
-7. Continue deferred UI and resolve business/rights facts and Telegram rotation.
+6. Continue deferred UI and resolve business/rights facts and Telegram rotation.
 
 Detailed evidence: [takeover ledger](2026-09-07-codex-takeover.md), individual Git
 commits, and private local `outputs/takeover-20260907/` reports. Local checks do not
