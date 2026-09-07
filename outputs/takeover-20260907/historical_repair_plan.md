@@ -1,6 +1,6 @@
 # Historical Shop metadata correction plan
 
-Prepared 2026-09-07 from sealed read-only production evidence. The user has already authorized correction of this past branch metadata. Execution remains gated by current-state checks, a quiet window, a Time Travel bookmark, the fixed maintenance service identity, and verification of the Cloudflare API token identity that performs the operation. Preparing and testing this bundle did not update D1, deploy code, run a migration, or synchronize secrets.
+Prepared 2026-09-07 from sealed read-only production evidence. The user has already authorized correction of this past branch metadata. Execution remains gated by current-state checks, a reviewed execution confirmation, a Time Travel bookmark, the fixed maintenance service identity, and verification of the Cloudflare API token identity that performs the operation. A low-write period is preferred, but the operator does not claim or require a global application pause. Preparing and testing this bundle did not update D1, deploy code, run a migration, or synchronize secrets.
 
 ## Frozen correction
 
@@ -40,7 +40,7 @@ This one private, owner-authorized historical correction uses a truthful mainten
 
 The service identity is compiled into the builder and operator as a one-entry allowlist. Execution input cannot supply an arbitrary actor object, user ID, display name, origin, task, or account. `audit_logs.user_id` and `audit_logs.user_name` are nullable in `cloudflare/migrations/0001_init.sql`, and no later migration adds a constraint to those columns. Normal duplicate merging and other application changes continue through the authenticated Business OS UI; this service identity is limited to this reviewed branch-metadata plan.
 
-After the release is verified and while writes to these records are paused:
+After the release is verified, preferably during a low-write period:
 
 1. Record a fresh D1 Time Travel bookmark.
 2. Run the operator's read-only identity check through the existing Wrangler token wrapper. Record only the returned Cloudflare account ID and API token ID; never copy the token into an input, artifact, command argument, or log.
@@ -94,7 +94,7 @@ Run the local synthetic transaction, rollback, drift, and hash-gate rehearsal wi
 node outputs/takeover-20260907/historical-repair-evidence/verify-repair-bundle.mjs
 ```
 
-The verifier uses local SQLite and a mocked D1 binding. It verifies the repair and recovery row counts, full-row hashes, guard rollback, actor allowlist, token-error redaction, bundle tamper rejection, confirmation gates, and exactly one 46-statement `batch()` call. It does not open a remote binding.
+The verifier uses local SQLite and a mocked D1 binding. It verifies the repair and recovery row counts, full-row hashes, guard rollback, actor allowlist, token-error redaction, bundle tamper rejection, confirmation gates, and exactly one 91-statement `batch()` call containing 45 guards followed by the 46 hash-bound writes. It does not open a remote binding.
 
 ## Private operator
 
@@ -114,15 +114,17 @@ node cloudflare/scripts/with-wrangler-auth.cjs node `
   outputs/takeover-20260907/historical-repair-evidence/run-historical-repair.mjs --identify
 ```
 
-There is no generic SQL option. Apply requires `--apply` plus all five exact confirmations: quiet window, run ID, manifest SHA-256, direct batch SHA-256, and Time Travel bookmark. The active token ID must equal the ID frozen in the execution manifest before `getPlatformProxy()` opens the remote D1 binding. Before any apply invocation, the release owner must independently review the exact committed operator and newly generated execution bundle. The apply command must be constructed from that reviewed bundle at the authorized maintenance window; it is deliberately omitted from this prepared plan so no placeholder can be copied into a production command.
+There is no generic SQL option. Apply requires `--apply` plus all five exact confirmations: reviewed execution, run ID, manifest SHA-256, direct write-batch SHA-256, and Time Travel bookmark. The reviewed-execution flag confirms the exact prepared inputs; it does not assert that all application writes are paused. The active token ID must equal the ID frozen in the execution manifest before `getPlatformProxy()` opens the remote D1 binding. Before any apply invocation, the release owner must independently review the exact committed operator and newly generated execution bundle. The apply command must be constructed from that reviewed bundle at the authorized maintenance window; it is deliberately omitted from this prepared plan so no placeholder can be copied into a production command.
 
 ## Atomic apply and audit
 
-The generated repair SQL is executable against a local SQLite rehearsal database. Production execution reads the 46 descriptors in `d1-batch.json.statements`, verifies both the independent statement-array SHA-256 and the batch-envelope SHA-256, prepares each exact SQL statement, and submits the prepared array through one `D1Database.batch()` call. D1 batch is the transaction boundary; the operator never sends the local `BEGIN IMMEDIATE` or `COMMIT` lines to D1. Cloudflare documents that `D1Database.batch()` runs statements sequentially as a transaction and aborts or rolls back the entire sequence when a statement fails: <https://developers.cloudflare.com/d1/worker-api/d1-database/#batch>.
+The generated repair SQL is executable against a local SQLite rehearsal database. Production execution preserves the hash-bound 46 descriptors in `d1-batch.json.statements` as the write plan. Immediately after reading and validating the current target rows, the operator builds 45 full-row read guards: 43 fee chunks of at most 99 rows, one sales guard, and one sale-items guard. Each guard binds one JSON row-array parameter through `json_each(?)` and compares every column from the pinned production-schema allowlist with SQLite `IS`. Row values never enter SQL text.
+
+The operator prepends those 45 guards to the 46 prepared write statements and submits all 91 statements through one `D1Database.batch()` call. Every guard must report zero changes. If any target row changes after the pre-read, the corresponding guard raises an error before the audit insert or branch updates, rolling back the whole batch. Unrelated application writes can continue; a legitimate concurrent edit to one of the target rows is preserved and causes this repair attempt to refuse cleanly. D1 batch is the transaction boundary; the operator never sends the local `BEGIN IMMEDIATE` or `COMMIT` lines to D1. Cloudflare documents that `D1Database.batch()` runs statements sequentially as a transaction and aborts or rolls back the entire sequence when a statement fails: <https://developers.cloudflare.com/d1/worker-api/d1-database/#batch>.
 
 Cloudflare documents that `getPlatformProxy()` is a Node.js API, accepts an exact Wrangler `configPath`, supports D1 bindings, and can enable remote bindings: <https://developers.cloudflare.com/workers/wrangler/api/#getplatformproxy>. The REST D1 query endpoint accepts a batch-shaped request but its API reference does not state the same rollback guarantee, so this plan does not use the REST query endpoint, dashboard SQL, `wrangler d1 execute --remote`, or `D1Database.exec()` as its production transaction boundary: <https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/>.
 
-The first statement inserts one `historical_branch_metadata_repair` audit row containing:
+The first write statement, after all 45 guards, inserts one `historical_branch_metadata_repair` audit row containing:
 
 - nullable maintenance service actor ID and fixed name;
 - maintenance origin, plan/task ID, and owner-authorization basis;
@@ -133,9 +135,9 @@ The first statement inserts one `historical_branch_metadata_repair` audit row co
 - all three exact before full-row hashes;
 - exact row counts and columns changed.
 
-That statement uses a transaction-local SQL guard. It calls an invalid JSON expression and fails unless branch 2 is still active/default Shop and all exact manifest IDs still have the expected null branch state. A guard failure aborts the batch before any update. Any later SQL failure rolls back the audit row and all updates.
+That audit statement retains its branch-state guard. The preceding full-row guards additionally protect every expected column against changes between pre-read and batch execution. Any guard or later SQL failure rolls back the audit row and all branch updates.
 
-Expected results are one audit insert, fee update counts matching the 43 manifest chunks, 22 changed sales, and 56 changed sale items. Treat any transport ambiguity or per-statement count mismatch as a failed run; keep the quiet window active and follow recovery. Never broaden a predicate to make a count pass.
+Expected results are 45 zero-change full-row guards, one audit insert, fee update counts matching the 43 manifest chunks, 22 changed sales, and 56 changed sale items. Treat any transport ambiguity or per-statement count mismatch as a failed run and follow recovery assessment before retrying. Never broaden a predicate to make a count pass.
 
 ## Postchecks
 
@@ -189,7 +191,7 @@ node outputs/takeover-20260907/historical-repair-evidence/build-repair-bundle.mj
 
 The builder requires both post reads to match, rebases the corrected branch fields to null in memory, and requires the resulting full-row hashes to equal the recorded before hashes. It also verifies the execution-manifest fingerprint. The generated recovery batch uses the same exact ID chunks, restores only the branch columns, and appends a `historical_branch_metadata_repair_recovery` audit row; it does not delete the original audit evidence.
 
-If the post-state hashes differ, a target received a later branch edit, the audit marker is absent, or the quiet window ended, do not run logical recovery. Use the recorded Time Travel bookmark only after assessing unrelated writes since the bookmark, because a restore rewinds the whole database. A failed D1 batch should already be atomic; Time Travel is for an ambiguous transport result or a failed postcondition, not routine rollback.
+If the post-state hashes differ, a target received a later branch edit, or the audit marker is absent, do not run logical recovery. Use the recorded Time Travel bookmark only after assessing unrelated writes since the bookmark, because a restore rewinds the whole database. A failed D1 batch should already be atomic; Time Travel is for an ambiguous transport result or a failed postcondition, not routine rollback.
 
 ## Excluded and unresolved records
 

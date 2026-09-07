@@ -54,7 +54,7 @@ const redactErrorMessage = (error, env = process.env) => {
 }
 
 function parseArgs(tokens = process.argv.slice(2)) {
-  const allowedFlags = new Set(['apply', 'identify', 'confirm-quiet-window'])
+  const allowedFlags = new Set(['apply', 'identify', 'confirm-reviewed-execution'])
   const allowedValues = new Set(['bundle', 'kind', 'confirm-run-id', 'confirm-manifest-sha256', 'confirm-batch-sha256', 'confirm-bookmark'])
   const parsed = {}
   for (let index = 0; index < tokens.length; index += 1) {
@@ -183,6 +183,10 @@ function validateBundle(bundleDir, kind = 'repair', dependencies = {}) {
   assert(stableJson(executionFrozenManifest) === stableJson(frozenManifest), 'execution manifest static plan does not match the pinned reviewed manifest')
   assert(fingerprint(without(executionManifest, 'execution_bundle_sha256')) === executionManifest.execution_bundle_sha256, 'execution manifest fingerprint mismatch')
   const execution = executionManifest.execution
+  const pinnedColumns = frozenManifest.full_row_precondition.expected_columns_from_sealed_production_schema
+  for (const table of ['fees', 'sales', 'sale_items']) {
+    assert(stableJson([...(execution?.full_row_columns?.[table] || [])].sort()) === stableJson([...pinnedColumns[table]].sort()), `execution manifest ${table} full-row columns do not match the pinned production schema`)
+  }
   assert(execution?.actor_key === 'codex-maintenance-owner-authorized', 'execution manifest service actor key is not allowlisted')
   assert(stableJson(execution.actor) === stableJson(expectedActor), 'execution manifest service actor does not match the fixed maintenance identity')
   assert(execution.cloudflare_operator?.account_id === expectedAccountId, 'execution manifest Cloudflare account mismatch')
@@ -256,6 +260,49 @@ async function readTargetRows(db, manifest) {
   }
 }
 
+const guardTableAllowlist = new Set(['fees', 'sales', 'sale_items'])
+const safeIdentifier = (value) => {
+  assert(typeof value === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value), 'full-row guard contains an invalid identifier')
+  return `"${value}"`
+}
+
+function fullRowGuard(table, rows, columns, label) {
+  assert(guardTableAllowlist.has(table), 'full-row guard table is not allowlisted')
+  assert(rows.length > 0 && rows.length <= 99, 'full-row guard chunk must contain 1 to 99 rows')
+  assert(columns.includes('id'), 'full-row guard column set lacks id')
+  const tableSql = safeIdentifier(table)
+  const comparisons = columns.map((column) => {
+    const columnSql = safeIdentifier(column)
+    return `actual.${columnSql} IS json_extract(expected.value, '$.${column}')`
+  }).join('\n      AND ')
+  return {
+    label,
+    expected_changes: 0,
+    sql: `SELECT CASE WHEN (\n  SELECT COUNT(*)\n  FROM ${tableSql} AS actual\n  JOIN json_each(?) AS expected\n    ON actual."id" IS json_extract(expected.value, '$.id')\n  WHERE ${comparisons}\n) = ${rows.length}\nTHEN 0 ELSE json('historical repair target row drift') END AS full_row_guard;`,
+    params: [JSON.stringify(rows)],
+  }
+}
+
+function buildFullRowGuards(manifest, rows) {
+  const columns = manifest.full_row_precondition.expected_columns_from_sealed_production_schema
+  const feesById = new Map(rows.fees.map((row) => [Number(row.id), row]))
+  const guards = manifest.batching.fee_chunks.map((chunk, index) => fullRowGuard(
+    'fees',
+    chunk.ids.map((id) => {
+      const row = feesById.get(id)
+      assert(row, `pre-read fees row ${id} is missing from guard input`)
+      return row
+    }),
+    columns.fees,
+    `full_row_guard_fees_${index + 1}`,
+  ))
+  guards.push(fullRowGuard('sales', rows.sales, columns.sales, 'full_row_guard_sales'))
+  guards.push(fullRowGuard('sale_items', rows.sale_items, columns.sale_items, 'full_row_guard_sale_items'))
+  assert(guards.length === 45, 'historical repair must produce exactly 45 full-row guards')
+  assert(guards.every((guard) => guard.params.length === 1), 'each full-row guard must use exactly one bound JSON parameter')
+  return guards
+}
+
 function validateRows(executionManifest, rows, phase, kind) {
   const expectedCounts = executionManifest.target.rows
   const expectedColumns = executionManifest.execution.full_row_columns
@@ -301,18 +348,24 @@ async function verifyAuditAndAllocations(db, executionManifest, kind) {
   return { action, rows: auditRows.length, sale_item_batch_allocations: Number(allocations[0]?.count || 0) }
 }
 
-async function executePreparedBatch(db, batch) {
-  const prepared = batch.statements.map((statement) => db.prepare(statement.sql))
+async function executePreparedBatch(db, batch, guards) {
+  assert(Array.isArray(guards) && guards.length === 45, 'atomic execution requires exactly 45 full-row guards')
+  const preparedGuards = guards.map((guard) => db.prepare(guard.sql).bind(...guard.params))
+  const preparedWrites = batch.statements.map((statement) => db.prepare(statement.sql))
+  const prepared = [...preparedGuards, ...preparedWrites]
   const results = await db.batch(prepared)
-  assert(Array.isArray(results) && results.length === batch.statements.length, 'D1 batch result count mismatch')
-  const changes = results.map((result) => Number(result?.meta?.changes))
+  assert(Array.isArray(results) && results.length === guards.length + batch.statements.length, 'D1 batch result count mismatch')
+  assert(results.every((result) => result?.success !== false), 'D1 batch returned an unsuccessful statement result')
+  const guardChanges = results.slice(0, guards.length).map((result) => Number(result?.meta?.changes))
+  assert(guardChanges.every((changes) => changes === 0), 'a full-row guard unexpectedly changed data')
+  const changes = results.slice(guards.length).map((result) => Number(result?.meta?.changes))
   const mismatches = batch.statements.flatMap((statement, index) => changes[index] === statement.expected_changes ? [] : [{ index, label: statement.label, expected: statement.expected_changes, observed: changes[index] }])
-  return { changes, mismatches }
+  return { guardChanges, changes, mismatches }
 }
 
 async function runApply(validated, confirmations, dependencies = {}) {
   const { executionManifest, batch } = validated
-  assert(confirmations['confirm-quiet-window'] === true, '--apply requires --confirm-quiet-window')
+  assert(confirmations['confirm-reviewed-execution'] === true, '--apply requires --confirm-reviewed-execution')
   assert(confirmations['confirm-run-id'] === executionManifest.execution.run_id, '--confirm-run-id mismatch')
   assert(confirmations['confirm-manifest-sha256'] === executionManifest.content_sha256, '--confirm-manifest-sha256 mismatch')
   assert(confirmations['confirm-batch-sha256'] === batch.content_sha256, '--confirm-batch-sha256 mismatch')
@@ -330,9 +383,11 @@ async function runApply(validated, confirmations, dependencies = {}) {
     assert(db?.prepare && db?.batch, 'remote D1 binding is unavailable')
     const preRows = await readTargetRows(db, executionManifest)
     const preHashes = validateRows(executionManifest, preRows, 'pre', batch.kind)
+    const guards = buildFullRowGuards(executionManifest, preRows)
+    await dependencies.afterPreRead?.({ db, preRows })
     let batchResult
     try {
-      batchResult = await executePreparedBatch(db, batch)
+      batchResult = await executePreparedBatch(db, batch, guards)
     } catch (_) {
       throw new Error('D1 batch failed or returned an ambiguous transport result; do not retry until the audit row and exact post-state are read')
     }
@@ -346,6 +401,10 @@ async function runApply(validated, confirmations, dependencies = {}) {
       run_id: executionManifest.execution.run_id,
       manifest_sha256: executionManifest.content_sha256,
       batch_sha256: batch.content_sha256,
+      guard_statement_count: guards.length,
+      write_statement_count: batch.statements.length,
+      atomic_statement_count: guards.length + batch.statements.length,
+      guard_statement_changes: batchResult.guardChanges,
       statement_changes: batchResult.changes,
       pre_full_row_sha256: preHashes,
       post_normalized_full_row_sha256: postHashes,
@@ -372,7 +431,9 @@ async function main() {
       run_id: validated.executionManifest.execution.run_id,
       manifest_sha256: validated.executionManifest.content_sha256,
       batch_sha256: validated.batch.content_sha256,
-      statement_count: validated.batch.statement_count,
+      write_statement_count: validated.batch.statement_count,
+      full_row_guard_statement_count: 45,
+      atomic_statement_count: validated.batch.statement_count + 45,
       remote_binding_opened: false,
       production_write: false,
     }, null, 2)}\n`)
@@ -390,6 +451,7 @@ if (isMain) main().catch((error) => {
 
 export {
   expectedActor,
+  buildFullRowGuards,
   executePreparedBatch,
   fingerprint,
   parseArgs,

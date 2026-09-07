@@ -94,6 +94,7 @@ try {
   assert(!generatedBatch.statements.some((statement) => /\b(?:BEGIN|COMMIT)\b/i.test(statement.sql)), 'direct D1 batch includes a transaction wrapper')
   const reviewed = JSON.parse(execFileSync(process.execPath, [join(evidenceDir, 'run-historical-repair.mjs'), '--bundle', bundleDir], { cwd: root, encoding: 'utf8' }))
   assert(reviewed.status === 'review_only' && reviewed.remote_binding_opened === false && reviewed.production_write === false, 'default operator mode is not read-only')
+  assert(reviewed.full_row_guard_statement_count === 45 && reviewed.write_statement_count === 46 && reviewed.atomic_statement_count === 91, 'review mode does not disclose the exact atomic execution shape')
 
   const repaired = new Database(databasePath)
   repaired.exec(readFileSync(join(bundleDir, 'historical-branch-repair.sql'), 'utf8'))
@@ -244,25 +245,37 @@ try {
   const applyDatabasePath = join(work, 'operator-apply.sqlite')
   copyFileSync(pristineDatabasePath, applyDatabasePath)
   const applySqlite = new Database(applyDatabasePath)
-  let batchCalls = 0
-  let disposed = false
-  const localD1 = {
-    prepare(sql) {
-      return {
-        sql,
-        async all() { return { results: applySqlite.prepare(sql).all() } },
-      }
-    },
-    async batch(statements) {
-      batchCalls += 1
-      return applySqlite.transaction(() => statements.map((statement) => {
-        const result = applySqlite.prepare(statement.sql).run()
-        return { success: true, meta: { changes: result.changes }, results: [] }
-      }))()
-    },
+  const makeLocalD1 = (sqlite) => {
+    const state = { batchCalls: 0, statementCounts: [], parameterCounts: [] }
+    return {
+      state,
+      d1: {
+        prepare(sql) {
+          return {
+            sql,
+            params: [],
+            bind(...params) { this.params = params; return this },
+            async all() { return { results: sqlite.prepare(sql).all(...this.params) } },
+          }
+        },
+        async batch(statements) {
+          state.batchCalls += 1
+          state.statementCounts.push(statements.length)
+          state.parameterCounts.push(statements.map((statement) => statement.params.length))
+          return sqlite.transaction(() => statements.map((statement) => {
+            const prepared = sqlite.prepare(statement.sql)
+            if (prepared.reader) return { success: true, meta: { changes: 0 }, results: prepared.all(...statement.params) }
+            const result = prepared.run(...statement.params)
+            return { success: true, meta: { changes: result.changes }, results: [] }
+          }))()
+        },
+      },
+    }
   }
+  const successfulBinding = makeLocalD1(applySqlite)
+  let disposed = false
   const confirmations = {
-    'confirm-quiet-window': true,
+    'confirm-reviewed-execution': true,
     'confirm-run-id': generatedManifest.execution.run_id,
     'confirm-manifest-sha256': generatedManifest.content_sha256,
     'confirm-batch-sha256': generatedBatch.content_sha256,
@@ -280,12 +293,79 @@ try {
   try {
     operatorResult = await runApply(validateBundle(bundleDir, 'repair'), confirmations, {
       verifyOperator: async () => executionInput.cloudflare_operator,
-      getPlatformProxy: async () => ({ env: { DB: localD1 }, dispose: async () => { disposed = true } }),
+      getPlatformProxy: async () => ({ env: { DB: successfulBinding.d1 }, dispose: async () => { disposed = true } }),
     })
   } finally {
     applySqlite.close()
   }
-  assert(operatorResult.status === 'applied_and_verified' && batchCalls === 1 && disposed, 'operator did not execute exactly one batch and dispose its binding')
+  assert(operatorResult.status === 'applied_and_verified' && successfulBinding.state.batchCalls === 1 && disposed, 'operator did not execute exactly one batch and dispose its binding')
+  assert(JSON.stringify(successfulBinding.state.statementCounts) === JSON.stringify([91]), 'operator batch did not contain 45 guards followed by 46 writes')
+  assert(successfulBinding.state.parameterCounts[0].slice(0, 45).every((count) => count === 1) && successfulBinding.state.parameterCounts[0].slice(45).every((count) => count === 0), 'guard/write parameter layout is not 45 one-parameter guards followed by parameter-free reviewed writes')
+  assert(operatorResult.guard_statement_count === 45 && operatorResult.write_statement_count === 46 && operatorResult.atomic_statement_count === 91, 'operator did not report the exact atomic guard/write shape')
+  assert(operatorResult.guard_statement_changes.every((changes) => changes === 0), 'a successful full-row guard reported a write')
+
+  const concurrentDatabasePath = join(work, 'operator-concurrent.sqlite')
+  copyFileSync(pristineDatabasePath, concurrentDatabasePath)
+  const concurrentSqlite = new Database(concurrentDatabasePath)
+  const concurrentBinding = makeLocalD1(concurrentSqlite)
+  const concurrentBefore = concurrentSqlite.prepare('SELECT amount_usd FROM fees WHERE id=1').get()
+  let concurrentDisposed = false
+  let concurrentDriftRefused = false
+  try {
+    await runApply(validateBundle(bundleDir, 'repair'), confirmations, {
+      verifyOperator: async () => executionInput.cloudflare_operator,
+      getPlatformProxy: async () => ({ env: { DB: concurrentBinding.d1 }, dispose: async () => { concurrentDisposed = true } }),
+      afterPreRead: async () => { concurrentSqlite.prepare('UPDATE fees SET amount_usd=COALESCE(amount_usd,0)+1 WHERE id=1').run() },
+    })
+  } catch (error) {
+    concurrentDriftRefused = /D1 batch failed or returned an ambiguous transport result/.test(String(error.message))
+  }
+  const concurrentAfter = {
+    amount_usd: concurrentSqlite.prepare('SELECT amount_usd FROM fees WHERE id=1').get().amount_usd,
+    branch_changes:
+      concurrentSqlite.prepare('SELECT COUNT(*) AS count FROM fees WHERE branch_id=2').get().count +
+      concurrentSqlite.prepare('SELECT COUNT(*) AS count FROM sales WHERE branch_id=2').get().count +
+      concurrentSqlite.prepare('SELECT COUNT(*) AS count FROM sale_items WHERE branch_id=2').get().count,
+    audit: concurrentSqlite.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='historical_branch_metadata_repair'").get().count,
+  }
+  concurrentSqlite.close()
+  assert(concurrentDriftRefused && concurrentDisposed && concurrentBinding.state.batchCalls === 1, 'concurrent full-row drift was not refused by the single attempted batch')
+  assert(JSON.stringify(concurrentBinding.state.statementCounts) === JSON.stringify([91]), 'concurrent drift did not use the exact 91-statement atomic batch')
+  assert(concurrentAfter.amount_usd === Number(concurrentBefore.amount_usd || 0) + 1, 'concurrent non-branch edit was rolled back or lost')
+  assert(concurrentAfter.branch_changes === 0 && concurrentAfter.audit === 0, 'concurrent drift guard allowed branch changes or an audit insert')
+
+  const unrelatedDatabasePath = join(work, 'operator-unrelated-write.sqlite')
+  copyFileSync(pristineDatabasePath, unrelatedDatabasePath)
+  const unrelatedSqlite = new Database(unrelatedDatabasePath)
+  const unrelatedBinding = makeLocalD1(unrelatedSqlite)
+  let unrelatedDisposed = false
+  const unrelatedResult = await runApply(validateBundle(bundleDir, 'repair'), confirmations, {
+    verifyOperator: async () => executionInput.cloudflare_operator,
+    getPlatformProxy: async () => ({ env: { DB: unrelatedBinding.d1 }, dispose: async () => { unrelatedDisposed = true } }),
+    afterPreRead: async () => { unrelatedSqlite.prepare("INSERT INTO audit_logs(action,entity,entity_id,details) VALUES('ordinary_business_write','test','unrelated','{}')").run() },
+  })
+  const unrelatedPreserved = unrelatedSqlite.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='ordinary_business_write'").get().count
+  unrelatedSqlite.close()
+  assert(unrelatedResult.status === 'applied_and_verified' && unrelatedDisposed && unrelatedBinding.state.batchCalls === 1, 'unrelated concurrent write prevented the exact repair')
+  assert(unrelatedPreserved === 1, 'unrelated concurrent write was not preserved')
+
+  const recoveryOperatorDatabasePath = join(work, 'operator-recovery.sqlite')
+  copyFileSync(pristineDatabasePath, recoveryOperatorDatabasePath)
+  const recoveryOperatorSqlite = new Database(recoveryOperatorDatabasePath)
+  recoveryOperatorSqlite.exec(readFileSync(join(bundleDir, 'historical-branch-repair.sql'), 'utf8'))
+  const recoveryOperatorBinding = makeLocalD1(recoveryOperatorSqlite)
+  let recoveryOperatorDisposed = false
+  const recoveryConfirmations = {
+    ...confirmations,
+    'confirm-batch-sha256': generatedRecoveryBatch.content_sha256,
+  }
+  const recoveryOperatorResult = await runApply(validateBundle(recoveryDir, 'recovery'), recoveryConfirmations, {
+    verifyOperator: async () => executionInput.cloudflare_operator,
+    getPlatformProxy: async () => ({ env: { DB: recoveryOperatorBinding.d1 }, dispose: async () => { recoveryOperatorDisposed = true } }),
+  })
+  recoveryOperatorSqlite.close()
+  assert(recoveryOperatorResult.status === 'applied_and_verified' && recoveryOperatorDisposed, 'recovery operator did not verify and dispose')
+  assert(JSON.stringify(recoveryOperatorBinding.state.statementCounts) === JSON.stringify([91]), 'recovery operator did not use the exact 91-statement atomic batch')
 
   const manifest = readJson(join(evidenceDir, 'repair-manifest.json'))
   const feeIds = manifest.batching.fee_chunks.flatMap((item) => item.ids)
@@ -304,7 +384,10 @@ try {
     frozen_manifest_tamper_rejected: frozenManifestTamperRejected,
     bad_confirmation_rejected_before_binding: confirmationRejectedBeforeBinding,
     token_error_redacted: tokenFailureSafe,
-    operator: { status: operatorResult.status, batch_calls: batchCalls, disposed },
+    operator: { status: operatorResult.status, batch_calls: successfulBinding.state.batchCalls, atomic_statements: successfulBinding.state.statementCounts[0], disposed },
+    concurrent_target_drift: { refused_atomically: concurrentDriftRefused, preserved_non_branch_edit: concurrentAfter.amount_usd, branch_changes: concurrentAfter.branch_changes, audit: concurrentAfter.audit },
+    unrelated_concurrent_write: { repair_succeeded: unrelatedResult.status === 'applied_and_verified', preserved: unrelatedPreserved === 1 },
+    recovery_operator: { status: recoveryOperatorResult.status, atomic_statements: recoveryOperatorBinding.state.statementCounts[0], disposed: recoveryOperatorDisposed },
     fee_chunks: manifest.batching.fee_chunks.length,
     max_ids_per_chunk: Math.max(...manifest.batching.fee_chunks.map((item) => item.ids.length)),
   }, null, 2)}\n`)
