@@ -169,7 +169,7 @@ assert.ok(createModal.includes('stockReceiptGateCode('), 'both of its line paths
 // IS filled and whose real remedy is a different column entirely. Every
 // sibling gate surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
 // StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
-// BranchStockAdjuster) shows the refusal's OWN reason; this import review
+// per-product adjust form) shows the refusal's OWN reason; this import review
 // must too.
 const stockActionImportModal = fs.readFileSync(
   path.join(root, '..', 'frontend', 'src', 'components', 'products', 'import', 'StockActionImportModal.tsx'),

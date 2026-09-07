@@ -24,9 +24,6 @@ import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
-// O3: a clipped product name must be revealable, not a dead-end "…". The
-// shared reveal-on-hover/click component, same one StatsStrip uses.
-import TruncatedText from '../shared/TruncatedText.tsx'
 // N13: a receipt id is never truncated -- it is shown in full and copied in
 // one tap, through the same component the Sale and Return detail modals use.
 import CopyableId from '../shared/CopyableId.tsx'
@@ -705,15 +702,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                         belongs with its supplier) so this cell means one thing
                         per line instead of multiplexing barcode/batch/dash. */}
                     <td>
-                      {/* O3: the name goes through the shared TruncatedText --
-                          a `title` tooltip is not an affordance (nothing shows
-                          that the "…" can be opened, and it is unreachable by
-                          tap), while TruncatedText marks the clipped value as
-                          revealable and opens it on hover AND on tap. It also
-                          stops the click from opening the row's detail modal,
-                          so reading a name is not the same gesture as leaving
-                          the list. */}
-                      <TruncatedText text={row.product_name} className="font-semibold text-gray-800 dark:text-gray-100" />
+                      {/* The app-level text-affordance controller serves this
+                          existing dense-cell contract. The row keeps its own
+                          click while hover or press-and-hold reveals the full
+                          clipped name. */}
+                      <span className="block dense-cell-truncate font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
                       <span className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400" title={model.barcode}>{model.barcode}</span>
                     </td>
                     <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate" title={translateMovementType(row.movement_type, t)}>{translateMovementType(row.movement_type, t)}</span></span></td>
@@ -750,9 +743,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                           FULL, never truncated, and is one tap to copy. So it
                           renders through CopyableId -- the same component the
                           Sale detail, the Return detail and this section's own
-                          movement modal use -- and not through TruncatedText,
-                          which clips to one line and reveals the tail only in
-                          a tooltip. The column budget above keeps the common
+                          movement modal use. The column budget above keeps the common
                           case on one line; beyond it the id WRAPS rather than
                           losing its tail, which is the half of an id that
                           distinguishes two receipts made the same day.

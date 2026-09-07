@@ -347,6 +347,7 @@ type MergeDuplicateProductsResult = ProductApiResponse & {
   madeProgress?: boolean
   mergedGroups?: number
   mergedProducts?: number
+  undoPendingCount?: number
   remainingProductsBefore?: number
   remainingProducts?: number
   maxAdditionalRequests?: number
@@ -1854,6 +1855,7 @@ function ProductsFullEditor() {
     let callCeiling = 1
     let mergedGroups = 0
     let mergedProducts = 0
+    let undoPendingCount = 0
     const processedCaseKeys = new Set<string>()
     const refusalsByCase = new Map<string, NonNullable<MergeDuplicateProductsResult['refusals']>[number]>()
     let completed = false
@@ -1864,6 +1866,7 @@ function ProductsFullEditor() {
         if (result?.success === false) throw new Error(result.error || 'Failed to merge duplicate products')
         mergedGroups += Number(result?.mergedGroups || 0)
         mergedProducts += Number(result?.mergedProducts || 0)
+        undoPendingCount += Math.max(0, Number(result?.undoPendingCount || 0))
         for (const key of Array.isArray(result?.processedCaseKeys) ? result.processedCaseKeys : []) {
           if (key) processedCaseKeys.add(String(key))
         }
@@ -1907,8 +1910,13 @@ function ProductsFullEditor() {
           firstRefusal,
         ].filter(Boolean).join('. ')
         : ''
+      const undoWarning = undoPendingCount > 0
+        ? (t('merge_duplicates_undo_unavailable') || 'Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.')
+          .replace('{count}', String(undoPendingCount))
+        : ''
       if (!mergedGroups) {
-        notify(refusalNote || t('no_duplicate_products_found') || 'No duplicate products found', refusals.length ? 'info' : undefined)
+        notify([refusalNote || t('no_duplicate_products_found') || 'No duplicate products found', undoWarning].filter(Boolean).join('. '),
+          refusals.length || undoPendingCount ? 'info' : undefined)
       } else {
         notify(
           [
@@ -1916,8 +1924,9 @@ function ProductsFullEditor() {
               .replace('{products}', String(mergedProducts))
               .replace('{groups}', String(mergedGroups)),
             refusalNote,
+            undoWarning,
           ].filter(Boolean).join('. '),
-          refusals.length ? 'info' : undefined,
+          refusals.length || undoPendingCount ? 'info' : undefined,
         )
       }
       await load(true)
@@ -1927,6 +1936,10 @@ function ProductsFullEditor() {
       // reaches the client. Reload in every started-run failure path; retrying
       // re-scans only active cases under the same server contract.
       if (calls > 0 || controller.signal.aborted) await load(true)
+      const undoWarning = undoPendingCount > 0
+        ? (t('merge_duplicates_undo_unavailable') || 'Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.')
+          .replace('{count}', String(undoPendingCount))
+        : ''
       if (!controller.signal.aborted) {
         const partialSummary = mergedGroups > 0
           ? (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
@@ -1935,8 +1948,11 @@ function ProductsFullEditor() {
           : ''
         notify([
           partialSummary,
+          undoWarning,
           getErrorMessage(e, 'Failed'),
         ].filter(Boolean).join('. '), 'error')
+      } else if (undoWarning) {
+        notify(undoWarning, 'info')
       }
     } finally {
       if (mergeDuplicatesAbortRef.current === controller) mergeDuplicatesAbortRef.current = null

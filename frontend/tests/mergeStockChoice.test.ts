@@ -304,10 +304,14 @@ test('the whole-catalog dry run shows the cost it will write, and what it will r
 })
 
 test('a whole-catalog run that skipped pairs does not report plain success', () => {
-  assert.match(productsPage, /const refusals = Array\.isArray\(result\?\.refusals\) \? result\.refusals : \[\]/)
+  assert.match(productsPage, /for \(const refusal of Array\.isArray\(result\?\.refusals\) \? result\.refusals : \[\]\)/,
+    'each continuation response contributes its refusals to the completed run')
   assert.match(productsPage, /refusals\.find\(\(r\) => r\?\.error\)\?\.error \|\| ''/,
     'the first refusal sentence says what to do -- a bare count does not')
   assert.match(productsPage, /merge_duplicates_refused_count/)
+  assert.match(productsPage, /undoPendingCount \+= Math\.max\(0, Number\(result\?\.undoPendingCount \|\| 0\)\)/)
+  assert.match(productsPage, /merge_duplicates_undo_unavailable/,
+    'committed cases whose recovery record is incomplete must stay visible to the operator')
   // Same reporting shape the Conflicts tab already uses for its bulk run.
   assert.match(duplicatesTab, /if \(firstRefusal\) parts\.push\(firstRefusal\)/)
   for (const key of ['merge_duplicates_refused_count', 'merge_duplicates_preview_cost_refused', 'merge_duplicates_preview_cost_refused_group']) {
