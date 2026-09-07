@@ -111,6 +111,30 @@ assert.equal(getMinimizedWork()[0]?.draftKey, receiveDraftKey)
 assert.equal(consumePendingRestore('receive_batch'), null)
 removeMinimizedWork(receiveEntry.key)
 
+// Product edits are an exact-entity contract. Even if a legacy chip is missing
+// explicit permission metadata, the registry must enforce products:edit.
+const productEditDraftKey = scopedWorkDraftKey('product_edit_777')
+writeWorkDraft(productEditDraftKey, { name: 'Khmer edit', price: '12.50' })
+minimizeWork({
+  key: 'edit-product-777',
+  kind: 'edit_product',
+  pageId: 'products',
+  label: 'Edit product — Khmer edit',
+  payload: { productId: 777 },
+  draftKey: productEditDraftKey,
+})
+const productEdit = getMinimizedWork()[0]!
+assert.equal(productEdit.kind, 'edit_product')
+assert.equal(productEdit.draftKey, productEditDraftKey)
+assert.deepEqual(productEdit.payload, { productId: 777 })
+assert.equal(canRestoreMinimizedWork(productEdit, () => false), false, 'product edit fallback blocks a revoked grant')
+assert.equal(canRestoreMinimizedWork(productEdit, (permission, action) => permission === 'products' && action === 'edit'), true)
+dispatchRestore(productEdit)
+reparkDeniedRestore(productEdit)
+assert.equal(getMinimizedWork()[0]?.draftKey, productEditDraftKey, 'a denied host restore reparks the exact product draft')
+assert.equal(readWorkDraft<{ name: string }>(productEditDraftKey)?.data.name, 'Khmer edit')
+removeMinimizedWork(productEdit.key)
+
 // A handled event also consumes the pending replay, and removing a chip does
 // not itself make a broad family-draft decision.
 minimizeWork({ key: 'session', kind: 'create_products_session', pageId: 'products', label: 'Create products', draftKey: scopedWorkDraftKey('create_products_session') })
@@ -132,6 +156,7 @@ assert.match(traySource, /entry\.draftKey \|\| \(legacyDraftBase \? scopedWorkDr
 assert.match(traySource, /aria-label=\{tr\('minimized_dismiss_hint', 'Dismiss and discard this draft'/)
 assert.match(traySource, /receive_batch: null/, 'per-product receive drafts must never use a family-wide fallback clear')
 assert.match(traySource, /if \(!canRestoreMinimizedWork\(entry, can\)\) \{[\s\S]*?return[\s\S]*?\}\s*navigateTo\(entry\.pageId, entry\.anchor\)/, 'permission must be rechecked before exact page/section navigation and dispatch')
+assert.match(traySource, /edit_product: null/, 'per-product edit drafts must never use a family-wide fallback clear')
 assert.match(receiveSource, /writeWorkDraft\(draftKey, currentDraft\(\)\)[\s\S]*?onMinimize\(\{[\s\S]*?draftKey,[\s\S]*?\}\)[\s\S]*?onClose\(\)/, 'receive minimize must persist before parking and unmounting')
 assert.match(receiveSource, /useCloseGuard\(\{ workKey: product \? `receive-batch-\$\{product\.id\}` : '' \}, onClose, preserveAndMinimize\)/, 'receive X, Cancel and backdrop must retain the shared guard while its prompt can preserve')
 assert.match(receiveSource, /<MinimizeButton disabled=\{saving\} tr=\{tr\} onMinimize=\{preserveAndMinimize\} \/>/, 'receive must show the shared minus beside Close')
