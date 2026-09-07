@@ -469,9 +469,9 @@ export default function PromotionsPage() {
   // present in the list (HubSectionNav filters `hidden` ones out) so the
   // gating stays legible in one place instead of three conditional spreads.
   const sections: HubSectionDef[] = [
-    { id: 'rules', label: t('promo_tab_rules') || 'Rules', icon: BadgePercent, hidden: !canPromotions, tone: 'text-rose-600 dark:text-rose-400', description: t('hub_desc_promotions_rules') || undefined },
-    { id: 'discounts', label: t('promo_tab_discounts') || 'Discounts', icon: Percent, hidden: !canManageDiscounts, tone: 'text-indigo-600 dark:text-indigo-400', description: t('hub_desc_promotions_discounts') || undefined },
-    { id: 'loyalty', label: t('loyalty_points') || 'Loyalty Points', icon: Gift, hidden: !canLoyalty, tone: 'text-amber-600 dark:text-amber-400', description: t('hub_desc_promotions_loyalty') || undefined },
+    { id: 'rules', label: t('promo_tab_rules') || 'Rules', icon: BadgePercent, hidden: !canPromotions, description: t('hub_desc_promotions_rules') || undefined },
+    { id: 'discounts', label: t('promo_tab_discounts') || 'Discounts', icon: Percent, hidden: !canManageDiscounts, description: t('hub_desc_promotions_discounts') || undefined },
+    { id: 'loyalty', label: t('loyalty_points') || 'Loyalty Points', icon: Gift, hidden: !canLoyalty, description: t('hub_desc_promotions_loyalty') || undefined },
   ]
 
   return (

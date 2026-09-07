@@ -63,10 +63,10 @@ export default function SalesHubPage() {
   const [section, setSection] = useHubSection<SalesHubSection>('sales', () => initialSection(canSales, canReturns, canFees), getHubDestinations('sales', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
 
   const tabs: HubSectionDef[] = [
-    { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, hidden: !canSales, tone: 'text-blue-600', description: trh('hub_desc_sales_sales', 'Ring up and record sales') },
-    { id: 'returns', label: trh('returns', 'Returns'), icon: RotateCcw, hidden: !canReturns, tone: 'text-amber-600', description: trh('hub_desc_sales_returns', 'Process customer returns') },
-    { id: 'fees', label: trh('fees', 'Expenses'), icon: HandCoins, hidden: !canFees, tone: 'text-emerald-600', description: trh('hub_desc_sales_fees', 'Track business expenses') },
-    { id: 'reports', label: trh('reports', 'Reports'), icon: BarChart3, hidden: !canReports, tone: 'text-indigo-600', description: trh('hub_desc_sales_reports', 'Sales, returns and expense reports') },
+    { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, hidden: !canSales, description: trh('hub_desc_sales_sales', 'Ring up and record sales') },
+    { id: 'returns', label: trh('returns', 'Returns'), icon: RotateCcw, hidden: !canReturns, description: trh('hub_desc_sales_returns', 'Process customer returns') },
+    { id: 'fees', label: trh('fees', 'Expenses'), icon: HandCoins, hidden: !canFees, description: trh('hub_desc_sales_fees', 'Track business expenses') },
+    { id: 'reports', label: trh('reports', 'Reports'), icon: BarChart3, hidden: !canReports, description: trh('hub_desc_sales_reports', 'Sales, returns and expense reports') },
   ]
 
   return (

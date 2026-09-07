@@ -115,8 +115,16 @@ runTest('the compact home renders a 2-column tile grid whose sub-grid spans the 
 runTest('the reshape keeps the guarded navigation hooks the lineage ships', () => {
   assert.match(sidebar, /mobileGroupAction\(expandedGroup, id, destinations\(id\), inline\)/, 'one-open-at-a-time still comes from the shared action')
   assert.match(sidebar, /navigateTo\(entry\.ownerId, hubAnchor\(entry\.ownerId, section\.id\)\)/, 'section taps still commit through the guarded navigateTo')
-  assert.match(sidebar, /const openSectionMenu = \(\) => \{\s*setExpandedGroup\(currentSections\.length \? page : null\)/, 'the header Back button still opens the current page unfolded')
-  assert.match(sidebar, /resolveHubSection\(page, location\.pathname, location\.hash/, 'the header title still resolves the committed section from the URL')
+  // N35: Back became a TOGGLE (navLayerToggle, utils/mobileNavChrome.ts) once
+  // the layer stopped being a bottom sheet with a scrim behind it to tap. The
+  // property this line was written for -- opening unfolds the page you are on
+  // -- is unchanged, and is asserted here and in tests/navChrome.test.ts.
+  assert.match(sidebar, /navLayerToggle\(\{ open: moreOpen, expanded: expandedGroup \}, page, currentSections\.length > 0\)/, 'the header Back button still opens the current page unfolded')
+  // Same page, stricter question: the chrome resolves the COMMITTED section
+  // and shows page level when the URL names none, rather than falling back to
+  // a remembered section the body may not be rendering (resolveChromeSection).
+  assert.match(sidebar, /resolveChromeSection\(page, location\.pathname, location\.hash/, 'the header title still resolves the committed section from the URL')
+  assert.doesNotMatch(sidebar, /localStorage\.getItem\(`bos:hub:/, 'and never from the last-visited-section key')
   assert.match(sidebar, /id="section-export-action-host"/, 'the mobile title bar keeps its export host')
   assert.match(sidebar, /<QuickPreferenceToggles \/>/, 'the header quick preferences stay in place')
 })

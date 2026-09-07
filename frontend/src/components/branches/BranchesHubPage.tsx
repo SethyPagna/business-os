@@ -106,10 +106,10 @@ export default function BranchesHubPage() {
   // the Dashboard hand-off and the render body below all key off 'products'.
   // Taking the RC ids wholesale would have silently broken the deep link.
   const tabs: HubSectionDef[] = [
-    { id: 'overview', label: trh('overview', 'Overview'), icon: Building2, hidden: !canBranchList, tone: 'text-sky-600', description: trh('hub_desc_branches_overview', 'Stock summary and every branch') },
-    { id: 'products', label: trh('products', 'Products'), icon: Package, hidden: !canInventory, tone: 'text-emerald-600', description: trh('hub_desc_branches_inventory', 'Per-branch product stock') },
-    { id: 'transfers', label: trh('transfer', 'Transfer'), icon: ArrowRightLeft, hidden: !canBranchList, tone: 'text-violet-600', description: trh('hub_desc_branches_transfers', 'Move stock between branches') },
-    { id: 'rfid', label: 'RFID', icon: Radio, hidden: !canInventory, tone: 'text-emerald-600', description: trh('hub_desc_branches_rfid', 'RFID tag scans') },
+    { id: 'overview', label: trh('overview', 'Overview'), icon: Building2, hidden: !canBranchList, description: trh('hub_desc_branches_overview', 'Stock summary and every branch') },
+    { id: 'products', label: trh('products', 'Products'), icon: Package, hidden: !canInventory, description: trh('hub_desc_branches_inventory', 'Per-branch product stock') },
+    { id: 'transfers', label: trh('transfer', 'Transfer'), icon: ArrowRightLeft, hidden: !canBranchList, description: trh('hub_desc_branches_transfers', 'Move stock between branches') },
+    { id: 'rfid', label: 'RFID', icon: Radio, hidden: !canInventory, description: trh('hub_desc_branches_rfid', 'RFID tag scans') },
   ]
   const visibleTabs = tabs.filter((tab) => !tab.hidden)
   const active = visibleTabs.some((tab) => tab.id === section) ? section : (visibleTabs[0]?.id || 'overview')

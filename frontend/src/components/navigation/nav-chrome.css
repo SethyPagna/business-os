@@ -1,0 +1,264 @@
+/* nav-chrome.css -- the admin design language for the mobile navigation
+   chrome (the top bar, and the pages layer its Back control opens).
+
+   WHY THIS FILE EXISTS
+   --------------------
+   Reported (owner, Sep 6 2026): "the color contrast them design for them are
+   not clear enough. like it all seems to just use grey, and background white,
+   text and icon black... looks very old." That was literal. The bar was
+   `bg-white` + `border-gray-200`; the tiles `bg-gray-50`; and the section
+   buttons `bg-white border-gray-200` with NO active treatment at all -- the
+   section you were actually in was styled identically to the ones beside it.
+
+   The admin design language is ivory ground / charcoal ink / muted-gold
+   accent. `--ui-accent` (#9c7a3c, brass) is the only part of it declared
+   globally in styles/main.css, so the rest is declared here, scoped to
+   `.bos-nav-chrome`, and layered ON TOP of that existing token instead of
+   restating its value -- a themed `--ui-accent` still drives this chrome.
+
+   Scoped, not `:root`, deliberately: reports/reports-surface.css already
+   declares an app-wide `--ui-surface` / `--ui-ink` / `--ui-line` set at
+   `:root`, but it ships inside the lazily-loaded Reports chunk, so those
+   tokens are undefined until someone opens Reports. Chrome reading them
+   would render unstyled on a cold launch. `--nav-*` under `.bos-nav-chrome`
+   exists the moment Sidebar mounts and collides with nothing.
+
+   Sidebar.tsx drops the Tailwind colour utilities from every element these
+   rules cover, so nothing here has to win a specificity tie or reach for
+   !important, and the stylesheet's load order does not matter.
+
+   EVERY color-mix() VALUE IS PRECEDED BY THE EQUIVALENT FLAT HEX. Two
+   reasons: a browser without color-mix support (this is a phone-first
+   surface) keeps a real colour instead of an invalid declaration, and
+   tests/navChrome.test.ts can measure the palette's actual contrast from
+   the declared values rather than taking the comment's word for it.
+
+   CONTRAST, measured by that test against the grounds these actually sit on:
+     light   ink   #23201b on surface #fffdf8 ........... 15.97:1
+             ink-2 #5c564c on surface #fffdf8 ............. 7.15:1
+             open  #6b5122 on accent-soft #efe8da ......... 6.10:1
+     dark    ink   #fafafa on surface #141414 ............ 17.65:1
+             ink-2 #d4d4d4 on surface #141414 ............ 12.43:1
+             open  #e8cd8d on accent-soft #352e1e ......... 8.68:1
+   Open and resting differ in ground, ink AND weight (plus a gold rule on the
+   leading edge), so "which one am I in" never rests on hue alone. */
+
+.bos-nav-chrome {
+  --nav-ground: #f4f1ea;      /* ivory -- the layer's own page ground */
+  --nav-surface: #fffdf8;     /* the bar, and a resting section button */
+  --nav-surface-2: #efeae0;   /* a resting page tile */
+  --nav-ink: #23201b;         /* charcoal */
+  --nav-ink-2: #5c564c;
+  --nav-line: rgba(35, 32, 27, 0.16);
+  --nav-accent: var(--ui-accent, #9c7a3c);
+  --nav-accent-soft: #efe8da;
+  --nav-accent-soft: color-mix(in srgb, var(--ui-accent, #9c7a3c) 16%, #fffdf8);
+  --nav-accent-line: #ccb996;
+  --nav-accent-line: color-mix(in srgb, var(--ui-accent, #9c7a3c) 52%, transparent);
+  --nav-accent-strong: #6b5122;
+  --nav-panel: #ede7dc;
+  --nav-panel: color-mix(in srgb, var(--ui-accent, #9c7a3c) 8%, #f4f1ea);
+  --nav-panel-line: #ddd2bd;
+  --nav-panel-line: color-mix(in srgb, var(--ui-accent, #9c7a3c) 26%, transparent);
+  --nav-display-font: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif;
+  --nav-row-h: 32px;
+  /* The open hub chip's ground. It is its own token because "lifted" is not
+     the same colour in the two themes: on ivory the open chip is LIGHTER
+     than the well it sits in, and on a near-black ground nothing is lighter
+     than the page -- there the lift has to come from the warm accent tint
+     instead. Using --nav-surface in both gave the dark chip a 1.07:1 step off
+     the well, i.e. no visible state at all. */
+  --nav-chip-open: #fffdf8;
+}
+
+:root.dark .bos-nav-chrome,
+.dark .bos-nav-chrome {
+  --nav-ground: var(--dm-page, #171717);
+  --nav-surface: var(--dm-sidebar, #141414);
+  --nav-surface-2: var(--dm-card, #262626);
+  --nav-ink: var(--dm-text, #fafafa);
+  --nav-ink-2: var(--dm-text-3, #d4d4d4);
+  --nav-line: var(--dm-border, rgba(82, 82, 82, 0.6));
+  /* main.css already uses the lighter brass (#c9a34e) wherever an accent has
+     to hold up on a near-black ground. */
+  --nav-accent: #c9a34e;
+  --nav-accent-soft: #352e1e;
+  --nav-accent-soft: color-mix(in srgb, #c9a34e 18%, #141414);
+  --nav-accent-line: #6d5b34;
+  --nav-accent-line: color-mix(in srgb, #c9a34e 52%, transparent);
+  --nav-accent-strong: #e8cd8d;
+  --nav-panel: #1e1b13;
+  --nav-panel: color-mix(in srgb, #c9a34e 8%, #171717);
+  --nav-panel-line: #4a4030;
+  --nav-panel-line: color-mix(in srgb, #c9a34e 26%, transparent);
+  --nav-chip-open: #352e1e;
+  --nav-chip-open: color-mix(in srgb, #c9a34e 18%, #141414);
+}
+
+/* Khmer never renders in a Latin display serif: the Khmer stack is the
+   legible face for it, and main.css's own line-height floor applies. */
+body.lang-km .bos-nav-chrome {
+  --nav-display-font: var(--ui-khmer-font-family, "Noto Sans Khmer", "Khmer OS Siemreap", "Battambang", "Khmer OS", sans-serif);
+}
+
+.bos-nav-topbar {
+  background-color: var(--nav-surface);
+  border-bottom: 1px solid var(--nav-line);
+  color: var(--nav-ink);
+}
+
+/* The page / section title. The display face is what separates the title
+   from the controls beside it without spending a second row on it. */
+.bos-nav-title {
+  font-family: var(--nav-display-font);
+  color: var(--nav-ink);
+  letter-spacing: 0.01em;
+}
+
+.bos-nav-back {
+  color: var(--nav-ink-2);
+}
+
+.bos-nav-back:hover,
+.bos-nav-back[aria-expanded='true'] {
+  background-color: var(--nav-accent-soft);
+  color: var(--nav-accent-strong);
+}
+
+/* The account control, and the avatar face inside it (repeated in the panel
+   it opens). It was the last colour left in the bar after the restyle, and a
+   colour this design language does not have: a `bg-blue-50/90` pill with a
+   `bg-blue-100` face and `text-blue-600` initials, dark-moded into
+   blue-900/30 and blue-900/40. It sits in pages mode too -- outside the
+   `inline ?` branch -- so on a sub page the merged bar read charcoal-and-gold
+   everywhere except its right end. Same treatment .bos-nav-back gets above:
+   the chrome's own soft accent ground, its strong accent ink.
+
+   The FACE is the bar's surface rather than the pill's ground, so the ring
+   the pill's `p-0.5` draws stays visible in both themes -- the same "a lift
+   has to be a real step" reasoning as --nav-chip-open. Measured on the flat
+   fallbacks (navChrome.test.ts recomputes):
+     light  ink  #6b5122 on the face #fffdf8 ..... 7.31:1
+            pill #efe8da against that face ....... 1.20:1
+     dark   ink  #e8cd8d on the face #141414 .... 11.89:1
+            pill #352e1e against that face ....... 1.37:1 */
+.bos-nav-avatar {
+  background-color: var(--nav-accent-soft);
+  color: var(--nav-accent-strong);
+}
+
+.bos-nav-avatar-face {
+  background-color: var(--nav-surface);
+  color: var(--nav-accent-strong);
+}
+
+/* The pages layer. Its `top` comes from utils/mobileNavChrome.ts -- the
+   bottom edge of the fixed chrome -- and it runs to the bottom of the
+   viewport, so it is opaque over the page it was opened from. */
+.bos-nav-layer {
+  background-color: var(--nav-ground);
+  color: var(--nav-ink);
+  border-top: 1px solid var(--nav-line);
+}
+
+.bos-nav-tile {
+  background-color: var(--nav-surface-2);
+  color: var(--nav-ink);
+  border: 1px solid transparent;
+}
+
+.bos-nav-tile.is-open {
+  background-color: var(--nav-accent-soft);
+  border-color: var(--nav-accent-line);
+  color: var(--nav-accent-strong);
+  font-weight: 600;
+}
+
+/* The unfolded tile's sub-grid: a tinted well, so the sub pages read as
+   belonging to the tile above them rather than floating in the list. */
+.bos-nav-sections {
+  background-color: var(--nav-panel);
+  border: 1px solid var(--nav-panel-line);
+}
+
+.bos-nav-section {
+  background-color: var(--nav-surface);
+  border: 1px solid var(--nav-line);
+  color: var(--nav-ink-2);
+  min-height: max(44px, var(--nav-row-h));
+}
+
+.bos-nav-section:hover {
+  border-color: var(--nav-panel-line);
+  color: var(--nav-ink);
+}
+
+/* The section you are actually in. Ground + ink + weight + a gold rule on
+   the leading edge: the treatment that was missing entirely. */
+.bos-nav-section.is-active {
+  background-color: var(--nav-accent-soft);
+  border-color: var(--nav-accent-line);
+  color: var(--nav-accent-strong);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 0 var(--nav-accent);
+}
+
+/* ------------------------------------------------------ hub chip row -----
+
+   The SECOND layer of the same two-layer navigation: the section chips a hub
+   renders in its own body (Products | Stock Changes | Stock-in Sessions |
+   Conflicts, and the equivalent on every other hub). It is what a large
+   screen shows INSTEAD of the compact top bar -- the "merge into one row"
+   rule -- and what compact "sections" mode shows as well, so it has to wear
+   the same language as the bar above, or the two layers read as two apps.
+
+   As it shipped: a `bg-gray-100` well, `text-gray-500` resting chips, and an
+   active chip that was `bg-white` plus whichever hue that hub had picked for
+   itself -- sky on Branches, rose/indigo/amber on Promotions, blue/teal/rose
+   on Review. The reported "it all seems to just use grey, and background
+   white" with a different accent per page underneath it.
+
+   Selected state keys off `aria-pressed`, which BOTH call sites already set
+   (shared/HubSectionNav.tsx, and the identical row products/Products.tsx
+   renders for its own four sections) -- so the state the assistive tree reads
+   and the state the eye reads cannot come apart. Both rows dropped their
+   colour utilities, so nothing here fights for specificity.
+
+   Measured (flat fallbacks; navChrome.test.ts recomputes these):
+     light   resting #5c564c on the well #ede7dc .......... 5.91:1
+             active  #6b5122 on the chip  #fffdf8 ......... 7.65:1
+     dark    resting #d4d4d4 on the well #1e1b13 ......... 11.61:1
+             active  #e8cd8d on the chip  #352e1e .......... 8.76:1
+   Active also differs by ground and by a gold underline, so the open chip is
+   not carried by hue alone. */
+
+.hub-section-pills {
+  background-color: var(--nav-panel);
+  border: 1px solid var(--nav-panel-line);
+}
+
+.hub-section-pill {
+  background-color: transparent;
+  border: 1px solid transparent;
+  color: var(--nav-ink-2);
+}
+
+.hub-section-pill:hover {
+  background-color: var(--nav-surface);
+  color: var(--nav-ink);
+}
+
+/* The open section. Ground + ink + a gold underline; `inset` keeps the rule
+   inside the chip's own rounded box instead of colliding with the well. */
+.hub-section-pill[aria-pressed='true'] {
+  background-color: var(--nav-chip-open);
+  border-color: var(--nav-accent-line);
+  color: var(--nav-accent-strong);
+  box-shadow: inset 0 -2px 0 0 var(--nav-accent);
+}
+
+/* The md+ rule under the chip row -- the line that separates the switcher
+   from the body. Grey-200 before; the chrome's own line now. */
+.hub-section-rule {
+  border-bottom: 2px solid var(--nav-line);
+}
