@@ -340,9 +340,18 @@ runTest('public product discovery uses a sticky unified search, responsive brand
   assert.doesNotMatch(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\]/,
     'the desktop letter grid and its inner scroller are retired')
   assert.match(paginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
-    'storefront paging should use the same current Back/Next/page-size control as the rest of the app')
-  assert.match(paginationSource, /pageSizeOptions=\{CATALOG_PAGE_SIZE_OPTIONS\}/)
-  assert.match(paginationSource, /editablePageSizeInput=\{false\}/,
+    'storefront paging should use the same current Back/Next control as the rest of the app')
+  // These two used to read `pageSizeOptions={CATALOG_PAGE_SIZE_OPTIONS}` and
+  // `editablePageSizeInput={false}` on the wrapper. Both props configured the
+  // per-page control that used to sit on the pager row, which the owner struck
+  // off on Sep 6 2026. The FACT they were protecting -- items-per-page stays
+  // bounded to the storefront presets -- is unchanged, so it is asserted at
+  // the presets and at the control that now offers them.
+  assert.match(paginationSource, /export const CATALOG_PAGE_SIZE_OPTIONS = \[20, 50, 100\]/,
+    'the storefront presets must stay a short fixed list')
+  assert.match(catalogProductsSectionSource, /options=\{CATALOG_PAGE_SIZE_OPTIONS\}/,
+    'and the Filters per-page field must offer exactly those, not a second list')
+  assert.match(catalogProductsSectionSource, /allowCustom=\{false\}/,
     'items-per-page should stay bounded to the storefront API presets')
 })
 

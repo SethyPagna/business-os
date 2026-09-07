@@ -72,25 +72,41 @@ assert.match(sectionSwitcher, /section-switcher max-w-full min-w-0/, 'shared sec
 assert.match(sectionSwitcher, /flex min-w-0 flex-wrap/, 'shared section switcher must wrap without horizontal scrolling')
 
 const pagination = read('components/shared/PaginationControls.tsx')
-// Every SINGLE-LINE PILL form of the pager must collapse its Back/Next words
-// to icon-only on narrow screens -- a pill has no room to wrap. Checked per
-// branch instead of as one whole-file count: a count silently turns into a
-// failure the moment another compliant pill branch is added, which is what the
-// centred storefront layout did.
-for (const [name, from, to] of [
-  ['centered', "  if (layout === 'centered')", '  if (compact && rangeAsPageSize)'],
-  ['compact range-as-page-size', '  if (compact && rangeAsPageSize)', '  if (compact)'],
+// The two SINGLE-LINE PILL forms of the pager, and what each one owes its
+// own screen. Checked per branch rather than as one whole-file count: a count
+// silently turns into a failure the moment another pill branch is added.
+//
+// They differ, and the difference is the point. The compact
+// `rangeAsPageSize` pill is an ADMIN control that sits inline in a Select-all
+// row beside other labelled controls, where the horizontal space is genuinely
+// contested -- it collapses to icons below `sm`. The centred pill IS the
+// storefront page, on its own row, and it used to collapse too: Tailwind
+// `sm` is 640px, so the owner's phone got two bare chevrons and no words on
+// the only navigation control of a 3,555-product catalogue. It keeps its
+// words at every width (storefrontPagerRow.test.ts measures that it still
+// fits and still cannot wrap).
+for (const [name, from, to, collapses] of [
+  ['centered', "  if (layout === 'centered')", '  if (compact && rangeAsPageSize)', false],
+  ['compact range-as-page-size', '  if (compact && rangeAsPageSize)', '  if (compact)', true],
 ] as const) {
   const start = pagination.indexOf(from)
   const end = pagination.indexOf(to, start + from.length)
   assert.ok(start > 0 && end > start, `pagination pill branch '${name}' must still be findable`)
   const branch = pagination.slice(start, end)
+  const hidden = (branch.match(/hidden sm:inline">\{(?:back|next)Label\}/g) || []).length
   assert.equal(
-    (branch.match(/hidden sm:inline">\{(?:back|next)Label\}/g) || []).length,
-    2,
-    `${name} pager labels must collapse to icon-only on narrow screens`,
+    hidden,
+    collapses ? 2 : 0,
+    collapses
+      ? `${name} pager labels must collapse to icon-only on narrow screens`
+      : `${name} pager labels must stay readable at 375px -- Tailwind sm is 640px, so hiding below it hides them on every phone`,
   )
-  assert.doesNotMatch(branch, /<span>\{(?:back|next)Label\}<\/span>/, `${name} pager must not render an always-on Back/Next word`)
+  // Either way the pill must not wrap: the words that DO show are nowrap.
+  const labelSpans = branch.match(/<span className="[^"]*">\{(?:back|next)Label\}<\/span>/g) || []
+  for (const span of labelSpans) {
+    assert.match(span, /hidden sm:inline|whitespace-nowrap/, `${name} pager label ${span} must either collapse or be nowrap`)
+  }
+  assert.doesNotMatch(branch, /<span>\{(?:back|next)Label\}<\/span>/, `${name} pager must not render an unclassed Back/Next word that can wrap`)
 }
 assert.match(pagination, /onPageChange\?\.\(safePage\)/, 'pager must repair stale out-of-range controlled pages')
 

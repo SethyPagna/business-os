@@ -100,6 +100,7 @@ const catalogEditorSurface = fs.readFileSync(new URL('../src/components/catalog/
 const catalogImages = fs.readFileSync(new URL('../src/components/catalog/catalogImages.tsx', import.meta.url), 'utf8')
 const catalogAssetUrls = fs.readFileSync(new URL('../src/components/catalog/catalogAssetUrls.ts', import.meta.url), 'utf8')
 const catalogPagination = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
+const catalogProductsSection = fs.readFileSync(new URL('../src/components/catalog/CatalogProductsSection.tsx', import.meta.url), 'utf8')
 const paginationControls = fs.readFileSync(new URL('../src/components/shared/PaginationControls.tsx', import.meta.url), 'utf8')
 const products = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const productExport = fs.readFileSync(new URL('../src/components/products/helpers/productExport.ts', import.meta.url), 'utf8')
@@ -554,7 +555,15 @@ assert.doesNotMatch(catalogPage, /from '\.\/portalContentI18n\.ts'/, 'public cat
 assert.match(catalogPage, /import\('\.\/portalLanguagePacks\.ts'\)/, 'public catalog should lazy-load first-party language packs only for non-English language intent')
 assert.match(catalogPage, /import\('\.\/portalContentI18n\.ts'\)/, 'public catalog should lazy-load content localization only for non-English language intent')
 assert.match(catalogPagination, /<PaginationControls/, 'public catalog pagination should use the shared responsive control')
-assert.match(catalogPagination, /editablePageSizeInput=\{false\}/, 'public catalog pagination should keep the mobile selector compact')
+// `editablePageSizeInput={false}` used to be checked here, as "keeps the
+// mobile selector compact". There is no selector on the storefront pager row
+// any more (the owner struck it off on Sep 6 2026); the flag went with it and
+// the chooser is a Filters field that bounds itself with allowCustom={false}.
+// What still matters for THIS file is that the storefront presets stay a
+// short fixed list rather than an open number, so a phone never requests a
+// 500-card page.
+assert.match(catalogPagination, /export const CATALOG_PAGE_SIZE_OPTIONS = \[20, 50, 100\]/, 'public catalog paging should stay bounded to three small presets')
+assert.match(catalogProductsSection, /allowCustom=\{false\}/, 'and the chooser that offers them must not accept an arbitrary page size')
 assert.match(paginationControls, /flex flex-col gap-2[^"]*sm:flex-row/, 'shared pagination should stack on narrow mobile cards and return to one row on larger screens')
 assert.match(viteConfig, /ResetData\.tsx'\)\) return 'backup-reset-tools'/, 'destructive Backup reset panels should have an action-only chunk')
 assert.match(viteConfig, /OtpModal\.tsx'\)\) return 'settings-otp-modal'/, 'Settings OTP setup/disable modal should have an action-only chunk')
