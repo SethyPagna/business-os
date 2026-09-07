@@ -4,10 +4,16 @@ This is the current request register. `progress.md` links here. Append new owner
 requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
-Last reconciled: 2026-09-07 09:05 UTC. Functional errors precede broad layout
-polish. The next verified functional deployment is authorized. No takeover code
-or data correction has been deployed/applied yet. Production version last
-confirmed: `6c3f9a35-9b38-4f00-bc7d-bae28bb0ef76`.
+Last reconciled: 2026-09-07T10:13:09.871Z. Functional fixes precede UI polish.
+First functional release **821efc94ce7a** is serving 100% traffic as Worker
+**498efadb-f833-471d-a8b7-b4326950bd26**, deployed 2026-09-07 09:54:13 UTC.
+Public Git branch: codex/release-fixes-20260907. Migrations 0128–0132 and required
+security configuration applied. Full 306 frontend files and 274 backend suites,
+both typechecks, i18n, build, and frozen browser smoke passed before deployment.
+Live assets match the release; Sales bootstrap timed out during network failures
+and is still under investigation (F36). Do not call every live workflow certified.
+Historical metadata correction and duplicate merge have not run. F32 follows in
+a separate deployment after its integrated/browser checks.
 
 State definitions: **Local pass** means implemented with relevant local evidence,
 not production completion. **Integrated** means source is composed but final
@@ -44,17 +50,18 @@ Every shipped row must eventually record its actual deployment version.
 | F22 | Customer delivery fee and actual delivery cost are separately editable and recorded. | Local pass for existing delivery / sales | Fee changes customer total; actual cost does not. No-delivery conversion is F32. |
 | F23 | Dashboard low/out lists load more at the bottom and reset on leaving. | Local pass / media, responsive | Desktop and 375px scroll 10→20 and leave/reenter reset passed. |
 | F24 | Total stock alerts use Shop+Warehouse; branch pages/POS branch options use individual branch stock. | Local pass / media | Pure aggregate/branch tests; alert setting events refresh Dashboard, POS and Branches. |
-| F25 | Permissions/roles fully scoped across add/edit/session/images, review, imports, bulk, offline and undo. | Local pass / media, minimize, portal | Synchronous matrix through 96abe402 and Queue authority through 1aae81d3 independently certified, including races, cancellation and current-role checks. Root combined sweep running. |
+| F25 | Permissions/roles fully scoped across add/edit/session/images, review, imports, bulk, offline and undo. | Local pass / media, minimize, portal | Synchronous matrix through 96abe402 and Queue authority through 1aae81d3 independently certified, including races, cancellation and current-role checks. Combined first-release sweep passed. |
 | F26 | Dismiss offline/update notifications with X without hiding failed saves or lying about connectivity. | Integrated / root, identity | Dismissal helper and App integration complete; reconnect/error behavior retained. |
 | F27 | Remove redundant eye next to Print in sales rows. | Local pass / sales | Browser row access remains; Actions shows Print only. |
 | F28 | Take over Claude lanes, commits, dirty/unverified work and progress sessions. | Reconciled / lineage, root | Twenty-lane lineage and shared patch inventory preserved; original dirty worktrees untouched. |
 | F29 | Remove duplicate delivery_actual_cost_usd field and rejected stopgap kind comment in Sales merge fallout. | Integrated / sales | Source/type/parity gates cover composed Sales. |
 | F30 | Finish earlier N18/N21/N23 and N28–N36/audit lanes without losing their fixes. | Reconciled; release pending / root | Canonical ea9f0d1b base includes checkpoint 2 and earlier integrations; individual follow-up fixes retained. |
-| F31 | GitHub commits describe individual fixes, not checkpoint/batch commits. | Prepared / lineage, root | Separate public release history preserves messages/authors; eight internal reports excluded, required clean test fixture retained. No push yet. |
+| F31 | GitHub commits describe individual fixes, not checkpoint/batch commits. | Prepared / lineage, root | Separate public release history preserves messages/authors; eight internal reports excluded, required clean test fixture retained. Pushed release branch at 821efc94. |
 | F32 | NEW: sale originally without delivery must allow later adding driver, customer delivery fee and actual delivery cost. | Active priority / sales; identity review | Added from owner's latest status request. Trace UI/API/status/money/Records/undo; separate fix commit required. |
 | F33 | Preserve creation-time basket history for future sales; unavailable historical snapshots must remain explicitly unknown. | Open follow-through / root | Review found live product names can change after rename/merge. Existing history must not invent original labels; durable future creation snapshot remains a follow-up to F21. |
-| F34 | Final browser discovery: Sales list returns 500 because Records count SQL exceeds the real D1 compound SELECT limit. | Active priority / sales, identity | Reproduced on frozen 25a357a2; fix bounded query structure and prove against actual local Worker, not only generic SQLite. |
-| F35 | Final browser discovery: Fast Stock minimize chip restores the wrong host page and disappears without reopening the draft. | Active priority / media, responsive | Draft remains; fix route/host handoff and only consume a successful restore. Preserve denied-action repark. |
+| F34 | Sales list/detail Records SQL failed in real D1. | Deployed 821efc94 / sales | Frozen actual Worker list/detail now 200; count and compound ordering repaired. |
+| F35 | Fast Stock minimize restored wrong host and consumed the chip. | Deployed 821efc94 / media | Exact user5 frozen browser restore passed; preserves draft and consumes only after modal mounts. |
+| F36 | Live Sales bootstrap timed out twice after deployment amid network interruptions. | Active diagnosis / root, minimize | Live tail also shows successful Sales responses in 629–867ms; identify network versus frontend loader failure before claiming cause. |
 
 ## Public portal and legal requests
 
@@ -66,7 +73,7 @@ Every shipped row must eventually record its actual deployment version.
 | P04 | Accessible public site: alt text, contrast, keyboard forms, clear buttons and small-screen heading. | Local pass / portal, responsive | 375px heading one line/no overflow; modal focus/inert/scroll checks and UI fixes passed. |
 | P05 | Remove fake reviews/unsupported claims and review image copyright. | Reviewed; rights facts unresolved / portal | No invented reviews/claims added. Existing image ownership/license cannot be proven from a file alone; keep this risk visible. |
 | P06 | Add truthful business details; check applicable local law and flag risks. | Needs facts / root, owner | Trade name/address/phone verified. Registered legal identity, registration, email and target markets remain unconfirmed; Cambodia sources and conditional foreign-market risks documented privately. |
-| P07 | Configuration security findings discovered during takeover. | Prepared / root | Dedicated portal HMAC absent; one malformed Telegram binding exposes credential text in its name. Remove stray binding during release; bot token rotation remains necessary. No credential values belong in this register. |
+| P07 | Configuration security findings discovered during takeover. | Prepared / root | Dedicated portal HMAC absent; one malformed Telegram binding exposes credential text in its name. Dedicated HMAC configured and stray binding removed; bot token rotation remains necessary. No credential values belong in this register. |
 
 ## UI follow-up queue
 
@@ -87,15 +94,15 @@ Every shipped row must eventually record its actual deployment version.
 
 ## Release and follow-through
 
-1. Finish F32, F34 and F35; independently review; run affected and combined gates.
-2. Final frozen browser smoke and exact public release-tree comparison.
-3. Fresh production snapshots/bookmark, required secret configuration and
-   migrations 0128–0132 plus the reviewed F32 migration 0133, then stamped deployment and live verification.
-4. Record actual deployed revision/version against shipped requests above.
-5. Execute proven historical Shop metadata correction with fresh hashes and
-   atomic audit/recovery; keep ambiguous driver/sale-link/fulfillment cases open.
-6. Run the requested supported duplicate merge with the owner's signed-in session.
-7. Continue the deferred UI queue and resolve missing business/rights facts.
+1. First release deployed; finish live Sales bootstrap diagnosis F36.
+2. F32 delivery addition integrated; run final browser and combined checks, then
+   append public fix commits, apply reviewed 0133 and deploy separately.
+3. Record actual per-workflow live results without conflating local and live checks.
+4. Execute proven historical Shop metadata correction using authenticated actor,
+   fresh full hashes, and one atomic audited binding batch.
+5. Run requested duplicate merge through the signed-in app, preserving undo IDs.
+6. Implement F33 future immutable creation snapshots; never invent legacy history.
+7. Continue deferred UI and resolve business/rights facts and Telegram rotation.
 
 Detailed evidence: [takeover ledger](2026-09-07-codex-takeover.md), individual Git
 commits, and private local `outputs/takeover-20260907/` reports. Local checks do not
