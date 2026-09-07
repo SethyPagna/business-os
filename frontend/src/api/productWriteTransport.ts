@@ -1,5 +1,4 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
-import { getLocalDb } from './lazyLocalDb.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
@@ -44,30 +43,8 @@ function encodeId(id: string | number): string {
   return encodeURIComponent(String(id))
 }
 
-async function ensureSupplierExists(name: unknown): Promise<void> {
-  const supplierName = String(name || '').trim()
-  if (!supplierName) return
-
-  try {
-    const db = await getLocalDb()
-    const suppliers = db.table('suppliers') as unknown as {
-      where: (field: string) => {
-        equalsIgnoreCase: (value: string) => {
-          first: () => Promise<unknown>
-        }
-      }
-    }
-    const existing = await suppliers.where('name').equalsIgnoreCase(supplierName).first()
-    if (existing) return
-
-    await apiFetch('POST', '/api/suppliers', { name: supplierName, ...getDevicePayload() })
-    cacheInvalidate('suppliers')
-  } catch (_) {}
-}
-
 export async function createProduct(payload: ProductPayload = {}): Promise<unknown> {
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'product')
-  await ensureSupplierExists(body.supplier)
   return route(
     'products:create',
     () => apiFetch('POST', '/api/products', body),
@@ -77,7 +54,6 @@ export async function createProduct(payload: ProductPayload = {}): Promise<unkno
 }
 
 export async function updateProduct(id: string | number, payload: ProductPayload = {}): Promise<unknown> {
-  await ensureSupplierExists(payload.supplier)
   const body = await withExpectedUpdatedAt('products', id, { ...getDevicePayload(), ...(payload || {}) })
   return route(
     'products:update',
