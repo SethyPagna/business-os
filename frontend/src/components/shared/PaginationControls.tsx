@@ -56,10 +56,10 @@ export interface PaginationControlsProps {
   // three-part admin row -- a "Showing 1-50 of 3,555 products" summary on the
   // left, then a labelled per-page column and the pager pushed to the right
   // edge -- is what a shopper was being shown above and below the product
-  // grid. This variant drops the summary entirely, folds the per-page chooser
-  // INTO the pager pill (sized to the value it prints, not a fixed column),
-  // and centres the whole thing. 'default' stays the default, so every admin
-  // consumer of this control renders exactly as before.
+  // grid. This variant drops the summary and page-size selector, keeps an
+  // editable page number between visible Back/Next controls, and centres the
+  // whole thing. 'default' stays the default, so every admin consumer of this
+  // control renders exactly as before.
   layout?: 'default' | 'centered'
 }
 
@@ -149,18 +149,54 @@ export default function PaginationControls({
   if (!state.visible) return null
 
   if (layout === 'centered') {
-    // Storefront pager: [< Back] [page / total] [Next >] [50 v], centred, and
-    // mounted identically above and below the grid.
+    // Storefront pager: ONE centred pill, "< Back  1 / 72  Next >", mounted
+    // identically above and below the grid.
     //
-    // The per-page trigger carries no width floor and no separate caption --
-    // the "per page" wording survives as its accessible name, which is where
-    // it belongs for a control whose visible value is already the number of
-    // items. Nothing here prints the item range, so the retired "Showing"
-    // string has no remaining consumer.
-    const arrowButtonClass = 'inline-flex h-8 shrink-0 items-center gap-0.5 px-2.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    // The centered layout has no page-size selector. Its row stays focused on
+    // page navigation: visible Back/Next labels, an editable page field, and
+    // the total page count. All controls keep a 40px hit area and an inset
+    // keyboard focus ring so the rounded pill does not clip the indicator.
+    const focusRingClass = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500'
+    const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 px-3 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${focusRingClass}`
+    const countClass = 'h-10 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-10 text-slate-500 dark:text-slate-400'
+    // The page box takes its width from what it prints. `ch` is the width of
+    // "0" in the current font, which is the right unit for a numeric field.
+    //
+    // With a FLOOR, though. Removing the fixed `w-9` closed the gap the owner
+    // circled, and then overshot: at text-xs a `ch` is about 6-7px, so a
+    // one-digit page gave `calc(1ch + 0.5rem)` ~= 15px of tap target -- 21px
+    // narrower than the 36px box it replaced, on the storefront's only
+    // page-jump control, and half the 40px floor the arrows beside it keep.
+    // `max()` keeps both facts: 40px minimum, and it still grows with the
+    // digits so "108" is snug and nothing reserves room for digits that are
+    // not there. `min-w-10` rather than `min-w-0` for the same reason -- a
+    // flex child told it may collapse below its content is the one thing that
+    // could undo the floor.
+    const pageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
+    // Centered navigation has no useful action on a single page. Keep this
+    // rule local: admin layouts still use `state.visible === total > 0` and
+    // may carry controls that remain useful when both arrows are disabled.
+    if (totalPages <= 1) return null
+    // A LANDMARK, not a bare div. This row is the storefront's whole
+    // navigation between pages of the catalogue, and as a `<div>` it appeared
+    // in no landmark list, so the one control a screen-reader user most needs
+    // to jump to was the one they had to hunt for.
+    //
+    // The name is composed from `page`, which every one of the 17 portal
+    // language packs already translates (portalLanguagePacks.ts), rather than
+    // from a `pagination` key added for this row alone: the storefront's
+    // `copy()` resolves through those packs, so a new key would be English in
+    // 15 languages and would duplicate a string that already exists.
+    //
+    // And it SAYS where it went. Pressing Next swapped the grid silently: the
+    // focus stays on Next, whose accessible name does not change, so nothing
+    // was announced at all. The polite live region carries the page and the
+    // total. Both mounts (above and below the grid) carry one, because either
+    // one can be the pager being operated; a reader on a page with both will
+    // hear the move once per region.
     return (
-      <div className={`flex w-full justify-center ${className}`}>
-        <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white pr-1 text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+      <nav className={`flex w-full justify-center ${className}`} aria-label={pageLabel}>
+        <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
           <button
             type="button"
             className={`${arrowButtonClass} rounded-l-full`}
@@ -169,9 +205,9 @@ export default function PaginationControls({
             aria-label={backLabel}
           >
             <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
-            <span className="hidden sm:inline">{backLabel}</span>
+            <span className="whitespace-nowrap">{backLabel}</span>
           </button>
-          <div className="inline-flex min-w-0 shrink items-center gap-1 px-1">
+          <div className="inline-flex min-w-0 shrink items-center">
             {editablePageInput ? (
               <>
                 <span className="sr-only">{pageLabel}</span>
@@ -179,7 +215,8 @@ export default function PaginationControls({
                   type="text"
                   inputMode="numeric"
                   aria-label={pageLabel}
-                  className="h-7 w-9 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                  style={{ width: `max(2.5rem, calc(${pageDigits}ch + 0.5rem))` }}
+                  className={`h-10 min-w-10 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100 ${focusRingClass}`}
                   value={pageDraft}
                   onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                   onBlur={(event) => commitPageDraft(event.currentTarget.value)}
@@ -187,35 +224,23 @@ export default function PaginationControls({
                 />
               </>
             ) : (
-              <span className="px-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
+              <span className="px-1 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
             )}
-            <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">/ {totalPages}</span>
+            <span className={countClass}>/ {totalPages}</span>
           </div>
           <button
             type="button"
-            className={arrowButtonClass}
+            className={`${arrowButtonClass} rounded-r-full`}
             disabled={nextDisabled}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
           >
-            <span className="hidden sm:inline">{nextLabel}</span>
+            <span className="whitespace-nowrap">{nextLabel}</span>
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
-          {onPageSizeChange ? (
-            <PageSizeSelect
-              value={safePageSize}
-              options={pageSizeOptions}
-              onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-              ariaLabel={perPageLabel}
-              allowCustom={editablePageSizeInput}
-              className="shrink-0"
-              buttonClassName="h-7 w-auto gap-1 rounded-full border-slate-200 bg-slate-100 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              menuClassName="min-w-[7rem]"
-              optionClassName="text-xs"
-            />
-          ) : null}
         </div>
-      </div>
+        <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
+      </nav>
     )
   }
 
