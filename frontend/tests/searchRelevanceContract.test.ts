@@ -158,12 +158,19 @@ check('the fully client-side pickers rank their own results', () => {
     'the bulk transfer picker filters an UNPAGED, unranked branch-stock read -- it must rank client-side')
 
   const supplierReturn = read('../src/components/returns/NewSupplierReturnModal.tsx')
-  assert.match(supplierReturn, /sortBySearchRelevance\(/,
-    'the supplier-return picker reads /api/inventory/summary, which takes no search term and answers name-A-Z')
-  assert.match(supplierReturn, /normalizeBarcodeKey\(product\.barcode\)/,
-    'a scan into the supplier-return box must be able to match a barcode at all')
-  assert.match(supplierReturn, /\$\{product\.barcode \|\| ''\}/,
-    'barcode must be in that picker haystack, not just in its exact-match probe')
+  const supplierReturnSearch = read('../src/components/returns/supplierReturnSearch.ts')
+  assert.match(supplierReturn, /filterAndRankSupplierReturnProducts\(products, search\)/,
+    'the supplier-return picker must route its unpaged inventory read through the guarded ranking helper')
+  assert.match(supplierReturnSearch, /sortBySearchRelevance\(/,
+    'the supplier-return helper must rank the inventory summary before rendering it')
+  assert.match(supplierReturnSearch, /searchTermBarcodeKeys\(raw\)/,
+    'a single scanned term must be classified with the shared barcode contract')
+  assert.match(supplierReturnSearch, /barcodeKeysMatch\(product\.barcode, raw\)/,
+    'validated UPC-A/UPC-E counterparts must match without collapsing unrelated internal codes')
+  assert.match(supplierReturnSearch, /barcodeSearchKeys\(product\.barcode\)/,
+    'product barcodes must contribute guarded search keys to the ranking haystack')
+  assert.doesNotMatch(supplierReturnSearch, /normalizeBarcodeKey\(product\.barcode\)\s*===\s*normalizeBarcodeKey\(search\)/,
+    'the supplier-return helper must not restore stripped equality that collides with seven-digit internal codes')
 
   const catalogPage = read('../src/components/catalog/CatalogPage.tsx')
   assert.match(catalogPage, /sortBySearchRelevance\([\s\S]{0,400}?\)\s*\.slice\(0, 30\)/,
