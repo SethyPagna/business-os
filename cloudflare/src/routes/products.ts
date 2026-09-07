@@ -3320,13 +3320,17 @@ type DuplicatePreviewCatalog = {
   complexLinkedProductIds: Set<number>
 }
 
-function multiClusterComplexLinkStatements(
+const MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS = 600
+const MERGE_DUPLICATES_MULTI_PREFLIGHT_STATEMENTS_PER_CHUNK = 15
+
+function multiClusterComplexLinkPlan(
   groups: Awaited<ReturnType<typeof findDuplicateProductGroups>>,
-): Array<{ sql: string; params: Record<string, unknown> }> {
-  const ids = [...new Set(groups
+): { statements: Array<{ sql: string; params: Record<string, unknown> }>; assumedComplexIds: number[] } {
+  const allIds = [...new Set(groups
     .filter((group) => group.duplicates.length > 1)
     .flatMap((group) => [group.canonical.id, ...group.duplicates.map((duplicate) => duplicate.id)]))]
-  return chunkForBinding(ids).map((chunk) => {
+  const ids = allIds.slice(0, MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS)
+  const statements = chunkForBinding(ids).map((chunk) => {
     const { sql, params } = buildInClause('complexProduct', chunk)
     return [
       { sql: `SELECT DISTINCT product_id FROM branch_stock WHERE product_id IN (${sql})`, params },
@@ -3346,17 +3350,28 @@ function multiClusterComplexLinkStatements(
       },
     ]
   }).flat()
+  if (statements.length > MERGE_DUPLICATES_MULTI_PREFLIGHT_STATEMENTS_PER_CHUNK * 6) {
+    throw new Error('merge_complex_preflight_statement_budget_exceeded')
+  }
+  return {
+    statements,
+    // Catalogs with more than 600 members in multi-row clusters remain safe:
+    // uninspected clusters are blocked whole in both preview and POST rather
+    // than spending the request's mutation reserve on additional preflight.
+    assumedComplexIds: allIds.slice(MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS),
+  }
 }
 
 async function readMultiClusterComplexProductIds(
   db: ReturnType<typeof getDb>,
   groups: Awaited<ReturnType<typeof findDuplicateProductGroups>>,
 ): Promise<Set<number>> {
-  const statements = multiClusterComplexLinkStatements(groups)
+  const plan = multiClusterComplexLinkPlan(groups)
+  const statements = plan.statements
   const results = statements.length ? await db.batch(statements) : []
-  return new Set(results.flatMap((result) => Array.isArray(result.results)
+  return new Set([...plan.assumedComplexIds, ...results.flatMap((result) => Array.isArray(result.results)
     ? result.results.map((row) => Number((row as { product_id?: unknown }).product_id))
-    : []).filter((id) => Number.isSafeInteger(id) && id > 0))
+    : []).filter((id) => Number.isSafeInteger(id) && id > 0)])
 }
 
 /**
@@ -3396,7 +3411,8 @@ async function readDuplicatePreviewCatalog(
       params,
     }
   })
-  const complexLinkStatements = multiClusterComplexLinkStatements(groups)
+  const complexLinkPlan = multiClusterComplexLinkPlan(groups)
+  const complexLinkStatements = complexLinkPlan.statements
   const batchedResults = readStatements.length || complexLinkStatements.length
     ? await db.batch([...readStatements, ...complexLinkStatements])
     : []
@@ -3409,9 +3425,9 @@ async function readDuplicatePreviewCatalog(
   const moneyByProductId = new Map<number, Record<string, unknown>>()
   const stockByProductId = new Map<number, DuplicatePreviewStockRow[]>()
   const activeBatchCountByProductId = new Map<number, number>()
-  const complexLinkedProductIds = new Set(complexLinkResults.flatMap((result) => Array.isArray(result.results)
+  const complexLinkedProductIds = new Set([...complexLinkPlan.assumedComplexIds, ...complexLinkResults.flatMap((result) => Array.isArray(result.results)
     ? result.results.map((row) => Number((row as { product_id?: unknown }).product_id))
-    : []).filter((id) => Number.isSafeInteger(id) && id > 0))
+    : []).filter((id) => Number.isSafeInteger(id) && id > 0)])
   for (const row of rows) {
     const productId = Number(row.id)
     if (!Number.isSafeInteger(productId) || productId <= 0) continue
