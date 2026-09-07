@@ -51,21 +51,27 @@ runTest('mobile:F1 -- ProductDetailFlyout panel clears the home indicator', () =
 })
 
 runTest('mobile:F1 -- ProductDetailFlyout gesture strip keeps only Add to Bucket', () => {
-  // Before the fix this string appears twice: once as the header X's
-  // aria-label, once as the footer Close button's visible text. The footer
-  // Close duplicated the header X with no distinct purpose (Add to Bucket is
-  // the strip's one real action) -- so after the fix it appears exactly once.
-  const closeCopyOccurrences = productDetailFlyoutSource.match(/copy\('close', 'Close'\)/g) || []
+  // The defect was a footer BUTTON labelled Close that duplicated the header
+  // X with no distinct purpose (Add to Bucket is the strip's one real action).
+  //
+  // Counting occurrences of copy('close', 'Close') was a proxy for that, and
+  // it stopped measuring the right thing once the a11y lane wired a translated
+  // close label into the ImageGalleryLightbox this flyout opens (65e22314):
+  // that is a DIFFERENT control's label, on a different surface, and it is
+  // wanted. Assert the actual rule instead -- exactly one close affordance in
+  // the flyout's own chrome, and it is the header X.
+  const lightboxLabels = productDetailFlyoutSource.match(/labels=\{\{[\s\S]*?\}\}/g) || []
+  const ownChrome = lightboxLabels.reduce((text, block) => text.replace(block, ''), productDetailFlyoutSource)
   assert.equal(
-    closeCopyOccurrences.length,
+    (ownChrome.match(/copy\('close', 'Close'\)/g) || []).length,
     1,
-    'the footer Close button duplicating the header X must be removed -- only the header aria-label should remain',
+    'the footer Close button duplicating the header X must stay removed -- only the header aria-label may carry it',
   )
-  assert.match(
-    productDetailFlyoutSource,
-    /onAddToBucket \? \(\s*<div className="flex items-center gap-3 border-t border-slate-200 p-4 dark:border-neutral-800">\s*<button\s*type="button"\s*onClick=\{\(\) => onAddToBucket/,
-    'the footer must open directly on the Add to Bucket button once the Close button is gone',
-  )
+  assert.match(ownChrome, /aria-label=\{copy\('close', 'Close'\)\}/)
+  // ...and no Close-labelled button anywhere in the flyout's own markup.
+  assert.doesNotMatch(ownChrome, /<button[^>]*>[\s\S]{0,400}?\{copy\('close', 'Close'\)\}[\s\S]{0,40}?<\/button>/)
+  // The lightbox's own close label is wanted, and stays.
+  assert.match(productDetailFlyoutSource, /close: copy\('close', 'Close'\)/)
 })
 
 runTest('mobile:F2 -- ProductDescriptionDetailModal panel clears the home indicator', () => {

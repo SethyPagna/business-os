@@ -124,6 +124,13 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function normalizeUnitRows(rows: unknown): UnitRow[] {
   if (!Array.isArray(rows)) return []
   return rows
+    // GET /api/units now returns the lookup table UNION the unit strings
+    // products actually carry (cloudflare/src/lib/lookupSuggestions.ts), so a
+    // product form can suggest a unit that has no lookup row. The MANAGER is
+    // the other half of that rule: it renames and deletes lookup ROWS, and a
+    // used-only name has none -- listing it here would render rename/delete
+    // controls with nothing behind them.
+    .filter((entry) => (entry as { source?: unknown } | null | undefined)?.source !== 'products')
     .map((row) => {
       const source = row as Partial<UnitRow> | null | undefined
       return {

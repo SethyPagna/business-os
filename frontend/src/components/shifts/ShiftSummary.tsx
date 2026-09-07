@@ -3,6 +3,8 @@ import { useApp } from '../../AppContext.tsx'
 import { fmtClock24, fmtDateOnly, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import type { Shift } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
+import ShiftReportFigures from './ShiftReportFigures.tsx'
+import { shiftCountedPairText } from '../../utils/shiftReportModel.ts'
 
 type Props = {
   shift: Shift
@@ -34,9 +36,11 @@ export default function ShiftSummary({ shift, detail = false, className = '' }: 
   const cashier = shift.user_name || tr('shift_staff', 'Staff')
   const branch = shift.branch_name || tr('all_branches', 'All branches')
   const before = `${fmtUSD(shift.opening_float_usd)} · ${fmtKHR(shift.opening_float_khr)}`
-  const after = shift.closing_counted_usd == null || shift.closing_counted_khr == null
-    ? '—'
-    : `${fmtUSD(shift.closing_counted_usd)} · ${fmtKHR(shift.closing_counted_khr)}`
+  // Per currency, through the shared rule. A drawer counted in dollars and
+  // left blank in riel used to print a bare "—" for BOTH, hiding a number the
+  // cashier actually wrote; now only the uncounted half is a dash, and a
+  // wholly uncounted drawer is still one dash.
+  const after = shiftCountedPairText(shift.closing_counted_usd, shift.closing_counted_khr, fmtUSD, fmtKHR)
 
   return (
     <section className={`min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900 ${className}`}>
@@ -65,6 +69,11 @@ export default function ShiftSummary({ shift, detail = false, className = '' }: 
             <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_closed_at', 'Closed at')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{shift.closed_at ? fmtDateTime24(shift.closed_at) : '—'}</dd></div>
             <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_duration', 'Duration')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{duration(shift, t)}</dd></div>
           </dl>
+          {/* The report the owner reads first: registered cash open vs end in
+              both currencies, then the money. The drawer chain below it stays
+              where it was -- it answers a different question (what should be
+              in the till), and only an admin's response carries `figures`. */}
+          <ShiftReportFigures shift={shift} />
           <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-zinc-800/70">
             <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-gray-100"><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{tr('shift_cash_breakdown', 'Cash breakdown')}</div>
             {/* The eight drawer rows the server reconciled, and the same eight the
