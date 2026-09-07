@@ -12,6 +12,7 @@ import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
 import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
+import { dashboardSaleStatusLabel, dashboardSaleStatusTone } from '../../utils/dashboardSaleStatus.ts'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -398,13 +399,6 @@ function formatDashboardHourLabel(hourValue: unknown): string {
   return hour < 12 ? `${hour} AM` : `${hour - 12} PM`
 }
 
-function getSaleStatusTone(status: unknown): string {
-  const key = String(status || '').toLowerCase()
-  if (key === 'refunded' || key === 'returned') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-  if (key === 'pending' || key === 'draft') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-  return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-}
-
 function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr, fmtUSD, onOpen }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
@@ -486,7 +480,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
             <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}</p></div>
-            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
+            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${dashboardSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
           </button>
         ))}
       </div>
@@ -1072,6 +1066,17 @@ export default function Dashboard() {
   const aDeliveryActualCount = analytics?.totals?.delivery_actual_cost_count || 0
   const aDeliverySales = analytics?.totals?.delivery_sale_count || 0
   const aDeliveryMargin = analytics?.totals?.delivery_margin_usd ?? (aDelivery - aDeliveryActual)
+  // CREDIT (owner, Sep 6 2026: "don't minus for credit amount add into revenue
+  // and profit, just note the credit amount is that much"). The kernel already
+  // puts this cohort INSIDE revenue_usd, cost_usd and profit_usd
+  // (recognizedExpr is `<> 'cancelled'`) and reports it additionally as
+  // pending_revenue_usd. Until now no Dashboard card named it, so the one
+  // figure the owner asked to see was on the wire and off the screen.
+  //
+  // It is an ANNOTATION on the Revenue card, never a term of it: nothing here
+  // may add it to aRevenue or take it off aProfit, or the printed equation
+  // would stop footing against the server.
+  const aCredit = analytics?.totals?.pending_revenue_usd || 0
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
@@ -1150,16 +1155,11 @@ export default function Dashboard() {
   const grossShortLabel = translateOr('gross_short', 'Gross')
   const saleShortLabel = translateOr('sale_short', 'sale')
   const marginShortLabel = translateOr('profit_margin_short', 'margin')
-  const completedStatusLabel = translateOr('completed', 'Completed')
-  const pendingStatusLabel = translateOr('pending', 'Pending')
-  const refundedStatusLabel = translateOr('refunded', 'Refunded')
 
-  const formatSaleStatus = useCallback((status: unknown) => {
-    const key = String(status || '').toLowerCase()
-    if (key === 'refunded' || key === 'returned') return refundedStatusLabel
-    if (key === 'pending' || key === 'draft') return pendingStatusLabel
-    return completedStatusLabel
-  }, [completedStatusLabel, pendingStatusLabel, refundedStatusLabel])
+  // A credit sale (sale_status 'awaiting_payment') used to fall past every arm
+  // of a private mapping here and print as 'Completed'. Known statuses now read
+  // the shared vocabulary, so it prints the pack's status_awaiting_payment.
+  const formatSaleStatus = useCallback((status: unknown) => dashboardSaleStatusLabel(status, t), [t])
 
   // Still serves the Best Hour drill below (openHourDetail). The period
   // KPI cards no longer use it -- they fold inline via StatsStrip.
@@ -1289,6 +1289,9 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         // reader to subtract it a second time.
         { label: translateOr('rpt_net_sales', 'Net sales'), value: fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aKernelRefund) },
+        // How much of the Net revenue above is still owed. Positive and
+        // unsigned: it is a slice of the figure it sits under, not a minus.
+        ...(aCredit > 0 ? [{ label: translateOr('rpt_pending_credit', 'Credit'), value: fmtUSD(aCredit) }] : []),
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
@@ -2158,7 +2161,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                   </div>
                   <div className="shrink-0 text-right">
                     <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
-                    <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>
+                    <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${dashboardSaleStatusTone(sale.sale_status)}`}>
                       {formatSaleStatus(sale.sale_status)}
                     </div>
                   </div>
