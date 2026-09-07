@@ -1,3 +1,5 @@
+> **Contacts additions F42–F46 and mobile U13–U15 recorded:** supplier/customer duplicates, phone formatting, membership lineage, Not Paid / ប្រាក់ជំពាក់ wording override, WebSocket attribution and bulk conflict review. Functional work continues; current states are in the owner register.
+
 > **Third functional release LIVE September 7, 13:14:39 UTC:** 02eecbe3833b,
 > Worker c3a21a40-544b-4678-bacd-bc50441df8a1 at 100%. F33/F36/F37/F38 shipped.
 > Migration 0134 preserved all 15,106 Sales rows and prior schema objects.
