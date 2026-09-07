@@ -4,8 +4,8 @@ This is the current request register. `progress.md` links here. Append new owner
 requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
-Last reconciled: 2026-09-07T14:33:21.332Z. Functional fixes precede UI polish.
-Current production: **560bfbcb**, Worker **03aa25a5-d482-45e9-9459-727b92ccf06c**, 100% at **2026-09-07T15:36:03.629193Z**. F41/F44/F45 deployed from the separate stability branch. No migration. Live signed-in Sales loads matching bundle; English and Khmer Not Paid verified. Historical correction: first 99 expense rows applied; 43 groups remain. Full REST postcheck confirms 1 applied/43 pending, exact 2 audits, zero violations. Product merge remains eight completed cases.
+Last reconciled: 2026-09-07T17:20:41.064Z. Functional fixes precede UI polish.
+Current production: **560bfbcb**, Worker **03aa25a5-d482-45e9-9459-727b92ccf06c**, 100% at **2026-09-07T15:36:03.629193Z**. F41/F44/F45 deployed from the separate stability branch. No migration. Live signed-in Sales loads matching bundle; English and Khmer Not Paid verified. Historical correction: 792 expense rows applied; 36 groups remain. Full REST postcheck after resume 2 confirms 8 applied/36 pending, exact 9 audits, zero violations. Resume 3 is active; do not infer additional completion. Product merge remains eight completed cases.
 
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
 **498efadb-f833-471d-a8b7-b4326950bd26**, deployed 2026-09-07 09:54:13 UTC.
@@ -63,7 +63,7 @@ Every shipped row must eventually record its actual deployment version.
 | F28 | Take over Claude lanes, commits, dirty/unverified work and progress sessions. | Deployed 821efc94; recorded limitations retained | Twenty-lane lineage and shared patch inventory preserved; original dirty worktrees untouched. |
 | F29 | Remove duplicate delivery_actual_cost_usd field and rejected stopgap kind comment in Sales merge fallout. | Deployed 821efc94; recorded limitations retained | Source/type/parity gates cover composed Sales. |
 | F30 | Finish earlier N18/N21/N23 and N28–N36/audit lanes without losing their fixes. | Deployed 821efc94; recorded limitations retained | Canonical ea9f0d1b base includes checkpoint 2 and earlier integrations; individual follow-up fixes retained. |
-| F31 | GitHub commits describe individual fixes, not checkpoint/batch commits. | Public fix commits pushed through 02eecbe3 / lineage, root | Separate public release history preserves messages/authors; eight internal reports excluded, required clean test fixture retained. Pushed release branch at 821efc94. |
+| F31 | GitHub commits describe individual fixes, not checkpoint/batch commits. | Public fix commits pushed through stability 560bfbcb / root | Separate public release history preserves messages/authors; eight internal reports excluded, required clean test fixture retained. Pushed release branch at 821efc94. |
 | F32 | Sale originally without delivery allows later driver, customer fee and actual cost. | Deployed c475e637 / sales | Full backend 276 suites; all frontend 306 files covered; independent money/migration review and browser actual retry/driver/totals/Records passed. |
 | F33 | Preserve original basket, payments, driver and actor for future sales. | Deployed 02eecbe3; live follow-through active | Four writers, migration 0134, backup and immutable Records independently pass; original basket/payment remain unchanged after later edits in browser. Backend 278/278 pass. |
 | F34 | Sales list/detail Records SQL failed in real D1. | Deployed 821efc94 / sales | Frozen actual Worker list/detail now 200; count and compound ordering repaired. |
@@ -76,11 +76,11 @@ Every shipped row must eventually record its actual deployment version.
 
 | F41 | Idle import polling writes to D1 and immediate retries amplify database overload. | Deployed 560bfbcb; independent PASS, backend 280/280 / sales | Skip no-op reaper writes when no stale jobs exist; preserve guarded stale recovery. Fail overload once instead of immediately retrying it. |
 
-| F42 | Contacts duplicates: supplier creation in stock sessions, raw versus spaced customer phone numbers, obsolete membership IDs; inspect existing fixes before correction. | Confirmed canonical-phone/import bugs; implementation active / accounting | Stock-in does not auto-create suppliers. Spaced/raw/+855 duplicate matching and import lookup-key freshness are inconsistent. Legacy membership IDs remain; no blind deletion or reassignment. |
-| F43 | Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree. | Frontend integrated 5801abb2; independent review and backend parity pending | Progressive spacing, prefixes, paste and caret covered in seven create/edit/quick-add fields. |
+| F42 | Contacts duplicates: supplier creation in stock sessions, raw versus spaced customer phone numbers, obsolete membership IDs; inspect existing fixes before correction. | Canonical create/edit/import guards integrated and independently passed; merge safety follow-up active / media | Stock-in does not auto-create suppliers. Spaced/raw/+855 duplicate matching and import lookup-key freshness are inconsistent. Legacy membership IDs remain; no blind deletion or reassignment. |
+| F43 | Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree. | Frontend through bedf499c integrated; independent PASS including mobile deletion and IME; not deployed | Progressive spacing, prefixes, paste and caret covered in seven create/edit/quick-add fields. |
 | F44 | Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere. | Deployed 560bfbcb; live EN/KM verified | Supersedes N39/F13 unpaid-state wording. Internal values/accounting unchanged; distinct Store Credit, supplier credit and overpayment concepts preserved. |
 | F45 | Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors. | Deployed 560bfbcb; independent PASS | Cooldown lacked wake-up and actual logout did not disconnect. Both corrected. content.js listener is extension noise; VM startTime ownership unproven. |
-| F46 | Bulk conflict multi-select processes slowly one by one; present combined before/after review and efficient bounded execution. | Queued after F39/F40 / identity | Distinguish conflict-resolution workflow from duplicate merge; keep atomicity, scope, audits and accurate partial progress. |
+| F46 | Bulk conflict multi-select processes slowly one by one; present combined before/after review and efficient bounded execution. | Products Conflicts serial preview/dialog/request cause confirmed; combined-review plan active / sales | Distinguish conflict-resolution workflow from duplicate merge; keep atomicity, scope, audits and accurate partial progress. |
 
 ## Public portal and legal requests
 
@@ -134,3 +134,12 @@ stand in for deployment, and missing historical evidence is never fabricated.
 
 Historical import follow-through: fees-001 committed 99 Shop branch corrections. CLI exit 0 output framing caused a safe pause; independent postcheck-after-file-import.json confirms exact state and audits. No later group ran. Parsing correction and explicit resume remain; the completed group must be skipped.
 
+
+## September 8 follow-through (17:15 UTC September 7)
+
+- F39/F40: bounded merge and redo economics passed independent review. Browser proved 20 pairs complete under one confirmation and normal continuation, undo works, and close aborts preview. It also exposed an unknown-outcome reload cache bug; fix integrated as 3b48412c, independent review and browser rerun pending. Persisted whole-cluster preview economics remains active. No new production product merges beyond the original eight.
+- F42: read-only production census found three shared canonical customer-phone groups, one same-name/phone candidate, two stale lookup keys, two duplicate supplier-name groups, and no normalized membership collision. These are candidates, not proof that people or businesses are identical. Existing contacts remain unchanged.
+- F42 merge review found missing delivery expense references, non-atomic writes, incomplete membership lineage and frontend permission mismatch. Backend and permission fixes assigned separately. Existing membership IDs must be preserved; no destructive candidate cleanup until supported by evidence and safe execution.
+- F43: seven phone input surfaces now have independently reviewed digit-preserving spacing, caret/paste, mobile beforeinput and IME handling. Membership display accurately marks assigned IDs read-only while preserving the legacy blank-ID path. Release gates remain.
+- F46: Products Conflicts performs up to two requests and one dialog per selected pair. Decision: combined review for exact two-row pairs with per-pair stock decisions, bounded execution and truthful partial progress; runtime follows the current release freeze.
+- Historical repair resume 2: eight fee groups applied (792 rows), 36 pending, nine exact audit records and zero full-row violations. Network failure stopped group nine; independent postcheck proved it pending before explicit resume 3.
