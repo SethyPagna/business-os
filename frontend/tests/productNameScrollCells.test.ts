@@ -208,9 +208,9 @@ runTest('no product-name cell still wraps or ellipsises instead of scrolling', (
 // mobile twin wraps (break-words), which has no ellipsis and therefore no dead
 // end. Neither may quietly acquire the scrolling class instead.
 const EXCLUDED_CELLS: Array<{ file: string; expect: Array<'truncate+title' | 'wrap'> }> = [
-  // Ledger2 moved the desktop cell to TruncatedText (the shared reveal
-  // contract), so only the mobile direct <span> remains in this tag sweep.
-  { file: 'components/products/StockChangeSection.tsx', expect: ['wrap'] },
+  // The desktop dense cell is served by the delegated reveal controller;
+  // the mobile twin wraps in full.
+  { file: 'components/products/StockChangeSection.tsx', expect: ['wrap', 'truncate+title'] },
   // The deployed-lineage stock-in work made both twins wrap before this lane
   // was reconciled. Preserve that newer readable behavior; the exclusion is
   // about keeping history rows out of product-name horizontal scrolling.
