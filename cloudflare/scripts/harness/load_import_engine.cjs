@@ -70,14 +70,23 @@ function loadPureLib(name) {
 // batchCode), so they have to be loaded while the Module._load patch below
 // is already installed -- building them eagerly, before the patch, made the
 // nested require fall through to the real filesystem and fail on a .ts path.
-const PURE_LIB_SPECIFIERS = ['./salesStatus', './productBatches', './batchCode', './searchMatch', './productDetailRule', './productDescriptionSections']
+const PURE_LIB_SPECIFIERS = [
+  './salesStatus', './productBatches', './batchCode', './searchMatch',
+  './productDetailRule', './productDescriptionSections', './sqlBinding',
+  './membershipNumber', './permissions', './media', './productImagePermission',
+]
 const pureLibCache = new Map()
 function getPureLib(specifier) {
   if (!pureLibCache.has(specifier)) pureLibCache.set(specifier, loadPureLib(specifier.replace('./', '')))
   return pureLibCache.get(specifier)
 }
 
-const stubbable = new Set(['../index', './db', './importCsv', './contactOptions', './cache', '../durable-objects/broadcastHub'])
+const stubbable = new Set([
+  '../index', './db', './importCsv', './contactOptions', './cache',
+  './stockActionCatalog', './stockActionSeal', './stockActionCommit',
+  './stockActionResolver', './stockActionImport', './salesImportCommit',
+  '../durable-objects/broadcastHub',
+])
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './importImageMatch') return imageMatchModuleObj.exports
