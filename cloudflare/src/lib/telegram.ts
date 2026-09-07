@@ -1076,11 +1076,20 @@ export function formatTransferTelegramLines(transfer: TelegramTransferSummary): 
   const total = transfer.items.reduce((sum, item) => sum + Math.abs(Number(item.quantity) || 0), 0)
   return [
     `Date: ${formatBusinessDateTime(transfer.createdAt)}`,
-    `From: ${from}`,
-    `To: ${to}`,
+    // A transfer whose branch names did not reach this builder prints no
+    // From/To line at all, rather than the placeholder words "Source" and
+    // "Destination" -- the same zero-value rule that took "Branch:
+    // Unassigned" out of the stock-change message. The two fallbacks are
+    // still used to LABEL the on-hand numbers in the bullets above, where a
+    // nameless quantity would be worse than a generic name.
+    transfer.fromBranch ? `From: ${from}` : '',
+    transfer.toBranch ? `To: ${to}` : '',
     ...items,
     transfer.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${transfer.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
-    `Total moved: ${total} unit(s) · ${transfer.items.length} product(s)`,
+    // ONE figure, like every other total this bot sends. The product count
+    // that used to ride along here counted the bullets directly above it, and
+    // a truncated list already states its own remainder on the line above.
+    `Total moved: ${total} unit(s)`,
     transfer.note ? `Note: ${transfer.note}` : '',
     transfer.by ? `By: ${transfer.by}` : '',
   ]

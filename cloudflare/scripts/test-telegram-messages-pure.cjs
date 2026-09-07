@@ -293,20 +293,40 @@ assert.deepEqual(telegram.formatTransferTelegramLines({
   'To: Shop',
   '• Rice 5kg 10 (lot 09032026) — Warehouse 90 · Shop 25 · all branches 115',
   '• Coca Cola 330ml 24 → Coca-Cola 330ml — Warehouse 0 · Shop 48',
-  'Total moved: 34 unit(s) · 2 product(s)',
+  // ONE figure. The product count that used to ride on this line ("· 2
+  // product(s)") counted the bullets directly above it -- the same repeated
+  // figure the Sep 2026 redesign took out of the expense report, where the
+  // records under the total ARE the count.
+  'Total moved: 34 unit(s)',
   'Note: Restock front shelf',
   'By: Za',
 ])
+// Every labelled line of an event message states exactly one figure, the rule
+// the reports follow. (Bullets are a list, the Date is a timestamp, and a
+// money pair like "$5.00 + 2,000៛" is one amount in the two currencies the
+// drawer holds.)
+for (const line of telegram.formatTransferTelegramLines({
+  createdAt: '2026-09-03 03:04:05', fromBranch: 'Warehouse', toBranch: 'Shop',
+  items: [{ product: 'Rice 5kg', quantity: 10 }],
+}).filter(Boolean)) {
+  if (line.startsWith('•') || line.startsWith('+') || !line.includes(': ') || line.startsWith('Date: ')) continue
+  const figures = line.slice(line.indexOf(': ') + 2).replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []
+  assert.ok(figures.length <= 1, `the transfer message puts ${figures.length} figures on one line: "${line}"`)
+}
 // unknown on-hand (read-back failed) and missing branch names never produce a
-// dangling "On hand:" fragment; the cap states the remainder
+// dangling "On hand:" fragment; the cap states the remainder.
+// A transfer whose branches are unknown prints NO From/To line rather than the
+// placeholder words "Source" and "Destination" -- the same zero-value rule
+// that took "Branch: Unassigned" out of the stock-change message.
 const bulk = telegram.formatTransferTelegramLines({
   items: Array.from({ length: 23 }, (_, i) => ({ product: `Item ${i + 1}`, quantity: 2 })),
 }).filter(Boolean)
-assert.equal(bulk[1], 'From: Source')
-assert.equal(bulk[3], '• Item 1 2')
+assert.ok(!bulk.some((line) => /^(From|To): /.test(line)), bulk.join('\n'))
+assert.equal(bulk[1], '• Item 1 2')
 assert.equal(bulk.filter((line) => line.startsWith('• ')).length, 20)
 assert.ok(bulk.includes('+ 3 more item(s)'))
-assert.ok(bulk.includes('Total moved: 46 unit(s) · 23 product(s)'))
+assert.ok(bulk.includes('Total moved: 46 unit(s)'))
+assert.ok(!bulk.some((line) => line.includes('product(s)')), bulk.join('\n'))
 
 // --- customer return: receipt-style, refund per line, resulting on-hand ---
 assert.deepEqual(telegram.formatReturnTelegramLines({
