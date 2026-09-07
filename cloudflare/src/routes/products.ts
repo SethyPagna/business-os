@@ -2633,6 +2633,35 @@ export const mergeStockSessionBlockedMessage = (operationId: string): string =>
   `One of these products is part of stock-in session ${operationId}, which can still be undone. `
   + 'Merging now would break that session\'s Undo. Undo it or let it settle first, then merge.'
 
+type ProductMergeImagePair = {
+  keeper: { id: number; image_path?: string | null }
+  discarded: { id: number; image_path?: string | null }
+}
+
+// The fold changes image state only when it removes gallery rows from the
+// discarded product, or when an empty keeper adopts the discarded primary.
+// Reading that exact plan before either merge endpoint writes lets an explicit
+// products:image override govern image mutations without blocking a merge
+// whose image fields remain untouched.
+export async function productMergeChangesImages(
+  db: ReturnType<typeof getDb>,
+  pairs: ProductMergeImagePair[],
+): Promise<boolean> {
+  const discardedIds = [...new Set(pairs.map(({ discarded }) => discarded.id).filter((id) => Number.isFinite(id) && id > 0))]
+  const galleryProductIds = new Set<number>()
+  if (discardedIds.length) {
+    const rows = await selectInChunks(discardedIds, 0, (chunk) => {
+      const { sql, params } = buildInClause('imageProduct', chunk)
+      return db.prepare(`SELECT DISTINCT product_id FROM product_images WHERE product_id IN (${sql})`)
+        .all<{ product_id: number }>(params)
+    })
+    for (const row of rows) galleryProductIds.add(Number(row.product_id))
+  }
+  return pairs.some(({ keeper, discarded }) =>
+    galleryProductIds.has(discarded.id)
+    || (!String(keeper.image_path || '').trim() && Boolean(String(discarded.image_path || '').trim())))
+}
+
 // The ledger line a WRITE-OFF leaves behind, and the fragment that finds it
 // again afterwards. Both live here so the reason text and the id-capture query
 // can never disagree: the "(#id) removed -- stock written off" middle is the
@@ -3409,6 +3438,12 @@ app.post('/merge-duplicates', async (c) => {
       remainingGroupCount: 0, maxAdditionalRequests: 0, requestId, processedCaseKeys: [], actionHistoryIds: [], undoPendingCount: 0, groups: [], refusals: [],
     })
   }
+  if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
+    db,
+    groups.flatMap((group) => group.duplicates.map((discarded) => ({ keeper: group.canonical, discarded }))),
+  )) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
@@ -3745,6 +3780,12 @@ app.post('/possible-duplicates/merge', async (c) => {
       // so the dialog the client is about to open is not blind to it.
       identity,
     }, 400)
+  }
+  if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
+    db,
+    [{ keeper, discarded: dup }],
+  )) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
 
   let stats: Awaited<ReturnType<typeof foldDuplicateProductInto>>
