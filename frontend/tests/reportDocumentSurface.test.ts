@@ -261,22 +261,37 @@ for (const view of VIEWS) {
 assert.equal(foldTags, 7, 'all seven view folds are accounted for (GroupedReport has two)')
 assert.match(openingTag(optionsFold.split(/<Fold[\s>]/)[1]), CARRIES_FLAG, 'and the options fold, whose Group titles are the same shape, opts in too')
 
-// The move is safe BY CONSTRUCTION, and this is the construction: every rule
-// scoped to `[data-reports-fold]` declares custom properties and line-height
-// and nothing else. If a later change ever adds a width, a margin, a padding
-// or a display to that scope, it would silently re-shape every report fold's
-// panel -- so it fails here first.
+// The move is safe BY CONSTRUCTION, and this is the construction: no rule
+// scoped to `[data-reports-fold]` may lay anything out. If a later change ever
+// adds a width, a margin, an inline padding or a display to that scope, it
+// would silently re-shape every report fold's panel -- so it fails here first.
+//
+// The budget splits on WHERE the attribute sits in the selector, because the
+// two halves are not the same risk:
+//   * a part that ENDS at `[data-reports-fold]` styles the panel root itself,
+//     the element the hook was hoisted onto -- custom properties and
+//     `line-height` only, exactly the budget it had before the hoist;
+//   * a part with a descendant after it styles content the panel already
+//     contained either way, so it may additionally carry `padding-block` --
+//     the Khmer anti-clip relief, a text-box property that cannot move the
+//     panel. Nothing else is allowed on that side either.
 // `/* ... *​/` comments inside these blocks carry prose with semicolons and
 // colons in it, so they are stripped before the declarations are split.
 const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, '')
-const foldScopedBodies = [...cssCode.matchAll(/\[data-reports-fold\][^{}]*\{([^}]*)\}/g)].map((m) => m[1])
-assert.ok(foldScopedBodies.length >= 4, 'the fold scope is real (base tokens, the >=1024 tier and the Khmer rules)')
-for (const body of foldScopedBodies) {
-  for (const decl of body.split(';').map((d) => d.trim()).filter(Boolean)) {
-    const prop = decl.slice(0, decl.indexOf(':')).trim()
+const cssRules = [...cssCode.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ selector: m[1].trim(), body: m[2] }))
+const selectorList = (selector: string) => selector.split(',').map((part) => part.replace(/\s+/g, ' ').trim()).filter(Boolean)
+const declaredProps = (body: string) => body.split(';').map((d) => d.trim()).filter(Boolean).map((d) => d.slice(0, d.indexOf(':')).trim())
+const foldScopedRules = cssRules.filter((rule) => selectorList(rule.selector).some((part) => part.includes('[data-reports-fold]')))
+assert.ok(foldScopedRules.length >= 4, 'the fold scope is real (base tokens, the >=1024 tier and the Khmer rules)')
+for (const rule of foldScopedRules) {
+  const targetsPanelRoot = selectorList(rule.selector).some((part) => part.endsWith('[data-reports-fold]'))
+  const alsoAllowed = targetsPanelRoot ? ['line-height'] : ['line-height', 'padding-block']
+  for (const prop of declaredProps(rule.body)) {
     assert.ok(
-      prop.startsWith('--') || prop === 'line-height',
-      `[data-reports-fold] may only declare custom properties and line-height, so hoisting the hook to the panel root cannot move the panel -- found "${prop}"`,
+      prop.startsWith('--') || alsoAllowed.includes(prop),
+      targetsPanelRoot
+        ? `[data-reports-fold] itself may only declare custom properties and line-height, so hoisting the hook to the panel root cannot move the panel -- found "${prop}"`
+        : `inside [data-reports-fold] only custom properties, line-height and the padding-block clip relief may be declared -- found "${prop}" in "${selectorList(rule.selector).join(', ')}"`,
     )
   }
 }
@@ -492,6 +507,31 @@ assert.doesNotMatch(km, /--ui-row-h:\s*\d+px;/)
 // And the Aug-31 line-height floor this surface already owns is untouched.
 assert.match(css, /body\.lang-km \[data-reports-hub\] \.text-xs,[\s\S]{0,120}line-height: 1\.62 !important;/, 'the Khmer line-box floor for .text-xs survives')
 assert.match(css, /body\.lang-km \[data-reports-hub\] \.text-sm,[\s\S]{0,120}line-height: 1\.6 !important;/, 'and for .text-sm')
+
+// ...and the clip RELIEF has to cover every scope the boost covers.
+//
+// VERIFIER DEFECT. `Fold.tsx` portals its panel to `document.body`, so nothing
+// rendered inside a report fold is a descendant of `[data-reports-hub]`. A
+// relief rule scoped to the hub alone therefore skips every truncating cell in
+// the seven `<Fold surface>` panels -- ReportTable's `max-w-[200px] truncate`
+// text columns and ReceiptSheet's `min-w-0 truncate` labels -- which are
+// exactly the cells the 1.2x boost pushes past their line box.
+//
+// Derived, not grepped for two literals: read the scopes OUT of the rule that
+// raises the boost, then require each of them to appear in a truncate
+// padding-block rule. Adding a third boosted scope later fails this too.
+const boostScopes = cssRules
+  .filter((rule) => Number((rule.body.match(/--ui-km-boost:\s*([\d.]+)\s*;/) || [])[1] ?? 1) > 1)
+  .flatMap((rule) => selectorList(rule.selector))
+assert.ok(boostScopes.length >= 2, `the Khmer boost must reach the portalled fold as well as the hub (found: ${boostScopes.join(' | ') || 'no boosted scope at all'})`)
+const clipReliefScopes = new Set(
+  cssRules
+    .filter((rule) => /\.truncate/.test(rule.selector) && /padding-block/.test(rule.body))
+    .flatMap((rule) => selectorList(rule.selector).map((part) => part.replace(/ (?:[a-z]+)?\.truncate$/, ''))),
+)
+for (const scope of boostScopes) {
+  assert.ok(clipReliefScopes.has(scope), `a scope that boosts Khmer must also relieve its clip site -- \`${scope}\` has no \`.truncate { padding-block }\` rule (relieved: ${[...clipReliefScopes].join(' | ') || 'none'})`)
+}
 
 // The receipt sheet's two hard-coded pixel sizes were the one place Khmer
 // could not follow the boost (10px/11px inside a 1.62em box is unreadable).

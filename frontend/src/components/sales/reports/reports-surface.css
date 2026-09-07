@@ -545,8 +545,17 @@ body.lang-km [data-reports-fold] .text-sm {
 }
 
 /* A truncating cell is the clip site: keep it single-line and elliptical, but
-   let the line box breathe so the ascender/descender ink stays inside it. */
+   let the line box breathe so the ascender/descender ink stays inside it.
+
+   Both boosted scopes, not just the hub. `Fold` portals its panel to
+   `document.body`, so nothing rendered inside a report fold is a descendant
+   of `[data-reports-hub]`: ReportTable's truncating text columns and
+   ReceiptSheet's truncating labels sit under `[data-reports-fold]` instead.
+   The 1.2 boost above already reaches them; the relief has to as well, or the
+   larger cluster ink shears against the same clip that it was written for. */
 body.lang-km [data-reports-hub] td.truncate,
-body.lang-km [data-reports-hub] .truncate {
+body.lang-km [data-reports-hub] .truncate,
+body.lang-km [data-reports-fold] td.truncate,
+body.lang-km [data-reports-fold] .truncate {
   padding-block: 2px;
 }
