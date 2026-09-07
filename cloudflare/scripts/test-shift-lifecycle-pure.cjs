@@ -366,7 +366,11 @@ async function main() {
     'historic unresolved shifts remain visible outside the closed-row limit')
   assert.equal(boundedRows[0].closed_at, null, 'unresolved shifts are ordered before bounded closed rows')
 
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const tomorrowDate = new Date(`${rootShift.business_date}T00:00:00.000Z`)
+  tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1)
+  const tomorrow = tomorrowDate.toISOString().slice(0, 10)
+  assert.notEqual(tomorrow, rootShift.business_date,
+    'the next-day uniqueness fixture must use a distinct business date')
   assert.doesNotThrow(() => sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at)
     VALUES ('NEXT-DAY','per_account',7,'Owner',1,'Shop',?,?)`).run(tomorrow, `${tomorrow}T01:00:00.000Z`),
