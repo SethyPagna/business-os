@@ -37,7 +37,7 @@ class FakeHono {
 }
 
 function countedAdapter(d1) {
-  const counters = { reads: 0, writes: 0, batches: 0, statementsInBatches: 0 }
+  const counters = { reads: 0, writes: 0, batches: 0, readBatches: 0, statementsInBatches: 0 }
   const adapter = {
     prepare(sql) {
       const statement = d1.prepare(sql)
@@ -54,6 +54,14 @@ function countedAdapter(d1) {
     batch(statements) {
       counters.batches += 1
       counters.statementsInBatches += statements.length
+      const readOnly = statements.every((statement) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(statement.sql))
+      if (readOnly) {
+        counters.readBatches += 1
+        return Promise.resolve(statements.map((statement) => ({
+          success: true,
+          results: d1.prepare(statement.sql).all(statement.params || {}),
+        })))
+      }
       return d1.batch(statements)
     },
   }
