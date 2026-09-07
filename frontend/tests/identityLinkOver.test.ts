@@ -458,4 +458,38 @@ check('the group-rename refusal reaches the dialog, which says what it is', () =
   }
 })
 
+check('every note that sends the operator to Conflicts names the section as the app labels it', () => {
+  // The link-over notes all end by promising the pair will be listed in
+  // Conflicts. That promise is only followable if it uses the SAME word the
+  // section chip uses: an operator who reads a synonym has nothing to look
+  // for. The Khmer notes said ទំនាស់ ('dispute'/'quarrel'), while the
+  // section is labelled km.conflicts. Asserting containment of the LABEL --
+  // not a literal string -- also means a future rename of the section breaks
+  // this test instead of silently stranding the notes in the old wording.
+  const en = JSON.parse(fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'lang', 'en.json'), 'utf8')) as Record<string, string>
+  const km = JSON.parse(fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'lang', 'km.json'), 'utf8')) as Record<string, string>
+  assert.ok(en.conflicts && km.conflicts, 'the section label itself must exist in both packs')
+  const NOTES = [
+    'identity_group_rename_note',
+    'identity_keep_separate_only_note',
+    'identity_link_over_note',
+    // Already correct when this check was written -- kept in the list as the
+    // control that proves the containment probe can pass at all, so three
+    // failures below are a real defect and not a broken instrument.
+    'create_match_keep_separate_note',
+  ]
+  for (const key of NOTES) {
+    assert.ok(en[key], `${key} must exist in the English pack`)
+    assert.ok(km[key], `${key} must exist in the Khmer pack`)
+    assert.ok(
+      en[key].includes(en.conflicts),
+      `en.${key} must name the Conflicts section by its own label (en.conflicts)`,
+    )
+    assert.ok(
+      km[key].includes(km.conflicts),
+      `km.${key} must name the Conflicts section by its own label (km.conflicts), not a synonym`,
+    )
+  }
+})
+
 console.log(`PASS identityLinkOver (${passed} checks)`)
