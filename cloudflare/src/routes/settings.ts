@@ -157,6 +157,8 @@ const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'upda
 // real feature or a decision to remove the row, not guessed at here.
 const BUSINESS_IDENTITY_KEYS = new Set([
   'business_name',
+  'business_legal_name',
+  'business_registration_number',
   'business_phone',
   'business_address',
   'business_email',
@@ -168,6 +170,10 @@ const BUSINESS_IDENTITY_KEYS = new Set([
   'ui_app_favicon_position_x',
   'ui_app_favicon_position_y',
 ])
+
+function isRegisteredBusinessIdentityKey(key: string): boolean {
+  return key === 'business_legal_name' || key === 'business_registration_number'
+}
 const SALES_POLICY_KEYS = new Set([
   'currency_usd_symbol',
   'currency_khr_symbol',
@@ -852,6 +858,23 @@ app.post('/', async (c) => {
         ? `You do not have permission to change "${missingBucket}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
         : 'You do not have permission to perform this action',
     }, 403)
+  }
+
+  // Registered seller identity is displayed by the public portal only after
+  // staff have supplied it. Keep these two values as deliberate plain text:
+  // trim surrounding whitespace, allow an empty string to clear an unverified
+  // value, and reject object/array coercion into JSON text.
+  const invalidRegisteredIdentityKey = attemptedKeys.find((key) => (
+    isRegisteredBusinessIdentityKey(key) && typeof body[key] !== 'string'
+  ))
+  if (invalidRegisteredIdentityKey) {
+    return c.json({
+      error: `"${invalidRegisteredIdentityKey}" must be plain text.`,
+      code: 'invalid_business_identity_value',
+    }, 400)
+  }
+  for (const key of attemptedKeys) {
+    if (isRegisteredBusinessIdentityKey(key)) body[key] = (body[key] as string).trim()
   }
 
   // The low-stock alert switch and its threshold decide what the WHOLE
