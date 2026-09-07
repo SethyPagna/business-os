@@ -1,5 +1,6 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
-import { productIdentitySignature, resolveMergedCost, resolveMergedPricing } from './productDetailRule.ts'
+import { normalizeLeadingZeroBarcodeForCleanup, productIdentitySignature } from './productDetailRule.ts'
+import { resolveProductMergeEconomics } from './productMerge.ts'
 
 type ProductId = number
 
@@ -154,39 +155,44 @@ export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRo
     clusters.get(signature)?.push(item)
   }
 
-  return order.map((signature): ProductGroupRow => {
+  return order.flatMap((signature): ProductGroupRow[] => {
     const cluster = [...(clusters.get(signature) || [])].sort((a, b) => toProductId(a?.id) - toProductId(b?.id))
     const lead = cluster[0] || {}
     const mergedProductIds = cluster.map((item) => toProductId(item?.id)).filter((id) => Number.isFinite(id) && id > 0)
+    const economics = resolveProductMergeEconomics(cluster as Record<string, unknown>[])
+    // The server quarantines malformed/negative money instead of merging it.
+    // Keep those raw rows visible separately so the client does not imply a
+    // merge that the authoritative write path will refuse.
+    if (economics.issues.length) {
+      return cluster.map((item) => ({ ...item, __mergedProductIds: [toProductId(item.id)], __mergedRowCount: 1 }))
+    }
     if (cluster.length <= 1) {
-      return {
+      return [{
         ...lead,
         __mergedProductIds: mergedProductIds,
         __mergedRowCount: 1,
-      }
+      }]
     }
     const branchStock = mergeBranchStockEntries(cluster)
     const stockTotal = branchStock.length
       ? branchStock.reduce((sum, entry) => sum + Number(entry.quantity || 0), 0)
       : cluster.reduce((sum, item) => sum + Number(item?.stock_quantity || 0), 0)
-    return {
+    return [{
       ...lead,
       id: lead.id,
-      // Selling and special price are not identity, so merged rows CAN
-      // disagree on them -- the highest of each wins, so the display never
-      // shows a lower price than one of the merged rows expected to charge.
-      // Same rule the server applies on import merges.
-      ...resolveMergedPricing(cluster as Record<string, unknown>[]),
+      // Retail/wholesale prices are not identity; the highest valid value of
+      // each is displayed, matching the authoritative merge kernel.
+      ...economics.merged,
       // Cost is not identity either (Sep 4 2026): rows bought at different
       // costs merge, and the merged row shows the mean of the DISTINCT costs
-      // rounded up to 4dp, so one article is one row no matter how many
-      // prices it was bought at.
-      ...resolveMergedCost(cluster as Record<string, unknown>[]),
+      // rounded once to 4dp, so one article is one row no matter how many
+      // prices it was bought at. `economics` resolves all fields together.
+      barcode: normalizeLeadingZeroBarcodeForCleanup(lead.barcode),
       stock_quantity: stockTotal,
       branch_stock: branchStock,
       __mergedProductIds: mergedProductIds,
       __mergedRowCount: cluster.length,
-    }
+    }]
   })
 }
 

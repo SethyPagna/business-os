@@ -10,6 +10,7 @@ import { costMoveRows } from './mergeConfirmationRule'
 type Translate = (key: string, fallback?: string) => string | undefined
 
 export type MergeDuplicatesPreviewGroup = {
+  caseKeys?: string[]
   canonicalId: number
   canonicalName: string | null
   canonicalBarcode: string | null
@@ -25,19 +26,22 @@ export type MergeDuplicatesPreviewGroup = {
   /**
    * What the run does to the KEPT row's cost. A merge averages the distinct
    * costs (owner ruling, 2026-09-04), so "nothing changes but the row count"
-   * was never true -- the server has folded these pairwise, in the order the
-   * run applies them, since N15 and this modal is where the operator sees it
-   * BEFORE confirming rather than afterwards on the product.
+   * was never true. The server takes one whole-cluster DISTINCT mean before
+   * any row is folded, and this modal shows it before confirmation.
    */
   costBefore?: Record<string, number>
   costAfter?: Record<string, number>
-  /** Pairs this run will SKIP: two costs too far apart to be one cost. */
-  costRefusals?: Array<{ mergedId: number; field: string; min: number; max: number }>
+  /** Invalid stored numeric values that block this whole identity cluster. */
+  costRefusals?: Array<{ mergedId: number | null; field: string; code: string; error: string }>
+  mergeable?: boolean
+  mergeBlockers?: Array<{ code: string; error: string }>
 }
 
 type PreviewResult = {
   groupCount: number
   duplicateProductCount: number
+  mergeableDuplicateProductCount?: number
+  blockedGroupCount?: number
   groups: MergeDuplicatesPreviewGroup[]
   /** Total across every group; a dry run that hides it is not a dry run. */
   costRefusalCount?: number
@@ -51,8 +55,8 @@ const COST_FIELD_LABEL: Record<string, [string, string]> = {
 function formatCost(field: string, value: number): string {
   const amount = Number(value) || 0
   return field.endsWith('_khr')
-    ? `${Math.round(amount).toLocaleString('en-US')}\u17db`
-    : `$${amount % 1 === 0 ? amount : amount.toFixed(2)}`
+    ? `${amount.toLocaleString('en-US', { maximumFractionDigits: 4 })}\u17db`
+    : `$${amount.toLocaleString('en-US', { maximumFractionDigits: 4 })}`
 }
 
 /** The cost fields this group’s fold actually moves, as before -> after. */
@@ -75,12 +79,8 @@ interface MergeDuplicatesReviewModalProps {
 // 96) actually shows which products would merge before the person commits
 // -- backed by the read-only GET /api/products/merge-duplicates/preview
 // (routes/products.ts), which reuses findDuplicateProductGroups without
-// acting on it. There is still no atomic preview-then-commit in one
-// transaction (see progress.md part 96's "did not touch" note) -- a
-// catalog change between opening this modal and clicking confirm can make
-// the real merge act on a slightly different group set than what was
-// shown, which the staleness note below says plainly rather than implying
-// a guarantee that doesn't exist.
+// acting on it. Each confirmed fold rechecks identity and source revisions in
+// its transaction; a changed case is refused and remains available to resume.
 export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLoadPreview, working }: MergeDuplicatesReviewModalProps) {
   // t() returns the raw key itself (never undefined/empty) on a miss, so
   // `t(key) || fallback` never actually falls back -- same fix as
@@ -123,8 +123,10 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
 
   const groups = preview?.groups || []
   const duplicateProductCount = preview?.duplicateProductCount || 0
+  const mergeableDuplicateProductCount = preview?.mergeableDuplicateProductCount ?? duplicateProductCount
+  const blockedGroupCount = preview?.blockedGroupCount || 0
   const costRefusalCount = preview?.costRefusalCount || 0
-  const canMerge = !previewLoading && !previewError && groups.length > 0
+  const canMerge = !previewLoading && !previewError && mergeableDuplicateProductCount > 0
 
   return (
     <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={onClose} size="lg" unsavedChanges="read-only">
@@ -146,7 +148,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <p>
             {T(
               'merge_duplicates_what_counts_body',
-              'Two products are only merged if their normalized name, cost price, and barcode all match. Selling and special prices do not create a child row; when they differ, the highest price is kept. A different cost or barcode stays as a separate child row. Matching is exact, never fuzzy or approximate.',
+              'Two products are merged only when their normalized names match exactly and their barcodes are equal after the leading-zero comparison rule. Cost is reconciled, not used as identity: one mean is taken from the whole group\u2019s distinct valid non-zero costs. The highest retail and wholesale prices are kept.',
             )}
           </p>
         </section>
@@ -191,13 +193,13 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             <li>
               {T(
                 'merge_duplicates_trail_audit',
-                'Every merged product gets an audit log entry recording which product it was folded into.',
+                'Every merged product gets an atomic audit and undo record with the stock and linked-record changes.',
               )}
             </li>
             <li>
               {T(
                 'merge_duplicates_trail_soft_delete',
-                'The absorbed duplicate is deactivated (soft delete), the same as a normal product delete -- it stops showing in the catalog, but old sales and movement records that reference it are unaffected and keep showing its original name.',
+                'The absorbed duplicate is deactivated. Product-linked sales, returns, inventory, RFID, promotion, image, batch, and stock records are moved to the kept product; a reversible stock session blocks the case until that session is resolved.',
               )}
             </li>
             <li>
@@ -257,8 +259,14 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
               </p>
               {costRefusalCount > 0 && (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-                  {T('merge_duplicates_preview_cost_refused', '{count} pair(s) will be left alone: their two costs are too far apart to be one product\u2019s cost.')
+                  {T('merge_duplicates_preview_cost_refused', '{count} invalid stored numeric value(s) block their identity group until corrected.')
                     .replace('{count}', String(costRefusalCount))}
+                </p>
+              )}
+              {blockedGroupCount > 0 && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                  {T('merge_duplicates_preview_blocked_groups', '{count} group(s) are quarantined and will remain unchanged.')
+                    .replace('{count}', String(blockedGroupCount))}
                 </p>
               )}
               <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
@@ -300,16 +308,19 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                         <span aria-hidden>{'\u2192'}</span>
                         <span className="font-medium text-gray-900 dark:text-gray-100">{formatCost(move.field, move.to)}</span>
                         <span className="text-gray-400">
-                          {T('merge_cost_average_title', 'The kept product\u2019s cost becomes the average')}
+                          {T('merge_cost_average_title', 'One mean of the group\u2019s distinct non-zero costs')}
                         </span>
                       </div>
                     ))}
                     {(group.costRefusals || []).length > 0 && (
                       <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
-                        {T('merge_duplicates_preview_cost_refused_group', '{count} row(s) in this group will be skipped \u2014 their cost is too far from the kept row\u2019s to average.')
+                        {T('merge_duplicates_preview_cost_refused_group', '{count} invalid numeric value(s) block this whole group until corrected.')
                           .replace('{count}', String((group.costRefusals || []).length))}
                       </p>
                     )}
+                    {(group.mergeBlockers || []).map((blocker) => (
+                      <p key={blocker.code} className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">{blocker.error}</p>
+                    ))}
                     {group.branchBreakdown.length > 0 && (
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {group.branchBreakdown.map((b) => (
@@ -334,7 +345,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <p className="text-gray-600 dark:text-gray-400">
             {T(
               'merge_duplicates_preview_staleness',
-              'This preview reflects the catalog right now -- if another change lands between opening this dialog and confirming, the merge below still acts on whatever the catalog looks like at that moment, so the exact result may shift slightly.',
+              'This preview reflects the catalog now. Each case is checked again inside its merge transaction. Changed or blocked cases stay unmerged and can be resumed safely; large runs are saved in bounded batches.',
             )}
           </p>
         </div>
@@ -350,7 +361,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <span>
             {T(
               'merge_duplicates_acknowledge',
-              'I understand quantities and batch/lot records will be combined per branch, and duplicates will be deactivated (not permanently erased).',
+              'I understand this one confirmation starts a bounded, resumable merge; quantities and linked records move to the kept products, and completed cases can be undone safely.',
             )}
           </span>
         </label>
@@ -365,14 +376,13 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           >
             {working
               ? T('merge_duplicates_working', 'Merging...')
-              : T('merge_duplicates_confirm_count', 'Merge {products} product(s) now').replace('{products}', String(duplicateProductCount))}
+              : T('merge_duplicates_confirm_count', 'Merge {products} product(s) now').replace('{products}', String(mergeableDuplicateProductCount))}
           </button>
           <button
             onClick={onClose}
-            disabled={working}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300"
           >
-            {T('cancel', 'Cancel')}
+            {working ? T('merge_duplicates_stop', 'Stop and keep completed cases') : T('cancel', 'Cancel')}
           </button>
         </div>
       </div>

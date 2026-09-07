@@ -18,10 +18,11 @@ import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
-import { findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, normalizeProductClusterKey, pickSameIdentityRow, resolveProductIdentityEdit } from '../lib/productIdentity'
-import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail, resolveMergedPricing } from '../lib/productDetailRule'
+import { canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
-import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
+import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, registerMergeFold, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
+import { MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, resolveProductMergeEconomics, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2454,8 +2455,6 @@ export type MergePricingChange = {
   changes: Array<{ field: string; from: number; to: number }>
 }
 
-const MERGE_PRICE_FIELDS = ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
-
 export async function readMergePricingChange(
   db: ReturnType<typeof getDb>,
   keeperId: number,
@@ -2466,7 +2465,7 @@ export async function readMergePricingChange(
     db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, number | null>>({ id: keeperId }),
     db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, number | null>>({ id: dupId }),
   ])
-  const merged = resolveMergedPricing([keeperRow || {}, dupRow || {}]) as Record<string, number | null | undefined>
+  const economics = resolveProductMergeEconomics([keeperRow || {}, dupRow || {}])
   const before: Record<string, number> = {}
   const after: Record<string, number> = {}
   const changes: Array<{ field: string; from: number; to: number }> = []
@@ -2474,7 +2473,7 @@ export async function readMergePricingChange(
     const from = Number(keeperRow?.[field]) || 0
     // Same fallback chain the fold writes, so the preview cannot promise a
     // price the fold would not actually set.
-    const to = Number(merged[field] ?? keeperRow?.[field] ?? 0) || 0
+    const to = Number(economics.merged[field] ?? keeperRow?.[field] ?? 0) || 0
     before[field] = from
     after[field] = to
     if (Math.round(from * 100) !== Math.round(to * 100)) changes.push({ field, from, to })
@@ -2509,16 +2508,15 @@ export type MergeIdentityDiff = {
   costBefore: Record<string, number>
   costAfter: Record<string, number>
   costOutliers: MergedCostOutlier[]
+  numericIssues: ProductMergeNumericIssue[]
 }
-
-const MERGE_IDENTITY_COST_FIELDS = ['cost_price_usd', 'cost_price_khr'] as const
 
 export async function readMergeIdentityDiff(
   db: ReturnType<typeof getDb>,
   keeperId: number,
   dupId: number,
 ): Promise<MergeIdentityDiff> {
-  const columns = 'id, name, barcode, cost_price_usd, cost_price_khr'
+  const columns = `id, name, barcode, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].join(', ')}`
   const [keeper, dup] = await Promise.all([
     db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, unknown>>({ id: keeperId }),
     db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, unknown>>({ id: dupId }),
@@ -2536,10 +2534,10 @@ export async function readMergeIdentityDiff(
   const costFill: Array<{ field: string; value: number }> = []
   const costBefore: Record<string, number> = {}
   const costAfter: Record<string, number> = {}
-  const { merged, outliers } = resolveMergedCostDetail([keeper || {}, dup || {}])
-  for (const field of MERGE_IDENTITY_COST_FIELDS) {
+  const economics = resolveProductMergeEconomics([keeper || {}, dup || {}])
+  for (const field of MERGE_COST_FIELDS) {
     const before = Number(keeper?.[field]) || 0
-    const after = Number(merged[field] ?? before) || 0
+    const after = Number(economics.merged[field] ?? before) || 0
     costBefore[field] = before
     costAfter[field] = after
     // The kept row has no cost of its own and takes the discarded row's. Not a
@@ -2554,7 +2552,8 @@ export async function readMergeIdentityDiff(
     costFill,
     costBefore,
     costAfter,
-    costOutliers: outliers,
+    costOutliers: [],
+    numericIssues: economics.issues,
   }
 }
 
@@ -2566,6 +2565,9 @@ export async function readMergeIdentityDiff(
 // to agree to that.) The refusal is the same on both merge routes.
 export const mergeCostRefusal = (identity: MergeIdentityDiff): MergedCostOutlier | null =>
   identity.costOutliers[0] ?? null
+
+export const mergeNumericRefusal = (identity: MergeIdentityDiff): ProductMergeNumericIssue | null =>
+  identity.numericIssues[0] ?? null
 
 export function mergeCostRefusalMessage(dupName: string | null, outlier: MergedCostOutlier): string {
   return `"${dupName}" and the product you are keeping record costs too far apart to be one product's cost `
@@ -2649,6 +2651,8 @@ export async function foldDuplicateProductInto(
   branchNameById: Map<number, string>,
   mergeContext: string,
   stockDisposition: MergeStockDisposition = 'merge',
+  economicsOverride?: ProductMergeEconomics,
+  atomicHistory?: { operationId: string },
 ): Promise<{
   batchesMoved: number
   batchesFolded: number
@@ -2666,11 +2670,14 @@ export async function foldDuplicateProductInto(
   returnsReparented: number
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
+  actionHistoryId: number | null
+  undoReady: boolean
   reversal: MergeReversal
 }> {
   const writeOffStock = stockDisposition === 'write_off'
   const canonicalId = canonical.id
   const canonicalName = canonical.name
+  const adjustmentMovementMarker = atomicHistory ? `[merge:${atomicHistory.operationId}]` : ''
   // Snapshot the keeper's current batch set at call time; a group caller
   // folding several duplicates commits each fold before the next call, so
   // a later duplicate sees (and folds into) batches an earlier one moved.
@@ -2694,13 +2701,16 @@ export async function foldDuplicateProductInto(
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
   const canonicalBefore = await db
-    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr
+    .prepare(`SELECT id, name, barcode, image_path, is_active, updated_at, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr
               FROM products WHERE id = @id`)
-    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: canonicalId })
+    .get<{ id: number; name: string | null; barcode: string | null; image_path: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: canonicalId })
   const dupPricing = await db
-    .prepare(`SELECT selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr
+    .prepare(`SELECT id, name, barcode, is_active, updated_at, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr
               FROM products WHERE id = @id`)
-    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: dup.id })
+    .get<{ id: number; name: string | null; barcode: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: dup.id })
+  if (!canonicalBefore || !dupPricing || !productsShareExactIdentity(canonicalBefore, dupPricing)) {
+    throw new Error('merge_identity_conflict')
+  }
   // Selling AND wholesale price: highest of the two rows wins (see
   // resolveMergedPricing). Both SELECTs above name wholesale_price_*, not the
   // retired special_price_* pair -- migration 0111 moved the discounted tier
@@ -2708,7 +2718,8 @@ export async function foldDuplicateProductInto(
   // merge resolved max(0, 0) and a folded-away duplicate's wholesale price was
   // deactivated with its row. Nothing threw; the number simply left the
   // catalogue. The dead pair is written by nothing here on purpose.
-  const mergedPricing = resolveMergedPricing([canonicalBefore || {}, dupPricing || {}])
+  const mergedEconomics = economicsOverride ?? resolveProductMergeEconomics([canonicalBefore, dupPricing])
+  if (mergedEconomics.issues.length) throw new Error(`merge_numeric_invalid:${productMergeNumericError(mergedEconomics.issues)}`)
   // Cost is no longer identity (Sep 4 2026), so folding a duplicate must also
   // reconcile the two costs rather than silently keeping the keeper's: the
   // survivor carries the mean of the distinct costs, rounded up to 4dp.
@@ -2718,9 +2729,10 @@ export async function foldDuplicateProductInto(
   // instead of inventing a mean nobody paid), and a merge that rewrote a cost
   // on that basis must say so. `costOutliers` rides out through the audit
   // entry and both merge responses.
-  const costResolution = resolveMergedCostDetail([canonicalBefore || {}, dupPricing || {}])
-  const mergedCost = costResolution.merged
-  const costOutliers: MergedCostOutlier[] = costResolution.outliers
+  const mergedPricing = mergedEconomics.merged
+  const mergedCost = mergedEconomics.merged
+  const costOutliers: MergedCostOutlier[] = []
+  const canonicalBarcode = canonicalProductBarcode([canonicalBefore, dupPricing])
   // Which of the keeper's prices this fold actually moves. Computed from the
   // same two rows and the same fallback chain the UPDATE below writes, so the
   // audit trail cannot claim a change the fold did not make (or miss one it
@@ -2753,7 +2765,7 @@ export async function foldDuplicateProductInto(
   const canonicalImagePaths = new Set(canonicalImageRows.map((r) => String(r.image_path)))
   let nextCanonicalImageOrder = canonicalImageRows.length
 
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [productMergeCasAssertion([canonicalBefore, dupPricing])]
   let quantityMoved = 0
   let quantityWrittenOff = 0
   for (const row of stockRows) {
@@ -2776,7 +2788,7 @@ export async function foldDuplicateProductInto(
           branchId: row.branch_id,
           branchName: branchNameById.get(row.branch_id) || null,
           quantity: -qty,
-          reason: writeOffReason(dup, mergeContext),
+          reason: writeOffReason(dup, `${mergeContext}${adjustmentMovementMarker ? ` ${adjustmentMovementMarker}` : ''}`),
           userId: user?.id ?? null,
           userName: actorSnapshot(user),
         },
@@ -2798,7 +2810,7 @@ export async function foldDuplicateProductInto(
         branchId: row.branch_id,
         branchName: branchNameById.get(row.branch_id) || null,
         quantity: qty,
-        reason: `Merged duplicate product "${dup.name}" (#${dup.id}) into this product -- ${mergeContext}`,
+        reason: `Merged duplicate product "${dup.name}" (#${dup.id}) into this product -- ${mergeContext}${adjustmentMovementMarker ? ` ${adjustmentMovementMarker}` : ''}`,
         userId: user?.id ?? null,
         userName: actorSnapshot(user),
       },
@@ -2842,6 +2854,7 @@ export async function foldDuplicateProductInto(
               wholesale_price_khr = @wholesaleKhr,
               cost_price_usd = @costUsd,
               cost_price_khr = @costKhr,
+              barcode = @barcode,
               updated_at = CURRENT_TIMESTAMP
           WHERE id = @canonicalId`,
     params: {
@@ -2852,6 +2865,7 @@ export async function foldDuplicateProductInto(
       wholesaleKhr: mergedPricing.wholesale_price_khr ?? canonicalBefore?.wholesale_price_khr ?? 0,
       costUsd: mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? 0,
       costKhr: mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? 0,
+      barcode: canonicalBarcode,
     },
   })
 
@@ -3067,7 +3081,75 @@ export async function foldDuplicateProductInto(
   const reparentedMovementIds = byTable('inventory_movements')
   const returnsReparented = byTable('return_items').length + byTable('return_replacement_items').length
 
-  await db.batch(statements)
+  const auditDetails = {
+    productName: dup.name,
+    mergedIntoProductId: canonicalId,
+    mergedIntoProductName: canonicalName,
+    canonicalBarcode,
+    stockDisposition,
+    priceChanges: priceChangesForAudit,
+    batchesMoved: batchesMovedThisDup,
+    batchesFoldedIntoExistingLot: batchesFoldedThisDup,
+    batchesWrittenOff: batchesWrittenOffThisDup,
+    quantityMoved,
+    quantityWrittenOff,
+    lotsWrittenOff: writtenOffLotDetail,
+    imagesMoved: imagesMovedThisDup,
+    salesReparented: reparentedSaleItemIds.length,
+    movementsReparented: reparentedMovementIds.length,
+    returnsReparented,
+    promotionRulesRescoped: promotionRulesBefore.map((rule) => rule.id),
+    childrenReparented: reparentedChildProductIds.length,
+    reparentedTables: reparentedByTable.map((e) => `${e.table}:${e.ids.length}`),
+  }
+  const reversal: MergeReversal = {
+    keeperId: canonicalId,
+    keeperName: canonicalName,
+    dupId: dup.id,
+    dupName: dup.name ?? null,
+    keeperImagePathBefore: canonicalBefore?.image_path ?? null,
+    keeperBarcodeBefore: canonicalBefore?.barcode ?? null,
+    keeperPricingBefore: {
+      selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
+      selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
+      wholesale_price_usd: Number(canonicalBefore?.wholesale_price_usd) || 0,
+      wholesale_price_khr: Number(canonicalBefore?.wholesale_price_khr) || 0,
+      cost_price_usd: Number(canonicalBefore?.cost_price_usd) || 0,
+      cost_price_khr: Number(canonicalBefore?.cost_price_khr) || 0,
+    },
+    keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
+    dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),
+    dupImagesBefore: dupImageRows.map((r) => ({ image_path: String(r.image_path), sort_order: r.sort_order == null ? null : Number(r.sort_order) })),
+    imagesMovedToKeeper: imagesMovedPaths,
+    repointedBatches,
+    foldedBatches,
+    writtenOffBatches,
+    reparentedSaleItemIds,
+    reparentedMovementIds,
+    reparentedByTable,
+    promotionRulesBefore,
+    reparentedChildProductIds,
+    keeperParentIdBefore: keeperWasChildOfDup ? dup.id : null,
+    adjustmentMovementIds: [],
+    ...(adjustmentMovementMarker ? { adjustmentMovementMarker } : {}),
+    stockDisposition,
+    mergeContext,
+  }
+
+  // Product stock caches and durable history belong to this case's transaction.
+  // A failure at any later statement rolls the graph mutations back as well.
+  statements.push(
+    { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: canonicalId } },
+    { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } },
+  )
+  if (atomicHistory) statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails))
+
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    if (/malformed JSON|merge_guard/i.test(String(error))) throw new Error('merge_state_conflict')
+    throw error
+  }
 
   // The stock-fold inserted one 'adjustment' inventory_movement per branch on
   // the keeper; capture their ids now (right after the batch, when exactly this
@@ -3078,7 +3160,7 @@ export async function foldDuplicateProductInto(
   // the keeper by the reparent pass, so they answer to the keeper id here just
   // like the merge path's adjustments. Both fragments are matched so undo
   // deletes exactly this fold's own rows whichever disposition ran.
-  const adjustmentMovementIds = (await db
+  const adjustmentMovementIds = atomicHistory ? [] : (await db
     .prepare(`SELECT id FROM inventory_movements
               WHERE product_id = @keeperId AND movement_type = 'adjustment'
                 AND (reason LIKE @frag OR reason LIKE @writeOffFrag)`)
@@ -3087,42 +3169,12 @@ export async function foldDuplicateProductInto(
       frag: `%(#${dup.id}) into this product%`,
       writeOffFrag: `%${writeOffMarker(dup.id)}%`,
     })).map((r) => Number(r.id))
+  reversal.adjustmentMovementIds = adjustmentMovementIds
 
-  await audit(env, user?.id ?? null, actorSnapshot(user), 'merge_duplicate', 'product', dup.id, {
-    productName: dup.name,
-    mergedIntoProductId: canonicalId,
-    mergedIntoProductName: canonicalName,
-    // Which of the two explicit answers the operator gave for the discarded
-    // row's stock. Never absent -- the endpoint refuses to guess.
-    stockDisposition,
-    // A merge adopts the HIGHER of the two rows' selling/special prices, so it
-    // can raise what the shop rings up. Recorded field by field (empty when
-    // nothing moved) rather than left as an invisible side effect -- the
-    // reviewer is shown the same before/after in the confirm dialog.
-    priceChanges: priceChangesForAudit,
-    batchesMoved: batchesMovedThisDup,
-    batchesFoldedIntoExistingLot: batchesFoldedThisDup,
-    batchesWrittenOff: batchesWrittenOffThisDup,
-    quantityMoved,
-    quantityWrittenOff,
-    lotsWrittenOff: writtenOffLotDetail,
-    // Recorded so a merge that moved imagery is visible in the audit log
-    // rather than being an invisible side effect.
-    imagesMoved: imagesMovedThisDup,
-    salesReparented: reparentedSaleItemIds.length,
-    movementsReparented: reparentedMovementIds.length,
-    // Only present on the rare fold that refused to average two costs, so an
-    // ordinary merge's audit payload is unchanged -- but when it happens the
-    // audit log is where it can still be found months later.
-    ...(costOutliers.length ? { costOutliers } : {}),
-    returnsReparented,
-    // The two links that are not INTEGER product FKs, so they are named
-    // explicitly rather than hiding inside reparentedTables: a promotion rule
-    // re-scoped onto the survivor, and a child variant reparented.
-    promotionRulesRescoped: promotionRulesBefore.map((rule) => rule.id),
-    childrenReparented: reparentedChildProductIds.length,
-    reparentedTables: reparentedByTable.map((e) => `${e.table}:${e.ids.length}`),
-  })
+  if (!atomicHistory) await audit(env, user?.id ?? null, actorSnapshot(user), 'merge_duplicate', 'product', dup.id, auditDetails)
+  const atomicRecord = atomicHistory
+    ? await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal)
+    : null
 
   return {
     batchesMoved: batchesMovedThisDup,
@@ -3137,40 +3189,9 @@ export async function foldDuplicateProductInto(
     returnsReparented,
     reparentedSaleItemIds,
     reparentedMovementIds,
-    // Everything undo needs to restore both products to their exact pre-fold
-    // state. Consumed by the 'product.merge' applier (lib/undoAppliers.ts) via
-    // the undo_snapshots side table; see makeMergeReversal() for the shape.
-    reversal: {
-      keeperId: canonicalId,
-      keeperName: canonicalName,
-      dupId: dup.id,
-      dupName: dup.name ?? null,
-      keeperImagePathBefore: canonicalBefore?.image_path ?? null,
-      keeperPricingBefore: {
-        selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
-        selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
-        wholesale_price_usd: Number(canonicalBefore?.wholesale_price_usd) || 0,
-        wholesale_price_khr: Number(canonicalBefore?.wholesale_price_khr) || 0,
-        cost_price_usd: Number(canonicalBefore?.cost_price_usd) || 0,
-        cost_price_khr: Number(canonicalBefore?.cost_price_khr) || 0,
-      },
-      keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
-      dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),
-      dupImagesBefore: dupImageRows.map((r) => ({ image_path: String(r.image_path), sort_order: r.sort_order == null ? null : Number(r.sort_order) })),
-      imagesMovedToKeeper: imagesMovedPaths,
-      repointedBatches,
-      foldedBatches,
-      writtenOffBatches,
-      reparentedSaleItemIds,
-      reparentedMovementIds,
-      reparentedByTable,
-      promotionRulesBefore,
-      reparentedChildProductIds,
-      keeperParentIdBefore: keeperWasChildOfDup ? dup.id : null,
-      adjustmentMovementIds,
-      stockDisposition,
-      mergeContext,
-    },
+    actionHistoryId: atomicRecord?.actionHistoryId ?? null,
+    undoReady: atomicRecord?.fingerprintReady ?? !atomicHistory,
+    reversal,
   }
 }
 
@@ -3241,55 +3262,50 @@ app.get('/merge-duplicates/preview', async (c) => {
       }))
 
       // WHAT THIS RUN WILL DO TO THE COST, which no preview said before.
-      // A merge averages the distinct costs (owner ruling, 2026-09-04), so
-      // "nothing will change but the row count" was never true and a dry run
-      // that hides it is not a dry run. Folded in the SAME sequential order
-      // the run below applies -- pairwise, keeper first -- because a mean of
-      // means is not the mean, and a preview that promises a cost the fold
-      // would not write is worse than no preview.
+      // A merge takes one mean over the whole cluster's distinct valid
+      // non-zero costs. It never averages an already-averaged keeper again.
       const costRows = await selectInChunks([group.canonical.id, ...duplicateIds], 0, (chunk) => {
         const { sql, params } = buildInClause('id', chunk)
         return db
-          .prepare(`SELECT id, cost_price_usd, cost_price_khr FROM products WHERE id IN (${sql})`)
-          .all<{ id: number; cost_price_usd: number | null; cost_price_khr: number | null }>(params)
+          .prepare(`SELECT id, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].join(', ')} FROM products WHERE id IN (${sql})`)
+          .all<Record<string, unknown>>(params)
       })
-      const costById = new Map(costRows.map((r) => [r.id, r]))
-      const canonicalCost: { cost_price_usd?: number | null; cost_price_khr?: number | null } = costById.get(group.canonical.id) || {}
+      const costById = new Map(costRows.map((r) => [Number(r.id), r]))
+      const canonicalCost = costById.get(group.canonical.id) || {}
       const costBefore = {
         cost_price_usd: Number(canonicalCost.cost_price_usd) || 0,
         cost_price_khr: Number(canonicalCost.cost_price_khr) || 0,
       }
-      let running: Record<string, unknown> = { ...canonicalCost }
-      const costSkips: Array<{ mergedId: number; field: string; min: number; max: number }> = []
-      for (const dup of group.duplicates) {
-        const detail = resolveMergedCostDetail([running, costById.get(dup.id) || {}])
-        if (detail.outliers.length) {
-          // Reported, and NOT folded into the running figure: the run below
-          // refuses this pair, so the cost it shows must be the cost of the
-          // merges that will actually happen.
-          const o = detail.outliers[0]
-          costSkips.push({ mergedId: dup.id, field: String(o.field), min: o.min, max: o.max })
-          continue
-        }
-        running = { ...running, ...detail.merged }
-      }
+      const economics = resolveProductMergeEconomics(costRows)
       const costAfter = {
-        cost_price_usd: Number(running.cost_price_usd) || 0,
-        cost_price_khr: Number(running.cost_price_khr) || 0,
+        cost_price_usd: Number(economics.merged.cost_price_usd ?? costBefore.cost_price_usd) || 0,
+        cost_price_khr: Number(economics.merged.cost_price_khr ?? costBefore.cost_price_khr) || 0,
       }
+      const mergeBlockers = group.duplicates.length > 25 ? [{
+          code: 'cluster_exceeds_atomic_limit',
+          error: `This ${group.duplicates.length + 1}-row identity cluster exceeds the safe atomic merge limit and needs a dedicated manifest.`,
+        }] : []
 
       return {
+        caseKeys: group.duplicates.map((dup) => productMergeCaseKey(group.canonical.id, dup.id)),
         canonicalId: group.canonical.id,
         canonicalName: group.canonical.name,
-        canonicalBarcode: group.canonical.barcode,
+        canonicalBarcode: canonicalProductBarcode([group.canonical, ...group.duplicates]),
         duplicates,
         totalQuantityToMove,
         branchBreakdown,
         costBefore,
         costAfter,
+        mergeable: mergeBlockers.length === 0 && economics.issues.length === 0,
+        mergeBlockers,
         // Pairs this run will REFUSE, named in the dry run rather than
         // discovered afterwards in the response.
-        costRefusals: costSkips,
+        costRefusals: economics.issues.map((issue) => ({
+          mergedId: issue.rowId,
+          field: issue.field,
+          code: issue.code,
+          error: productMergeNumericError([issue]),
+        })),
       }
     }),
   )
@@ -3298,8 +3314,11 @@ app.get('/merge-duplicates/preview', async (c) => {
     success: true,
     groupCount: previewGroups.length,
     duplicateProductCount: previewGroups.reduce((sum, g) => sum + g.duplicates.length, 0),
+    mergeableDuplicateProductCount: previewGroups.reduce((sum, g) => sum + (g.mergeable ? g.duplicates.length : 0), 0),
+    blockedGroupCount: previewGroups.filter((group) => !group.mergeable).length,
     groups: previewGroups,
     costRefusalCount: previewGroups.reduce((sum, g) => sum + g.costRefusals.length, 0),
+    batchLimit: 25,
   })
 })
 
@@ -3309,9 +3328,18 @@ app.post('/merge-duplicates', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
+  const requestBody: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  const rawRequestId = String(requestBody.client_request_id || '').trim()
+  const requestId = rawRequestId && rawRequestId.length <= 120 ? rawRequestId : null
   const groups = await findDuplicateProductGroups(db)
+  const remainingProductsBefore = groups.reduce((sum, group) => sum + group.duplicates.length, 0)
   if (!groups.length) {
-    return c.json({ success: true, mergedGroups: 0, mergedProducts: 0, groups: [] })
+    return c.json({
+      success: true, complete: true, stalled: false, madeProgress: false,
+      batchLimit: 25, mergedGroups: 0, mergedProducts: 0,
+      remainingProductsBefore: 0, remainingProducts: 0,
+      remainingGroupCount: 0, maxAdditionalRequests: 0, requestId, processedCaseKeys: [], actionHistoryIds: [], undoPendingCount: 0, groups: [], refusals: [],
+    })
   }
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
@@ -3324,27 +3352,56 @@ app.post('/merge-duplicates', async (c) => {
     mergedNames: (string | null)[]
   }> = []
   let mergedProductsCount = 0
-  // Folds that refused to average two costs (see resolveMergedCostDetail's
-  // similarity guard). Normally empty; returned so a bulk run that silently
-  // rewrote a cost on one row out of hundreds is still visible in the result
-  // rather than only in the audit log.
-  const costOutlierReports: Array<{ keeperId: number; mergedId: number; field: string; min: number; max: number; kept: number }> = []
+  const actionHistoryIds: number[] = []
+  const processedCaseKeys: string[] = []
+  let undoPendingCount = 0
   // Pairs this run REFUSED and left exactly as they were. Same rule as the
   // pair route's 409s, because "merge these two" cannot mean one thing in the
   // review dialog and another in the bulk run: a cost pair too far apart to
   // be one cost needs a person, and a product still inside a reversible
   // stock-in session must not have that session broken underneath it.
-  const refusals: Array<{ keeperId: number; mergedId: number; mergedName: string | null; code: string; error: string }> = []
-  // Every fold's reversal, in application order, so the whole run can be undone
-  // (and redone) as ONE action -- see recordBulkMergeUndoSnapshot below. Kept
-  // server-side only; never returned in the response (it's large).
-  const reversals: MergeReversal[] = []
-
+  const refusals: Array<{ caseKey: string; keeperId: number; mergedId: number; mergedName: string | null; code: string; error: string }> = []
+  // Bounded, resumable work: each request commits at most this many products.
+  // The next request simply re-scans the remaining active identities. A whole
+  // identity cluster is never split, preserving one global DISTINCT cost mean.
+  const MAX_MERGES_PER_REQUEST = 25
   for (const group of groups) {
+    if (mergedProductsCount > 0 && mergedProductsCount + group.duplicates.length > MAX_MERGES_PER_REQUEST) break
     const canonicalId = group.canonical.id
     const canonicalName = group.canonical.name
     const mergedIds: number[] = []
     const mergedNames: (string | null)[] = []
+
+    // Never split one identity cluster across requests: doing so would feed a
+    // previously averaged keeper back into the next mean. A cluster larger
+    // than the transaction budget is quarantined for a dedicated manifest
+    // workflow instead of issuing an unbounded D1 batch.
+    if (group.duplicates.length > MAX_MERGES_PER_REQUEST) {
+      for (const dup of group.duplicates) {
+        refusals.push({
+          caseKey: productMergeCaseKey(canonicalId, dup.id),
+          keeperId: canonicalId,
+          mergedId: dup.id,
+          mergedName: dup.name,
+          code: 'cluster_exceeds_atomic_limit',
+          error: `This ${group.duplicates.length + 1}-row identity cluster exceeds the safe atomic merge limit and needs a dedicated manifest.`,
+        })
+      }
+      continue
+    }
+
+    const ids = [canonicalId, ...group.duplicates.map((item) => item.id)]
+    const moneyRows = await selectInChunks(ids, 0, (chunk) => {
+      const { sql, params } = buildInClause('id', chunk)
+      return db.prepare(`SELECT id, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].join(', ')} FROM products WHERE id IN (${sql})`)
+        .all<Record<string, unknown>>(params)
+    })
+    const economics = resolveProductMergeEconomics(moneyRows)
+    if (economics.issues.length) {
+      const message = productMergeNumericError(economics.issues)
+      for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'invalid_merge_numeric', error: message })
+      continue
+    }
 
     // Batch/lot history reassignment, stock fold, image carry, audit --
     // the whole per-duplicate fold lives in foldDuplicateProductInto
@@ -3354,62 +3411,81 @@ app.post('/merge-duplicates', async (c) => {
     // "growing set" the old per-group snapshot provided).
     for (const dup of group.duplicates) {
       const identity = await readMergeIdentityDiff(db, canonicalId, dup.id)
-      const costOutlier = mergeCostRefusal(identity)
-      if (costOutlier) {
-        refusals.push({ keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'cost_outlier_review', error: mergeCostRefusalMessage(dup.name, costOutlier) })
+      if (!identity.same) {
+        refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'incompatible_product_identity', error: 'The product identity changed before this case could be merged.' })
         continue
       }
       const blockingSession = await mergeBlockedByReversibleStockSession(db, [canonicalId, dup.id])
       if (blockingSession) {
-        refusals.push({ keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'stock_session_reversible', error: mergeStockSessionBlockedMessage(blockingSession.operationId) })
+        refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'stock_session_reversible', error: mergeStockSessionBlockedMessage(blockingSession.operationId) })
         continue
       }
-      const { reversal, costOutliers } = await foldDuplicateProductInto(
-        c.env, db, user,
-        { id: canonicalId, name: canonicalName },
-        dup,
-        branchNameById,
-        'branch-only duplicate cleanup',
-      )
-      reversals.push(reversal)
-      for (const outlier of costOutliers) {
-        costOutlierReports.push({ keeperId: canonicalId, mergedId: dup.id, field: String(outlier.field), min: outlier.min, max: outlier.max, kept: outlier.chosen })
+      try {
+        const operationId = crypto.randomUUID()
+        const result = await foldDuplicateProductInto(
+          c.env, db, user,
+          { id: canonicalId, name: canonicalName },
+          dup,
+          branchNameById,
+          'bounded duplicate cleanup',
+          'merge',
+          economics,
+          { operationId },
+        )
+        if (result.actionHistoryId) actionHistoryIds.push(result.actionHistoryId)
+        if (!result.undoReady) undoPendingCount += 1
+      } catch (error) {
+        const conflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
+        refusals.push({
+          caseKey: productMergeCaseKey(canonicalId, dup.id),
+          keeperId: canonicalId,
+          mergedId: dup.id,
+          mergedName: dup.name,
+          code: conflict ? 'merge_state_conflict' : 'merge_failed',
+          error: conflict ? 'The product changed during this case; refresh and resume.' : String(error),
+        })
+        continue
       }
       mergedIds.push(dup.id)
       mergedNames.push(dup.name)
+      processedCaseKeys.push(productMergeCaseKey(canonicalId, dup.id))
       mergedProductsCount += 1
     }
 
-    // One recompute of the canonical row's denormalized stock_quantity
-    // cache after all its duplicates for this group have merged in --
-    // same pattern branches.ts/returns.ts use after any branch_stock
-    // change (see comment there); cheaper as one pass at the end of the
-    // group than after every individual duplicate.
-    await db
-      .prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id')
-      .run({ id: canonicalId })
-
     groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
+    if (mergedProductsCount >= MAX_MERGES_PER_REQUEST) break
   }
 
-  // Record the whole run as ONE undoable/redoable action (the big reversal set
-  // goes to undo_snapshots; a small action_history row points at it). Done
-  // synchronously before responding so the returned actionHistoryId is real.
-  const undoRecord = await recordBulkMergeUndoSnapshot(c.env, user, reversals)
+  const remainingGroups = await findDuplicateProductGroups(db)
+  const remainingProducts = remainingGroups.reduce((sum, group) => sum + group.duplicates.length, 0)
+  const madeProgress = remainingProducts < remainingProductsBefore
+  const stalled = remainingProducts > 0 && !madeProgress
 
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({
     success: true,
-    mergedGroups: groups.length,
+    complete: remainingProducts === 0,
+    stalled,
+    madeProgress,
+    batchLimit: MAX_MERGES_PER_REQUEST,
+    mergedGroups: groupSummaries.filter((group) => group.mergedIds.length > 0).length,
     mergedProducts: mergedProductsCount,
+    remainingProductsBefore,
+    remainingProducts,
+    remainingGroupCount: remainingGroups.length,
+    // Because a cluster is never split, the exact conservative request bound
+    // is one remaining group per call rather than ceil(products / 25).
+    maxAdditionalRequests: remainingGroups.length,
+    requestId,
+    processedCaseKeys,
     groups: groupSummaries,
-    costOutliers: costOutlierReports,
     // What this run deliberately did NOT do. An empty array is the normal
     // answer; a non-empty one is work left for a person, and the UI says so.
     refusals,
-    actionHistoryId: undoRecord?.actionHistoryId ?? null,
+    actionHistoryIds,
+    undoPendingCount,
   })
 })
 
@@ -3477,6 +3553,7 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     mergeBlockedByReversibleStockSession(db, [keepId, mergeId]),
   ])
   const costOutlier = mergeCostRefusal(identity)
+  const numericIssue = mergeNumericRefusal(identity)
   return c.json({
     success: true,
     keepId,
@@ -3488,7 +3565,11 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     identity,
     // Read-only warnings, so the reviewer learns BEFORE choosing a keeper that
     // this pair cannot be merged yet, instead of after pressing Apply.
-    blocked: costOutlier
+    blocked: !identity.same
+      ? { code: 'incompatible_product_identity' }
+      : numericIssue
+        ? { code: 'invalid_merge_numeric', field: numericIssue.field, rowId: numericIssue.rowId }
+      : costOutlier
       ? { code: 'cost_outlier_review', field: String(costOutlier.field), min: costOutlier.min, max: costOutlier.max }
       : blockingSession
         ? { code: 'stock_session_reversible', operationId: blockingSession.operationId }
@@ -3508,7 +3589,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   // the two words is treated as "no answer given", never as a default.
   const stockChoice: MergeStockDisposition | null =
     body.stock === 'merge' ? 'merge' : body.stock === 'write_off' ? 'write_off' : null
-  if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
+  if (!Number.isSafeInteger(keepId) || keepId <= 0 || !Number.isSafeInteger(mergeId) || mergeId <= 0 || keepId === mergeId) {
     return c.json({ error: 'keepId and mergeId (two different ids) are required' }, 400)
   }
   const db = getDb(c.env)
@@ -3532,6 +3613,24 @@ app.post('/possible-duplicates/merge', async (c) => {
   // unstocked row needs no answer and proceeds as before.
   const stockImpact = await readMergeStockImpact(db, dup.id, branchNameById)
   const identity = await readMergeIdentityDiff(db, keeper.id, dup.id)
+  if (!identity.same) {
+    return c.json({
+      success: false,
+      code: 'incompatible_product_identity',
+      error: 'These products do not have the same normalized name and barcode, so they cannot be merged.',
+      identity,
+    }, 409)
+  }
+  const numericIssue = mergeNumericRefusal(identity)
+  if (numericIssue) {
+    return c.json({
+      success: false,
+      code: 'invalid_merge_numeric',
+      error: productMergeNumericError(identity.numericIssues),
+      identity,
+      numericIssue,
+    }, 409)
+  }
   // Cost first: a pair whose costs cannot be one cost is not a merge decision
   // at all, whatever the operator says about the stock.
   const costOutlier = mergeCostRefusal(identity)
@@ -3565,31 +3664,27 @@ app.post('/possible-duplicates/merge', async (c) => {
     }, 400)
   }
 
-  const stats = await foldDuplicateProductInto(
-    c.env, db, user,
-    { id: keeper.id, name: keeper.name },
-    { id: dup.id, name: dup.name, image_path: dup.image_path },
-    branchNameById,
-    'possible-duplicates review merge',
-    stockChoice ?? 'merge',
-  )
-  await db
-    .prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id')
-    .run({ id: keeper.id })
-  // ...and the discarded row's own cache, which both dispositions empty. Left
-  // stale it would keep reporting phantom stock on a deactivated product -- and
-  // a written-off row reporting stock it no longer has is exactly the kind of
-  // silent mismatch this whole change exists to stop.
-  await db
-    .prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id')
-    .run({ id: dup.id })
-
-  // Record the merge as a reload-durable undoable/redoable action. The heavy
-  // reversal snapshot goes to undo_snapshots; a small action_history row points
-  // at it, so the reviewer (or an admin) can undo this exact merge later from
-  // any tab. Recorded only for this reviewer-triggered single-pair merge, not
-  // the whole-catalog auto-merge of provably-identical rows.
-  const undoRecord = await recordMergeUndoSnapshot(c.env, user, stats.reversal)
+  let stats: Awaited<ReturnType<typeof foldDuplicateProductInto>>
+  try {
+    stats = await foldDuplicateProductInto(
+      c.env, db, user,
+      { id: keeper.id, name: keeper.name },
+      { id: dup.id, name: dup.name, image_path: dup.image_path },
+      branchNameById,
+      'possible-duplicates review merge',
+      stockChoice ?? 'merge',
+      undefined,
+      { operationId: crypto.randomUUID() },
+    )
+  } catch (error) {
+    if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
+      return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the merge was being prepared. Refresh and try again.' }, 409)
+    }
+    if (/merge_numeric_invalid:/.test(String(error))) {
+      return c.json({ success: false, code: 'invalid_merge_numeric', error: String(error).replace(/^Error:\s*merge_numeric_invalid:/, '') }, 409)
+    }
+    throw error
+  }
 
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
@@ -3599,7 +3694,6 @@ app.post('/possible-duplicates/merge', async (c) => {
     success: true,
     keptId: keeper.id,
     mergedId: dup.id,
-    actionHistoryId: undoRecord.actionHistoryId,
     stockDisposition: stockChoice ?? 'merge',
     stockImpact,
     ...publicStats,

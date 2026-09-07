@@ -116,6 +116,7 @@ export interface MergeReversal {
   dupName: string | null
   mergeContext: string
   keeperImagePathBefore: string | null
+  keeperBarcodeBefore?: string | null
   // Optional for backward compatibility with snapshots written before merge
   // cleanup began carrying the highest selling/wholesale prices to the keeper.
   keeperPricingBefore?: {
@@ -155,6 +156,10 @@ export interface MergeReversal {
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
   adjustmentMovementIds: number[]
+  // New atomic merge snapshots identify their own adjustment rows with a
+  // cryptographically random marker because their integer ids do not exist
+  // until the same D1 batch that stores this snapshot runs.
+  adjustmentMovementMarker?: string
   // What the fold did with the discarded row's stock. Absent on snapshots
   // written before the choice existed -- those were all 'merge'.
   stockDisposition?: MergeStockDisposition
@@ -184,6 +189,8 @@ export interface MergeReversal {
   // fold cleared that parent link, and undo puts this value back.
   keeperParentIdBefore?: number | null
   mergedStateFingerprint?: string
+  fingerprintPending?: boolean
+  operationId?: string
 }
 
 // What a merge does with the stock still sitting on the row being discarded.
@@ -300,7 +307,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 const intIds = (arr: unknown): number[] =>
   (Array.isArray(arr) ? arr : []).map(Number).filter((n) => Number.isInteger(n) && n > 0)
 
-async function mergeStateFingerprint(db: ReturnType<typeof getDb>, reversals: MergeReversal[]): Promise<string> {
+export async function mergeStateFingerprint(db: ReturnType<typeof getDb>, reversals: MergeReversal[]): Promise<string> {
   const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
   if (!productIds.length) return ''
   const products: Array<Record<string, unknown>> = []
@@ -309,7 +316,7 @@ async function mergeStateFingerprint(db: ReturnType<typeof getDb>, reversals: Me
   const movementHeads: Array<Record<string, unknown>> = []
   for (const ids of chunk(productIds, 80)) {
     const placeholders = ids.map(() => '?').join(',')
-    products.push(...await db.prepare(`SELECT id, is_active, stock_quantity FROM products WHERE id IN (${placeholders})`).all<Record<string, unknown>>(ids))
+    products.push(...await db.prepare(`SELECT * FROM products WHERE id IN (${placeholders})`).all<Record<string, unknown>>(ids))
     branchStock.push(...await db.prepare(`SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
     batches.push(...await db.prepare(`SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
     movementHeads.push(...await db.prepare(`SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`).all<Record<string, unknown>>(ids))
@@ -324,6 +331,49 @@ async function mergeStateFingerprint(db: ReturnType<typeof getDb>, reversals: Me
   for (const ids of chunk(batchIds, 80)) {
     batchStock.push(...await db.prepare(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
   }
+  const productImages: Array<Record<string, unknown>> = []
+  const stockSessions: Array<Record<string, unknown>> = []
+  for (const ids of chunk(productIds, 80)) {
+    const placeholders = ids.map(() => '?').join(',')
+    productImages.push(...await db.prepare(`SELECT * FROM product_images WHERE product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
+    stockSessions.push(...await db.prepare(`SELECT * FROM stock_session_members WHERE product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
+  }
+  const adjustmentRows: Array<Record<string, unknown>> = []
+  for (const reversal of reversals) {
+    if (reversal.adjustmentMovementMarker) {
+      adjustmentRows.push(...await db.prepare(`SELECT * FROM inventory_movements WHERE product_id=? AND reason LIKE ?`)
+        .all<Record<string, unknown>>([reversal.keeperId, `%${reversal.adjustmentMovementMarker}%`]))
+    } else {
+      for (const ids of chunk(intIds(reversal.adjustmentMovementIds), 80)) {
+        adjustmentRows.push(...await db.prepare(`SELECT * FROM inventory_movements WHERE id IN (${ids.map(() => '?').join(',')})`)
+          .all<Record<string, unknown>>(ids))
+      }
+    }
+  }
+  const linkedRows: Record<string, Array<Record<string, unknown>>> = {}
+  for (const entry of MERGE_REPARENT_TABLES) {
+    const ids = [...new Set(reversals.flatMap((r) => (r.reparentedByTable || [])
+      .filter((saved) => saved.table === entry.table && saved.column === entry.column)
+      .flatMap((saved) => intIds(saved.ids))))]
+    if (!ids.length) continue
+    const rows: Array<Record<string, unknown>> = []
+    for (const group of chunk(ids, 80)) rows.push(...await db.prepare(`SELECT * FROM ${entry.table} WHERE id IN (${group.map(() => '?').join(',')})`).all<Record<string, unknown>>(group))
+    linkedRows[`${entry.table}.${entry.column}`] = rows
+  }
+  const promotionIds = [...new Set(reversals.flatMap((r) => (r.promotionRulesBefore || []).map((row) => Number(row.id))).filter((id) => Number.isInteger(id) && id > 0))]
+  const promotionRules: Array<Record<string, unknown>> = []
+  for (const ids of chunk(promotionIds, 80)) promotionRules.push(...await db.prepare(`SELECT * FROM promotion_rules WHERE id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
+  const childIds = [...new Set(reversals.flatMap((r) => intIds(r.reparentedChildProductIds)))]
+  const childProducts: Array<Record<string, unknown>> = []
+  for (const ids of chunk(childIds, 80)) childProducts.push(...await db.prepare(`SELECT id,parent_id,updated_at FROM products WHERE id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
+  const allocationIds = {
+    sale: [...new Set(reversals.flatMap((r) => (r.foldedBatches || []).flatMap((b) => intIds(b.saleAllocationIds))))],
+    returns: [...new Set(reversals.flatMap((r) => (r.foldedBatches || []).flatMap((b) => intIds(b.returnAllocationIds))))],
+  }
+  const saleAllocations: Array<Record<string, unknown>> = []
+  const returnAllocations: Array<Record<string, unknown>> = []
+  for (const ids of chunk(allocationIds.sale, 80)) saleAllocations.push(...await db.prepare(`SELECT * FROM sale_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
+  for (const ids of chunk(allocationIds.returns, 80)) returnAllocations.push(...await db.prepare(`SELECT * FROM return_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
   const byNumbers = (keys: string[]) => (a: Record<string, unknown>, b: Record<string, unknown>) => {
     for (const key of keys) {
       const difference = Number(a[key]) - Number(b[key])
@@ -336,10 +386,24 @@ async function mergeStateFingerprint(db: ReturnType<typeof getDb>, reversals: Me
   batches.sort(byNumbers(['id']))
   batchStock.sort(byNumbers(['batch_id', 'branch_id']))
   movementHeads.sort(byNumbers(['product_id']))
-  return JSON.stringify({ products, branchStock, batches, batchStock, movementHeads })
+  adjustmentRows.sort(byNumbers(['id']))
+  productImages.sort(byNumbers(['id']))
+  stockSessions.sort((a, b) => String(a.operation_id).localeCompare(String(b.operation_id)) || Number(a.product_id) - Number(b.product_id))
+  promotionRules.sort(byNumbers(['id']))
+  childProducts.sort(byNumbers(['id']))
+  saleAllocations.sort(byNumbers(['id']))
+  returnAllocations.sort(byNumbers(['id']))
+  for (const rows of Object.values(linkedRows)) rows.sort(byNumbers(['id']))
+  return JSON.stringify({ products, branchStock, batches, batchStock, movementHeads, adjustmentRows, productImages, stockSessions, linkedRows, promotionRules, childProducts, saleAllocations, returnAllocations })
 }
 
 async function assertMergeStateUnchanged(db: ReturnType<typeof getDb>, reversals: MergeReversal[], expected?: string): Promise<void> {
+  if (reversals.some((reversal) => reversal.fingerprintPending)) {
+    throw new UndoConflictError('This merge is missing its completed safety fingerprint, so it cannot be replayed automatically.')
+  }
+  // Legacy snapshots predate fingerprints; keep them replayable under their
+  // existing row-level guards. Every snapshot written by the atomic path has
+  // fingerprintPending until a complete expected value is stored.
   if (expected && await mergeStateFingerprint(db, reversals) !== expected) {
     throw new UndoConflictError('This merge has later stock or batch activity, so it can no longer be undone safely.')
   }
@@ -571,6 +635,92 @@ async function replayAtomicSaleAddItems(
   }
 }
 
+export type AtomicMergeStatement = { sql: string; params?: Record<string, unknown> }
+
+// These statements are appended to the SAME D1 batch as one forward fold.
+// If any graph mutation, snapshot, history, or audit insert fails, D1 rolls
+// back the whole case. last_insert_rowid() is read immediately after the
+// snapshot insert, before another insert can replace it.
+export function buildAtomicMergeHistoryStatements(
+  user: SessionUser | null,
+  reversal: MergeReversal,
+  operationId: string,
+  auditDetails: Record<string, unknown>,
+): AtomicMergeStatement[] {
+  if (!operationId) throw new Error('A merge operation id is required.')
+  const stored = { ...reversal, operationId, fingerprintPending: true }
+  const keeperName = reversal.keeperName || `#${reversal.keeperId}`
+  const dupName = reversal.dupName || `#${reversal.dupId}`
+  const actorId = user?.id ?? null
+  const actorName = actorSnapshot(user)
+  const details = JSON.stringify(auditDetails)
+  return [
+    {
+      sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
+            VALUES('product.merge','applied',@payload,@byId,@byName)`,
+      params: { payload: JSON.stringify(stored), byId: actorId, byName: actorName },
+    },
+    {
+      sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
+              undo_payload,redo_payload,created_by_id,created_by_name)
+            VALUES('products','product',@entityId,@label,@undoLabel,@redoLabel,1,'undoable',
+              json_object('applier','product.merge','snapshot_id',last_insert_rowid(),'operation_id',@operationId),
+              json_object('applier','product.merge','snapshot_id',last_insert_rowid(),'operation_id',@operationId),
+              @byId,@byName)`,
+      params: {
+        entityId: String(reversal.dupId),
+        label: `Merged "${dupName}" into "${keeperName}"`,
+        undoLabel: `Undo merge of "${dupName}"`,
+        redoLabel: `Redo merge of "${dupName}"`,
+        operationId,
+        byId: actorId,
+        byName: actorName,
+      },
+    },
+    {
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            VALUES(@byId,@byName,'merge_duplicate','product',@entityId,@details,'product',@entityId,@details)`,
+      params: { byId: actorId, byName: actorName, entityId: String(reversal.dupId), details },
+    },
+  ]
+}
+
+export async function finalizeAtomicMergeHistory(
+  env: Env,
+  operationId: string,
+  reversal: MergeReversal,
+): Promise<{ snapshotId: number; actionHistoryId: number; fingerprintReady: boolean }> {
+  const db = getDb(env)
+  const history = await db.prepare(`
+    SELECT id, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id
+    FROM action_history
+    WHERE json_extract(undo_payload,'$.operation_id')=@operationId
+      AND json_extract(undo_payload,'$.applier')='product.merge'
+    ORDER BY id DESC LIMIT 1
+  `).get<{ id: number; snapshot_id: number }>({ operationId })
+  const snapshotId = Number(history?.snapshot_id)
+  const actionHistoryId = Number(history?.id)
+  if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !Number.isSafeInteger(actionHistoryId) || actionHistoryId <= 0) {
+    throw new Error('The atomic merge committed without a resolvable history record.')
+  }
+  try {
+    const mergedStateFingerprint = await mergeStateFingerprint(db, [reversal])
+    const stored = { ...reversal, operationId, fingerprintPending: false, mergedStateFingerprint }
+    const result = await db.prepare(`
+      UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP
+      WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
+        AND json_extract(payload_json,'$.operationId')=@operationId
+        AND json_extract(payload_json,'$.fingerprintPending')=1
+    `).run({ payload: JSON.stringify(stored), snapshotId, operationId })
+    return { snapshotId, actionHistoryId, fingerprintReady: Number(result.changes || 0) === 1 }
+  } catch {
+    // The merge and its history are already atomically durable. Keep the
+    // explicit pending flag so undo fails closed, and report the state to the
+    // caller rather than turning a committed merge into an ambiguous retry.
+    return { snapshotId, actionHistoryId, fingerprintReady: false }
+  }
+}
+
 // Record a completed merge as an undoable/redoable action: the large reversal
 // goes to undo_snapshots, and a small action_history row points at it. Returns
 // both ids so the merge endpoint can hand the action id back to the client.
@@ -671,7 +821,10 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
 
   // 1. Reactivate the merged-away product; restore keeper's image_path.
   stmts.push({ sql: 'UPDATE products SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
-  stmts.push({ sql: 'UPDATE products SET image_path = @path, updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId', params: { keeperId, path: r.keeperImagePathBefore ?? null } })
+  stmts.push({
+    sql: `UPDATE products SET image_path=@path${r.keeperBarcodeBefore !== undefined ? ',barcode=@barcode' : ''},updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
+    params: { keeperId, path: r.keeperImagePathBefore ?? null, ...(r.keeperBarcodeBefore !== undefined ? { barcode: r.keeperBarcodeBefore } : {}) },
+  })
   if (r.keeperPricingBefore) {
     // Cost is restored only when the snapshot recorded it. A pre-Sep-4-2026
     // snapshot has no cost_price_* in its payload, and writing `|| 0` for a
@@ -756,6 +909,11 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
   const adjIds = intIds(r.adjustmentMovementIds)
   if (adjIds.length) {
     for (const grp of chunk(adjIds, 400)) stmts.push({ sql: `DELETE FROM inventory_movements WHERE id IN (${grp.join(',')})` })
+  } else if (r.adjustmentMovementMarker) {
+    stmts.push({
+      sql: `DELETE FROM inventory_movements WHERE product_id=@keeperId AND movement_type='adjustment' AND reason LIKE @marker`,
+      params: { keeperId, marker: `%${String(r.adjustmentMovementMarker)}%` },
+    })
   } else {
     stmts.push({ sql: `DELETE FROM inventory_movements WHERE product_id = @keeperId AND movement_type = 'adjustment' AND reason LIKE @frag`, params: { keeperId, frag: `%(#${dupId}) into this product%` } })
   }

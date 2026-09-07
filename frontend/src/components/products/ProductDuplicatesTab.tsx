@@ -174,12 +174,9 @@ function ClusterCard({
   // when EVERY row is decided and exactly ONE row is kept. Editing a row
   // (the in-place Resolve) never leaves this section.
   const [decisions, setDecisions] = useState<Record<number, 'keep' | 'remove'>>({})
-  // A long product name truncates to "..." in the fixed row width, and
-  // hover-only `title` tooltips don't exist on touch -- so the name (and
-  // the cluster's shared value chip) toggle to full, wrapped text on
-  // click/tap (user, Aug 31: "if product name is long it uses '...' and
-  // can't click to view details").
-  const [expandedNames, setExpandedNames] = useState<Record<number, boolean>>({})
+  // The cluster's shared value chip still toggles to full, wrapped text on
+  // click/tap because hover-only tooltips do not exist on touch. Product names
+  // scroll horizontally in place like the rest of the Products surface.
   const [valueExpanded, setValueExpanded] = useState(false)
   const busy = dismissing || merging
 
@@ -247,14 +244,7 @@ function ClusterCard({
             <div key={product.id} className="flex items-center gap-2 text-sm">
               <ProductImg src={product.image_path || ''} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
               <div className="min-w-0 flex-1">
-                <button
-                  type="button"
-                  onClick={() => setExpandedNames((current) => ({ ...current, [product.id]: !current[product.id] }))}
-                  className={`block w-full text-left font-medium text-gray-900 dark:text-white ${expandedNames[product.id] ? 'whitespace-normal break-words' : 'truncate'}`}
-                  title={product.name || ''}
-                >
-                  {product.name || `#${product.id}`}
-                </button>
+                <div className="scroll-x-clean font-medium text-gray-900 dark:text-white">{product.name || `#${product.id}`}</div>
                 <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-gray-500 dark:text-gray-400">
                   {cluster.type !== 'barcode' && product.barcode ? <span>{product.barcode}</span> : null}
                   <span>{money(product.cost_price_usd)} → {money(product.selling_price_usd)}</span>

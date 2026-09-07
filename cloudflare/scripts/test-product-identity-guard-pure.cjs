@@ -42,13 +42,30 @@ function loadTs(relPath, requireShim) {
   return mod.exports
 }
 const detailRule = loadTs('lib/productDetailRule.ts', {})
-const { pickSameIdentityRow, resolveProductIdentityEdit } = loadTs('lib/productIdentity.ts', {
+const { canonicalProductBarcode, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } = loadTs('lib/productIdentity.ts', {
   './db': {},
   './sqlBinding': { buildInClause: () => ({ sql: '', params: {} }), selectInChunks: async () => [] },
   './productDetailRule': detailRule,
 })
 assert.equal(typeof pickSameIdentityRow, 'function', 'productIdentity must export pickSameIdentityRow')
 assert.equal(typeof resolveProductIdentityEdit, 'function', 'productIdentity must export resolveProductIdentityEdit')
+assert.equal(productsShareExactIdentity(
+  { name: '  Dior  Lip Glow ', barcode: '003614274226546' },
+  { name: 'dior lip glow', barcode: '3614274226546' },
+), true, 'exact normalized name plus folded barcode is one identity')
+assert.equal(productsShareExactIdentity(
+  { name: 'Dior Lip Glow', barcode: '3614274226546' },
+  { name: 'Dior Lip Glow', barcode: '3614274226547' },
+), false, 'a different barcode is never merge compatible')
+assert.equal(canonicalProductBarcode([
+  { id: 1, barcode: '003614274226546' },
+  { id: 2, barcode: '03614274226546' },
+  { id: 3, barcode: '3614274226546' },
+]), '3614274226546', 'the displayed barcode converges on the clean spelling')
+assert.equal(canonicalProductBarcode([
+  { id: 1, barcode: '003614274226546' },
+  { id: 2, barcode: '03614274226546' },
+]), '3614274226546', 'the display removes equivalent leading zeroes even when no row was already clean')
 
 // ---- 1. The guard's SQL against the real schema, then the real comparison ----
 const sqlMatch = source.match(/`\s*\n\s*(SELECT id, name, barcode, cost_price_usd, cost_price_khr FROM products[\s\S]*?LIMIT 200)\s*\n\s*`/)
