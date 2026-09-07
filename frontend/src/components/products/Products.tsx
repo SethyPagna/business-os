@@ -346,6 +346,7 @@ type MergeDuplicateRequestOptions = { requestId?: string; signal?: AbortSignal }
 
 type MergeDuplicateProductsResult = ProductApiResponse & {
   complete?: boolean
+  blockedOnly?: boolean
   interrupted?: boolean
   interruptionCode?: 'merge_budget_reached' | 'merge_infrastructure_interrupted' | null
   stalled?: boolean
@@ -1978,6 +1979,13 @@ function ProductsFullEditor() {
           continue
         }
         if (result?.complete) {
+          completed = true
+          break
+        }
+        if (result?.blockedOnly) {
+          // The confirmed scan evaluated everything it could, but explicitly
+          // refused cases still exist. Finish this run so their concrete
+          // reasons reach the summary without claiming the catalog is clean.
           completed = true
           break
         }

@@ -118,7 +118,7 @@ function loadPreviewRoute(adapter) {
     '../lib/productDetailRule': detailRule,
     '../lib/productMerge': productMerge,
     '../lib/sqlBinding': sqlBinding,
-    '../lib/undoAppliers': { registerMergeFold: () => {} },
+    '../lib/undoAppliers': { registerMergeFold: () => {}, MERGE_REPARENT_TABLES: [] },
   }).default
   const route = app.routes.find((entry) => entry.method === 'GET' && entry.path === '/merge-duplicates/preview')
   assert.ok(route, 'real products route must register duplicate preview')
@@ -139,7 +139,7 @@ function seedCatalog() {
     let nextId = 1
     const fixtureGroups = []
     for (let groupIndex = 0; groupIndex < GROUP_COUNT; groupIndex += 1) {
-      const memberCount = groupIndex === 0 ? 3 : groupIndex === 1 ? 27 : 2
+      const memberCount = groupIndex === 0 || groupIndex === 3 ? 3 : groupIndex === 1 ? 27 : 2
       const ids = []
       const name = `Scale Item ${String(groupIndex).padStart(4, '0')}`
       const barcode = `88${String(groupIndex).padStart(10, '0')}`
@@ -164,19 +164,12 @@ function seedCatalog() {
       fixtureGroups.push(ids)
     }
 
-    const meanIds = fixtureGroups[0]
-    // Exact-barcode clusters keep the most-stocked row. Give the 4-cost row
-    // the canonical position so 4/5/6 proves the whole-cluster mean is 5.
-    raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(meanIds[0], 1, 10)
-    raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(meanIds[1], 1, 2)
-    raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(meanIds[1], 2, 3)
-    raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(meanIds[2], 1, 4)
+    const complexIds = fixtureGroups[3]
+    raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(complexIds[1], 1, 2)
     const insertBatch = raw.prepare(`INSERT INTO product_batches(
       id,variant_product_id,batch_key,lot_code,batch_number,received_at,unit_cost_usd,is_active
     ) VALUES(?,?,?,?,?,?,?,1)`)
-    insertBatch.run(9001, meanIds[1], 'mean-2-a', 'MEAN-2-A', 1, '2026-01-01', 5)
-    insertBatch.run(9002, meanIds[1], 'mean-2-b', 'MEAN-2-B', 2, '2026-01-02', 5)
-    insertBatch.run(9003, meanIds[2], 'mean-3-a', 'MEAN-3-A', 1, '2026-01-03', 6)
+    insertBatch.run(9001, complexIds[1], 'complex-a', 'COMPLEX-A', 1, '2026-01-01', 5)
     raw.exec('COMMIT')
     return { d1, fixtureGroups, productCount: nextId - 1 }
   } catch (error) {
@@ -195,7 +188,7 @@ async function invokePreview(handler, user) {
 
 ;(async () => {
   const { d1, fixtureGroups, productCount } = seedCatalog()
-  assert.equal(productCount, 4_026)
+  assert.equal(productCount, 4_027)
   const adapter = countingAdapter(d1)
   const handler = loadPreviewRoute(adapter)
 
@@ -209,9 +202,9 @@ async function invokePreview(handler, user) {
   assert.equal(response.status, 200)
   assert.equal(response.body.success, true)
   assert.equal(response.body.groupCount, GROUP_COUNT)
-  assert.equal(response.body.duplicateProductCount, 2_026)
-  assert.equal(response.body.mergeableDuplicateProductCount, 1_999)
-  assert.equal(response.body.blockedGroupCount, 2)
+  assert.equal(response.body.duplicateProductCount, 2_027)
+  assert.equal(response.body.mergeableDuplicateProductCount, 1_998)
+  assert.equal(response.body.blockedGroupCount, 3)
   assert.equal(response.body.costRefusalCount, 1)
   assert.equal(response.body.batchLimit, 25)
   assert.equal(response.body.groups.length, GROUP_COUNT)
@@ -225,14 +218,11 @@ async function invokePreview(handler, user) {
     `${fixtureGroups[0][0]}:${fixtureGroups[0][2]}`,
   ])
   assert.deepEqual(meanGroup.duplicates, [
-    { id: fixtureGroups[0][1], name: 'Scale Item 0000', barcode: '880000000000', quantity: 5, batchCount: 2 },
-    { id: fixtureGroups[0][2], name: 'Scale Item 0000', barcode: '880000000000', quantity: 4, batchCount: 1 },
+    { id: fixtureGroups[0][1], name: 'Scale Item 0000', barcode: '880000000000', quantity: 0, batchCount: 0 },
+    { id: fixtureGroups[0][2], name: 'Scale Item 0000', barcode: '880000000000', quantity: 0, batchCount: 0 },
   ])
-  assert.equal(meanGroup.totalQuantityToMove, 9)
-  assert.deepEqual(meanGroup.branchBreakdown, [
-    { branchId: 1, branchName: 'Shop', quantity: 6 },
-    { branchId: 2, branchName: 'Warehouse', quantity: 3 },
-  ])
+  assert.equal(meanGroup.totalQuantityToMove, 0)
+  assert.deepEqual(meanGroup.branchBreakdown, [])
   assert.deepEqual(meanGroup.costBefore, { cost_price_usd: 4, cost_price_khr: 4000 })
   assert.deepEqual(meanGroup.costAfter, { cost_price_usd: 5, cost_price_khr: 5000 })
   assert.equal(meanGroup.mergeable, true)
@@ -244,6 +234,10 @@ async function invokePreview(handler, user) {
   assert.equal(oversized.mergeable, false)
   assert.equal(oversized.mergeBlockers[0].code, 'cluster_exceeds_atomic_limit')
 
+  const complex = response.body.groups.find((group) => group.canonicalName === 'Scale Item 0003')
+  assert.equal(complex.mergeable, false)
+  assert.equal(complex.mergeBlockers[0].code, 'cluster_requires_manifest')
+
   const invalidCost = response.body.groups.find((group) => group.canonicalId === fixtureGroups[2][0])
   assert.equal(invalidCost.mergeable, false)
   assert.deepEqual(invalidCost.mergeBlockers, [])
@@ -251,12 +245,13 @@ async function invokePreview(handler, user) {
   assert.equal(invalidCost.costRefusals[0].field, 'cost_price_usd')
   assert.equal(invalidCost.costRefusals[0].code, 'negative')
 
-  // 4,026 unique member ids fit in 41 100-bind reads, plus one duplicate
-  // detector query and one branch-name query. This bound is deliberately
+  // 4,027 unique member ids fit in 41 100-bind reads. One additional UNION
+  // statement maps every potentially linked member of a multi-row cluster,
+  // plus one duplicate detector query and one branch-name query. This bound is deliberately
   // independent of group count; the old per-group route executes 6,002.
-  assert.ok(adapter.metrics.queries <= 43, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
-  assert.equal(adapter.metrics.batchRoundTrips, 1, 'the 41 preview hydration statements must share one D1 round trip')
-  assert.equal(adapter.metrics.maxBatchStatements, 41)
+  assert.ok(adapter.metrics.queries <= 44, `preview executed ${adapter.metrics.queries} D1 reads for ${GROUP_COUNT} groups`)
+  assert.equal(adapter.metrics.batchRoundTrips, 1, 'preview hydration and the linked-member map must share one D1 round trip')
+  assert.equal(adapter.metrics.maxBatchStatements, 42)
   assert.ok(adapter.metrics.maxBoundParams <= 100, `preview bound ${adapter.metrics.maxBoundParams} params in one statement`)
   assert.ok(
     adapter.metrics.sql.some((sql) => /FROM products p LEFT JOIN branch_stock/i.test(sql)),

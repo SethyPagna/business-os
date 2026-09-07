@@ -188,7 +188,7 @@ async function overloadAfterEight() {
 }
 
 async function budgetStopsBetweenWholeGroups() {
-  const d1 = seedGroups([3, 1])
+  const d1 = seedGroups([2, 1])
   let now = 0
   const realNow = Date.now
   Date.now = () => now
@@ -198,13 +198,16 @@ async function budgetStopsBetweenWholeGroups() {
     assert.equal(result.status, 200)
     assert.equal(result.body.interrupted, true)
     assert.equal(result.body.interruptionCode, 'merge_budget_reached')
-    assert.equal(result.body.mergedProducts, 3, 'the three-member duplicate side of one cluster must never be split')
+    assert.equal(result.body.mergedProducts, 2, 'the 4/5/6 three-row cluster must complete before a normal budget yield')
     assert.equal(result.body.mergedGroups, 1)
-    assert.equal(result.body.processedCaseKeys.length, 3)
+    assert.equal(result.body.processedCaseKeys.length, 2)
     assert.equal(result.body.remainingProducts, null)
     assert.equal(result.body.maxAdditionalRequests, 2, 'the initial group scan provides a bounded same-confirmation continuation ceiling')
-    assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 3)
+    assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 2)
     assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=1").get().n, 3)
+    const mergedCost = d1.db.prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=1').get()
+    assert.equal(mergedCost.cost_price_usd, 5, 'the accepted plain 4/5/6 cluster keeps its one whole-cluster USD mean')
+    assert.equal(mergedCost.cost_price_khr, 5000, 'the accepted plain 4/5/6 cluster keeps its one whole-cluster KHR mean')
   } finally {
     Date.now = realNow
   }
@@ -215,7 +218,8 @@ async function oversizedFirstClusterIsRefusedWhole() {
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))
   assert.equal(result.status, 200)
   assert.equal(result.body.mergedProducts, 0)
-  assert.equal(result.body.complete, true, 'a run that evaluated every case completes while reporting deliberate refusals')
+  assert.equal(result.body.complete, false, 'blocked products remain and must not be reported as merged')
+  assert.equal(result.body.blockedOnly, true, 'the client can finish the reviewed run and display refusal reasons')
   assert.equal(result.body.stalled, false)
   assert.equal(result.body.refusals.length, 4)
   assert.ok(result.body.refusals.every((refusal) => refusal.code === 'cluster_exceeds_atomic_limit'))
@@ -225,10 +229,12 @@ async function oversizedFirstClusterIsRefusedWhole() {
 }
 
 async function postCommitHistoryLookupFailureRemainsReported() {
-  const d1 = seedGroups([1])
+  const d1 = seedGroups([1, 1])
   const result = await invoke(loadMergeHandler(makeAdapter(d1, { failHistoryLookupAfterCommitted: 1 })))
   assert.equal(result.status, 200)
-  assert.equal(result.body.complete, true)
+  assert.equal(result.body.complete, false)
+  assert.equal(result.body.interrupted, true)
+  assert.equal(result.body.interruptionCode, 'merge_infrastructure_interrupted')
   assert.equal(result.body.mergedProducts, 1, 'the already committed case remains in the response')
   assert.equal(result.body.processedCaseKeys.length, 1)
   assert.equal(result.body.mergeOperationIds.length, 1)
@@ -236,6 +242,7 @@ async function postCommitHistoryLookupFailureRemainsReported() {
   assert.equal(result.body.actionHistoryIds.length, 0, 'an unresolved numeric id must not be invented')
   assert.equal(result.body.undoPendingCount, 1)
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=1").get().n, 3, 'no later case starts after finalization becomes pending')
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='recorded' AND reversible=0").get().n, 1)
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE status='applied'").get().n, 1)
 }
@@ -247,7 +254,8 @@ async function oversizedWritePlanRefusesBeforeMutation() {
   for (let branchId = 1; branchId <= 100; branchId += 1) insertStock.run(2, branchId)
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))
   assert.equal(result.status, 200)
-  assert.equal(result.body.complete, true)
+  assert.equal(result.body.complete, false)
+  assert.equal(result.body.blockedOnly, true)
   assert.equal(result.body.mergedProducts, 0)
   assert.equal(result.body.refusals[0]?.code, 'merge_case_exceeds_safe_limit')
   assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
@@ -264,10 +272,26 @@ async function oversizedDependentReadRefusesBeforeMutation() {
   }
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))
   assert.equal(result.status, 200)
-  assert.equal(result.body.complete, true)
+  assert.equal(result.body.complete, false)
+  assert.equal(result.body.blockedOnly, true)
   assert.equal(result.body.mergedProducts, 0)
   assert.equal(result.body.refusals[0]?.code, 'merge_case_exceeds_safe_limit')
   assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+}
+
+async function complexLaterMemberBlocksWholeThreeRowCluster() {
+  const d1 = seedGroups([2])
+  d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(3001,3,?,1,1)')
+    .run('later-member-lot')
+  const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.complete, false)
+  assert.equal(result.body.blockedOnly, true)
+  assert.equal(result.body.mergedProducts, 0, 'the simple first member must not commit before a later complex member is refused')
+  assert.equal(result.body.refusals.length, 2)
+  assert.ok(result.body.refusals.every((refusal) => refusal.code === 'cluster_requires_manifest'))
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM products WHERE is_active=0').get().n, 0)
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
 }
 
@@ -278,5 +302,6 @@ async function oversizedDependentReadRefusesBeforeMutation() {
   await postCommitHistoryLookupFailureRemainsReported()
   await oversizedWritePlanRefusesBeforeMutation()
   await oversizedDependentReadRefusesBeforeMutation()
+  await complexLaterMemberBlocksWholeThreeRowCluster()
   console.log('PASS merge route reports committed partial work and stops only between complete clusters')
 })().catch((error) => { console.error(error); process.exitCode = 1 })
