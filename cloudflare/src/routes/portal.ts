@@ -15,6 +15,10 @@ import { detectBufferKind } from '../lib/uploadSecurity'
 import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse } from '../lib/portalAi'
+// Only getProviderMeta -- the vendor label table. /ai/status discloses which
+// third party a shopper's question reaches; nothing else from the gateway
+// belongs on a public response.
+import { getProviderMeta } from '../lib/aiGateway'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
@@ -772,24 +776,34 @@ app.get('/ai/status', async (c) => {
   const db = getDb(c.env)
   const provider = config.aiProviderId
     ? await db.prepare(`
-        SELECT id, name, requests_per_minute FROM ai_provider_configs
+        SELECT id, name, provider, requests_per_minute FROM ai_provider_configs
         WHERE id = ? AND enabled = 1 AND provider_type = 'chat'
-      `).get<{ id: number; name: string; requests_per_minute: number }>([config.aiProviderId])
+      `).get<{ id: number; name: string; provider: string; requests_per_minute: number }>([config.aiProviderId])
     : await db.prepare(`
-        SELECT id, name, requests_per_minute FROM ai_provider_configs
+        SELECT id, name, provider, requests_per_minute FROM ai_provider_configs
         WHERE enabled = 1 AND provider_type = 'chat' ORDER BY priority ASC LIMIT 1
-      `).get<{ id: number; name: string; requests_per_minute: number }>()
+      `).get<{ id: number; name: string; provider: string; requests_per_minute: number }>()
 
   // Public availability only: whether the assistant is on, plus its title
   // and disclaimer. The backing provider row's identity (id/name) and config
   // are internal and never exposed here -- the shopper only needs to know the
   // assistant is available. `usage` stays as an empty, non-identifying shape
   // for response-shape stability with the client's existing handling.
+  //
+  // providerLabel is the ONE exception, and it is a disclosure, not config
+  // (N45). A shopper's question and their skin-type answers leave this
+  // business for a third party; "sent to an AI provider" does not let anyone
+  // decide whether they mind, and "sent to Groq" does. It is the vendor label
+  // from PROVIDER_META only -- never the row's own name, the endpoint, the
+  // model or the key, all of which are the merchant's internal setup. An
+  // unrecognised provider key yields '' and the client falls back to the
+  // generic wording rather than printing a raw key.
   return c.json({
     success: true,
     enabled: !!config.aiEnabled && !!provider,
     title: config.aiTitle,
     disclaimer: config.aiDisclaimer,
+    providerLabel: provider ? (getProviderMeta(provider.provider)?.label || '') : '',
     usage: { providers: [] },
   })
 })

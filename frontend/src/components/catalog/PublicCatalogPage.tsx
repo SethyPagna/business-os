@@ -639,6 +639,10 @@ export default function PublicCatalogPage() {
   const [assistantExpandedProductId, setAssistantExpandedProductId] = useState<string | number | null>(null)
   const [aiUsageSummary, setAiUsageSummary] = useState<LooseRecord | null>(null)
   const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LooseRecord | null>(null)
+  // The vendor a shopper's question actually reaches (N45). '' when the
+  // provider key is one PROVIDER_META does not know, and the notice then
+  // falls back to the unnamed wording rather than printing a raw key.
+  const [aiProviderLabel, setAiProviderLabel] = useState('')
   const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTarget('en'))
   const [translateApplyState, setTranslateApplyState] = useState<'idle' | 'applied' | 'failed'>('idle')
   const [translateApplyMessage, setTranslateApplyMessage] = useState('')
@@ -1152,6 +1156,7 @@ export default function PublicCatalogPage() {
         const data = (result || {}) as LooseRecord
         setAiUsageSummary((data.usage || data.usageSummary || null) as LooseRecord | null)
         setAssistantRequestPolicy((data.policy || data.requestPolicy || null) as LooseRecord | null)
+        setAiProviderLabel(typeof data.providerLabel === 'string' ? data.providerLabel : '')
       })
       .catch(() => {})
   }, [activeTab, displayConfig.aiEnabled])
@@ -1351,6 +1356,7 @@ export default function PublicCatalogPage() {
         clearAssistantState={clearAssistantState}
         aiUsageSummary={aiUsageSummary}
         assistantRequestPolicy={assistantRequestPolicy}
+        aiProviderLabel={aiProviderLabel}
         replaceVars={(template: string, values: Record<string, string | number>) => replaceVars(template, values)}
         assistantError={assistantError}
         assistantResponse={assistantResponse}

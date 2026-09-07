@@ -1334,6 +1334,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [assistantError, setAssistantError] = useState('')
   const [assistantExpandedProductId, setAssistantExpandedProductId] = useState<string | number | null>(null)
   const [assistantUsage, setAssistantUsage] = useState<LegacyCatalogRecord | null>(null)
+  // Parity with the storefront: the admin preview shows the same assistant
+  // panel, so it must show the same third-party disclosure (N45).
+  const [assistantProviderLabel, setAssistantProviderLabel] = useState('')
   const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LegacyCatalogRecord | null>(null)
   const [expandedFaqId, setExpandedFaqId] = useState<string | null>(null)
   const [recommendedProductSearchInput, setRecommendedProductSearchInput] = useState('')
@@ -1604,6 +1607,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         if (!aliveRef.current || !isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
         setAssistantUsage(result?.usage || null)
         setAssistantRequestPolicy(result?.requestPolicy || null)
+        setAssistantProviderLabel(typeof result?.providerLabel === 'string' ? result.providerLabel : '')
       } catch {
         if (!aliveRef.current || !isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
         assistantStatusKeyRef.current = ''
@@ -3212,6 +3216,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     ? localizeConfiguredFaqItems(displayConfig.faqItems, t).filter((item) => item?.question && item?.answer)
     : []
   const aiUsageSummary = assistantUsage || null
+  const aiProviderLabel = assistantProviderLabel
   const questionCharLimit = Math.max(280, Math.min(1500, Number(assistantRequestPolicy?.questionMaxChars || 700) || 700))
   const handleUploadSubmissionImages = async () => {
     try {
@@ -3261,6 +3266,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     assistantLoading,
     clearAssistantState,
     aiUsageSummary,
+    aiProviderLabel,
     assistantRequestPolicy,
     replaceVars,
     assistantError,

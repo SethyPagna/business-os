@@ -262,6 +262,7 @@ interface CatalogAiSectionProps {
   assistantLoading: boolean
   clearAssistantState: () => void
   aiUsageSummary?: AiUsageSummary | null
+  aiProviderLabel?: string
   assistantRequestPolicy?: AssistantRequestPolicy | null
   replaceVars: (template: string, values: Record<string, string | number>) => string
   assistantError?: string
@@ -273,6 +274,11 @@ interface CatalogAiSectionProps {
 // The assistant notice the merchant cannot edit away -- see its use below.
 const ASSISTANT_AUTOMATED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to a third-party AI provider to produce an answer and is kept for about 30 days, so please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, please speak to a pharmacist or doctor -- and contact the store team for anything about a product.'
 const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបីដើម្បីបង្កើតចម្លើយ ហើយរក្សាទុកប្រហែល៣០ថ្ងៃ ដូច្នេះសូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
+// Same sentence, with the vendor named. /ai/status reports the label; when it
+// reports nothing recognisable the unnamed pair above is used instead, so a
+// shopper is never shown a raw provider key (N45).
+const ASSISTANT_AUTOMATED_NAMED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to {provider} to produce an answer and is kept for about 30 days, so please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, please speak to a pharmacist or doctor -- and contact the store team for anything about a product.'
+const ASSISTANT_AUTOMATED_NAMED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅ {provider} ដើម្បីបង្កើតចម្លើយ ហើយរក្សាទុកប្រហែល៣០ថ្ងៃ ដូច្នេះសូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
 
 type CatalogSecondaryTabsProps = {
   tab?: string
@@ -651,6 +657,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
     assistantLoading,
     clearAssistantState,
     aiUsageSummary,
+    aiProviderLabel,
     assistantRequestPolicy,
     replaceVars,
     assistantError,
@@ -776,7 +783,9 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 as a different product class; the assistant is instructed not
                 to make one, and a reader is told what it is either way. */}
             <p className="rounded-[28px] border border-slate-200 bg-white px-4 py-3 text-[11px] leading-6 text-slate-600 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-400">
-              {copy('assistantAutomatedNotice', ASSISTANT_AUTOMATED_EN, ASSISTANT_AUTOMATED_KM)}
+              {aiProviderLabel
+                ? replaceVars(copy('assistantAutomatedNoticeNamed', ASSISTANT_AUTOMATED_NAMED_EN, ASSISTANT_AUTOMATED_NAMED_KM), { provider: aiProviderLabel })
+                : copy('assistantAutomatedNotice', ASSISTANT_AUTOMATED_EN, ASSISTANT_AUTOMATED_KM)}
             </p>
           </div>
         </div>

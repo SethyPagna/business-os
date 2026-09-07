@@ -139,6 +139,38 @@ for (const phrase of [/automated/i, /not medical advice/i, /third-party AI provi
 assert.match(secondary, /const ASSISTANT_AUTOMATED_KM = '[^']*[ក-៿]/, 'the assistant notice must ship a real Khmer string, not an English fallback')
 assert.doesNotMatch(secondary, /aiDisclaimer \|\| copy\('assistantAutomatedNotice'/, 'the safety notice must not be a merchant-editable field')
 
+// "sent to a third-party AI provider" does not let a shopper decide whether
+// they mind; "sent to Groq" does. /ai/status reports the vendor LABEL only,
+// and the notice names it when there is one -- falling back to the unnamed
+// sentence rather than printing a provider key the label table cannot resolve.
+const named = (secondary.match(/const ASSISTANT_AUTOMATED_NAMED_EN = '([^']*)'/) || [])[1] || ''
+assert.match(named, /\{provider\}/, 'the named notice must interpolate the provider label')
+for (const phrase of [/automated/i, /not medical advice/i, /30 days/, /pharmacist or doctor/i]) {
+  assert.match(named, phrase, `the named assistant notice no longer says ${phrase}`)
+}
+assert.doesNotMatch(named, /third-party AI provider/i, 'the named notice names the provider instead of the generic phrase')
+assert.match(secondary, /const ASSISTANT_AUTOMATED_NAMED_KM = '[^']*[ក-៿]/, 'the named notice needs real Khmer too')
+assert.match(secondary, /aiProviderLabel\s*\n?\s*\?\s*replaceVars\(copy\('assistantAutomatedNoticeNamed'/, 'the named notice must be what renders when a label is known')
+
+// Both the storefront and the admin preview read the label off /ai/status,
+// and the Worker sends the PROVIDER_META label -- never the row's own name,
+// the endpoint, the model or the key, which are the merchant's internal setup.
+for (const rel of ['components/catalog/PublicCatalogPage.tsx', 'components/catalog/CatalogPage.tsx']) {
+  assert.match(source(rel), /providerLabel === 'string'/, `${rel} must read providerLabel off /ai/status`)
+}
+const portalRoute = fs.readFileSync(path.join(here, '..', '..', 'cloudflare', 'src', 'routes', 'portal.ts'), 'utf8')
+assert.match(portalRoute, /providerLabel: provider \? \(getProviderMeta\(provider\.provider\)\?\.label \|\| ''\) : ''/, '/ai/status must expose the vendor label, and only the label')
+const statusStart = portalRoute.indexOf("app.get('/ai/status'")
+assert.ok(statusStart > 0, '/ai/status must still exist')
+// Comments in this block talk ABOUT the fields it must not send, so the leak
+// check runs on the code with the comments stripped out.
+const statusBlock = portalRoute
+  .slice(statusStart, portalRoute.indexOf('\n})', statusStart))
+  .replace(/\/\/[^\n]*/g, '')
+for (const leak of [/endpoint/i, /api_key/i, /default_model/i, /provider\.name/]) {
+  assert.doesNotMatch(statusBlock, leak, `/ai/status must not expose ${String(leak)}`)
+}
+
 // 5. Khmer is really Khmer
 const KHMER = /[ក-៿]/
 for (const key of enKeys) {

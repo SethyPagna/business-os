@@ -105,6 +105,9 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
   '../lib/portalSession': { createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
+  // N45: /ai/status names the third party a shopper's question reaches.
+  // Real, tiny and pure -- it is a label table with no I/O.
+  '../lib/aiGateway': { getProviderMeta: (key) => (String(key || '').toLowerCase() === 'groq' ? { label: 'Groq' } : null) },
   // N45: an abuse counter's key is made one-way before it is stored, so
   // the portal routes reach for this on the way to checkRateLimit. Stubbed to
   // a fixed key here -- the digest itself is pinned by
