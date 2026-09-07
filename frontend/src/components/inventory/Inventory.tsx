@@ -68,7 +68,7 @@ import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import type { QueryParams } from '../../api/query.ts'
@@ -1127,7 +1127,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const handleAdjust = async () => {
     if (adjustSaving) return
     const qty = parseFloat(String(adjustForm.quantity))
-    if (!qty || qty <= 0) return notify('Invalid quantity', 'error')
+    // A set is a TARGET, not a movement: 0 is how an operator records an
+    // emptied shelf. One rule, shared with StockAdjustModal, FastStockInModal
+    // and routes/inventory.ts's own split -- and the refusal is a pack key,
+    // not hard-coded English.
+    const quantityError = stockAdjustQuantityError(adjustForm.type, adjustForm.quantity)
+    if (quantityError) return notify(tr(quantityError, STOCK_ADJUST_QUANTITY_FALLBACKS[quantityError]), 'error')
     // Mirrors the transfer form's own required-reason check just below, and
     // backs up routes/inventory.ts's /adjust hard requirement (added
     // alongside the unconditional batch-ledger routing) with a fast inline

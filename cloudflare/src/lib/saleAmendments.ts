@@ -732,12 +732,26 @@ export function planDeliveryFeeChange(input: {
  * this never enters the sale total: it changes only the two reporting columns.
  * `null` is supported as an explicit "not recorded" value so a mistaken cost
  * can be cleared without pretending that zero was paid.
+ *
+ * `stamp` is the caller's mutation stamp and is NOT optional, because
+ * `updated_at` is not decoration here: every write on this sale carries
+ * `expected_updated_at`, and the client stores whatever the response says the
+ * new one is. If this statement wrote SQLite's `CURRENT_TIMESTAMP`
+ * ("2026-09-07 03:14:15") while the response reported the JS stamp
+ * ("2026-09-07T03:14:15.926Z"), the two could never be equal and the next edit
+ * of the same sale would be refused as a write conflict that never happened.
+ *
+ * The delivery-fee path avoids this only by accident of composition -- its
+ * plan writes CURRENT_TIMESTAMP too, and a later `saleMoneyUpdateStatement`
+ * in the same batch overwrites `updated_at` with the stamp. The actual-cost
+ * path has no money statement to save it, so it takes the stamp directly.
  */
 export function planDeliveryActualCostChange(input: {
   saleId: number | string
   sale: AmendableSaleRow
   newCostUsd: number | null
   exchangeRate: number
+  stamp: string
 }): { statements: StockStatement[]; costBeforeUsd: number | null; costAfterUsd: number | null; costDeltaUsd: number } {
   const exchangeRate = Number(input.exchangeRate) || 4100
   const rawBefore = input.sale.delivery_actual_cost_usd
@@ -745,13 +759,18 @@ export function planDeliveryActualCostChange(input: {
   const costBeforeUsd = parsedBefore !== null && Number.isFinite(parsedBefore) && parsedBefore >= 0 ? round2(parsedBefore) : null
   const costAfterUsd = input.newCostUsd === null ? null : round2(Math.max(0, Number(input.newCostUsd) || 0))
   const costDeltaUsd = round2((costAfterUsd ?? 0) - (costBeforeUsd ?? 0))
+  // No fallback to CURRENT_TIMESTAMP: a fallback is how the two values drifted
+  // apart in the first place, and a blank stamp would null the column outright.
+  const stamp = String(input.stamp || '').trim()
+  if (!stamp) throw new Error('planDeliveryActualCostChange needs the mutation stamp the response reports as updated_at')
   return {
     statements: [{
-      sql: `UPDATE sales SET delivery_actual_cost_usd = @cost_usd, delivery_actual_cost_khr = @cost_khr, updated_at = CURRENT_TIMESTAMP WHERE id = @sale_id`,
+      sql: `UPDATE sales SET delivery_actual_cost_usd = @cost_usd, delivery_actual_cost_khr = @cost_khr, updated_at = @stamp WHERE id = @sale_id`,
       params: {
         sale_id: input.saleId,
         cost_usd: costAfterUsd,
         cost_khr: costAfterUsd === null ? null : calculatedKhr(costAfterUsd, exchangeRate),
+        stamp,
       },
     }],
     costBeforeUsd,

@@ -7,7 +7,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
-import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd } from '../../utils/statsFormulas'
+import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -27,7 +27,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload } from '../../api/salesTransport.ts'
+import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
@@ -194,21 +194,15 @@ interface SaleItemAddition {
   applied_price_usd?: number
 }
 
-// S4-30: what the detail view asks the server to change, and the ledger rows
-// it reads back. The request shape is the one salesTransport.amendSale sends;
-// the row shape is migration 0115's, shared with utils/saleAmendments.ts so
-// the renderer and the caller cannot drift.
-interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
-  sale_item_id?: number
-  quantity?: number
-  delivery_fee_usd?: number
-  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
-  notes?: string
-  client_request_id: string
-  expected_exchange_rate: number
-  expected_updated_at?: string
-}
+// S4-30: what the detail view asks the server to change is
+// `SaleAmendmentRequest`, IMPORTED from api/salesTransport.ts above rather than
+// re-declared here. It used to be re-declared, verbatim, and that is what broke
+// the build on 4e58891f: adding one member to the `kind` union means editing
+// every hand-copy of it, and that commit found two of the three. A wire type
+// has exactly one home -- the module that puts it on the wire. The ledger ROW
+// shape is migration 0115's and lives in utils/saleAmendments.ts, for the same
+// reason. tests/saleAmendmentKindParity.test.ts now fails if any copy of the
+// union drifts from the canonical one, or from the Worker's accepted kinds.
 
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
 type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
@@ -1294,7 +1288,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         label: t('sales') || 'Sales',
         value: String(txCount),
         sub: txCount > 0 ? `${translateOr('stats_avg_sale', 'avg')} ${fmtUSD(Number(totals.avg_order_usd) || 0)}` : undefined,
-        hint: translateOr('stats_sales_hint', 'Every non-cancelled sale in the range. Sales still awaiting payment ARE counted in the money figures — the goods left the shop; what is still owed is reported separately as Not Paid. Only cancelled sales contribute nothing. The breakdown counts every status.'),
+        hint: translateOr('stats_sales_hint', 'Every non-cancelled sale in the range. A credit sale IS counted in the money figures — the goods left the shop; how much of it is still owed is reported beside them as Credit. Only cancelled sales contribute nothing. The breakdown counts every status.'),
         details: byStatus.map((row) => ({
           label: getStatusLabel(String(row.sale_status || 'completed'), t),
           value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.total_usd) || 0)}`,
@@ -1340,7 +1334,7 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
         value: fmtUSD(profitUsd),
         tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
         sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
-        hint: `${translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (including Not Paid).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងមិនទាន់បង់)។')}
+        hint: `${translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (credit sales included).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងការលក់ជាឥណទាន)។')}
 
 ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd }, profitTerms(formulaTotals), fmtUSD, translateOr)}`,
         details: [
@@ -1430,6 +1424,20 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   // only 6 of those 12 produced the $67.47.
   const revenueCount = salesStats?.revenue_count
     ?? filtered.filter(isCountedSale).length
+
+  // How much of that revenue is still owed (owner, Sep 6 2026: "just note the
+  // credit amount is that much so instead of $-n... just $n"). It was already
+  // being FETCHED into salesStats and rendered nowhere, so the one number the
+  // owner asked for was on the wire and off the screen.
+  //
+  // It is an annotation, not a term: `revenue` above already contains these
+  // rows (isRevenueCountedSale excludes only cancelled), so this is never
+  // added to it and never taken off it. Same server-first / same-definition
+  // fallback shape as `revenue`, so the two figures can never come from two
+  // different populations of the same window.
+  const creditUsd = salesStats
+    ? salesStats.pending_revenue_usd
+    : saleListCreditUsd(filtered)
 
   const toggleSelected = (saleId: number | string) => {
     const numericId = Number(saleId)
@@ -2053,6 +2061,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         loading={loading}
         revenue={revenue}
         revenueCount={revenueCount}
+        creditUsd={creditUsd}
         isCountedSale={isCountedSale as SalesListSurfaceProps['isCountedSale']}
         salesSections={salesSections as SalesListSurfaceProps['salesSections']}
         selectAllRef={selectAllRef as SalesListSurfaceProps['selectAllRef']}
