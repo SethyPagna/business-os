@@ -3326,6 +3326,8 @@ type DuplicatePreviewCatalog = {
  * turned a 2,000-group preview into roughly 6,000 D1 round trips. Chunking the
  * unique catalog member set keeps every statement within D1's 100-bind limit
  * and makes the read count proportional to catalog rows rather than groups.
+ * The bounded statements are sent through one D1 read batch so production
+ * pays one storage round trip instead of one round trip per 100 products.
  * The correlated batch count uses the existing variant-product index; joining
  * batches directly would multiply branch rows and corrupt quantities.
  */
@@ -3337,9 +3339,10 @@ async function readDuplicatePreviewCatalog(
     group.canonical.id,
     ...group.duplicates.map((duplicate) => duplicate.id),
   ]))]
-  const rows = await selectInChunks(memberIds, 0, (chunk) => {
+  const readStatements = chunkForBinding(memberIds).map((chunk) => {
     const { sql, params } = buildInClause('id', chunk)
-    return db.prepare(`
+    return {
+      sql: `
       SELECT p.id, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => `p.${field}`).join(', ')},
              bs.branch_id, bs.quantity,
              (SELECT COUNT(*) FROM product_batches pb
@@ -3348,8 +3351,14 @@ async function readDuplicatePreviewCatalog(
       LEFT JOIN branch_stock bs ON bs.product_id=p.id
       WHERE p.id IN (${sql})
       ORDER BY p.id ASC, bs.branch_id ASC
-    `).all<Record<string, unknown>>(params)
+    `,
+      params,
+    }
   })
+  const readResults = readStatements.length ? await db.batch(readStatements) : []
+  const rows = readResults.flatMap((result) => Array.isArray(result.results)
+    ? result.results as Record<string, unknown>[]
+    : [])
 
   const moneyByProductId = new Map<number, Record<string, unknown>>()
   const stockByProductId = new Map<number, DuplicatePreviewStockRow[]>()
