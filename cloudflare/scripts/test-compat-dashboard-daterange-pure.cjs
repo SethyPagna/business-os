@@ -196,6 +196,7 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
 // ---- Source lock ----
 {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
+  const auditSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'audit.ts'), 'utf8')
   check('compat.ts has no raw date()-wrapped created_at window filter left',
     !/date\(s?\.?created_at\) (BETWEEN|= date\(@today\))/.test(src) && !/created_at >= date\(@(startDate|today)\)/.test(src))
   check('compat.ts buckets the range breakdowns via the local-day helper',
@@ -233,26 +234,26 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   // so there is no index for a sargable rewrite to reach anyway.
   check('the expiry_date date() site is deliberately untouched', /date\(expiry_date\)/.test(src))
 
-  // The audit_logs retention delete USED to be excluded from the sargable
-  // sweep, on the reasoning that it had no created_at index so a +-7h drift
-  // was immaterial. fx/sargable-date-fix rewrote it anyway, for a second
-  // reason the old exclusion never considered: a single unbounded DELETE over
-  // a large backlog blows D1's statement budget. It is now both sargable (a
-  // bare `created_at < @cutoff`, no date() wrapper for an index to trip over)
-  // and batched behind a LIMIT so the retention sweep cannot run away.
-  //
-  // This assertion was red on fx/sargable-date-fix's own branch -- the lane
-  // changed the behaviour and left the guard pinning the old shape. Pin the
-  // new intent instead, and keep both halves, so neither property can be lost
-  // silently: dropping the batching would be a production incident, and
-  // re-adding date(created_at) would undo the sargability.
+  // Manual and scheduled retention now share one SQL builder in lib/audit.ts.
+  // Keep checking the effective policy rather than looking for an inline
+  // DELETE in compat.ts: the shared statement must stay sargable and bounded,
+  // and it must retain the narrow Return bulk replay provenance exception.
   {
-    const retention = src.slice(src.indexOf('DELETE FROM audit_logs'))
+    const retentionStart = auditSrc.indexOf('export function buildAuditLogRetentionDeleteSql')
+    const retentionEnd = auditSrc.indexOf('// Ported from', retentionStart)
+    const retention = retentionStart >= 0 && retentionEnd > retentionStart
+      ? auditSrc.slice(retentionStart, retentionEnd + 2)
+      : ''
+    check('compat.ts uses the shared audit retention policy',
+      /import \{ audit, buildAuditLogRetentionDeleteSql \} from '\.\.\/lib\/audit'/.test(src)
+      && /prepare\(buildAuditLogRetentionDeleteSql\(\)\)/.test(src))
     check('the audit_logs retention delete is sargable -- no date() around created_at',
-      /DELETE FROM audit_logs/.test(src) && !/DELETE FROM audit_logs WHERE date\(created_at\)/.test(src)
-      && /created_at < @cutoff/.test(retention.slice(0, 300)))
+      /DELETE FROM audit_logs/.test(retention) && !/date\(created_at\)/.test(retention)
+      && /created_at < @cutoff/.test(retention))
+    check('the shared retention exception stays limited to Return bulk replay provenance',
+      /entity = 'return'[\s\S]*action IN \('action_undo','action_redo'\)[\s\S]*json_extract\(details, '\$\.kind'\) = 'return\.fields\.bulk'/.test(retention))
     check('and it is batched, so a large backlog cannot exhaust the D1 statement budget',
-      /LIMIT \d+/.test(retention.slice(0, 300)))
+      /LIMIT 5000/.test(retention))
   }
 
   const win = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8')
